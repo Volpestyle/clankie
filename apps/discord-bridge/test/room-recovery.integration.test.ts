@@ -334,10 +334,11 @@ it("recovers an outage once, delivers saved answers to their original room and a
     const tool = (await captain.laneToolBank("operator", "global-default")).tools.find(
       (entry) => entry.name === "room_turn",
     )!;
-    const refused = await tool.call({ room: roomId, brief: "Test audience refusal." });
+    // The loopback channel names no text type, so the fork is refused before any turn.
+    const refused = await tool.call({ channel: "50000", brief: "Test channel refusal." });
     const projected = readableMcpResult({ ...refused, content: [...refused.content] }, "room_turn");
     const callerCause = projected.content.find((block) => block.type === "text")?.text;
-    expect(callerCause).toContain("discord_owner_audience_required");
+    expect(callerCause).toContain("room_fork_not_a_text_room");
     expect(audienceReads).toBeGreaterThan(0);
     expect(posts).toHaveLength(0);
     const reprojected = readableMcpResult(
@@ -347,7 +348,7 @@ it("recovers an outage once, delivers saved answers to their original room and a
       },
       "room_turn",
     );
-    expect(reprojected.content[0]?.text).toContain("discord_owner_audience_required");
+    expect(reprojected.content[0]?.text).toContain("room_fork_not_a_text_room");
     const before = modelCalls;
     modelUp = true;
     body = restart(true);

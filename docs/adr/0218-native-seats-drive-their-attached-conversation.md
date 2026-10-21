@@ -466,7 +466,10 @@ seat holds it. Workers, peers, rooms and room-attached seat banks never get it.
 - **A file rides the reply.** `file` names a workspace file. The
   delivered-file host publishes it under the room's key and it posts with the
   reply (ADR 0088, 2026-10-06), so it needs `replyTo`. A file the fork delivers
-  itself rides the same way.
+  itself rides the same way. _Amended 2026-10-21 (VUH-2581):_ a file also rides
+  a message that answers nobody, and the fork can name a channel by ID before
+  any room conversation exists. Tools and context now follow the room's
+  audience ([ADR 0251](0251-discord-owners-and-room-skills.md#owner-directed-room-turns-2026-10-21)).
 - **Retries never rerun.** A request ID, by default a hash of the request,
   maps to one settled result in `room-forks.json`. A retry returns it. A run
   interrupted by restart reports `uncertain` and is never rerun.

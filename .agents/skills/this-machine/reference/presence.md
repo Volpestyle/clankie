@@ -41,6 +41,22 @@ persists, an authorized owner can inspect `clankie body status` and use
 `clankie body request '{"action":"recover","resource":"browser","conversationId":"CONVERSATION_ID"}'`
 from an existing writable conversation. Computer recovery uses its own contract.
 
+## Owner-directed room posts
+
+When the owner asks for a post in a Discord room, the operator seat calls
+`room_turn` with either the room conversation ID or, for a channel with no room
+conversation yet, its Discord `channel` ID. That channel must be a visible text
+channel or thread in a server listed in `ingressGuildIds` (and in
+`ingressChannelIds` when that list is set). The room is created the way ingress
+creates it. `file` posts with the message, with or without `replyTo`. Its
+`path` resolves against the operator conversation's working directory, which
+is the service's working directory (the home folder by default), not the
+caller's cwd or scratch folder. Copy the file inside that directory first.
+Anything outside it fails with `delivered_file_outside_conversation_workspace`.
+A room that only owners can read gets machine tools and private context. Any
+other room gets a social one-shot that sees only the room and the brief
+([ADR 0251](../../../../docs/adr/0251-discord-owners-and-room-skills.md#owner-directed-room-turns-2026-10-21)).
+
 ## Activity artifact shares
 
 Owners use `clankie share list` or `clankie share request JSON`; `/share` in

@@ -6805,10 +6805,11 @@ alone grants no authority. The conversation journal records the same
 `ownerOrigin`. Owner authority is rechecked before native admission. A
 `reply` tool answers an escalation by `event_id`; the reply lands in the
 escalating conversation as his own message. To speak in a Discord room on his
-own initiative, the seat calls `room_turn` with the room conversation ID and a
-brief, plus optionally `replyTo` (a message ID) and `file` (a workspace file;
-needs `replyTo`). It forks a one-shot room turn under that room's grants and
-mouth. The turn sees the room's recent history and the brief, never the seat's
+own initiative, the seat calls `room_turn` with the room conversation ID (or a
+Discord `channel` ID for a room he has no conversation in yet) and a brief,
+plus optionally `replyTo` (a message ID) and `file` (a path inside the
+operator conversation's working directory, by default the service's home
+folder). It forks a one-shot room turn under that room's grants and mouth. The turn sees the room's recent history and the brief, never the seat's
 transcript. It returns what posted, its message ID, or why not, and the action
 is recorded in both conversations. An identical request, or a reused
 `requestId`, returns the first result without running again (ADR 0218,

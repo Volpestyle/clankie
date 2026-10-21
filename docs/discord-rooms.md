@@ -106,10 +106,26 @@ same current authenticated transport and live presence claim as writes. It
 returns `{reply: result}` or `{reply: null}`; errors prove neither delivery nor
 absence. A predecessor still running cannot have its write released this way.
 
-Owner-directed `room_turn` failures include their concrete code in worker MCP
-output and the service log. `discord_owner_audience_required` means the current
-Discord audience could not be proven owner-only; recovery does not widen that
-boundary. Inspect the room's audience instead of reposting private instructions.
+Owner-directed `room_turn` names its room by conversation ID or by Discord
+`channel` ID. A channel ID reaches a channel Clankie has not talked in yet, or
+one with lane history but no conversation record. The service reads the channel
+through the active body. It accepts a text, announcement or thread channel in a
+server in `ingressGuildIds` (and in `ingressChannelIds` when that list is set),
+then creates the room conversation the way ingress does. Other channels are
+refused with `room_fork_channel_unavailable`, `room_fork_not_a_text_room` or
+`room_fork_channel_not_admitted` before any turn runs. A proven owner-only
+audience gets machine tools and private context. Any other room gets a social
+one-shot with no machine tools and no private or fleet context beyond the
+brief ([ADR 0251](adr/0251-discord-owners-and-room-skills.md#owner-directed-room-turns-2026-10-21)).
+Participant servers keep every other limit: no server management and no posts
+on a non-owner's request.
+
+`file` posts with the message whether or not `replyTo` is set. Its `path` is
+relative to, or absolute inside, the operator conversation's working directory.
+That directory is the service's working directory (the home folder by
+default), not the calling seat's cwd or scratch folder. A file outside it fails
+with `delivered_file_outside_conversation_workspace`. Failures include their
+concrete code in worker MCP output and the service log.
 
 `clankie discord guide CONVERSATION_ID TEXT` or TUI `/discord guide` queues bounded
 private context for that room's next naturally admitted turn. `--clear` clears it.

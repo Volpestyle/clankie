@@ -437,7 +437,10 @@ export class DiscordTextInbox {
         return result;
       },
       executeDiscordPresenceAction: async (write) => {
-        if (write.payload.kind !== "reply" && write.payload.kind !== "reply_with_media")
+        if (
+          (write.payload.kind !== "reply" && write.payload.kind !== "reply_with_media") ||
+          write.payload.messageId === undefined
+        )
           return delegate.executeDiscordPresenceAction(write);
         const id = write.payload.messageId;
         const row = this.row(id);

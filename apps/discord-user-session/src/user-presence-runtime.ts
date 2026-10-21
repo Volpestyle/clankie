@@ -106,7 +106,9 @@ export class DiscordUserPresenceRuntime {
           "payload_json",
           JSON.stringify({
             content: payload.content,
-            message_reference: { message_id: payload.messageId },
+            ...(payload.messageId === undefined
+              ? {}
+              : { message_reference: { message_id: payload.messageId } }),
             allowed_mentions: { parse: [] },
           }),
         );

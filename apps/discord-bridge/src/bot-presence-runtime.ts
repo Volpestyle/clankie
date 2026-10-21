@@ -69,7 +69,7 @@ export class DiscordBotPresenceRuntime {
   /** Read the complete reply history before an abandoned write can be replayed. */
   public async reconcileReply(write: DiscordPresenceWrite): Promise<DiscordPresenceWriteResult | null> {
     const payload = write.payload;
-    if (payload.kind !== "reply" && payload.kind !== "reply_with_media")
+    if ((payload.kind !== "reply" && payload.kind !== "reply_with_media") || payload.messageId === undefined)
       throw new Error("discord_reply_reconciliation_unsupported");
     const self = (await this.rest.get(Routes.user("@me"))) as { id: string };
     if (typeof self.id !== "string" || !self.id) throw new Error("discord_reply_identity_unavailable");
@@ -193,7 +193,9 @@ export class DiscordBotPresenceRuntime {
           body: {
             ...replyNonce(write),
             content: file === undefined ? `${payload.content}\n\n${MEDIA_LOST_NOTE}` : payload.content,
-            message_reference: { message_id: payload.messageId },
+            ...(payload.messageId === undefined
+              ? {}
+              : { message_reference: { message_id: payload.messageId } }),
             allowed_mentions: { parse: [] },
           },
           ...(file === undefined

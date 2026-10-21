@@ -60,6 +60,50 @@ flowchart TD
     Private -- no --> Refuse[Refuse delivery]
 ```
 
+## Owner-directed room turns, 2026-10-21
+
+James asked Clankie to post a clip in a shared channel he had never talked in
+(VUH-2581): "u should just be able to post, no?" `room_turn` refused for two
+reasons. It needed an existing room conversation. And since this ADR it ran
+every fork with machine tools and private context, so it refused any room it
+could not prove owner-only (`discord_owner_audience_required`).
+
+**Decision.** The seat names a room by conversation ID or by Discord channel
+ID. A channel must be a text, announcement or thread channel that the active
+body can read, in a server the bot body admits (`ingressGuildIds`, and
+`ingressChannelIds` when set). Its room conversation is created exactly as
+ingress would create it. The fork's authority depends on the audience:
+
+- **Proven owner-only audience:** machine tools and private context, as before.
+- **Any other audience:** a social one-shot. It gets no machine tools, and no
+  private work, fleet or memory context reaches it. Its only outside context is
+  the brief the seat wrote to be posted. The prompt tells it that people other
+  than the owner can read the room.
+
+This is stricter than an owner speaking in a mixed room, which keeps one-shot
+machine tools. The fork's owner did not speak in the room, and nobody there
+can see what the operator seat is doing. Initiation stays owner-only, because
+only the operator lane's bank holds `room_turn`. Participant servers keep
+every other limit: no server management, and posts go only through the
+admitted bot body's captain actions. A file posts without `replyTo`
+(`reply_with_media` without `messageId`), and its path resolves against the
+operator conversation's working directory. As with plain `post_message`,
+reconciling a lost acknowledgement for a post that answers nobody is
+unsupported.
+
+```mermaid
+flowchart TD
+    Seat["Operator seat: room_turn"] --> Name{"room or channel?"}
+    Name -- channel --> Read["Read channel via active body"]
+    Read --> Admit{"Text channel in an admitted server?"}
+    Admit -- no --> Refuse["Refuse before any turn"]
+    Admit -- yes --> Room["Room conversation, as ingress makes it"]
+    Name -- room --> Room
+    Room --> Audience{"Owner-only audience proven?"}
+    Audience -- yes --> Machine["Machine tools + private context"]
+    Audience -- no --> Social["Social one-shot: room + brief only"]
+```
+
 ## Migration and rollout
 
 1. Normalize old stored configs on load and persist on the next normal settings

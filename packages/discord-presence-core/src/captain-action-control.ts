@@ -155,11 +155,23 @@ export function planNonWatchCaptainDiscordAction(
 ): CaptainDiscordActionPlan | undefined {
   if (input.action === "server_action") return undefined;
   if (input.action === "post_message")
-    return {
-      action: "discord.presence.send_message",
-      payload: { kind: "send_message", channelId: input.channelId, content: input.text },
-      successMessage: "I posted the message.",
-    };
+    return input.media === undefined
+      ? {
+          action: "discord.presence.send_message",
+          payload: { kind: "send_message", channelId: input.channelId, content: input.text },
+          successMessage: "I posted the message.",
+        }
+      : {
+          action: "discord.presence.reply_with_media",
+          payload: {
+            kind: "reply_with_media",
+            channelId: input.channelId,
+            content: input.text,
+            artifactRef: input.media.artifactRef,
+            filename: input.media.filename,
+          },
+          successMessage: "I posted the message with its file.",
+        };
   const { action, channelId, messageId } = input;
   switch (action) {
     case "react":

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -39,6 +39,9 @@ const CHANNEL = "1551975693582336060";
 const OWNER = "830574404453793842";
 const MEMBER = "692124766018076782";
 const ASKED = "1557079355589664801";
+// A channel nobody has talked to him in, readable by the whole server.
+const FRESH = "1486034927731474635";
+const ELSEWHERE = "1551975693582339999";
 const ROOM = `room-${createHash("sha256").update(`discord_presence:${GUILD}:${CHANNEL}`).digest("hex").slice(0, 24)}`;
 
 const cleanups: Array<() => Promise<unknown>> = [];
@@ -110,6 +113,7 @@ async function fixture() {
     discord: {
       ...current.discord,
       servers: [{ serverId: GUILD, role: "participant", owners: "me" }],
+      ingressGuildIds: [GUILD],
       ownerUserId: OWNER,
       systemActorUserIds: [OWNER],
     },
@@ -180,20 +184,24 @@ async function fixture() {
         ok: true,
         message: "Owner-only room metadata",
         data:
-          action.path === "/users/@me"
-            ? { id: "30001", bot: true }
-            : action.path === `/guilds/${GUILD}`
-              ? { id: GUILD, owner_id: OWNER }
-              : action.path === `/guilds/${GUILD}/roles`
-                ? [{ id: GUILD, permissions: "0" }]
-                : {
-                    id: CHANNEL,
-                    guild_id: GUILD,
-                    permission_overwrites: [
-                      { id: GUILD, type: 0, allow: "0", deny: "1024" },
-                      { id: "30001", type: 1, allow: "1024", deny: "0" },
-                    ],
-                  },
+          action.path === `/channels/${FRESH}`
+            ? { id: FRESH, guild_id: GUILD, type: 0, name: "hacker-mans", permission_overwrites: [] }
+            : action.path === `/channels/${ELSEWHERE}`
+              ? { id: ELSEWHERE, guild_id: "1052402897645759999", type: 0, permission_overwrites: [] }
+              : action.path === "/users/@me"
+                ? { id: "30001", bot: true }
+                : action.path === `/guilds/${GUILD}`
+                  ? { id: GUILD, owner_id: OWNER }
+                  : action.path === `/guilds/${GUILD}/roles`
+                    ? [{ id: GUILD, permissions: "0" }]
+                    : {
+                        id: CHANNEL,
+                        guild_id: GUILD,
+                        permission_overwrites: [
+                          { id: GUILD, type: 0, allow: "0", deny: "1024" },
+                          { id: "30001", type: 1, allow: "1024", deny: "0" },
+                        ],
+                      },
       }),
       execute: async (input: DiscordCaptainActionInput, guard?: () => Promise<void>) => {
         await guard?.();
@@ -282,7 +290,7 @@ async function fixture() {
   const tool = (await captain.laneToolBank("operator", "global-default")).tools.find(
     (item) => item.name === "room_turn",
   )!;
-  return { tool, effects, prompts, workspace, session };
+  return { tool, effects, prompts, workspace, session, root };
 }
 
 const parse = (result: { content: readonly { type: string; text?: string }[] }) =>
@@ -335,4 +343,51 @@ it("posts an owner-directed message that answers nobody, and refuses once the ro
   const refused = await tool.call({ room: ROOM, brief: "Second note.", requestId: "retry-after-reconnect" });
   expect(refused.isError).toBe(true);
   expect(parse(refused)).toMatchObject({ state: "failed", code: "room_fork_room_authority_unavailable" });
+});
+
+it("posts an owner-directed file into a channel he has never talked in, as a social turn", async () => {
+  const { tool, effects, prompts, workspace, root } = await fixture();
+  const roomOf = (targetId: string) =>
+    `room-${createHash("sha256").update(`discord_presence:${targetId}`).digest("hex").slice(0, 24)}`;
+  const meta = (id: string) =>
+    readFile(join(root, "conversations", id, "meta.json"), "utf8").then(JSON.parse, () => undefined);
+  const room = roomOf(`${GUILD}:${FRESH}`);
+  expect(await meta(room)).toBeUndefined();
+  await writeFile(join(workspace, "clip.mp4"), "fixture clip");
+  const before = effects.length;
+  const promptsBefore = prompts.length;
+  const result = parse(
+    await tool.call({
+      channel: FRESH,
+      brief: "Post this clip of the boss fight.",
+      file: { path: join(workspace, "clip.mp4") },
+    }),
+  );
+  expect(result).toMatchObject({ state: "posted", room, channelId: FRESH, file: "clip.mp4" });
+  expect(result).not.toHaveProperty("replyTo");
+  // One message with its file, answering nobody.
+  const posted = effects.slice(before);
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({
+    action: "discord.presence.reply_with_media",
+    payload: { kind: "reply_with_media", channelId: FRESH, filename: "clip.mp4" },
+  });
+  expect(posted[0]!.payload).not.toHaveProperty("messageId");
+  // The room now exists the way ingress makes it, named for the channel.
+  expect(await meta(room)).toMatchObject({
+    scope: { kind: "room", lane: "discord_presence", targetId: `${GUILD}:${FRESH}` },
+    title: `Discord text · ${GUILD} / #hacker-mans`,
+  });
+  // Everyone can read it, so the owner's personal machine access does not follow him in.
+  const fork = prompts.slice(promptsBefore).find((prompt) => prompt.body.includes("[Owner brief]"))!;
+  expect(fork.tools).not.toContain("bash");
+  expect(fork.body).toContain("People other than your owner can read this room.");
+
+  // A channel outside every admitted server is refused before a room or turn exists.
+  const refused = await tool.call({ channel: ELSEWHERE, brief: "Hello." });
+  expect(parse(refused)).toMatchObject({ state: "failed", code: "room_fork_channel_not_admitted" });
+  expect(await meta(roomOf(`1052402897645759999:${ELSEWHERE}`))).toBeUndefined();
+  expect(effects).toHaveLength(before + 1);
+  // Exactly one of room or channel.
+  expect((await tool.call({ room, channel: FRESH, brief: "Both." })).isError).toBe(true);
 });

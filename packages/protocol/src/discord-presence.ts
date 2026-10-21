@@ -361,6 +361,8 @@ export const DiscordCaptainActionInputSchema = z.discriminatedUnion("action", [
       guildId: z.string().min(1).max(128).optional(),
       channelId: z.string().min(1).max(128),
       text: z.string().trim().min(1).max(2_000),
+      /** Host-captured or owner-attached media; the schema admits only attachable refs. */
+      media: CaptainTurnMediaSchema.optional(),
     })
     .strict(),
   /**
@@ -685,7 +687,8 @@ export const DiscordPresenceActionRequestSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("reply_with_media"),
       channelId: z.string().min(1),
-      messageId: z.string().min(1),
+      /** The message it answers; absent for an owner-directed post that answers nobody. */
+      messageId: z.string().min(1).optional(),
       content: z.string().min(1).max(2_000),
       artifactRef: z.string().refine(isAttachableTurnMediaRef, "expected an attachable turn media reference"),
       filename: z.string().min(1).max(200),

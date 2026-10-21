@@ -11,9 +11,10 @@ import { createClankieApp } from "../../clankie/src/app.ts";
 import { createCaptain } from "../../clankie/src/captain/captain.ts";
 import type { CaptainDeps } from "../../clankie/src/captain/deps.ts";
 
-// VUH-2142 live golden: a file without replyTo was refused before dispatch,
-// but the retained lead bridge displayed only "room turn: failed.".
-// Exercise the current CLI bridge, real HTTP lane bank, SDK and stdio wire.
+// VUH-2142 live golden: a room turn refused before dispatch (then a file
+// without replyTo, VUH-2581 lifted that) showed only "room turn: failed." in
+// the retained lead bridge. Exercise the current CLI bridge, real HTTP lane
+// bank, SDK and stdio wire with a fixture that has no Discord body.
 it("puts a real room-turn refusal cause in the current bridge's error text", async () => {
   const root = await mkdtemp(join(tmpdir(), "room-cause-wire-"));
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -99,7 +100,6 @@ it("puts a real room-turn refusal cause in the current bridge's error text", asy
       arguments: {
         room,
         brief: "Validation probe: no post should occur.",
-        file: { path: "vuh-2142-validation-only.txt" },
         requestId: "vuh-2142-current-bridge-cause",
       },
     });
@@ -108,7 +108,7 @@ it("puts a real room-turn refusal cause in the current bridge's error text", asy
       .filter((block) => block.type === "text")
       .map((block) => block.text)
       .join("\n");
-    expect(text).toContain("room_fork_file_needs_reply_to");
+    expect(text).toContain("room_fork_discord_unavailable");
     if (process.env.VUH_2142_BRIDGE_PROOF_PATH)
       await writeFile(
         process.env.VUH_2142_BRIDGE_PROOF_PATH,

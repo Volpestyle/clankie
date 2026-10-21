@@ -1069,28 +1069,61 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
   async function forkIntoRoom(input: RoomForkInput): Promise<RoomForkResult> {
     const fingerprint = createHash("sha256")
       .update(
-        JSON.stringify([input.sourceConversationId, input.room, input.brief, input.replyTo, input.file]),
+        JSON.stringify([
+          input.sourceConversationId,
+          input.room ?? `channel:${input.channel}`,
+          input.brief,
+          input.replyTo,
+          input.file,
+        ]),
       )
       .digest("hex");
     const id = input.requestId ?? fingerprint.slice(0, 32);
+    let room = input.room ?? `channel:${input.channel}`;
     const refuse = (code: string): RoomForkResult => {
-      console.error({ room: input.room, requestId: id, code }, "Owner-directed room turn failed");
-      return { state: "failed", room: input.room, code };
+      console.error({ room, requestId: id, code }, "Owner-directed room turn failed");
+      return { state: "failed", room, code };
     };
-    const scope = ctx.conversations.conversation(input.room)?.scope;
+    if (ctx.deps.discordActions === undefined) return refuse("room_fork_discord_unavailable");
+    const { settings: discord } = resolveDiscordSettings(
+      (await ctx.settings()).discord,
+      ctx.options.discordEnvironment,
+    );
+    if (input.channel !== undefined) {
+      // A channel he has not talked in yet gets its room the way ingress would
+      // make it: a visible text channel of a server his bot body admits.
+      const read = await ctx.deps.discordActions.serverAction({
+        method: "GET",
+        path: `/channels/${input.channel}`,
+      });
+      const channel = read.ok ? (read.data as Record<string, unknown> | undefined) : undefined;
+      const guildId = typeof channel?.guild_id === "string" ? channel.guild_id : undefined;
+      if (guildId === undefined || channel?.id !== input.channel)
+        return refuse("room_fork_channel_unavailable");
+      if (![0, 5, 10, 11, 12].includes(Number(channel.type))) return refuse("room_fork_not_a_text_room");
+      if (
+        !discord.ingressGuildIds.includes(guildId) ||
+        (discord.ingressChannelIds.length > 0 && !discord.ingressChannelIds.includes(input.channel))
+      )
+        return refuse("room_fork_channel_not_admitted");
+      const targetId = `${guildId}:${input.channel}`;
+      const fresh = ctx.conversations.conversation(
+        `room-${createHash("sha256").update(`discord_presence:${targetId}`).digest("hex").slice(0, 24)}`,
+      );
+      room = ctx.conversations.roomConversation("discord_presence", targetId);
+      if (fresh === undefined && typeof channel.name === "string" && channel.name.trim())
+        ctx.conversations.nameRoomConversation(
+          room,
+          `Discord text · ${guildId} / #${channel.name}`.slice(0, 200),
+        );
+    }
+    const scope = ctx.conversations.conversation(room)?.scope;
     if (scope?.kind !== "room" || scope.lane !== "discord_presence")
       return refuse("room_fork_not_a_text_room");
     const separator = scope.targetId.indexOf(":");
     const guildId = scope.targetId.slice(0, separator);
     const channelId = scope.targetId.slice(separator + 1);
     if (separator <= 0 || guildId === "dm") return refuse("room_fork_guild_room_required");
-    if (input.file !== undefined && input.replyTo === undefined)
-      return refuse("room_fork_file_needs_reply_to");
-    if (ctx.deps.discordActions === undefined) return refuse("room_fork_discord_unavailable");
-    const { settings: discord } = resolveDiscordSettings(
-      (await ctx.settings()).discord,
-      ctx.options.discordEnvironment,
-    );
     if (discord.ownerUserId === undefined) return refuse("room_fork_owner_unconfigured");
     const origin: DiscordWatchOrigin = {
       baseSessionKey: `discord:clankie:discord:${guildId}:${channelId}`,
@@ -1102,24 +1135,23 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       deliveryId: `room-fork-${id}`,
       transportKind: "bot",
     };
-    // An owner-directed turn may bring private work only to a proven owner audience.
-    const ownerAudience = await discordOwnerAudience(discord, guildId, channelId, async (action) => {
+    // Private work reaches only a proven owner audience. Anywhere else the fork
+    // is a mixed-room turn: social, one-shot, nothing private beyond the brief.
+    const systemTools = await discordOwnerAudience(discord, guildId, channelId, async (action) => {
       const result = await ctx.deps.discordActions!.serverAction(action);
       if (!result.ok) throw new Error("Discord audience unavailable");
       return result.data;
     });
-    if (!ownerAudience) return refuse("discord_owner_audience_required");
-    const systemTools = true;
-    const owner: ConversationOwner = { conversationId: input.room, discord: origin };
+    const owner: ConversationOwner = { conversationId: room, discord: origin };
     const mode = systemTools ? "machine" : "social";
-    if (roomForksRunning.has(id)) return { state: "uncertain", room: input.room, code: "room_fork_running" };
-    roomForkGrants.set(id, { room: input.room, origin });
+    if (roomForksRunning.has(id)) return { state: "uncertain", room, code: "room_fork_running" };
+    roomForkGrants.set(id, { room, origin });
     // A definite refusal before dispatch is never recorded, so the same request can retry.
     if (!(await validateConversationOwner(owner, mode))) {
       roomForkGrants.delete(id);
       return refuse("room_fork_room_authority_unavailable");
     }
-    const early = ctx.roomForks.begin(id, fingerprint, input.room, roomForksRunning.has(id));
+    const early = ctx.roomForks.begin(id, fingerprint, room, roomForksRunning.has(id));
     if (early !== undefined) {
       roomForkGrants.delete(id);
       return early;
@@ -1128,10 +1160,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     const settle = (result: RoomForkResult): RoomForkResult => {
       const settled = ctx.roomForks.settle(id, fingerprint, result);
       if (settled.state === "failed" || settled.state === "uncertain")
-        console.error(
-          { room: input.room, requestId: id, code: settled.code },
-          "Owner-directed room turn failed",
-        );
+        console.error({ room, requestId: id, code: settled.code }, "Owner-directed room turn failed");
       ctx.conversations.recordToolAction(input.sourceConversationId, {
         toolCallId: `room-fork-${id}`,
         name: ROOM_FORK_TOOL,
@@ -1159,9 +1188,10 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       const prompt = [
         "Your owner, working from the operator seat, is asking you to act in this room. Their brief is below; it is the only context from outside this room. Your reply posts in this channel" +
           (input.replyTo === undefined ? "." : " as a reply to the message they named.") +
+          (systemTools ? "" : " People other than your owner can read this room.") +
           ` If, after reading the room, nothing should be said, reply with exactly ${CAPTAIN_SILENT_REPLY_SENTINEL}.`,
         ctx.conversations.roomForkContext(
-          input.room,
+          room,
           (await ctx.laneLog.read(scope.lane, scope.targetId, CAPTAIN_LANE_ENTRIES_MAX)).entries,
         ),
         `[Owner brief]\n${input.brief}`,
@@ -1177,7 +1207,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
           images: [],
           heard: "[Owner-directed room turn]",
           access: {
-            privateContext: true,
+            privateContext: systemTools,
             actorId: origin.actorId,
             authorize: () => validateConversationOwner(owner, mode),
           },
@@ -1194,7 +1224,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         "message",
       );
       const base = {
-        room: input.room,
+        room,
         channelId,
         ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
       };
@@ -1218,6 +1248,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
               guildId,
               channelId,
               text,
+              ...(attached === undefined ? {} : { media: attached }),
             }
           : {
               action: "send_reply",
@@ -1243,7 +1274,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       // The turn or post may have happened; never rerun it under this request.
       return settle({
         state: "uncertain",
-        room: input.room,
+        room,
         code: (error instanceof Error ? error.message : String(error)).slice(0, 256),
       });
     } finally {
@@ -1285,8 +1316,10 @@ export const ROOM_FORK_TOOL = "room_turn";
 export interface RoomForkInput {
   /** The owner's conversation the seat is driving; its log records the action. */
   readonly sourceConversationId: string;
-  /** The room conversation ID, as `conversations` lists it. */
-  readonly room: string;
+  /** The room conversation ID, as `conversations` lists it. Exactly one of `room` or `channel`. */
+  readonly room?: string;
+  /** A Discord text channel ID; its room conversation is created when he has none there yet. */
+  readonly channel?: string;
   readonly brief: string;
   readonly replyTo?: string;
   readonly file?: { readonly path: string; readonly filename?: string };
