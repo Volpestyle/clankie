@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "proofs.tar",
+      "size": 19968,
+      "sha256": "05993dd902ab55eee0ee2fae369122a6622e4c57c79e91fc2c4865821c3d342c",
+      "url": "clankie://evidence/sha256/05993dd902ab55eee0ee2fae369122a6622e4c57c79e91fc2c4865821c3d342c"
+    }
+  ]
+}
