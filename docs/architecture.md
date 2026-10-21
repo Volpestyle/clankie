@@ -139,7 +139,10 @@ managed provisioning implementation belong in the private operations repository
 The public service also defines optional host-selected
 [`runtime-provider` hooks](../apps/clankie/src/runtime-provider.ts), empty by
 default. Private managed-body composition supplies quotas, credit routes,
-heartbeat accounting and model-plan policy through those hooks. Generic service
+heartbeat accounting and model-plan policy through those hooks. The accepted
+[continuous hosted presence](adr/0285-hosted-presence-has-no-idle-clock.md)
+lifecycle removes idle/hour sleeps in the managed service; its rollout remains
+pending, and paid work stays subject to credit limits. Generic service
 lifecycle, transport, signed pairing and device-security recovery stay public.
 The [Linux guide](../infra/hosted/README.md#optional-runtime-provider) documents
 module selection across launcher restarts.

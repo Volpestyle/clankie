@@ -122,7 +122,9 @@ acknowledgments cannot prove queue drain, so Stop retains a post-input lease. Re
 Locally, the service keeps running after the console closes, as long as the Mac
 stays awake and online; by default a self-hosted Mac keeps itself awake while
 plugged in ([`clankie awake`](/cli/#awake)). Hosted, closing
-a client leaves his work running within the plan's limits.
+a client leaves his work running within the plan's limits. The accepted Premium
+lifecycle keeps presence and scheduled Auto rounds running across idle periods;
+its managed-service rollout is pending. Inference still uses AI credits.
 
 The host keeps service state and credentials: Keychain on macOS, a private file
 store on Linux. Connected GitHub, Linear, and Google accounts are stored there

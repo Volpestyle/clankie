@@ -111,8 +111,18 @@ Clankie.
 ## A hosted Clankie
 
 A hosted body runs on Clankie's service rather than your Mac, so your Mac's power
-does not matter to it. It sleeps when idle and the app or a Discord mention wakes
-it ("Asleep" and "Waking" in the app are that, not a fault). Sign in with
+does not matter to it. The accepted Premium lifecycle keeps the hosted body
+present continuously: Discord, voice availability, phone and relay access, and
+scheduled Auto rounds continue across idle periods with the laptop shut.
+Inference uses AI credits and stops at the available balance and spending limits;
+being present does not promise unlimited model use or compute. A hosted body
+cannot use a sleeping Mac's desktop or simulator. Optional cloud burst capacity
+is outside Premium's first release.
+
+This lifecycle requires the VUH-2575 managed-service rollout; older deployments
+can still sleep automatically. Explicit owner pauses, billing suspension and
+protective data limits remain. See [ADR 0285](adr/0285-hosted-presence-has-no-idle-clock.md).
+Sign in with
 `clankie login`, or `clankie connect hosted` to require one, then pair the app;
 see [local and hosted connection modes](cli.md#local-and-hosted-connection-modes).
 Setup and pricing are in the [public field guide](https://docs.clankie.bot/get-started/).

@@ -26,6 +26,12 @@ use the Mac setup.
    phone (or scan its QR), review the access, and connect.
 4. Open **Messages**, choose **Clankie**, and say hello.
 
+Premium’s accepted availability promise is continuous Discord, voice and phone
+presence, with scheduled Auto rounds while your laptop is shut. The managed
+service rollout for this lifecycle is pending. AI work uses credits with spending
+limits; a sleeping Mac’s desktop and simulator remain unavailable. Burst workers
+are deferred from the first Premium release.
+
 Hosted Clankie uses AI credits only; customer model keys and subscription
 sign-ins are available when you run him yourself. You need no Mac install,
 model subscription, or API key. Add credits from your account if they run out. To use a terminal as well, run `clankie connect hosted`

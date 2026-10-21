@@ -153,3 +153,14 @@ mints a read-only device bound to the live grant, including during streams;
 revocation or expiry ends access. Shell also permits commands and the content
 they can read while its window is open. Treat the grant as the authority to
 inspect a customer's body; ordinary fleet health access does not supply it.
+
+## Continuous presence
+
+VUH-2575 / [ADR 0285](../../../../docs/adr/0285-hosted-presence-has-no-idle-clock.md)
+retires automatic idle sleep and active-body-hour limits for managed bodies.
+Presence and scheduled Auto rounds continue independently of owner-device
+traffic; inference still requires AI credits. Confirm the managed-service rollout
+before describing a particular installation as continuously present. Explicit
+owner pauses, billing suspension and protective data limits remain. Linked
+machines must be awake for their desktop tools and simulators. Burst is deferred
+from Premium's first release. Hosted operations and deployment stay in clankie-ops.

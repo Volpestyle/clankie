@@ -65,6 +65,11 @@
       "pattern": "0098-the-room-can-type-to-a-playthrough|0189-agent-sessions-read-from-their-transcripts|0191-a-reply-to-his-post-goes-to-whoever-owns-the-work|0207-workers-publish-through-one-clankie-app",
       "adr": "0275-0278 (VUH-2396 renumbering)",
       "now": "That record moved to a new number; docs/adr/README.md#renumbered-records maps each former file to it."
+    },
+    {
+      "pattern": "It sleeps when idle and the app or a Discord mention wakes",
+      "adr": "0285",
+      "now": "Managed presence has no automatic idle sleep or active-hour cap; confirm rollout on older deployments."
     }
   ]
 }
