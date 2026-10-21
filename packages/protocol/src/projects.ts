@@ -17,6 +17,7 @@ import {
   RetiredWorkingPreferencesSchema,
 } from "./project-work-policy.ts";
 export * from "./project-work-policy.ts";
+import { ProjectReviewSchema } from "./reviews.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -148,6 +149,8 @@ export const ProjectSchema = z
     /** Evidence-first progress reports; absent means on. */
     autoUpdates: z.boolean().optional(),
     hiring: ProjectHiringPolicySchema.optional(),
+    /** The standing reviewer every landing candidate goes to (ADR 0287); absent means none. */
+    review: ProjectReviewSchema.optional(),
     fleet: z
       .object({
         size: z.enum(["max", "large", "small", "solo"]).optional(),
@@ -268,6 +271,8 @@ export const ProjectsSnapshotSchema = z
     /** Opt-in work-policy view only, so existing strict clients retain their response shape. */
     projectWorkPolicy: z.literal(true).optional(),
     projectAutoUpdates: z.literal(true).optional(),
+    /** Opt-in reviewer view (ADR 0287), so existing strict clients retain their response shape. */
+    projectReview: z.literal(true).optional(),
     retiredWorkingPreferences: RetiredWorkingPreferencesSchema.optional(),
     linearProjectBindings: z.literal(true).optional(),
     /** Each project's status line by project ID, in the autonomy-aware view of a current service. */
@@ -459,6 +464,8 @@ export const UpdateProjectSettingsSchema = z
         ownerLoop: ProjectOwnerLoopSchema.nullable().optional(),
         autoUpdates: z.boolean().nullable().optional(),
         hiring: ProjectHiringPolicySchema.nullable().optional(),
+        /** null removes the reviewer; landings then need no review. */
+        review: ProjectReviewSchema.nullable().optional(),
       })
       .strict()
       .refine(

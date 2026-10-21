@@ -16,6 +16,19 @@ running the real thing. Models rate output like their own more favorably: for a
 consequential change, prefer a reviewer from another model family when usage
 allows.
 
+For projects that want independent review of every landing, set a standing
+reviewer instead of relaying packets by hand
+([ADR 0287](../../../../docs/adr/0287-a-standing-reviewer-gates-every-landing.md)):
+hire a reviewer seat, ideally from a different harness or model family than the
+authors, and run `clankie project settings PROJECT --reviewer-role reviewer`.
+Authors then `submit_for_review` and the reviewer decides with `review_verdict`;
+the service routes the patch and the landing gate holds (exit 3) until the
+reviewer approves that exact patch. A verdict notice to you asks for no action.
+Keep a reviewer seat live while the setting is on, or landings wait. `waive_review`
+lands one exact patch without review. It is rare, needs a reason, and is recorded
+with you as the waiver and shown to the owner; never use it to skip pushback you
+disagree with. Look at the candidate with `clankie review list|show`.
+
 Ask for coverage of the changed boundary in this order: full E2E with real
 dependencies and nothing mocked, integration across data, API and schema
 boundaries, then goldens grounded in real examples. Push back on new unit-test

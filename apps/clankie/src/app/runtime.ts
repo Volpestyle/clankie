@@ -118,6 +118,7 @@ import { createModelKeyRoutes } from "../model-key-routes.ts";
 import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
 import { PairingOfferStore, replayReviewOffers } from "../pairing.ts";
 import { createProjectRoutes } from "../project-routes.ts";
+import { createReviewRoutes } from "../review-routes.ts";
 import { createPushDispatcher, type PushDispatcher } from "../push.ts";
 import { createRuntimeUpdateRoutes } from "../runtime-update-routes.ts";
 import { DiscordStreamWatchProjection } from "../stream-watch-observation.ts";
@@ -1209,6 +1210,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(dependencies.builtInTracker ? { tracker: dependencies.builtInTracker } : {}),
     }),
   );
+  app.route("/", createReviewRoutes(dependencies.captain.reviews, authorizeOwnerSecrets));
   app.route(
     "/",
     createProjectRoutes(authorizeOwnerSecrets, settingsSource, {

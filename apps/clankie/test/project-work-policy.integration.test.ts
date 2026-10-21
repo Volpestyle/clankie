@@ -136,6 +136,55 @@ it("edits project work policy through authenticated CLI/HTTP, fences revisions a
   }
 });
 
+it("names a project's standing reviewer through authenticated CLI/HTTP; older views never see it (ADR 0287)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "project-reviewer-"));
+  const store = new SettingsStore(join(root, "settings.json"));
+  await store.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({ projects: [{ id: "kh2", name: "KH2" }] }),
+  }));
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const token = mintOperatorToken();
+  await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+  const app = createProjectRoutes(
+    async (request) => (request.headers.get("authorization") === `Bearer ${token}` ? true : "forbidden"),
+    store,
+  );
+  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
+  try {
+    if (!server.listening) await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No HTTP address");
+    const host = `http://127.0.0.1:${address.port}`;
+    const options = { host, env: {}, operatorCredentialStore: credentials };
+    const shown = await runProjectSettingsCommand(
+      ["settings", "kh2", "--reviewer-role", "Reviewer"],
+      options,
+    );
+    expect(shown).toMatchObject({ reviewer: { role: "reviewer" } });
+    expect((await store.load()).projects.projects[0]?.review).toEqual({ role: "reviewer" });
+    await runProjectSettingsCommand(["settings", "kh2", "--reviewer-seat", "pc/term_quill"], options);
+    expect((await store.load()).projects.projects[0]?.review).toEqual({ seat: "pc/term_quill" });
+    const plain = await fetch(
+      `${host}${PROJECTS_PATH}?includeAutonomy=true&includeWorkPolicy=true&includeAutoUpdates=true`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+      },
+    ).then((response) => response.json());
+    expect(plain).not.toHaveProperty("projectReview");
+    expect(plain.settings.projects[0]).not.toHaveProperty("review");
+    expect(await runProjectSettingsCommand(["settings", "kh2", "--reviewer", "none"], options)).toMatchObject(
+      { reviewer: "none" },
+    );
+    expect((await store.load()).projects.projects[0]).not.toHaveProperty("review");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("retains exact saved retired preferences in a durable, idempotent migration receipt", async () => {
   const root = await mkdtemp(join(tmpdir(), "retired-working-preferences-"));
   const path = join(root, "settings.json");

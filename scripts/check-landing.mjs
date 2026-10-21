@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { landingTypechecks } from "./testing/landing-typechecks.mjs";
 import { randomUUID } from "node:crypto";
 import { retryFailedFiles } from "./check-release.mjs";
+import { landingReview, landingReviewMessage } from "./testing/landing-review.mjs";
 import {
   changePatchId,
   recordLandingHistory,
@@ -70,10 +71,20 @@ if (revalidate) {
   console.log(JSON.stringify(verdict, null, 2));
   console.log(
     verdict.valid
-      ? `[landing] gate for ${verdict.gate.head} still covers HEAD ${head} on base ${base}; push without rerunning`
+      ? `[landing] gate for ${verdict.gate.head} still covers HEAD ${head} on base ${base}`
       : "[landing] rerun the root gate: " + verdict.reasons.join("; "),
   );
-  process.exit(verdict.valid ? 0 : 1);
+  if (!verdict.valid) process.exit(1);
+  // Green checks still wait for APPROVE of exactly this patch (ADR 0287).
+  const review = landingReview(root, base);
+  console.log(landingReviewMessage(review));
+  if (recorded) {
+    recorded.revalidations.at(-1).review = { state: review.state, ...review.landing };
+    writeFileSync(reportPath, JSON.stringify(recorded, null, 2) + "\n");
+  }
+  if (review.state === "held" || review.state === "unavailable") process.exit(3);
+  console.log("[landing] push without rerunning");
+  process.exit(0);
 }
 const fingerprint = () => sourceFingerprint(root);
 const source = await fingerprint();
@@ -254,6 +265,19 @@ report.sourceStable = git("rev-parse", "HEAD") === head && (await fingerprint())
 if (!report.sourceStable) {
   console.error("[landing] Source changed while the gate ran; this result cannot authorize a push.");
   exit = 1;
+}
+// Green checks are recorded on their own, so revalidation can carry them to an
+// approval that arrives later; landing still waits for it (ADR 0287).
+report.checksExitCode = exit;
+if (!exit) {
+  const review = landingReview(root, base);
+  report.review = {
+    state: review.state,
+    ...review.landing,
+    ...(review.reason ? { reason: review.reason } : {}),
+  };
+  console.log(landingReviewMessage(review));
+  if (review.state === "held" || review.state === "unavailable") exit = 3;
 }
 report.exitCode = exit;
 report.elapsedSeconds = (performance.now() - started) / 1000;

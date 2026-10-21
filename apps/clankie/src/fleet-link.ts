@@ -32,10 +32,10 @@ import { decodeRemoteShellError } from "./remote-shell-error.ts";
 
 /** The only paths the link listener answers (seat routes and the fleet's granted tools); everything else is 404. */
 const LINK_ROUTE =
-  /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages|peers|peer-messages|tool-catalog)|mcp)$/u;
+  /^\/v1\/fleet\/(?:seats\/[^/]+\/(?:events|hook|messages|peers|peer-messages|review-candidates|review-verdicts|tool-catalog)|mcp)$/u;
 const LEAD_ROUTE = /^\/v1\/fleet\/lead\/(?:mcp|prompt|transcript|events(?:\/[^/]+\/(?:ack|reply))?)$/u;
 const LINK_RECEIPT =
-  /^\/v1\/fleet\/seats\/[^/]+\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
+  /^\/v1\/fleet\/seats\/[^/]+\/(?:messages|peer-messages|review-candidates)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const LINK_MESSAGE_STATUS =
   /^\/v1\/fleet\/seats\/[^/]+\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/status$/iu;
 const LINK_EVENT_ACK = /^\/v1\/fleet\/seats\/[^/]+\/events\/[^/]+\/ack$/u;

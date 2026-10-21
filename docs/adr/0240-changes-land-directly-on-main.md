@@ -3,7 +3,9 @@
 Status: Accepted (James, 2026-10-07). Retires the mandatory landing queue in
 [integration](../integration.md); `clankie integrate` remains an optional tool.
 Amended 2026-10-10 for gate revalidation (VUH-2024) and timed deploy holds
-(VUH-2049).
+(VUH-2049). Amended 2026-10-21 by [ADR 0287](0287-a-standing-reviewer-gates-every-landing.md):
+when the project names a reviewer, the gate also holds until that reviewer
+approves the exact patch, and exits 3 while it waits.
 
 ## Context
 

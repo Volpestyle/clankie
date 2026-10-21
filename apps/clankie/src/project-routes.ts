@@ -39,6 +39,7 @@ function projectSnapshot(
   includeAutonomy: boolean,
   includeWorkPolicy = false,
   includeAutoUpdates = false,
+  includeReview = false,
 ) {
   const projects = current.projects.projects.map((saved) => {
     const project = { ...saved };
@@ -51,6 +52,7 @@ function projectSnapshot(
       delete project.productPaths;
     }
     if (!includeAutoUpdates) delete project.autoUpdates;
+    if (!includeReview) delete project.review;
     if (!includeWorkPolicy) {
       delete project.wipCap;
       delete project.ownerLoop;
@@ -80,6 +82,7 @@ function projectSnapshot(
         }
       : {}),
     ...(includeAutoUpdates ? { projectAutoUpdates: true } : {}),
+    ...(includeReview ? { projectReview: true } : {}),
     revision: projectsRevision(current.projects),
   };
 }
@@ -136,6 +139,7 @@ export function createProjectRoutes(
         includeAutonomy,
         context.req.query("includeWorkPolicy") === "true",
         context.req.query("includeAutoUpdates") === "true",
+        context.req.query("includeReview") === "true",
       ),
       ...(status === undefined ? {} : { projectStatus: status.projects, needsYou: status.needsYou }),
     });
@@ -162,6 +166,7 @@ export function createProjectRoutes(
         context.req.query("includeAutonomy") === "true",
         context.req.query("includeWorkPolicy") === "true",
         context.req.query("includeAutoUpdates") === "true",
+        context.req.query("includeReview") === "true",
       );
       return context.json({ ...projected, revision: result.revision }, 201);
     } catch (error) {
@@ -258,6 +263,7 @@ export function createProjectRoutes(
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
           context.req.query("includeAutoUpdates") === "true",
+          context.req.query("includeReview") === "true",
         ),
       );
     } catch {
@@ -286,6 +292,7 @@ export function createProjectRoutes(
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
           context.req.query("includeAutoUpdates") === "true",
+          context.req.query("includeReview") === "true",
         ),
       );
     } catch {
@@ -319,6 +326,7 @@ export function createProjectRoutes(
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
           context.req.query("includeAutoUpdates") === "true",
+          context.req.query("includeReview") === "true",
         ),
       );
     } catch {
@@ -347,6 +355,7 @@ export function createProjectRoutes(
           context.req.query("includeAutonomy") === "true",
           context.req.query("includeWorkPolicy") === "true",
           context.req.query("includeAutoUpdates") === "true",
+          context.req.query("includeReview") === "true",
         ),
       );
     } catch {

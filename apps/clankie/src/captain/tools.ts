@@ -1,6 +1,9 @@
 import type { LeadChat } from "./lead-roster.ts";
 import { huddleSummary } from "./huddles.ts";
 import type { HuddleService } from "./port.ts";
+import type { ReviewGate } from "./review-gate.ts";
+import { realpath } from "node:fs/promises";
+import { readCandidatePatch } from "../../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
 import type { ProjectProposalDraft } from "@clankie/protocol/projects";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import type { QuestionDraft } from "./conversation-questions.ts";
@@ -315,6 +318,9 @@ export function captainTools(
             ? []
             : [workerAccountsTool(herdrWatches.workerAccountsReport)]),
           ...(herdrWatches.huddles === undefined ? [] : [huddleTool(herdrWatches.huddles, turn)]),
+          ...(herdrWatches.reviews === undefined || lane !== "operator"
+            ? []
+            : [waiveReviewTool(herdrWatches.reviews, turn)]),
         ]
       : []),
     // Hiring starts a process on the operator's machine, so it rides the same
@@ -1115,6 +1121,43 @@ function hireAgentTool(
           status: result.seat.status,
         },
       });
+    },
+  });
+}
+
+function waiveReviewTool(reviews: ReviewGate, turn: TurnContext): ToolDefinition {
+  return defineTool({
+    name: "waive_review",
+    label: "Waive review",
+    description:
+      "Land one exact patch without its project's standing review (ADR 0287). Reads the committed change in a local " +
+      "checkout (merge-base with origin/main..HEAD), hashes it, and records the waiver with you as lead, your reason and " +
+      "the patch-id on its candidate; the landing gate then lets exactly that patch land. The owner and your own report " +
+      "stream see it. Rare by design: prefer the reviewer's verdict; never waive to skip pushback you disagree with.",
+    parameters: Type.Object({
+      directory: Type.String({ minLength: 1, maxLength: 4096, description: "The local checkout to land." }),
+      reason: Type.String({ minLength: 1, maxLength: 2000, description: "Why this lands without review." }),
+    }),
+    executionMode: "sequential",
+    execute: async (_id, input) => {
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
+      const directory = await realpath(input.directory);
+      const candidate = readCandidatePatch(directory);
+      const result = await reviews.waive(
+        {
+          schemaVersion: 1,
+          directory,
+          base: candidate.base,
+          head: candidate.head,
+          patchId: candidate.patchId,
+          patch: candidate.patch.toString("base64"),
+          reason: input.reason,
+        },
+        { actor: "lead", conversationId: authority.owner.conversationId },
+      );
+      if ("error" in result) throw new Error(`${result.error}: ${result.detail}`);
+      return json(result);
     },
   });
 }

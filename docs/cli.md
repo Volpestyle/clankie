@@ -1164,7 +1164,9 @@ the service returned `spawned`; completion still needs the matching native event
 Default landing is direct: commit to `main`, `git pull --rebase origin main`,
 run `clankie heavy -- pnpm check:landing`, then push
 ([ADR 0240](adr/0240-changes-land-directly-on-main.md)). `integrate` is optional
-when you want a composed, gated batch.
+when you want a composed, gated batch. When the project names a reviewer, the
+gate also waits for that reviewer to approve the exact patch (see
+[`review`](#review) below).
 
 Clankie's core queue landing gates rerun each failed Vitest file once in
 isolation on the same composed tree before isolating batch members. The first attempt completes its
@@ -3858,6 +3860,47 @@ browser is unaffected. JSON is the `browser status` shape with
 `"appliesTo": "next_session"`. `/browser harnesses` and `/browser delegate on|off`
 in the TUI call the same code. A listed harness is hired with `hire_agent`;
 `chrome: true` starts claude with `--chrome`.
+
+<a id="review"></a>
+
+### `review list|show|status|waive`
+
+The owner's side of the standing review gate
+([ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md)). A project may
+name a reviewer (`project settings PROJECT --reviewer-role ROLE`, below). Authors
+submit and reviewers decide from their own seats with the worker tools
+`submit_for_review`, `review_candidate` and `review_verdict`
+([worker access](worker-access.md)). These commands use the operator credential.
+They never record a verdict.
+
+```sh
+clankie review list [--project ID]
+clankie review show ID [--patch]
+clankie review status [--directory DIR] [--base REF]
+clankie review waive --reason TEXT [--directory DIR] [--base REF]
+```
+
+- `list` prints the candidates, newest first, optionally for one project.
+- `show ID` prints one candidate with its status, files, evidence, verdict and
+  any waiver. `--patch` adds the stored patch text.
+- `status` hashes the checkout's committed change (`git diff --binary`
+  from the merge base with `--base`, default `origin/main`, to `HEAD`) and asks
+  whether that exact patch may land. It prints the landing record and exits 0
+  when the patch is landable: the project names no reviewer, or the patch is
+  approved or waived. It exits 1 while the patch is awaiting review, has
+  CHANGES or was never submitted, and when the service has no review routes.
+- `waive --reason TEXT` records that this exact patch lands without review. The
+  reason is required. The candidate keeps who waived it, why and when, and
+  verdict readers show it. The lead has the same power through its
+  `waive_review` tool. Both are rare.
+
+`check:landing` runs `status` after green checks. If review is pending or the
+service cannot answer while the owner's settings name a reviewer, it records
+`checksExitCode: 0` and exits 3. `pnpm check:landing --revalidate` carries those
+green checks forward when only `main` moved, asks about review again and exits 3
+while it is held; exit 0 means push, exit 1 means rerun the gate. A rebase that
+changes the patch changes its hash and needs a new review. With no reviewer
+named, a service from before the gate, or CI, the review phase is skipped.
 
 <a id="fleet-resource-governor"></a>
 
@@ -7710,7 +7753,7 @@ Stale revisions or removal of an in-use role fail without overwriting the saved
 settings. Read the settings again and review the changes before retrying.
 
 `clankie project settings PROJECT` prints stored autonomy overrides
-and their current effective values, plus `auto` and `focus`. `--auto on|off` and
+and their current effective values, plus `auto`, `focus` and the `reviewer`. `--auto on|off` and
 `--focus TEXT|clear` set those in the same revision-fenced update. Add `--closure lead|owner|inherit` or
 `--machine-setup lead|owner|inherit`, `--commit lead|owner|inherit`,
 `--push lead|owner|inherit`, `--release lead|owner|time_rule|inherit`
@@ -7718,6 +7761,18 @@ and their current effective values, plus `auto` and `focus`. `--auto on|off` and
 the current revision-bearing owner API. Missing leaves inherit the global setting independently;
 `inherit` removes the selected override without changing its sibling. The console
 accepts the same syntax as `/project settings PROJECT ...`.
+
+`--reviewer-role ROLE`, `--reviewer-seat SEAT` or `--reviewer none` names or
+clears the project's standing reviewer
+([ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md)). A role such as
+`reviewer` resolves to the live seats holding it and is the better default,
+because seats retire; a seat is an exact `FLEET/term_…` ID. While a reviewer is
+set, `pnpm check:landing` exits 3 until the reviewer approves the exact patch
+(see [`review`](#review)). The JSON update accepts `review` as `{"role":"ROLE"}`,
+`{"seat":"SEAT"}` or `null` to clear. Readers opt in with `includeReview=true` and
+see `review` and `projectReview:true`; the CLI and TUI opt in automatically, and
+a service without `projectReview` refuses the flags. The `/project` menu has a
+**Reviewer** row.
 
 ```sh
 clankie project settings garden --closure owner
@@ -7727,6 +7782,8 @@ clankie project settings clankie --release time_rule --release-rule "Release wit
 clankie project settings garden --commit owner --push inherit
 clankie project settings garden --wip-cap 6 --owner-loop milestones
 clankie project settings garden --auto-updates off
+clankie project settings garden --reviewer-role reviewer
+clankie project settings garden --reviewer none
 ```
 
 Projects expose work policy with `projectWorkPolicy:true` when API readers use

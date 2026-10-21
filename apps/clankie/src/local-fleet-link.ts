@@ -23,6 +23,8 @@ export interface LocalFleetProofRequestContext {
     | "messages"
     | "peers"
     | "peer-messages"
+    | "review-candidates"
+    | "review-verdicts"
     | "tool-catalog"
     | "fixture-admissions"
     | "receipt";
@@ -107,7 +109,15 @@ export class LocalFleetLink {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const path = new URL(request.url).pathname;
       const seatRoute =
-        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|tool-catalog)$/u.exec(path);
+        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|review-candidates|review-verdicts|tool-catalog)$/u.exec(
+          path,
+        ) ||
+        // A review candidate's read is its author's or reviewer's own (ADR 0287).
+        (request.method !== "GET"
+          ? null
+          : /^\/v1\/fleet\/seats\/([^/]+)\/(review-candidates)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
+              path,
+            ));
       const receipt =
         request.method === "GET" &&
         (/^\/v1\/fleet\/seats\/([^/]+)\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(

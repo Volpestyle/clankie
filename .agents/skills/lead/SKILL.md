@@ -108,7 +108,9 @@ evidence, and read a transcript only to resolve a gap or contradiction.
 On completion, inspect, decide and act. A branch is not landed, and landing is
 not delivery: check the integrated consumer as soon as the parts can join.
 Respect the repo's review gate with one bounded pass over the actual diff and
-the boundary that could break ([delivery](reference/delivery.md)). Independent
+the boundary that could break; where a project wants independent review of every
+landing, give it a standing reviewer rather than relaying reviews yourself
+([delivery](reference/delivery.md)). Independent
 bundle checks follow `work-items`. Nothing unlanded is closed or forgotten
 silently (`tidy`).
 

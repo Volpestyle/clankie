@@ -35,6 +35,7 @@ import {
   type FleetAutonomyWire,
   type FleetAutonomyMode,
 } from "@clankie/protocol";
+import { ProjectReviewSchema } from "@clankie/protocol/reviews";
 import { commandHost } from "./io.ts";
 
 /** Revision-bearing API client shared by the CLI and the console's /project entry. */
@@ -130,7 +131,7 @@ export async function runProjectSettingsCommand(
         {
           ...((options.includeAutonomy ?? true) ? { includeAutonomy: "true" } : {}),
           ...((options.includeWorkPolicy ?? options.includeAutonomy ?? true)
-            ? { includeWorkPolicy: "true", includeAutoUpdates: "true" }
+            ? { includeWorkPolicy: "true", includeAutoUpdates: "true", includeReview: "true" }
             : {}),
         },
       ).toString()}`,
@@ -204,12 +205,19 @@ async function runProjectFleetSettings(
   }
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--reviewer-seat SEAT|--reviewer-role ROLE|--reviewer none]",
     );
   const changes: FleetAutonomyPatch = {};
   const work: Pick<
     UpdateProjectSettings["changes"],
-    "auto" | "autoUpdates" | "focus" | "trackerProjectId" | "linearProjectBinding" | "wipCap" | "ownerLoop"
+    | "auto"
+    | "autoUpdates"
+    | "focus"
+    | "trackerProjectId"
+    | "linearProjectBinding"
+    | "wipCap"
+    | "ownerLoop"
+    | "review"
   > = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
@@ -251,6 +259,12 @@ async function runProjectFleetSettings(
     else if (args[index] === "--linear-project" && work.linearProjectBinding === undefined)
       work.linearProjectBinding =
         value === "clear" ? null : LinearProjectBindingSchema.parse({ provider: "linear", projectId: value });
+    else if (args[index] === "--reviewer-seat" && work.review === undefined)
+      work.review = ProjectReviewSchema.parse({ seat: value });
+    else if (args[index] === "--reviewer-role" && work.review === undefined)
+      work.review = ProjectReviewSchema.parse({ role: value });
+    else if (args[index] === "--reviewer" && work.review === undefined && value === "none")
+      work.review = null;
     else if (args[index] === "--release" && releaseMode === undefined) releaseMode = value;
     else if (args[index] === "--release-rule" && releaseRule === undefined) releaseRule = value;
     else if (args[index] === "--gate-preset") {
@@ -312,6 +326,8 @@ async function runProjectFleetSettings(
     throw new Error(
       "This service does not support automatic project updates; update it before editing them.",
     );
+  if ("review" in work && snapshot.projectReview !== true)
+    throw new Error("This service does not support project reviewers; update it before setting one.");
   if (("wipCap" in work || "ownerLoop" in work) && snapshot.projectWorkPolicy !== true)
     throw new Error("This service does not support project work policy; update it before editing it.");
   if (Object.keys(changes).length || Object.keys(work).length) {
@@ -352,6 +368,7 @@ async function runProjectFleetSettings(
     ...(snapshot.projectsAuto === true
       ? { auto: project.auto === true, ...(project.focus === undefined ? {} : { focus: project.focus }) }
       : {}),
+    ...(snapshot.projectReview === true ? { reviewer: project.review ?? "none" } : {}),
     fleet: {
       closure: project.autonomy?.fleet?.closure ?? "inherit",
       machineSetup: project.autonomy?.fleet?.machineSetup ?? "inherit",

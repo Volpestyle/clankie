@@ -98,7 +98,8 @@ export class PeerSeatMessages {
     enabled(): Promise<boolean>;
     sender(paneId: string): Promise<HerdrAgentSnapshot | undefined>;
     recipient(seatId: string): Promise<HerdrAgentSnapshot | undefined>;
-    seats(): Promise<readonly HerdrAgentSnapshot[]>;
+    /** The complete inventory of one fleet: `default` is this machine's. */
+    seats(fleet: string): Promise<readonly HerdrAgentSnapshot[]>;
     deliver(seatId: string, text: string, options: PeerDeliveryOptions): Promise<FleetSeatDelivery>;
     /** A first confirmed native acceptance, never an attempt or receipt read. */
     confirmed?(event: {
@@ -166,7 +167,7 @@ export class PeerSeatMessages {
     // Sends and receipt reads keep their separate sender checks.
     const sender = await this.sender(authority, false);
     if (!sender) return undefined;
-    const seats = await this.options.seats();
+    const seats = await this.options.seats(authority.proof.fleet);
     if (!(await authority.validate()) || !(await this.options.enabled())) return undefined;
     const card = (agent: HerdrAgentSnapshot) => ({
       seatId: agent.terminalId,

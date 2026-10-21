@@ -40,6 +40,14 @@ lead with issue clips and stills at stable asset URLs and short captions, then
 what is open and what comes next. A hint is not proof of delivery or publication
 authority. Reconcile uncertain status-update writes before doing anything else.
 
+`clankie project settings PROJECT --reviewer-role ROLE|--reviewer-seat SEAT|--reviewer none`
+names the project's standing landing reviewer
+([ADR 0287](../../../../docs/adr/0287-a-standing-reviewer-gates-every-landing.md)).
+While one is set, `pnpm check:landing` exits 3 until the reviewer approves the
+exact patch. Prefer a role, because seats retire. `clankie review list|show`
+reads the candidates and verdicts; they are part of the project's review record,
+and an issue still gets its own verdict comment.
+
 For an existing project's team settings, `clankie project list` returns the
 current revision. `clankie project update PROJECT --changes FILE.json --revision
 REVISION` changes only the reviewed name, roles, worker cap or tracker binding;

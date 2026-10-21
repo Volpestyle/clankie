@@ -74,8 +74,11 @@ This repository is public. Both neighbors are private and consume
   after it passes. Its own `--changed` selection is the gate; hand-picked subsets
   do not count, and a changed source needs a new gate. If only `main` moved, rebase
   and run `pnpm check:landing --revalidate`: exit 0 pushes as is, exit 1 reruns
-  the gate. Don't judge overlap yourself, and resolve conflicts only in your own
-  files. ADR 0240 also sets when a lead may accept unchanged timing-sensitive
+  the gate. When the project names a reviewer, the gate exits 3 until the
+  reviewer approves the exact patch
+  ([ADR 0287](docs/adr/0287-a-standing-reviewer-gates-every-landing.md)):
+  `submit_for_review`, then `pnpm check:landing --revalidate`. Don't judge
+  overlap yourself, and resolve conflicts only in your own files. ADR 0240 also sets when a lead may accept unchanged timing-sensitive
   failures (the release-only list is
   [`scripts/testing/landing-test-policy.ts`](scripts/testing/landing-test-policy.ts));
   never report that as a green gate. The full `pnpm check` runs for releases and

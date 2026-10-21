@@ -189,3 +189,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0284: A service restart pauses one Pi room turn](0284-a-service-restart-pauses-one-pi-room-turn.md) — VUH-2574 (bounded prototype).
 - [0285: Hosted presence has no idle clock](0285-hosted-presence-has-no-idle-clock.md) — VUH-2575.
 - [0286: One body holds Clankie at a time](0286-one-body-holds-clankie-at-a-time.md) — VUH-2577.
+- [0287: A standing reviewer gates every landing](0287-a-standing-reviewer-gates-every-landing.md) — VUH-2616. Amends ADR 0240.

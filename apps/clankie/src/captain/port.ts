@@ -17,6 +17,7 @@ import type { ConversationOwner, ConversationAuthority, WorkerWriteAuthority } f
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type { PeerSeatAuthority } from "./peer-seat-messages.ts";
+import type { ReviewGate } from "./review-gate.ts";
 import type { InboundSeatRequest } from "./inbound-seat-receipts.ts";
 import type {
   DeliveryStage,
@@ -495,6 +496,8 @@ export interface CaptainPort {
     options?: { readonly urgent?: boolean },
   ): Promise<boolean | FleetSeatMessageReceipt>;
   listFleetPeerSeats(authority: PeerSeatAuthority): Promise<FleetPeerSeats | undefined>;
+  /** The standing review gate (ADR 0287); absent on a host without one. */
+  readonly reviews?: ReviewGate;
   sendFleetPeerMessage(authority: PeerSeatAuthority, input: FleetPeerMessage): Promise<FleetPeerReceipt>;
   reconcileFleetPeerMessage(
     authority: PeerSeatAuthority,

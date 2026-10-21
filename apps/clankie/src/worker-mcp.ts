@@ -1628,6 +1628,8 @@ export class WorkerMcp {
                 clankie: {
                   tools: connected ? "connected" : "off",
                   peerMessages,
+                  // The standing review gate's seat tools (ADR 0287).
+                  reviews: "on",
                   refreshPending,
                   catalogRevision: this.catalogRevisionOf(
                     authority.fleet,

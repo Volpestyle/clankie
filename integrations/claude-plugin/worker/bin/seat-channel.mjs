@@ -16,6 +16,7 @@ import {
   requestWithAdmissionRetry,
 } from "./admission.mjs";
 import { createPeerSender, readPeerCatalog } from "./peer-receipt.mjs";
+import { createReviewTools, REVIEW_TOOLS } from "./review-tools.mjs";
 import { createCatalogWatcher, signalCodexCatalog } from "./catalog-watch.mjs";
 // The clankie-worker channel on a linked machine (VUH-1527): the same seat
 // mailbox `clankie mcp --seat` serves on Clankie's own Mac, reached through the
@@ -26,6 +27,8 @@ import { createCatalogWatcher, signalCodexCatalog } from "./catalog-watch.mjs";
 // - message_clankie, for writing to him first. He reads it as this
 //   agent's output, never as the owner's instruction;
 // - list_fleet_seats and message_peer, when the service admits peer messaging;
+// - submit_for_review, review_candidate and review_verdict, when the service
+//   runs the standing review gate (ADR 0287);
 // - the tools the owner granted this fleet (`clankie access fleet`), such as
 //   Linear through his connected account, proxied to his service over the link.
 //
@@ -331,6 +334,7 @@ function fleetTools(
       let cursor;
       let toolsState;
       let peerMessages;
+      let reviews;
       let runtimeRevision;
       let catalogRevision;
       let pluginVersion;
@@ -345,6 +349,7 @@ function fleetTools(
             throw new Error("Inconsistent fleet tools settings metadata");
           toolsState = state;
         }
+        if (result._meta?.clankie?.reviews === "on") reviews = "on";
         const peers = result._meta?.clankie?.peerMessages;
         if (peers !== undefined) {
           if (!["on", "off"].includes(peers) || (peerMessages && peerMessages !== peers))
@@ -393,6 +398,7 @@ function fleetTools(
             tools,
             toolsState,
             peerMessages,
+            reviews,
             runtimeRevision,
             catalogRevision,
             pluginVersion,
@@ -529,6 +535,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   let link = readLink();
   let verifiedTools;
   let verifiedPeers;
+  let verifiedReviews = false;
   let verifiedRevision;
   let runtimeRevision;
   let expectedPluginVersion;
@@ -625,6 +632,9 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     }
   };
   const discoverPeers = (signal) => peerRequest("peers", "", undefined, signal);
+  const reviewTools = createReviewTools({
+    request: (route, suffix, init) => peerRequest(route, suffix, init),
+  });
   const peerCatalog = async (signal) => {
     const response = await discoverPeers(signal);
     const admission = await admissionRefusal(response);
@@ -687,6 +697,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           MESSAGE_CLANKIE_STATUS_TOOL,
           ...(verifiedTools ?? []),
           ...(verifiedPeers ? PEER_TOOLS : []),
+          ...(verifiedReviews ? REVIEW_TOOLS : []),
         ]
       : [];
   let reportObservation;
@@ -738,6 +749,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           return verifiedTools;
         }
         peerMessages = result.peerMessages;
+        verifiedReviews = result.reviews === "on";
         const tools = result.toolsState === "off" ? [] : result.tools;
         if (
           result.toolsState !== "off" &&
@@ -1317,6 +1329,21 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
             isError: !peers,
           },
         });
+      }
+      const review =
+        params?.name === "submit_for_review"
+          ? reviewTools.submit
+          : params?.name === "review_candidate"
+            ? reviewTools.read
+            : params?.name === "review_verdict"
+              ? reviewTools.verdict
+              : undefined;
+      if (review) {
+        try {
+          return send({ id, result: await review(params?.arguments) });
+        } catch (error) {
+          return send({ id, result: { isError: true, content: [{ type: "text", text: String(error) }] } });
+        }
       }
       if (params?.name === "message_peer") {
         const args = params?.arguments;

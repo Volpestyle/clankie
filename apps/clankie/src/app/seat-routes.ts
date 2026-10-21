@@ -44,6 +44,14 @@ import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-autho
 import { RemoteObservationError } from "../remote-fleet-relay.ts";
 import { fleetAdmissionUnavailableResponse } from "../local-fleet-admission.ts";
 import { SeatLinkInterruptedError } from "../captain/seat-outbox.ts";
+import {
+  FLEET_REVIEW_CANDIDATES_PATH,
+  FLEET_REVIEW_VERDICTS_PATH,
+  REVIEW_PATCH_MAX_BYTES,
+  ReviewSubmissionSchema,
+  ReviewVerdictInputSchema,
+} from "@clankie/protocol/reviews";
+import { reviewRefusalStatus } from "../review-routes.ts";
 
 /**
  * A seat bridge talking to a service that is shutting down gets a 503 and a
@@ -344,6 +352,59 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     return receipt
       ? context.json(receipt)
       : context.json({ error: "unknown_peer_receipt", deliveryStage: "uncertain" }, 404);
+  });
+
+  // The standing review gate (ADR 0287): the author submits and the reviewer
+  // decides from their own native seats; the service hashes and routes both.
+  ctx.app.post(
+    FLEET_REVIEW_CANDIDATES_PATH,
+    bodyLimit({ maxSize: Math.ceil(REVIEW_PATCH_MAX_BYTES / 3) * 4 + 64 * 1024 }),
+    async (context) => {
+      const authority = await peerSeatAuthority(context);
+      if (!authority) return context.json({ error: "native_seat_required" }, 403);
+      const reviews = ctx.dependencies.captain.reviews;
+      if (!reviews) return context.json({ error: "reviews_unavailable" }, 503);
+      // allow-swallowed-rejection -- A malformed body is refused below as an invalid submission.
+      const input = ReviewSubmissionSchema.safeParse(await context.req.json().catch(() => undefined));
+      if (!input.success) return context.json({ error: "invalid_review_submission" }, 400);
+      const result = await reviews.submit(authority, input.data);
+      return "error" in result
+        ? context.json(result, reviewRefusalStatus(result))
+        : context.json({ schemaVersion: 1, candidate: result });
+    },
+  );
+  ctx.app.get(`${FLEET_REVIEW_CANDIDATES_PATH}/:id`, async (context) => {
+    context.header("cache-control", "no-store");
+    const authority = await peerSeatAuthority(context);
+    if (!authority) return context.json({ error: "native_seat_required" }, 403);
+    const reviews = ctx.dependencies.captain.reviews;
+    if (!reviews) return context.json({ error: "reviews_unavailable" }, 503);
+    const id = z.string().uuid().safeParse(context.req.param("id"));
+    if (!id.success) return context.json({ error: "unknown_candidate" }, 404);
+    const result = await reviews.read(authority, id.data);
+    return "error" in result
+      ? context.json(result, reviewRefusalStatus(result))
+      : context.json({ schemaVersion: 1, ...result });
+  });
+  ctx.app.post(FLEET_REVIEW_VERDICTS_PATH, bodyLimit({ maxSize: 256 * 1024 }), async (context) => {
+    const authority = await peerSeatAuthority(context);
+    if (!authority) return context.json({ error: "native_seat_required" }, 403);
+    const reviews = ctx.dependencies.captain.reviews;
+    if (!reviews) return context.json({ error: "reviews_unavailable" }, 503);
+    // allow-swallowed-rejection -- A malformed body is refused below as an invalid verdict.
+    const input = ReviewVerdictInputSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!input.success)
+      return context.json(
+        {
+          error: "invalid_review_verdict",
+          detail: input.error.issues.map((issue) => issue.message).join("; "),
+        },
+        400,
+      );
+    const result = await reviews.verdict(authority, input.data);
+    return "error" in result
+      ? context.json(result, reviewRefusalStatus(result))
+      : context.json({ schemaVersion: 1, candidate: result });
   });
 
   // A fleet seat's mailbox (ADR 0161). Same door as the head outbox — operator

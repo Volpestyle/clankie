@@ -77,7 +77,9 @@ export async function revalidateLanding({ root, report, base }) {
     reasons,
     ...extra,
   });
-  if (report?.exitCode !== 0 || report.sourceStable !== true) reasons.push("the recorded gate was not green");
+  // A gate held only for review recorded green checks (ADR 0287); the review is asked again.
+  if ((report?.checksExitCode ?? report?.exitCode) !== 0 || report.sourceStable !== true)
+    reasons.push("the recorded gate was not green");
   if (!report?.change || !report.tests || !report.typecheckScope?.affectedInputs)
     reasons.push("the recorded gate predates selection recording; run the gate");
   if (reasons.length) return result();

@@ -14,6 +14,7 @@ import {
   type Project,
   type ProjectStatus,
 } from "@clankie/protocol/projects";
+import { ProjectReviewSchema } from "@clankie/protocol/reviews";
 import type { ClankieFaceShell } from "./shell/shell.ts";
 import type { SetupFlow } from "./shell/setup-flow.ts";
 
@@ -29,6 +30,9 @@ export interface ProjectsMenuServices {
   readonly cwd?: string;
 }
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** A seat ID carries `term_`; anything else names a role (ADR 0287). */
+const reviewerChoice = (text: string) =>
+  /(?:^|\/)term_/u.test(text.trim()) ? { seat: text.trim() } : { role: text.trim() };
 const home = (path: string) => path.replace(/^\/(?:Users|home)\/[^/]+/u, "~");
 
 async function attempt(flow: SetupFlow, work: () => Promise<unknown>, done: string): Promise<void> {
@@ -210,6 +214,20 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
               },
             ]
           : []),
+        ...(snapshot.projectReview === true
+          ? [
+              {
+                value: "reviewer",
+                label: "Reviewer",
+                hint:
+                  project.review === undefined
+                    ? "none · landings need no review"
+                    : "seat" in project.review
+                      ? `seat ${project.review.seat}`
+                      : `role ${project.review.role}`,
+              },
+            ]
+          : []),
         ...(snapshot.projectWorkPolicy === true
           ? [
               { value: "wip-cap", label: "Started issue cap", hint: project.wipCap?.toString() ?? "none" },
@@ -357,6 +375,24 @@ async function projectDetail(shell: ClankieFaceShell, services: ProjectsMenuServ
       });
       if (value !== undefined)
         await update({ autoUpdates: value === "on" }, "Automatic project updates saved.");
+    } else if (choice === "reviewer") {
+      const value = await flow.readText({
+        message:
+          "Reviewer every landing waits for: a role (such as reviewer) or an exact seat (FLEET/term_…); empty removes it",
+        ...(project.review === undefined
+          ? {}
+          : { defaultValue: "seat" in project.review ? project.review.seat : project.review.role }),
+        allowBack: true,
+        validate: (text) =>
+          text.trim() === "" || ProjectReviewSchema.safeParse(reviewerChoice(text)).success
+            ? undefined
+            : "Use a role name or a seat ID, or leave empty.",
+      });
+      if (value !== undefined)
+        await update(
+          { review: value.trim() === "" ? null : ProjectReviewSchema.parse(reviewerChoice(value)) },
+          value.trim() === "" ? "Reviewer removed; landings need no review." : "Reviewer saved.",
+        );
     } else if (choice === "owner-loop") {
       const value = await flow.readSelect({
         message: "When should the owner hear project updates?",

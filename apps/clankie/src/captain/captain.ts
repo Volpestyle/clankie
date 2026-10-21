@@ -53,6 +53,7 @@ import {
   syncOwnerCheckout,
   verifyHireCheckout,
   projectPathContains,
+  projectRoleForPersona,
   checkoutGit,
 } from "@clankie/settings";
 import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
@@ -64,6 +65,7 @@ import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@cl
 import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
+import { ReviewGate } from "./review-gate.ts";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
 import { fleetInstructions } from "./captain-prompts.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
@@ -109,6 +111,7 @@ import {
   type WorkerReportRouting,
 } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
+import { operatorAgentRoleKey } from "@clankie/protocol";
 import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
 import {
   codexAccounts,
@@ -5953,7 +5956,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     enabled: async () => (await settings()).fleet.peerMessages === "on",
     sender: (pane) => herdrRunner.get(pane).catch(() => undefined),
     recipient: (seat) => herdrRunner.resolveTerminal(seat).catch(() => undefined),
-    seats: () => herdrRunner.list?.() ?? Promise.resolve([]),
+    // A linked machine's seat lists its own machine's inventory (VUH-2616).
+    seats: (fleet) => herdrRunner.list?.(fleet === "default" ? undefined : fleet) ?? Promise.resolve([]),
     deliver: (seat, text, deliveryOptions) =>
       deliverToSeat(
         seat,
@@ -5999,8 +6003,94 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
   });
 
+  // The standing review gate (ADR 0287): the service routes candidates and
+  // verdicts itself, so neither direction needs a lead relay or a peer channel.
+  const reviewProject = async (agent: HerdrAgentSnapshot) => {
+    if (agent.workingDirectory === undefined) return undefined;
+    const current = await settings();
+    const fleet = splitFleetQualified(agent.paneId)?.fleet;
+    return fleet === undefined
+      ? (
+          await resolveFleetSettingsContext(
+            current,
+            { workingDirectory: agent.workingDirectory, machine: "local" },
+            {},
+          )
+        ).projectId
+      : remoteWorkspaceProject(current, current.projects, fleet, agent.workingDirectory);
+  };
+  const reviews = new ReviewGate({
+    path: join(options.stateDir, "reviews", "candidates.json"),
+    review: async (projectId) =>
+      (await settings()).projects.projects.find((project) => project.id === projectId)?.review,
+    // allow-swallowed-rejection -- A seat Herdr cannot read is no proven seat; the gate refuses it.
+    seat: (pane) => herdrRunner.get(pane).catch(() => undefined),
+    // allow-swallowed-rejection -- A seat Herdr cannot resolve gets no verdict notice; the record keeps it.
+    resolve: (seatId) => herdrRunner.resolveTerminal(seatId).catch(() => undefined),
+    // allow-swallowed-rejection -- An unresolvable checkout submits nothing (no_project).
+    seatProject: (agent) => reviewProject(agent).catch(() => undefined),
+    // Fails loudly: an unreadable checkout must not read as "no reviewer, landable".
+    directoryProject: async (directory) =>
+      (
+        await resolveFleetSettingsContext(
+          await settings(),
+          { workingDirectory: directory, machine: "local" },
+          {},
+        )
+      ).projectId,
+    async reviewers(projectId, review) {
+      if ("seat" in review) {
+        // allow-swallowed-rejection -- A named seat Herdr cannot resolve is not a live reviewer.
+        const seat = await herdrRunner.resolveTerminal(review.seat).catch(() => undefined);
+        return seat?.session === undefined ? [] : [seat];
+      }
+      const projects = (await settings()).projects;
+      const holders = (await refreshFleet()).filter(
+        (seat) =>
+          operatorAgentRoleKey(projectRoleForPersona(projects, seat.personaId, projectId) ?? "") ===
+          operatorAgentRoleKey(review.role),
+      );
+      const resolved = await Promise.all(
+        // allow-swallowed-rejection -- A role holder Herdr cannot resolve is not a live reviewer.
+        holders.map((seat) => herdrRunner.resolveTerminal(seat.seatId).catch(() => undefined)),
+      );
+      return resolved
+        .filter((seat): seat is HerdrAgentSnapshot => seat?.session !== undefined)
+        .sort((left, right) => left.terminalId.localeCompare(right.terminalId));
+    },
+    lead: (agent) => herdrWatches.nativeOwner(agent),
+    deliver: (seatId, text, conversationId) =>
+      deliverToSeat(seatId, text, {
+        conversationId: conversationId ?? conversations.defaultGlobalConversationId(),
+        source: "review",
+      }),
+    async notifyLead(owner, text) {
+      const lead = owner ?? { conversationId: conversations.defaultGlobalConversationId() };
+      // Durable in the lead's chat on every surface, even when its woken turn fails.
+      conversations.recordServiceNotice(lead.conversationId, text);
+      await wakeConversation(lead, text, undefined, "machine", true).catch(() => false);
+    },
+    room: ({ id, kind, from, to, text }) =>
+      noteFleetRoom({
+        id,
+        at: new Date().toISOString(),
+        kind: kind === "waiver" ? "lead_message" : "peer_message",
+        from:
+          "seatId" in from
+            ? workerParty(from.seatId)
+            : from.actor === "lead" && from.conversationId !== undefined
+              ? leadParty(from.conversationId)
+              : { kind: "owner", label: "Owner" },
+        to: to === undefined ? null : workerParty(to.seatId),
+        text,
+      }),
+  });
+
+  herdrWatches.reviews = reviews;
+
   return {
     huddles: huddleService,
+    reviews,
     listFleetPeerSeats: (authority) => peerMessages.list(authority),
     sendFleetPeerMessage: (authority, input) => peerMessages.send(authority, input),
     reconcileFleetPeerMessage: (authority, delivery, fingerprint) =>

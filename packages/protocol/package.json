@@ -38,6 +38,7 @@
     "./hosted-mail": "./src/hosted-mail.ts",
     "./discord-settings": "./src/discord-settings.ts",
     "./projects": "./src/projects.ts",
+    "./reviews": "./src/reviews.ts",
     "./presence": "./src/presence.ts",
     "./tool-catalog": "./src/tool-catalog.ts",
     "./integrate": "./src/integrate.ts",

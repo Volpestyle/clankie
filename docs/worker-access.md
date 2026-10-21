@@ -5,7 +5,9 @@ account is verified. Provider credentials stay in Clankie's broker. The bridge
 exposes `clankie_tools` and `clankie_call` from fleet settings and admission;
 provider discovery and verified account checks happen on invocation. The native
 worker bridge separately supplies `message_clankie` and, when peer messages are
-enabled, `list_fleet_seats` and `message_peer`. Peer invocations require stronger
+enabled, `list_fleet_seats` and `message_peer`, and the landing review tools
+(`submit_for_review`, `review_candidate`, `review_verdict`; see
+[Landing review](#landing-review)). Peer and review invocations require stronger
 native identity proof. Manual grants keep their selected direct tools.
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) supersedes the
 project-tool gate in ADR 0216. Projects still own roles, caps, hiring and tracker binding.
@@ -274,7 +276,9 @@ Clankie to relay each exchange. The Claude worker plugin and `clankie mcp --flee
 share the `runSeatChannel` bridge and expose:
 
 - `list_fleet_seats({})`: the sender's own fleet, with its identity and exact
-  recipient seat/binding records.
+  recipient seat/binding records. A seat on a remote machine sees the other seats
+  on that machine; the service reads the sender's fleet inventory, not only this
+  Mac's.
 - `message_peer({seat, text})`: set `seat` to a returned `seatId` and provide the
   message text. The bridge obtains the sender and recipient bindings; workers
   do not supply them. A current binding does not authorize a later pane occupant.
@@ -340,7 +344,37 @@ The service retains full bodies for the latest 100 settled messages and every
 unresolved message. Older settled bodies are pruned, with compact exact receipts
 retained to prevent an old delivery ID from dispatching again.
 [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608)
-records this contract.
+records this contract. Peers never cross a fleet boundary: a seat on one machine
+cannot message a seat on another, and the send is refused as unknown or ambiguous
+in this fleet. Until [ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md),
+remote seats also saw an empty catalog; that is fixed.
+
+## Landing review
+
+When a project names a standing reviewer
+([ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md)), the worker
+bridge adds three tools. The service advertises them with `reviews: "on"` in its
+catalog metadata, so an older service shows none.
+
+- `submit_for_review({summary, issue?, evidence?, base?})`: the author sends the
+  checkout's exact committed change (`git diff --binary` from the merge base with
+  `origin/main` to `HEAD`). The service hashes it, routes it to a live reviewer
+  seat other than the author and returns the candidate. Passing the same `issue`
+  after CHANGES links the new candidate to the old one.
+- `review_candidate({candidateId})`: the author and the project's reviewer read
+  the stored patch and the candidate record.
+- `review_verdict({candidateId, patchId, verdict, findings?, summary?})`: the
+  reviewer records `approve` or `changes` for the patch it read. CHANGES needs at
+  least one concrete finding. A verdict is refused from the author, from a seat
+  that is not the project's reviewer, and for a different patch-id.
+
+These use the same native seat proof as peer messages, never a caller-supplied
+identity, so transport-only admission and bearer links cannot submit or decide.
+They do not depend on `fleet.peerMessages`. Seat routes are
+`POST /v1/fleet/seats/{paneId}/review-candidates`,
+`GET /v1/fleet/seats/{paneId}/review-candidates/{id}` and
+`POST /v1/fleet/seats/{paneId}/review-verdicts`; the owner reads with
+[`clankie review`](cli.md#review).
 
 ## Discover and call
 

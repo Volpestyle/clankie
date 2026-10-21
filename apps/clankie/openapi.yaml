@@ -3228,12 +3228,136 @@ paths:
         "401": { description: Owner authentication required }
         "403": { description: Caller lacks owner authority }
         "409": { description: Context could not be verified or settings changed }
+  /v1/operator/reviews:
+    get:
+      tags: [Operator]
+      operationId: listReviewCandidates
+      summary: List landing review candidates, newest first
+      description: The standing review gate's candidates (ADR 0287) with status, author, reviewer, verdict and any waiver. At most 500. An operator bearer reads and waives but never records a verdict.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - { name: project, in: query, required: false, schema: { type: string, minLength: 1, maxLength: 64 } }
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, candidates]
+                properties:
+                  schemaVersion: { const: 1 }
+                  candidates: { type: array, maxItems: 500, items: { type: object } }
+        "400": { description: Malformed query }
+        "401": { description: Operator authentication required }
+        "403": { description: Caller lacks owner authority }
+        "503": { description: Reviews unavailable }
+  /v1/operator/reviews/{id}:
+    get:
+      tags: [Operator]
+      operationId: getReviewCandidate
+      summary: Read one landing review candidate
+      description: With patch=true, also the stored patch bytes, base64.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: patch, in: query, required: false, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200":
+          description: The candidate and, when asked, its patch
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, candidate]
+                properties:
+                  schemaVersion: { const: 1 }
+                  candidate: { type: object }
+                  patch: { type: string, contentEncoding: base64 }
+        "401": { description: Operator authentication required }
+        "403": { description: Caller lacks owner authority }
+        "404": { description: Unknown candidate }
+        "503": { description: Reviews unavailable }
+  /v1/operator/reviews/landing:
+    get:
+      tags: [Operator]
+      operationId: getReviewLanding
+      summary: Ask whether one exact patch may land
+      description: The landing gate's question (ADR 0287). The service maps the checkout directory to its project. landable is true when the project names no reviewer, the change is empty, or the patch-id is approved or waived. Otherwise status is not_submitted, awaiting_review or changes. `clankie review status` and `pnpm check:landing` ask this; the gate exits 3 while landable is false.
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - {
+            name: directory,
+            in: query,
+            required: true,
+            schema: { type: string, minLength: 1, maxLength: 4096 },
+          }
+        - {
+            name: patchId,
+            in: query,
+            required: true,
+            description: "`git patch-id --verbatim` of the committed change, or `empty`.",
+            schema: { type: string },
+          }
+      responses:
+        "200":
+          description: The landing decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, required, patchId, status, landable]
+                properties:
+                  schemaVersion: { const: 1 }
+                  required: { type: boolean }
+                  projectId: { type: string }
+                  patchId: { type: string }
+                  status:
+                    type: string
+                    enum:
+                      [not_required, not_submitted, awaiting_review, changes, approved, waived, superseded]
+                  landable: { type: boolean }
+                  candidate: { type: object }
+        "400": { description: Malformed query }
+        "401": { description: Operator authentication required }
+        "403": { description: Caller lacks owner authority }
+        "503": { description: Reviews unavailable }
+  /v1/operator/reviews/waivers:
+    post:
+      tags: [Operator]
+      operationId: waiveReview
+      summary: Land one exact patch without its project's review
+      description: Owner only. Records the owner, the reason and the time on the candidate for exactly this patch-id, and the landing gate then lets that patch land. The service recomputes the patch-id from the bytes and refuses a mismatch. The lead's `waive_review` tool does the same on the operator lane. Rare by design.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, directory, base, head, patchId, patch, reason]
+              properties:
+                schemaVersion: { const: 1 }
+                directory: { type: string, minLength: 1, maxLength: 4096 }
+                base: { type: string, pattern: "^[0-9a-f]{40,64}$" }
+                head: { type: string, pattern: "^[0-9a-f]{40,64}$" }
+                patchId: { type: string, pattern: "^[0-9a-f]{40,64}$" }
+                patch: { type: string, description: "`git diff --binary` bytes, base64; at most 4 MiB." }
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200": { description: The waived candidate }
+        "400": { description: Malformed waiver or invalid patch }
+        "401": { description: Operator authentication required }
+        "403": { description: Caller lacks owner authority }
+        "409": { description: Patch-id mismatch, no project, or the project names no reviewer }
+        "503": { description: Reviews unavailable }
   /v1/operator/projects/update:
     post:
       tags: [Operator]
       operationId: updateProjectSettings
       summary: Update project policy while preserving independent inheritance
-      description: Each autonomy.fleet leaf overrides its global default independently; null clears only that override and omission retains it. Release mode and rule are one atomic leaf. Responses omit autonomy fields unless includeAutonomy=true; workingPreferences=true then advertises support for the new controls. The expectedRevision fences full project settings even for legacy projections. linearProjectBinding names a connected Linear project by exact UUID, independently of the built-in trackerProjectId. It never changes a saved tracker backend; null clears only the Linear reference. The autonomy-aware view advertises linearProjectBindings=true.
+      description: Each autonomy.fleet leaf overrides its global default independently; null clears only that override and omission retains it. Release mode and rule are one atomic leaf. Responses omit autonomy fields unless includeAutonomy=true; workingPreferences=true then advertises support for the new controls. The expectedRevision fences full project settings even for legacy projections. linearProjectBinding names a connected Linear project by exact UUID, independently of the built-in trackerProjectId. It never changes a saved tracker backend; null clears only the Linear reference. The autonomy-aware view advertises linearProjectBindings=true. review names the standing landing reviewer (ADR 0287); it appears only with includeReview=true.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -3253,6 +3377,12 @@ paths:
             in: query,
             schema: { type: string, enum: ["true"] },
             description: Opt into automatic project update settings and capability,
+          }
+        - {
+            name: includeReview,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into the project's standing reviewer (ADR 0287) and projectReview=true,
           }
       requestBody:
         required: true
@@ -3276,6 +3406,21 @@ paths:
                         type: [boolean, "null"],
                         description: "Evidence-first progress reports; null restores default on.",
                       }
+                    review:
+                      type: object
+                      nullable: true
+                      description: The project's standing landing reviewer (ADR 0287); null clears it. Either an exact seat or a role whose live seats review.
+                      oneOf:
+                        - type: object
+                          additionalProperties: false
+                          required: [seat]
+                          properties:
+                            seat: { type: string, minLength: 1, maxLength: 256 }
+                        - type: object
+                          additionalProperties: false
+                          required: [role]
+                          properties:
+                            role: { type: string, minLength: 1, maxLength: 24 }
                     hiring:
                       {
                         type: [object, "null"],
@@ -3317,7 +3462,7 @@ paths:
       tags: [Operator]
       operationId: getOperatorProjects
       summary: Read owner project settings and their current revision
-      description: Legacy responses omit autonomy and work-policy fields. includeAutonomy=true adds autonomy overrides and defaults. includeWorkPolicy=true adds wipCap, ownerLoop, hiring, projectWorkPolicy=true and a read-only retiredWorkingPreferences receipt. includeAutoUpdates=true adds autoUpdates and projectAutoUpdates=true. Revision always covers the full stored settings.
+      description: Legacy responses omit autonomy and work-policy fields. includeAutonomy=true adds autonomy overrides and defaults. includeWorkPolicy=true adds wipCap, ownerLoop, hiring, projectWorkPolicy=true and a read-only retiredWorkingPreferences receipt. includeAutoUpdates=true adds autoUpdates and projectAutoUpdates=true. includeReview=true adds each project's standing reviewer as review and projectReview=true. Revision always covers the full stored settings.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -3337,6 +3482,12 @@ paths:
             in: query,
             schema: { type: string, enum: ["true"] },
             description: Opt into automatic project update settings and capability,
+          }
+        - {
+            name: includeReview,
+            in: query,
+            schema: { type: string, enum: ["true"] },
+            description: Opt into the project's standing reviewer (ADR 0287) and projectReview=true,
           }
       responses:
         "200": { description: Project settings and SHA-256 revision }
@@ -5571,6 +5722,113 @@ paths:
           description: Native peer sender proof unavailable
         "404":
           description: No exact original receipt available; delivery remains uncertain
+
+  /v1/fleet/seats/{paneId}/review-candidates:
+    post:
+      tags: [Captain]
+      operationId: submitReviewCandidate
+      summary: Submit the seat's exact patch to its project's standing reviewer
+      description: |
+        Requires the same native process/session proof as peer messages; the
+        author is attributed from that proof, never from the body. The body
+        carries `git diff --binary` bytes (base64, at most 4 MiB) and the
+        bridge's `git patch-id --verbatim`; the service recomputes the hash over
+        the bytes it stores and refuses a mismatch. It sends a review packet to
+        the first live reviewer seat that is not the author. An author's earlier
+        candidate for the same issue becomes superseded. ADR 0287.
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, base, head, patchId, patch, summary]
+              properties:
+                schemaVersion: { const: 1 }
+                base: { type: string, pattern: "^[0-9a-f]{40,64}$" }
+                head: { type: string, pattern: "^[0-9a-f]{40,64}$" }
+                patchId: { type: string, pattern: "^[0-9a-f]{40,64}$" }
+                patch: { type: string, description: Base64 diff bytes }
+                issue: { type: string, minLength: 1, maxLength: 64 }
+                summary: { type: string, minLength: 1, maxLength: 4000 }
+                evidence: { type: array, maxItems: 20, items: { type: string, maxLength: 2048 } }
+                supersedes: { type: string, format: uuid }
+      responses:
+        "200": { description: The stored candidate }
+        "400": { description: Invalid submission or patch }
+        "403": { description: Native seat proof unavailable }
+        "409": { description: Patch-id mismatch, no project, or the project names no reviewer }
+        "503": { description: Reviews or the review store unavailable }
+
+  /v1/fleet/seats/{paneId}/review-candidates/{id}:
+    get:
+      tags: [Captain]
+      operationId: readReviewCandidate
+      summary: Read a candidate and its stored patch as its author or reviewer
+      description: Requires native seat proof. Only the author and a seat that currently holds the project's reviewer setting may read the patch; others get not_reviewer.
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: The candidate and its patch }
+        "403": { description: Native seat proof unavailable, or the seat is neither author nor reviewer }
+        "404": { description: Unknown candidate }
+
+  /v1/fleet/seats/{paneId}/review-verdicts:
+    post:
+      tags: [Captain]
+      operationId: recordReviewVerdict
+      summary: Record APPROVE or CHANGES for one exact patch
+      description: |
+        Requires native seat proof from a seat that currently holds the project's
+        reviewer setting; the author's seat or occupant is refused. `patchId` must
+        equal the candidate's stored hash. CHANGES needs at least one finding. The
+        verdict reaches the author's seat and, as a notice that asks for no
+        action, the author's lead. A superseded or already decided candidate
+        refuses. The record flags `sameHarness` when author and reviewer share a
+        harness. ADR 0287.
+      security: []
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, candidateId, patchId, verdict]
+              properties:
+                schemaVersion: { const: 1 }
+                candidateId: { type: string, format: uuid }
+                patchId: { type: string, pattern: "^[0-9a-f]{40,64}$" }
+                verdict: { type: string, enum: [approve, changes] }
+                findings:
+                  { type: array, maxItems: 50, items: { type: string, minLength: 1, maxLength: 4000 } }
+                summary: { type: string, minLength: 1, maxLength: 4000 }
+      responses:
+        "200": { description: The candidate with its verdict }
+        "400": { description: Invalid verdict, such as CHANGES with no findings }
+        "403": { description: Native seat proof unavailable, or the seat is not the reviewer }
+        "404": { description: Unknown candidate }
+        "409": { description: Superseded, already decided, or patch-id mismatch }
 
   /v1/fleet/seats/{paneId}/hook:
     post:
