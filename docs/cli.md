@@ -8225,14 +8225,16 @@ servers are not supervised.
 `/auth anthropic` opens API-key entry directly. Clankie no longer offers Claude
 subscription login or refresh; replace any legacy token with an Anthropic API
 key (or remove it through `/auth`). Doctor/setup do not count that legacy OAuth
-entry as usable authentication. Native Claude Code and Codex retain their own
-login.
+entry as usable authentication. Self-hosted native Claude Code and Codex retain
+their own login.
 
-Hosted Clankie/Pi refuses ChatGPT subscription login and token forwarding pending
-OpenAI approval, before opening a browser or requesting a device code. Use a
-provider API key or included model usage. Local/self-hosted ChatGPT login remains
-available. Approval and waitlist submission are owner actions; see
-[ADR 0052](adr/0052-subscription-precedence-over-metered-api-key.md).
+Managed Clankie uses AI credits only. Model and native subscription sign-in,
+customer-key entry and customer-model selection are refused with an explanatory
+message. Local Claude/Codex hires are also refused until a credit-backed native
+adapter exists; hire those harnesses on linked self-hosted hardware instead.
+Local/self-hosted ChatGPT sign-in and supported API-key model paths remain
+available. Existing credential stores are preserved. See
+[ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md).
 
 One credential store backs both surfaces: `/auth <providerId>` writes it, and
 every service this CLI starts reads it. Provider config in `clankie.json` never
