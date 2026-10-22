@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "after-setup.png",
+      "size": 178665,
+      "sha256": "617a6509f53a49990fcb42f672a6e41691be2f99fa7e851fc1445bf8d698053d",
+      "url": "clankie://evidence/sha256/617a6509f53a49990fcb42f672a6e41691be2f99fa7e851fc1445bf8d698053d"
+    },
+    {
+      "path": "before-setup.png",
+      "size": 189614,
+      "sha256": "d4e997142982a20d0a65d1e78e166b948a0632f93cb89d6b35fe5af000a2ab66",
+      "url": "clankie://evidence/sha256/d4e997142982a20d0a65d1e78e166b948a0632f93cb89d6b35fe5af000a2ab66"
+    }
+  ]
+}

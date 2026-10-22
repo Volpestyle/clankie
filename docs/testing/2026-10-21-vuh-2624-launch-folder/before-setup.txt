@@ -1,0 +1,40 @@
+Clankie
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ ▄██▄ ▄████▄
+  ▀  ▄█▀        clankie
+  ▄███▄███▄
+  █ ▄  ▄  █     Ask for anything, or type / for commands.
+  ▀███████▀     Click a tool row to open it · ctrl+o opens them all.
+   ▄█████▄
+   ▀██▀██▀
+
+done /setup
+  High: Clankie takes every call he can: workers handle everyday work, he decides on outward and hard-to-undo changes,
+  commits, pushes, sets up workers and closes work. Releases, money and accounts ask you.
+
+done /provider
+  ollama → http://localhost:11434/v1 (8 models) written to clankie.json.
+  No credential needed. Restart the service (`clankie restart`) before Clankie himself uses it.
+
+ Live conversation unavailable
+
+ Operator conversation dispatch failed with status 500. History remains durable.
+
+done /setup
+  1 of 4 · Clankie thinks with ollama/qwen3-vl:8b.
+
+done /setup
+  Phone pairing skipped. Return to /setup or /pair when you have the app.
+
+done /setup
+  Review the request below, then press Enter. Clankie will handle the hire; /agents shows live seats.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Please help me hire my first native agent in your Herdr workspace for
+  "/private/tmp/claude-501/-Users-james-dev/abfd37d9-b8e3-4619-bcb5-a8e194a45a2c/scratchpad/proof-before/home/.local/s
+  hare/clankie/releases/v0.4.9". Task: Explore this folder and report what is here. Do not change files.
+  Choose a suitable installed harness and lead the agent through its normal native channel. If a harness or its
+  sign-in needs setup, walk me through it here. Tell me who was hired and how I can reach them.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/.local/share/clankie/releases/v0.4.9 • Clankie                              ollama/qwen3-vl:8b (off effort)  context ?
+This Mac

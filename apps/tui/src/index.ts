@@ -102,7 +102,7 @@ const tuiStateRoot = process.env.CLANKIE_INSTALL_ROOT
   : join(repoRoot, ".data", "tui");
 const skillCatalog = await discoverClankieSkills(repoRoot);
 // The launcher resolves either the checkout or installed release as repoRoot.
-// Where the operator typed `clankie` is what decides the room they land in.
+// Where the operator typed `clankie` is where the global room works.
 const launchedWorkspace = launchWorkspace(process.cwd(), repoRoot);
 
 if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
@@ -232,7 +232,12 @@ let conversationObservation:
   | { readonly controller: AbortController; readonly done: Promise<void> }
   | undefined;
 let conversationNotice: string | undefined;
-let currentWorkspace = launchedWorkspace ?? repoRoot;
+// A conversation without a workspace (the global room, an agent's, a Discord
+// room) works where the operator launched the console. The install directory
+// is never a project, so it is the last resort; `/cd` into the service repo
+// moves it there on purpose.
+let globalWorkspace = launchedWorkspace ?? repoRoot;
+let currentWorkspace = globalWorkspace;
 let currentConversationTitle: string | undefined;
 try {
   const directConversationId = parseDirectConversation(process.argv.slice(2)).conversationId;
@@ -245,7 +250,7 @@ try {
     selected.scope.kind === "room" ? `${selected.title} · read-only` : selected.title;
   currentContextUsage = selected.contextUsage;
   currentDriver = selected.driver;
-  currentWorkspace = conversationWorkspace(selected) ?? repoRoot;
+  currentWorkspace = conversationWorkspace(selected) ?? globalWorkspace;
 } catch (error) {
   // The service may not be ready yet; surface it and keep the console usable
   // (the /conversation command re-checks on demand).
@@ -372,11 +377,12 @@ const conversationsContext = {
   // not one workspace among many — it is where the global conversation lives.
   open: async (path: string) => {
     const workspace = resolveWorkspacePath(path, currentWorkspace);
-    const conversation =
-      launchWorkspace(workspace, repoRoot) === undefined
-        ? (await conversationClient.list({ kind: "global" }))[0]
-        : await resolveWorkspaceConversation({ client: conversationClient, workspace });
+    const serviceRepo = launchWorkspace(workspace, repoRoot) === undefined;
+    const conversation = serviceRepo
+      ? (await conversationClient.list({ kind: "global" }))[0]
+      : await resolveWorkspaceConversation({ client: conversationClient, workspace });
     if (conversation === undefined) throw new Error("No global conversation is available");
+    if (serviceRepo) globalWorkspace = repoRoot;
     return await conversationsContext.select(conversation.conversationId);
   },
 };
@@ -387,7 +393,7 @@ async function selectConversation(conversationId: string) {
     conversation.scope.kind === "room" ? `${conversation.title} · read-only` : conversation.title;
   currentContextUsage = conversation.contextUsage;
   currentDriver = conversation.driver;
-  currentWorkspace = conversationWorkspace(conversation) ?? repoRoot;
+  currentWorkspace = conversationWorkspace(conversation) ?? globalWorkspace;
   // The console's own shell escape, path completion, and footer follow the
   // captain into the directory his session now works in.
   shell.setCwd(currentWorkspace);
