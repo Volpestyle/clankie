@@ -807,6 +807,8 @@ describe("authenticated operator conversation relay", () => {
       true,
     ],
     ["a definitive refusal", () => new DeviceConversationRefusal(409), true],
+    // A hosted gateway can answer a plain 503 after it forwarded the send.
+    ["an unmarked 503 on the owner hop", () => new DeviceConversationRefusal(503), false],
   ] as const)(
     "after %s, an identical retry dispatches again only if nothing can have reached a pane (VUH-2670)",
     async (_name, failure, again) => {

@@ -1264,13 +1264,15 @@ interface TurnIdempotencyEntry {
  * following a seat hand-off (VUH-2670). A hop that failed any other way (a
  * dropped connection, a 500, an unmarked restart) may already have put a seat
  * send in the worker's pane at an unmoved revision, so a copy must not pass
- * the fence: the identical retry gets the original failure back.
+ * the fence: the identical retry gets the original failure back. A plain 503
+ * is not a definitive refusal either: a gateway in front of a hosted service
+ * can answer one after it forwarded the send.
  */
 function redispatchable(outcome: { value: OperatorConversationServiceResult } | { error: unknown }): boolean {
   if ("value" in outcome)
     return outcome.value.op === "send" && outcome.value.result.status === "seat_offline";
   return (
-    outcome.error instanceof DeviceConversationRefusal ||
+    (outcome.error instanceof DeviceConversationRefusal && outcome.error.status !== 503) ||
     (outcome.error instanceof ConversationServiceRestarting && outcome.error.seatHandoffReported)
   );
 }
