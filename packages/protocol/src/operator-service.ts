@@ -789,9 +789,13 @@ export type OperatorWorkItemsOutcome =
  * whether it ever took that request, whatever became of it. `completeForMs`
  * says how far back that answer is complete, on the relay's monotonic clock:
  * it keeps every send it took for this long. A send it does not hold never
- * reached it only if the sender's own monotonic age for it, measured when
- * this answer arrives (not when the query left), is less than this. That
- * holds for one relay process; see the relay README.
+ * reached it only if the sender's own age for it, measured when this answer
+ * arrives (not when the query left), is less than this. That age must come
+ * from a monotonic clock that keeps counting while asleep (for example
+ * mach_continuous_time or CLOCK_MONOTONIC on Darwin, CLOCK_BOOTTIME on Linux
+ * and Android). A sender that cannot name one checks its monotonic age
+ * against the wall clock and treats any disagreement (a sleep, a clock step)
+ * as an unknown age. It holds for one relay process; see the relay README.
  */
 export const SendReceiptRecordSchema = z.strictObject({
   received: z.boolean(),

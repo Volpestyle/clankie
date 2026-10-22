@@ -74,10 +74,18 @@ A request with `record: true` also gets the relay's `record` (VUH-2668).
 even one whose hop then failed. `completeForMs` says how far back that answer
 holds: the relay keeps every send it takes from its start, until it drops the
 oldest for room, and for at most 24 hours, on its monotonic clock. Absence
-counts only when the sender's own monotonic age for that send is less than
+counts only when the sender's own age for that send is less than
 `completeForMs`. The sender measures that age when the answer arrives, not
 when the query left, because the relay computes the window when it receives
-the query. No clocks are compared across machines. Without the field the answer is
+the query.
+
+That age must come from a monotonic clock that keeps counting while asleep:
+`mach_continuous_time` or `CLOCK_MONOTONIC` on Darwin, `CLOCK_BOOTTIME` on
+Linux and Android. A clock that pauses in sleep reads a send taken by an
+earlier relay process as younger than it is. A sender that cannot name such a
+clock checks its monotonic age against the wall clock, and treats any
+disagreement (a sleep, a clock step) as an unknown age, which never allows a
+resend. No clocks are compared across machines. Without the field the answer is
 unchanged. An older relay refuses it, and an older client never sees it.
 
 This additive service contract supports the separate VUH-1882 composer work and
