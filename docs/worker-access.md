@@ -356,9 +356,15 @@ When a project names a standing reviewer
 bridge adds three tools. The service advertises them with `reviews: "on"` in its
 catalog metadata, so an older service shows none.
 
-- `submit_for_review({summary, issue?, evidence?, base?})`: the author sends the
-  checkout's exact committed change (`git diff --binary` from the merge base with
-  `origin/main` to `HEAD`). The service hashes it, routes it to a live reviewer
+- `submit_for_review({checkout, summary, issue?, evidence?, base?})`: the author
+  sends the exact committed change (`git diff --binary` from the merge base with
+  `origin/main` to `HEAD`) of the absolute `checkout` it names. The bridge resolves
+  that path to its work-tree root and never reads its own working directory, which
+  is where the session started (VUH-2662). A missing, relative or non-git checkout
+  is refused with nothing stored, and every result echoes the `read` checkout,
+  `HEAD`, base and patch-id. A seat without the tool (a harness that lacks the
+  review tools, or a bridge started before them) runs `clankie review submit`
+  in its own pane, proven by the same fleet link. The service hashes it, routes it to a live reviewer
   seat other than the author and returns the candidate. Passing the same `issue`
   after CHANGES links the new candidate to the old one.
 - `review_candidate({candidateId})`: the author and the project's reviewer read

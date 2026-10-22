@@ -392,6 +392,7 @@ const HEADLESS_COMMAND_HELP = [
       "  review list [--project ID] | show ID [--patch]   Landing candidates and verdicts of the standing review gate (JSON)",
       "  review status [--directory DIR] [--base REF]   Whether this checkout's exact patch may land (exit 1 while held)",
       "  review waive --reason TEXT [--directory DIR] [--base REF]   Owner: land this exact patch without review, on the record",
+      "  review submit --checkout DIR --summary TEXT [--issue KEY] [--evidence URL]...   Author, from its own pane: submit_for_review without the tool",
     ],
   },
   {

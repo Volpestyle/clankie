@@ -1,7 +1,10 @@
 import { realpath } from "node:fs/promises";
+import { win32 } from "node:path";
 import { projectPathContains, resolveProjectMembership, type ClankieSettings } from "@clankie/settings";
 import type { Project, ProjectsSettings } from "@clankie/protocol/projects";
 import { autoProjectRounds } from "./auto-projects.ts";
+import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
+import { splitFleetQualified } from "../herdr-fleet.ts";
 
 /** The service's local machine ID is `local` (machines.ts); a fleet label is not a machine identity. */
 export async function localWorkspaceProject(
@@ -72,6 +75,27 @@ export function remoteWorkspaceProject(
       `${directory} on fleet ${fleet} is registered to more than one project (${matches.join(", ")}). Name the projectId to hire into.`,
     );
   return matches[0];
+}
+
+/**
+ * The project of a review candidate's checkout: the work-tree root its author named, on
+ * the author's machine (VUH-2662). Git for Windows prints `C:/…` where the owner registers
+ * `C:\…`, so a Windows machine's spelling is normalized before matching.
+ */
+export async function reviewCheckoutProject(
+  settings: ClankieSettings,
+  paneId: string,
+  checkout: string | undefined,
+): Promise<string | undefined> {
+  if (checkout === undefined) return undefined;
+  const fleet = splitFleetQualified(paneId)?.fleet;
+  if (fleet === undefined)
+    return (await resolveFleetSettingsContext(settings, { workingDirectory: checkout, machine: "local" }, {}))
+      .projectId;
+  const windows = remoteHireMachine(settings, fleet)?.platform === "windows";
+  const normal = windows ? win32.normalize(checkout) : checkout;
+  const directory = windows && /^[a-z]:/u.test(normal) ? normal[0]!.toUpperCase() + normal.slice(1) : normal;
+  return remoteWorkspaceProject(settings, settings.projects, fleet, directory);
 }
 
 /** The machine a remote fleet reaches, with every ID its project workspaces may be registered under. */

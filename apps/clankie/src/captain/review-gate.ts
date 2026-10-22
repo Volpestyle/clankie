@@ -46,8 +46,11 @@ export interface ReviewGateOptions {
   seat(paneId: string): Promise<HerdrAgentSnapshot | undefined>;
   /** The native seat with this terminal ID, wherever it now sits. */
   resolve(seatId: string): Promise<HerdrAgentSnapshot | undefined>;
-  /** The project a seat's own checkout belongs to. */
-  seatProject(agent: HerdrAgentSnapshot): Promise<string | undefined>;
+  /**
+   * The project of the checkout the author named on its machine, or, from a bridge that
+   * names none, of the seat's own working directory (where its session started).
+   */
+  seatProject(agent: HerdrAgentSnapshot, checkout?: string): Promise<string | undefined>;
   /** The project a local checkout directory belongs to. */
   directoryProject(directory: string): Promise<string | undefined>;
   /** Live seats that currently hold the project's reviewer setting. */
@@ -224,7 +227,7 @@ export class ReviewGate {
           error: "patch_id_mismatch",
           detail: `The service hashed ${patchId}; the submission named ${input.patchId}. Nothing was stored.`,
         };
-      const projectId = await this.options.seatProject(author);
+      const projectId = await this.options.seatProject(author, input.checkout);
       if (projectId === undefined)
         return { error: "no_project", detail: "Your checkout belongs to no project; nothing was stored." };
       const review = await this.options.review(projectId);

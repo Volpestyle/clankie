@@ -140,9 +140,13 @@ status` exits 1 while held, and in Clankie's own repo `pnpm check:landing` exits
 3 after green checks. Your catalog has `submit_for_review`, `review_candidate`
 and `review_verdict`.
 
-- **Author.** Commit, then call `submit_for_review` with a `summary`, the `issue`
-  and `evidence` links. The service routes the patch to the reviewer; you do not
-  message anyone. After CHANGES, fix, commit and submit again with the same
+- **Author.** Commit, then call `submit_for_review` with the `checkout` (the
+  absolute path of the worktree holding your commit, as the gate prints it), a
+  `summary`, the `issue` and `evidence` links. Check the `read` it echoes: that
+  checkout and `HEAD` are what the reviewer sees. No `submit_for_review` in your
+  catalog? Run `clankie review submit --checkout DIR --summary TEXT --issue KEY`
+  in your own pane instead. The service routes the patch to the reviewer; you do
+  not message anyone. After CHANGES, fix, commit and submit again with the same
   `issue`, so the new candidate supersedes the old. After APPROVE, rerun the
   gate (`pnpm check:landing --revalidate` in Clankie's repo) and push on exit 0. A rebase that changes the
   patch needs a new review.

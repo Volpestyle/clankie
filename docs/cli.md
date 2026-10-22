@@ -3896,16 +3896,22 @@ The owner's side of the standing review gate
 name a reviewer (`project settings PROJECT --reviewer-role ROLE`, below). Authors
 submit and reviewers decide from their own seats with the worker tools
 `submit_for_review`, `review_candidate` and `review_verdict`
-([worker access](worker-access.md)). These commands use the operator credential.
-They never record a verdict.
+([worker access](worker-access.md)). These commands use the operator credential,
+except `submit`. They never record a verdict.
 
 ```sh
+clankie review submit --checkout DIR --summary TEXT [--issue KEY] [--evidence URL]... [--base REF]
 clankie review list [--project ID]
 clankie review show ID [--patch]
 clankie review status [--directory DIR] [--base REF]
 clankie review waive --reason TEXT [--directory DIR] [--base REF]
 ```
 
+- `submit` is the author's `submit_for_review` for a seat whose catalog lacks the
+  tool: a harness without the review tools, or a bridge started before them. Run
+  it in the author's own fleet pane. The pane's fleet link proves the author
+  exactly as the tool does, and the operator credential plays no part. It takes
+  the same absolute `--checkout` and prints the same candidate and `read` echo.
 - `list` prints the candidates, newest first, optionally for one project.
 - `show ID` prints one candidate with its status, files, evidence, verdict and
   any waiver. `--patch` adds the stored patch text.
@@ -7794,7 +7800,9 @@ clears the project's standing reviewer
 `reviewer` resolves to the live seats holding it and is the better default,
 because seats retire; a seat is an exact `FLEET/term_…` ID. While a reviewer is
 set, `pnpm check:landing` exits 3 until the reviewer approves the exact patch
-(see [`review`](#review)). The JSON update accepts `review` as `{"role":"ROLE"}`,
+(see [`review`](#review)). Seats already working in the project keep a way to
+submit: the result's `reviewSubmit` names `submit_for_review` and, for a seat
+whose catalog lacks it, `clankie review submit` from its own pane. The JSON update accepts `review` as `{"role":"ROLE"}`,
 `{"seat":"SEAT"}` or `null` to clear. Readers opt in with `includeReview=true` and
 see `review` and `projectReview:true`; the CLI and TUI opt in automatically, and
 a service without `projectReview` refuses the flags. The `/project` menu has a

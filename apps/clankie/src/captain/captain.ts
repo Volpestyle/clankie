@@ -312,6 +312,7 @@ import {
   remoteHireMachine,
   remoteWorkspaceProject,
   selectHireProject,
+  reviewCheckoutProject,
 } from "./project-hire-context.ts";
 import { projectOnboarding } from "./project-onboarding.ts";
 import { createRemoteClaudeWorkerSeatAdapter } from "./remote-claude-worker.ts";
@@ -6028,20 +6029,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   // The standing review gate (ADR 0287): the service routes candidates and
   // verdicts itself, so neither direction needs a lead relay or a peer channel.
-  const reviewProject = async (agent: HerdrAgentSnapshot) => {
-    if (agent.workingDirectory === undefined) return undefined;
-    const current = await settings();
-    const fleet = splitFleetQualified(agent.paneId)?.fleet;
-    return fleet === undefined
-      ? (
-          await resolveFleetSettingsContext(
-            current,
-            { workingDirectory: agent.workingDirectory, machine: "local" },
-            {},
-          )
-        ).projectId
-      : remoteWorkspaceProject(current, current.projects, fleet, agent.workingDirectory);
-  };
+  // The named checkout decides; a seat's own directory is only where its session started.
+  const reviewProject = async (agent: HerdrAgentSnapshot, checkout = agent.workingDirectory) =>
+    reviewCheckoutProject(await settings(), agent.paneId, checkout);
   const reviews = new ReviewGate({
     path: join(options.stateDir, "reviews", "candidates.json"),
     review: async (projectId) =>
@@ -6051,7 +6041,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // allow-swallowed-rejection -- A seat Herdr cannot resolve gets no verdict notice; the record keeps it.
     resolve: (seatId) => herdrRunner.resolveTerminal(seatId).catch(() => undefined),
     // allow-swallowed-rejection -- An unresolvable checkout submits nothing (no_project).
-    seatProject: (agent) => reviewProject(agent).catch(() => undefined),
+    seatProject: (agent, checkout) => reviewProject(agent, checkout).catch(() => undefined),
     // Fails loudly: an unreadable checkout must not read as "no reviewer, landable".
     directoryProject: async (directory) =>
       (

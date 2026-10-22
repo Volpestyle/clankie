@@ -369,6 +369,13 @@ async function runProjectFleetSettings(
       ? { auto: project.auto === true, ...(project.focus === undefined ? {} : { focus: project.focus }) }
       : {}),
     ...(snapshot.projectReview === true ? { reviewer: project.review ?? "none" } : {}),
+    // Every seat already working here can submit, including ones hired before the reviewer (VUH-2662).
+    ...(snapshot.projectReview === true && project.review !== undefined
+      ? {
+          reviewSubmit:
+            "Authors submit with submit_for_review and their checkout. A seat whose catalog lacks that tool (a harness without it, or a bridge started before it) runs `clankie review submit --checkout DIR --summary TEXT --issue KEY` from its own pane.",
+        }
+      : {}),
     fleet: {
       closure: project.autonomy?.fleet?.closure ?? "inherit",
       machineSetup: project.autonomy?.fleet?.machineSetup ?? "inherit",

@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 // The standing review gate's seat tools (ADR 0287). The author's bridge reads
-// the exact patch from its own checkout; the service hashes the bytes it
-// stores and routes the candidate to the project's reviewer, and the verdict
-// back, with no lead relay and no peer channel.
+// the exact patch from the checkout the author names; the service hashes the
+// bytes it stores and routes the candidate to the project's reviewer, and the
+// verdict back, with no lead relay and no peer channel. The bridge never reads
+// its own working directory: that is where the session started, which may be
+// another worktree or gone (VUH-2662).
 
 const PATCH_MAX_BYTES = 4 * 1024 * 1024;
 const INLINE_PATCH_MAX_BYTES = 64 * 1024;
@@ -15,10 +17,17 @@ export const REVIEW_TOOLS = [
   {
     name: "submit_for_review",
     description:
-      "Submit your committed change as a landing candidate to your project's standing reviewer. Sends the exact `git diff --binary` of merge-base(origin/main)..HEAD from your checkout; the service hashes it and the verdict binds to that hash. Landing waits for APPROVE of exactly this patch. After CHANGES, fix, commit and call this again with the same issue. Uncommitted changes are not part of the candidate.",
+      "Submit your committed change as a landing candidate to your project's standing reviewer. Sends the exact `git diff --binary` of merge-base(origin/main)..HEAD from the checkout you name (the absolute path of the worktree holding your commit, as the landing gate prints it); the service hashes it and the verdict binds to that hash. The result echoes the checkout and HEAD it read. Landing waits for APPROVE of exactly this patch. After CHANGES, fix, commit and call this again with the same issue. Uncommitted changes are not part of the candidate.",
     inputSchema: {
       type: "object",
       properties: {
+        checkout: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+          description:
+            "Absolute path of the git worktree that holds your committed change. Never assumed from where the session started.",
+        },
         summary: {
           type: "string",
           minLength: 1,
@@ -38,7 +47,7 @@ export const REVIEW_TOOLS = [
           description: "The ref this change lands on; defaults to origin/main.",
         },
       },
-      required: ["summary"],
+      required: ["checkout", "summary"],
       additionalProperties: false,
     },
   },
@@ -79,9 +88,28 @@ export const REVIEW_TOOLS = [
 
 function git(cwd, args, input) {
   const result = spawnSync("git", args, { cwd, input, maxBuffer: PATCH_MAX_BYTES + 1024 * 1024 });
+  if (result.error) throw new Error(`git ${args.join(" ")} could not run in ${cwd}: ${result.error.message}`);
   if (result.status !== 0)
-    throw new Error(`git ${args.join(" ")} failed: ${result.stderr?.toString().trim() || result.status}`);
+    throw new Error(
+      `git ${args.join(" ")} failed in ${cwd}: ${result.stderr?.toString().trim() || `exit ${result.status}`}`,
+    );
   return result.stdout;
+}
+
+/** The work tree an author named: absolute, present, and inside a git repository; its root. */
+function resolveCheckout(checkout) {
+  if (typeof checkout !== "string" || !checkout.trim())
+    throw new Error("Name the checkout: the absolute path of the worktree that holds your committed change.");
+  if (!isAbsolute(checkout)) throw new Error(`The checkout must be an absolute path; got ${checkout}.`);
+  let directory;
+  try {
+    directory = statSync(checkout).isDirectory();
+  } catch {
+    directory = false;
+  }
+  if (!directory) throw new Error(`The checkout ${checkout} does not exist or is not a directory.`);
+  // Git for Windows prints C:/…; resolve() gives this machine's own spelling.
+  return resolve(git(checkout, ["rev-parse", "--show-toplevel"]).toString().trim());
 }
 
 /** The exact candidate this checkout would land: its patch bytes and verbatim patch-id. */
@@ -106,7 +134,7 @@ const text = (value, isError = false) => ({
  * Handlers for the review tools. `request(route, suffix, init)` reaches this
  * pane's seat routes with its native proof, exactly as peer messages do.
  */
-export function createReviewTools({ request, cwd = () => process.cwd(), patchDirectory }) {
+export function createReviewTools({ request, patchDirectory }) {
   const call = async (route, suffix, init) => {
     const response = await request(route, suffix, init);
     const body = await response.text();
@@ -120,12 +148,23 @@ export function createReviewTools({ request, cwd = () => process.cwd(), patchDir
   };
   return {
     async submit(args) {
+      let checkout;
       let candidate;
       try {
-        candidate = readCandidatePatch(cwd(), args?.base ?? "origin/main");
+        checkout = resolveCheckout(args?.checkout);
+        candidate = readCandidatePatch(checkout, args?.base ?? "origin/main");
       } catch (error) {
-        return text(`Nothing was submitted: ${error instanceof Error ? error.message : String(error)}`, true);
+        return text(
+          {
+            error: "nothing_submitted",
+            detail: error instanceof Error ? error.message : String(error),
+            ...(checkout === undefined ? {} : { checkout }),
+          },
+          true,
+        );
       }
+      // What the bridge read, so the author can see a wrong checkout before the reviewer does.
+      const read = { checkout, head: candidate.head, base: candidate.base, patchId: candidate.patchId };
       const { ok, value } = await call("review-candidates", "", {
         method: "POST",
         body: JSON.stringify({
@@ -134,14 +173,16 @@ export function createReviewTools({ request, cwd = () => process.cwd(), patchDir
           head: candidate.head,
           patchId: candidate.patchId,
           patch: candidate.patch.toString("base64"),
+          checkout,
           summary: args?.summary,
           ...(args?.issue ? { issue: args.issue } : {}),
           evidence: Array.isArray(args?.evidence) ? args.evidence : [],
         }),
       });
-      if (!ok) return text(value, true);
+      if (!ok) return text({ ...value, read }, true);
       return text({
         ...value,
+        read,
         ...(candidate.dirty
           ? { note: "Your checkout has uncommitted changes; they are not part of this candidate." }
           : {}),

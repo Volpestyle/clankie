@@ -7,11 +7,15 @@ import {
   ReviewLandingSchema,
 } from "@clankie/protocol/reviews";
 import { realpath } from "node:fs/promises";
-import { readCandidatePatch } from "../../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
+import { readLink, seatRoute } from "../../../../integrations/claude-plugin/worker/bin/link.mjs";
+import {
+  createReviewTools,
+  readCandidatePatch,
+} from "../../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
 import { commandHost } from "./io.ts";
 
 export const REVIEW_USAGE =
-  "Usage: clankie review list [--project ID] | show ID [--patch] | status [--directory DIR] [--base REF] | waive --reason TEXT [--directory DIR] [--base REF]";
+  "Usage: clankie review list [--project ID] | show ID [--patch] | status [--directory DIR] [--base REF] | waive --reason TEXT [--directory DIR] [--base REF] | submit --checkout DIR --summary TEXT [--issue KEY] [--evidence URL]... [--base REF]";
 
 export interface ReviewCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -46,6 +50,7 @@ export async function runReviewCommand(
   args: readonly string[],
   options: ReviewCommandOptions = {},
 ): Promise<{ ok: boolean; body: unknown }> {
+  if (args[0] === "submit") return submitFromPane(args.slice(1), options);
   const env = options.env ?? process.env;
   const credential = await resolveOperatorCredential({
     env,
@@ -139,4 +144,63 @@ export async function runReviewCommand(
     return { ok: result.status === 200, body: result.body };
   }
   throw new Error(REVIEW_USAGE);
+}
+
+/**
+ * An author's submit from its own pane, for a seat whose catalog lacks
+ * submit_for_review (a harness without the review tools, or a bridge that
+ * predates them; VUH-2662). The pane's fleet link proves the author exactly as
+ * the review tools do; the operator credential plays no part.
+ */
+async function submitFromPane(
+  args: readonly string[],
+  options: ReviewCommandOptions,
+): Promise<{ ok: boolean; body: unknown }> {
+  const env = options.env ?? process.env;
+  const values = new Map<string, string>();
+  const evidence: string[] = [];
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index]!;
+    const value = args[index + 1];
+    if (value === undefined || !["--checkout", "--summary", "--issue", "--evidence", "--base"].includes(flag))
+      throw new Error(REVIEW_USAGE);
+    if (flag === "--evidence") evidence.push(value);
+    else if (values.has(flag)) throw new Error(REVIEW_USAGE);
+    else values.set(flag, value);
+  }
+  const link = readLink(env.HERDR_SOCKET_PATH, env);
+  const pane = env.HERDR_PANE_ID?.trim();
+  if (!link || !pane)
+    throw new Error(
+      "Run clankie review submit in your own fleet pane: its link proves you are the author, as submit_for_review does.",
+    );
+  const tools = createReviewTools({
+    request: (route, suffix = "", init) =>
+      (options.fetchImpl ?? fetch)(`${seatRoute(link, pane, route).href}${suffix}`, {
+        ...init,
+        headers: {
+          ...(link.authentication === "local-process"
+            ? { "x-clankie-pane": pane }
+            : { authorization: `Bearer ${link.token ?? ""}` }),
+          "content-type": "application/json",
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      }),
+  });
+  const result = (await tools.submit({
+    checkout: values.get("--checkout"),
+    summary: values.get("--summary"),
+    ...(values.has("--issue") ? { issue: values.get("--issue") } : {}),
+    ...(values.has("--base") ? { base: values.get("--base") } : {}),
+    evidence,
+  })) as { content: { text: string }[]; isError?: boolean };
+  const text = result.content[0]?.text ?? "";
+  let body: unknown = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    /* plain refusal text */
+  }
+  return { ok: result.isError !== true, body };
 }

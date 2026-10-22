@@ -40,8 +40,9 @@ A role is the better default, because seats retire. It is set through
 
 **The service routes candidates and verdicts itself.**
 
-1. _Submit._ The author calls `submit_for_review` from its own seat. The bridge
-   sends the exact `git diff --binary merge-base(origin/main)..HEAD` bytes. It
+1. _Submit._ The author calls `submit_for_review` from its own seat, naming the
+   checkout. The bridge sends the exact `git diff --binary
+merge-base(origin/main)..HEAD` bytes of that checkout. It
    uses the same native process proof as peer messages: the author's identity
    comes from that proof, never from fields in the request.
 2. _Hash._ The service computes `git patch-id --verbatim` over the bytes it
@@ -129,3 +130,24 @@ does not depend on peer messaging at all.
 - `apps/clankie/test/remote-peer-catalog.integration.test.ts` reproduces the empty
   remote catalog and proves the fix.
 - The live proof with real seats is recorded on VUH-2616.
+
+## Amendment: the author names its checkout (2026-10-22, VUH-2662)
+
+The bridge first read the patch from its own working directory. That is where
+the seat's session started, not where its current work lives: a seat that moved
+to a new worktree would have submitted the old worktree's `HEAD`, and the
+reviewer would have approved the wrong patch; a seat whose launch worktree was
+removed could not submit at all. `submit_for_review` now requires an absolute
+`checkout`, resolves it to the work tree's root and never falls back to the
+process directory. A missing, relative or non-git checkout is refused with
+nothing stored, git's own error is reported, and every result echoes the
+checkout, `HEAD`, base and patch-id it read. The landing gate's hint names the
+checkout root to pass.
+
+Seats hired before a project named its reviewer, and harnesses without the
+review tools, had no submit route, so enabling a reviewer stranded their
+landings. `clankie review submit` gives every fleet pane one: run in the
+author's own pane, it reaches the same seat route through the pane's fleet link
+and is proven exactly as the bridge is, never with the operator credential. The
+gate's held message names both routes with the checkout filled in, and setting
+a reviewer reports how existing seats submit.

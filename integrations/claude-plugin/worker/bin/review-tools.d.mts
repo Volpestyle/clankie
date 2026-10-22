@@ -5,6 +5,5 @@ export function readCandidatePatch(
 export const REVIEW_TOOLS: readonly { name: string; description: string; inputSchema: object }[];
 export function createReviewTools(options: {
   request: (route: string, suffix?: string, init?: RequestInit) => Promise<Response>;
-  cwd?: () => string;
   patchDirectory?: string;
 }): Record<"submit" | "read" | "verdict", (args: unknown) => Promise<unknown>>;

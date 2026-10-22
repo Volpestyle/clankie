@@ -8,11 +8,16 @@ import { join } from "node:path";
  * checkout's exact patch may land: its project names no reviewer, or the
  * reviewer approved (or the owner or lead waived) exactly this patch-id.
  *
- * Returns `{ state: "landable" | "held" | "skipped" | "unavailable", ... }`.
+ * Returns `{ state: "landable" | "held" | "skipped" | "unavailable", checkout, ... }`;
+ * `checkout` is the root the author names to submit_for_review (VUH-2662).
  * Without a reachable service the gate holds only when the owner's settings
  * name a reviewer for some project; CI has neither and skips.
  */
 export function landingReview(root, base) {
+  return { ...reviewState(root, base), checkout: root };
+}
+
+function reviewState(root, base) {
   const cli = spawnSync(
     process.execPath,
     [join(root, "apps/tui/bin/clankie.ts"), "review", "status", "--directory", root, "--base", base],
@@ -62,7 +67,7 @@ export function landingReviewMessage(review) {
     return review.landing.status === "changes"
       ? `[landing] review: CHANGES on patch ${review.landing.patchId}; make the required changes, commit and submit_for_review again`
       : review.landing.status === "not_submitted"
-        ? `[landing] review: project ${review.landing.projectId} requires review; checks are green, so submit_for_review, then run pnpm check:landing --revalidate after APPROVE`
+        ? `[landing] review: project ${review.landing.projectId} requires review; checks are green, so submit_for_review with checkout ${JSON.stringify(review.checkout)} (no such tool in your catalog? from this pane run: clankie review submit --checkout ${JSON.stringify(review.checkout)} --issue KEY --summary TEXT), then run pnpm check:landing --revalidate after APPROVE`
         : `[landing] review: ${review.landing.status} for patch ${review.landing.patchId} (candidate ${review.landing.candidate?.id}); run pnpm check:landing --revalidate after APPROVE`;
   return `[landing] review: ${review.reason}; landing held. ${review.detail ?? ""}`.trim();
 }

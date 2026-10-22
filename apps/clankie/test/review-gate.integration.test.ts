@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -80,7 +80,9 @@ it("holds landing until the reviewer approves the exact patch, across CHANGES an
     review: async () => review,
     seat: async (pane) => seats.find((entry) => entry.paneId === pane),
     resolve: async (id) => seats.find((entry) => entry.terminalId === id),
-    seatProject: async (agent) => (agent === author ? "clankie" : undefined),
+    // The author's session started elsewhere; only the checkout it names maps to the project.
+    seatProject: async (agent, checkout = "/launch/worktree/gone") =>
+      agent === author && checkout === repo.root ? "clankie" : undefined,
     directoryProject: async (directory) => (directory === repo.root ? "clankie" : undefined),
     reviewers: async () => [reviewer],
     lead: (agent) => (agent === author ? { conversationId: "lead-chat" } : undefined),
@@ -105,7 +107,6 @@ it("holds landing until the reviewer approves the exact patch, across CHANGES an
     const linkFetch = fleetLinkFetch(service.app.fetch);
     const toolsFor = (agent: HerdrAgentSnapshot) =>
       createReviewTools({
-        cwd: () => repo.root,
         patchDirectory: join(state, `patches-${agent.title}`),
         request: async (route, suffix = "", init) => {
           const pane = agent.paneId.slice(3);
@@ -143,15 +144,46 @@ it("holds landing until the reviewer approves the exact patch, across CHANGES an
           service.app.fetch(new Request(input, init)),
       });
 
+    // VUH-2662: the bridge reads only the checkout the author names, never where its
+    // process started. This test process runs in a different repository, so a wrong
+    // read would submit that repository's HEAD.
+    const refusals = [
+      [{ summary: "No checkout" }, /Name the checkout/u],
+      [{ summary: "Relative", checkout: "repo" }, /must be an absolute path/u],
+      [{ summary: "Removed", checkout: join(repo.root, "removed-worktree") }, /does not exist/u],
+      [
+        { summary: "Not git", checkout: tmpdir() },
+        /failed in .*rev-parse --show-toplevel|not a git repository/u,
+      ],
+    ] as const;
+    for (const [args, reason] of refusals) {
+      const refused = result(await authorTools.submit(args));
+      expect(refused.isError).toBe(true);
+      expect(refused.body).toMatchObject({ error: "nothing_submitted" });
+      expect(refused.body.detail).toMatch(reason);
+    }
+    expect(gate.list()).toEqual([]);
     // The author submits; the service hashes the bytes it stores and sends them to the reviewer directly.
+    mkdirSync(join(repo.root, "nested"));
     const first = result(
       await authorTools.submit({
+        // Any directory inside the worktree names it; the bridge resolves the root.
+        checkout: join(repo.root, "nested"),
         summary: "Fix the answer",
         issue: "VUH-2616",
         evidence: ["clankie://evidence/x"],
       }),
     );
     expect(first.isError, JSON.stringify(first.body)).toBe(false);
+    expect(first.body.read).toEqual({
+      checkout: repo.root,
+      head: repo.run("rev-parse", "HEAD"),
+      base: repo.run("merge-base", "HEAD", "origin/main"),
+      patchId: readCandidatePatch(repo.root).patchId,
+    });
+    expect(repo.run("rev-parse", "HEAD")).not.toBe(
+      execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    );
     const candidate = first.body.candidate;
     expect(candidate).toMatchObject({
       status: "awaiting_review",
@@ -212,7 +244,9 @@ it("holds landing until the reviewer approves the exact patch, across CHANGES an
 
     // The author resubmits a new exact patch; the old verdict never covers it.
     repo.commit("other.ts", "export const other = 2;\n", "fix the other value");
-    const second = result(await authorTools.submit({ summary: "Fix both values", issue: "VUH-2616" }));
+    const second = result(
+      await authorTools.submit({ checkout: repo.root, summary: "Fix both values", issue: "VUH-2616" }),
+    );
     const resubmitted = second.body.candidate;
     expect(resubmitted.patchId).not.toBe(candidate.patchId);
     expect(resubmitted).toMatchObject({ supersedes: candidate.id, files: ["app.ts", "other.ts"] });
@@ -276,6 +310,54 @@ it("holds landing until the reviewer approves the exact patch, across CHANGES an
       },
     });
     expect((await owner(["status", "--directory", repo.root])).ok).toBe(true);
+
+    // A seat whose catalog lacks submit_for_review submits from its own pane with the
+    // CLI (VUH-2662). The pane's fleet link proves the author; no operator credential.
+    repo.commit("app.ts", "export const answer = 44;\n", "from the pane");
+    const paneState = mkdtempSync(join(tmpdir(), "review-pane-"));
+    roots.push(paneState);
+    mkdirSync(join(paneState, "links"));
+    writeFileSync(
+      join(paneState, "links", "default-local.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        authentication: "local-process",
+        fleet: "pc",
+        socket: "/fixture/herdr.sock",
+        url: "http://127.0.0.1:1",
+      }),
+    );
+    const pane = author.paneId.slice(3);
+    const fromPane = await runReviewCommand(
+      ["submit", "--checkout", repo.root, "--summary", "From the pane", "--issue", "VUH-2662"],
+      {
+        env: { CLANKIE_STATE: paneState, HERDR_SOCKET_PATH: "/fixture/herdr.sock", HERDR_PANE_ID: pane },
+        fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const headers = new Headers(init?.headers);
+          expect(headers.get("authorization")).toBeNull();
+          headers.set("x-test-seat", headers.get("x-clankie-pane") ?? "");
+          return linkFetch(
+            new Request(String(input).replace("http://127.0.0.1:1", "http://localhost"), {
+              ...init,
+              headers,
+            }),
+          );
+        },
+      },
+    );
+    expect(fromPane.ok, JSON.stringify(fromPane.body)).toBe(true);
+    expect(fromPane.body).toMatchObject({
+      candidate: {
+        status: "awaiting_review",
+        issue: "VUH-2662",
+        patchId: readCandidatePatch(repo.root).patchId,
+      },
+      read: { checkout: repo.root, head: repo.run("rev-parse", "HEAD") },
+    });
+    // Outside a fleet pane there is nothing to prove the author.
+    await expect(
+      runReviewCommand(["submit", "--checkout", repo.root, "--summary", "Nowhere"], { env: {} }),
+    ).rejects.toThrow(/own fleet pane/u);
 
     // With no reviewer named, nothing waits.
     review = undefined;

@@ -49,6 +49,11 @@ export const ReviewSubmissionSchema = z
     evidence: z.array(SingleLine(2048)).max(20).default([]),
     /** The candidate this one answers; the service also links an author's earlier one. */
     supersedes: z.string().uuid().optional(),
+    /**
+     * The work-tree root the patch was read from, on the author's machine. It names the
+     * candidate's project; older bridges omit it and the seat's own directory decides (VUH-2662).
+     */
+    checkout: z.string().min(1).max(4096).optional(),
   })
   .strict();
 export type ReviewSubmission = z.infer<typeof ReviewSubmissionSchema>;

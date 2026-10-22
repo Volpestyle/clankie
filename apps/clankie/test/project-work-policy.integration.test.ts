@@ -162,6 +162,8 @@ it("names a project's standing reviewer through authenticated CLI/HTTP; older vi
       options,
     );
     expect(shown).toMatchObject({ reviewer: { role: "reviewer" } });
+    // Seats already working here are told how to submit, with or without the tool (VUH-2662).
+    expect((shown as { reviewSubmit?: string }).reviewSubmit).toContain("clankie review submit --checkout");
     expect((await store.load()).projects.projects[0]?.review).toEqual({ role: "reviewer" });
     await runProjectSettingsCommand(["settings", "kh2", "--reviewer-seat", "pc/term_quill"], options);
     expect((await store.load()).projects.projects[0]?.review).toEqual({ seat: "pc/term_quill" });

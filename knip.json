@@ -51,6 +51,7 @@
         "integrations/claude-plugin/worker/bin/seat-channel.d.mts",
         "integrations/claude-plugin/worker/bin/peer-receipt.d.mts",
         "integrations/claude-plugin/worker/bin/review-tools.d.mts",
+        "integrations/claude-plugin/worker/bin/link.d.mts",
         "integrations/claude-plugin/worker/bin/catalog-watch.d.mts",
         "integrations/claude-plugin/worker/bin/admission.d.mts",
         "integrations/claude-plugin/worker/bin/codex-tool-catalog.d.mts",
