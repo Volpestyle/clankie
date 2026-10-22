@@ -68,6 +68,11 @@ provider payloads do not cross the boundary.
 Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
 Transient `seat_offline` refusals collapse concurrently but are not retained, so a retry observes a pane that has returned.
 
+A service that is stopping for a restart answers `503 service_restarting`. The
+relay passes that code through, on dispatch and on a shared tail, so a device can
+retry it like a dropped connection (VUH-2663). Every other upstream failure stays
+`502 conversation_upstream_unavailable`, or the owner route's refusal status.
+
 Conversation tails share one upstream read per active conversation across both
 JSON long polls and NDJSON streams. Each device keeps its own opaque cursor,
 page limit, live-draft sequence, wait deadline and authorization checks. The

@@ -490,6 +490,43 @@ it("revocation after committed answer withholds response but later exact read re
   expect(f.continuation).toHaveBeenCalledTimes(1);
 });
 
+it("passes a restarting service through as 503 service_restarting, while a failed one stays 502 (VUH-2663)", async () => {
+  const f = await fixture();
+  const answer = (status: number) => async (request: Request, response: Response) =>
+    new URL(request.url).pathname === "/operator/v1/dispatch"
+      ? Response.json(
+          status === 503 ? { error: "service_restarting", message: "Clankie is restarting" } : {},
+          { status },
+        )
+      : response;
+  const tail = {
+    op: "tail",
+    schemaVersion: 1,
+    tail: { schemaVersion: 1, conversationId: f.id, surfaceClientId: "fixture", waitMs: 0 },
+  } as const;
+  f.hooks.after = answer(503);
+  // The device's own route, the captain's, and the relay's shared tail.
+  for (const request of [
+    { op: "input_get", schemaVersion: 1, conversationId: f.id },
+    { op: "get", schemaVersion: 1, conversationId: f.id },
+    tail,
+  ] as const) {
+    const response = await f.raw(request);
+    expect([request.op, response.status, await response.json()]).toEqual([
+      request.op,
+      503,
+      { error: "service_restarting" },
+    ]);
+  }
+  f.hooks.after = answer(500);
+  const failed = await f.raw({ op: "get", schemaVersion: 1, conversationId: f.id });
+  expect([failed.status, await failed.json()]).toEqual([502, { error: "conversation_upstream_unavailable" }]);
+  const refused = await f.raw({ op: "input_get", schemaVersion: 1, conversationId: f.id });
+  expect(refused.status).toBe(502);
+  delete f.hooks.after;
+  expect((await f.raw({ op: "get", schemaVersion: 1, conversationId: f.id })).status).toBe(200);
+});
+
 it("uncertain answer response is recovered by exact read, never an automatic second mutation", async () => {
   const f = await fixture();
   await f.send();

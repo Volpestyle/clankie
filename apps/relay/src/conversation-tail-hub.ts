@@ -10,6 +10,7 @@ import {
   type OperatorConversationServiceResult,
   type OperatorConversationStreamEvent,
 } from "../../../packages/protocol/src/index.ts";
+import { ConversationServiceRestarting } from "./conversation-upstream.ts";
 
 type TailRequest = Extract<OperatorConversationServiceRequest, { op: "tail" }>;
 type TailResult = Extract<OperatorConversationServiceResult, { op: "tail" }>;
@@ -184,9 +185,12 @@ export class ConversationTailHub {
         if (!bootstrap && !value.result.hasMore && Date.now() - started < 250)
           await delay(250, undefined, { signal });
       }
-    } catch {
+    } catch (error) {
       if (!signal.aborted) {
-        entry.error = new Error("conversation tail upstream unavailable");
+        entry.error =
+          error instanceof ConversationServiceRestarting
+            ? error
+            : new Error("conversation tail upstream unavailable");
         this.notify(entry);
       }
     }

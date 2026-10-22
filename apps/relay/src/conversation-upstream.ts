@@ -33,9 +33,35 @@ export function createCaptainConversationDispatch(
       body: JSON.stringify(request),
       signal: dispatchSignal(signal),
     });
-    if (!response.ok) throw new Error(`Captain conversation service returned HTTP ${response.status}`);
+    if (!response.ok) {
+      if (await upstreamRestarting(response)) throw new ConversationServiceRestarting();
+      throw new Error(`Captain conversation service returned HTTP ${response.status}`);
+    }
     return parseProtocolResponse(OperatorConversationServiceResultSchema, await response.json());
   };
+}
+
+/**
+ * The service answered `503 service_restarting` (VUH-2626). Devices retry it
+ * like a dropped connection, so the relay keeps the code rather than folding
+ * it into an upstream failure (VUH-2663).
+ */
+export class ConversationServiceRestarting extends Error {
+  public constructor() {
+    super("Clankie is restarting");
+    this.name = "ConversationServiceRestarting";
+  }
+}
+
+/** Reads only a 503's error code; any other failed body is discarded unread. */
+async function upstreamRestarting(response: Response): Promise<boolean> {
+  if (response.status !== 503) {
+    await response.body?.cancel();
+    return false;
+  }
+  // allow-swallowed-rejection -- a body that is not JSON carries no error code; the status still fails the request
+  const body: unknown = await response.json().catch(() => undefined);
+  return typeof body === "object" && body !== null && "error" in body && body.error === "service_restarting";
 }
 
 export type DeviceConversationRequest = Extract<
@@ -126,7 +152,7 @@ export function createDeviceConversationDispatch(options: {
     );
     requestSignal.throwIfAborted();
     if (!response.ok) {
-      await response.body?.cancel();
+      if (await upstreamRestarting(response)) throw new ConversationServiceRestarting();
       if ([400, 401, 403, 404, 409, 429, 503].includes(response.status))
         throw new DeviceConversationRefusal(response.status);
       throw new Error("Conversation owner upstream unavailable");

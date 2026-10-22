@@ -33,7 +33,11 @@ import {
   LinearFollowUpdateSchema,
   LinearFollowSnapshotSchema,
 } from "../../../packages/protocol/src/linear-settings.ts";
-import { DeviceConversationRefusal, type DeviceConversationDispatch } from "./conversation-upstream.ts";
+import {
+  ConversationServiceRestarting,
+  DeviceConversationRefusal,
+  type DeviceConversationDispatch,
+} from "./conversation-upstream.ts";
 import { supportReadOperationAllowed } from "../../../packages/protocol/src/support-access.ts";
 import {
   DISCORD_VOICE_TRANSCRIPTS_PATH,
@@ -864,6 +868,12 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
     } catch (error) {
       if (abort.signal.aborted) return true;
+      if (error instanceof ConversationServiceRestarting) {
+        // A restart, not a failure: the device retries it (VUH-2663).
+        writeJson(response, 503, { error: "service_restarting" });
+        logger.warn(logFields(authorization, serviceRequest, 503), "conversation relay upstream restarting");
+        return true;
+      }
       const status = ownerRoute && error instanceof DeviceConversationRefusal ? error.status : 502;
       writeJson(response, status, {
         error: status === 502 ? "conversation_upstream_unavailable" : "conversation_owner_upstream_refused",
