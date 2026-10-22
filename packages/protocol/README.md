@@ -69,6 +69,17 @@ theirs. The existing revision fence and relay deduplication remain unchanged.
 Definitive HTTP refusals (including a read-only room's 409) are not uncertain
 transport outcomes. Room transcripts remain read-only.
 
+A request with `record: true` also gets the relay's `record` (VUH-2668).
+`received` says whether the relay ever took that exact send from this device,
+even one whose hop then failed. `completeForMs` says how far back that answer
+holds: the relay keeps every send it takes from its start, until it drops the
+oldest for room, and for at most 24 hours, on its monotonic clock. Absence
+counts only when the sender's own monotonic age for that send is less than
+`completeForMs`. The sender measures that age when the answer arrives, not
+when the query left, because the relay computes the window when it receives
+the query. No clocks are compared across machines. Without the field the answer is
+unchanged. An older relay refuses it, and an older client never sees it.
+
 This additive service contract supports the separate VUH-1882 composer work and
 VUH-1883 Send-to-Stop UI. No app UI is changed in this repository.
 

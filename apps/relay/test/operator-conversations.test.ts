@@ -723,6 +723,105 @@ describe("authenticated operator conversation relay", () => {
     expect(sends).toBe(1);
   });
 
+  it("records whether it ever took a send, and for how long that is complete (VUH-2668)", async () => {
+    let now = 1_000;
+    let sends = 0;
+    const relay = await startRelay({
+      clock: () => now,
+      dispatch: async (request) => {
+        if (request.op !== "send") throw new Error("receipt dispatched upstream");
+        sends += 1;
+        // The first "lost" never answers: the hop drops after the relay took it.
+        if (request.turn.kind === "message" && request.turn.message === "lost" && sends === 1)
+          throw new Error("socket hang up");
+        return {
+          op: "send",
+          schemaVersion: 1,
+          result: {
+            schemaVersion: 1,
+            status: "accepted",
+            conversationId: request.turn.conversationId,
+            runId: `run-${sends}`,
+            revision: 1,
+            safeCursor: "000000000001",
+          },
+        };
+      },
+    });
+    const record = async (turn: ReturnType<typeof sendRequest>) =>
+      (await post(relay.url, "/operator/v1/dispatch", { ...turn, op: "send_receipt", record: true })).json();
+    const lost = sendRequest("lost", 0);
+    now = 5_000;
+    // Never taken: the relay says so, and that its record covers the 4 s since it started.
+    expect(await record(lost)).toEqual({
+      op: "send_receipt",
+      schemaVersion: 1,
+      record: { received: false, completeForMs: 4_000 },
+    });
+    // Taken, then the hop failed: received, with no result, and nothing is dispatched by the read.
+    expect((await post(relay.url, "/operator/v1/dispatch", lost)).status).toBe(502);
+    expect(await record(lost)).toEqual({
+      op: "send_receipt",
+      schemaVersion: 1,
+      record: { received: true, completeForMs: 4_000 },
+    });
+    expect(sends).toBe(1);
+    // An identical retry of a failed original still dispatches again, and its result is kept.
+    expect((await (await post(relay.url, "/operator/v1/dispatch", lost)).json()).result).toMatchObject({
+      runId: "run-2",
+    });
+    expect(await record(lost)).toMatchObject({ result: { runId: "run-2" }, record: { received: true } });
+    // Without the field the answer is unchanged, so an older client never meets the record.
+    expect(
+      await (await post(relay.url, "/operator/v1/dispatch", { ...lost, op: "send_receipt" })).json(),
+    ).toEqual({ op: "send_receipt", schemaVersion: 1, result: expect.objectContaining({ runId: "run-2" }) });
+    // Dropping a send for room shortens what the record can vouch for to after it. The oldest,
+    // "lost" taken at 5 s, goes first: it now reads as not received, but only for less than the
+    // 5 s since it arrived, so a sender that started it at least that long ago is never told it
+    // can resend.
+    now = 9_000;
+    for (let index = 0; index < 4_096; index += 1)
+      expect((await post(relay.url, "/operator/v1/dispatch", sendRequest(`fill ${index}`, 0))).status).toBe(
+        200,
+      );
+    now = 10_000;
+    expect((await record(lost)).record).toEqual({ received: false, completeForMs: 5_000 });
+    expect((await record(sendRequest("fill 0", 0))).record).toEqual({ received: true, completeForMs: 5_000 });
+    // Expiry bounds it too: never more than the 24 h a send is kept.
+    now = 3 * 24 * 60 * 60_000;
+    expect((await record(sendRequest("never", 0))).record).toEqual({
+      received: false,
+      completeForMs: 24 * 60 * 60_000,
+    });
+  }, 60_000);
+
+  it("keeps the record's window on a monotonic clock, so a wall-clock jump after a restart never stretches it (VUH-2668)", async () => {
+    // A fresh relay process: every send the previous one took is gone. Then the
+    // wall clock steps an hour forward (NTP, sleep and wake). Only Date is faked,
+    // before the relay starts, so it sees the step exactly as a real one.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const relay = await startRelay({
+        dispatch: async () => {
+          throw new Error("receipt dispatched upstream");
+        },
+      });
+      vi.setSystemTime(Date.now() + 60 * 60_000);
+      const response = await post(relay.url, "/operator/v1/dispatch", {
+        ...sendRequest("taken by the previous relay 30 minutes ago", 0),
+        op: "send_receipt",
+        record: true,
+      });
+      const { record } = await response.json();
+      expect(record.received).toBe(false);
+      // Only as long as this process has really run, nowhere near the 30 minutes
+      // a sender would need before resending, let alone the hour the wall clock moved.
+      expect(record.completeForMs).toBeLessThan(60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails closed when an upstream record tries to expose private Eve state", async () => {
     const privateValues = ["eve-session-private", "continuation-private", "provider-key-private"];
     const relay = await startRelay({

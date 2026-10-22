@@ -166,6 +166,11 @@ export interface OperatorConversationRelayOptions {
   readonly readBodyLeases?: (deviceToken: string) => Promise<Response>;
   readonly downloadFile?: (request: OperatorDeliveredFileDownloadRequest) => Promise<Response>;
   readonly logger?: RelayConversationLogger;
+  /**
+   * Monotonic milliseconds for the send record: arrival, expiry and how far
+   * back it is complete (VUH-2668). A wall-clock step must never stretch that
+   * window, so the default is `performance.now()`, not `Date.now()`.
+   */
   readonly clock?: () => number;
   readonly tailPollMs?: number;
   /** Bounded test/fixture seam; production leaves the stream unbounded. */
@@ -343,7 +348,7 @@ const VIEW_RENDER_ROUTE: (typeof OWNER_SETTINGS_ROUTES)[string] = {
  */
 export function createOperatorConversationRelayHandler(options: OperatorConversationRelayOptions) {
   const logger = options.logger ?? silentLogger;
-  const idempotency = new TurnIdempotencyStore(options.clock ?? Date.now);
+  const idempotency = new TurnIdempotencyStore(options.clock ?? (() => performance.now()));
   const tails = new ConversationTailHub(async (request, signal) =>
     publicServiceResult(await options.dispatch(request, signal)),
   );
@@ -1240,15 +1245,27 @@ async function streamTerminalTail(input: StreamTerminalTailInput): Promise<void>
   }
 }
 
+interface TurnIdempotencyEntry {
+  readonly receivedAt: number;
+  readonly expiresAt: number;
+  readonly result: Promise<OperatorConversationServiceResult>;
+  /** A failed dispatch or a transient seat refusal: still received, but an identical retry dispatches again. */
+  retryable: boolean;
+}
+
 class TurnIdempotencyStore {
-  private readonly entries = new Map<
-    string,
-    { readonly expiresAt: number; readonly result: Promise<OperatorConversationServiceResult> }
-  >();
+  private readonly entries = new Map<string, TurnIdempotencyEntry>();
   private readonly clock: () => number;
+  /**
+   * Since when this relay holds every send it took: its start, and the newest
+   * send it dropped for room. Expiry is bounded by the TTL (VUH-2668).
+   */
+  private readonly startedAt: number;
+  private evictedThrough = Number.NEGATIVE_INFINITY;
 
   public constructor(clock: () => number) {
     this.clock = clock;
+    this.startedAt = clock();
   }
 
   public async read(
@@ -1258,13 +1275,27 @@ class TurnIdempotencyStore {
     this.expire();
     const original = { op: "send" as const, schemaVersion: 1 as const, turn: request.turn };
     const entry = this.entries.get(this.key(deviceId, original));
-    // Unknown, expired and upstream failures all stay unknown. No send fallback.
+    // A missing result stays unknown, and this read never dispatches. Asked for
+    // its record, it also says whether this relay ever took the exact send, and
+    // for how long that answer is complete (VUH-2668).
     // allow-swallowed-rejection -- A failed original has no retained result; this read must stay unknown and never resend.
     const value = await entry?.result.catch(() => undefined);
+    const now = this.clock();
     return {
       op: "send_receipt",
       schemaVersion: 1,
       ...(value?.op === "send" ? { result: value.result } : {}),
+      ...(request.record
+        ? {
+            record: {
+              received: entry !== undefined,
+              completeForMs: Math.max(
+                0,
+                Math.floor(Math.min(now - this.startedAt, now - this.evictedThrough, IDEMPOTENCY_TTL_MS)),
+              ),
+            },
+          }
+        : {}),
     };
   }
 
@@ -1287,21 +1318,31 @@ class TurnIdempotencyStore {
     this.expire();
     const key = this.key(deviceId, request);
     const existing = this.entries.get(key);
-    if (existing !== undefined) return existing.result;
+    if (existing !== undefined && !existing.retryable) return existing.result;
+    // A retry of a failed or refused original dispatches again; until it does,
+    // the original stays on record as received.
+    if (existing !== undefined) this.entries.delete(key);
+    const now = this.clock();
+    let retryable = false;
     const result = dispatch()
       .then((value) => {
-        if (value.op === "send" && value.result.status === "seat_offline") this.entries.delete(key);
+        if (value.op === "send" && value.result.status === "seat_offline") retryable = true;
         return value;
       })
       .catch((error: unknown) => {
-        this.entries.delete(key);
+        retryable = true;
         throw error;
+      })
+      .finally(() => {
+        const current = this.entries.get(key);
+        if (current?.result === result) current.retryable = retryable;
       });
-    this.entries.set(key, { expiresAt: this.clock() + IDEMPOTENCY_TTL_MS, result });
+    this.entries.set(key, { receivedAt: now, expiresAt: now + IDEMPOTENCY_TTL_MS, result, retryable: false });
     while (this.entries.size > IDEMPOTENCY_MAX_ENTRIES) {
-      const oldest = this.entries.keys().next().value as string | undefined;
+      const oldest = this.entries.entries().next().value as [string, TurnIdempotencyEntry] | undefined;
       if (oldest === undefined) break;
-      this.entries.delete(oldest);
+      this.evictedThrough = Math.max(this.evictedThrough, oldest[1].receivedAt);
+      this.entries.delete(oldest[0]);
     }
     return result;
   }

@@ -349,6 +349,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     op: z.literal("send_receipt"),
     schemaVersion: z.literal(1),
     turn: SubmitOperatorConversationTurnSchema,
+    /** Also ask whether the relay ever received it (VUH-2668). An older relay refuses the field. */
+    record: z.literal(true).optional(),
   }),
   z.strictObject({
     op: z.literal("pending_messages"),
@@ -782,6 +784,21 @@ export type OperatorWorkItemsOutcome =
     }
   | { readonly outcome: "unavailable"; readonly message: string };
 
+/**
+ * The relay's own record of one device's exact send (VUH-2668). `received` says
+ * whether it ever took that request, whatever became of it. `completeForMs`
+ * says how far back that answer is complete, on the relay's monotonic clock:
+ * it keeps every send it took for this long. A send it does not hold never
+ * reached it only if the sender's own monotonic age for it, measured when
+ * this answer arrives (not when the query left), is less than this. That
+ * holds for one relay process; see the relay README.
+ */
+export const SendReceiptRecordSchema = z.strictObject({
+  received: z.boolean(),
+  completeForMs: z.number().int().nonnegative(),
+});
+export type SendReceiptRecord = z.infer<typeof SendReceiptRecordSchema>;
+
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1), result: LeadChatsResultSchema })
@@ -944,6 +961,8 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     op: z.literal("send_receipt"),
     schemaVersion: z.literal(1),
     result: SubmitOperatorConversationTurnResultSchema.optional(),
+    /** Only when the request asked for it, so an older client's strict parse never meets it. */
+    record: SendReceiptRecordSchema.optional(),
   }),
   z.strictObject({
     op: z.literal("pending_messages"),
@@ -1375,6 +1394,11 @@ export interface OperatorConversationServiceClient {
   sendReceipt?(
     turn: SubmitOperatorConversationTurn,
   ): Promise<SubmitOperatorConversationTurnResult | undefined>;
+  /** The receipt plus the relay's record of whether it ever took the send (VUH-2668). */
+  sendReceiptRecord?(turn: SubmitOperatorConversationTurn): Promise<{
+    readonly result?: SubmitOperatorConversationTurnResult;
+    readonly record?: SendReceiptRecord;
+  }>;
   ownerUpdateList?(filter?: OwnerUpdateListFilter): Promise<OwnerUpdateList>;
   ownerUpdateRead?(id: string): Promise<OwnerUpdateResult>;
   ownerUpdateDismiss?(id: string): Promise<OwnerUpdateResult>;
@@ -2072,6 +2096,14 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "send_receipt", schemaVersion: 1, turn });
       if (result.op !== "send_receipt") throw new Error(`Unexpected ${result.op} result for send receipt`);
       return result.result;
+    },
+    async sendReceiptRecord(turn) {
+      const result = await dispatch({ op: "send_receipt", schemaVersion: 1, turn, record: true });
+      if (result.op !== "send_receipt") throw new Error(`Unexpected ${result.op} result for send receipt`);
+      return {
+        ...(result.result === undefined ? {} : { result: result.result }),
+        ...(result.record === undefined ? {} : { record: result.record }),
+      };
     },
     async send(turn) {
       const result = await dispatch({ op: "send", schemaVersion: 1, turn });

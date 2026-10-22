@@ -375,6 +375,8 @@ export {
   type OperatorEvidenceFetchOutcome,
   type OperatorWorkProjectDetailsOutcome,
   OperatorConversationServiceResultSchema,
+  SendReceiptRecordSchema,
+  type SendReceiptRecord,
   type OperatorConversationServiceResult,
   type OperatorConversationServiceDispatch,
   type OperatorConversationTailItem,

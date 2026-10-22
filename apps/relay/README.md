@@ -65,8 +65,8 @@ Responses pass the strict public schema and value redaction before emission.
 Captain session IDs, continuation tokens, provider credentials, and arbitrary
 provider payloads do not cross the boundary.
 
-Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
-Transient `seat_offline` refusals collapse concurrently but are not retained, so a retry observes a pane that has returned.
+Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. A send whose hop failed, or which a seat refused as offline, stays on record as received, and an identical retry dispatches it again; `send_receipt` returns a retained `seat_offline` result. With `record: true`, `send_receipt` also reports that record and how far back it is complete, on the relay's monotonic clock (VUH-2668). `received: false` holds only for this one relay process's memory: running several relays for one device, or a proxy in front that may replay a POST, breaks it, so neither may be added without revisiting it. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
+Transient `seat_offline` refusals collapse concurrently. They stay on record, but a retry dispatches again, so it observes a pane that has returned.
 
 A service that is stopping for a restart answers `503 service_restarting`. The
 relay passes that code through, on dispatch and on a shared tail, so a device can
