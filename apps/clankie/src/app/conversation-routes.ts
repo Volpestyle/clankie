@@ -18,6 +18,7 @@ import {
   OperatorConversationServiceRequestSchema,
   OperatorDeliveredFileDownloadRequestSchema,
   type DomainEvent,
+  SERVICE_RESTARTING_SEAT_HANDOFF,
 } from "@clankie/protocol";
 import type {
   WorkItemWriteReceipt,
@@ -667,7 +668,10 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         if (error instanceof ConversationRefusedError || error instanceof ConversationResetError)
           return context.json({ error: "refused", message: error.message }, 409);
         if (error instanceof ServiceShuttingDownError)
-          return context.json({ error: "service_restarting", message: error.message }, 503);
+          return context.json(
+            { error: "service_restarting", message: error.message, ...SERVICE_RESTARTING_SEAT_HANDOFF },
+            503,
+          );
         throw error;
       }
     }
@@ -933,7 +937,10 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       if (error instanceof HerdrUnavailableError)
         return context.json({ error: "herdr_unavailable", message: error.message }, 503);
       if (error instanceof ServiceShuttingDownError)
-        return context.json({ error: "service_restarting", message: error.message }, 503);
+        return context.json(
+          { error: "service_restarting", message: error.message, ...SERVICE_RESTARTING_SEAT_HANDOFF },
+          503,
+        );
       if (error instanceof FleetRosterLimitError)
         return context.json(
           { error: "fleet_roster_limit", message: error.message, count: error.count, limit: error.limit },

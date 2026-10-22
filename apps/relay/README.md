@@ -65,12 +65,18 @@ Responses pass the strict public schema and value redaction before emission.
 Captain session IDs, continuation tokens, provider credentials, and arbitrary
 provider payloads do not cross the boundary.
 
-Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. A send whose hop failed, or which a seat refused as offline, stays on record as received, and an identical retry dispatches it again; `send_receipt` returns a retained `seat_offline` result. With `record: true`, `send_receipt` also reports that record and how far back it is complete, on the relay's monotonic clock (VUH-2668). `received: false` holds only for this one relay process's memory: running several relays for one device, or a proxy in front that may replay a POST, breaks it, so neither may be added without revisiting it. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
+Turn submission retains the registry's `expectedRevision` fence. Duplicate delivery of the same authenticated device request is collapsed to one in-flight or retained result; a stale fence returns the registry's typed `revision_conflict` result. Every send the relay takes stays on record as received, whatever became of it. An identical retry dispatches it again only when the service said nothing was applied or handed to a pane: a definitive refusal, a seat that was offline, or a restart marked `seatHandoff: "reported"`. After any other hop failure (a dropped connection, a 500, an unmarked restart), the retry gets the original failure back, because a seat send may already be in the worker's pane at an unmoved revision (VUH-2670). `send_receipt` returns a retained `seat_offline` result. With `record: true`, `send_receipt` also reports that record and how far back it is complete, on the relay's monotonic clock (VUH-2668). `received: false` holds only for this one relay process's memory: running several relays for one device, or a proxy in front that may replay a POST, breaks it, so neither may be added without revisiting it. Replay and tail cursors remain opaque and surface-scoped. A dropped stream resumes from the last emitted event cursor, while expired or reset cursors produce one typed recovery frame and close.
 Transient `seat_offline` refusals collapse concurrently. They stay on record, but a retry dispatches again, so it observes a pane that has returned.
 
 A service that is stopping for a restart answers `503 service_restarting`. The
 relay passes that code through, on dispatch and on a shared tail, so a device can
-retry it like a dropped connection (VUH-2663). Every other upstream failure stays
+retry it like a dropped connection (VUH-2663). A seat or persona send never
+answers it once its text may have reached the worker's pane: it answers
+`seat_delivery_unconfirmed` instead, which devices keep uncertain (VUH-2670).
+Such a service marks its `503 service_restarting` with `seatHandoff:
+"reported"`, and the relay keeps the marker. A device resends a seat or persona
+send that got this 503 only when the marker is present. Without it (an older
+service, or an older relay) the send stays uncertain. Every other upstream failure stays
 `502 conversation_upstream_unavailable`, or the owner route's refusal status.
 
 Conversation tails share one upstream read per active conversation across both

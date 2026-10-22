@@ -42,6 +42,7 @@ import { supportReadOperationAllowed } from "../../../packages/protocol/src/supp
 import {
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DiscordVoiceTranscriptPageSchema,
+  SERVICE_RESTARTING_SEAT_HANDOFF,
 } from "../../../packages/protocol/src/index.ts";
 import {
   DISCORD_ROOMS_PATH,
@@ -875,7 +876,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       if (abort.signal.aborted) return true;
       if (error instanceof ConversationServiceRestarting) {
         // A restart, not a failure: the device retries it (VUH-2663).
-        writeJson(response, 503, { error: "service_restarting" });
+        writeJson(response, 503, {
+          error: "service_restarting",
+          ...(error.seatHandoffReported ? SERVICE_RESTARTING_SEAT_HANDOFF : {}),
+        });
         logger.warn(logFields(authorization, serviceRequest, 503), "conversation relay upstream restarting");
         return true;
       }
@@ -1249,8 +1253,26 @@ interface TurnIdempotencyEntry {
   readonly receivedAt: number;
   readonly expiresAt: number;
   readonly result: Promise<OperatorConversationServiceResult>;
-  /** A failed dispatch or a transient seat refusal: still received, but an identical retry dispatches again. */
+  /** Refused before anything was applied: still received, but an identical retry dispatches again. */
   retryable: boolean;
+}
+
+/**
+ * Whether a send that did not complete may be dispatched again by an identical
+ * retry. Only when the service said nothing was applied or handed to a pane: a
+ * definitive refusal, a seat that was offline, or a restart it marks as never
+ * following a seat hand-off (VUH-2670). A hop that failed any other way (a
+ * dropped connection, a 500, an unmarked restart) may already have put a seat
+ * send in the worker's pane at an unmoved revision, so a copy must not pass
+ * the fence: the identical retry gets the original failure back.
+ */
+function redispatchable(outcome: { value: OperatorConversationServiceResult } | { error: unknown }): boolean {
+  if ("value" in outcome)
+    return outcome.value.op === "send" && outcome.value.result.status === "seat_offline";
+  return (
+    outcome.error instanceof DeviceConversationRefusal ||
+    (outcome.error instanceof ConversationServiceRestarting && outcome.error.seatHandoffReported)
+  );
 }
 
 class TurnIdempotencyStore {
@@ -1319,18 +1341,18 @@ class TurnIdempotencyStore {
     const key = this.key(deviceId, request);
     const existing = this.entries.get(key);
     if (existing !== undefined && !existing.retryable) return existing.result;
-    // A retry of a failed or refused original dispatches again; until it does,
-    // the original stays on record as received.
+    // A retry of a refused original dispatches again; until it does, the
+    // original stays on record as received.
     if (existing !== undefined) this.entries.delete(key);
     const now = this.clock();
     let retryable = false;
     const result = dispatch()
       .then((value) => {
-        if (value.op === "send" && value.result.status === "seat_offline") retryable = true;
+        retryable = redispatchable({ value });
         return value;
       })
       .catch((error: unknown) => {
-        retryable = true;
+        retryable = redispatchable({ error });
         throw error;
       })
       .finally(() => {

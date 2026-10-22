@@ -15,7 +15,11 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationStreamEvent,
 } from "../../../packages/protocol/src/index.ts";
-import { createCaptainConversationDispatch } from "../src/conversation-upstream.ts";
+import {
+  ConversationServiceRestarting,
+  createCaptainConversationDispatch,
+  DeviceConversationRefusal,
+} from "../src/conversation-upstream.ts";
 import { ControlPlaneDeviceAuthorizer, type RelayDeviceAuthorizer } from "../src/device-auth.ts";
 import { publicGatewayTargetFor } from "../../../packages/protocol/src/public-gateway.ts";
 import {
@@ -766,15 +770,14 @@ describe("authenticated operator conversation relay", () => {
       record: { received: true, completeForMs: 4_000 },
     });
     expect(sends).toBe(1);
-    // An identical retry of a failed original still dispatches again, and its result is kept.
-    expect((await (await post(relay.url, "/operator/v1/dispatch", lost)).json()).result).toMatchObject({
-      runId: "run-2",
-    });
-    expect(await record(lost)).toMatchObject({ result: { runId: "run-2" }, record: { received: true } });
+    // Its hop failed after dispatch, so it may already be in a pane: an identical retry gets the
+    // failure back instead of passing the fence again (VUH-2670).
+    expect((await post(relay.url, "/operator/v1/dispatch", lost)).status).toBe(502);
+    expect(sends).toBe(1);
     // Without the field the answer is unchanged, so an older client never meets the record.
     expect(
       await (await post(relay.url, "/operator/v1/dispatch", { ...lost, op: "send_receipt" })).json(),
-    ).toEqual({ op: "send_receipt", schemaVersion: 1, result: expect.objectContaining({ runId: "run-2" }) });
+    ).toEqual({ op: "send_receipt", schemaVersion: 1 });
     // Dropping a send for room shortens what the record can vouch for to after it. The oldest,
     // "lost" taken at 5 s, goes first: it now reads as not received, but only for less than the
     // 5 s since it arrived, so a sender that started it at least that long ago is never told it
@@ -794,6 +797,52 @@ describe("authenticated operator conversation relay", () => {
       completeForMs: 24 * 60 * 60_000,
     });
   }, 60_000);
+
+  it.each([
+    ["a dropped hop", () => new Error("socket hang up"), false],
+    ["a restart the service does not mark", () => new ConversationServiceRestarting(false), false],
+    [
+      "a restart the service marks as never after a seat hand-off",
+      () => new ConversationServiceRestarting(true),
+      true,
+    ],
+    ["a definitive refusal", () => new DeviceConversationRefusal(409), true],
+  ] as const)(
+    "after %s, an identical retry dispatches again only if nothing can have reached a pane (VUH-2670)",
+    async (_name, failure, again) => {
+      let sends = 0;
+      const relay = await startRelay({
+        dispatch: async () => {
+          sends += 1;
+          if (sends === 1) throw failure();
+          return {
+            op: "send",
+            schemaVersion: 1,
+            result: {
+              schemaVersion: 1,
+              status: "accepted",
+              conversationId: "global-default",
+              runId: "run-again",
+              revision: 1,
+              safeCursor: "000000000001",
+            },
+          };
+        },
+      });
+      const turn = sendRequest("once to the pane", 0);
+      expect((await post(relay.url, "/operator/v1/dispatch", turn)).status).not.toBe(200);
+      const retry = await post(relay.url, "/operator/v1/dispatch", turn);
+      expect({ dispatchedAgain: retry.status === 200, sends }).toEqual({
+        dispatchedAgain: again,
+        sends: again ? 2 : 1,
+      });
+      // Either way the relay keeps it on record as received.
+      const { record } = await (
+        await post(relay.url, "/operator/v1/dispatch", { ...turn, op: "send_receipt", record: true })
+      ).json();
+      expect(record.received).toBe(true);
+    },
+  );
 
   it("keeps the record's window on a monotonic clock, so a wall-clock jump after a restart never stretches it (VUH-2668)", async () => {
     // A fresh relay process: every send the previous one took is gone. Then the

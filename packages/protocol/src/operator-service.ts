@@ -785,6 +785,16 @@ export type OperatorWorkItemsOutcome =
   | { readonly outcome: "unavailable"; readonly message: string };
 
 /**
+ * Carried on a `503 service_restarting` body by a service that never answers a
+ * restart for a seat or persona send whose text may have reached the worker's
+ * pane (VUH-2670); such a send answers `seat_delivery_unconfirmed` instead. A
+ * device may resend a seat or persona send that got this 503 only when the
+ * marker is present. Without it (an older service, or an older relay that drops
+ * the field) the send stays uncertain.
+ */
+export const SERVICE_RESTARTING_SEAT_HANDOFF = { seatHandoff: "reported" } as const;
+
+/**
  * The relay's own record of one device's exact send (VUH-2668). `received` says
  * whether it ever took that request, whatever became of it. `completeForMs`
  * says how far back that answer is complete, on the relay's monotonic clock:

@@ -2759,6 +2759,56 @@ export class ConversationStore {
       message = [turn.message, prepared.note].filter((part) => part.length > 0).join("\n\n");
       attachmentNote = prepared.note;
     }
+    // From the hand-off on, the text may already be with the worker. A failure
+    // after it, a shutdown included, must not throw: the VUH-2626 wrapper would
+    // turn that into a 503 with the revision unmoved, and the app resends a 503
+    // (ADR 0119), repeating the instruction. It answers unconfirmed instead
+    // (VUH-2670). A refusal before the hand-off still throws; nothing was sent.
+    let handedOff = false;
+    try {
+      return await this.deliverSeatTurnFrom(
+        meta,
+        seatId,
+        offlineIdentity,
+        turn,
+        message,
+        attachmentNote,
+        attachments,
+        authority,
+        safeCursor,
+        () => {
+          handedOff = true;
+        },
+      );
+    } catch (error) {
+      if (!handedOff) throw error;
+      console.error(`seat send in ${meta.conversationId} failed after its hand-off`, error);
+      return {
+        schemaVersion: 1,
+        status: "seat_delivery_unconfirmed",
+        deliveryStage: "uncertain",
+        conversationId: meta.conversationId,
+        ...offlineIdentity,
+        detail:
+          "This message may have reached the agent before something stopped it. Check the agent before sending it again.",
+        currentRevision: meta.revision,
+        safeCursor,
+      };
+    }
+  }
+
+  private async deliverSeatTurnFrom(
+    meta: ConversationMeta,
+    seatId: string | undefined,
+    offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
+    turn: SubmitOperatorConversationTurn,
+    message: string,
+    attachmentNote: string | undefined,
+    attachments: readonly StoredOwnerAttachment[] | undefined,
+    authority: QuestionAuthority | undefined,
+    safeCursor: string,
+    handOff: () => void,
+  ): Promise<SubmitOperatorConversationTurnResult> {
     if (turn.delivery === "queue" && this.nativeMessageHost && seatId !== undefined) {
       const authorize = this.nativeMessageAuthority(meta, seatId, authority);
       let admitted = false;
@@ -2771,6 +2821,8 @@ export class ConversationStore {
             await authorize();
             if (!admitted && turn.expectedRevision !== meta.revision)
               throw new ConversationRefusedError("Conversation changed during queue admission");
+            // Admitted: the host queue may hold it from here on.
+            handOff();
           },
           attachmentNote,
         )
@@ -2818,6 +2870,7 @@ export class ConversationStore {
         seatDelivery: { state: "queued" },
       };
     }
+    if (seatId !== undefined && this.sendToSeat) handOff();
     const delivery =
       seatId === undefined
         ? undefined

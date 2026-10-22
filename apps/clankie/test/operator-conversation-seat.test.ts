@@ -385,6 +385,95 @@ describe("seat conversations", () => {
   });
 });
 
+describe("a seat send that fails after its hand-off (VUH-2670)", () => {
+  // The worker may already have the text, so the send must not throw: during a
+  // shutdown that would become a 503 at an unmoved revision, which the app resends.
+  it.each([
+    ["the seat sender takes it, then throws", "throws"],
+    ["its record fails to save after the seat took it", "save fails"],
+  ] as const)("%s: answers unconfirmed once, never throws", async (_name, failure) => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-seat-handoff-"));
+    roots.push(root);
+    const handed: string[] = [];
+    let store!: ConversationStore;
+    const sender = vi.fn(async (_seatId: string, text: string): Promise<FleetSeatDelivery> => {
+      handed.push(text);
+      if (failure === "throws") throw new Error("Seat mailbox delivery was unbound.");
+      // The stores close under the send once the seat has the text.
+      vi.spyOn(store as unknown as { saveMeta(): void }, "saveMeta").mockImplementation(() => {
+        throw new Error("Conversation store is closed");
+      });
+      return { outcome: "delivered", state: "started" };
+    });
+    store = new ConversationStore(root, vi.fn(), undefined, sender);
+    try {
+      const created = await store.serve({
+        schemaVersion: 1,
+        op: "create",
+        scope: { kind: "seat", seatId: "term-one" },
+        title: "Worker",
+      });
+      if (created.op !== "create") throw new Error("create expected");
+      const sent = await store.serve({
+        schemaVersion: 1,
+        op: "send",
+        turn: {
+          schemaVersion: 1,
+          kind: "message",
+          conversationId: created.conversation.conversationId,
+          surfaceClientId: "tui",
+          expectedRevision: 0,
+          message: "Run the migration once.",
+        },
+      });
+      if (sent.op !== "send") throw new Error("send expected");
+      expect(SubmitOperatorConversationTurnResultSchema.parse(sent.result)).toMatchObject({
+        status: "seat_delivery_unconfirmed",
+        deliveryStage: "uncertain",
+        seatId: "term-one",
+      });
+      expect(handed).toEqual(["Run the migration once."]);
+    } finally {
+      vi.restoreAllMocks();
+      await store.close();
+    }
+  });
+
+  it("still refuses a stale revision before any hand-off", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-seat-handoff-"));
+    roots.push(root);
+    const sender = vi.fn(
+      async (): Promise<FleetSeatDelivery> => ({ outcome: "delivered", state: "started" }),
+    );
+    const store = new ConversationStore(root, vi.fn(), undefined, sender);
+    try {
+      const created = await store.serve({
+        schemaVersion: 1,
+        op: "create",
+        scope: { kind: "seat", seatId: "term-one" },
+        title: "Worker",
+      });
+      if (created.op !== "create") throw new Error("create expected");
+      const sent = await store.serve({
+        schemaVersion: 1,
+        op: "send",
+        turn: {
+          schemaVersion: 1,
+          kind: "message",
+          conversationId: created.conversation.conversationId,
+          surfaceClientId: "tui",
+          expectedRevision: 7,
+          message: "Stale.",
+        },
+      });
+      expect(sent).toMatchObject({ result: { status: "revision_conflict" } });
+      expect(sender).not.toHaveBeenCalled();
+    } finally {
+      await store.close();
+    }
+  });
+});
+
 it("exposes queued native delivery to API/CLI and the visible conversation", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-seat-queued-"));
   roots.push(root);

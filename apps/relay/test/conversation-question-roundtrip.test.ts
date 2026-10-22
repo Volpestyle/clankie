@@ -492,13 +492,16 @@ it("revocation after committed answer withholds response but later exact read re
 
 it("passes a restarting service through as 503 service_restarting, while a failed one stays 502 (VUH-2663)", async () => {
   const f = await fixture();
-  const answer = (status: number) => async (request: Request, response: Response) =>
-    new URL(request.url).pathname === "/operator/v1/dispatch"
-      ? Response.json(
-          status === 503 ? { error: "service_restarting", message: "Clankie is restarting" } : {},
-          { status },
-        )
-      : response;
+  const answer =
+    (status: number, marker?: { seatHandoff: string }) => async (request: Request, response: Response) =>
+      new URL(request.url).pathname === "/operator/v1/dispatch"
+        ? Response.json(
+            status === 503
+              ? { error: "service_restarting", message: "Clankie is restarting", ...marker }
+              : {},
+            { status },
+          )
+        : response;
   const tail = {
     op: "tail",
     schemaVersion: 1,
@@ -516,6 +519,20 @@ it("passes a restarting service through as 503 service_restarting, while a faile
       request.op,
       503,
       { error: "service_restarting" },
+    ]);
+  }
+  // A service with VUH-2670 marks its 503; the relay keeps the marker on both hops (an older
+  // service sends none, as above, and none is invented).
+  f.hooks.after = answer(503, { seatHandoff: "reported" });
+  for (const request of [
+    { op: "input_get", schemaVersion: 1, conversationId: f.id },
+    { op: "get", schemaVersion: 1, conversationId: f.id },
+  ] as const) {
+    const response = await f.raw(request);
+    expect([request.op, response.status, await response.json()]).toEqual([
+      request.op,
+      503,
+      { error: "service_restarting", seatHandoff: "reported" },
     ]);
   }
   f.hooks.after = answer(500);

@@ -376,6 +376,7 @@ export {
   type OperatorWorkProjectDetailsOutcome,
   OperatorConversationServiceResultSchema,
   SendReceiptRecordSchema,
+  SERVICE_RESTARTING_SEAT_HANDOFF,
   type SendReceiptRecord,
   type OperatorConversationServiceResult,
   type OperatorConversationServiceDispatch,

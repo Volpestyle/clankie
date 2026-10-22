@@ -3,6 +3,7 @@ import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceResultSchema,
+  SERVICE_RESTARTING_SEAT_HANDOFF,
   parseProtocolResponse,
   type OperatorDeliveredFileDownloadRequest,
   type OperatorConversationServiceDispatch,
@@ -34,7 +35,8 @@ export function createCaptainConversationDispatch(
       signal: dispatchSignal(signal),
     });
     if (!response.ok) {
-      if (await upstreamRestarting(response)) throw new ConversationServiceRestarting();
+      const restarting = await upstreamRestarting(response);
+      if (restarting) throw restarting;
       throw new Error(`Captain conversation service returned HTTP ${response.status}`);
     }
     return parseProtocolResponse(OperatorConversationServiceResultSchema, await response.json());
@@ -44,24 +46,31 @@ export function createCaptainConversationDispatch(
 /**
  * The service answered `503 service_restarting` (VUH-2626). Devices retry it
  * like a dropped connection, so the relay keeps the code rather than folding
- * it into an upstream failure (VUH-2663).
+ * it into an upstream failure (VUH-2663), and keeps the service's seat
+ * hand-off marker with it (VUH-2670).
  */
 export class ConversationServiceRestarting extends Error {
-  public constructor() {
+  public readonly seatHandoffReported: boolean;
+  public constructor(seatHandoffReported = false) {
     super("Clankie is restarting");
     this.name = "ConversationServiceRestarting";
+    this.seatHandoffReported = seatHandoffReported;
   }
 }
 
-/** Reads only a 503's error code; any other failed body is discarded unread. */
-async function upstreamRestarting(response: Response): Promise<boolean> {
+/** Reads only a 503's error code and marker; any other failed body is discarded unread. */
+async function upstreamRestarting(response: Response): Promise<ConversationServiceRestarting | undefined> {
   if (response.status !== 503) {
     await response.body?.cancel();
-    return false;
+    return undefined;
   }
   // allow-swallowed-rejection -- a body that is not JSON carries no error code; the status still fails the request
   const body: unknown = await response.json().catch(() => undefined);
-  return typeof body === "object" && body !== null && "error" in body && body.error === "service_restarting";
+  if (typeof body !== "object" || body === null || !("error" in body) || body.error !== "service_restarting")
+    return undefined;
+  return new ConversationServiceRestarting(
+    "seatHandoff" in body && body.seatHandoff === SERVICE_RESTARTING_SEAT_HANDOFF.seatHandoff,
+  );
 }
 
 export type DeviceConversationRequest = Extract<
@@ -152,7 +161,8 @@ export function createDeviceConversationDispatch(options: {
     );
     requestSignal.throwIfAborted();
     if (!response.ok) {
-      if (await upstreamRestarting(response)) throw new ConversationServiceRestarting();
+      const restarting = await upstreamRestarting(response);
+      if (restarting) throw restarting;
       if ([400, 401, 403, 404, 409, 429, 503].includes(response.status))
         throw new DeviceConversationRefusal(response.status);
       throw new Error("Conversation owner upstream unavailable");
