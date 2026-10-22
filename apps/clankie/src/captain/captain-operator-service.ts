@@ -9,6 +9,7 @@ import {
   type OperatorFleetSeat,
 } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
+import { logger } from "../app/log.ts";
 import type { WorkerReportSummary } from "@clankie/protocol";
 import { projectsRevision, SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { FleetMembershipReadError } from "../fleet-project-membership.ts";
@@ -122,8 +123,8 @@ export interface CreateOperatorServiceContext {
 }
 
 export class ServiceShuttingDownError extends Error {
-  constructor() {
-    super("Clankie is restarting");
+  constructor(cause?: unknown) {
+    super("Clankie is restarting", cause === undefined ? undefined : { cause });
     this.name = "ServiceShuttingDownError";
   }
 }
@@ -1146,8 +1147,19 @@ export function createOperatorService(
     try {
       return await serve(request, authority, readSignal);
     } catch (error) {
-      if (ctx.shutdown.signal.aborted) throw new ServiceShuttingDownError();
-      throw error;
+      if (!ctx.shutdown.signal.aborted) throw error;
+      // The shutdown's own abort is how a parked tail ends. Anything else may be
+      // a real fault that only happened to race the restart, so keep a trace.
+      if (error !== ctx.shutdown.signal.reason)
+        logger.warn(
+          {
+            event: "operator_conversation.shutdown_error",
+            op: request.op,
+            error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+          },
+          "A conversation request failed while Clankie was shutting down",
+        );
+      throw new ServiceShuttingDownError(error);
     }
   };
 }
