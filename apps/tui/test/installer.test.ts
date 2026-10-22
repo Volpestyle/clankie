@@ -71,7 +71,7 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         const path = join(source, "clankie", "bin", command);
         await writeFile(
           path,
-          `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.INSTALL_TEST_REFRESHES, JSON.stringify({version: '${version}', args: process.argv.slice(2)}) + '\\n');\nconsole.log('{"ok":true}');\n`,
+          `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(process.env.INSTALL_TEST_REFRESHES, JSON.stringify({version: '${version}', args: process.argv.slice(2)}) + '\\n');\nif (process.env.INSTALL_TEST_REFRESH_ERROR && process.argv.includes('--refresh-linked')) { console.error(process.env.INSTALL_TEST_REFRESH_ERROR); process.exit(1); }\nconsole.log('{"ok":true}');\n`,
         );
         await chmod(path, 0o755);
       }
@@ -121,6 +121,29 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
         ? JSON.stringify({ version: "v0.2.0", args: ["start", "clankie"] }) + "\n"
         : "",
     );
+    // Linking is optional: a refresh that cannot finish never fails a finished install (VUH-2661).
+    for (const [error, hint] of [
+      [
+        "clankie: Keychain unavailable; retrying in 30 seconds",
+        "Skipped harness linking: the Keychain is locked or unavailable. Log in or unlock it, then run clankie harness install.",
+      ],
+      [
+        "clankie: Keychain locked: unlock it in Keychain Access; Clankie will retry without opening password dialogs.",
+        "Skipped harness linking: the Keychain is locked or unavailable. Log in or unlock it, then run clankie harness install.",
+      ],
+      [
+        "clankie: profile write refused",
+        "Harness linking failed; Clankie is installed. Run clankie harness install to retry.",
+      ],
+    ]) {
+      const refused = spawnSync("sh", [installer, "--version", "v0.2.0"], {
+        env: { ...env, INSTALL_TEST_REFRESH_ERROR: error },
+        encoding: "utf8",
+      });
+      expect(refused.status, refused.stderr).toBe(0);
+      expect(refused.stdout).toContain(hint);
+      expect(await readlink(join(installation, "current"))).toBe("releases/v0.2.0");
+    }
     const retained = join(installation, "releases", "v0.1.0", "retained");
     await writeFile(retained, "immutable directory");
     expect(spawnSync("sh", [installer, "--version", "v0.1.0"], { env }).status).toBe(0);

@@ -174,9 +174,11 @@ else
       *'unknown command "harness"'*) exit 0 ;;
       # Releases before v0.4.7 refuse before the first service start, when nothing is linked yet.
       *'Machine setup policy needs the operator credential'*) refreshed='{"skipped":"service-not-started"}' ;;
+      # Linking is optional and retryable, so it never fails an install that finished.
+      *Keychain*) refreshed='{"skipped":"credentials-unavailable"}' ;;
       *)
         printf '%s\n' "$refreshed" >&2
-        exit 1
+        refreshed='{"skipped":"refresh-failed"}'
         ;;
     esac
   fi
@@ -184,6 +186,13 @@ else
     # A fresh Mac: harness linking needs the service's policy, so it waits for the first start.
     *'"skipped":"service-not-started"'*)
       echo "Optional harness linking waits for the first start: run clankie, then clankie harness install."
+      ;;
+    # Over SSH or before login the Keychain can be locked or unreachable.
+    *'"skipped":"credentials-unavailable"'*)
+      echo "Skipped harness linking: the Keychain is locked or unavailable. Log in or unlock it, then run clankie harness install."
+      ;;
+    *'"skipped":"refresh-failed"'*)
+      echo "Harness linking failed; Clankie is installed. Run clankie harness install to retry."
       ;;
     *)
       printf '%s\n' "$refreshed"

@@ -27,7 +27,9 @@ Codex worker plugins, including profiles on enabled SSH fleet machines, through
 the existing harness installer. First-time linking still uses interactive
 consent. On a fresh Mac nothing is linked before the service first starts, so
 the installer reports that linking waits for it: run `clankie`, then
-`clankie harness install`. A non-default `CLANKIE_INSTALL_ROOT` skips all harness linking, including
+`clankie harness install`. Linking is optional, so a refresh that cannot finish
+(a locked or unreachable Keychain over SSH, for example) prints how to retry and
+the install still succeeds. A non-default `CLANKIE_INSTALL_ROOT` skips all harness linking, including
 fleet refresh and the interactive prompt, and prints that it skipped it.
 Managed Codex profiles reuse a previously approved source-owned setup;
 missing setup or an unreachable machine returns an incomplete receipt. Native
