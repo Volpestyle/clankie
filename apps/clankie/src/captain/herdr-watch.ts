@@ -916,6 +916,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly hireReceipts: DeliveryFence;
   private readonly hireOwners: HireOwners;
   private readonly validateOwner: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
+  private readonly onReadopted:
+    | ((seat: { occupantId: string; title: string; harness: string; name?: string }) => void)
+    | undefined;
   private readonly activeHires = new Set<string>();
   private readonly remoteHireReceipts: RemoteHireReceipts | undefined;
   private readonly channelReceipt:
@@ -1073,12 +1076,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
       ) => Promise<boolean | FleetSeatDelivery>;
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
+      /** A seat re-adopted by its hiring conversation, for its persona's name (VUH-2667). */
+      readonly onReadopted?: (seat: {
+        occupantId: string;
+        title: string;
+        harness: string;
+        name?: string;
+      }) => void;
     } = {},
   ) {
     this.path = path;
     this.remoteHireReceipts = options.remoteHireReceipts;
     this.channelReceipt = options.channelReceipt;
     this.validateOwner = options.validateOwner;
+    this.onReadopted = options.onReadopted;
     this.hireOwners = new HireOwners(`${path}.owners.json`);
     this.nativeLaunchPolicy = options.nativeLaunchPolicy;
     this.fleetResources = options.fleetResources;
@@ -1898,6 +1909,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
     );
     this.retireReboundWatches(rebound.replaced, latest);
     this.watchHiredSeat(latest.terminalId, occupantIdForHerdrSession(latest.session), rebound.owner);
+    this.onReadopted?.({
+      occupantId: occupantIdForHerdrSession(latest.session),
+      title: latest.title,
+      harness: latest.agent,
+      ...(latest.name === undefined ? {} : { name: latest.name }),
+    });
   }
 
   private nativeSessionKey(agent: HerdrAgentSnapshot): string | undefined {

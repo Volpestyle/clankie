@@ -796,6 +796,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     requireWorkerAccess: (fleet) => requireAccess(fleet, "workers"),
+    // A re-adopted seat named only after its pane's title takes a handle (VUH-2667).
+    onReadopted: (seat) => personas.nameAdopted(seat),
     ...(deps.localNativeHireRefusal === undefined
       ? {}
       : {

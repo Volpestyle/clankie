@@ -44,6 +44,7 @@ import {
 } from "@clankie/protocol";
 import { z } from "zod";
 import type { ObservedFleetSeat } from "./herdr-census.ts";
+import { adoptedHandle } from "./hire-name.ts";
 
 function retiredPersona(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
@@ -358,10 +359,14 @@ export class PersonaStore {
     const current = this.records.get(seat.personaId);
     if (current === undefined) throw new Error("Agent persona binding did not create a character");
     const now = new Date().toISOString();
+    // A census can file the pane before the hire adopts it, naming the persona after the title its
+    // harness wrote ("Clankie brief 9ffe6b76 assignment"). Nobody chose that name, so the hire's
+    // replaces it; a name the owner gave stays (VUH-2667).
+    const kept = previousRecords.get(seat.personaId)?.name;
     this.records.set(seat.personaId, {
       schemaVersion: 1,
       personaId: seat.personaId,
-      name: previousRecords.get(seat.personaId)?.name ?? name,
+      name: kept === undefined || discoveredName(kept, observed) ? name : kept,
       appearance: current.appearance,
       // A move re-adopts the same character; it keeps the role it had.
       ...((this.projectStore ? current.role : (role ?? current.role)) === undefined
@@ -394,6 +399,28 @@ export class PersonaStore {
       throw error;
     }
     return { ...seat, title: this.records.get(seat.personaId)!.name };
+  }
+
+  /**
+   * A seat Clankie re-adopted keeps the name it was given, but one only ever named after its pane's
+   * title takes its Herdr name, or a handle (VUH-2667).
+   */
+  public nameAdopted(seat: {
+    readonly occupantId: string;
+    readonly title: string;
+    readonly harness: string;
+    readonly name?: string;
+  }): void {
+    const personaId = this.personaForOccupant(seat.occupantId);
+    const current = personaId === undefined ? undefined : this.records.get(personaId);
+    if (personaId === undefined || current === undefined || !discoveredName(current.name, seat)) return;
+    const named = seat.name === undefined ? undefined : OperatorAgentNameSchema.safeParse(seat.name);
+    this.records.set(personaId, {
+      ...current,
+      name: named?.success === true ? named.data : adoptedHandle(personaId),
+      updatedAt: new Date().toISOString(),
+    });
+    this.save();
   }
 
   /**
@@ -777,4 +804,9 @@ function acquireJournalWriter(journal: string): { path: string; nonce: string } 
   const nonce = randomUUID();
   durableJson(join(path, "owner.json"), { pid: process.pid, nonce });
   return { path, nonce };
+}
+
+/** A name the census took from the pane's own title, or its harness fallback: nobody chose it. */
+function discoveredName(name: string, seat: { readonly title: string; readonly harness: string }): boolean {
+  return name === seat.title.trim() || name === `${seat.harness} agent`;
 }

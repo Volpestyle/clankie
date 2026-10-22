@@ -16,6 +16,43 @@ export function hireDisplayName(title: string): string {
   return FALLBACK_NAMES[createHash("sha256").update(name).digest()[0]! % FALLBACK_NAMES.length]!;
 }
 
+const HANDLE_NAMES = [
+  "ari",
+  "basil",
+  "cleo",
+  "dex",
+  "ember",
+  "fern",
+  "gus",
+  "hazel",
+  "iris",
+  "juno",
+  "kit",
+  "lark",
+  "moss",
+  "nell",
+  "otto",
+  "pip",
+  "quill",
+  "rowan",
+  "sage",
+  "tam",
+  "umi",
+  "vale",
+  "wren",
+  "zuri",
+] as const;
+
+/**
+ * A handle for a seat Clankie adopted without naming it (VUH-2667), shaped like a hired seat's
+ * Herdr name ("wren-28a1"), so surfaces show "Wren" rather than the pane's title. Stable for one
+ * persona.
+ */
+export function adoptedHandle(personaId: string): string {
+  const digest = createHash("sha256").update(personaId).digest();
+  return `${HANDLE_NAMES[digest[0]! % HANDLE_NAMES.length]}-${digest.toString("hex").slice(2, 6)}`;
+}
+
 /** A manual Herdr label, independent of the harness's changing OSC title. */
 export function hirePaneLabel(name: string, taskTitle?: string, role?: string): string {
   const shortTask = (value: string) =>

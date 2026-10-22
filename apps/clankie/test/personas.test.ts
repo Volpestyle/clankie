@@ -74,6 +74,70 @@ describe("PersonaStore", () => {
     });
   });
 
+  it("names a hire the census already filed under its pane title by the hire's name (VUH-2667)", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-persona-hire-race-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    // The harness titled its pane from the brief before the hire adopted it, as Rowan's did.
+    const pane = {
+      ...observed("term-1"),
+      harness: "claude",
+      title: "Clankie brief 9ffe6b76 assignment",
+      subject: "adhoc-w5T-p2",
+    };
+    expect(store.reconcile([pane])[0]!.title).toBe("Clankie brief 9ffe6b76 assignment");
+    const hired = store.adoptSpawn(
+      { ...pane, subject: "rowan-1bb8", renamed: { name: "rowan-1bb8", from: pane.subject } },
+      "Rowan",
+    );
+    expect(hired.title).toBe("Rowan");
+    expect(new PersonaStore(root).all([hired], () => undefined)).toMatchObject([{ name: "Rowan" }]);
+  });
+
+  it("gives a re-adopted seat named only after its pane title its Herdr name or a handle, and keeps a chosen name (VUH-2667)", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-persona-adopted-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const titled = (seatId: string, occupantId: string) => ({
+      ...observed(seatId, occupantId, `adhoc-${seatId}`),
+      harness: "claude",
+      title: "Clankie captain brief assignment",
+    });
+    const [plain, named] = store.reconcile([titled("term-1", OCCUPANT_ONE), titled("term-2", OCCUPANT_TWO)]);
+    store.nameAdopted({
+      occupantId: OCCUPANT_ONE,
+      title: "Clankie captain brief assignment",
+      harness: "claude",
+    });
+    store.nameAdopted({
+      occupantId: OCCUPANT_TWO,
+      title: "Clankie captain brief assignment",
+      harness: "claude",
+      name: "basil-91c2",
+    });
+    const names = () =>
+      new PersonaStore(root)
+        .all([plain!, named!], () => undefined)
+        .map((persona) => [persona.personaId, persona.name] as const);
+    const handle = new Map(names()).get(plain!.personaId)!;
+    expect(handle).toMatch(/^[a-z]+-[0-9a-f]{4}$/u);
+    expect(new Map(names()).get(named!.personaId)).toBe("basil-91c2");
+    // Stable, and an owner's choice outlives the next adoption.
+    store.nameAdopted({
+      occupantId: OCCUPANT_ONE,
+      title: "Clankie captain brief assignment",
+      harness: "claude",
+    });
+    expect(new Map(names()).get(plain!.personaId)).toBe(handle);
+    store.update({ schemaVersion: 1, personaId: plain!.personaId, name: "Juniper" });
+    store.nameAdopted({
+      occupantId: OCCUPANT_ONE,
+      title: "Clankie captain brief assignment",
+      harness: "claude",
+    });
+    expect(new Map(names()).get(plain!.personaId)).toBe("Juniper");
+  });
+
   it("preserves the current name on appearance-only and avatar-only saves across restart and census", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-persona-avatar-name-"));
     roots.push(root);
