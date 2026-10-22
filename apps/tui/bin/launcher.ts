@@ -8,14 +8,14 @@ import {
   ensureCaptainCredential,
   ensureOperatorCredential,
 } from "@clankie/credential-broker";
-import { discordSettingsToEnvironment, keepAwakeEnabled, SettingsStore } from "@clankie/settings";
+import { SettingsStore } from "@clankie/settings";
 import packageMetadata from "../../../package.json" with { type: "json" };
 import {
   isHeadlessCaptainCommand,
   runHeadlessCaptainCommand,
   unknownLauncherCommand,
 } from "./headless-captain.ts";
-import { KEEP_AWAKE_ENV, startOne } from "./services.ts";
+import { applyLauncherEnvironment, startOne } from "./services.ts";
 import { parseDirectConversation } from "../src/session/operator-conversations.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
@@ -52,36 +52,13 @@ if (
   args[0] === "down" ||
   args[0] === "recover"
 ) {
-  await applyLauncherDiscordEnvironment();
+  await applyLauncherEnvironment();
 }
 
 if (isHeadlessCaptainCommand(args[0])) {
   process.exitCode = await runHeadlessCaptainCommand(args, { repoRoot });
 } else {
   await runOperatorConsole();
-}
-
-async function applyLauncherDiscordEnvironment(): Promise<void> {
-  // Every child fills its own env from settings. The launcher consumes only the
-  // active-body switches and activity tunnel, so project just those for commands
-  // that inspect or change the process graph. Config commands read the store
-  // directly; projecting first would falsely report stored values as env overrides.
-  const stored = await new SettingsStore().load();
-  const configured = discordSettingsToEnvironment(stored.discord);
-  for (const name of [
-    "DISCORD_ACTIVE_BODY",
-    "DISCORD_USER_SESSION_ENABLED",
-    "CLANKIE_ACTIVITY_TUNNEL_NAME",
-    "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME",
-  ] as const) {
-    const value = configured[name];
-    if ((process.env[name]?.length ?? 0) === 0 && value !== undefined) process.env[name] = value;
-  }
-  // The owner's always-on choice (on by default for a self-hosted Mac) decides
-  // whether the launcher runs `caffeinate`.
-  if ((process.env[KEEP_AWAKE_ENV]?.length ?? 0) === 0 && keepAwakeEnabled(stored)) {
-    process.env[KEEP_AWAKE_ENV] = "1";
-  }
 }
 
 async function runOperatorConsole(): Promise<void> {

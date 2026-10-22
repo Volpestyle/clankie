@@ -58,6 +58,7 @@ async function stateEnv(): Promise<NodeJS.ProcessEnv> {
     XDG_STATE_HOME: root,
     CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: "operator-secret",
+    DISCORD_APPLICATION_ID: "1100000000000000000",
   };
 }
 

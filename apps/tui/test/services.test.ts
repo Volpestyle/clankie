@@ -39,7 +39,8 @@ async function stateEnv(): Promise<NodeJS.ProcessEnv> {
   const root = await mkdtemp(join(tmpdir(), "clankie-services-"));
   tempDirs.push(root);
   await mkdir(join(root, "clankie"), { recursive: true });
-  return { XDG_STATE_HOME: root };
+  // A Discord app is set up, so the official bot is a body the launcher runs.
+  return { XDG_STATE_HOME: root, DISCORD_APPLICATION_ID: "1100000000000000000" };
 }
 
 /** A detached child that stays alive, like a real service. */
@@ -654,6 +655,19 @@ describe("discord bridge health", () => {
     expect(status).toMatchObject({ state: "unreachable", owned: false });
   });
 
+  it("reports a bridge nobody set up as off, not unreachable", async () => {
+    const { DISCORD_APPLICATION_ID: _none, ...env } = await stateEnv();
+    const status = await inspectService(managedService("discord-bridge"), {
+      repoRoot: "/repo",
+      env,
+      fetchImpl: presenceFetch(undefined),
+      operatorToken: "operator-secret",
+      listProcessCommandsImpl: noProcesses,
+    });
+
+    expect(status).toMatchObject({ state: "healthy", detail: "not set up — /discord", owned: false });
+  });
+
   it("keeps an owned bridge healthy when the presence projection cannot be read", async () => {
     const env = await stateEnv();
     await writeRecord(env, "discord-bridge", 9_400);
@@ -689,7 +703,11 @@ describe("service targets", () => {
   });
 
   it("starts only the active Discord body", () => {
-    expect(managedService("discord-bridge").enabled?.({})).toBe(true);
+    // A fresh install has no Discord app, so there is no bot to start (VUH-2626).
+    expect(managedService("discord-bridge").enabled?.({})).toBe(false);
+    expect(
+      managedService("discord-bridge").enabled?.({ DISCORD_APPLICATION_ID: "1100000000000000000" }),
+    ).toBe(true);
     expect(managedService("discord-bridge").enabled?.({ DISCORD_ACTIVE_BODY: "user_session" })).toBe(false);
     expect(managedService("discord-user-session").enabled?.({ DISCORD_USER_SESSION_ENABLED: "true" })).toBe(
       false,
@@ -814,7 +832,9 @@ describe("service targets", () => {
     expect(order).toEqual(["stop:9701", "start:@clankie/clankie", "start:@clankie/relay"]);
     expect(outcomes.map((outcome) => outcome.id)).toEqual(["clankie", "relay"]);
     expect(managedService("activity").enabled?.(env)).toBe(false);
-    expect(managedService("discord-bridge").enabled?.({})).toBe(true);
+    expect(
+      managedService("discord-bridge").enabled?.({ DISCORD_APPLICATION_ID: "1100000000000000000" }),
+    ).toBe(true);
     const status = await inspectService(managedService("discord-bridge"), {
       repoRoot: "/repo",
       env,

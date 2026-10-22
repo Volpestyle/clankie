@@ -65,16 +65,14 @@ describe("local endpoint context discovery over HTTP", () => {
     });
 
     const declared = config.provider?.["ollama"]?.models ?? {};
-    expect(Object.keys(declared)).toHaveLength(8);
+    expect(Object.keys(declared)).toHaveLength(7);
     expect(declared["qwen3-vl:8b"]).toEqual({ tool_call: true, limit: { context: 262_144, output: 8_192 } });
     expect(declared["glm-4.7-flash:latest"]).toEqual({
       tool_call: true,
       limit: { context: 202_752, output: 8_192 },
     });
-    expect(declared["nomic-embed-text:latest"]).toEqual({
-      tool_call: true,
-      limit: { context: 2_048, output: 512 },
-    });
+    // Listed first, and it only embeds: setup would have preselected it (VUH-2626).
+    expect(declared["nomic-embed-text:latest"]).toBeUndefined();
   });
 
   it("leaves a runtime without /api/show at a fallback larger than Clankie's first request", async () => {

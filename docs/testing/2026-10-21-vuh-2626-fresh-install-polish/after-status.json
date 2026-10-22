@@ -1,0 +1,71 @@
+{
+  "presence": {
+    "schemaVersion": 1,
+    "cursor": "3fb04559230a0e3c4de7f44942bacf2876934df8c8e3cc8cf4aa60db1504b9bf",
+    "mood": "idle",
+    "detail": "Taking a break",
+    "since": null,
+    "activeSeats": 0
+  },
+  "ok": true,
+  "status": "ready",
+  "host": "http://127.0.0.1:57718",
+  "owned": true,
+  "pid": 66576,
+  "operatorCredential": { "present": true, "source": "store", "consistency": "store_only" },
+  "services": [
+    { "id": "clankie", "label": "Clankie", "state": "healthy", "owned": true, "pid": 66576 },
+    {
+      "id": "relay",
+      "label": "App relay",
+      "state": "healthy",
+      "owned": true,
+      "detail": "devices on 127.0.0.1:57719",
+      "pid": 66680
+    },
+    {
+      "id": "discord-bridge",
+      "label": "Discord bridge",
+      "state": "healthy",
+      "owned": false,
+      "detail": "not set up — /discord"
+    },
+    {
+      "id": "discord-user-session",
+      "label": "Discord lab body",
+      "state": "healthy",
+      "owned": false,
+      "detail": "lab body off"
+    },
+    { "id": "activity", "label": "Activity surface", "state": "unreachable", "owned": false },
+    {
+      "id": "tunnel",
+      "label": "Activity tunnel",
+      "state": "healthy",
+      "owned": false,
+      "detail": "not configured; activity stays local"
+    },
+    {
+      "id": "awake",
+      "label": "Keep-awake",
+      "state": "healthy",
+      "owned": false,
+      "detail": "off; the Mac sleeps as it is set to"
+    }
+  ],
+  "connection": { "mode": "local", "label": "This Mac" },
+  "doorway": { "state": "disabled" },
+  "self": { "epoch": 0, "state": "active", "dormant": false },
+  "runtimeHealth": {
+    "state": "healthy",
+    "observedAt": "2026-10-22T01:32:09.895Z",
+    "cpuPercent": 3.4,
+    "healthLatencyMs": 1,
+    "healthAvailable": true,
+    "durationMs": 0,
+    "reasons": [],
+    "delivery": "none"
+  },
+  "nextStep": "Pair a phone or tablet: run `clankie pair`. To reach him away from this network, sign in with `clankie remote-access on` or set `clankie gateway direct`.",
+  "seatBridges": []
+}

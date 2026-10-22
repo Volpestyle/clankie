@@ -18,6 +18,7 @@ import {
   createCaptainRouteClient,
   OperatorConversationClientError,
   OperatorConversationPromptSession,
+  OperatorConversationRestartingError,
   OperatorConversationSelection,
   OperatorConversationTailStore,
   parseDirectConversation,
@@ -934,7 +935,11 @@ describe("TUI selected-conversation prompt path", () => {
     await prompt;
   });
 
-  it("reopens a dropped durable tail and replays through the accepted turn", async () => {
+  it.each([
+    ["a dropped connection", () => new TypeError("fetch failed")],
+    // A service stopping for a restart answers 503 instead (VUH-2626).
+    ["a restarting service", () => new OperatorConversationRestartingError()],
+  ] as const)("reopens a durable tail after %s and replays through the accepted turn", async (_, failure) => {
     const { store } = await tempTailStore();
     const selection = new OperatorConversationSelection(client());
     await selection.selectDefault();
@@ -943,7 +948,7 @@ describe("TUI selected-conversation prompt path", () => {
       ...client(),
       tail: async function* (request) {
         tails += 1;
-        if (tails === 1) throw new TypeError("fetch failed");
+        if (tails === 1) throw failure();
         yield {
           kind: "event",
           event: streamEvent(request.conversationId, "global-default:reply", {

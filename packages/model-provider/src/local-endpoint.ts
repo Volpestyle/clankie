@@ -58,6 +58,8 @@ export function normalizeLocalBaseUrl(value: string): string {
 /**
  * Lists an OpenAI-compatible endpoint's models (`GET {baseURL}/models`).
  * Local runtimes are unknown to models.dev, so the endpoint itself is the catalog.
+ * A model Ollama says only embeds is left out: it cannot chat, and listed
+ * newest first it was the one setup preselected (VUH-2626).
  */
 export async function probeLocalModels(
   baseURL: string,
@@ -76,26 +78,29 @@ export async function probeLocalModels(
     const context = record.max_context_length ?? record.context_length;
     return [{ id: record.id, ...(typeof context === "number" && context > 0 ? { context } : {}) }];
   });
-  return await Promise.all(
+  const probed = await Promise.all(
     listed.map(async (model) => {
       if (model.context !== undefined) return model;
-      const context = await probeOllamaContext(baseURL, model.id, fetchImpl);
-      return context === undefined ? model : { ...model, context };
+      const shown = await probeOllamaShow(baseURL, model.id, fetchImpl);
+      if (shown?.embeddingOnly === true) return undefined;
+      return shown?.context === undefined ? model : { ...model, context: shown.context };
     }),
   );
+  return probed.filter((model) => model !== undefined);
 }
 
 /**
  * Ollama's `/v1/models` reports no context length, so every model fell back to
  * the 32k default (VUH-2623). Its native `/api/show` reports the model's own
- * window as `model_info["<arch>.context_length"]`. Any other runtime answers
- * this route with an error, which leaves the model unreported.
+ * window as `model_info["<arch>.context_length"]`, and `capabilities` says
+ * whether it can complete at all. Any other runtime answers this route with an
+ * error, which leaves the model unreported.
  */
-async function probeOllamaContext(
+async function probeOllamaShow(
   baseURL: string,
   model: string,
   fetchImpl: typeof fetch,
-): Promise<number | undefined> {
+): Promise<{ readonly context?: number; readonly embeddingOnly: boolean } | undefined> {
   try {
     const response = await fetchImpl(new URL("/api/show", normalizeLocalBaseUrl(baseURL)), {
       method: "POST",
@@ -104,10 +109,14 @@ async function probeOllamaContext(
       signal: AbortSignal.timeout(3_000),
     });
     if (!response.ok) return undefined;
-    const body = (await response.json()) as { model_info?: unknown };
-    if (typeof body.model_info !== "object" || body.model_info === null) return undefined;
+    const body = (await response.json()) as { model_info?: unknown; capabilities?: unknown };
+    const capabilities = Array.isArray(body.capabilities) ? body.capabilities : [];
+    const embeddingOnly = capabilities.includes("embedding") && !capabilities.includes("completion");
+    if (typeof body.model_info !== "object" || body.model_info === null) return { embeddingOnly };
     const context = Object.entries(body.model_info).find(([key]) => key.endsWith(".context_length"))?.[1];
-    return typeof context === "number" && Number.isInteger(context) && context > 0 ? context : undefined;
+    return typeof context === "number" && Number.isInteger(context) && context > 0
+      ? { context, embeddingOnly }
+      : { embeddingOnly };
   } catch {
     return undefined;
   }

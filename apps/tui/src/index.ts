@@ -92,7 +92,7 @@ import { runEvaluatorCommand } from "./command/evaluator.ts";
 import { doctorCommand } from "./command/doctor.ts";
 import { runAccountsCommand } from "./command/accounts.ts";
 import { Readable } from "node:stream";
-import { createServiceOptions, restartTarget } from "../bin/services.ts";
+import { applyLauncherEnvironment, createServiceOptions, restartTarget } from "../bin/services.ts";
 import { clankieStateHome } from "./state-home.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
@@ -459,6 +459,7 @@ const brokeredCommands = {
     : { userSessionOptIn: operatorClient, rooms: operatorClient, setup: operatorClient }),
 };
 async function restartCaptain(): Promise<void> {
+  await applyLauncherEnvironment();
   const outcomes = await restartTarget(
     "clankie",
     await createServiceOptions({

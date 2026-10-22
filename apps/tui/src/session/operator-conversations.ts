@@ -133,6 +133,8 @@ export function createCaptainOperatorConversationClient(
       if (ownerRequired && response.status === 403) {
         throw new OperatorConversationClientError(ownerError);
       }
+      if (response.status === 503 && (await errorCode(response)) === "service_restarting")
+        throw new OperatorConversationRestartingError();
       if (response.status === 409) {
         const body: unknown = await response.json();
         if (
@@ -163,6 +165,20 @@ export class OperatorConversationClientError extends Error {
     super(message, { cause });
     this.name = "OperatorConversationClientError";
   }
+}
+
+/** The service is stopping for a restart; a durable read can retry once it is back. */
+export class OperatorConversationRestartingError extends OperatorConversationClientError {
+  public constructor() {
+    super("Clankie is restarting. Retry when he is back.");
+    this.name = "OperatorConversationRestartingError";
+  }
+}
+
+async function errorCode(response: Response): Promise<unknown> {
+  // allow-swallowed-rejection -- a body that is not JSON carries no error code; the status still fails the request
+  const body: unknown = await response.json().catch(() => undefined);
+  return typeof body === "object" && body !== null && "error" in body ? body.error : undefined;
 }
 
 /** Failed admission, distinct from an error observing an already accepted turn. */
@@ -809,9 +825,11 @@ export class OperatorConversationPromptSession {
         return;
       } catch (error) {
         if (isAborted(signal)) return;
-        // Fetch uses TypeError for a dropped connection. Re-open only the
-        // idempotent durable tail; send and schema/HTTP failures stay terminal.
-        if (!(error instanceof TypeError)) throw error;
+        // Fetch uses TypeError for a dropped connection, and a stopping service
+        // answers 503. Re-open only the idempotent durable tail; send and other
+        // schema/HTTP failures stay terminal.
+        if (!(error instanceof TypeError || error instanceof OperatorConversationRestartingError))
+          throw error;
         await sleep(250, undefined, signal === undefined ? undefined : { signal });
       }
     }

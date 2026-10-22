@@ -32,6 +32,7 @@ it.each(["rooms/trusted-room", "turns/discord_presence~guild%3Achannel", "voice/
       PI_SESSION_ID: "discord-session",
       CLANKIE_LAUNCHER_PATH: "/release/bin/clankie",
       CLANKIE_SERVICES: "clankie,relay,discord-bridge",
+      DISCORD_APPLICATION_ID: "1100000000000000000",
     };
     let output = "";
     let helper: { args: string[]; options: SpawnOptions } | undefined;

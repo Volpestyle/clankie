@@ -104,6 +104,7 @@ async function fixture(
   } as unknown as WorkerReportsContext);
   const serve = createOperatorService({
     conversations: store,
+    shutdown: new AbortController(),
     personas: { ready: async () => undefined },
     deps: {},
     reportSummaries: reports.reportSummaries,

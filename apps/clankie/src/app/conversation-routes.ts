@@ -40,6 +40,7 @@ import { manageConnections } from "../connections.ts";
 import { type DeviceRegistry } from "../devices.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { FleetRosterLimitError } from "../captain/herdr-census.ts";
+import { ServiceShuttingDownError } from "../captain/captain-operator-service.ts";
 import { WorkRequestError, type WorkInboxContext } from "../work-items.ts";
 import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
@@ -665,6 +666,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           return context.json({ error: "question_owner_required" }, 403);
         if (error instanceof ConversationRefusedError || error instanceof ConversationResetError)
           return context.json({ error: "refused", message: error.message }, 409);
+        if (error instanceof ServiceShuttingDownError)
+          return context.json({ error: "service_restarting", message: error.message }, 503);
         throw error;
       }
     }
@@ -929,6 +932,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return context.json({ error: "captain_authentication_required" }, 403);
       if (error instanceof HerdrUnavailableError)
         return context.json({ error: "herdr_unavailable", message: error.message }, 503);
+      if (error instanceof ServiceShuttingDownError)
+        return context.json({ error: "service_restarting", message: error.message }, 503);
       if (error instanceof FleetRosterLimitError)
         return context.json(
           { error: "fleet_roster_limit", message: error.message, count: error.count, limit: error.limit },

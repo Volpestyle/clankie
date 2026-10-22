@@ -1,0 +1,40 @@
+Clankie
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ ▄██▄ ▄████▄
+  ▀  ▄█▀        clankie
+  ▄███▄███▄
+  █ ▄  ▄  █     Ask for anything, or type / for commands.
+  ▀███████▀     Click a tool row to open it · ctrl+o opens them all.
+   ▄█████▄
+   ▀██▀██▀
+
+done /setup
+  High:┌───────────────────────────────────────────────────────────────────────────────────────────────────────┐anges,
+  commi│ Which Model? (8 From Ollama, Newest First — Type To Filter)                                           │
+       │                                                                                                       │
+done /p│                                                                                                       │
+  ollam│ Up/down move | Enter/→ chooses | type to filter | ← Back                                              │
+  No cr│                                                                                                       │
+       │ > nomic-embed-text:latest  2k ctx · $0/$0 per M - nomic-embed-text:latest                             │
+       │   qwen3.6:27b-mlx          262k ctx · $0/$0 per M - qwen3.6:27b-mlx                                   │
+       │   qwen3-vl:32b             262k ctx · $0/$0 per M - qwen3-vl:32b                                      │
+       │   qwen3-vl:8b              262k ctx · $0/$0 per M - qwen3-vl:8b                                       │
+       │   qwen3.6:27b-mlx-bf16     262k ctx · $0/$0 per M - qwen3.6:27b-mlx-bf16                              │
+       │   qwen3-coder-next:latest  262k ctx · $0/$0 per M - qwen3-coder-next:latest                           │
+       │   qwen3.6:35b-mlx          262k ctx · $0/$0 per M - qwen3.6:35b-mlx                                   │
+       │   glm-4.7-flash:latest     203k ctx · $0/$0 per M - glm-4.7-flash:latest                              │
+       └───────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/.local/share/clankie/releases/v0.4.9 • Clankie                                        no model yet · /setup  context ?
+Success: Added ollama (8 models). · setup input · This Mac

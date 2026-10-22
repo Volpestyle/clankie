@@ -121,12 +121,19 @@ export interface CreateOperatorServiceContext {
   ) => WorkerReportSummary[];
 }
 
+export class ServiceShuttingDownError extends Error {
+  constructor() {
+    super("Clankie is restarting");
+    this.name = "ServiceShuttingDownError";
+  }
+}
+
 export function createOperatorService(
   ctx: CreateOperatorServiceContext,
 ): CaptainPort["serveOperatorConversation"] {
   let reportCursor: string | undefined;
   let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
-  return async function serveOperatorConversation(
+  async function serve(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
     readSignal?: AbortSignal,
@@ -1130,5 +1137,17 @@ export function createOperatorService(
             : ctx.withDriver(result.conversation),
       };
     return result;
+  }
+  // A request that reaches the service while it stops (a kept-alive tail, or a
+  // turn racing SIGTERM) finds its stores closing. That is a restart, not a
+  // failure, and callers retry it like a dropped connection (VUH-2626).
+  return async function serveOperatorConversation(request, authority, readSignal) {
+    if (ctx.shutdown.signal.aborted) throw new ServiceShuttingDownError();
+    try {
+      return await serve(request, authority, readSignal);
+    } catch (error) {
+      if (ctx.shutdown.signal.aborted) throw new ServiceShuttingDownError();
+      throw error;
+    }
   };
 }

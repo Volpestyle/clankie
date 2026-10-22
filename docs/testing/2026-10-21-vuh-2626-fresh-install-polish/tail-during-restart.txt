@@ -1,0 +1,2 @@
+v0.4.9 (before): tail parked: True; restart exit: 0; tail answer after 2.7 s: (500, Internal Server Error)
+fixed build (after): tail parked: True; restart exit: 0; tail answer after 2.6 s: (503, {"error":"service_restarting","message":"Clankie is restarting"})

@@ -1117,6 +1117,7 @@ function validateContextWindow(value: string): string | undefined {
 async function addLocalProviderFlow(
   shell: ClankieFaceShell,
   services: ProviderServices,
+  options: { readonly restarts?: boolean } = {},
 ): Promise<string | undefined> {
   const flow = shell.setupFlow;
   const typedId = await flow.readText({
@@ -1201,7 +1202,10 @@ async function addLocalProviderFlow(
     "/provider",
     [
       `${added.providerId} → ${added.baseURL} (${added.models.length} models) written to clankie.json.`,
-      "No credential needed. Restart the service (`clankie restart`) before Clankie himself uses it.",
+      // Setup restarts the service itself once a model is chosen.
+      options.restarts === true
+        ? "No credential needed."
+        : "No credential needed. Restart the service (`clankie restart`) before Clankie himself uses it.",
     ].join("\n"),
     "success",
   );
@@ -1423,7 +1427,9 @@ export async function runThinkingSetup(
       else if (choice === "api")
         providerId = await addApiKeyFlow(shell, services, { modelProvidersOnly: true });
       else if (choice === "local") {
-        providerId = await addLocalProviderFlow(shell, services);
+        providerId = await addLocalProviderFlow(shell, services, {
+          restarts: options.restartCaptain !== undefined,
+        });
         addedEndpoint = providerId !== undefined;
       }
       if (providerId === undefined) continue;

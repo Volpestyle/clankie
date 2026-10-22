@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "after-picker.png",
+      "size": 152005,
+      "sha256": "df5d9adb3bcb4f099a41a4119cdffe4b423ef080066fad2cb550d0af422f46d0",
+      "url": "clankie://evidence/sha256/df5d9adb3bcb4f099a41a4119cdffe4b423ef080066fad2cb550d0af422f46d0"
+    },
+    {
+      "path": "after-setup.png",
+      "size": 178665,
+      "sha256": "617a6509f53a49990fcb42f672a6e41691be2f99fa7e851fc1445bf8d698053d",
+      "url": "clankie://evidence/sha256/617a6509f53a49990fcb42f672a6e41691be2f99fa7e851fc1445bf8d698053d"
+    },
+    {
+      "path": "before-picker.png",
+      "size": 159449,
+      "sha256": "4660f08548234764efb0dc9eb56ceacc131fe33965025c95b03a4b9be3af0b79",
+      "url": "clankie://evidence/sha256/4660f08548234764efb0dc9eb56ceacc131fe33965025c95b03a4b9be3af0b79"
+    },
+    {
+      "path": "before-setup.png",
+      "size": 189614,
+      "sha256": "d4e997142982a20d0a65d1e78e166b948a0632f93cb89d6b35fe5af000a2ab66",
+      "url": "clankie://evidence/sha256/d4e997142982a20d0a65d1e78e166b948a0632f93cb89d6b35fe5af000a2ab66"
+    }
+  ]
+}

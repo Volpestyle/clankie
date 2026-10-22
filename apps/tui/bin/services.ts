@@ -1,7 +1,14 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parsePositiveInt, resolveDiscordActiveBody, serviceInLoadout } from "@clankie/settings";
+import {
+  discordSettingsToEnvironment,
+  keepAwakeEnabled,
+  parsePositiveInt,
+  resolveDiscordActiveBody,
+  serviceInLoadout,
+  SettingsStore,
+} from "@clankie/settings";
 import {
   ensureCaptainCredential,
   resolveOperatorCredential,
@@ -345,11 +352,17 @@ const RELAY: ManagedService = {
   },
 };
 
+function discordBotConfigured(env: NodeJS.ProcessEnv): boolean {
+  return (env.DISCORD_APPLICATION_ID?.trim() ?? "").length > 0;
+}
+
 const DISCORD_BRIDGE: ManagedService = {
   id: "discord-bridge",
   label: "Discord bridge",
   ...workspaceStart("@clankie/discord-bridge", "apps/discord-bridge"),
-  enabled: (env) => resolveDiscordActiveBody(env) === "bot",
+  // A fresh install has no Discord app yet; the bridge would only exit asking
+  // for one, and status would call it unreachable (VUH-2626).
+  enabled: (env) => resolveDiscordActiveBody(env) === "bot" && discordBotConfigured(env),
   // Its live presence claim is only valid against the service instance that
   // issued it, so a clankie restart requires a bridge restart.
   restartsWith: ["clankie"],
@@ -373,6 +386,7 @@ const DISCORD_BRIDGE: ManagedService = {
     if (resolveDiscordActiveBody(env) !== "bot") {
       return { state: "healthy", detail: "inactive — lab user body is the mouth" };
     }
+    if (!discordBotConfigured(env)) return { state: "healthy", detail: "not set up — /discord" };
     const presence = await readPresenceDetail({ env, fetchImpl, operatorToken });
     if (record !== undefined) {
       return { state: "healthy", ...(presence === undefined ? {} : { detail: presence }) };
@@ -546,6 +560,32 @@ const TUNNEL: ManagedService = {
 
 /** Set to 1 by the launcher when keep-awake is on (the default on a self-hosted Mac); macOS only. */
 export const KEEP_AWAKE_ENV = "CLANKIE_KEEP_AWAKE";
+
+/**
+ * Every child fills its own env from settings. The launcher consumes only the
+ * active-body switches, whether a bot app exists, and the activity tunnel, so
+ * project just those for commands that inspect or change the process graph.
+ * Config commands read the store directly; projecting first would falsely
+ * report stored values as env overrides. The console calls this again before
+ * it restarts anything, since `/discord` may have set up the bot since launch.
+ */
+export async function applyLauncherEnvironment(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const stored = await new SettingsStore().load();
+  const configured = discordSettingsToEnvironment(stored.discord);
+  for (const name of [
+    "DISCORD_ACTIVE_BODY",
+    "DISCORD_APPLICATION_ID",
+    "DISCORD_USER_SESSION_ENABLED",
+    "CLANKIE_ACTIVITY_TUNNEL_NAME",
+    "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME",
+  ] as const) {
+    const value = configured[name];
+    if ((env[name]?.length ?? 0) === 0 && value !== undefined) env[name] = value;
+  }
+  // The owner's always-on choice (on by default for a self-hosted Mac) decides
+  // whether the launcher runs `caffeinate`.
+  if ((env[KEEP_AWAKE_ENV]?.length ?? 0) === 0 && keepAwakeEnabled(stored)) env[KEEP_AWAKE_ENV] = "1";
+}
 
 /**
  * The owner's always-on Mac (VUH-1461): `caffeinate -s` under the launcher.
