@@ -44,13 +44,19 @@ const HANDLE_NAMES = [
 ] as const;
 
 /**
- * A handle for a seat Clankie adopted without naming it (VUH-2667), shaped like a hired seat's
- * Herdr name ("wren-28a1"), so surfaces show "Wren" rather than the pane's title. Stable for one
- * persona.
+ * A name for a seat Clankie adopted without naming it (VUH-2667), read like a hire's: its Herdr
+ * handle without the tag ("basil-91c2" is Basil), or else one picked for the persona, stable for it.
+ * Never the pane's title.
  */
-export function adoptedHandle(personaId: string): string {
-  const digest = createHash("sha256").update(personaId).digest();
-  return `${HANDLE_NAMES[digest[0]! % HANDLE_NAMES.length]}-${digest.toString("hex").slice(2, 6)}`;
+export function adoptedName(personaId: string, handle?: string): string {
+  const base = handle
+    ?.trim()
+    .replace(/-[0-9a-f]{4}$/iu, "")
+    .replaceAll(/[-_]+/gu, " ")
+    .trim();
+  const picked = HANDLE_NAMES[createHash("sha256").update(personaId).digest()[0]! % HANDLE_NAMES.length]!;
+  const name = base || picked;
+  return hireDisplayName(name[0]!.toLocaleUpperCase() + name.slice(1));
 }
 
 /** A manual Herdr label, independent of the harness's changing OSC title. */

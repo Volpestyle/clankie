@@ -797,7 +797,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
     requireWorkerAccess: (fleet) => requireAccess(fleet, "workers"),
     // A re-adopted seat named only after its pane's title takes a handle (VUH-2667).
-    onReadopted: (seat) => personas.nameAdopted(seat),
+    onReadopted: (seat) => {
+      // The readopt itself has already committed; a name that can't be saved waits for the next one.
+      try {
+        personas.nameAdopted(seat);
+      } catch (error) {
+        console.warn("Re-adopted seat name unsaved", seat.occupantId, String(error));
+      }
+    },
     ...(deps.localNativeHireRefusal === undefined
       ? {}
       : {

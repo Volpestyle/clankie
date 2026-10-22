@@ -44,7 +44,7 @@ import {
 } from "@clankie/protocol";
 import { z } from "zod";
 import type { ObservedFleetSeat } from "./herdr-census.ts";
-import { adoptedHandle } from "./hire-name.ts";
+import { adoptedName } from "./hire-name.ts";
 
 function retiredPersona(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
@@ -403,7 +403,7 @@ export class PersonaStore {
 
   /**
    * A seat Clankie re-adopted keeps the name it was given, but one only ever named after its pane's
-   * title takes its Herdr name, or a handle (VUH-2667).
+   * title takes its Herdr name, or one picked for it, read like a hire's (VUH-2667).
    */
   public nameAdopted(seat: {
     readonly occupantId: string;
@@ -414,13 +414,17 @@ export class PersonaStore {
     const personaId = this.personaForOccupant(seat.occupantId);
     const current = personaId === undefined ? undefined : this.records.get(personaId);
     if (personaId === undefined || current === undefined || !discoveredName(current.name, seat)) return;
-    const named = seat.name === undefined ? undefined : OperatorAgentNameSchema.safeParse(seat.name);
     this.records.set(personaId, {
       ...current,
-      name: named?.success === true ? named.data : adoptedHandle(personaId),
+      name: adoptedName(personaId, seat.name),
       updatedAt: new Date().toISOString(),
     });
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      this.records.set(personaId, current);
+      throw error;
+    }
   }
 
   /**

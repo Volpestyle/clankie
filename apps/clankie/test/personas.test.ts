@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -94,7 +94,7 @@ describe("PersonaStore", () => {
     expect(new PersonaStore(root).all([hired], () => undefined)).toMatchObject([{ name: "Rowan" }]);
   });
 
-  it("gives a re-adopted seat named only after its pane title its Herdr name or a handle, and keeps a chosen name (VUH-2667)", () => {
+  it("gives a re-adopted seat named only after its pane title a name read like a hire's, and keeps a chosen name (VUH-2667)", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-persona-adopted-"));
     roots.push(root);
     const store = new PersonaStore(root);
@@ -119,9 +119,11 @@ describe("PersonaStore", () => {
       new PersonaStore(root)
         .all([plain!, named!], () => undefined)
         .map((persona) => [persona.personaId, persona.name] as const);
+    // Its Herdr handle reads as a hire's name does ("basil-91c2" is Basil); without one, one is
+    // picked for it.
     const handle = new Map(names()).get(plain!.personaId)!;
-    expect(handle).toMatch(/^[a-z]+-[0-9a-f]{4}$/u);
-    expect(new Map(names()).get(named!.personaId)).toBe("basil-91c2");
+    expect(handle).toMatch(/^[A-Z][a-z]+$/u);
+    expect(new Map(names()).get(named!.personaId)).toBe("Basil");
     // Stable, and an owner's choice outlives the next adoption.
     store.nameAdopted({
       occupantId: OCCUPANT_ONE,
@@ -136,6 +138,25 @@ describe("PersonaStore", () => {
       harness: "claude",
     });
     expect(new Map(names()).get(plain!.personaId)).toBe("Juniper");
+  });
+
+  it("leaves a re-adopted seat's name as it was when it can't be saved (VUH-2667)", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-persona-adopted-unsaved-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const title = "Clankie captain brief assignment";
+    const [seat] = store.reconcile([
+      { ...observed("term-1", OCCUPANT_ONE, "adhoc-term-1"), harness: "claude", title },
+    ]);
+    chmodSync(root, 0o500);
+    try {
+      expect(() =>
+        store.nameAdopted({ occupantId: OCCUPANT_ONE, title, harness: "claude", name: "basil-91c2" }),
+      ).toThrow();
+    } finally {
+      chmodSync(root, 0o700);
+    }
+    expect(store.all([seat!], () => undefined)).toMatchObject([{ name: title }]);
   });
 
   it("preserves the current name on appearance-only and avatar-only saves across restart and census", () => {
