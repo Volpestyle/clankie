@@ -19,6 +19,12 @@ import {
 } from "./evidence.ts";
 import { FreeAgentIntentSchema, type FreeAgentIntent } from "./free-agent.ts";
 import {
+  WorkMediaEntrySchema,
+  WorkMediaRequestSchema,
+  WORK_MEDIA_REQUEST_MAX,
+  type WorkMediaEntry,
+} from "./work-media.ts";
+import {
   PendingNativeMessageActionSchema,
   PendingNativeMessagesResultSchema,
   StopNativeTaskResultSchema,
@@ -475,6 +481,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({ op: z.literal("evidence_preview"), schemaVersion: z.literal(1), sha256: EvidenceSha256Schema })
     .strict(),
+  /** Media links in returned tracker items, resolved to evidence blobs (VUH-2666), for any device that reads work. */
+  WorkMediaRequestSchema.extend({ op: z.literal("work_media"), schemaVersion: z.literal(1) }).strict(),
   /** One item's comments and state changes, read-only (VUH-1936). */
   z
     .object({
@@ -760,6 +768,10 @@ export type OperatorEvidenceRecordsOutcome =
   | { readonly outcome: "unavailable"; readonly message: string };
 export type OperatorEvidencePreviewOutcome =
   | (EvidenceDevicePreview & { readonly outcome: "ready" })
+  | { readonly outcome: "unavailable"; readonly message: string };
+
+export type OperatorWorkMediaOutcome =
+  | { readonly outcome: "ready"; readonly media: readonly WorkMediaEntry[] }
   | { readonly outcome: "unavailable"; readonly message: string };
 
 export type OperatorEvidenceFetchOutcome =
@@ -1086,6 +1098,21 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       result: z.discriminatedUnion("outcome", [
         EvidenceDeviceFetchSchema.extend({ outcome: z.literal("ready") }).strict(),
+        z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
+      ]),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("work_media"),
+      schemaVersion: z.literal(1),
+      result: z.discriminatedUnion("outcome", [
+        z
+          .object({
+            outcome: z.literal("ready"),
+            media: z.array(WorkMediaEntrySchema).max(WORK_MEDIA_REQUEST_MAX),
+          })
+          .strict(),
         z.object({ outcome: z.literal("unavailable"), message: z.string().max(1000) }).strict(),
       ]),
     })
@@ -1534,6 +1561,8 @@ export interface OperatorConversationServiceClient {
   workProject?(repoId: string): Promise<OperatorWorkProjectOutcome>;
   /** One item's comments and state changes, or why they cannot be read. */
   evidenceFetch?(request: EvidenceDeviceFetchRequest): Promise<OperatorEvidenceFetchOutcome>;
+  /** Media links in items this service returned, resolved to evidence blobs (VUH-2666). */
+  workMedia?(urls: readonly string[]): Promise<OperatorWorkMediaOutcome>;
   workProjectDetails?(repoId: string): Promise<OperatorWorkProjectDetailsOutcome>;
   workItemActivity?(repoId: string, itemId: string): Promise<OperatorWorkItemActivityOutcome>;
   /** The evidence store's records for one issue key, and a small preview of one blob. */
@@ -1947,6 +1976,11 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "evidence_preview", schemaVersion: 1, sha256 });
       if (result.op !== "evidence_preview")
         throw new Error(`Unexpected ${result.op} result for evidence_preview`);
+      return result.result;
+    },
+    async workMedia(urls) {
+      const result = await dispatch({ op: "work_media", schemaVersion: 1, urls: [...urls] });
+      if (result.op !== "work_media") throw new Error(`Unexpected ${result.op} result for work_media`);
       return result.result;
     },
     async evidenceFetch(request) {

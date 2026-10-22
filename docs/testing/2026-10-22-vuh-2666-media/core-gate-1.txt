@@ -1,0 +1,16 @@
+[landing] root /Users/james/dev/clankie-wt/vuh-2666; HEAD bba2eb4f2e8115b42fab9af60736728addc275fa; fixed base 733e485a145789c66f4e133b145ef07165f898d7
+[landing] skills: pnpm herdr:skill:check
+[landing] format: pnpm fmt:check
+[landing] lint: pnpm lint
+[landing] deadcode: pnpm deadcode
+[landing] doc-links: node scripts/check-doc-links.mjs
+[landing] retired-claims: node scripts/check-retired-claims.mjs
+[landing] swallowed-rejections: node scripts/check-swallowed-rejections.mjs 733e485a145789c66f4e133b145ef07165f898d7
+[landing] evidence: node scripts/testing/evidence-landing-guard.mjs
+[landing] evidence roots: no newly added in-scope files
+[landing] public-docs: pnpm docs:public:check
+[landing] typecheck 23/32: @clankie/agent-hosts, @clankie/agent-transcript, @clankie/api-client, @clankie/clankie, @clankie/credential-broker, @clankie/discord-activity, @clankie/discord-bridge, @clankie/discord-presence-core, @clankie/discord-user-session, @clankie/game-extension, @clankie/interactive-environment, @clankie/minecraft, @clankie/minecraft-mcp, @clankie/model-provider, @clankie/play, @clankie/play-voice, @clankie/pokemon, @clankie/protocol, @clankie/relay, @clankie/rendered-surface-client, @clankie/settings, @clankie/tui, @clankie/work-items
+[landing] typecheck: pnpm exec turbo run typecheck --only --concurrency=1 --filter=@clankie/agent-hosts --filter=@clankie/agent-transcript --filter=@clankie/api-client --filter=@clankie/clankie --filter=@clankie/credential-broker --filter=@clankie/discord-activity --filter=@clankie/discord-bridge --filter=@clankie/discord-presence-core --filter=@clankie/discord-user-session --filter=@clankie/game-extension --filter=@clankie/interactive-environment --filter=@clankie/minecraft --filter=@clankie/minecraft-mcp --filter=@clankie/model-provider --filter=@clankie/play --filter=@clankie/play-voice --filter=@clankie/pokemon --filter=@clankie/protocol --filter=@clankie/relay --filter=@clankie/rendered-surface-client --filter=@clankie/settings --filter=@clankie/tui --filter=@clankie/work-items
+[landing] tests: pnpm exec vitest run --config vitest.config.ts --changed 733e485a145789c66f4e133b145ef07165f898d7 --bail 1 --passWithNoTests --reporter=default --reporter=./scripts/testing/landing-graph-reporter.mjs
+[landing] review: project clankie requires review; checks are green, so submit_for_review with checkout "/Users/james/dev/clankie-wt/vuh-2666" (no such tool in your catalog? from this pane run: clankie review submit --checkout "/Users/james/dev/clankie-wt/vuh-2666" --issue KEY --summary TEXT), then run pnpm check:landing --revalidate after APPROVE
+[landing] exit 3; 932.65s; evidence /Users/james/dev/clankie-wt/vuh-2666/.local/landing-gate.json

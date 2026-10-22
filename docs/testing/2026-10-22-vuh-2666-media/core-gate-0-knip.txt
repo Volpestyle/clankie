@@ -1,0 +1,6 @@
+[landing] root /Users/james/dev/clankie-wt/vuh-2666; HEAD ac1508df5083472d668a9925242f942d1284475f; fixed base 733e485a145789c66f4e133b145ef07165f898d7
+[landing] skills: pnpm herdr:skill:check
+[landing] format: pnpm fmt:check
+[landing] lint: pnpm lint
+[landing] deadcode: pnpm deadcode
+[landing] exit 1; 105.33s; evidence /Users/james/dev/clankie-wt/vuh-2666/.local/landing-gate.json

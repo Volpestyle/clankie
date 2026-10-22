@@ -1,0 +1,53 @@
+== u06ed-recovery04
+  0.03s range 0 262144
+  0.30s range 262144 262144
+  0.30s range 524288 262144
+  0.40s status 1 
+  0.42s first frame image 1920x760 
+  0.56s range 786432 262144
+  0.56s range 1048576 262144
+  0.83s range 1310720 262144
+  0.83s range 1572864 262144
+  1.09s range 1835008 262144
+  1.09s range 2097152 262144
+  1.36s range 2359296 262144
+  1.36s range 2621440 262144
+  1.63s range 2883584 87370
+  6.07s done status 1 ranges 12 loadedTimeRanges [9.8]
+== u03c7-host-reversal
+  0.03s range 0 262144
+  0.30s range 262144 262144
+  0.30s range 524288 262144
+  0.57s range 1835008 262144
+  0.57s range 2097152 3740
+  0.84s range 786432 262144
+  0.85s range 1048576 262144
+  0.89s status 1 
+  0.90s first frame image 1920x540 
+  1.11s range 1310720 262144
+  1.11s range 1572864 262144
+  6.08s done status 1 ranges 9 loadedTimeRanges [6.01]
+== u03c7-tpose
+  0.03s range 0 262144
+  0.29s range 262144 262144
+  0.29s range 524288 262144
+  0.56s range 1572864 233761
+  0.84s range 786432 262144
+  0.84s range 1048576 262144
+  0.89s status 1 
+  0.90s first frame image 1280x720 
+  1.10s range 1310720 262144
+  6.06s done status 1 ranges 7 loadedTimeRanges [6.965]
+== ub37e-two-roxas
+  0.03s range 0 262144
+  0.30s range 262144 262144
+  0.30s range 524288 262144
+  0.56s range 2097152 69922
+  0.84s range 786432 262144
+  0.84s range 1048576 262144
+  0.89s status 1 
+  0.90s first frame image 1920x1160 
+  1.10s range 1310720 262144
+  1.10s range 1572864 262144
+  1.37s range 1835008 262144
+  6.07s done status 1 ranges 9 loadedTimeRanges [18.067]

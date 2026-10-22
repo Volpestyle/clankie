@@ -22,6 +22,7 @@ export * from "./discord-setup.ts";
 export * from "./discord-directory.ts";
 export * from "./discord-rooms.ts";
 export * from "./discord-tracker-forum.ts";
+export * from "./work-media.ts";
 export * from "./delivery.ts";
 export * from "./agent-work.ts";
 export * from "./connections.ts";
@@ -373,6 +374,7 @@ export {
   type OperatorEvidenceRecordsOutcome,
   type OperatorEvidencePreviewOutcome,
   type OperatorEvidenceFetchOutcome,
+  type OperatorWorkMediaOutcome,
   type OperatorWorkProjectDetailsOutcome,
   OperatorConversationServiceResultSchema,
   SendReceiptRecordSchema,

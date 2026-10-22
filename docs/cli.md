@@ -2926,6 +2926,24 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   answer `too_large`; a malformed or interlaced PNG answers `not_previewable`.
   The original stays unchanged. The bearer `/v1/evidence/*` routes stay
   operator-only, and their `preview` route is unchanged.
+  Media embedded in work (VUH-2666) resolves through `work_media`: a device
+  sends up to 32 links it found in items, project updates or comments, and each
+  answers `ready` with the evidence blob's sha256, content type, kind
+  (`image`, `video` or `file`) and size, `pending` while the service downloads
+  it (ask again shortly), or `failed` with a reason. A
+  `clankie://evidence/sha256/…` link resolves only to a recorded blob. A Linear
+  upload (`uploads.linear.app` or `public.linear.app`) is fetched only when a
+  `work_items`, `work_project_details` or `work_item_activity` read returned it
+  within the last six hours; anything else answers `not_returned` and is never
+  fetched, so this is not a proxy for arbitrary URLs. The service downloads the
+  upload once with the connected Linear app (no redirects, 128 MiB and 30
+  seconds at most, two at a time), records it as evidence and caches it by the
+  link without its signature; a failed download is retried after five minutes.
+  Only raster images, video and PDF keep their type. HTML, SVG and anything
+  else are recorded as `application/octet-stream` (kind `file`), so an upload
+  can never become inline-renderable evidence.
+  The device then reads the bytes through `evidence_preview` and
+  `evidence_fetch` and never holds a Linear credential.
 - `clankie work create TITLE [--summary S] [--owner NAME] [--criterion C]...
 [--status S] [--priority 0..4]`.
   Summary prose has no separate 20,000-character cap, matching canonical

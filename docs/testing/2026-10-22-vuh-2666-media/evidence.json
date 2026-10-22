@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "iphone/iphone-11-activity.png",
+      "size": 377168,
+      "sha256": "35aa163d788e865a0c4820b82ccc4484c7586a06d98eddb45f325b7b43360e9d",
+      "url": "clankie://evidence/sha256/35aa163d788e865a0c4820b82ccc4484c7586a06d98eddb45f325b7b43360e9d"
+    },
+    {
+      "path": "iphone/iphone-13a.png",
+      "size": 830860,
+      "sha256": "cceb6b72910659f1b089e15c448da7a65c5b2e4f7caf6bca1b0be4edc14eac05",
+      "url": "clankie://evidence/sha256/cceb6b72910659f1b089e15c448da7a65c5b2e4f7caf6bca1b0be4edc14eac05"
+    },
+    {
+      "path": "iphone/iphone-16a.png",
+      "size": 740823,
+      "sha256": "6a927bec257252e8c62e258c940707679d719aaeee1a594316a2a38a040b3c35",
+      "url": "clankie://evidence/sha256/6a927bec257252e8c62e258c940707679d719aaeee1a594316a2a38a040b3c35"
+    },
+    {
+      "path": "iphone/iphone-17-tpose.png",
+      "size": 195882,
+      "sha256": "fd9fbb45955f3c91d40417ae97c5f93f15c7c926e278b726befec81afa4241a7",
+      "url": "clankie://evidence/sha256/fd9fbb45955f3c91d40417ae97c5f93f15c7c926e278b726befec81afa4241a7"
+    },
+    {
+      "path": "iphone/iphone-19-roxas.png",
+      "size": 1104470,
+      "sha256": "655fdc28d072e07b0d468bf9a7296669d82d9c9802653b13c7b2f97d441aee5e",
+      "url": "clankie://evidence/sha256/655fdc28d072e07b0d468bf9a7296669d82d9c9802653b13c7b2f97d441aee5e"
+    },
+    {
+      "path": "iphone/iphone-22-activity-loading.png",
+      "size": 377853,
+      "sha256": "8689d80daf4104a69be24303282aaa0da85dd6b8f280261794f08099a738554c",
+      "url": "clankie://evidence/sha256/8689d80daf4104a69be24303282aaa0da85dd6b8f280261794f08099a738554c"
+    },
+    {
+      "path": "iphone/iphone-25-overview-media.png",
+      "size": 605418,
+      "sha256": "c7395fdc6d16fc7883aac029b9d80214399ba75bb0647b095596f0d1f4d79ccb",
+      "url": "clankie://evidence/sha256/c7395fdc6d16fc7883aac029b9d80214399ba75bb0647b095596f0d1f4d79ccb"
+    },
+    {
+      "path": "iphone/sheet-iphone-final.png",
+      "size": 633870,
+      "sha256": "7975951cf7b35849b406a4a709f63fc7266388bb5d10f915b1f4e99eedbbc37c",
+      "url": "clankie://evidence/sha256/7975951cf7b35849b406a4a709f63fc7266388bb5d10f915b1f4e99eedbbc37c"
+    },
+    {
+      "path": "iphone/sheet-iphone-issue.png",
+      "size": 999572,
+      "sha256": "fde14695d76c258d5b82100a019beb97f798faea2f5c3ecdfa6ae738f39b5348",
+      "url": "clankie://evidence/sha256/fde14695d76c258d5b82100a019beb97f798faea2f5c3ecdfa6ae738f39b5348"
+    },
+    {
+      "path": "iphone/sheet-iphone-scroll.png",
+      "size": 1450246,
+      "sha256": "fb6c2c25d4b9cdcaa2653badeffc7e0d441c19043232434fb7cbd786f73939c7",
+      "url": "clankie://evidence/sha256/fb6c2c25d4b9cdcaa2653badeffc7e0d441c19043232434fb7cbd786f73939c7"
+    }
+  ]
+}

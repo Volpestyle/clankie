@@ -776,6 +776,24 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       }
     }
+    // Only links some returned item carried are fetched (VUH-2666); evidence links resolve to
+    // recorded blobs. The device reads the bytes through evidence_preview and evidence_fetch.
+    if (parsed.data.op === "work_media") {
+      try {
+        if (!ctx.dependencies.workMedia) throw new Error("Tracker media is not available on this host");
+        return context.json({
+          op: "work_media",
+          schemaVersion: 1,
+          result: { outcome: "ready", media: await ctx.dependencies.workMedia.resolve(parsed.data.urls) },
+        });
+      } catch {
+        return context.json({
+          op: "work_media",
+          schemaVersion: 1,
+          result: { outcome: "unavailable", message: "This work’s media can’t be read here." },
+        });
+      }
+    }
     if (parsed.data.op === "work_project_details") {
       try {
         if (!ctx.dependencies.workItems) throw new Error("Work tracking is not running on this host");
@@ -784,6 +802,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           false,
         );
         if (!("updates" in result)) throw new Error("Unexpected project details result");
+        ctx.dependencies.workMedia?.observe(result);
         return context.json({
           op: "work_project_details",
           schemaVersion: 1,
@@ -808,6 +827,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           false,
         );
         if (!("entries" in result)) throw new Error("Unexpected work activity result");
+        ctx.dependencies.workMedia?.observe(result);
         return context.json({
           op: "work_item_activity",
           schemaVersion: 1,
@@ -858,6 +878,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           }
         });
         if (!("items" in result)) throw new Error("unexpected work result");
+        ctx.dependencies.workMedia?.observe(result.items);
         return context.json({
           op: "work_items",
           schemaVersion: 1,

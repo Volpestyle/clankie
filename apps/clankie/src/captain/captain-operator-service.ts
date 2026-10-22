@@ -926,6 +926,7 @@ export function createOperatorService(
       request.op === "evidence_records" ||
       request.op === "evidence_fetch" ||
       request.op === "evidence_preview" ||
+      request.op === "work_media" ||
       request.op === "work_items" ||
       request.op === "work_item_write" ||
       request.op === "work_item_write_receipt"

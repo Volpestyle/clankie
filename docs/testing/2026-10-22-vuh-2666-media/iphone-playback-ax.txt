@@ -1,0 +1,3 @@
+'Pause'
+'0:02 elapsed'
+'\u200e−0:08 remaining'

@@ -16,8 +16,10 @@ import {
   withinLinearRequestInvocation,
   withLinearRequestInvocation,
   type LinearRequestBudget,
+  type LinearRequestPriority,
 } from "./linear-request-budget.ts";
 import type { EvidenceStore } from "./evidence-store.ts";
+import type { EvidenceUploadRequest } from "@clankie/protocol/evidence";
 
 export interface LinearImportOptions {
   credentials: CredentialStore;
@@ -176,6 +178,92 @@ function linearUploadUrl(value: string): boolean {
   }
 }
 
+const LINEAR_UPLOAD_MAX_BYTES = 128 * 1024 * 1024;
+
+export class LinearUploadRefused extends Error {
+  readonly reason: "too_large" | "not_found" | "unavailable";
+  constructor(reason: "too_large" | "not_found" | "unavailable", message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+/** One credentialed read of a Linear upload: allowlisted host, no redirects, bounded size and time. */
+export async function downloadLinearUpload(
+  url: string,
+  options: {
+    budget: LinearRequestBudget;
+    access: () => Promise<{ bearer: string; credential: Parameters<LinearRequestBudget["fetch"]>[0] }>;
+    dispatch: () => void;
+    /** A device waiting on the media reads at interactive priority; imports run in the background. */
+    priority?: LinearRequestPriority;
+    fetch?: typeof fetch;
+  },
+) {
+  if (!linearUploadUrl(url)) throw new Error("Unsafe Linear upload URL");
+  const selected = await options.access();
+  const response = await withLinearRequestInvocation(options.priority ?? "background", () =>
+    options.budget.fetch(
+      selected.credential,
+      options.fetch ?? fetch,
+      url,
+      {
+        redirect: "error",
+        headers: { authorization: `Bearer ${selected.bearer}` },
+        signal: AbortSignal.timeout(30_000),
+      },
+      options.dispatch,
+    ),
+  );
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new LinearUploadRefused(
+      response.status === 404 ? "not_found" : "unavailable",
+      `Linear attachment download failed (HTTP ${response.status})`,
+    );
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (!response.body) throw new Error("Linear attachment has no body");
+  const reader = response.body.getReader();
+  while (true) {
+    const { value: chunk, done } = await reader.read();
+    if (done) break;
+    size += chunk.byteLength;
+    if (size > LINEAR_UPLOAD_MAX_BYTES) {
+      await reader.cancel();
+      throw new LinearUploadRefused("too_large", "Linear attachment exceeds 128 MiB");
+    }
+    chunks.push(chunk);
+  }
+  return {
+    bytes: Buffer.concat(chunks),
+    contentType: response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream",
+  };
+}
+
+/** Records bytes the service already holds as evidence, settling the upload receipt. */
+export async function storeEvidenceBytes(
+  evidence: Pick<EvidenceStore, "upload" | "acceptBlob" | "lookup">,
+  actor: Parameters<EvidenceStore["upload"]>[0],
+  bytes: Uint8Array,
+  request: EvidenceUploadRequest,
+) {
+  const receipt = await evidence.upload(actor, request);
+  if (receipt.state === "pending")
+    await evidence.acceptBlob(
+      EvidenceActorKey(actor),
+      request.idempotencyKey,
+      (async function* () {
+        yield bytes;
+      })(),
+    );
+  const settled = await evidence.lookup(actor, request.idempotencyKey);
+  if (settled.state !== "applied" || !settled.recordId)
+    throw new Error("Linear evidence upload did not settle");
+  return { url: settled.url, recordId: settled.recordId };
+}
+
 export async function importLinearMedia(
   snapshot: LinearImportSnapshot,
   options: LinearImportOptions & {
@@ -216,37 +304,7 @@ export async function importLinearMedia(
       await options.evidence.fetch({ sha256: record.sha256 });
       continue;
     }
-    if (!linearUploadUrl(url)) throw new Error("Unsafe Linear upload URL");
-    const selected = await options.access();
-    const response = await withLinearRequestInvocation("background", () =>
-      options.budget.fetch(
-        selected.credential,
-        fetch,
-        url,
-        {
-          redirect: "error",
-          headers: { authorization: `Bearer ${selected.bearer}` },
-          signal: AbortSignal.timeout(30_000),
-        },
-        options.dispatch,
-      ),
-    );
-    if (!response.ok) throw new Error(`Linear attachment download failed (HTTP ${response.status})`);
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    if (!response.body) throw new Error("Linear attachment has no body");
-    const reader = response.body.getReader();
-    while (true) {
-      const { value: chunk, done } = await reader.read();
-      if (done) break;
-      size += chunk.byteLength;
-      if (size > 128 * 1024 * 1024) {
-        await reader.cancel();
-        throw new Error("Linear attachment exceeds 128 MiB");
-      }
-      chunks.push(chunk);
-    }
-    const bytes = Buffer.concat(chunks);
+    const { bytes, contentType } = await downloadLinearUpload(url, options);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const actor = {
       kind: "operator" as const,
@@ -255,27 +313,16 @@ export async function importLinearMedia(
       onBehalfOf: [{ kind: "human", id: "owner" }],
     };
     const key = createHash("sha256").update(`${snapshot.workspaceId}:${url}:${sha256}`).digest("hex");
-    const receipt = await options.evidence.upload(actor, {
+    const settled = await storeEvidenceBytes(options.evidence, actor, bytes, {
       idempotencyKey: key,
       sha256,
-      size,
-      contentType: response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream",
+      size: bytes.byteLength,
+      contentType,
       fileName: decodeURIComponent(new URL(url).pathname.split("/").at(-1) || sha256),
       ...(issueKey ? { issueKey } : {}),
       project: String(snapshot.projects[0]?.name),
       caption: "Imported from Linear",
     });
-    if (receipt.state === "pending")
-      await options.evidence.acceptBlob(
-        EvidenceActorKey(actor),
-        key,
-        (async function* () {
-          yield bytes;
-        })(),
-      );
-    const settled = await options.evidence.lookup(actor, key);
-    if (settled.state !== "applied" || !settled.recordId)
-      throw new Error("Linear evidence upload did not settle");
     cache[url] = { url: settled.url, recordId: settled.recordId };
     const temporary = `${cachePath}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(cache, null, 2)}\n`, { mode: 0o600 });

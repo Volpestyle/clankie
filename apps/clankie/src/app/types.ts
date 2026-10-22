@@ -226,6 +226,8 @@ export interface ClankieAppDependencies {
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */
   workItems?: WorkItemsService;
+  /** Media embedded in returned work items, resolved to evidence blobs (VUH-2666). */
+  workMedia?: Pick<import("../work-media.ts").WorkMedia, "observe" | "resolve">;
   workerMcp?: WorkerMcp;
   fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
   linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;

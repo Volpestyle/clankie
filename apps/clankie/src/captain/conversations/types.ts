@@ -46,6 +46,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "evidence_records" }
   | { op: "evidence_fetch" }
   | { op: "evidence_preview" }
+  | { op: "work_media" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
@@ -91,6 +92,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "evidence_records" }
   | { op: "evidence_fetch" }
   | { op: "evidence_preview" }
+  | { op: "work_media" }
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }

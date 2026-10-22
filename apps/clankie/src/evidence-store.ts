@@ -926,6 +926,15 @@ export class EvidenceStore {
       : { sha256, available: true, contentType: "text/plain", text };
   }
 
+  /** The settled record that authorizes a blob, if any; metadata only (VUH-2666). */
+  async recordForBlob(
+    sha256: string,
+  ): Promise<Pick<EvidenceRecord, "sha256" | "size" | "contentType"> | undefined> {
+    if (!EvidenceSha256Schema.safeParse(sha256).success) return undefined;
+    const record = await this.metadata.findRecordForBlob?.(sha256);
+    return record && { sha256: record.sha256, size: record.size, contentType: record.contentType };
+  }
+
   /** Internal record lookup for tracker references; resolves metadata, never reads blob bytes. */
   async record(id: string): Promise<EvidenceRecord | undefined> {
     const record = await this.metadata.findRecord(id);

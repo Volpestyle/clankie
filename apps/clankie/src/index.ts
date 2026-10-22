@@ -1,7 +1,13 @@
 import { readProjectWorkQueue } from "./project-work-queue.ts";
 import { createDeliverableProjectReader } from "./fleet-project-deliverable.ts";
 import { MachineJoins } from "./machine-joins.ts";
-import { connectedLinearSession, importConnectedLinear, importLinearMedia } from "./linear-import.ts";
+import {
+  connectedLinearSession,
+  downloadLinearUpload,
+  importConnectedLinear,
+  importLinearMedia,
+} from "./linear-import.ts";
+import { WorkMedia } from "./work-media.ts";
 import { readProjectOutcomes } from "./project-outcomes.ts";
 import { AutoRoundRecord } from "./captain/auto-rounds.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
@@ -2070,7 +2076,23 @@ const linearMirrors = new LinearMirrors({
   },
   log: (level, fields, message) => logger[level](fields, message),
 });
+// Linear uploads in returned items, fetched once through the connected app (VUH-2666).
+const workMedia = new WorkMedia({
+  evidence: evidenceStore,
+  directory: join(stateRoot, "work-media"),
+  download: async (url) => {
+    const session = await mirrorSession();
+    return downloadLinearUpload(url, {
+      budget: linearRequestBudget,
+      access: session.access,
+      dispatch: session.dispatch,
+      priority: "interactive",
+    });
+  },
+  log: (fields, message) => logger.warn(fields, message),
+});
 const clankie = await createClankieApp({
+  workMedia,
   remoteProjectLeads: new RemoteProjectLeads({
     repoRoot,
     directory: join(stateRoot, "remote-project-leads"),
