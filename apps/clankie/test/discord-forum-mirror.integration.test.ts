@@ -387,3 +387,33 @@ it("a locked post is left alone and a write lost in a crash is never repeated", 
   await restarted.close();
   await f.stopLoop();
 });
+
+it("a fresh install with no forum bound says nothing, even when setup replaces the tracker store", async () => {
+  const root = await mkdtemp(join(tmpdir(), "discord-forum-unbound-"));
+  roots.push(root);
+  const notices: DiscordForumNotice[] = [];
+  const errors: unknown[] = [];
+  const discord = new FakeDiscord();
+  const mirror = (directory: string) =>
+    new DiscordForumMirror({
+      path: join(root, "discord-forum.json"),
+      tracker: createLocalTracker({ directory: join(root, directory) }),
+      bindings: async () => [],
+      serverAction: discord.serverAction,
+      botUserId: BOT,
+      onNotice: (notice) => notices.push(notice),
+      onError: (error) => errors.push(error),
+    });
+  const first = mirror("first-store");
+  await first.start();
+  await first.idle();
+  await first.close();
+  // First-run setup replaces the built-in store; the view had shown nothing.
+  const second = mirror("second-store");
+  await second.start();
+  await second.idle();
+  await second.close();
+  expect(notices).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(discord.requests).toEqual([]);
+});

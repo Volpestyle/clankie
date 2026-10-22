@@ -286,13 +286,21 @@ export class DiscordForumMirror {
   async start(): Promise<void> {
     const storeId = await this.options.tracker.storeId();
     if (this.journal.storeId !== undefined && this.journal.storeId !== storeId) {
-      this.notice({
-        forumId: "*",
-        reason: "write_failed",
-        subject: "store",
-        detail: "The built-in tracker store changed; the Discord forum view stopped instead of reposting.",
-      });
-      return;
+      // Posts already in Discord would be posted again from another store: stop, and
+      // say so only where a forum is bound. With nothing ever shown there is nothing
+      // to repost, so the view begins again with this store and says nothing.
+      if (Object.keys(this.journal.issues).length > 0) {
+        if ((await this.options.bindings()).length > 0)
+          this.notice({
+            forumId: "*",
+            reason: "write_failed",
+            subject: "store",
+            detail:
+              "The built-in tracker store changed; the Discord forum view stopped instead of reposting.",
+          });
+        return;
+      }
+      this.journal.cursor = 0;
     }
     this.journal.storeId = storeId;
     this.save();
