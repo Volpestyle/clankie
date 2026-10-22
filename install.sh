@@ -175,7 +175,10 @@ else
       # Releases before v0.4.7 refuse before the first service start, when nothing is linked yet.
       *'Machine setup policy needs the operator credential'*) refreshed='{"skipped":"service-not-started"}' ;;
       # Linking is optional and retryable, so it never fails an install that finished.
-      *Keychain*) refreshed='{"skipped":"credentials-unavailable"}' ;;
+      *Keychain*)
+        printf '%s\n' "$refreshed" >&2
+        refreshed='{"skipped":"credentials-unavailable"}'
+        ;;
       *)
         printf '%s\n' "$refreshed" >&2
         refreshed='{"skipped":"refresh-failed"}'

@@ -142,6 +142,7 @@ fs.copyFileSync(path.join(process.env.INSTALL_TEST_DOWNLOADS, url.pathname.slice
       });
       expect(refused.status, refused.stderr).toBe(0);
       expect(refused.stdout).toContain(hint);
+      expect(refused.stderr).toContain(error);
       expect(await readlink(join(installation, "current"))).toBe("releases/v0.2.0");
     }
     const retained = join(installation, "releases", "v0.1.0", "retained");
