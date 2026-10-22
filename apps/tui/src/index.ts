@@ -31,6 +31,7 @@ import { SettingsStore } from "@clankie/settings";
 import type { HerdrBinding, OperatorConversationContextUsage } from "@clankie/protocol";
 import { APPEARANCE_SETTINGS_PATH, AppearanceSettingsSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { ownerSettingsApi } from "./command/owner-settings-api.ts";
+import { MachineWorkerAccountsSchema } from "@clankie/protocol/worker-accounts";
 import { ClankieFaceShell } from "./shell/shell.ts";
 import { buildConsoleCommands } from "./commands.ts";
 import {
@@ -482,6 +483,8 @@ const setupServices: SetupCommandServices = {
     if (!conversationClient.fleet) throw new Error("Agent directory is unavailable");
     return (await conversationClient.fleet()).personas;
   },
+  workerAccounts: async () =>
+    (await ownerSettingsApi(brokeredCommands)).get("/v1/worker-accounts", MachineWorkerAccountsSchema),
   workspace: () => currentWorkspace,
   pair: (shell) => runConsolePair("", shell, { repoRoot, env: process.env, host: serviceUrl }),
   autostart: (verb) => runAutostartCommand([verb], { env: process.env }),

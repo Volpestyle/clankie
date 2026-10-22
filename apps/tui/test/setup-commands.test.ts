@@ -8,6 +8,7 @@ import type { InstallDoctorReport } from "../src/install-doctor.ts";
 import type { ProviderServices } from "../src/provider-commands.ts";
 import {
   buildSetupCommands,
+  noHarnessReady,
   checklistEntries,
   WALKTHROUGH_DRAFT,
   type SetupCommandServices,
@@ -294,4 +295,45 @@ it("offers the owner workspace choice only for running sessions found by doctor"
   ).toMatchObject({
     command: "herdr",
   });
+});
+
+it("names the missing harnesses and their install steps when no harness can take the first hire (VUH-2625)", () => {
+  const fresh = {
+    machine: "local",
+    shell: "posix" as const,
+    observedAt: "2026-10-21T00:00:00.000Z",
+    unavailable: {
+      claude: "Claude Code is not installed on local (no claude command on its PATH). Install it with …",
+      codex: "Codex is not installed on local (no codex command on its PATH). Install it with …",
+    },
+    accounts: [
+      {
+        harness: "pi" as const,
+        label: "default",
+        home: "/h/.pi",
+        signedIn: null,
+        headroom: null,
+        usable: false,
+        reason: "Native Pi is not enabled. It is an owner opt-in",
+      },
+    ],
+  };
+  expect(noHarnessReady(fresh)).toBe(
+    "No agent harness on this Mac can take the hire yet. Claude Code is not installed on local (no claude command on its PATH). Install it with …. Codex is not installed on local (no codex command on its PATH). Install it with …. Native Pi is not enabled. It is an owner opt-in.",
+  );
+  const signedOut = {
+    harness: "claude" as const,
+    label: "default",
+    home: "/h/.claude",
+    signedIn: false,
+    headroom: null,
+    usable: false,
+    reason: "not signed in. Sign it in on local: claude auth login.",
+  };
+  expect(noHarnessReady({ ...fresh, unavailable: {}, accounts: [signedOut] })).toBe(
+    "No agent harness on this Mac can take the hire yet. Claude Code default: not signed in. Sign it in on local: claude auth login.",
+  );
+  expect(
+    noHarnessReady({ ...fresh, accounts: [{ ...signedOut, usable: true, signedIn: true }] }),
+  ).toBeUndefined();
 });

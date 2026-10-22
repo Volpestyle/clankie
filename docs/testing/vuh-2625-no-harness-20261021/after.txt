@@ -1,0 +1,20 @@
+# scratch service: private HOME and state (scripts/scratch-stack.mjs), PATH=/usr/bin:/bin:/usr/sbin:/sbin (no node, claude or codex), service run from this patch on d5ee10a80
+{
+  "status": 200,
+  "unavailable": {
+    "claude": "Claude Code is not installed on local (no claude command on its PATH). Install it with curl -fsSL https://claude.ai/install.sh | bash, sign in with claude auth login, then run clankie harness install",
+    "codex": "Codex is not installed on local (no codex command on its PATH). Install it with npm install -g @openai/codex (or brew install --cask codex on a Mac), sign in with codex login, then run clankie harness install"
+  },
+  "accounts": [
+    {
+      "harness": "pi",
+      "label": "default",
+      "usable": false,
+      "reason": "Native Pi is not enabled. It is an owner opt-in: restart Clankie with CLANKIE_PI_NATIVE_ENABLED=1 in its environment (CLANKIE_PI_NATIVE_ENABLED=1 clankie restart). No setting or other command enables it"
+    }
+  ]
+}
+
+hire (no harness named): {"refused":"No usable claude or codex or pi account on local to choose a harness from: Claude Code is not installed on local (no claude command on its PATH). Install it with curl -fsSL https://claude.ai/install.sh | bash, sign in with claude auth login, then run clankie harness install; Codex is not installed on local (no codex command on its PATH). Install it with npm install -g @openai/codex (or brew install --cask codex on a Mac), sign in with codex login, then run clankie harness install; pi default: Native Pi is not enabled. It is an owner opt-in: restart Clankie with CLANKIE_PI_NATIVE_ENABLED=1 in its environment (CLANKIE_PI_NATIVE_ENABLED=1 clankie restart). No setting or other command enables it. Pass harness (and account) for this hire."}
+
+/setup after the hire request: No agent harness on this Mac can take the hire yet. Claude Code is not installed on local (no claude command on its PATH). Install it with curl -fsSL https://claude.ai/install.sh | bash, sign in with claude auth login, then run clankie harness install. Codex is not installed on local (no codex command on its PATH). Install it with npm install -g @openai/codex (or brew install --cask codex on a Mac), sign in with codex login, then run clankie harness install. Native Pi is not enabled. It is an owner opt-in: restart Clankie with CLANKIE_PI_NATIVE_ENABLED=1 in its environment (CLANKIE_PI_NATIVE_ENABLED=1 clankie restart). No setting or other command enables it.

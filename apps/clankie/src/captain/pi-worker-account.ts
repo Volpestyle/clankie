@@ -75,6 +75,10 @@ export function piSeatModelRefs(selected: PiSeatModel | undefined): readonly str
   return [...new Set([selected.model, ...declared])];
 }
 
+/** Pi is an owner opt-in in the service's environment, not a setting or a command (VUH-2625). */
+export const PI_NOT_ENABLED =
+  "Native Pi is not enabled. It is an owner opt-in: restart Clankie with CLANKIE_PI_NATIVE_ENABLED=1 in its environment (CLANKIE_PI_NATIVE_ENABLED=1 clankie restart). No setting or other command enables it";
+
 /** Native runtime and model authority are independently verified before Pi enters the shared account view. */
 export function createPiWorkerStatusReader(options: {
   enabled: () => boolean;
@@ -83,8 +87,7 @@ export function createPiWorkerStatusReader(options: {
 }) {
   return async (): Promise<WorkerAccountStatus> => {
     const base = { harness: "pi" as const, label: "default", home: getAgentDir(), headroom: null };
-    if (!options.enabled())
-      return { ...base, signedIn: null, usable: false, reason: "Native Pi control is not enabled" };
+    if (!options.enabled()) return { ...base, signedIn: null, usable: false, reason: PI_NOT_ENABLED };
     try {
       const capability = await discoverPiNativeCapability({ harness: "pi", cwd: options.cwd, brief: "" });
       await capability.verify();

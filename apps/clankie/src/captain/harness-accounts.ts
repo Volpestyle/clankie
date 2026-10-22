@@ -1,6 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { execFile } from "node:child_process";
-import { posix, win32 } from "node:path";
+import { dirname, posix, win32 } from "node:path";
 import { z } from "zod";
 import {
   codexAccounts,
@@ -175,6 +175,9 @@ const run = (command, args, env, cwd) => new Promise((resolve) => {
   child.on("error", () => finish(null));
   child.on("close", () => finish(out));
 });
+const onPath = (command) => (process.env.PATH || "").split(path.delimiter).some((dir) => dir && (windows ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""]).some((ext) => {
+  try { const file = path.join(dir, command + ext); fs.accessSync(file, windows ? fs.constants.F_OK : fs.constants.X_OK); return fs.statSync(file).isFile(); } catch { return false; }
+}));
 const claudeUsage = async (env) => {
   const v = String(await run("claude", ["--version"], env)).split(".", 3);
   if (!(v[0] * 1e6 + v[1] * 1e3 + parseFloat(v[2]) >= input.claudeUsageVersion)) return {};
@@ -262,7 +265,7 @@ const codex = (profile) => new Promise((resolve) => {
   send({ id: 1, method: "initialize", params: { clientInfo: { name: "clankie-accounts", version: "1" } } });
 });
 (async () => {
-  const output = { schemaVersion: 1, accounts: [] };
+  const output = { schemaVersion: 1, accounts: [], missing: ["claude", "codex"].filter((harness) => input.harnesses.includes(harness) && !onPath(harness)) };
   const listed = (harness) => input.profiles && input.profiles[harness] ? input.profiles[harness].map(entry => ({ ...entry })) : [];
   const profiles = (harness) => {
     const prefix = "." + harness;
@@ -281,10 +284,10 @@ const codex = (profile) => new Promise((resolve) => {
     }
     return [...out.values()];
   };
-  if (input.harnesses.includes("claude")) {
+  if (input.harnesses.includes("claude") && !output.missing.includes("claude")) {
     output.accounts.push(...(await Promise.all(profiles("claude").map(claude))));
   }
-  if (input.harnesses.includes("codex")) {
+  if (input.harnesses.includes("codex") && !output.missing.includes("codex")) {
     output.accounts.push(...(await Promise.all(profiles("codex").map(codex))));
   }
   process.stdout.write(JSON.stringify(output));
@@ -345,6 +348,8 @@ const ProbeOutput = z.object({
       }),
     )
     .max(64),
+  /** Harnesses whose command is not on the machine's PATH; their homes are not probed. */
+  missing: z.array(z.enum(["claude", "codex"])).optional(),
 });
 type ProbeAccount = z.infer<typeof ProbeOutput>["accounts"][number];
 
@@ -372,13 +377,24 @@ export function workerAccountsProbeCommand(
   ]);
 }
 
-/** This machine as a fleet shell, for its own registered profiles. */
+/**
+ * This machine as a fleet shell, for its own registered profiles. A release
+ * runs on its own `libexec/node`, and a fresh Mac has no `node` on PATH, so
+ * the probe falls back to the service's Node after the owner's (VUH-2625).
+ */
 const localWorkerAccountsShell: FleetShellRun = (command, timeoutMs) =>
   new Promise((resolve, reject) =>
     execFile(
       "/bin/sh",
       ["-c", command],
-      { timeout: timeoutMs ?? 60_000, maxBuffer: 1024 * 1024 },
+      {
+        timeout: timeoutMs ?? 60_000,
+        maxBuffer: 1024 * 1024,
+        env: {
+          ...process.env,
+          PATH: [process.env.PATH, dirname(process.execPath)].filter(Boolean).join(":"),
+        },
+      },
       (error, stdout) => (error === null ? resolve(String(stdout)) : reject(error)),
     ),
   );
@@ -393,6 +409,8 @@ export async function readMachineWorkerAccounts(
     readonly profiles?: Partial<Record<WorkerAccountHarness, readonly { label: string; home: string }[]>>;
     readonly registry?: HarnessAccountIdentities;
     readonly now?: number;
+    /** This Mac rather than a linked machine. */
+    readonly local?: boolean;
   } = {},
 ): Promise<MachineWorkerAccounts> {
   const harnesses = options.harnesses ?? WORKER_ACCOUNT_HARNESSES;
@@ -413,13 +431,29 @@ export async function readMachineWorkerAccounts(
       shell: fleet.ssh.shell,
       observedAt: new Date(now).toISOString(),
       accounts: [],
-      unavailable: Object.fromEntries(harnesses.map((harness) => [harness, reason])),
+      // Only Claude and Codex are probed; Pi and Prime answer for themselves.
+      unavailable: Object.fromEntries(
+        harnesses
+          .filter((harness) => harness === "claude" || harness === "codex")
+          .map((harness) => [harness, reason]),
+      ),
     };
   }
+  const missing = (parsed.missing ?? []).filter((harness) => harnesses.includes(harness));
   return {
     machine: fleet.id,
     shell: fleet.ssh.shell,
     observedAt: new Date(now).toISOString(),
+    ...(missing.length
+      ? {
+          unavailable: Object.fromEntries(
+            missing.map((harness) => [
+              harness,
+              harnessInstallFix(fleet.id, fleet.ssh.shell, harness, options.local === true),
+            ]),
+          ),
+        }
+      : {}),
     accounts: (options.registry ?? harnessAccountIdentities()).group(
       fleet.id,
       parsed.accounts.map((account) =>
@@ -554,6 +588,27 @@ function claudeSetupFix(
   return `Open it once on ${machine} with ${command}, pick a theme, accept the security notes and trust the folder you hire into, then quit.`;
 }
 
+/** A harness whose command the probe could not find, and how the owner installs and signs it in (VUH-2625). */
+function harnessInstallFix(
+  machine: string,
+  shell: HerdrSshTransport["shell"],
+  harness: "claude" | "codex",
+  /** This Mac links its harnesses itself; a linked machine is prepared through its link. */
+  local: boolean,
+): string {
+  const link = local ? "clankie harness install" : `clankie herdr prepare ${machine}`;
+  if (harness === "claude")
+    return (
+      `Claude Code is not installed on ${machine} (no claude command on its PATH). Install it with ` +
+      `${shell === "powershell" ? "irm https://claude.ai/install.ps1 | iex" : "curl -fsSL https://claude.ai/install.sh | bash"}, ` +
+      `sign in with claude auth login, then run ${link}`
+    );
+  return (
+    `Codex is not installed on ${machine} (no codex command on its PATH). Install it with npm install -g @openai/codex` +
+    `${shell === "powershell" ? "" : " (or brew install --cask codex on a Mac)"}, sign in with codex login, then run ${link}`
+  );
+}
+
 /** The owner's one step to make a profile usable on its machine. */
 function accountFix(
   machine: string,
@@ -645,7 +700,7 @@ export function chooseWorkerAccount(
   const unavailable = report.unavailable?.[harness];
   return {
     refused: unavailable
-      ? `No ${noun} on ${machine} could be checked: ${unavailable}.`
+      ? `No ${noun} on ${machine} can take a hire: ${unavailable}.`
       : `No ${noun} on ${machine} can take a hire now${skipped.length ? `: ${skipped.join("; ")}` : ""}.`,
   };
 }
@@ -749,7 +804,7 @@ export function chooseWorkerHarness(
   return {
     refused:
       `No usable ${allowed.join(" or ")} account on ${machine} to choose a harness from` +
-      `${skipped.length ? `: ${skipped.join("; ")}` : unavailable.length ? `: ${unavailable.join("; ")}` : ""}. ` +
+      `${unavailable.length || skipped.length ? `: ${[...unavailable, ...skipped].join("; ")}` : ""}. ` +
       "Pass harness (and account) for this hire.",
   };
 }
@@ -798,6 +853,7 @@ export function createWorkerAccountsReader(options: {
         localWorkerAccountsShell,
         {
           ...read,
+          local: true,
           profiles: {
             claude: current.claudeAccounts,
             codex: codexAccounts(current),

@@ -1,0 +1,21 @@
+# scratch service: private HOME and state (scripts/scratch-stack.mjs), PATH=/usr/bin:/bin:/usr/sbin:/sbin (no node, claude or codex), service run from d5ee10a80 (origin/main before the fix)
+{
+  "status": 200,
+  "unavailable": {
+    "claude": "local did not answer the account probe (is Node on its PATH and the machine linked?)",
+    "codex": "local did not answer the account probe (is Node on its PATH and the machine linked?)",
+    "pi": "local did not answer the account probe (is Node on its PATH and the machine linked?)"
+  },
+  "accounts": [
+    {
+      "harness": "pi",
+      "label": "default",
+      "usable": false,
+      "reason": "Native Pi control is not enabled"
+    }
+  ]
+}
+
+hire (no harness named): {"refused":"No usable claude or codex or pi account on local to choose a harness from: pi default: Native Pi control is not enabled. Pass harness (and account) for this hire."}
+
+/setup after the hire request: No live agent seat is observed yet. Continue with Clankie above to finish the hire; /agents shows the team. Return to /setup anytime. (static text on d5ee10a80)

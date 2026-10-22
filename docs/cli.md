@@ -2275,6 +2275,15 @@ setup (theme, security notes, folder trust) is unfinished is not `usable`: a
 hire there would stall at those screens with `start_unconfirmed`. Its `reason`
 names the one-time fix, opening Claude once in that profile.
 
+A machine with no `claude` or `codex` command on its PATH reports that harness
+under `unavailable` as not installed, with its install command, sign-in and
+plugin step (`clankie harness install` on this Mac, `clankie herdr prepare NAME`
+on a linked machine), rather than probing its homes (VUH-2625). This Mac's probe
+runs on the owner's `node` and falls back to the service's own, so a release on
+a Mac with no Node on PATH still answers. A linked machine with no Node, or no
+link, reports that it did not answer the probe. When the first hire in `/setup`
+finds no usable harness, `/setup` repeats these reasons.
+
 The report's `allocation` ranks each harness's accounts for automatic hires
 (VUH-1974). Each eligible (usable, unheld) account gets its spare capacity per
 day: plan weight × (fraction left ÷ days until that window resets − share used
@@ -2297,7 +2306,11 @@ the worker has a configured authenticated model. Managed bodies derive that
 model from their existing included/customer provider route; no owner account
 setup is needed. On owner-run bodies, the opt-in is
 `CLANKIE_PI_NATIVE_ENABLED=1` in the service environment, followed by an
-owner-authorized service restart. Other values leave native Pi disabled. The
+owner-authorized service restart, for example
+`CLANKIE_PI_NATIVE_ENABLED=1 clankie restart`; the disabled report names that
+step. A service started later without the variable, such as by autostart, runs
+with Pi disabled again. There is no setting or `clankie pi` command for it.
+Other values leave native Pi disabled. The
 local profile is separate from Clankie’s service credentials: its selected model
 must be available and authenticated. The report distinguishes a missing default,
 an unavailable model, missing authentication and expired OAuth. Refresh expired

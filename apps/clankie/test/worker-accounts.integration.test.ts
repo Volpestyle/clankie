@@ -2,7 +2,7 @@ import { autoRoundPrompt } from "../src/captain/auto-projects.ts";
 import { mintOperatorToken } from "@clankie/credential-broker";
 import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-routes.ts";
 import { execFile, execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -17,6 +17,7 @@ import { runAccountsCommand } from "../../tui/src/command/accounts.ts";
 import {
   createWorkerAccountsReader,
   chooseWorkerAccount,
+  chooseWorkerHarness,
   readMachineWorkerAccounts,
   workerAccountsProbeCommand,
   type MachineWorkerAccounts,
@@ -226,6 +227,44 @@ it("keeps the Windows probe command within the ssh command-line bound", () => {
   expect(command.length).toBeLessThan(30_000);
   expect(command).toMatch(/^powershell\.exe -NoProfile -NonInteractive -EncodedCommand /u);
 });
+
+it("says a harness with no command on PATH is not installed, and how to install it (VUH-2625)", async () => {
+  const home = await fixtureHome();
+  const shell = fixtureShell(home);
+  // A fresh machine: Node for the probe, and no claude or codex anywhere on PATH.
+  const bin = join(home, "..", "node-only");
+  await mkdir(bin);
+  await symlink(process.execPath, join(bin, "node"));
+  // The service asks for every harness; Pi answers for itself, beside the probe.
+  const report = await readMachineWorkerAccounts(
+    box,
+    (command, timeout) => shell(`PATH='${bin}:/usr/bin:/bin'; ${command}`, timeout),
+    { harnesses: ["claude", "codex", "pi"] },
+  );
+  expect(report.accounts).toEqual([]);
+  expect(report.unavailable?.claude).toBe(
+    "Claude Code is not installed on box (no claude command on its PATH). Install it with curl -fsSL https://claude.ai/install.sh | bash, sign in with claude auth login, then run clankie herdr prepare box",
+  );
+  expect(report.unavailable?.codex).toBe(
+    "Codex is not installed on box (no codex command on its PATH). Install it with npm install -g @openai/codex (or brew install --cask codex on a Mac), sign in with codex login, then run clankie herdr prepare box",
+  );
+  const pi = {
+    harness: "pi" as const,
+    label: "default",
+    home: "/pi",
+    signedIn: null,
+    headroom: null,
+    usable: false,
+    reason: "Native Pi is not enabled",
+  };
+  const choice = chooseWorkerHarness("box", { ...report, accounts: [pi] });
+  expect(choice).toHaveProperty("refused");
+  const refused = (choice as { refused: string }).refused;
+  expect(refused).toContain("Claude Code is not installed on box");
+  expect(refused).toContain("Codex is not installed on box");
+  expect(refused).toContain("pi default: Native Pi is not enabled");
+  expect(refused).not.toMatch(/is Node on its PATH/u);
+}, 60_000);
 
 /**
  * James's PC as its probe reported it on 2026-10-07 (identities redacted):

@@ -7,6 +7,7 @@ import {
   type OperatorAgentPersona,
 } from "@clankie/protocol";
 import type { CaptainReadiness } from "@clankie/model-provider";
+import type { MachineWorkerAccounts } from "@clankie/protocol/worker-accounts";
 import type { AutonomyCommandResult } from "./command/fleet.ts";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import type { AutostartCommandResult } from "./command/autostart.ts";
@@ -22,6 +23,8 @@ export interface SetupCommandServices {
   readonly doctor: () => Promise<InstallDoctorReport>;
   readonly devices: (signal: AbortSignal) => Promise<readonly DeviceListItem[]>;
   readonly agents: () => Promise<readonly OperatorAgentPersona[]>;
+  /** This Mac's harness accounts, so a hire no harness can take says why (VUH-2625). */
+  readonly workerAccounts?: () => Promise<MachineWorkerAccounts>;
   readonly workspace: () => string;
   readonly pair: (shell: ClankieFaceShell) => Promise<number>;
   readonly autostart: (verb: "status" | "enable") => Promise<AutostartCommandResult>;
@@ -189,14 +192,37 @@ async function runGuidedSetup(
   } else if (action === "send") {
     await shell.submitUserPrompt(request);
     const hired = (await services.agents()).find((agent) => agent.activeSeatId !== undefined);
+    const blocked = hired
+      ? undefined
+      : await services.workerAccounts?.().then(noHarnessReady, () => undefined);
     shell.insertCommandResult(
       "/setup",
       hired
         ? `4 of 4 · ${hired.name} has a live agent seat. /agents opens the team; /setup rooms has the other settings.`
-        : "No live agent seat is observed yet. Continue with Clankie above to finish the hire; /agents shows the team. Return to /setup anytime.",
+        : blocked
+          ? `${blocked} Then ask Clankie again, or return to /setup.`
+          : "No live agent seat is observed yet. Continue with Clankie above to finish the hire; /agents shows the team. Return to /setup anytime.",
       hired ? "success" : "error",
     );
   }
+}
+
+const HARNESS_NAMES = { claude: "Claude Code", codex: "Codex" } as const;
+
+/** Why no harness on this Mac can take a hire, in the probe's own words; undefined when one can (VUH-2625). */
+export function noHarnessReady(report: MachineWorkerAccounts): string | undefined {
+  if (report.accounts.some((account) => account.usable)) return undefined;
+  const reasons = (["claude", "codex", "pi"] as const).flatMap((harness) => {
+    const unavailable = report.unavailable?.[harness];
+    if (unavailable !== undefined) return [unavailable];
+    return report.accounts
+      .filter((account) => account.harness === harness && account.reason !== undefined)
+      .map((account) =>
+        harness === "pi" ? account.reason! : `${HARNESS_NAMES[harness]} ${account.label}: ${account.reason!}`,
+      );
+  });
+  if (!reasons.length) return undefined;
+  return `No agent harness on this Mac can take the hire yet. ${reasons.map((reason) => (/[.!?]$/u.test(reason) ? reason : `${reason}.`)).join(" ")}`;
 }
 
 /** Explicit owner choice; cancellation never writes a level or advances onboarding. */

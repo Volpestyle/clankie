@@ -9,7 +9,11 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-routes.ts";
 import { chooseWorkerHarness, createWorkerAccountsReader } from "../src/captain/harness-accounts.ts";
-import { createPiWorkerStatusReader, localPiWorkerModelStatus } from "../src/captain/pi-worker-account.ts";
+import {
+  createPiWorkerStatusReader,
+  localPiWorkerModelStatus,
+  PI_NOT_ENABLED,
+} from "../src/captain/pi-worker-account.ts";
 import { runAccountsCommand } from "../../tui/src/command/accounts.ts";
 import { supportedPiUnavailable } from "./fixtures/supported-pi.ts";
 
@@ -87,9 +91,11 @@ it("exposes the same disabled Pi status and revision-fenced owner hold through A
         signedIn: null,
         headroom: null,
         usable: false,
-        reason: "Native Pi control is not enabled",
+        reason: PI_NOT_ENABLED,
       },
     ]);
+    // The real opt-in, so neither Clankie nor the owner invents a `clankie pi enable` (VUH-2625).
+    expect(PI_NOT_ENABLED).toContain("CLANKIE_PI_NATIVE_ENABLED=1 clankie restart");
     expect(chooseWorkerHarness("local", await reader(undefined, ["pi"]))).toHaveProperty("refused");
     const token = mintOperatorToken();
     const routes = createWorkerAccountHoldsRoutes(
