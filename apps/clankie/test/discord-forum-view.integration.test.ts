@@ -141,6 +141,25 @@ it("a participant server's bound forum takes the view's writes and nothing else"
     { method: "POST" as const, path: `/channels/${post.id}/threads`, body: { name: "x" } },
   ];
   for (const action of refused) expect((await f.body(action)).ok, JSON.stringify(action)).toBe(false);
+  // Catch-up may page its own reads; a query anywhere else, or another audit action, is refused.
+  const pagedElsewhere = [
+    { method: "GET" as const, path: `/channels/${FORUM}`, query: { limit: "5" } },
+    { method: "GET" as const, path: `/guilds/${GUILD}/audit-logs`, query: { action_type: "110" } },
+    { method: "GET" as const, path: `/channels/${post.id}/messages`, query: { before: post.id } },
+    {
+      method: "PATCH" as const,
+      path: `/channels/${post.id}`,
+      body: { archived: false },
+      query: { limit: "1" },
+    },
+  ];
+  for (const action of pagedElsewhere) expect((await f.body(action)).ok, JSON.stringify(action)).toBe(false);
+  expect(
+    (await f.body({ method: "GET", path: `/guilds/${GUILD}/audit-logs`, query: { action_type: "111" } })).ok,
+  ).toBe(true);
+  expect(
+    (await f.body({ method: "GET", path: `/channels/${post.id}/messages`, query: { after: post.id } })).ok,
+  ).toBe(true);
   expect(f.discord.threads.get(post.id)!.name).toContain("Water the seedlings");
 });
 
@@ -180,7 +199,7 @@ it("posts, tag changes and replies reach the tracker with the host's owner verdi
       targetId: owned.id,
       createdTimestamp: Date.now(),
       executor: person(OWNER, "james"),
-      changes: [{ key: "applied_tags" }],
+      changes: [{ key: "applied_tags", new: [f.discord.tagId("Review")] }],
     },
   ]);
   await reportForumTags(f.bridge, before, thread(f.discord, owned.id));
@@ -203,6 +222,22 @@ it("posts, tag changes and replies reach the tracker with the host's owner verdi
   expect((await f.issue(memberItem!)).status).toBe("Backlog");
   expect(f.discord.tagNames(memberPost)).toEqual(["Later"]);
 
+  // An owner's earlier entry never speaks for tags someone else changed afterwards unrecorded.
+  const hijacked = thread(f.discord, owned.id);
+  owned.applied_tags = [f.discord.tagId("Later")];
+  f.setAudit(async () => [
+    {
+      id: "800000000000000004",
+      targetId: owned.id,
+      createdTimestamp: Date.now(),
+      executor: person(OWNER, "james"),
+      changes: [{ key: "applied_tags", new: [f.discord.tagId("Now")] }],
+    },
+  ]);
+  await reportForumTags(f.bridge, hijacked, thread(f.discord, owned.id));
+  expect((await f.issue(ownerItem!)).status).toBe("In Review");
+  expect(f.discord.tagNames(owned)).toEqual(["Review"]);
+
   // Without View Audit Log, status tags are display-only and the owner is told once.
   const ownerBefore = thread(f.discord, owned.id);
   owned.applied_tags = [f.discord.tagId("Later")];
@@ -222,7 +257,7 @@ it("posts, tag changes and replies reach the tracker with the host's owner verdi
       targetId: owned.id,
       createdTimestamp: Date.now(),
       executor: { id: BOT, bot: true, username: "clankie", globalName: null },
-      changes: [{ key: "applied_tags" }],
+      changes: [{ key: "applied_tags", new: [...owned.applied_tags] }],
     },
   ]);
   await reportForumTags(

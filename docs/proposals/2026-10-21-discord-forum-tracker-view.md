@@ -116,10 +116,9 @@ sequenceDiagram
   Closed items are re-archived after their tag lands.
 - A locked post, or a 403 or 404, stops that projection and records the reason.
   The mirror never retries in a loop, which protects the invalid-request budget.
-- At startup and after a gateway resume, the mirror lists active threads and
-  pages archived public threads. It then compares each mapped post's tags with
-  the tracker and repairs any drift outbound. A tag drift with no author cannot
-  be attributed, so it is not imported.
+- At startup and every ten minutes, the mirror catches up on what the gateway
+  did not deliver (see slice 2). A tag drift with no attributable owner is not
+  imported; the tracker's tags are restored.
 
 ## Trust
 
@@ -181,8 +180,10 @@ so slice 2 adds an exception for exactly the owner-bound forum.
      `POST /v1/captain/discord-forum-events`. Only the `discord_text` captain
      may call it, and the service decides who is an owner;
    - a tag change is credited only to an audit-log entry for that thread, from
-     the last minute, that records `applied_tags`. The view's own edits are
-     dropped as its echo; anything else is `not_found` and display-only;
+     the last minute, whose recorded `applied_tags` equal the post's current
+     tags, so a later unrecorded change never borrows an earlier owner's entry.
+     The view's own edits are dropped as its echo; anything else is `not_found`
+     and display-only;
    - `discord.trackerForums` binds a forum to a project. The body's REST fences
      allow exactly the view's writes there (reads, the forum's tags, new posts,
      a post's tags and archive state, replies) without the admin role or an
@@ -191,9 +192,22 @@ so slice 2 adds an exception for exactly the owner-bound forum.
      that post next syncs, and the write is retried on the item's next change.
      A transport failure may have reached Discord, so it stays uncertain and is
      never repeated;
-   - not yet: catching up on Discord activity from while the service was down
-     (archived listing and audit-log backfill), the user-session body and the
-     hosted official bot.
+   - catch-up (built after slice 3): at start and every ten minutes, the view
+     lists the forum's active posts and its archived posts since the last pass,
+     then imports new posts, replies after the last message it saw, and tag
+     changes. Who changed tags comes from the audit log, under the same
+     equal-tags rule; an owner's Discord edit that the tracker overtook (the
+     item changed after the edit) is restored, so the newer side wins. The first
+     pass only marks where the view begins, so binding never imports the
+     forum's earlier posts. Every import keeps its Discord-keyed idempotency, so
+     repeated passes change nothing. One post never stalls a pass: a post whose
+     starter Discord refuses to read (deleted) is skipped with one notice, and a
+     post that fails partway is read directly on the next pass, even once
+     archived. The body allows these reads and their paging (`after`, `before`,
+     `limit`, and `action_type` 111 for the audit log) only for a guild with a
+     bound forum; the active-threads and audit-log reads are guild-wide and stay
+     on the host;
+   - not yet: the user-session body and the hosted official bot.
 3. **Owner surface:**
    - built: `clankie discord forum bind|unbind` with an explicit
      `--confirm-audience`, over the same revision-fenced settings API;

@@ -28,12 +28,31 @@ export interface DiscordServerAuthority {
 function trackerForumWrite(action: DiscordServerAction, parts: readonly string[], forum: boolean): boolean {
   const keys = Object.keys(record(action.body) ?? {});
   const only = (allowed: readonly string[]) => keys.length > 0 && keys.every((key) => allowed.includes(key));
+  const query = Object.keys(action.query ?? {});
+  const queryOnly = (allowed: readonly string[]) => query.every((key) => allowed.includes(key));
+  if (action.method === "GET") {
+    if (parts.length === 2) return query.length === 0;
+    // Catch-up reads: a post's messages and the forum's archived posts.
+    if (!forum && parts[2] === "messages")
+      return parts.length === 3 ? queryOnly(["after", "limit"]) : parts.length === 4 && query.length === 0;
+    return forum && parts.slice(2).join("/") === "threads/archived/public" && queryOnly(["before", "limit"]);
+  }
+  if (query.length > 0) return false;
   if (parts.length === 2)
-    return (
-      action.method === "GET" ||
-      (action.method === "PATCH" && only(forum ? ["available_tags"] : ["applied_tags", "archived"]))
-    );
+    return action.method === "PATCH" && only(forum ? ["available_tags"] : ["applied_tags", "archived"]);
   return parts.length === 3 && action.method === "POST" && parts[2] === (forum ? "threads" : "messages");
+}
+/** A bound forum's server-wide catch-up reads: its active posts, and who changed post tags. */
+function trackerForumGuildRead(action: DiscordServerAction, parts: readonly string[]): boolean {
+  const query = Object.keys(action.query ?? {});
+  if (action.method !== "GET") return false;
+  if (parts.slice(2).join("/") === "threads/active") return query.length === 0;
+  return (
+    parts.length === 3 &&
+    parts[2] === "audit-logs" &&
+    action.query?.action_type === "111" &&
+    query.every((key) => ["action_type", "limit", "before"].includes(key))
+  );
 }
 
 /** The credential-owning transport implements this; it never exposes its token. */
@@ -106,6 +125,7 @@ export async function executeDiscordServerAction(
   let serverId = policy?.serverId ?? authority.serverId ?? authority.servers?.[0]?.serverId;
   if (
     parsed.data.method === "GET" &&
+    parsed.data.query === undefined &&
     origin?.source === "operator" &&
     /^\/channels\/\d{5,32}$/u.test(parsed.data.path) &&
     authority.servers?.length
@@ -187,6 +207,8 @@ export async function executeDiscordServerAction(
     } catch {
       trackerForum = false;
     }
+  if (guildRoute && forums.length > 0) trackerForum = trackerForumGuildRead(action, parts);
+  if (action.query !== undefined && !trackerForum) return refuse("That Discord route takes no query.");
   const features = authority.guilds?.[serverId] ?? (serverId === authority.serverId ? authority : undefined);
   const participantPost =
     channelRoute &&

@@ -7992,7 +7992,9 @@ channel as a forum in that server (`tracker_forum_project_not_found`,
 `tracker_forum_not_found`, `tracker_forum_not_a_forum`,
 `tracker_forum_unverified`); unchanged bindings are not proved again. The work
 tracker read (`clankie project settings PROJECT`, `GET /v1/operator/work-tracker?projectId=ID`)
-shows a project's bound forum as `discordForum`.
+shows a project's bound forum as `discordForum`. Binding does not import the
+forum's earlier posts. Posts, replies and tag changes made while the service or
+the bot was offline are caught up at the next start and every ten minutes.
 Everyone who can read the forum sees that project. Posts are items, moderated
 status tags carry their status and replies are comments; members' posts are
 untrusted Backlog items, or wait for an owner's status tag with `owner_tag`.

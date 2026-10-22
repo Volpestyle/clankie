@@ -18,6 +18,13 @@ export const DiscordServerActionSchema = z
         message: "Webhook bearer routes are never accepted.",
       }),
     body: z.union([z.record(z.string(), z.json()), z.array(z.json())]).optional(),
+    /** Paging for the few reads that need it (a tracker forum's catch-up); the body refuses it elsewhere. */
+    query: z
+      .partialRecord(
+        z.enum(["after", "before", "limit", "action_type"]),
+        z.string().regex(/^[\w:.+-]{1,64}$/u),
+      )
+      .optional(),
   })
   .strict();
 export type DiscordServerAction = z.infer<typeof DiscordServerActionSchema>;

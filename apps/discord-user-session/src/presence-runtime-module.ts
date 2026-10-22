@@ -139,6 +139,8 @@ export function createDiscordUserPresenceRuntime(
             )
               throw new Error("discord_server_authority_changed");
           }
+          // The lab body serves no tracker forum, so it takes none of the forum's paged reads.
+          if (action.query !== undefined) throw new Error("discord_user_session_query_unsupported");
           const response = await (options.fetch ?? globalThis.fetch)(
             `https://discord.com/api/v10${action.path}`,
             {

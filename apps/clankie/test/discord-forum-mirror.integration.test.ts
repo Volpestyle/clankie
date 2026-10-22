@@ -134,13 +134,14 @@ it("the tracker's items, statuses and comments appear in the forum once, and clo
   expect(post.thread_metadata.archived).toBe(false);
   expect(f.discord.tagNames(post)).toEqual(["Next", "bug", "art"]);
 
-  // A restart resumes from the saved cursor: nothing is posted twice.
+  // A restart resumes from the saved cursor and catches up: it reads, but writes nothing twice.
   await mirror.close();
-  const before = f.discord.requests.length;
+  const writes = () => f.discord.requests.filter((request) => request.method !== "GET").length;
+  const before = writes();
   const restarted = f.mirror();
   await restarted.start();
   await restarted.idle();
-  expect(f.discord.requests.length).toBe(before);
+  expect(writes()).toBe(before);
   expect(f.discord.threads.size).toBe(1);
   expect(f.discord.messages.get(post.id)).toHaveLength(2);
   expect(f.errors).toEqual([]);

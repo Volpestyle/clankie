@@ -134,6 +134,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
               throw new Error("discord_server_authority_changed");
             if (
               JSON.stringify(current.guilds) !== JSON.stringify(authority.guilds) ||
+              JSON.stringify(current.trackerForums) !== JSON.stringify(authority.trackerForums) ||
               JSON.stringify(current.servers) !== JSON.stringify(authority.servers) ||
               current.ownerUserId !== authority.ownerUserId
             )
@@ -142,7 +143,12 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
 
           return rest[action.method.toLowerCase() as "get" | "post" | "patch" | "put" | "delete"](
             action.path as `/${string}`,
-            action.body === undefined ? undefined : { body: action.body },
+            action.body === undefined && action.query === undefined
+              ? undefined
+              : {
+                  ...(action.body === undefined ? {} : { body: action.body }),
+                  ...(action.query === undefined ? {} : { query: new URLSearchParams(action.query) }),
+                },
           );
         },
         origin,

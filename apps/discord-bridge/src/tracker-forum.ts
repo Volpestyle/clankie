@@ -30,7 +30,8 @@ export interface ForumAuditEntry {
   readonly targetId: string | null;
   readonly createdTimestamp: number;
   readonly executor: ForumAuthor | null;
-  readonly changes: readonly { readonly key: string }[];
+  /** discord.js reports each change's new value as `new`. */
+  readonly changes: readonly { readonly key: string; readonly new?: unknown }[];
 }
 export interface TrackerForumBody {
   readonly botUserId: () => string | undefined;
@@ -130,7 +131,15 @@ export async function reportForumTags(
         (candidate) =>
           candidate.targetId === after.id &&
           now() - candidate.createdTimestamp <= AUDIT_WINDOW_MS &&
-          candidate.changes.some((change) => change.key === "applied_tags"),
+          // Only an edit that produced exactly these tags speaks for them; a later unrecorded
+          // change by someone else must never borrow an earlier owner's entry.
+          candidate.changes.some(
+            (change) =>
+              change.key === "applied_tags" &&
+              Array.isArray(change.new) &&
+              change.new.length === after.appliedTags.length &&
+              change.new.every((tag) => after.appliedTags.includes(tag as string)),
+          ),
       )
       .sort((left, right) => right.createdTimestamp - left.createdTimestamp)[0];
     if (entry?.executor) {

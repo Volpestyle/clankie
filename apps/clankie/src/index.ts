@@ -1722,6 +1722,25 @@ void startTrackerOwnerLoop({
     "built-in tracker owner loop did not start",
   ),
 );
+// The host decides who is an owner (ADR 0251); a role policy is proved by a member read.
+const discordForumOwner = async (guildId: string, userId: string) => {
+  const { discord } = await settingsStore.load();
+  return discordActorOwnsServer(
+    resolveDiscordSettings(discord, captainDiscordEnvironment).settings,
+    guildId,
+    userId,
+    async (action) => {
+      const current = await settingsStore.load();
+      const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
+      const result = await createDiscordCaptainActionClient({
+        ...process.env,
+        DISCORD_ACTIVE_BODY: body,
+      }).serverAction(action);
+      if (!result.ok) throw new Error("Discord membership unavailable");
+      return result.data;
+    },
+  );
+};
 // Forums bound as two-way views of built-in tracker projects (VUH-2531). Its
 // notices reach the owner once per post or day, never as a model turn.
 const discordForum = new DiscordForumMirror({
@@ -1750,6 +1769,9 @@ const discordForum = new DiscordForumMirror({
       action,
     );
   },
+  owns: (guildId, userId) => discordForumOwner(guildId, userId),
+  // Gateway gaps happen while the service runs too, not only across restarts.
+  catchUpIntervalMs: 10 * 60_000,
   onNotice: (notice) => captain.recordRuntimeHealthNotice(`Discord forum: ${notice.detail}`),
   onError: (error) =>
     logger.warn(
@@ -1765,25 +1787,6 @@ void discordForum
       "Discord forum view did not start",
     ),
   );
-// The host decides who is an owner (ADR 0251); a role policy is proved by a member read.
-const discordForumOwner = async (guildId: string, userId: string) => {
-  const { discord } = await settingsStore.load();
-  return discordActorOwnsServer(
-    resolveDiscordSettings(discord, captainDiscordEnvironment).settings,
-    guildId,
-    userId,
-    async (action) => {
-      const current = await settingsStore.load();
-      const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
-      const result = await createDiscordCaptainActionClient({
-        ...process.env,
-        DISCORD_ACTIVE_BODY: body,
-      }).serverAction(action);
-      if (!result.ok) throw new Error("Discord membership unavailable");
-      return result.data;
-    },
-  );
-};
 // VUH-1527: each ssh fleet reaches the seat routes, and only those, through its link.
 fleetProjectMembership = new FleetProjectMembership({
   settings: async () => (await settingsStore.load()).projects,
