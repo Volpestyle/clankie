@@ -640,7 +640,7 @@ export class PersonaStore {
     } else {
       // Only the rename itself adopts the Herdr name, so a later rename in the
       // app is not overwritten on the next census.
-      const generic = /^(?:claude(?: code)?|codex|clankie[ -]?brief\b)/iu.test(current.name);
+      const generic = /^(?:(?:claude(?: code)?|codex)(?: agent)?$|clankie[ -]?brief\b)/iu.test(current.name);
       const name =
         renamed && chosen?.success === true
           ? chosen.data

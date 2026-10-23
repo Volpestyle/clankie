@@ -46,6 +46,22 @@ describe("PersonaStore", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  it.each(["Codex Reviewer", "Claudette", "Claude Architect"])(
+    "keeps the owner rename %s through repeated census and restart",
+    (name) => {
+      const root = mkdtempSync(join(tmpdir(), "clankie-owner-persona-name-"));
+      roots.push(root);
+      const original = { ...observed("term-1"), harness: "claude", title: "Claude Code" };
+      const store = new PersonaStore(root);
+      const seat = store.reconcile([original])[0]!;
+      store.update({ schemaVersion: 1, personaId: seat.personaId, name });
+      expect(store.reconcile([original])[0]!.title).toBe(name);
+      const restarted = new PersonaStore(root);
+      expect(restarted.reconcile([original])[0]!.title).toBe(name);
+      expect(restarted.reconcile([{ ...original, title: "New native title" }])[0]!.title).toBe(name);
+    },
+  );
+
   it("keeps a Unicode owner rename through census, restart and re-adoption, without changing identity or appearance", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-persona-name-"));
     roots.push(root);
