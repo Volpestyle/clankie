@@ -101,7 +101,7 @@ export function renderClankieBanner(
     ...fullSprite,
     grid: fullSprite.grid.slice(Math.max(0, headTop), bodyTop < 0 ? undefined : bodyTop - 1),
   };
-  const art = caps.unicode ? renderSprite(sprite, caps) : [...ASCII_SPROUT.slice(-3)];
+  const art = caps.unicode ? renderSprite(sprite, caps) : ASCII_SPROUT.slice(-3);
   const artWidth = caps.unicode
     ? spriteColumns(sprite)
     : Math.max(...ASCII_SPROUT.map((line) => line.length));
