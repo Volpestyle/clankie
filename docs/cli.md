@@ -8440,7 +8440,10 @@ retained window once; the service deduplicates it. No host file path is read by 
 conversation; retries and resume retain the same native entry identities. The
 next hook retries retained records after a transport failure. The final page carries
 `responding` at prompt submission or tool progress and `waiting` at session start/end or stop/failure;
-compaction leaves activity unchanged. Empty transcripts still carry lifecycle
+the prompt submission also carries `turnStart: true`, while tool progress does
+not. This start signal keeps late tool progress from invalidating a captured
+Stop settlement. Older strict services receive one retry without the marker.
+Compaction leaves activity unchanged. Empty transcripts still carry lifecycle
 activity. These are display signals, not service-run completion or ownership. Reset retires that
 conversation's native sessions; launch a new seat afterward so old history cannot
 repopulate the cleared conversation. Sync failures never

@@ -5127,7 +5127,11 @@ paths:
                 activity:
                   type: string
                   enum: [responding, waiting]
-                  description: Native hook activity, supplied on the final transcript page. Display only; does not complete a service run.
+                  description: Native hook activity, supplied on the final transcript page; does not complete a service run.
+                turnStart:
+                  type: boolean
+                  enum: [true]
+                  description: UserPromptSubmit starts a new native turn. Supplied only on the final page; PostToolUse continues the same turn.
                 entries:
                   type: array
                   maxItems: 100
