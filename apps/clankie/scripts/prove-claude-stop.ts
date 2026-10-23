@@ -6,7 +6,7 @@
  * PANE is a throwaway interactive Claude the prover started itself, idle, with
  * an empty input line. Every Herdr call is fenced to that one pane: any other
  * target throws before Herdr runs. The real Herdr runner, Claude seat control,
- * HerdrWatchStore.stopNativeTask, SeatOutbox and settleStoppedTurn run here;
+ * HerdrWatchStore.stopNativeTask, SeatOutbox and prepareStoppedTurnSettlement run here;
  * the service's HTTP/authority layer and the worker channel do not (the hook
  * log's SessionStart is recorded here, as the service would on the plugin's hook).
  *
@@ -28,7 +28,7 @@ import {
 } from "../src/captain/herdr-watch.ts";
 import { paneInputLine } from "../src/captain/pane-draft.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
-import { settleStoppedTurn } from "../src/captain/stopped-turn.ts";
+import { prepareStoppedTurnSettlement } from "../src/captain/stopped-turn.ts";
 
 const run = promisify(execFile);
 const [pane, outArg] = process.argv.slice(2);
@@ -165,17 +165,17 @@ note("a.queued-held", { admitted, releasedSoFar: released.length });
 
 const observed = await watch.nativeTaskObservation(terminalId);
 if (!observed) throw new Error("proof pane was not observed");
+const settle = prepareStoppedTurnSettlement(await runner.get(pane), {
+  mailbox: () => undefined,
+  conversation: () => "proof",
+  outbox: () => outbox,
+  publishWaiting: (conversationId, session) => note("a.publish-waiting", { conversationId, session }),
+});
 const stopAt = Date.now();
 const stopped = await watch.stopNativeTask(terminalId, observed.binding, authorize);
 const stopMs = Date.now() - stopAt;
 note("a.stop", { result: stopped, ms: stopMs, authorityChecks });
-if (stopped.outcome === "stopped")
-  settleStoppedTurn(await runner.get(pane), {
-    mailbox: () => undefined,
-    conversation: () => "proof",
-    outbox: () => outbox,
-    publishWaiting: (conversationId, session) => note("a.publish-waiting", { conversationId, session }),
-  });
+if (stopped.outcome === "stopped") settle();
 const delivery = await Promise.race([held, sleep(10_000).then(() => "still held after 10s")]);
 note("a.queued-released", {
   delivery,

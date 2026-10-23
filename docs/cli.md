@@ -6215,9 +6215,10 @@ otherwise the result is `uncertain` and nothing is repeated. Claude's draft
 check is the last read before the key. Herdr cannot tell an interrupt from a
 turn that finished on its own in the instant before the key landed, so that
 race also reports `stopped`, not `already_finished`. A confirmed stop settles
-that session's turn as waiting, so a Queued message goes out at once instead
-of waiting for the hold to expire (Claude's Stop hook does not run after an
-interrupt).
+the hold captured before Stop as waiting, so a Queued message goes out at once
+instead of waiting for expiry (Claude's Stop hook does not run after an
+interrupt). Activity synced or a delivery taken after that capture keeps its own
+hold, even in the same session; a late Stop result cannot release the new turn.
 
 Every device sees a stopped Claude turn as the existing `turn` event with
 `phase: "cancelled"`, `reasonCode: "native_interrupted"` and the summary

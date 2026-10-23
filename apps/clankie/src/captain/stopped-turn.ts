@@ -14,19 +14,23 @@ export interface StoppedTurnHolds {
 }
 
 /**
- * A confirmed Stop ends the turn (VUH-2680). Claude's Stop hook does not run
- * after a user interrupt, so nothing else reports it: without this, the turn
- * hold stays "responding" and a Queued message waits out the stale window.
- * Only the exact stopped session is settled; another session's hold is not
- * released (`SeatOutbox.observeTurn` refuses it).
+ * Capture both holds before requesting Stop. Claude's Stop hook does not run
+ * after an interrupt, so a confirmed stop must settle its own hold. A later
+ * turn observation or channel take invalidates the captured settlement, even
+ * in the same session and millisecond (VUH-2686).
  */
-export function settleStoppedTurn(agent: HerdrAgentSnapshot, holds: StoppedTurnHolds): void {
+export function prepareStoppedTurnSettlement(agent: HerdrAgentSnapshot, holds: StoppedTurnHolds): () => void {
   const session = agent.session;
-  if (session === undefined) return;
+  if (session === undefined) return () => {};
   const sessionId = session.kind === "id" ? session.value : basename(session.value, ".jsonl");
-  holds.mailbox(agent.terminalId)?.observeTurn(sessionId, "waiting");
+  const mailbox = holds.mailbox(agent.terminalId);
+  const settleMailbox = mailbox?.stoppedTurnSettlement(sessionId);
   const conversationId = holds.conversation(agent);
-  if (conversationId === undefined) return;
-  if (holds.outbox(conversationId)?.observeTurn(sessionId, "waiting"))
-    holds.publishWaiting(conversationId, sessionId);
+  const outbox = conversationId === undefined ? undefined : holds.outbox(conversationId);
+  const settleOutbox = outbox?.stoppedTurnSettlement(sessionId);
+  return () => {
+    if (holds.mailbox(agent.terminalId) === mailbox) settleMailbox?.();
+    if (conversationId !== undefined && holds.outbox(conversationId) === outbox && settleOutbox?.())
+      holds.publishWaiting(conversationId, sessionId);
+  };
 }

@@ -67,7 +67,7 @@ import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { ReviewGate } from "./review-gate.ts";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
-import { settleStoppedTurn } from "./stopped-turn.ts";
+import { prepareStoppedTurnSettlement } from "./stopped-turn.ts";
 import { fleetInstructions } from "./captain-prompts.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
 import {
@@ -2201,34 +2201,42 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         { guard, stableReceiptKey: messageId },
       ),
     stop: async (seatId, binding, guard) => {
+      // Capture the exact occupant's holds before any asynchronous Stop work.
+      // allow-swallowed-rejection -- unreadable identity skips settlement; Stop still checks its own binding.
+      const before = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+      const settle =
+        before?.session &&
+        JSON.stringify([before.paneId, before.terminalId, before.agent, before.session]) === binding
+          ? prepareStoppedTurnSettlement(before, {
+              mailbox: (terminalId) => fleetMailboxes.get(terminalId),
+              conversation: (native) => {
+                try {
+                  return (
+                    conversations.attachedConversationForNative(native) ??
+                    (headSeat?.seatId === native.terminalId
+                      ? conversations.defaultGlobalConversationId()
+                      : undefined)
+                  );
+                } catch {
+                  return undefined;
+                }
+              },
+              outbox: (conversationId) => seatOutboxes.get(conversationId),
+              publishWaiting: (conversationId, sessionId) => {
+                conversations.syncNativeSeatTranscript(conversationId, sessionId, [], "waiting");
+              },
+            })
+          : undefined;
       const result = await herdrWatches.stopNativeTask(seatId, binding, guard);
       if (result.outcome !== "stopped") return result;
-      // Settle only the occupant that was stopped, never one that replaced it since.
-      // allow-swallowed-rejection -- an unreadable occupant only skips settling; the stop result stands and the hold expires as before.
+      // A replacement occupant cannot settle the captured session's holds.
+      // allow-swallowed-rejection -- unreadable identity leaves the hold to expire.
       const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
       if (
         agent?.session &&
         JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]) === binding
       )
-        settleStoppedTurn(agent, {
-          mailbox: (terminalId) => fleetMailboxes.get(terminalId),
-          conversation: (native) => {
-            try {
-              return (
-                conversations.attachedConversationForNative(native) ??
-                (headSeat?.seatId === native.terminalId
-                  ? conversations.defaultGlobalConversationId()
-                  : undefined)
-              );
-            } catch {
-              return undefined;
-            }
-          },
-          outbox: (conversationId) => seatOutboxes.get(conversationId),
-          publishWaiting: (conversationId, sessionId) => {
-            conversations.syncNativeSeatTranscript(conversationId, sessionId, [], "waiting");
-          },
-        });
+        settle?.();
       return result;
     },
   };

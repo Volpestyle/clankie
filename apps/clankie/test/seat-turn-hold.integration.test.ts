@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { SeatHookLog, createClaudeWorkerSeatAdapter } from "../src/captain/claude-worker-seat.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
-import { settleStoppedTurn } from "../src/captain/stopped-turn.ts";
+import { prepareStoppedTurnSettlement } from "../src/captain/stopped-turn.ts";
 
 // VUH-2045: the local operator seat went deaf while idle. Every event the seat
 // takes starts a turn, and only the seat's own "waiting" sync ends it. A seat
@@ -201,19 +201,75 @@ it("a Queued message held behind a Claude turn goes out as soon as Stop confirms
     publishWaiting,
   };
   // Settling a different session releases nothing.
-  settleStoppedTurn({ ...agent, session: { ...agent.session!, value: randomUUID() } }, holds);
+  prepareStoppedTurnSettlement({ ...agent, session: { ...agent.session!, value: randomUUID() } }, holds)();
   await new Promise((resolve) => setTimeout(resolve, 150));
   expect(notifications).toEqual([]);
   expect(publishWaiting).not.toHaveBeenCalled();
 
+  const settle = prepareStoppedTurnSettlement(agent, holds);
   const observed = await watch.nativeTaskObservation("seat1");
   expect(await watch.stopNativeTask("seat1", observed!.binding, async () => {})).toEqual({
     outcome: "stopped",
   });
   const stoppedAt = Date.now();
-  settleStoppedTurn(agent, holds);
+  settle();
   expect(publishWaiting).toHaveBeenCalledWith("global-default", sessionId);
   expect(await held).toMatchObject({ outcome: "delivered" });
   expect(notifications).toEqual(["Queued while working"]);
   expect(Date.now() - stoppedAt).toBeLessThan(2_000);
 });
+
+it.each(["observed", "taken"])(
+  "Stop settlement preserves a newer %s turn and keeps its queued message held (VUH-2686)",
+  async (source) => {
+    // Constant clock: timestamps cannot distinguish these turns.
+    const outbox = new SeatOutbox({ turnHoldStaleMs: 60_000, now: () => 100 });
+    const mailbox = new SeatOutbox({ turnHoldStaleMs: 60_000, now: () => 100 });
+    const notifications = channel(outbox);
+    const workerNotifications = channel(mailbox);
+    await vi.waitFor(() => expect(outbox.bound() && mailbox.bound()).toBe(true));
+    const agent: HerdrAgentSnapshot = {
+      agent: "claude",
+      paneId: "w1:p1",
+      terminalId: "seat1",
+      title: "lead",
+      status: "working",
+      session: { source: "herdr:claude", kind: "id", value: "session-a" },
+    };
+    outbox.observeTurn("session-a", "responding");
+    mailbox.observeTurn("session-a", "responding");
+    const publishWaiting = vi.fn();
+    const settle = prepareStoppedTurnSettlement(agent, {
+      mailbox: () => mailbox,
+      conversation: () => "global-default",
+      outbox: () => outbox,
+      publishWaiting,
+    });
+    // Stop has observed idle, but before its async completion returns, a new
+    // turn starts through a native sync or a bridge take in that same session.
+    if (source === "observed") {
+      outbox.observeTurn("session-a", "responding");
+      mailbox.observeTurn("session-a", "responding");
+    } else {
+      outbox.observeTurn("session-a", "waiting");
+      mailbox.observeTurn("session-a", "waiting");
+      await send(outbox, "New turn");
+      await send(mailbox, "New turn");
+    }
+    const held = send(outbox, "Wait for new turn", "queue");
+    const workerHeld = send(mailbox, "Wait for new turn", "queue");
+    // Attach rejection handlers so teardown also stays clean when the regression fails.
+    void held.catch(() => {});
+    void workerHeld.catch(() => {});
+    settle();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(notifications).toEqual(source === "taken" ? ["New turn"] : []);
+    expect(workerNotifications).toEqual(notifications);
+    expect(outbox.responding() && mailbox.responding()).toBe(true);
+    expect(publishWaiting).not.toHaveBeenCalled();
+    outbox.observeTurn("session-a", "waiting");
+    mailbox.observeTurn("session-a", "waiting");
+    expect(await held).toMatchObject({ outcome: "delivered" });
+    expect(await workerHeld).toMatchObject({ outcome: "delivered" });
+  },
+);
