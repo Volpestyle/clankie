@@ -205,8 +205,11 @@ credential holder.
   transcript and follows its live tail. Linked machines use their native session
   readers, including Claude account profiles; terminal summaries are never used
   as chat history. An opened chat keeps a private display cache so an offline
-  machine shows its last known transcript with an offline notice. Native reader
-  retention limits still apply. `--chat <conversationId>` opens the same
+  machine shows its last known transcript with an offline notice. Local chats
+  show at most the last 9,000 entries. Linked-machine chats show the newest 500
+  records within a 4 MiB read; older history stays in the native transcript.
+  The private cache holds at most 64 snapshots and 32 MiB in total, evicting the
+  oldest snapshots. `--chat <conversationId>` opens the same
   record directly; `clankie conversations list|show|tail` exposes it as JSON.
 - `/new [title]` starts and selects a conversation with fresh model context in
   the current workspace. The previous conversation remains available through

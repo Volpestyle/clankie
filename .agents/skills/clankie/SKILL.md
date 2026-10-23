@@ -179,6 +179,10 @@ Opening a worker in the TUI reads its native session, including linked-machine
 Claude profiles, and follows messages and tools live. An offline native source
 shows its last opened transcript from the private display cache. This grants no
 pane control; sends still use the native channel and its original receipts.
+Local chats show at most the last 9,000 entries. Linked-machine chats show the
+newest 500 records within a 4 MiB read; older history stays in the native
+transcript. The private offline cache holds at most 64 snapshots and 32 MiB in
+total, evicting the oldest snapshots and writing only when content changes.
 
 ## Authority and receipts
 

@@ -70,7 +70,10 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  statSync,
+  unlinkSync,
   unwatchFile,
   watchFile,
   writeFileSync,
@@ -405,6 +408,8 @@ const RETRY_ADMISSION_MS = 5_000;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
 const SEAT_REPLY_READ_LINES = 240;
 const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
+const NATIVE_CHAT_CACHE_FILES_MAX = 64;
+const NATIVE_CHAT_CACHE_BYTES_MAX = 32 * 1024 * 1024;
 // Harness startup includes loading extensions; it is not a short Herdr query.
 const SPAWN_READY_WAIT_MS = 30_000;
 const SPAWN_SESSION_WAIT_MS = 10_000;
@@ -1263,7 +1268,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     text: string,
     deliver: () => Promise<boolean>,
   ): Promise<boolean> {
-    const before = await this.readNativeChat(seatId);
+    const before = await this.readRoomReply(seatId);
     const priorIds = new Set(before?.transcript.entries.map((entry) => entry.id));
     const sent = await deliver();
     if (!sent) return false;
@@ -1272,7 +1277,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       while (!this.closed && Date.now() < deadline) {
         await delay(this.seatTranscriptTailMs);
         if (this.closed) return;
-        const snapshot = await this.readNativeChat(seatId);
+        const snapshot = await this.readRoomReply(seatId);
         if (snapshot === undefined) return;
         if (before !== undefined && snapshot.transcript.sessionKey !== before.transcript.sessionKey) return;
         const entries = snapshot.transcript.entries;
@@ -1360,7 +1365,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
       // A cache write failure cannot make a successful native read fail.
       try {
-        this.writeSidecar(cachePath, display);
+        this.cacheNativeChat(cachePath, display);
       } catch {
         /* read-through remains live */
       }
@@ -1375,6 +1380,61 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const status = live === undefined ? "offline" : unavailable ? "unavailable" : agent.status;
     transcript ??= { sessionKey: `unavailable:${seatId}`, entries: [] };
     return { agent: { ...agent, status }, transcript };
+  }
+
+  /** Only an explicit room prompt may use the transcriptless answer fallback. */
+  private async readRoomReply(seatId: string) {
+    const native = await this.readNativeChat(seatId);
+    if (native?.agent.status !== "unavailable") return native;
+    const live = await this.runner.resolveTerminal(seatId).catch(() => undefined);
+    if (live === undefined) return undefined;
+    const reply = await this.readSeatReply(live, "recent-unwrapped");
+    return {
+      agent: live,
+      transcript: {
+        sessionKey: `terminal:${seatId}`,
+        entries:
+          reply === undefined
+            ? []
+            : [{ type: "message" as const, id: "latest", role: "agent" as const, text: reply }],
+      },
+    };
+  }
+
+  /** Compact display snapshots share one bounded, oldest-write-first cache. */
+  private cacheNativeChat(path: string, transcript: HerdrSeatTranscript): void {
+    let snapshot = transcript;
+    let encoded = JSON.stringify(snapshot);
+    while (Buffer.byteLength(encoded) > NATIVE_CHAT_CACHE_BYTES_MAX && snapshot.entries.length > 0) {
+      snapshot = { ...snapshot, entries: snapshot.entries.slice(Math.ceil(snapshot.entries.length / 2)) };
+      encoded = JSON.stringify(snapshot);
+    }
+    const unchanged = existsSync(path) && readFileSync(path, "utf8") === encoded;
+    const directory = dirname(path);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const files = readdirSync(directory)
+      .filter((name) => /^[a-f0-9]{64}\.json$/u.test(name) && join(directory, name) !== path)
+      .map((name) => {
+        const file = join(directory, name);
+        const stat = statSync(file);
+        return { path: file, bytes: stat.size, modifiedAt: stat.mtimeMs };
+      })
+      .sort((a, b) => a.modifiedAt - b.modifiedAt || a.path.localeCompare(b.path));
+    let bytes = files.reduce((total, file) => total + file.bytes, 0) + Buffer.byteLength(encoded);
+    while (files.length >= NATIVE_CHAT_CACHE_FILES_MAX || bytes > NATIVE_CHAT_CACHE_BYTES_MAX) {
+      const oldest = files.shift();
+      if (!oldest) break;
+      unlinkSync(oldest.path);
+      bytes -= oldest.bytes;
+    }
+    if (unchanged) return;
+    const temporary = `${path}.${String(process.pid)}.tmp`;
+    try {
+      writeFileSync(temporary, encoded, { mode: 0o600 });
+      renameSync(temporary, path);
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
   }
 
   /** Controller observations and actions retain the exact native occupant. */

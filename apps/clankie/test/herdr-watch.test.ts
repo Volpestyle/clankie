@@ -4,7 +4,7 @@ import {
   type WorkerSeatAgent,
 } from "../src/captain/claude-worker-seat.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -2510,6 +2510,77 @@ it("captures only the reply following an explicit room prompt, not old or unrela
     expect(project).toHaveBeenCalledWith("term-potato", { kind: "reply", text: "Room answer" }),
   );
   expect(project).toHaveBeenCalledTimes(1);
+  store.close();
+});
+
+it("captures a transcriptless room reply while chat display never reads terminal text", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-room-terminal-reply-"));
+  roots.push(root);
+  const agent = { ...done, session: undefined };
+  let answer = "※ recap: Previous answer.";
+  const read = vi.fn(async () => answer);
+  const project = vi.fn();
+  const store = new HerdrWatchStore(join(root, "watches.json"), {
+    seatTranscriptTailMs: 5,
+    runner: {
+      get: async () => agent,
+      resolveTerminal: async () => agent,
+      wait: async () => agent,
+      transcript: async () => undefined,
+      read,
+    },
+  });
+  store.start(async () => {}, project);
+  expect((await store.readNativeChat("term-potato"))?.transcript.entries).toEqual([]);
+  expect(read).not.toHaveBeenCalled();
+  await store.sendAndWatchReply("term-potato", "Room question", async () => {
+    answer = "※ recap: Room answer.";
+    return true;
+  });
+  await vi.waitFor(() =>
+    expect(project).toHaveBeenCalledWith("term-potato", { kind: "reply", text: "Room answer." }),
+  );
+  expect(project).toHaveBeenCalledTimes(1);
+  store.close();
+});
+
+it("bounds native display snapshots across sessions and leaves unchanged snapshots unwritten", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-native-cache-limit-"));
+  roots.push(root);
+  const path = join(root, "watches.json");
+  const directory = `${path}.native-chat`;
+  let session = "session-0";
+  const agent = () => ({ ...done, session: { source: "herdr:claude", kind: "id" as const, value: session } });
+  const store = new HerdrWatchStore(path, {
+    runner: {
+      get: async () => agent(),
+      resolveTerminal: async () => agent(),
+      wait: async () => agent(),
+      transcript: async () => ({
+        sessionKey: session,
+        entries: [{ type: "message", id: "a1", role: "agent", text: "Native answer" }],
+      }),
+    },
+  });
+  await store.readNativeChat("term-potato");
+  const first = join(directory, (await readdir(directory))[0]!);
+  await utimes(first, 1, 1);
+  await store.readNativeChat("term-potato");
+  expect((await stat(first)).mtimeMs).toBe(1_000);
+  for (let index = 1; index <= 65; index += 1) {
+    session = `session-${index}`;
+    await store.readNativeChat("term-potato");
+  }
+  const retained = await readdir(directory);
+  expect(retained).toHaveLength(64);
+  await expect(stat(first)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(
+    (
+      await Promise.all(
+        retained.map(async (file) => JSON.parse(await readFile(join(directory, file), "utf8"))),
+      )
+    ).some((value) => value.sessionKey === "session-65"),
+  ).toBe(true);
   store.close();
 });
 
