@@ -62,7 +62,7 @@ async function gate() {
   const sourceRoot = resolve(argument("--source-root", runnerRoot));
   const output = resolve(argument("--output", join(runnerRoot, ".data/qa/fleet-load.json")));
   const durationSeconds = numeric("--duration-seconds", 120, 15);
-  const warmupSeconds = numeric("--warmup-seconds", 10, 1);
+  const warmupSeconds = numeric("--warmup-seconds", 30, 1);
   const workers = numeric("--workers", 10, 1);
   if (!Number.isInteger(workers) || workers > 32)
     throw new Error("--workers must be an integer from 1 to 32");
@@ -80,11 +80,19 @@ async function gate() {
   const health: number[] = [];
   const fleet: number[] = [];
   const nativeCpu: number[] = [];
+  const warmup = {
+    healthRequests: 0,
+    fleetRequests: 0,
+    workerToolCalls: 0,
+    readyWorkers: 0,
+    elapsedSeconds: 0,
+  };
   let service: ChildProcess | undefined;
   let herdrProcess: ChildProcess | undefined;
   let provider: Awaited<ReturnType<typeof startLinearFixture>> | undefined;
   let fixture: Awaited<ReturnType<typeof seedCodex>> | undefined;
   let started = 0;
+  let measurementAt = Infinity;
   let ended = 0;
   let sourceCommit = "unknown";
   let admissionRefusals = 0;
@@ -104,7 +112,7 @@ async function gate() {
     }
   };
   const loop = async (interval: number, work: () => Promise<void>) => {
-    while (!signal.aborted && Date.now() < started + durationSeconds * 1000) {
+    while (!signal.aborted) {
       const at = Date.now();
       try {
         await work();
@@ -349,16 +357,12 @@ async function gate() {
     const work = await dispatch({ op: "work_items", repoId: "workspace" });
     if (!JSON.stringify(work).includes("LOAD-1"))
       throw new Error(`Work panel did not read the controlled Linear issue: ${JSON.stringify(work)}`);
-    await sleep(warmupSeconds * 1000, undefined, { signal });
-    started = Date.now();
-    service.send("measure");
-    await writeFile(join(root, "workers", "start"), String(started));
-    const finish = setTimeout(() => abort.abort(), durationSeconds * 1000);
-    console.log(
-      `Fleet load: ${workers} real bridges, ${durationSeconds}s measurement, source ${sourceCommit.slice(0, 8)}`,
-    );
+    // Warm the actual traffic and every worker's staggered 30-second cadence,
+    // rather than sleeping while workers still wait for their start marker.
+    const warmupAt = Date.now();
+    await writeFile(join(root, "workers", "start"), String(warmupAt));
     let cursor: string | undefined;
-    await Promise.all([
+    const traffic = Promise.all([
       loop(1000, async () => {
         const at = performance.now();
         const response = await fetch(`${base}/health`, {
@@ -366,7 +370,8 @@ async function gate() {
         });
         const body = (await response.json()) as { ok?: boolean };
         if (!response.ok || body.ok !== true) throw new Error(`Health failed (${response.status})`);
-        health.push(performance.now() - at);
+        if (at >= measurementAt) health.push(performance.now() - at);
+        else warmup.healthRequests++;
       }),
       loop(1000, async () => {
         const at = performance.now();
@@ -374,7 +379,8 @@ async function gate() {
           { op: "fleet", includeWork: true },
           AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
         );
-        fleet.push(performance.now() - at);
+        if (at >= measurementAt) fleet.push(performance.now() - at);
+        else warmup.fleetRequests++;
       }),
       loop(1, async () => {
         const result = await dispatch(
@@ -392,6 +398,7 @@ async function gate() {
         );
       }),
       loop(1000, async () => {
+        const at = performance.now();
         const output = (await execute("ps", ["-axo", "pid=,ppid=,%cpu="], { timeout: 5000 })).stdout;
         const rows = output
           .trim()
@@ -406,15 +413,41 @@ async function gate() {
               changed = true;
             }
         }
-        nativeCpu.push(
-          rows.reduce(
-            (sum, [pid, _parent, cpu]) =>
-              sum + (pid && pid !== ready.pid && descendants.has(pid) ? (cpu ?? 0) : 0),
-            0,
-          ),
-        );
+        if (started && at >= measurementAt)
+          nativeCpu.push(
+            rows.reduce(
+              (sum, [pid, _parent, cpu]) =>
+                sum + (pid && pid !== ready.pid && descendants.has(pid) ? (cpu ?? 0) : 0),
+              0,
+            ),
+          );
       }),
     ]);
+    console.log(`Fleet load: ${warmupSeconds}s warm-up with real worker and endpoint traffic`);
+    await sleep(warmupSeconds * 1000, undefined, { signal });
+    // A release warms every staggered worker through its first real tool call.
+    // The RPC already has a 35-second deadline; never wait beyond one more RPC.
+    const warmupDeadline = Date.now() + 35_000;
+    while (true) {
+      const warmed = await Promise.all(workerPaths.map(readWorker));
+      warmup.readyWorkers = warmed.filter((worker) => worker && worker.calls.length > 0).length;
+      warmup.workerToolCalls = warmed.reduce((sum, worker) => sum + (worker?.calls.length ?? 0), 0);
+      if (warmupSeconds < 30 || warmup.readyWorkers === workers) break;
+      if (Date.now() >= warmupDeadline) throw new Error("Warm-up did not exercise every worker tool");
+      await sleep(100, undefined, { signal });
+    }
+    warmup.elapsedSeconds = (Date.now() - warmupAt) / 1000;
+    if (!warmup.healthRequests || !warmup.fleetRequests)
+      throw new Error("Warm-up did not exercise every endpoint");
+    console.log(`Fleet load warm-up proof: ${JSON.stringify(warmup)}`);
+    started = Date.now();
+    measurementAt = performance.now();
+    service.send("measure");
+    const finish = setTimeout(() => abort.abort(), durationSeconds * 1000);
+    console.log(
+      `Fleet load: ${workers} real bridges, ${durationSeconds}s measurement, source ${sourceCommit.slice(0, 8)}`,
+    );
+    await traffic;
     clearTimeout(finish);
     ended = Date.now();
   } catch (error) {
@@ -493,6 +526,7 @@ async function gate() {
         workers,
         durationSeconds,
         warmupSeconds,
+        warmup,
         fleetFreshReadMs: 1000,
         fleetLongPollMs: 20_000,
         catalogMs: 5000,
@@ -546,7 +580,7 @@ async function gate() {
 
 if (args.includes("--help")) {
   console.log(
-    "Fleet release safety gate (manual/release ONLY)\n  pnpm check:load [--source-root PATH] [--output PATH]\n  --duration-seconds 120 --warmup-seconds 10 --workers 10 --large-session-mb 32\n  --cpu-budget-percent 9.9 --health-p95-ms 250 --tool-p95-ms 2000 --linear-calls-per-minute 24\n  Requires macOS and a frozen real install in source-root; installs checksum-pinned official Herdr.\n  Shorter windows are development evidence; release uses the defaults.",
+    "Fleet release safety gate (manual/release ONLY)\n  pnpm check:load [--source-root PATH] [--output PATH]\n  --duration-seconds 120 --warmup-seconds 30 --workers 10 --large-session-mb 32\n  --cpu-budget-percent 9.9 --health-p95-ms 250 --tool-p95-ms 2000 --linear-calls-per-minute 24\n  Requires macOS and a frozen real install in source-root; installs checksum-pinned official Herdr.\n  Shorter windows are development evidence; release uses the defaults.",
   );
 } else if (args.includes("--internal-service")) {
   const config = JSON.parse(

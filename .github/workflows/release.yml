@@ -71,13 +71,15 @@ jobs:
           node-version: 26.7.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Fleet CPU and latency release gate
-        run: pnpm check:load
+      - name: Fleet CPU and latency release gate with one timing-only retry
+        run: node scripts/check-release-load.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: fleet-load
-          path: .data/qa/fleet-load.json
+          path: |
+            .data/qa/fleet-load*.json
+            .data/qa/fleet-load-release-summary.md
           include-hidden-files: true
           retention-days: 7
 

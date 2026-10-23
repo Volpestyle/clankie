@@ -284,6 +284,11 @@ full repository check, builds and smoke-tests the archive on an Apple silicon
 GitHub runner, runs the fleet load gate on a fresh runner of its own, builds the `linux-arm64` and `linux-x64` archives that hosted bodies
 install ([ADR 0237](adr/0237-hosted-bodies-update-themselves-to-official-releases.md)),
 and uploads all three archives with their checksums to the matching GitHub Release.
+The load gate warms real worker and endpoint traffic for 30 seconds before its
+unchanged 120-second measurement. A complete failure of only the health or CPU
+budget gets one fresh attempt; any persistent failure, incomplete workload,
+interruption, admission refusal or other error still blocks publication. Both
+attempts and the first failure remain in the `fleet-load` artifact and job summary.
 When that load gate fails on the runner but not locally, the manual
 `Load gate A/B` workflow (`gh workflow run load-ab.yml -f refs="vA vB"`) measures
 `pnpm check:load` for each revision interleaved on one runner, so a code

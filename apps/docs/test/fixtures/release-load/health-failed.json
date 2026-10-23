@@ -1,0 +1,902 @@
+{
+  "schemaVersion": 1,
+  "outcome": "failed",
+  "sourceRoot": "/Users/runner/work/clankie/clankie",
+  "sourceCommit": "af52d4aa13f0e1ea65b5abd7669f9fd8786ddd6d",
+  "runnerRoot": "/Users/runner/work/clankie/clankie",
+  "recordedAt": "2026-10-23T16:14:24.478Z",
+  "budgets": {
+    "steadyCpuPercent": 9.9,
+    "healthP95Ms": 250,
+    "toolP95Ms": 2000,
+    "admissionRefusals": 0,
+    "linearCallsPerMinute": 24
+  },
+  "workload": {
+    "workers": 10,
+    "durationSeconds": 120,
+    "warmupSeconds": 10,
+    "fleetFreshReadMs": 1000,
+    "fleetLongPollMs": 20000,
+    "catalogMs": 5000,
+    "mailboxMs": 25000,
+    "workerToolMs": 30000,
+    "workerToolPhase": "evenly staggered within the 30-second cadence",
+    "workPanelMs": 60000,
+    "codex": {
+      "ids": [
+        "cfa05dcd-51f3-4de8-8ab9-35e12e7a6df2",
+        "932f93cc-af43-4535-accf-6e2a2f6810a5",
+        "47ee9566-9e59-436c-8051-97c1e2ea9a72",
+        "bb38a445-4f08-4394-9273-4a270e33907a",
+        "4651ef89-9bb6-4505-bdee-4b0a4ae53137",
+        "f8e5c1cc-a8ea-4d8a-9a89-416f4fd8b27a",
+        "7bcc1288-8b80-4a6b-bbf2-19bb70a4d892",
+        "891562ce-1a2b-4ebc-a33a-30d0781cf447",
+        "eb1db52a-0d23-47d5-8cea-b54705ae638b",
+        "7c558f46-b7b6-4f4e-9e47-70eb75b659b8"
+      ],
+      "bytes": 75582102,
+      "files": 532,
+      "largeParents": 2,
+      "largeMb": 32
+    }
+  },
+  "metrics": {
+    "elapsedSeconds": 120.067,
+    "readyWorkers": 10,
+    "steadyCpuPercent": 8.931763179240347,
+    "cpuP95Percent": 23.241949842384333,
+    "nativeDescendantCpuPercent": 0.9091666666666665,
+    "healthP95Ms": 502.6145830000023,
+    "healthRequests": 120,
+    "toolP95Ms": 702,
+    "toolCalls": 40,
+    "fleetP95Ms": 608.7079589999921,
+    "fleetRequests": 120,
+    "admissionRefusals": 0,
+    "linearCalls": 42,
+    "linearCallsPerMinute": 20.988281542805268,
+    "linearByTool": {
+      "list_issues": 2,
+      "get_issue": 40
+    },
+    "eventLoopP95Ms": 19.349503
+  },
+  "errors": ["health p95: 502.6145830000023 exceeds budget 250"],
+  "samples": [
+    {
+      "kind": "sample",
+      "at": 1792771945326,
+      "cpuPercent": 83.0117768827178,
+      "admissions": 0,
+      "eventLoopP95Ms": 21.430271
+    },
+    {
+      "kind": "sample",
+      "at": 1792771946329,
+      "cpuPercent": 0.6697982988391802,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.901823
+    },
+    {
+      "kind": "sample",
+      "at": 1792771947334,
+      "cpuPercent": 9.203866815230741,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.098431
+    },
+    {
+      "kind": "sample",
+      "at": 1792771948336,
+      "cpuPercent": 5.049288558795643,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.819903
+    },
+    {
+      "kind": "sample",
+      "at": 1792771949337,
+      "cpuPercent": 8.828611358669592,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.581183
+    },
+    {
+      "kind": "sample",
+      "at": 1792771950338,
+      "cpuPercent": 0.6448718949836793,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.509183
+    },
+    {
+      "kind": "sample",
+      "at": 1792771951339,
+      "cpuPercent": 6.6865343267163295,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.279231
+    },
+    {
+      "kind": "sample",
+      "at": 1792771952339,
+      "cpuPercent": 0.5919684166276987,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.402111
+    },
+    {
+      "kind": "sample",
+      "at": 1792771953341,
+      "cpuPercent": 6.840761041091681,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.352959
+    },
+    {
+      "kind": "sample",
+      "at": 1792771954342,
+      "cpuPercent": 4.602402401086705,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.935167
+    },
+    {
+      "kind": "sample",
+      "at": 1792771955345,
+      "cpuPercent": 8.035037346065915,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.606911
+    },
+    {
+      "kind": "sample",
+      "at": 1792771956346,
+      "cpuPercent": 0.5498698567243844,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.197311
+    },
+    {
+      "kind": "sample",
+      "at": 1792771957348,
+      "cpuPercent": 16.482697658962483,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.819903
+    },
+    {
+      "kind": "sample",
+      "at": 1792771958350,
+      "cpuPercent": 1.8707653402118485,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.361151
+    },
+    {
+      "kind": "sample",
+      "at": 1792771959352,
+      "cpuPercent": 7.40799451400202,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.434303
+    },
+    {
+      "kind": "sample",
+      "at": 1792771960353,
+      "cpuPercent": 3.5865423761442368,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.156351
+    },
+    {
+      "kind": "sample",
+      "at": 1792771961356,
+      "cpuPercent": 7.500118518919008,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.934015
+    },
+    {
+      "kind": "sample",
+      "at": 1792771962362,
+      "cpuPercent": 1.6158787661960647,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.263423
+    },
+    {
+      "kind": "sample",
+      "at": 1792771963387,
+      "cpuPercent": 29.5595993334016,
+      "admissions": 0,
+      "eventLoopP95Ms": 19.906559
+    },
+    {
+      "kind": "sample",
+      "at": 1792771964388,
+      "cpuPercent": 61.72406905150704,
+      "admissions": 0,
+      "eventLoopP95Ms": 18.137087
+    },
+    {
+      "kind": "sample",
+      "at": 1792771965419,
+      "cpuPercent": 10.916060424953072,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.375807
+    },
+    {
+      "kind": "sample",
+      "at": 1792771966421,
+      "cpuPercent": 5.737246748065221,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.106047
+    },
+    {
+      "kind": "sample",
+      "at": 1792771967422,
+      "cpuPercent": 9.917378922007819,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.827519
+    },
+    {
+      "kind": "sample",
+      "at": 1792771968424,
+      "cpuPercent": 0.6887595158727738,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.245311
+    },
+    {
+      "kind": "sample",
+      "at": 1792771969425,
+      "cpuPercent": 8.827800780705239,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.958591
+    },
+    {
+      "kind": "sample",
+      "at": 1792771970426,
+      "cpuPercent": 0.6347016739207813,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.500415
+    },
+    {
+      "kind": "sample",
+      "at": 1792771971427,
+      "cpuPercent": 9.422431851856135,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.803519
+    },
+    {
+      "kind": "sample",
+      "at": 1792771972428,
+      "cpuPercent": 3.1413727695859657,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.852095
+    },
+    {
+      "kind": "sample",
+      "at": 1792771973429,
+      "cpuPercent": 7.468426356889281,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.228927
+    },
+    {
+      "kind": "sample",
+      "at": 1792771974430,
+      "cpuPercent": 0.7130082599577561,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.417919
+    },
+    {
+      "kind": "sample",
+      "at": 1792771975431,
+      "cpuPercent": 12.939395686255454,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.090815
+    },
+    {
+      "kind": "sample",
+      "at": 1792771976433,
+      "cpuPercent": 9.482316985743637,
+      "admissions": 0,
+      "eventLoopP95Ms": 17.301503
+    },
+    {
+      "kind": "sample",
+      "at": 1792771977435,
+      "cpuPercent": 0.6283150182967305,
+      "admissions": 0,
+      "eventLoopP95Ms": 11.583487
+    },
+    {
+      "kind": "sample",
+      "at": 1792771978438,
+      "cpuPercent": 11.467079528200989,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.794751
+    },
+    {
+      "kind": "sample",
+      "at": 1792771979439,
+      "cpuPercent": 0.5146643643240969,
+      "admissions": 0,
+      "eventLoopP95Ms": 11.452415
+    },
+    {
+      "kind": "sample",
+      "at": 1792771980441,
+      "cpuPercent": 9.434446412490551,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.680063
+    },
+    {
+      "kind": "sample",
+      "at": 1792771981442,
+      "cpuPercent": 3.5955980487985153,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.378111
+    },
+    {
+      "kind": "sample",
+      "at": 1792771982444,
+      "cpuPercent": 14.364988012978836,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.016511
+    },
+    {
+      "kind": "sample",
+      "at": 1792771983445,
+      "cpuPercent": 3.5388998592062917,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.787711
+    },
+    {
+      "kind": "sample",
+      "at": 1792771984446,
+      "cpuPercent": 8.434932273674006,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.851519
+    },
+    {
+      "kind": "sample",
+      "at": 1792771985447,
+      "cpuPercent": 0.8966423017639289,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.597567
+    },
+    {
+      "kind": "sample",
+      "at": 1792771986450,
+      "cpuPercent": 8.995769016510485,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.154623
+    },
+    {
+      "kind": "sample",
+      "at": 1792771987452,
+      "cpuPercent": 3.396141096427177,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.826943
+    },
+    {
+      "kind": "sample",
+      "at": 1792771988454,
+      "cpuPercent": 50.9455105774598,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.540799
+    },
+    {
+      "kind": "sample",
+      "at": 1792771989454,
+      "cpuPercent": 3.3828777176720894,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.197311
+    },
+    {
+      "kind": "sample",
+      "at": 1792771990455,
+      "cpuPercent": 3.4210627609750155,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.072703
+    },
+    {
+      "kind": "sample",
+      "at": 1792771991459,
+      "cpuPercent": 6.9098741692343975,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.621567
+    },
+    {
+      "kind": "sample",
+      "at": 1792771992460,
+      "cpuPercent": 1.1663184545126148,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.990783
+    },
+    {
+      "kind": "sample",
+      "at": 1792771993462,
+      "cpuPercent": 11.032145926196984,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.572991
+    },
+    {
+      "kind": "sample",
+      "at": 1792771994463,
+      "cpuPercent": 0.5792427763458845,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.409727
+    },
+    {
+      "kind": "sample",
+      "at": 1792771995466,
+      "cpuPercent": 8.547845742014749,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.400959
+    },
+    {
+      "kind": "sample",
+      "at": 1792771996470,
+      "cpuPercent": 3.7112534341309065,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.072703
+    },
+    {
+      "kind": "sample",
+      "at": 1792771997472,
+      "cpuPercent": 6.6551206167049255,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.802367
+    },
+    {
+      "kind": "sample",
+      "at": 1792771998473,
+      "cpuPercent": 0.6152367039154243,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.318463
+    },
+    {
+      "kind": "sample",
+      "at": 1792771999473,
+      "cpuPercent": 9.839093247479036,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.663103
+    },
+    {
+      "kind": "sample",
+      "at": 1792772000475,
+      "cpuPercent": 0.9078756690844113,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.319039
+    },
+    {
+      "kind": "sample",
+      "at": 1792772001476,
+      "cpuPercent": 4.1122192045120975,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.983743
+    },
+    {
+      "kind": "sample",
+      "at": 1792772002479,
+      "cpuPercent": 2.170941711795911,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.475263
+    },
+    {
+      "kind": "sample",
+      "at": 1792772003481,
+      "cpuPercent": 5.750518321431378,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.154623
+    },
+    {
+      "kind": "sample",
+      "at": 1792772004482,
+      "cpuPercent": 0.8992295536713247,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.753215
+    },
+    {
+      "kind": "sample",
+      "at": 1792772005484,
+      "cpuPercent": 9.342540632651069,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.450111
+    },
+    {
+      "kind": "sample",
+      "at": 1792772006485,
+      "cpuPercent": 4.576660026458747,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.605183
+    },
+    {
+      "kind": "sample",
+      "at": 1792772007487,
+      "cpuPercent": 3.2885878100793526,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.580607
+    },
+    {
+      "kind": "sample",
+      "at": 1792772008488,
+      "cpuPercent": 13.618295522612826,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.925247
+    },
+    {
+      "kind": "sample",
+      "at": 1792772009490,
+      "cpuPercent": 7.967996841079517,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.588799
+    },
+    {
+      "kind": "sample",
+      "at": 1792772010491,
+      "cpuPercent": 0.7173409312150058,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.498687
+    },
+    {
+      "kind": "sample",
+      "at": 1792772011492,
+      "cpuPercent": 10.166904206500037,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.613375
+    },
+    {
+      "kind": "sample",
+      "at": 1792772012494,
+      "cpuPercent": 0.7046644441353636,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.311423
+    },
+    {
+      "kind": "sample",
+      "at": 1792772013496,
+      "cpuPercent": 11.417401893090732,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.836287
+    },
+    {
+      "kind": "sample",
+      "at": 1792772014497,
+      "cpuPercent": 4.3406756655867245,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.566527
+    },
+    {
+      "kind": "sample",
+      "at": 1792772015499,
+      "cpuPercent": 12.915806667848905,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.082623
+    },
+    {
+      "kind": "sample",
+      "at": 1792772016499,
+      "cpuPercent": 1.4577227530132908,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.745599
+    },
+    {
+      "kind": "sample",
+      "at": 1792772017502,
+      "cpuPercent": 19.403540300212107,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.589375
+    },
+    {
+      "kind": "sample",
+      "at": 1792772018504,
+      "cpuPercent": 1.395902656258988,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.302079
+    },
+    {
+      "kind": "sample",
+      "at": 1792772019506,
+      "cpuPercent": 7.813219224047879,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.720447
+    },
+    {
+      "kind": "sample",
+      "at": 1792772020506,
+      "cpuPercent": 5.430092242577269,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.245887
+    },
+    {
+      "kind": "sample",
+      "at": 1792772021508,
+      "cpuPercent": 14.175090534132275,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.385727
+    },
+    {
+      "kind": "sample",
+      "at": 1792772022509,
+      "cpuPercent": 9.038614595391477,
+      "admissions": 0,
+      "eventLoopP95Ms": 11.993087
+    },
+    {
+      "kind": "sample",
+      "at": 1792772023510,
+      "cpuPercent": 16.22206855792995,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.090815
+    },
+    {
+      "kind": "sample",
+      "at": 1792772024511,
+      "cpuPercent": 6.380898090894462,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.648447
+    },
+    {
+      "kind": "sample",
+      "at": 1792772025513,
+      "cpuPercent": 1.7440750102006006,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.539647
+    },
+    {
+      "kind": "sample",
+      "at": 1792772026515,
+      "cpuPercent": 23.241949842384333,
+      "admissions": 0,
+      "eventLoopP95Ms": 19.349503
+    },
+    {
+      "kind": "sample",
+      "at": 1792772027518,
+      "cpuPercent": 1.0150730871328042,
+      "admissions": 0,
+      "eventLoopP95Ms": 11.771903
+    },
+    {
+      "kind": "sample",
+      "at": 1792772028520,
+      "cpuPercent": 14.011088980303397,
+      "admissions": 0,
+      "eventLoopP95Ms": 17.432575
+    },
+    {
+      "kind": "sample",
+      "at": 1792772029520,
+      "cpuPercent": 6.896871218864951,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.943359
+    },
+    {
+      "kind": "sample",
+      "at": 1792772030522,
+      "cpuPercent": 14.058950463588737,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.335999
+    },
+    {
+      "kind": "sample",
+      "at": 1792772031523,
+      "cpuPercent": 2.383359557067708,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.827519
+    },
+    {
+      "kind": "sample",
+      "at": 1792772032524,
+      "cpuPercent": 20.90284885031317,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.533183
+    },
+    {
+      "kind": "sample",
+      "at": 1792772033525,
+      "cpuPercent": 12.594302254460334,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.204927
+    },
+    {
+      "kind": "sample",
+      "at": 1792772034527,
+      "cpuPercent": 13.266679047674854,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.688831
+    },
+    {
+      "kind": "sample",
+      "at": 1792772035528,
+      "cpuPercent": 4.926707110808353,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.154623
+    },
+    {
+      "kind": "sample",
+      "at": 1792772036529,
+      "cpuPercent": 20.734173549560285,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.278655
+    },
+    {
+      "kind": "sample",
+      "at": 1792772037530,
+      "cpuPercent": 1.413509924800996,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.721599
+    },
+    {
+      "kind": "sample",
+      "at": 1792772038532,
+      "cpuPercent": 14.497883888887584,
+      "admissions": 0,
+      "eventLoopP95Ms": 25.772031
+    },
+    {
+      "kind": "sample",
+      "at": 1792772039532,
+      "cpuPercent": 0.9658435387184141,
+      "admissions": 0,
+      "eventLoopP95Ms": 18.219007
+    },
+    {
+      "kind": "sample",
+      "at": 1792772040534,
+      "cpuPercent": 14.209416864368766,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.024127
+    },
+    {
+      "kind": "sample",
+      "at": 1792772041534,
+      "cpuPercent": 77.97061014695004,
+      "admissions": 0,
+      "eventLoopP95Ms": 20.168703
+    },
+    {
+      "kind": "sample",
+      "at": 1792772042535,
+      "cpuPercent": 11.105507861236923,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.654335
+    },
+    {
+      "kind": "sample",
+      "at": 1792772043538,
+      "cpuPercent": 1.0740262940473426,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.211967
+    },
+    {
+      "kind": "sample",
+      "at": 1792772044540,
+      "cpuPercent": 7.66200783216648,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.596991
+    },
+    {
+      "kind": "sample",
+      "at": 1792772045543,
+      "cpuPercent": 7.8743121643252145,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.236543
+    },
+    {
+      "kind": "sample",
+      "at": 1792772046544,
+      "cpuPercent": 1.2062027135105533,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.902399
+    },
+    {
+      "kind": "sample",
+      "at": 1792772047545,
+      "cpuPercent": 10.45358310922637,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.524991
+    },
+    {
+      "kind": "sample",
+      "at": 1792772048546,
+      "cpuPercent": 3.7693742615570383,
+      "admissions": 0,
+      "eventLoopP95Ms": 12.378111
+    },
+    {
+      "kind": "sample",
+      "at": 1792772049548,
+      "cpuPercent": 0.901467408087341,
+      "admissions": 0,
+      "eventLoopP95Ms": 11.771903
+    },
+    {
+      "kind": "sample",
+      "at": 1792772050549,
+      "cpuPercent": 8.961316081186718,
+      "admissions": 0,
+      "eventLoopP95Ms": 28.704767
+    },
+    {
+      "kind": "sample",
+      "at": 1792772051550,
+      "cpuPercent": 1.8910152372392328,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.187967
+    },
+    {
+      "kind": "sample",
+      "at": 1792772052551,
+      "cpuPercent": 5.352137375156428,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.359423
+    },
+    {
+      "kind": "sample",
+      "at": 1792772053559,
+      "cpuPercent": 3.0315635689825675,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.852095
+    },
+    {
+      "kind": "sample",
+      "at": 1792772054561,
+      "cpuPercent": 6.409236857193551,
+      "admissions": 0,
+      "eventLoopP95Ms": 13.975551
+    },
+    {
+      "kind": "sample",
+      "at": 1792772055563,
+      "cpuPercent": 1.020634734699659,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.147583
+    },
+    {
+      "kind": "sample",
+      "at": 1792772056564,
+      "cpuPercent": 11.518177277720076,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.515071
+    },
+    {
+      "kind": "sample",
+      "at": 1792772057565,
+      "cpuPercent": 1.6768660349057602,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.523839
+    },
+    {
+      "kind": "sample",
+      "at": 1792772058566,
+      "cpuPercent": 12.601938886371167,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.835135
+    },
+    {
+      "kind": "sample",
+      "at": 1792772059568,
+      "cpuPercent": 4.607987694720153,
+      "admissions": 0,
+      "eventLoopP95Ms": 16.236543
+    },
+    {
+      "kind": "sample",
+      "at": 1792772060569,
+      "cpuPercent": 11.57956643330705,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.007743
+    },
+    {
+      "kind": "sample",
+      "at": 1792772061570,
+      "cpuPercent": 1.34396425508197,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.688255
+    },
+    {
+      "kind": "sample",
+      "at": 1792772062575,
+      "cpuPercent": 10.4452377442023,
+      "admissions": 0,
+      "eventLoopP95Ms": 15.515647
+    },
+    {
+      "kind": "sample",
+      "at": 1792772063579,
+      "cpuPercent": 2.9211323203602717,
+      "admissions": 0,
+      "eventLoopP95Ms": 14.475263
+    }
+  ]
+}

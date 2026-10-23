@@ -151,6 +151,12 @@ an installed service for this check. Linux installation starts a service, so run
 its proof in an isolated container rather than on the owner's machine.
 
 Never weaken or skip the workflow's repository gate to make a release pass.
+The release-only `scripts/check-release-load.mjs` retains both load measurements
+and permits one retry only for a complete health/CPU-only budget failure. Read
+`fleet-load-release-summary.md` and both attempt JSONs: a recovered first failure
+must stay visible in the release report. Local `pnpm check:load` stays a single
+strict measurement; real worker and endpoint traffic warm for 30 seconds first.
+Incomplete work, authority refusals, interruptions and other failures never retry.
 
 Developer ID signing, notarization, Intel macOS, Alpine/musl Linux, package-manager
 formulas, and a browser-downloaded installer remain separate targets until the
