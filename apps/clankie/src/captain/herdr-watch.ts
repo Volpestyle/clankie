@@ -65,6 +65,7 @@ import {
 } from "@clankie/settings";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import {
   existsSync,
   mkdirSync,
@@ -1334,19 +1335,46 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const live = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     const agent = live ?? previous;
     if (agent === undefined || (live === undefined && agent.session === undefined)) return undefined;
-    const transcript = await this.runner.transcript?.(agent);
-    if (transcript === undefined) {
-      if (live === undefined) return undefined;
-      const reply = await this.readSeatReply(live, "recent-unwrapped");
-      return {
-        agent,
-        transcript: {
-          sessionKey: `terminal:${seatId}`,
-          entries: reply === undefined ? [] : [{ type: "message", id: "latest", role: "agent", text: reply }],
-        },
-      };
+    // A cache belongs to this exact native occupant, never its pane's next agent.
+    // It is an on-demand display snapshot, separate from owned conversation events.
+    const cachePath = `${this.path}.native-chat/${createHash("sha256")
+      .update(JSON.stringify([seatId, agent.agent, agent.session]))
+      .digest("hex")}.json`;
+    const cacheSchema = z.object({
+      sessionKey: z.string(),
+      entries: SeatTranscriptUploadSchema.shape.entries.element.array().max(9_000),
+    });
+    let transcript: HerdrSeatTranscript | undefined;
+    let unavailable = false;
+    try {
+      transcript = await this.runner.transcript?.(agent);
+    } catch {
+      unavailable = true;
     }
-    return { agent: live === undefined ? { ...agent, status: "offline" } : agent, transcript };
+    if (transcript !== undefined) {
+      const display = {
+        ...transcript,
+        entries: transcript.entries.filter(
+          (entry) => entry.type !== "viewed_image" && !(entry.type === "message" && entry.internal),
+        ),
+      };
+      // A cache write failure cannot make a successful native read fail.
+      try {
+        this.writeSidecar(cachePath, display);
+      } catch {
+        /* read-through remains live */
+      }
+    } else {
+      try {
+        transcript = cacheSchema.parse(JSON.parse(readFileSync(cachePath, "utf8")));
+      } catch {
+        /* never substitute terminal text */
+      }
+      unavailable = true;
+    }
+    const status = live === undefined ? "offline" : unavailable ? "unavailable" : agent.status;
+    transcript ??= { sessionKey: `unavailable:${seatId}`, entries: [] };
+    return { agent: { ...agent, status }, transcript };
   }
 
   /** Controller observations and actions retain the exact native occupant. */

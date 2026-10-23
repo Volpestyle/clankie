@@ -201,7 +201,7 @@ export function primeAgentDir(
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 const psQuote = (text: string) => `'${text.replaceAll("'", "''")}'`;
 const psRoots =
-  "$roots = @(@{h='claude';p=(Join-Path $env:USERPROFILE '.claude\\projects')}, @{h='codex';p=(Join-Path $env:USERPROFILE '.codex\\sessions')}, @{h='grok';p=(Join-Path $env:USERPROFILE '.grok\\sessions')}, @{h='pi';p=(Join-Path $env:USERPROFILE '.pi\\agent\\sessions')}, @{h='prime';p=(Join-Path $(if ($env:PRIME_AGENT_CODING_AGENT_DIR) { $env:PRIME_AGENT_CODING_AGENT_DIR -replace '^~(?=$|[\\\\/])', $env:USERPROFILE } else { Join-Path $env:USERPROFILE '.prime\\agent' }) 'sessions')})";
+  "$profiles = @((Join-Path $env:USERPROFILE '.claude')); if ($env:CLAUDE_CONFIG_DIR) { $profiles += $env:CLAUDE_CONFIG_DIR }; $profiles += @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Filter '.claude-*' | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } | ForEach-Object { $_.FullName }); $roots = @($profiles | Sort-Object -Unique | ForEach-Object { @{h='claude';p=(Join-Path $_ 'projects')} }); $roots += @(@{h='codex';p=(Join-Path $env:USERPROFILE '.codex\\sessions')}, @{h='grok';p=(Join-Path $env:USERPROFILE '.grok\\sessions')}, @{h='pi';p=(Join-Path $env:USERPROFILE '.pi\\agent\\sessions')}, @{h='prime';p=(Join-Path $(if ($env:PRIME_AGENT_CODING_AGENT_DIR) { $env:PRIME_AGENT_CODING_AGENT_DIR -replace '^~(?=$|[\\\\/])', $env:USERPROFILE } else { Join-Path $env:USERPROFILE '.prime\\agent' }) 'sessions')})";
 const PRIME_POSIX_ROOT = `prime_root="\${PRIME_AGENT_CODING_AGENT_DIR:-$HOME/.prime/agent}"
 case "$prime_root" in "~"|"~/"*) prime_root="$HOME\${prime_root#"~"}";; esac
 prime_root="$prime_root/sessions"
@@ -212,32 +212,37 @@ function powershell(script: string) {
 function posix(script: string) {
   return `sh -c ${quote(script)}`;
 }
-function listCommand(shell: AgentHostConfig["shell"], count: number) {
+function listCommand(shell: AgentHostConfig["shell"], count: number, session?: string) {
   if (shell === "powershell")
     return powershell(
-      `${psRoots}; $rows = @(foreach ($r in $roots) { if (Test-Path -LiteralPath $r.p) { Get-ChildItem -LiteralPath $r.p -Recurse -File -Filter '*.jsonl' | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($r.h -ne 'grok' -or $_.Name -eq 'chat_history.jsonl') } | ForEach-Object { [PSCustomObject]@{harness=$r.h; path=$_.FullName; size=$_.Length; mtimeMs=([DateTimeOffset]$_.LastWriteTimeUtc).ToUnixTimeMilliseconds()} } } }); ConvertTo-Json -Compress -InputObject @($rows | Sort-Object mtimeMs -Descending | Select-Object -First ${count})`,
+      `${psRoots}; $rows = @(foreach ($r in $roots) { if (Test-Path -LiteralPath $r.p) { Get-ChildItem -LiteralPath $r.p -Recurse -File -Filter '*.jsonl' | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($r.h -ne 'grok' -or $_.Name -eq 'chat_history.jsonl')${session === undefined ? "" : ` -and $(if ($r.h -eq 'grok') { $_.FullName } else { $_.Name }).Contains(${psQuote(session)})`} } | ForEach-Object { [PSCustomObject]@{harness=$r.h; path=$_.FullName; size=$_.Length; mtimeMs=([DateTimeOffset]$_.LastWriteTimeUtc).ToUnixTimeMilliseconds()} } } }); ConvertTo-Json -Compress -InputObject @($rows | Sort-Object path -Unique | Sort-Object mtimeMs -Descending | Select-Object -First ${count})`,
     );
   return posix(`set -eu
-${PRIME_POSIX_ROOT}for h in claude codex grok pi prime; do
-  case "$h" in
-    claude) root="$HOME/.claude/projects";;
-    codex) root="$HOME/.codex/sessions";;
-    grok) root="$HOME/.grok/sessions";;
-    pi) root="$HOME/.pi/agent/sessions";;
-    prime) root="$prime_root";;
+seen="|"
+${PRIME_POSIX_ROOT}for root in "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" "$HOME/.claude/projects" "$HOME"/.claude-*/projects "$HOME/.codex/sessions" "$HOME/.grok/sessions" "$HOME/.pi/agent/sessions" "$prime_root"; do
+  h=claude
+  case "$root" in
+    "$HOME/.codex/sessions") h=codex;;
+    "$HOME/.grok/sessions") h=grok;;
+    "$HOME/.pi/agent/sessions") h=pi;;
+    "$prime_root") h=prime;;
   esac
   pattern='*.jsonl'
   [ "$h" != grok ] || pattern=chat_history.jsonl
   [ -d "$root" ] || continue
+  root=$(CDPATH= cd -P -- "$root" && pwd)
+  case "$seen" in *"|$root|"*) continue;; esac
+  seen="$seen$root|"
   find "$root" -type f -name "$pattern" -exec sh -c '
-    h=$1; shift
+    h=$1; session=$2; shift 2
     for p do
+      ${session === undefined ? "" : 'case "$p" in *"$session"*) ;; *) continue;; esac'}
       meta=$(stat -c "%s %Y" "$p" 2>/dev/null || stat -f "%z %m" "$p")
       encoded=$(printf "%s" "$p" | base64 | tr -d "\\n")
       printf "%s %s %s\\n" "$meta" "$h" "$encoded"
     done
-  ' sh "$h" {} +
-done | sort -k2,2nr | head -n ${count}`);
+  ' sh "$h" ${quote(session ?? "")} {} +
+done | sort -u | sort -k2,2nr | head -n ${count}`);
 }
 function readCommand(shell: AgentHostConfig["shell"], path: string, from: number, max: number) {
   if (shell === "powershell")
@@ -251,7 +256,7 @@ case "$p" in /*.jsonl) ;; *) exit 2;; esac
 dir=$(CDPATH= cd -P -- "$(dirname "$p")" && pwd)
 p="$dir/$(basename "$p")"
 ok=false
-${PRIME_POSIX_ROOT}for root in "$HOME/.claude/projects" "$HOME/.codex/sessions" "$HOME/.grok/sessions" "$HOME/.pi/agent/sessions" "$prime_root"; do
+${PRIME_POSIX_ROOT}for root in "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" "$HOME/.claude/projects" "$HOME"/.claude-*/projects "$HOME/.codex/sessions" "$HOME/.grok/sessions" "$HOME/.pi/agent/sessions" "$prime_root"; do
   [ -d "$root" ] || continue
   root=$(CDPATH= cd -P -- "$root" && pwd)
   case "$p" in "$root"/*) ok=true;; esac
@@ -288,7 +293,7 @@ export function createSshAgentHost(
     id: config.id,
     async list(opts) {
       const count = limit(opts?.limit);
-      const output = await call(listCommand(config.shell, count));
+      const output = await call(listCommand(config.shell, count, opts?.session));
       const rows: unknown =
         config.shell === "powershell"
           ? JSON.parse(output.replace(/^\uFEFF/, ""))

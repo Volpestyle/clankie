@@ -50,7 +50,9 @@ export function remoteHerdrTranscriptReader(host: AgentTranscriptHost, now: () =
     const key = JSON.stringify([agent.agent, session.kind, session.value]);
     let file = resolved.get(key);
     if (!file) {
-      const matches = (await host.list({ limit: 1000 })).filter(
+      const matches = (
+        await host.list({ limit: 1000, ...(session.kind === "id" ? { session: session.value } : {}) })
+      ).filter(
         (candidate) =>
           candidate.harness === agent.agent &&
           (session.kind === "path"

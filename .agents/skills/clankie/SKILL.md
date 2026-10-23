@@ -175,6 +175,11 @@ pane and native occupant are distinct; fleet addresses are qualified
 (`FLEET/term_…`). Keep remote cwd and workspace policy on the remote machine. Do
 not close or restart other agents as a diagnostic step.
 
+Opening a worker in the TUI reads its native session, including linked-machine
+Claude profiles, and follows messages and tools live. An offline native source
+shows its last opened transcript from the private display cache. This grants no
+pane control; sends still use the native channel and its original receipts.
+
 ## Authority and receipts
 
 Only the owner or an explicitly authorized operator changes fleet tool settings

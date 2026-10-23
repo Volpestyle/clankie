@@ -202,7 +202,11 @@ credential holder.
   typing in the inspector cannot send to Discord or grant operator authority.
   Press `x` to close an inactive operator conversation; active, default, and
   transport-owned room conversations stay protected. Switching rebuilds the
-  transcript and follows its live tail. `--chat <conversationId>` opens the same
+  transcript and follows its live tail. Linked machines use their native session
+  readers, including Claude account profiles; terminal summaries are never used
+  as chat history. An opened chat keeps a private display cache so an offline
+  machine shows its last known transcript with an offline notice. Native reader
+  retention limits still apply. `--chat <conversationId>` opens the same
   record directly; `clankie conversations list|show|tail` exposes it as JSON.
 - `/new [title]` starts and selects a conversation with fresh model context in
   the current workspace. The previous conversation remains available through

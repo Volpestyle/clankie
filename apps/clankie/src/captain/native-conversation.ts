@@ -85,6 +85,13 @@ export async function nativeConversationPage(
     else if (event.type === "file")
       add(`annotation:${event.cursor}`, event.occurredAt, { type: "file", file: event.file });
   }
+  if (status === "offline" || status === "unavailable")
+    add(`native-source:${status}`, entries.at(-1)?.occurredAt ?? conversation.createdAt, {
+      type: "message",
+      role: "external",
+      text: `${status === "offline" ? "Agent offline" : "Native history unavailable"}. ${transcript.entries.length ? "Showing the last known transcript." : "No transcript has been cached yet."}`,
+      streaming: false,
+    });
   const phase = status === "working" ? "responding" : "waiting";
   const safeCursor = `${cursor}:${phase}`;
   const from = request.cursor;

@@ -2428,6 +2428,55 @@ it("reads the saved native session on demand after its pane closes", async () =>
   store.close();
 });
 
+it("keeps opened native history across an offline host and service restart without terminal fallback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-native-cache-"));
+  roots.push(root);
+  const agent = { ...done, terminalId: "pc/term-potato" };
+  const history = {
+    sessionKey: "pc:session",
+    entries: [
+      { type: "message" as const, id: "u1", role: "operator" as const, text: "Native question" },
+      { type: "tool" as const, id: "t1", toolCallId: "call", name: "read", phase: "completed" as const },
+      { type: "message" as const, id: "a1", role: "agent" as const, text: "Native answer" },
+    ],
+  };
+  const path = join(root, "watches.json");
+  const store = new HerdrWatchStore(path, {
+    runner: {
+      get: async () => agent,
+      resolveTerminal: async () => agent,
+      wait: async () => agent,
+      transcript: async () => history,
+    },
+  });
+  expect((await store.readNativeChat(agent.terminalId))?.transcript).toEqual(history);
+  store.close();
+  const read = vi.fn();
+  const offline = new HerdrWatchStore(path, {
+    runner: {
+      get: async () => {
+        throw new Error("offline");
+      },
+      resolveTerminal: async () => {
+        throw new Error("offline");
+      },
+      wait: async () => agent,
+      transcript: async () => {
+        throw new Error("offline");
+      },
+      read,
+    },
+  });
+  expect(await offline.readNativeChat(agent.terminalId, agent)).toMatchObject({
+    agent: { status: "offline" },
+    transcript: history,
+  });
+  const replaced = { ...agent, session: { ...agent.session!, value: "other-session" } };
+  expect((await offline.readNativeChat(agent.terminalId, replaced))?.transcript.entries).toEqual([]);
+  expect(read).not.toHaveBeenCalled();
+  offline.close();
+});
+
 it("captures only the reply following an explicit room prompt, not old or unrelated activity", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-explicit-reply-"));
   roots.push(root);
