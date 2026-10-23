@@ -99,6 +99,7 @@
         "scripts/fleet-load-worker.mjs",
         "scripts/runtime-canary-live-proof.ts",
         "scripts/prove-durable-pi-room.ts",
+        "scripts/prove-claude-stop.ts",
         "scripts/prove-body-transfer.ts",
         "scripts/prove-companion-identity.ts",
         "scripts/prove-joined-hire.ts",

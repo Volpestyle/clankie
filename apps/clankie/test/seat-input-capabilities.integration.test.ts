@@ -297,7 +297,10 @@ it("a live Claude with pane access advertises Stop and stops through the exact-t
   const hooks = new SeatHookLog(join(root, "hooks.json"));
   hooks.record("w1:p1", { schemaVersion: 1, event: "SessionStart", sessionId });
   const keys: string[][] = [];
-  const empty = readFileSync(new URL("./fixtures/pane-draft/claude-empty.ansi", import.meta.url), "utf8");
+  const empty = readFileSync(
+    new URL("./fixtures/pane-draft/claude-busy-empty.ansi", import.meta.url),
+    "utf8",
+  );
   const adapter = createClaudeWorkerSeatAdapter({
     consent: async () => ({ approved: true }),
     hooks,

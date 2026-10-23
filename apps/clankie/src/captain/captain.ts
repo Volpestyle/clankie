@@ -67,6 +67,7 @@ import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { ReviewGate } from "./review-gate.ts";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
+import { settleStoppedTurn } from "./stopped-turn.ts";
 import { fleetInstructions } from "./captain-prompts.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
 import {
@@ -2198,7 +2199,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         { conversationId, source: "operator", delivery: "steer" },
         { guard, stableReceiptKey: messageId },
       ),
-    stop: (seatId, binding, guard) => herdrWatches.stopNativeTask(seatId, binding, guard),
+    stop: async (seatId, binding, guard) => {
+      const result = await herdrWatches.stopNativeTask(seatId, binding, guard);
+      if (result.outcome !== "stopped") return result;
+      // Settle only the occupant that was stopped, never one that replaced it since.
+      const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+      if (
+        agent?.session &&
+        JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]) === binding
+      )
+        settleStoppedTurn(agent, {
+          mailbox: (terminalId) => fleetMailboxes.get(terminalId),
+          conversation: (native) => {
+            try {
+              return (
+                conversations.attachedConversationForNative(native) ??
+                (headSeat?.seatId === native.terminalId
+                  ? conversations.defaultGlobalConversationId()
+                  : undefined)
+              );
+            } catch {
+              return undefined;
+            }
+          },
+          outbox: (conversationId) => seatOutboxes.get(conversationId),
+          publishWaiting: (conversationId, sessionId) => {
+            conversations.syncNativeSeatTranscript(conversationId, sessionId, [], "waiting");
+          },
+        });
+      return result;
+    },
   };
   // Open every head outbox whose seat was polling before this restart, so each
   // routing check sees that seat as reconnecting rather than gone. This runs

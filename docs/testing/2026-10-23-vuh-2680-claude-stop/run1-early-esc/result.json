@@ -1,0 +1,88 @@
+[
+  {
+    "at": "2026-10-23T03:58:16.579Z",
+    "step": "pane",
+    "pane": "w4F:p21",
+    "terminalId": "term_65e79fca01583137",
+    "session": {
+      "source": "herdr:claude",
+      "kind": "id",
+      "value": "128b1d9d-95ed-4d45-9757-1a5b9bad6434"
+    },
+    "status": "idle"
+  },
+  {
+    "at": "2026-10-23T03:58:21.159Z",
+    "step": "a.busy-input-line",
+    "line": {
+      "state": "empty"
+    }
+  },
+  {
+    "at": "2026-10-23T03:58:21.177Z",
+    "step": "a.capabilities",
+    "inputCapabilities": {
+      "deliveryModes": [],
+      "interrupt": true,
+      "nextTurnOnly": false
+    }
+  },
+  {
+    "at": "2026-10-23T03:58:22.200Z",
+    "step": "a.queued-held",
+    "admitted": "queued",
+    "releasedSoFar": 0
+  },
+  {
+    "at": "2026-10-23T03:58:22.261Z",
+    "step": "herdr.send-keys",
+    "pane": "w4F:p21",
+    "keys": [
+      "esc"
+    ]
+  },
+  {
+    "at": "2026-10-23T03:58:22.528Z",
+    "step": "a.stop",
+    "result": {
+      "outcome": "stopped"
+    },
+    "ms": 311,
+    "authorityChecks": 3
+  },
+  {
+    "at": "2026-10-23T03:58:22.532Z",
+    "step": "a.publish-waiting",
+    "conversationId": "proof",
+    "session": "128b1d9d-95ed-4d45-9757-1a5b9bad6434"
+  },
+  {
+    "at": "2026-10-23T03:58:22.534Z",
+    "step": "a.queued-released",
+    "delivery": {
+      "outcome": "delivered",
+      "messageId": "seat-e34cd0a9-c9fe-479d-a99a-f4d30bd99e45",
+      "deliveryStage": "delivered"
+    },
+    "msAfterStop": 315
+  },
+  {
+    "at": "2026-10-23T03:58:32.839Z",
+    "step": "b.draft-input-line",
+    "line": {
+      "state": "draft",
+      "text": "DRAFT do not send",
+      "typed": true
+    }
+  },
+  {
+    "at": "2026-10-23T03:58:32.914Z",
+    "step": "b.stop",
+    "result": {
+      "outcome": "unavailable",
+      "detail": "Claude's input line holds an unsent draft that Esc would clear; nothing was sent."
+    },
+    "keysSent": 0,
+    "statusAfter": "working"
+  }
+]

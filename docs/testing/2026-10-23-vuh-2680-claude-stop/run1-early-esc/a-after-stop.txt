@@ -1,0 +1,45 @@
+
+ ▐▛███▛█   Claude Code v2.1.309
+▝▜██████▀  Opus 5.5 with medium effort · Claude Max
+ ▝▝   ▝▝   ~/dev/clankie-wt/vuh-2680-core/.local/stop-proof · /rc
+
+⚠ Allow rule Bash(git -C * push origin *) allows any option at its *
+  · use an exact value
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+─────────────────────────────────────────────────────────────────────
+❯ Write a 1500-word short story about a lighthouse keeper who
+  collects lost letters. Plain prose, no tools, no headings.
+─────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)

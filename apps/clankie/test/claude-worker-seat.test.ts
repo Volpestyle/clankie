@@ -1085,7 +1085,8 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
     const f = await fixture();
     f.hooks.record("w1:p1", { schemaVersion: 1, event: "SessionStart", sessionId: SESSION });
     f.agent.status = "working";
-    const screen = options.screen ?? (await golden("empty"));
+    // Captured live from a working Claude (VUH-2680): spinner, "esc to interrupt", empty line.
+    const screen = options.screen ?? (await golden("busy-empty"));
     const read = vi.fn(async (_paneId: string) => {
       if (screen instanceof Error) throw screen;
       return screen;
@@ -1213,6 +1214,11 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
 
   it.each([
     {
+      name: "an unsent draft typed while Claude works",
+      screen: () => golden("busy-draft"),
+      detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
+    },
+    {
       name: "an unsent draft",
       screen: () => golden("draft"),
       detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
@@ -1220,7 +1226,7 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
     {
       name: "an unstyled screen",
       // oxlint-disable-next-line no-control-regex -- strip the captured native styling
-      screen: async () => (await golden("empty")).replace(/\x1b\[[0-9;]*m/gu, ""),
+      screen: async () => (await golden("busy-empty")).replace(/\x1b\[[0-9;]*m/gu, ""),
       detail: "Claude's input line could not be read, so a draft can't be ruled out; nothing was sent.",
     },
     {
@@ -1232,7 +1238,8 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
     const f = await stopFixture({ screen: await screen() });
     expect(await f.stop(f.guard)).toEqual({ outcome: "unavailable", detail });
     expect(f.sendKeys).not.toHaveBeenCalled();
-    expect(f.guard).not.toHaveBeenCalled();
+    // The input line is the last thing read, after authority and the re-observation.
+    expect(f.guard).toHaveBeenCalledTimes(1);
   });
 
   it("refuses when owner authority or the binding fails its last check", async () => {
@@ -1262,5 +1269,18 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
       detail: "The seat's Claude session is gone; nothing was sent.",
     });
     expect(swapped.sendKeys).not.toHaveBeenCalled();
+
+    // A draft typed into the pane while authority is checked still blocks the key.
+    const typed = await stopFixture({ afterEsc: "idle" });
+    const draft = await golden("busy-draft");
+    typed.guard.mockImplementationOnce(async () => {
+      typed.read.mockResolvedValue(draft);
+    });
+    expect(await typed.stop(typed.guard)).toEqual({
+      outcome: "unavailable",
+      detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
+    });
+    expect(typed.read).toHaveBeenCalledTimes(1);
+    expect(typed.sendKeys).not.toHaveBeenCalled();
   });
 });

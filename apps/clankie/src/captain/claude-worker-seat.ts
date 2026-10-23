@@ -695,7 +695,18 @@ class ClaudeWorkerSeatControl implements SeatControl {
     };
     const before = await working();
     if (!("paneId" in before)) return before;
-    const ansi = await pane.read(before.paneId).catch(() => undefined);
+    try {
+      await beforeDispatch();
+    } catch {
+      return refused("Native binding or owner authority changed; nothing was sent.");
+    }
+    // The last checks before the key: the same session, still mid-turn, and
+    // an input line read now, after every slower check, still provably empty.
+    const current = await working();
+    if (!("paneId" in current)) return current;
+    if (current.terminalId !== before.terminalId)
+      return refused("The seat binding changed before the key; nothing was sent.");
+    const ansi = await pane.read(current.paneId).catch(() => undefined);
     const line = ansi === undefined ? undefined : paneInputLine("claude", ansi);
     if (line?.state === "draft")
       return refused("Claude's input line holds an unsent draft that Esc would clear; nothing was sent.");
@@ -703,16 +714,6 @@ class ClaudeWorkerSeatControl implements SeatControl {
       return refused(
         "Claude's input line could not be read, so a draft can't be ruled out; nothing was sent.",
       );
-    try {
-      await beforeDispatch();
-    } catch {
-      return refused("Native binding or owner authority changed; nothing was sent.");
-    }
-    // The last check before the key: the same session, still mid-turn.
-    const current = await working();
-    if (!("paneId" in current)) return current;
-    if (current.terminalId !== before.terminalId)
-      return refused("The seat binding changed before the key; nothing was sent.");
     try {
       await pane.sendKeys(current.paneId, ["esc"]);
     } catch {

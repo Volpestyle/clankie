@@ -6211,7 +6211,13 @@ draft, an unreadable input line, a seat waiting on the owner or a changed
 binding returns `unavailable` without a key. Owner authority and the binding are
 checked again just before the key. Exactly one Esc is sent per stop, concurrent
 requests share it, and `stopped` needs Claude seen idle within five seconds;
-otherwise the result is `uncertain` and nothing is repeated. External Codex
+otherwise the result is `uncertain` and nothing is repeated. Claude's draft
+check is the last read before the key. Herdr cannot tell an interrupt from a
+turn that finished on its own in the instant before the key landed, so that
+race also reports `stopped`, not `already_finished`. A confirmed stop settles
+that session's turn as waiting, so a Queued message goes out at once instead
+of waiting for the hold to expire (Claude's Stop hook does not run after an
+interrupt). External Codex
 sessions, Pi, OpenCode and Grok currently return `unsupported`; there is no
 signal, pane-close or replacement-session fallback, and no other terminal key.
 

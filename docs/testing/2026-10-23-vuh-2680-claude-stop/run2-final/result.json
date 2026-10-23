@@ -1,0 +1,95 @@
+[
+  {
+    "at": "2026-10-23T03:59:16.460Z",
+    "step": "pane",
+    "pane": "w4F:p21",
+    "terminalId": "term_65e79fca01583137",
+    "session": {
+      "source": "herdr:claude",
+      "kind": "id",
+      "value": "128b1d9d-95ed-4d45-9757-1a5b9bad6434"
+    },
+    "status": "done"
+  },
+  {
+    "at": "2026-10-23T03:59:32.049Z",
+    "step": "a.busy-input-line",
+    "line": {
+      "state": "empty"
+    }
+  },
+  {
+    "at": "2026-10-23T03:59:32.068Z",
+    "step": "a.capabilities",
+    "inputCapabilities": {
+      "deliveryModes": [],
+      "interrupt": true,
+      "nextTurnOnly": false
+    }
+  },
+  {
+    "at": "2026-10-23T03:59:33.090Z",
+    "step": "a.queued-held",
+    "admitted": "queued",
+    "releasedSoFar": 0
+  },
+  {
+    "at": "2026-10-23T03:59:33.152Z",
+    "step": "herdr.send-keys",
+    "pane": "w4F:p21",
+    "keys": [
+      "esc"
+    ]
+  },
+  {
+    "at": "2026-10-23T03:59:33.673Z",
+    "step": "a.stop",
+    "result": {
+      "outcome": "stopped"
+    },
+    "ms": 563,
+    "authorityChecks": 3
+  },
+  {
+    "at": "2026-10-23T03:59:33.677Z",
+    "step": "a.publish-waiting",
+    "conversationId": "proof",
+    "session": "128b1d9d-95ed-4d45-9757-1a5b9bad6434"
+  },
+  {
+    "at": "2026-10-23T03:59:33.679Z",
+    "step": "a.queued-released",
+    "delivery": {
+      "outcome": "delivered",
+      "messageId": "seat-36ad13a6-2b28-44dc-81c4-6e8f1b617671",
+      "deliveryStage": "delivered"
+    },
+    "msAfterStop": 567
+  },
+  {
+    "at": "2026-10-23T03:59:33.687Z",
+    "step": "a.input-line-after-stop",
+    "line": {
+      "state": "empty"
+    }
+  },
+  {
+    "at": "2026-10-23T03:59:40.055Z",
+    "step": "b.draft-input-line",
+    "line": {
+      "state": "draft",
+      "text": "DRAFT do not send",
+      "typed": true
+    }
+  },
+  {
+    "at": "2026-10-23T03:59:40.108Z",
+    "step": "b.stop",
+    "result": {
+      "outcome": "unavailable",
+      "detail": "Claude's input line holds an unsent draft that Esc would clear; nothing was sent."
+    },
+    "keysSent": 0,
+    "statusAfter": "working"
+  }
+]

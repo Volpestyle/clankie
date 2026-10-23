@@ -185,13 +185,15 @@ It keeps `stop_task`'s authority and adds terminal-specific fences:
   checked again with owner authority immediately before the key;
 - Herdr must show the session working; idle is `already_finished`, and a seat
   waiting on the owner is refused;
-- the styled input line must read provably empty
-  ([pane drafts](../../apps/clankie/src/captain/pane-draft.ts)); a draft, or a
-  line that cannot be read, is refused, because Esc would clear it;
+- the styled input line, read last, just before the key, must be provably
+  empty ([pane drafts](../../apps/clankie/src/captain/pane-draft.ts)); a draft,
+  or a line that cannot be read, is refused, because Esc would clear it;
 - one Esc per request, shared by concurrent requests and never retried;
-  `stopped` only after Claude is seen idle again, otherwise `uncertain`.
+  `stopped` only after Claude is seen idle again, otherwise `uncertain`;
+- Claude's Stop hook does not run after an interrupt, so a confirmed stop
+  settles that exact session's turn as waiting itself, releasing Queued
+  messages at once.
 
 Everything else stays as above: `interrupt()` remains false, a hire's brief and
 messages never use terminal keys, and no other automation types into a Claude
 pane.
-
