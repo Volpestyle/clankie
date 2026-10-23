@@ -1386,6 +1386,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private async readRoomReply(seatId: string) {
     const native = await this.readNativeChat(seatId);
     if (native?.agent.status !== "unavailable") return native;
+    // allow-swallowed-rejection -- a failed lookup proves no live room recipient; no terminal reply is claimed.
     const live = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (live === undefined) return undefined;
     const reply = await this.readSeatReply(live, "recent-unwrapped");
