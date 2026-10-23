@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -140,5 +140,28 @@ it("cancels a waiting sign-in, refuses unauthenticated callers, and reports a mi
   expect((await bare.call(HARNESS_LOGIN_START_PATH, { harness: "codex" })).body).toEqual({
     ok: false,
     error: "not_installed",
+  });
+
+  // A fresh Mac has only Clankie's own PATH shim, which is not Claude Code.
+  const shimDir = mkdtempSync(join(tmpdir(), "harness-login-shim-"));
+  cleanup.push(() => rmSync(shimDir, { recursive: true, force: true }));
+  writeFileSync(join(shimDir, "claude"), "#!/bin/sh\n# clankie-claude-path-shim\nexit 127\n");
+  chmodSync(join(shimDir, "claude"), 0o755);
+  const shimOnly = fixture({}, `${shimDir}:/usr/bin:/bin`);
+  expect((await shimOnly.call(HARNESS_LOGINS_PATH)).body.harnesses).toContainEqual({
+    harness: "claude",
+    installed: false,
+    signedIn: false,
+  });
+  expect((await shimOnly.call(HARNESS_LOGIN_START_PATH, { harness: "claude" })).body).toEqual({
+    ok: false,
+    error: "not_installed",
+  });
+  // Behind the shim, the real Claude still signs in.
+  const behind = fixture({}, `${shimDir}:${bin}:${process.env.PATH}`);
+  expect((await behind.call(HARNESS_LOGINS_PATH)).body.harnesses).toContainEqual({
+    harness: "claude",
+    installed: true,
+    signedIn: false,
   });
 });

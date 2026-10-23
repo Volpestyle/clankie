@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import { realClaude } from "../../../integrations/herdr-plugin/claude-path-shim.mjs";
 import type {
   HarnessLoginResult,
   HarnessLoginsResponse,
@@ -25,8 +26,8 @@ interface Job {
 
 const COMMANDS: Record<LoginHarness, readonly string[]> = {
   // Subscription is Claude's default; the link's page shows a code to send back.
-  claude: ["claude", "auth", "login", "--claudeai"],
-  codex: ["codex", "login", "--device-auth"],
+  claude: ["auth", "login", "--claudeai"],
+  codex: ["login", "--device-auth"],
 };
 /** Only the vendor's own sign-in pages are forwarded to a device. */
 const LOGIN_HOSTS: Record<LoginHarness, readonly string[]> = {
@@ -64,8 +65,8 @@ export class HarnessSignIns {
       [...this.jobs.values()].some((job) => ["pending", "needs_code", "verifying"].includes(job.view.state))
     )
       return { ok: false, error: "busy" };
-    if (!(await this.signedIn(harness)).installed) return { ok: false, error: "not_installed" };
-    const [command, ...args] = COMMANDS[harness];
+    const command = await this.executable(harness);
+    if (!command || !(await this.signedIn(harness)).installed) return { ok: false, error: "not_installed" };
     let child: ChildProcessWithoutNullStreams;
     const env: NodeJS.ProcessEnv = { ...this.options.env, BROWSER: "false", NO_COLOR: "1" };
     // The login signs in the subscription, not whatever key the environment carries.
@@ -73,7 +74,7 @@ export class HarnessSignIns {
     try {
       // Its own process group: the npm launchers wrap a native binary, and
       // ending the sign-in must end both.
-      child = spawn(command!, args, {
+      child = spawn(command, COMMANDS[harness], {
         env,
         stdio: ["pipe", "pipe", "pipe"],
         detached: true,
@@ -192,9 +193,11 @@ export class HarnessSignIns {
   private async signedIn(
     harness: LoginHarness,
   ): Promise<{ installed: boolean; signedIn: boolean; method?: string }> {
+    const command = await this.executable(harness);
+    if (!command) return { installed: false, signedIn: false };
     // An env key makes Claude report `api_key` whatever else is signed in: ask without it.
     const result = await this.capture(
-      harness === "claude" ? ["claude", "auth", "status", "--json"] : ["codex", "login", "status"],
+      harness === "claude" ? [command, "auth", "status", "--json"] : [command, "login", "status"],
       harness === "claude" ? ["ANTHROPIC_API_KEY"] : [],
     );
     if (result === undefined) return { installed: false, signedIn: false };
@@ -216,6 +219,13 @@ export class HarnessSignIns {
       signedIn: result.code === 0,
       ...(result.code === 0 && method ? { method } : {}),
     };
+  }
+
+  /** Clankie's own `claude` PATH shim is not Claude Code: look past it. */
+  private async executable(harness: LoginHarness): Promise<string | undefined> {
+    if (harness === "codex") return "codex";
+    // allow-swallowed-rejection -- realClaude rejects only when no real Claude is on PATH: not installed.
+    return realClaude(this.options.env).catch(() => undefined);
   }
 
   private capture(
