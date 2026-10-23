@@ -89,11 +89,12 @@ This repository is public. Both neighbors are private and consume
   precedence, and the private app reads its own project policy. Releasing
   follows `release-clankie`.
 - Build every feature API- and CLI-first, and update the relevant agent-facing
-  skill and human-facing docs. A setting the owner cares about is settable from
-  every UI (TUI, app on phone, web and desktop, and the hosted dashboard)
-  through the same API, unless it only makes sense on one surface (billing,
-  for example). Keep settings few: sensible defaults, grouped by what is at
-  stake, the ones people change easy to reach, the rest under Advanced.
+  skill and human-facing docs. The CLI covers every setting: it is the agents'
+  interface. The app and desktop pet cover the Common tier through the same
+  API; Advanced stays in the CLI. Maintain existing TUI controls. The dashboard
+  covers billing and account only. Keep settings few, with sensible defaults
+  and Common controls grouped by what is at stake
+  ([settings inventory](docs/settings-inventory.md); amends VUH-1813).
 - Reusable lessons about how Clankie works belong in the relevant shipped skill
   or the tool description that needs them. `apps/clankie/src/captain/instructions.md`
   is re-read on every model call, so it holds only identity, trust boundaries and
@@ -104,10 +105,11 @@ This repository is public. Both neighbors are private and consume
 - Keep the public/private boundary: code that runs only on Clankie's hosted
   service (gateway, accounts, managed-hosting control plane), its deployment,
   and business, App Store or production records go to `clankie-ops`, never here.
-- Hosted Clankie just works. A self-hosted feature may need owner setup, but its
-  hosted counterpart may not: a managed user asks Clankie (and pays, if their
-  plan requires it), and the control plane does the rest. No accounts,
-  credentials, tunnels, claims or infrastructure choices on their side.
+- Managed account services handle their own infrastructure. Free accounts
+  support pairing, awake-Mac phone steering and the official Discord bot.
+  Clankie Plus adds Presence, push and multiple machines through fleet-checked
+  account entitlements; it does not provision a hosted body. Preserve existing
+  hosted-body support without steering new users into hosted sales.
 - The repository is Apache-2.0 except `apps/vox`, which retains its own
   AGPL-3.0-or-later license and provenance record.
 - The credential broker (Keychain on macOS) is the canonical secret store.

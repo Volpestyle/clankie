@@ -1,11 +1,20 @@
 # Owner settings inventory
 
 This page lists every setting an owner can change, which API stores it, and
-which surfaces can set it today. It is the baseline for the "every UI" rule in
-`AGENTS.md` (VUH-1813): a setting the owner cares about must be settable from
-the TUI, the app (phone, web and desktop) and the hosted dashboard through the
-same API. Settings that only make sense on one surface are marked
-**single-surface**, with the reason.
+which surfaces can set it today. The approved October 2026 direction amends
+VUH-1813's “every UI” rule in `AGENTS.md`:
+
+- **CLI:** covers every setting; it is the agents' interface.
+- **App and desktop pet:** cover the **Common** tier through the same API.
+- **Advanced:** stays in the CLI. Existing controls elsewhere are not a mandate
+  to expand those surfaces.
+- **Dashboard:** billing and account only.
+- **TUI:** a maintained surface; existing controls remain supported.
+
+This is the coverage target, not a claim that every CLI setting is implemented.
+The dated inventory below records observed capability, including old controls
+outside today's scope. Missing Advanced app controls and body-settings dashboard
+controls are no longer parity gaps. No controls are removed by this doc change.
 
 Audited 2026-10-07 against clankie `6f165578`, clankie-app `3068dd9` and
 clankie-ops `244e4de`. Core follow-up on 2026-10-07 adds host writes and moves
@@ -16,13 +25,14 @@ changes, update this page.
 ## How to read it
 
 - **Tier.** **Common**: the owner changes it; keep it up front. **Advanced**:
-  sensible default, behind an Advanced disclosure. **Single**: single-surface by
+  sensible default, configured through the CLI. **Single**: single-surface by
   nature.
 - **API.** The HTTP route that owns the value. "None" means no API writes it.
   Then the value lives only in `~/.config/clankie/settings.json`, and only local
   tools can change it.
 - **Surfaces.** **CLI**/**TUI** are the local `clankie` commands and console.
-  **App** is clankie-app. **Dash** is the hosted account page
+  **App** is clankie-app (phone, web and desktop). The desktop pet shares the
+  Common coverage target; it has not been separately audited here. **Dash** is the account page
   (`clankie-ops/apps/fleet/web`).
   - ✓ sets it through the API.
   - **file**: the local CLI or TUI writes `settings.json` directly instead of
@@ -181,10 +191,14 @@ changes, payment cards, invoices, credit top-ups, overage caps, account
 deletion and sign-out all pass through Stripe or Cognito. The app shows
 credits read-only.
 
-Discord ownership and room-skill controls in **clankie-app** (including its web/desktop surfaces, [VUH-1835](https://linear.app/vuhlp/issue/VUH-1835)) and **clankie-ops hosted dashboard** ([VUH-1836](https://linear.app/vuhlp/issue/VUH-1836)) are named follow-ups to VUH-1831. Core API, CLI and TUI ship together; older clients preserve these settings on unrelated saves.
+Historical follow-ups: Discord ownership and room-skill controls in **clankie-app** (including its web/desktop surfaces, [VUH-1835](https://linear.app/vuhlp/issue/VUH-1835)) and **clankie-ops hosted dashboard** ([VUH-1836](https://linear.app/vuhlp/issue/VUH-1836)) are named follow-ups to VUH-1831. Core API, CLI and TUI ship together; older clients preserve these settings on unrelated saves.
 
-## Gaps, ranked by what the owner cares about
+## Historical parity gaps (October 7 audit)
 
+> **Scope amended 2026-10-23.** The entries below retain the audit history;
+> dashboard body settings and Advanced app settings are not launch requirements.
+> CLI coverage and Common app/pet controls are the current target.
+>
 > **Status 2026-10-07.** Gaps 1–4 are closed in core (`669b2946`, ADR 0248)
 > and the app (clankie-app `72bb526`…`88800dc`, iPhone captures in that
 > repo's `docs/testing/2026-10-07-vuh-1813-settings-parity/`). Still open:
@@ -228,7 +242,7 @@ Discord ownership and room-skill controls in **clankie-app** (including its web/
 9. **Guidance text outside protocol.**
    - `FLEET_SIZE_GUIDANCE` and `FLEET_MODEL_GUIDANCE` live in
      `@clankie/settings`, so the app writes its own copy.
-10. **Planned settings that must land at parity from the start:**
+10. **Historical cross-surface follow-ups:**
     - VUH-1782 gates ("Just do it / Clankie decides / Ask me" plus presets),
       with the VUH-1809 mailbox following those gates.
     - Web (VUH-1793) and desktop (VUH-1791) inherit the app's settings.
@@ -247,5 +261,6 @@ concern:
 7. Machines
 8. Devices and privacy
 
-Within each group, the Common rows come first and everything else goes behind
-Advanced. Play and the raw Discord fields stay under Advanced.
+Within each group, app and pet expose the Common rows. Advanced settings,
+including play and raw Discord fields, stay in the CLI. Dashboard settings are
+limited to billing and account. Existing TUI controls remain supported.
