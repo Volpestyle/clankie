@@ -59,6 +59,7 @@ it("reads persisted update threads through the existing comment tools, independe
     const legacy = structuredClone(details);
     delete legacy.updates[0]!.replies;
     delete legacy.updates[0]!.replyCount;
+    delete legacy.updates[0]!.repliesTruncated;
     expect(WorkProjectDetailsSchema.parse(legacy).updates[0]).not.toHaveProperty("replies");
     // Cross two pagination boundaries and retain only the latest activity window.
     for (let index = 0; index < 201; index++)
@@ -68,10 +69,48 @@ it("reads persisted update threads through the existing comment tools, independe
         { actor: TRACKER_OWNER },
       );
     const bounded = (await read()).updates[0]!;
-    expect(bounded.replyCount).toBe(203);
+    expect(bounded.replyCount).toBe(200);
+    expect(bounded.repliesTruncated).toBe(true);
     expect(bounded.replies).toHaveLength(200);
     expect(bounded.replies![0]!.body).toBe("Reply 1");
     expect(bounded.replies!.at(-1)!.body).toBe("Reply 200");
+    // Large feeds cap requests and isolate a single failed thread read.
+    for (let index = 0; index < 24; index++)
+      await tracker.call("save_status_update", {
+        type: "project",
+        project: project.id,
+        body: `Update ${index}`,
+      });
+    let calls = 0,
+      active = 0,
+      peak = 0;
+    const partial = await readProjectDetails(directory, convention, {
+      builtIn: {
+        projectId: project.id,
+        teamId: "LOCAL",
+        open: () => ({
+          catalog: () => reopened.catalog(),
+          async call(name, args, options) {
+            if (name !== "list_comments") return reopened.call(name, args, options);
+            const callNumber = ++calls;
+            active++;
+            peak = Math.max(peak, active);
+            try {
+              await new Promise((resolve) => setTimeout(resolve, 1));
+              if (callNumber === 1) throw new Error("Provider thread unavailable");
+              return await reopened.call(name, args, options);
+            } finally {
+              active--;
+            }
+          },
+        }),
+      },
+    });
+    expect(partial.updates).toHaveLength(25);
+    expect(calls).toBe(20);
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(partial.updates.filter((update) => update.replies !== undefined)).toHaveLength(19);
+    expect(partial.updates.at(-1)!.replies).toBeUndefined();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

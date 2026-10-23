@@ -82,45 +82,10 @@ export async function readProjectDetails(
       const update = row(value);
       if (!text(update.id) || !text(update.createdAt) || typeof update.body !== "string")
         throw new Error("Incomplete project update");
-      const replies: NonNullable<WorkProjectDetails["updates"][number]["replies"]> = [];
-      const replyIds = new Set<string>();
-      const replyCursors = new Set<string>();
-      let replyCursor: string | undefined;
-      for (;;) {
-        const comments = row(
-          await tools.call("list_comments", {
-            statusUpdateId: update.id,
-            statusUpdateType: "project",
-            orderBy: "createdAt",
-            limit: 100,
-            ...(replyCursor ? { cursor: replyCursor } : {}),
-          }),
-        );
-        if (!Array.isArray(comments.comments)) throw new Error("Project update replies unavailable");
-        for (const value of comments.comments) {
-          const reply = commentEntry(row(value));
-          if (!reply) throw new Error("Incomplete project update reply");
-          if (replyIds.has(reply.id)) continue;
-          replyIds.add(reply.id);
-          replies.push(reply);
-        }
-        if (comments.hasNextPage === false) break;
-        if (
-          comments.hasNextPage !== true ||
-          typeof comments.cursor !== "string" ||
-          replyCursors.has(comments.cursor)
-        )
-          throw new Error("Incomplete project reply pagination");
-        replyCursor = comments.cursor;
-        replyCursors.add(replyCursor);
-      }
-      replies.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
       updates.push({
         id: text(update.id) ?? "",
         body: typeof update.body === "string" ? update.body : "",
         createdAt: text(update.createdAt) ?? "",
-        replies: replies.slice(-WORK_ACTIVITY_MAX),
-        replyCount: replies.length,
         health: text(update.health),
         author: name(update.user ?? update.author),
         attachments: [...links(update.attachments), ...embeddedLinks(update.body as string)],
@@ -133,6 +98,43 @@ export async function readProjectDetails(
     cursor = page.cursor;
     seen.add(cursor);
   } while (cursor);
+  // Both trackers return newest first for createdAt. Enrich only the recent
+  // updates, with one bounded comment page each and at most four calls in flight.
+  // Older updates and failed thread reads retain the legacy presentation shape.
+  updates.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const recent = updates.slice(0, 20);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, recent.length) }, async () => {
+      while (next < recent.length) {
+        const update = recent[next++]!;
+        try {
+          const page = row(
+            await tools.call("list_comments", {
+              statusUpdateId: update.id,
+              statusUpdateType: "project",
+              orderBy: "createdAt",
+              limit: WORK_ACTIVITY_MAX,
+            }),
+          );
+          if (!Array.isArray(page.comments) || typeof page.hasNextPage !== "boolean")
+            throw new Error("Project update replies unavailable");
+          const replies = page.comments.map((value) => {
+            const reply = commentEntry(row(value));
+            if (!reply) throw new Error("Incomplete project update reply");
+            return reply;
+          });
+          if (replies.length > WORK_ACTIVITY_MAX) throw new Error("Unbounded project update replies");
+          replies.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+          update.replies = replies;
+          update.replyCount = replies.length;
+          update.repliesTruncated = page.hasNextPage;
+        } catch {
+          // A thread can be unavailable while its update and the project remain useful.
+        }
+      }
+    }),
+  );
   const teams = Array.isArray(project.teams) ? project.teams : project.teams ? row(project.teams).nodes : [];
   if (!Array.isArray(teams)) throw new Error("Project teams unavailable");
   return WorkProjectDetailsSchema.parse({

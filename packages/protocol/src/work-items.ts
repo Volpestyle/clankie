@@ -408,8 +408,9 @@ export const WorkProjectDetailsSchema = z
             attachments: z.array(WorkProjectLinkSchema).max(100),
             /** Absent on legacy services; present (including empty) when threads are supported. */
             replies: z.array(WorkActivityEntrySchema).max(WORK_ACTIVITY_MAX).optional(),
-            /** Total replies, including those outside the bounded latest-replies window. */
+            /** Reply count; a lower bound when repliesTruncated is true. */
             replyCount: z.number().int().nonnegative().optional(),
+            repliesTruncated: z.boolean().optional(),
           })
           .strict(),
       )

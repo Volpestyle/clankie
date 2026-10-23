@@ -125,4 +125,4 @@ scope, native recipient or original thread refuses before the owner write. The
 assignment and original note retain separate receipts; uncertainty is checked,
 never replayed or reversed.
 
-Project update threads use the existing comment tools: `list_comments` with `statusUpdateId` and `statusUpdateType: "project"`, and `save_comment` with `statusUpdateId` and `body`. A reply to a reply uses `parentId`. Do not post an update reply with `projectId`: that creates a project-level comment. `work project-details` includes each update’s total `replyCount` and latest 200 `replies` in time order.
+Project update threads use the existing comment tools: `list_comments` with `statusUpdateId` and `statusUpdateType: "project"`, and `save_comment` with `statusUpdateId` and `body`. A reply to a reply uses `parentId`. Do not post an update reply with `projectId`: that creates a project-level comment. `work project-details` includes up to 200 `replies` in time order on the latest 20 updates. `replyCount` is a lower bound when `repliesTruncated` is true. Failed thread reads and older updates omit reply fields.
