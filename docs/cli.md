@@ -6217,7 +6217,18 @@ turn that finished on its own in the instant before the key landed, so that
 race also reports `stopped`, not `already_finished`. A confirmed stop settles
 that session's turn as waiting, so a Queued message goes out at once instead
 of waiting for the hold to expire (Claude's Stop hook does not run after an
-interrupt). External Codex
+interrupt).
+
+Every device sees a stopped Claude turn as the existing `turn` event with
+`phase: "cancelled"`, `reasonCode: "native_interrupted"` and the summary
+"Stopped before it finished." It comes from Claude's own interrupt record
+(`[Request interrupted by user]`, or `… for tool use]` after a rejected tool),
+whichever surface pressed Esc. The run ID is derived from that record, so a
+replay or a second sync never adds another, and it never counts as an active
+run. An Esc before Claude has replied writes no record: Claude puts the prompt
+back in its input instead, and no marker is published for that turn. A service
+older than this entry refuses a hook upload containing it; `clankie seat-sync`
+then resends that page without it. External Codex
 sessions, Pi, OpenCode and Grok currently return `unsupported`; there is no
 signal, pane-close or replacement-session fallback, and no other terminal key.
 

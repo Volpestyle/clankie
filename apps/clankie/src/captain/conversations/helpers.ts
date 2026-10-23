@@ -52,12 +52,29 @@ export function transcriptEventBody(
       streaming: false,
     };
   }
+  if (entry.type === "interrupted") return nativeInterruptBody(entry.id);
   return {
     type: "tool",
     toolCallId: entry.toolCallId,
     name: entry.name,
     phase: entry.phase,
     ...(entry.detail === undefined ? {} : { detail: entry.detail }),
+  };
+}
+
+/**
+ * A native interrupt record as the existing `turn`/`cancelled` event (VUH-2680),
+ * so every device and older builds show it without a new event type. The run
+ * is derived from the native record, never a service run: it is not counted
+ * as active, and the same record always yields the same event.
+ */
+export function nativeInterruptBody(entryId: string): OperatorConversationEventBody {
+  return {
+    type: "turn",
+    runId: `native-interrupt:${entryId}`,
+    phase: "cancelled",
+    reasonCode: "native_interrupted",
+    summary: "Stopped before it finished.",
   };
 }
 

@@ -466,3 +466,77 @@ test("each hook sends only what the Claude session appended since its acknowledg
     await forgetFold(sessionId);
   }
 });
+
+test("a Claude interrupt uploads as its own entry, and an older service that refuses it still gets the rest (VUH-2680)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-seat-interrupt-"));
+  const env = (sessionId: string) => ({
+    CLANKIE_SEAT_SESSION_ID: sessionId,
+    CLANKIE_CONVERSATION_ID: "global-default",
+    CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
+  });
+  const records = [
+    {
+      uuid: "assistant-1",
+      parentUuid: null,
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Working on it" }] },
+    },
+    {
+      uuid: "interrupt-1",
+      parentUuid: "assistant-1",
+      type: "user",
+      interruptedMessageId: "msg_1",
+      message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] },
+    },
+  ];
+  const run = async (fetchImpl: typeof fetch) => {
+    const sessionId = randomUUID();
+    const path = join(root, `${sessionId}.jsonl`);
+    await writeFile(path, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    try {
+      return await runSeatSyncCommand([], {
+        env: env(sessionId),
+        fetchImpl,
+        stdin: Readable.from([
+          JSON.stringify({ session_id: sessionId, transcript_path: path, hook_event_name: "Stop" }),
+        ]),
+      });
+    } finally {
+      await forgetFold(sessionId);
+    }
+  };
+  try {
+    const current: unknown[] = [];
+    expect(
+      await run(async (_url, init) => {
+        current.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true });
+      }),
+    ).toBe(0);
+    expect(current).toEqual([
+      expect.objectContaining({
+        entries: [
+          expect.objectContaining({ type: "message", role: "agent" }),
+          { type: "interrupted", id: "claude:interrupt-1" },
+        ],
+      }),
+    ]);
+
+    const older: Array<{ entries: Array<{ type: string }> }> = [];
+    expect(
+      await run(async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { entries: Array<{ type: string }> };
+        older.push(body);
+        return body.entries.some((entry) => entry.type === "interrupted")
+          ? new Response("", { status: 400 })
+          : Response.json({ ok: true });
+      }),
+    ).toBe(0);
+    expect(older.map((body) => body.entries.map((entry) => entry.type))).toEqual([
+      ["message", "interrupted"],
+      ["message"],
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

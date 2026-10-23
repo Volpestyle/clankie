@@ -158,6 +158,23 @@ export async function runSeatSyncCommand(
       throw new SeatSessionRetiredError(
         "Seat session is bound elsewhere or retired by reset; launch a new seat for this conversation",
       );
+    // A service older than the interrupt entry (VUH-2680) refuses the whole
+    // page. Resend it without them; that service could never show them.
+    if (response.status === 400 && entries.some((entry) => entry.type === "interrupted")) {
+      await send(
+        entries.filter((entry) => entry.type !== "interrupted"),
+        final,
+      );
+      if (options.checkpointPath) {
+        for (const entry of entries) acknowledged.add(entry.id);
+        writePrivate(options.checkpointPath, {
+          sessionId,
+          target: url.href,
+          entries: [...acknowledged].slice(-RETAINED_ENTRIES),
+        });
+      }
+      return;
+    }
     if (!response.ok)
       throw new Error(
         `Seat transcript sync failed (${response.status}); the next hook retries retained records`,

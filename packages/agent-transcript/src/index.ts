@@ -69,7 +69,21 @@ interface HerdrTranscriptViewedImage {
   readonly occurredAt?: string | undefined;
 }
 
-export type HerdrTranscriptEntry = HerdrTranscriptMessage | HerdrTranscriptTool | HerdrTranscriptViewedImage;
+/**
+ * The owner interrupted the agent's turn (VUH-2680). Claude writes this as a
+ * user record, which must never render as the owner's own chat.
+ */
+interface HerdrTranscriptInterrupted {
+  readonly type: "interrupted";
+  readonly id: string;
+  readonly occurredAt?: string | undefined;
+}
+
+export type HerdrTranscriptEntry =
+  | HerdrTranscriptMessage
+  | HerdrTranscriptTool
+  | HerdrTranscriptViewedImage
+  | HerdrTranscriptInterrupted;
 
 export interface HerdrSeatTranscript {
   readonly sessionKey: string;
@@ -1268,6 +1282,7 @@ function claudeRecordEntries(
       return claudePrompt(`claude:${nativeId}`, text, timestamp(entry), includeChannelPrompts);
   }
   if (entry.isMeta === true || entry.promptSource === "system") return [];
+  if (claudeInterrupt(entry)) return [{ type: "interrupted", id: `claude:${nativeId}`, ...timestamp(entry) }];
   // Mid-turn input rides the active chain as an attachment, stamped when it was sent.
   const queued = queuedCommand(entry);
   if (queued !== undefined) {
@@ -1524,6 +1539,27 @@ const CLAUDE_CHANNEL_PROMPT = /^<channel[ >]/u;
 function queuedCommand(entry: Record<string, unknown>): Record<string, unknown> | undefined {
   const attachment = entry.type === "attachment" ? record(entry.attachment) : undefined;
   return attachment?.type === "queued_command" ? attachment : undefined;
+}
+
+/**
+ * Claude's own record of an interrupt: a user record whose content is exactly
+ * one text block reading "[Request interrupted by user]" or "… for tool use]".
+ * Newer versions also carry `interruptedMessageId`; older ones (2.1.28x) do
+ * not, so the shape decides. A prompt the owner types arrives as plain string
+ * content, so typing the same words stays an ordinary message. The tool-use
+ * variant follows a separate rejected `tool_result`, which stays a failed tool.
+ */
+function claudeInterrupt(entry: Record<string, unknown>): boolean {
+  if (entry.type !== "user") return false;
+  const content = record(entry.message)?.content;
+  if (!Array.isArray(content) || content.length !== 1) return false;
+  const [only] = content;
+  return (
+    isRecord(only) &&
+    only.type === "text" &&
+    (only.text === "[Request interrupted by user]" ||
+      only.text === "[Request interrupted by user for tool use]")
+  );
 }
 
 function claudePrompt(
@@ -1911,6 +1947,13 @@ export const SeatTranscriptUploadSchema = z
                 .max(OPERATOR_CONVERSATION_TOOL_DETAIL_MAX)
                 .transform(redactSensitiveText)
                 .optional(),
+              occurredAt: z.string().max(64).optional(),
+            })
+            .strict(),
+          z
+            .object({
+              type: z.literal("interrupted"),
+              id: z.string().min(1).max(256),
               occurredAt: z.string().max(64).optional(),
             })
             .strict(),

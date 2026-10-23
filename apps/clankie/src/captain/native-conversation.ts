@@ -9,6 +9,7 @@ import {
   type ReplayOperatorConversationResult,
 } from "@clankie/protocol";
 import { isDeliveredImagePath, namedImagePaths } from "../delivered-files.ts";
+import { nativeInterruptBody } from "./conversations/helpers.ts";
 import type { HerdrSeatTranscript } from "./herdr-transcript.ts";
 
 /**
@@ -60,13 +61,15 @@ export async function nativeConversationPage(
     const body: OperatorConversationEventBody =
       entry.type === "message"
         ? { type: "message", role: entry.role, text: entry.text, streaming: false }
-        : {
-            type: "tool",
-            toolCallId: entry.toolCallId,
-            name: entry.name,
-            phase: entry.phase,
-            ...(entry.detail === undefined ? {} : { detail: trimDetail(entry.detail) }),
-          };
+        : entry.type === "interrupted"
+          ? nativeInterruptBody(entry.id)
+          : {
+              type: "tool",
+              toolCallId: entry.toolCallId,
+              name: entry.name,
+              phase: entry.phase,
+              ...(entry.detail === undefined ? {} : { detail: trimDetail(entry.detail) }),
+            };
     add(JSON.stringify(entry), at, body);
     if (entry.type === "message" && entry.role === "agent")
       for (const path of namedImagePaths(entry.text).slice(0, 4))

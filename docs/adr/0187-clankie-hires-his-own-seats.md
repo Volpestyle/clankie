@@ -194,6 +194,15 @@ It keeps `stop_task`'s authority and adds terminal-specific fences:
   settles that exact session's turn as waiting itself, releasing Queued
   messages at once.
 
+The durable "stopped" marker comes from Claude's own interrupt record in its
+transcript, published as the existing `turn`/`cancelled` event with a run ID
+derived from that record. It is not a new event type, so older app builds still
+parse replay pages. The Stop path itself publishes no marker, so each interrupt
+yields exactly one. An Esc before Claude's first reply writes no interrupt
+record: Claude withdraws the request and restores the prompt as an unsent draft.
+The service publishes no marker then either. A synthesized one would have no
+native record to key it, and the owner's own draft already shows what happened.
+
 Everything else stays as above: `interrupt()` remains false, a hire's brief and
 messages never use terminal keys, and no other automation types into a Claude
 pane.
