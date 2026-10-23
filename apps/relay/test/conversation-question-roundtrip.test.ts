@@ -879,6 +879,7 @@ it.each([false, true])(
     const created = await f.store.serve({
       op: "create",
       schemaVersion: 1,
+      title: "Stop compatibility",
       scope: { kind: "seat", seatId: "stop-fixture" },
     });
     if (created.op !== "create") throw new Error("Expected a native conversation");

@@ -516,6 +516,7 @@ it("Stop reasons are opt-in for shipped strict clients; 400 always precedes disp
   const created = await f.conversations.serve({
     op: "create",
     schemaVersion: 1,
+    title: "Stop compatibility",
     scope: { kind: "seat", seatId: BINDING },
   });
   if (created.op !== "create") throw new Error("Expected a native conversation");
