@@ -55,14 +55,30 @@ function decodeUtf8Response(response: Response): Response {
   return response;
 }
 
-function base64(bytes: Uint8Array): string {
+// Every response chunk passes through these, a whole fleet snapshot every few seconds on a busy
+// fleet, so neither walks the bytes through a per-byte callback or string append (VUH-2700).
+const BASE64_CHUNK = 0x2000; // well under the engines' argument limits, Hermes included
+/** @internal Exported for the property test against the original per-byte version. */
+export function base64(bytes: Uint8Array): string {
   let text = "";
-  for (const byte of bytes) text += String.fromCharCode(byte);
+  for (let start = 0; start < bytes.length; start += BASE64_CHUNK)
+    text += String.fromCharCode(...bytes.subarray(start, start + BASE64_CHUNK));
   return btoa(text);
 }
-function unbase64(text: string): Uint8Array<ArrayBuffer> {
-  const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-  if (base64(bytes) !== text) throw new Error("Noncanonical encrypted data");
+const BASE64_TEXT = /^[A-Za-z0-9+/]*={0,2}$/u;
+/**
+ * Strict standard base64: the alphabet, whole four-character groups, and padding and trailing
+ * bits exactly as `base64` writes them. Every group but the last decodes and re-encodes to
+ * itself, so re-encoding only the last group is the same check as re-encoding the whole text.
+ * @internal Exported for the property test against the original per-byte version.
+ */
+export function unbase64(text: string): Uint8Array<ArrayBuffer> {
+  if (text.length % 4 !== 0 || !BASE64_TEXT.test(text)) throw new Error("Noncanonical encrypted data");
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  if (text.length > 0 && btoa(binary.slice((text.length / 4 - 1) * 3)) !== text.slice(-4))
+    throw new Error("Noncanonical encrypted data");
   return bytes;
 }
 /** Browsers and Node 20+ through WebCrypto; no `node:` import, so a web bundle can ship it. */
