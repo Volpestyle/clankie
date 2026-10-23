@@ -16,7 +16,7 @@ export interface StoppedTurnHolds {
 /**
  * Capture both holds before requesting Stop. Claude's Stop hook does not run
  * after an interrupt, so a confirmed stop must settle its own hold. A later
- * turn observation or channel take invalidates the captured settlement, even
+ * turn start or channel take invalidates the captured settlement, even
  * in the same session and millisecond (VUH-2686).
  */
 export function prepareStoppedTurnSettlement(agent: HerdrAgentSnapshot, holds: StoppedTurnHolds): () => void {

@@ -6,6 +6,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
+import { runSeatSyncCommand } from "../../tui/src/command/seat-sync.ts";
 import { SeatHookLog, createClaudeWorkerSeatAdapter } from "../src/captain/claude-worker-seat.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import { prepareStoppedTurnSettlement } from "../src/captain/stopped-turn.ts";
@@ -248,8 +251,8 @@ it.each(["observed", "taken"])(
     // Stop has observed idle, but before its async completion returns, a new
     // turn starts through a native sync or a bridge take in that same session.
     if (source === "observed") {
-      outbox.observeTurn("session-a", "responding");
-      mailbox.observeTurn("session-a", "responding");
+      outbox.observeTurn("session-a", "responding", { turnStart: true });
+      mailbox.observeTurn("session-a", "responding", { turnStart: true });
     } else {
       outbox.observeTurn("session-a", "waiting");
       mailbox.observeTurn("session-a", "waiting");
@@ -273,3 +276,57 @@ it.each(["observed", "taken"])(
     expect(await workerHeld).toMatchObject({ outcome: "delivered" });
   },
 );
+
+it("a stopped turn's late PostToolUse upload preserves its settlement and releases queued input (VUH-2686)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "late-tool-sync-"));
+  const sessionId = randomUUID();
+  cleanup.push(async () => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(join(tmpdir(), `clankie-seat-sync-${sessionId}`), { force: true });
+  });
+  const outbox = new SeatOutbox({ turnHoldStaleMs: 60_000, now: () => 100 });
+  const notifications = channel(outbox);
+  await vi.waitFor(() => expect(outbox.bound()).toBe(true));
+  outbox.observeTurn(sessionId, "responding", { turnStart: true });
+  const agent: HerdrAgentSnapshot = {
+    agent: "claude",
+    paneId: "w1:p1",
+    terminalId: "seat1",
+    title: "lead",
+    status: "working",
+    session: { source: "herdr:claude", kind: "id", value: sessionId },
+  };
+  const publishWaiting = vi.fn();
+  const settle = prepareStoppedTurnSettlement(agent, {
+    mailbox: () => undefined,
+    conversation: () => "global-default",
+    outbox: () => outbox,
+    publishWaiting,
+  });
+  const held = send(outbox, "Queued during the stopped tool turn", "queue");
+  void held.catch(() => {});
+  // The real hook producer uploads responding, but no turn-start marker.
+  await runSeatSyncCommand([], {
+    env: { CLANKIE_SEAT_SESSION_ID: sessionId, CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43) },
+    host: "http://127.0.0.1:59999",
+    transcriptCheckpointPath: join(root, "fold.json"),
+    stdin: Readable.from([
+      JSON.stringify({
+        session_id: sessionId,
+        transcript_path: join(root, `${sessionId}.jsonl`),
+        hook_event_name: "PostToolUse",
+      }),
+    ]),
+    fetchImpl: async (_url, init) => {
+      const upload = SeatTranscriptUploadSchema.parse(JSON.parse(String(init?.body)));
+      expect(upload.activity).toBe("responding");
+      expect(upload.turnStart).toBeUndefined();
+      outbox.observeTurn(upload.sessionId, upload.activity!, { turnStart: upload.turnStart === true });
+      return Response.json({ ok: true });
+    },
+  });
+  settle();
+  expect(publishWaiting).toHaveBeenCalledWith("global-default", sessionId);
+  expect(await held).toMatchObject({ outcome: "delivered" });
+  expect(notifications).toEqual(["Queued during the stopped tool turn"]);
+});

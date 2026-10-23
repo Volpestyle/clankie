@@ -232,7 +232,7 @@ export class SeatOutbox {
   private turnActive = false;
   private turnSessionId: string | undefined;
   private turnObservedAt = 0;
-  private turnRevision = 0;
+  private turnGeneration = 0;
   private readonly turnHoldStaleMs: number;
   private usageLimit: SeatUsageLimit | undefined;
 
@@ -311,12 +311,17 @@ export class SeatOutbox {
   }
 
   /** Authenticated seat-sync activity; an unrelated session cannot release a hold. */
-  public observeTurn(sessionId: string, activity: "responding" | "waiting", onlyIfUnknown = false): boolean {
+  public observeTurn(
+    sessionId: string,
+    activity: "responding" | "waiting",
+    options: { onlyIfUnknown?: boolean; turnStart?: boolean } = {},
+  ): boolean {
     if (this.closed) return false;
-    if (onlyIfUnknown && this.turnSessionId !== undefined) return false;
+    if (options.onlyIfUnknown && this.turnSessionId !== undefined) return false;
     if (activity === "waiting" && this.turnSessionId !== undefined && this.turnSessionId !== sessionId)
       return false;
-    this.turnRevision += 1;
+    if (this.turnSessionId !== sessionId || (activity === "responding" && options.turnStart))
+      this.turnGeneration += 1;
     this.turnSessionId = sessionId;
     this.turnActive = activity === "responding";
     this.turnObservedAt = this.now();
@@ -324,10 +329,10 @@ export class SeatOutbox {
     return true;
   }
 
-  /** Capture before Stop: later activity or a newly taken delivery owns its own hold. */
+  /** Capture before Stop: a later turn start or newly taken delivery owns its own hold. */
   public stoppedTurnSettlement(sessionId: string): () => boolean {
-    const revision = this.turnRevision;
-    return () => this.turnRevision === revision && this.observeTurn(sessionId, "waiting");
+    const generation = this.turnGeneration;
+    return () => this.turnGeneration === generation && this.observeTurn(sessionId, "waiting");
   }
 
   public constructor(
@@ -1160,7 +1165,7 @@ export class SeatOutbox {
       this.queued.splice(this.queued.indexOf(pending), 1);
       // Expiry only stops a quiet turn blocking delivery; it never proves the seat idle.
       pending.admission = this.turnActive ? "steered" : "started";
-      this.turnRevision += 1;
+      this.turnGeneration += 1;
       this.turnActive = true;
       this.turnObservedAt = this.now();
       pending.taken = true;

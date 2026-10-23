@@ -3081,7 +3081,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             detail: "Peer authority changed before mailbox delivery; nothing was sent.",
           };
         if (context.delivery && current?.session?.kind === "id" && current.status === "working")
-          live.observeTurn(current.session.value, "responding", true);
+          live.observeTurn(current.session.value, "responding", { onlyIfUnknown: true });
         return deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
           ...context,
           ...(deliveryOptions?.recipientBinding !== undefined
@@ -7220,7 +7220,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       observeSeatUsageLimit(id, transcript.entries);
       if (
         transcript.activity !== undefined &&
-        seatOutbox(id).observeTurn(transcript.sessionId, transcript.activity)
+        seatOutbox(id).observeTurn(transcript.sessionId, transcript.activity, {
+          turnStart: transcript.turnStart === true,
+        })
       ) {
         conversations.syncNativeSeatTranscript(id, transcript.sessionId, [], transcript.activity);
         // Reports waiting for the seat's round ride the turn it just started.
@@ -7781,7 +7783,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (hook.event !== "SessionStart")
         fleetMailboxes
           .get(agent.terminalId)
-          ?.observeTurn(hook.sessionId, hook.event === "UserPromptSubmit" ? "responding" : "waiting");
+          ?.observeTurn(hook.sessionId, hook.event === "UserPromptSubmit" ? "responding" : "waiting", {
+            turnStart: hook.event === "UserPromptSubmit",
+          });
       const binding = inboundBinding(agent);
       const qualified = splitFleetQualified(paneId);
       const receiver =

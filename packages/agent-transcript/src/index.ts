@@ -1916,6 +1916,8 @@ export const SeatTranscriptUploadSchema = z
   .object({
     sessionId: z.union([z.uuid(), z.string().regex(/^ses_[A-Za-z0-9]{8,128}$/u)]),
     activity: z.enum(["responding", "waiting"]).optional(),
+    /** UserPromptSubmit starts a turn; tool progress merely continues it. */
+    turnStart: z.literal(true).optional(),
     entries: z
       .array(
         z.discriminatedUnion("type", [

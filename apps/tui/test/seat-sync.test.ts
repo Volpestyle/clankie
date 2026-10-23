@@ -183,6 +183,7 @@ test("native hooks report activity even before a transcript exists, but compacti
         sessionId,
         entries: [],
         activity,
+        ...(activity === "responding" ? { turnStart: true } : {}),
       })),
     );
   } finally {
@@ -538,5 +539,35 @@ test("a Claude interrupt uploads as its own entry, and an older service that ref
     ]);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("UserPromptSubmit preserves transcript sync with an older strict service that refuses the start marker", async () => {
+  const root = await mkdtemp(join(tmpdir(), "seat-turn-start-compat-"));
+  const sessionId = randomUUID();
+  const bodies: Array<Record<string, unknown>> = [];
+  try {
+    await runSeatSyncCommand([], {
+      env: { CLANKIE_SEAT_SESSION_ID: sessionId, CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43) },
+      stdin: Readable.from([
+        JSON.stringify({
+          session_id: sessionId,
+          transcript_path: join(root, `${sessionId}.jsonl`),
+          hook_event_name: "UserPromptSubmit",
+        }),
+      ]),
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        return new Response(null, { status: body.turnStart ? 400 : 200 });
+      },
+    });
+    expect(bodies).toEqual([
+      { sessionId, entries: [], activity: "responding", turnStart: true },
+      { sessionId, entries: [], activity: "responding" },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await forgetFold(sessionId);
   }
 });

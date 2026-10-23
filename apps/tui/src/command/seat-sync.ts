@@ -139,12 +139,15 @@ export async function runSeatSyncCommand(
       /* Missing or invalid checkpoints replay safely. */
     }
   }
-  const send = async (entries: SeatTranscriptUpload["entries"], final = false) => {
+  const send = async (entries: SeatTranscriptUpload["entries"], final = false, includeTurnStart = true) => {
     signal.throwIfAborted();
     const body = SeatTranscriptUploadSchema.parse({
       sessionId,
       entries,
       ...(final && activity !== undefined ? { activity } : {}),
+      ...(final && includeTurnStart && hook.hook_event_name === "UserPromptSubmit"
+        ? { turnStart: true }
+        : {}),
     });
     const response = await (options.fetchImpl ?? fetch)(url, {
       method: "POST",
@@ -158,12 +161,19 @@ export async function runSeatSyncCommand(
       throw new SeatSessionRetiredError(
         "Seat session is bound elsewhere or retired by reset; launch a new seat for this conversation",
       );
+    // Older strict schemas do not know the start marker; transcript uploads
+    // remain compatible, without claiming those services can guard Stop races.
+    if (response.status === 400 && body.turnStart) {
+      await send(entries, final, false);
+      return;
+    }
     // A service older than the interrupt entry (VUH-2680) refuses the whole
     // page. Resend it without them; that service could never show them.
     if (response.status === 400 && entries.some((entry) => entry.type === "interrupted")) {
       await send(
         entries.filter((entry) => entry.type !== "interrupted"),
         final,
+        includeTurnStart,
       );
       if (options.checkpointPath) {
         for (const entry of entries) acknowledged.add(entry.id);

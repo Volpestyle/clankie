@@ -6217,8 +6217,13 @@ turn that finished on its own in the instant before the key landed, so that
 race also reports `stopped`, not `already_finished`. A confirmed stop settles
 the hold captured before Stop as waiting, so a Queued message goes out at once
 instead of waiting for expiry (Claude's Stop hook does not run after an
-interrupt). Activity synced or a delivery taken after that capture keeps its own
-hold, even in the same session; a late Stop result cannot release the new turn.
+interrupt). A new session, an explicit `UserPromptSubmit` start (`turnStart: true` on
+seat-sync), or any channel take after capture keeps its own hold, even in the
+same session. A late tool-progress sync continues the stopped turn and does not
+invalidate its settlement. Channel takes include Steer, so a take during Stop
+conservatively keeps the hold until a later turn-end sync or expiry. Older
+services accept seat-sync's retry without the new start marker, but do not gain
+this race guard until updated.
 
 Every device sees a stopped Claude turn as the existing `turn` event with
 `phase: "cancelled"`, `reasonCode: "native_interrupted"` and the summary
