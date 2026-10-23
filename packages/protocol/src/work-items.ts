@@ -406,6 +406,10 @@ export const WorkProjectDetailsSchema = z
             body: z.string().max(100_000),
             createdAt: z.string().max(64),
             attachments: z.array(WorkProjectLinkSchema).max(100),
+            /** Absent on legacy services; present (including empty) when threads are supported. */
+            replies: z.array(WorkActivityEntrySchema).max(WORK_ACTIVITY_MAX).optional(),
+            /** Total replies, including those outside the bounded latest-replies window. */
+            replyCount: z.number().int().nonnegative().optional(),
           })
           .strict(),
       )

@@ -96,7 +96,7 @@ interface LinearComment {
 }
 
 /** A tracker comment as an activity entry; a comment without an id or time is left out, never invented. */
-function commentEntry(comment: LinearComment): WorkActivityEntry | undefined {
+export function commentEntry(comment: LinearComment): WorkActivityEntry | undefined {
   const actor = comment.author?.name ?? comment.user?.name ?? undefined;
   const attachments = (comment.attachments ?? [])
     .filter((attachment) => typeof attachment.url === "string" && attachment.url.length > 0)

@@ -1,8 +1,10 @@
 import {
+  WORK_ACTIVITY_MAX,
   WorkProjectDetailsSchema,
   type WorkConvention,
   type WorkProjectDetails,
 } from "@clankie/protocol/work-items";
+import { commentEntry } from "./backends/linear.ts";
 import { trackerToolsFor, type TrackerDeps } from "./tracker.ts";
 
 type Row = Record<string, unknown>;
@@ -80,10 +82,45 @@ export async function readProjectDetails(
       const update = row(value);
       if (!text(update.id) || !text(update.createdAt) || typeof update.body !== "string")
         throw new Error("Incomplete project update");
+      const replies: NonNullable<WorkProjectDetails["updates"][number]["replies"]> = [];
+      const replyIds = new Set<string>();
+      const replyCursors = new Set<string>();
+      let replyCursor: string | undefined;
+      for (;;) {
+        const comments = row(
+          await tools.call("list_comments", {
+            statusUpdateId: update.id,
+            statusUpdateType: "project",
+            orderBy: "createdAt",
+            limit: 100,
+            ...(replyCursor ? { cursor: replyCursor } : {}),
+          }),
+        );
+        if (!Array.isArray(comments.comments)) throw new Error("Project update replies unavailable");
+        for (const value of comments.comments) {
+          const reply = commentEntry(row(value));
+          if (!reply) throw new Error("Incomplete project update reply");
+          if (replyIds.has(reply.id)) continue;
+          replyIds.add(reply.id);
+          replies.push(reply);
+        }
+        if (comments.hasNextPage === false) break;
+        if (
+          comments.hasNextPage !== true ||
+          typeof comments.cursor !== "string" ||
+          replyCursors.has(comments.cursor)
+        )
+          throw new Error("Incomplete project reply pagination");
+        replyCursor = comments.cursor;
+        replyCursors.add(replyCursor);
+      }
+      replies.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
       updates.push({
         id: text(update.id) ?? "",
         body: typeof update.body === "string" ? update.body : "",
         createdAt: text(update.createdAt) ?? "",
+        replies: replies.slice(-WORK_ACTIVITY_MAX),
+        replyCount: replies.length,
         health: text(update.health),
         author: name(update.user ?? update.author),
         attachments: [...links(update.attachments), ...embeddedLinks(update.body as string)],

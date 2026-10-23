@@ -124,3 +124,5 @@ recipient from its name, or strip it after refusal. Missing Take Control, tracke
 scope, native recipient or original thread refuses before the owner write. The
 assignment and original note retain separate receipts; uncertainty is checked,
 never replayed or reversed.
+
+Project update threads use the existing comment tools: `list_comments` with `statusUpdateId` and `statusUpdateType: "project"`, and `save_comment` with `statusUpdateId` and `body`. A reply to a reply uses `parentId`. Do not post an update reply with `projectId`: that creates a project-level comment. `work project-details` includes each update’s total `replyCount` and latest 200 `replies` in time order.

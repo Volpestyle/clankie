@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileCredentialStore, resolveProviderBearer } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker, writeConvention } from "@clankie/work-items";
+import { createLocalTracker, readProjectDetails, writeConvention } from "@clankie/work-items";
 import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { linearProjectExists } from "../src/linear-project-binding.ts";
@@ -87,6 +87,37 @@ describe("registered Linear OAuth through real broker and hosted tracker", () =>
       expect(provider.validationErrors).toEqual([]);
     },
   );
+  it("reads update replies and posts through the same authenticated comment adapter", async () => {
+    const { tracker, provider, host, directory } = await setup();
+    const comment = provider.rows.comments![0]!;
+    comment.issue = comment.project = null;
+    comment.projectUpdate = { id: UPDATE_ID };
+    const details = await readProjectDetails(
+      directory,
+      {
+        schemaVersion: 1,
+        backend: "linear",
+        linear: { team: TEAM_ID, project: PROJECT_ID },
+        decidedBy: "owner",
+        decidedAt: new Date().toISOString(),
+      },
+      { linear: (name, args) => tracker.call(name, args) },
+    );
+    expect(details.updates[0]).toMatchObject({ id: UPDATE_ID, replyCount: 1, replies: [{ id: COMMENT_ID }] });
+    const result = await host.call({
+      server: "linear",
+      tool: "save_comment",
+      lane: "operator",
+      arguments: { statusUpdateId: UPDATE_ID, body: "Owner reply to this update" },
+    });
+    expect(result).toMatchObject({ outcome: "ok", isError: false });
+    const sent = provider.seen.find((entry) => entry.query?.includes("commentCreate"));
+    expect(JSON.parse(sent!.body).variables.input).toMatchObject({
+      projectUpdateId: UPDATE_ID,
+      body: "Owner reply to this update",
+    });
+    expect(provider.validationErrors).toEqual([]);
+  });
   it("verifies an exact project binding without a complexity-heavy collection scan", async () => {
     const { host, provider } = await setup();
     const before = provider.seen.length;
