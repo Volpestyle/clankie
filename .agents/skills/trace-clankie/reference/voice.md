@@ -134,6 +134,19 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   Vox, and sends finish only after its local queue empties. A successful tool
   result does not prove its spoken answer survived playback.
 
+- **A provider that hangs up leaves him deaf or mute, not idle.**
+  `discord.voice.failed` with code `voice_listener_lost` (stage
+  `transcription_session`) or `voice_conversation_lost` (stage
+  `conversation_session`) means the realtime provider's socket ended under
+  him. `utterance` receipts can still show capture working. `closeReason`
+  says how the socket ended: `socket` (the provider closed it), `error`
+  (transport or a safety bound) or `lifetime`. `closeCode` is the provider's
+  WebSocket close code. `providerCode` is the code of its last error frame,
+  such as a refused key, quota or model; its message text is never kept.
+  Receipts from before VUH-2728 lack these three fields. A join that returns
+  `joined` proves only that the sockets opened, not that the provider
+  accepted the session.
+
 - **An ElevenLabs byte-limit failure can follow audible speech.**
   `discord.voice.failed` with code
   `elevenlabs_context_audio_exceeded_the_byte_limit` means synthesized PCM hit

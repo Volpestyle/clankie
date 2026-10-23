@@ -3849,6 +3849,74 @@ describe("reconnect", () => {
   });
 });
 
+describe("a provider that hangs up says how (VUH-2728)", () => {
+  // The production provider composition over a scripted socket: an error frame,
+  // then the provider's own close. The receipt keeps the codes, never the text.
+  const refusal = {
+    type: "error",
+    error: { type: "invalid_request_error", code: "insufficient_quota", message: "private provider text" },
+  };
+
+  it("a lost listener names the provider's close code and error code", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    const sockets: VoiceRecoverySocket[] = [];
+    harness.ports.openTranscription = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: harness.timers,
+      socketFactory: async () => {
+        const socket = new VoiceRecoverySocket();
+        sockets.push(socket);
+        return socket;
+      },
+    }).openTranscription;
+    harness.vox.emit({ type: "speaking_start", userId: ALICE });
+    await flush();
+    const socket = at(sockets, -1);
+    socket.emit(refusal);
+    socket.hangUp(1008);
+    await flush();
+    expect(harness.ofType("failed")).toMatchObject([
+      {
+        stage: "transcription_session",
+        code: "voice_listener_lost",
+        closeReason: "socket",
+        closeCode: 1008,
+        providerCode: "insufficient_quota",
+      },
+    ]);
+    expect(JSON.stringify(harness.ofType("failed"))).not.toContain("private provider text");
+    await harness.session.leave("fixture_done");
+  });
+
+  it("a lost conversation names the provider's close code and error code", async () => {
+    const harness = await joinedHarness();
+    await harness.consent(ALICE);
+    const socket = new VoiceRecoverySocket();
+    harness.ports.openConversation = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: harness.timers,
+      socketFactory: async () => socket,
+    }).openConversation;
+    await harness.say(ALICE, "hey clankie are you there");
+    socket.emit(refusal);
+    socket.hangUp(1011);
+    await flush();
+    expect(harness.ofType("failed").filter((event) => event.stage === "conversation_session")).toMatchObject([
+      {
+        code: "voice_conversation_lost",
+        closeReason: "socket",
+        closeCode: 1011,
+        providerCode: "insufficient_quota",
+      },
+    ]);
+    expect(JSON.stringify(harness.ofType("failed"))).not.toContain("private provider text");
+    await harness.session.leave("fixture_done");
+  });
+});
+
 describe("speaker listener bounds", () => {
   it("closes an inactive speaker listener and reopens it on their next utterance", async () => {
     const harness = await joinedHarness({ floorOverrides: { volition: { maxPerHour: 0 } } });
@@ -5177,7 +5245,7 @@ class VoiceRecoverySocket implements RealtimeSocket {
   readonly sent: Record<string, unknown>[] = [];
   closed = false;
   private receive: ((data: string) => void) | undefined;
-  private closing: (() => void) | undefined;
+  private closing: ((code?: number) => void) | undefined;
   private transportError: ((error: unknown) => void) | undefined;
   send(data: string | Uint8Array): void {
     if (typeof data !== "string") throw new Error("Expected a JSON frame");
@@ -5186,8 +5254,15 @@ class VoiceRecoverySocket implements RealtimeSocket {
   onMessage(handler: (data: string) => void): void {
     this.receive = handler;
   }
-  onClose(handler: () => void): void {
+  onClose(handler: (code?: number) => void): void {
     this.closing = handler;
+  }
+  /** The provider hangs up with its own close code. */
+  hangUp(code: number): void {
+    if (!this.closed) {
+      this.closed = true;
+      this.closing?.(code);
+    }
   }
   onError(handler: (error: unknown) => void): void {
     this.transportError = handler;

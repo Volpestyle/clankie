@@ -454,6 +454,10 @@ export const DiscordVoiceEvidenceSchema = z
         userId: DiscordVoiceGatewayIdSchema.optional(),
         stage: DiscordVoiceFailureStageSchema,
         code: DiscordVoiceFailureCodeSchema,
+        // A lost provider session says how it ended (VUH-2728): never message text.
+        closeReason: z.enum(["closed", "lifetime", "socket", "error"]).optional(),
+        closeCode: z.number().int().min(0).max(4999).optional(),
+        providerCode: DiscordVoiceFailureCodeSchema.optional(),
       })
       .strict(),
     z

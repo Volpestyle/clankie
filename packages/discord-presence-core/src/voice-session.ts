@@ -63,6 +63,7 @@ import {
   type RealtimeFunctionCall,
   type RealtimeResponseMeta,
   type RealtimeResponseAttempt,
+  type RealtimeSessionCloseDetail,
   type RealtimeSessionCloseReason,
   type RealtimeTimers,
   type RealtimeTranscriptEvent,
@@ -385,7 +386,7 @@ export interface VoiceConversationPort {
 
 export interface VoiceTranscriptionHandlers {
   readonly onTranscript: (event: RealtimeTranscriptEvent) => void;
-  readonly onClose: (reason: RealtimeSessionCloseReason) => void;
+  readonly onClose: (reason: RealtimeSessionCloseReason, detail?: RealtimeSessionCloseDetail) => void;
   readonly onError: (message: string) => void;
 }
 
@@ -404,7 +405,7 @@ export interface VoiceConversationOpenInput {
   readonly onResponseStarted?: (attempt: RealtimeResponseAttempt) => void;
   readonly onResponseAbandoned?: (attempt: RealtimeResponseAttempt) => void;
   readonly onResponseDone: (meta: RealtimeResponseMeta) => void;
-  readonly onClose: (reason: RealtimeSessionCloseReason) => void;
+  readonly onClose: (reason: RealtimeSessionCloseReason, detail?: RealtimeSessionCloseDetail) => void;
   /** null explicitly means an idle mouth failure, with no utterance to attribute. */
   readonly onError: (message: string, itemId?: string | null) => void;
 }
@@ -2762,8 +2763,8 @@ export class DiscordVoiceSession {
           if (generation === this.sessionGeneration && this.conversation === port)
             this.handleResponseDone(meta);
         },
-        onClose: (reason) => {
-          this.handleConversationClose(reason, generation, guildId, channelId);
+        onClose: (reason, detail) => {
+          this.handleConversationClose(reason, generation, guildId, channelId, detail);
         },
         onError: (message, itemId) => {
           // The mouth failing is the only voice failure the room feels and
@@ -2941,6 +2942,7 @@ export class DiscordVoiceSession {
     generation: number,
     guildId: string,
     channelId: string,
+    detail?: RealtimeSessionCloseDetail,
   ): void {
     if (generation !== this.sessionGeneration) return;
     this.conversation = undefined;
@@ -2980,6 +2982,7 @@ export class DiscordVoiceSession {
       channelId,
       stage: "conversation_session",
       code: "voice_conversation_lost",
+      ...providerCloseEvidence(reason, detail),
     });
     // The floor machine owns floor state and exposes no forced release; after
     // an unexpected session loss it converges on its own — the next wake or
@@ -4405,8 +4408,8 @@ export class DiscordVoiceSession {
       onTranscript: (event) => {
         if (generation === this.sessionGeneration) this.handleTranscript(userId, event);
       },
-      onClose: (reason) => {
-        this.handleTranscriptionClose(userId, port, reason, generation, guildId, channelId);
+      onClose: (reason, detail) => {
+        this.handleTranscriptionClose(userId, port, reason, generation, guildId, channelId, detail);
       },
       onError: () => undefined,
     });
@@ -4435,6 +4438,7 @@ export class DiscordVoiceSession {
     generation: number,
     guildId: string,
     channelId: string,
+    detail?: RealtimeSessionCloseDetail,
   ): void {
     if (generation !== this.sessionGeneration) return;
     if (this.transcriptions.get(userId) !== port) return;
@@ -4449,6 +4453,7 @@ export class DiscordVoiceSession {
       channelId,
       stage: "transcription_session",
       code: "voice_listener_lost",
+      ...providerCloseEvidence(reason, detail),
     });
     this.scheduleListenerReconnect(userId);
   }
@@ -4766,6 +4771,21 @@ function parseAskClankieRequest(argumentsJson: string): string | undefined {
 }
 
 /** Evidence codes are machine tokens; a captain code is normalized, never trusted. */
+/** Why the provider's session ended, in receipt terms: how, its close code and its last error code. */
+function providerCloseEvidence(
+  reason: RealtimeSessionCloseReason,
+  detail: RealtimeSessionCloseDetail | undefined,
+): { closeReason: RealtimeSessionCloseReason; closeCode?: number; providerCode?: string } {
+  const closeCode = detail?.closeCode;
+  return {
+    closeReason: reason,
+    ...(closeCode !== undefined && Number.isSafeInteger(closeCode) && closeCode >= 0 && closeCode <= 4999
+      ? { closeCode }
+      : {}),
+    ...(detail?.providerCode === undefined ? {} : { providerCode: detail.providerCode }),
+  };
+}
+
 function sanitizeFailureCode(code: string, fallback = "voice_captain_turn_failed"): string {
   const normalized = code
     .toLowerCase()

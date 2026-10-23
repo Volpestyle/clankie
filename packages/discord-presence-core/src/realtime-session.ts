@@ -331,7 +331,8 @@ export interface RealtimeSocket {
   send(data: string | Uint8Array): void;
   close(): void;
   onMessage(handler: (data: string) => void): void;
-  onClose(handler: () => void): void;
+  /** `code` is the WebSocket close code the peer sent, when the transport reports one. */
+  onClose(handler: (code?: number) => void): void;
   onError(handler: (error: unknown) => void): void;
 }
 
@@ -354,6 +355,16 @@ export interface RealtimeTimers {
  * byte cap.
  */
 export type RealtimeSessionCloseReason = "closed" | "lifetime" | "socket" | "error";
+
+/**
+ * What the provider said as it went, for a receipt that can tell a refused
+ * key from a dropped network (VUH-2728): its WebSocket close code and the
+ * machine-readable code of its last error frame. Never its message text.
+ */
+export interface RealtimeSessionCloseDetail {
+  readonly closeCode?: number;
+  readonly providerCode?: string;
+}
 
 export interface RealtimeTranscriptEvent {
   readonly itemId: string;
@@ -396,7 +407,7 @@ interface RealtimeSessionCommonOptions {
   /** Session lifetime cap in milliseconds; the session closes itself and reports `onClose("lifetime")`. */
   readonly maxLifetimeMs?: number;
   readonly timers?: RealtimeTimers;
-  readonly onClose?: (reason: RealtimeSessionCloseReason) => void;
+  readonly onClose?: (reason: RealtimeSessionCloseReason, detail?: RealtimeSessionCloseDetail) => void;
   /** Sanitized, content-free error messages only; never transport detail, never the key. */
   readonly onError?: (message: string) => void;
 }
@@ -479,7 +490,7 @@ export const openRealtimeWebSocket: RealtimeSocketFactory = (url, headers) => {
   return new Promise<RealtimeSocket>((resolve, reject) => {
     const socket = new WebSocketCtor(url, { headers });
     const messageHandlers: ((data: string) => void)[] = [];
-    const closeHandlers: (() => void)[] = [];
+    const closeHandlers: ((code?: number) => void)[] = [];
     const errorHandlers: ((error: unknown) => void)[] = [];
     socket.addEventListener("message", (event) => {
       // The realtime protocol is JSON text frames; binary frames are ignored.
@@ -487,8 +498,8 @@ export const openRealtimeWebSocket: RealtimeSocketFactory = (url, headers) => {
         for (const handler of messageHandlers) handler(event.data);
       }
     });
-    socket.addEventListener("close", () => {
-      for (const handler of closeHandlers) handler();
+    socket.addEventListener("close", (event) => {
+      for (const handler of closeHandlers) handler(event.code);
     });
     socket.addEventListener("error", (event) => {
       for (const handler of errorHandlers) handler(event);
@@ -532,7 +543,9 @@ interface RealtimeSessionCoreInit {
   readonly socket: RealtimeSocket;
   readonly timers: RealtimeTimers;
   readonly maxLifetimeMs: number;
-  readonly onClose: ((reason: RealtimeSessionCloseReason) => void) | undefined;
+  readonly onClose:
+    | ((reason: RealtimeSessionCloseReason, detail?: RealtimeSessionCloseDetail) => void)
+    | undefined;
   readonly onError: ((message: string) => void) | undefined;
 }
 
@@ -541,9 +554,13 @@ abstract class RealtimeSessionCore {
   private readonly socket: RealtimeSocket;
   private readonly timers: RealtimeTimers;
   private readonly lifetimeHandle: unknown;
-  private readonly onCloseCallback: ((reason: RealtimeSessionCloseReason) => void) | undefined;
+  private readonly onCloseCallback:
+    | ((reason: RealtimeSessionCloseReason, detail?: RealtimeSessionCloseDetail) => void)
+    | undefined;
   protected readonly onErrorCallback: ((message: string) => void) | undefined;
   private closed = false;
+  private remoteCloseCode: number | undefined;
+  private lastProviderCode: string | undefined;
 
   protected constructor(init: RealtimeSessionCoreInit) {
     this.socket = init.socket;
@@ -553,7 +570,8 @@ abstract class RealtimeSessionCore {
     init.socket.onMessage((data) => {
       this.receive(data);
     });
-    init.socket.onClose(() => {
+    init.socket.onClose((code) => {
+      this.remoteCloseCode = code;
       this.closeWith("socket");
     });
     init.socket.onError(() => {
@@ -637,7 +655,10 @@ abstract class RealtimeSessionCore {
     } catch {
       // Already closing; the reason we report is the one that got here first.
     }
-    this.onCloseCallback?.(reason);
+    this.onCloseCallback?.(reason, {
+      ...(this.remoteCloseCode === undefined ? {} : { closeCode: this.remoteCloseCode }),
+      ...(this.lastProviderCode === undefined ? {} : { providerCode: this.lastProviderCode }),
+    });
   }
 
   protected assertOpen(): void {
@@ -658,6 +679,7 @@ abstract class RealtimeSessionCore {
     const type = asString(event.type);
     if (type === undefined) return;
     if (type === "error") {
+      this.lastProviderCode = providerErrorCode(event) ?? this.lastProviderCode;
       this.handleServerError(event);
       return;
     }
@@ -1437,6 +1459,17 @@ function buildRealtimeUrl(baseUrl: string | undefined, query: Readonly<Record<st
 
 function isLoopback(url: URL): boolean {
   return url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1";
+}
+
+/** The error frame's code (or type), reduced to the receipt's code alphabet. */
+function providerErrorCode(event: Record<string, unknown>): string | undefined {
+  const error = asRecord(event.error);
+  const raw = asString(error?.code) ?? asString(error?.type);
+  const code = raw
+    ?.toLowerCase()
+    .replaceAll(/[^a-z0-9_]/gu, "_")
+    .slice(0, 64);
+  return code === undefined || code.length === 0 ? undefined : code;
 }
 
 function describeServerError(event: Record<string, unknown>): string {

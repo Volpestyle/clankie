@@ -38,6 +38,7 @@ import type {
   RealtimeFunctionCall,
   RealtimeResponseMeta,
   RealtimeResponseAttempt,
+  RealtimeSessionCloseDetail,
   RealtimeSessionCloseReason,
   RealtimeTimers,
 } from "./realtime-session.ts";
@@ -81,7 +82,7 @@ export interface ExternalVoiceRealtimeHandlers {
   readonly onResponseStarted: (attempt: RealtimeResponseAttempt) => void;
   readonly onResponseAbandoned: (attempt: RealtimeResponseAttempt) => void;
   readonly onResponseDone: (meta: RealtimeResponseMeta) => void;
-  readonly onClose: (reason: RealtimeSessionCloseReason) => void;
+  readonly onClose: (reason: RealtimeSessionCloseReason, detail?: RealtimeSessionCloseDetail) => void;
   readonly onError: (message: string) => void;
 }
 
@@ -198,8 +199,8 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       onResponseDone: (meta) => {
         this.handleResponseDone(meta);
       },
-      onClose: (reason) => {
-        this.handleRealtimeClose(reason);
+      onClose: (reason, detail) => {
+        this.handleRealtimeClose(reason, detail);
       },
       onError: this.input.onError,
     });
@@ -524,7 +525,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
     }
   }
 
-  private handleRealtimeClose(reason: RealtimeSessionCloseReason): void {
+  private handleRealtimeClose(reason: RealtimeSessionCloseReason, detail?: RealtimeSessionCloseDetail): void {
     if (!this.closed) {
       this.closed = true;
       for (const itemId of this.heldDone.keys()) this.releaseHeldDone(itemId);
@@ -535,7 +536,7 @@ class ExternalVoiceConversation implements VoiceConversationPort {
       this.openedContexts.clear();
       this.liveItemIds.clear();
     }
-    this.input.onClose(reason);
+    this.input.onClose(reason, detail);
   }
 
   private ttsHandlers(): ExternalVoiceTtsHandlers {
