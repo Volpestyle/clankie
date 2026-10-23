@@ -6219,7 +6219,9 @@ that controller retains the original stop attempt. Claude's Esc goes out only
 while Herdr shows that exact pane, terminal and session working and its styled
 input line is provably empty; an idle seat returns `already_finished`, and a
 draft, an unreadable input line, a seat waiting on the owner or a changed
-binding returns `unavailable` without a key. Owner authority and the binding are
+binding returns `unavailable` without a key. A confirmed draft includes typed
+`reason: "unsent_draft"`; Stop leaves that text intact. Open the agent's terminal
+to review it. Clients match the reason, never the diagnostic `detail`. Owner authority and the binding are
 checked again just before the key. Exactly one Esc is sent per stop, concurrent
 requests share it, and `stopped` needs Claude seen idle within five seconds;
 otherwise the result is `uncertain` and nothing is repeated. Claude's draft

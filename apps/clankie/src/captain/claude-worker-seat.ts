@@ -710,7 +710,11 @@ class ClaudeWorkerSeatControl implements SeatControl {
     const ansi = await pane.read(current.paneId).catch(() => undefined);
     const line = ansi === undefined ? undefined : paneInputLine("claude", ansi);
     if (line?.state === "draft")
-      return refused("Claude's input line holds an unsent draft that Esc would clear; nothing was sent.");
+      return {
+        outcome: "unavailable",
+        reason: "unsent_draft",
+        detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
+      };
     if (line?.state !== "empty")
       return refused(
         "Claude's input line could not be read, so a draft can't be ruled out; nothing was sent.",

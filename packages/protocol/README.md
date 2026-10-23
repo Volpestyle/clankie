@@ -43,7 +43,10 @@ meaning. `interrupt` means the existing authenticated `stop_task` operator
 operation can stop that exact task. A harness's generic interrupt method does
 not establish this capability. Interactive Claude's `stop_task` is one guarded
 Esc into its exact working pane with an empty input line (VUH-2680); a bare
-terminal Escape key elsewhere still establishes nothing. `nextTurnOnly` means
+terminal Escape key elsewhere still establishes nothing. A draft refusal returns
+`outcome: "unavailable", reason: "unsent_draft"` (VUH-2687). Clients use the typed
+`reason` to explain that Stop leaves the unsent terminal text intact and direct
+the owner to that terminal; `detail` is diagnostic prose, never a discriminator. `nextTurnOnly` means
 Claude has only an authenticated next-UserPromptSubmit receiver: Queue can be
 stored, but Steer cannot wake or modify its current turn. A live exact-session
 Claude poll offers both modes; unverified Claude offers neither. Codex's native

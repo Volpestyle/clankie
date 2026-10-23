@@ -4634,7 +4634,11 @@ paths:
         dispatch uncertain. `stop_task` takes conversationId and returns stopped,
         already_finished, unsupported, unavailable or uncertain, with taskId when
         known. Controller-owned Codex uses exact turn/interrupt plus observed native
-        completion; other native stop controls currently return unsupported.
+        completion. Interactive Claude sends one guarded Esc only with an empty
+        input line. A confirmed unsent draft returns unavailable with typed
+        reason `unsent_draft`, without sending a key or clearing the text; open
+        the agent's terminal to review it. Clients match reason, never diagnostic
+        detail. Other native stop controls currently return unsupported.
         The canonical schemas are in packages/protocol/src/operator-conversations.ts
         and packages/protocol/src/operator-service.ts.
         Project onboarding uses `project_proposal_get` for one defaults-first

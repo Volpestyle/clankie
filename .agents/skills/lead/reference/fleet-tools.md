@@ -306,3 +306,10 @@ The roster's `inputCapabilities` lists observed `deliveryModes`, exact-task
 `interrupt` support and Claude `nextTurnOnly`; use them, not a harness-name
 guess. Next-turn-only Claude supports Queue, never Steer, and missing
 capabilities mean unknown. Capabilities never grant authority.
+
+## Exact-task Stop refusals
+
+`clankie conversations stop-task ID` uses the authenticated exact-task route.
+For Claude, `outcome: "unavailable", reason: "unsent_draft"` means its terminal
+has unsent input. Stop sends no key and leaves that text intact; open the agent's
+terminal to review it. Match the typed reason, never free-text `detail`.

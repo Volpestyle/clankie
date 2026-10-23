@@ -6,6 +6,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StopNativeTaskResultSchema } from "@clankie/protocol";
 import type { SeatView } from "@clankie/agent-hosts";
 import {
   SeatHookLog,
@@ -1216,11 +1217,13 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
     {
       name: "an unsent draft typed while Claude works",
       screen: () => golden("busy-draft"),
+      reason: "unsent_draft",
       detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
     },
     {
       name: "an unsent draft",
       screen: () => golden("draft"),
+      reason: "unsent_draft",
       detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
     },
     {
@@ -1234,9 +1237,13 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
       screen: async () => new Error("pane read failed"),
       detail: "Claude's input line could not be read, so a draft can't be ruled out; nothing was sent.",
     },
-  ])("refuses $name in the input line", async ({ screen, detail }) => {
+  ])("refuses $name in the input line", async ({ screen, detail, reason }) => {
     const f = await stopFixture({ screen: await screen() });
-    expect(await f.stop(f.guard)).toEqual({ outcome: "unavailable", detail });
+    expect(StopNativeTaskResultSchema.parse(await f.stop(f.guard))).toEqual({
+      outcome: "unavailable",
+      detail,
+      ...(reason === undefined ? {} : { reason }),
+    });
     expect(f.sendKeys).not.toHaveBeenCalled();
     // The input line is the last thing read, after authority and the re-observation.
     expect(f.guard).toHaveBeenCalledTimes(1);
@@ -1279,6 +1286,7 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
     expect(await typed.stop(typed.guard)).toEqual({
       outcome: "unavailable",
       detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
+      reason: "unsent_draft",
     });
     expect(typed.read).toHaveBeenCalledTimes(1);
     expect(typed.sendKeys).not.toHaveBeenCalled();

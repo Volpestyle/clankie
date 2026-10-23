@@ -46,6 +46,8 @@ export const PendingNativeMessagesResultSchema = z.strictObject({
 });
 export type PendingNativeMessagesResult = z.infer<typeof PendingNativeMessagesResultSchema>;
 export const StopNativeTaskResultSchema = z.strictObject({
+  /** Machine-readable refusal; detail is diagnostic text, never a client discriminator. */
+  reason: z.enum(["unsent_draft"]).optional(),
   outcome: z.enum(["stopped", "already_finished", "unsupported", "uncertain", "unavailable"]),
   taskId: z.string().min(1).max(512).optional(),
   detail: z.string().max(512).optional(),
