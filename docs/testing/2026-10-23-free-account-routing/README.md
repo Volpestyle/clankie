@@ -10,5 +10,6 @@ accounts still route to their existing body. Core has no Checkout/provisioning
 endpoint; the fleet's default-closed sales and first-tenant materialization
 gates live in clankie-ops (VUH-2711-ops).
 
-The no-hosted-machine error now directs the owner to `clankie login` and states
-that hosted machines are no longer sold, removing its stale purchase suggestion.
+The no-hosted-machine error now directs the owner to `clankie login` without a
+hosted purchase suggestion. Public getting-started routes now lead with the Mac
+and free account; existing hosted-body connection/support docs remain.

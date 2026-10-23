@@ -4,13 +4,13 @@ A Mac that sleeps is asleep to everything on it: Clankie's service, his Discord
 bodies and the connection the app reaches him through all stop until it wakes.
 Clankie treats that as a normal condition to recover from, not a fault
 ([ADR 0203](adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
-"Always on" is the owner's choice between three ways to live with it.
+Choose how your own Mac handles sleep. Free accounts provide phone steering
+while it is awake; an account alone does not keep a sleeping Mac running.
 
-| Choice            | What it means                                                                  | Use it when                                                    |
-| ----------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| An awake Mac      | The default: the launcher holds the Mac awake while it is plugged in.          | The Mac is your always-plugged-in home machine.                |
-| Let the Mac sleep | `clankie awake off`. Clankie recovers on wake (below).                         | The Mac is a laptop you carry, or you can wait for it to wake. |
-| A hosted Clankie  | His body runs on Clankie's service, not your Mac. The Mac can sleep or be off. | You want him reachable without keeping a computer running.     |
+| Choice            | What it means                                                         | Use it when                                                    |
+| ----------------- | --------------------------------------------------------------------- | -------------------------------------------------------------- |
+| An awake Mac      | The default: the launcher holds the Mac awake while it is plugged in. | The Mac is your always-plugged-in home machine.                |
+| Let the Mac sleep | `clankie awake off`. Clankie recovers on wake (below).                | The Mac is a laptop you carry, or you can wait for it to wake. |
 
 ## What recovers on its own
 
@@ -105,33 +105,24 @@ the launcher's. Amphetamine and other tools that hold a sleep assertion count in
 Limits, stated plainly: this holds against idle sleep on AC power. Closing a
 laptop lid follows macOS's own clamshell rules and is part of the wake test, not
 something this guide promises. It does not survive a power cut, a restart, or
-the Mac being unplugged. If the Mac must be reachable regardless, use a hosted
-Clankie.
+the Mac being unplugged. For a free self-operated route, use your own always-on
+machine and network access. Clankie Plus is planned to add Presence, push and
+multiple machines; it is not a promise that these capabilities are deployed.
 
-## A hosted Clankie
+## Existing hosted bodies
 
-A hosted body runs on Clankie's service rather than your Mac, so your Mac's power
-does not matter to it. The accepted Premium lifecycle keeps the hosted body
-present continuously: Discord, voice availability, phone and relay access, and
-scheduled Auto rounds continue across idle periods with the laptop shut.
-Inference uses AI credits and stops at the available balance and spending limits;
-being present does not promise unlimited model use or compute. A hosted body
-cannot use a sleeping Mac's desktop or simulator. Optional cloud burst capacity
-is outside Premium's first release.
-
-This lifecycle requires the VUH-2575 managed-service rollout; older deployments
-can still sleep automatically. Explicit owner pauses, billing suspension and
-protective data limits remain. See [ADR 0285](adr/0285-hosted-presence-has-no-idle-clock.md).
-Sign in with
-`clankie login`, or `clankie connect hosted` to require one, then pair the app;
-see [local and hosted connection modes](cli.md#local-and-hosted-connection-modes).
-Setup and pricing are in the [public field guide](https://docs.clankie.bot/get-started/).
-Self-hosting the same body on your own Linux host is in
-[Linux self-hosting](../infra/hosted/README.md).
+A hosted body already on your account runs independently of your Mac's power.
+Its actual deployed lifecycle, billing suspension and data limits determine
+availability; a free account does not provision one. See
+[hosted support](hosted.md) for the retained deployment and recovery details.
+Sign in with `clankie login`, or `clankie connect hosted` to require an existing
+hosted body, then pair the app; see
+[local and hosted connection modes](cli.md#local-and-hosted-connection-modes).
+Self-hosting on your own Linux host is in [Linux self-hosting](../infra/hosted/README.md).
 
 ### Moving an existing Clankie to a hosted body
 
-A hosted body you sign up for starts as a new, unclaimed Clankie.
+An existing unclaimed hosted body can receive your Clankie.
 [`clankie transfer`](cli.md#transfer) moves your Mac's Clankie there as the same
 one: identity, memory, conversations, projects and tracker. It moves him back the same way
 ([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). One body holds him at

@@ -1,41 +1,15 @@
 # Get started
 
 Clankie is an agent lead with a memory and a personality: he plans the work,
-leads a team to do it, and owns it until it lands. Have his machine looked after
-for you, or run him yourself.
+leads a team to do it, and owns it until it lands. Start on your Mac with your
+own agent subscriptions, models and tools. The desktop pet is the front door;
+the TUI, CLI and phone app reach the same lead.
 
-|                  | Hosted Clankie                          | Run him yourself                                    |
-| ---------------- | --------------------------------------- | --------------------------------------------------- |
-| Where he lives   | A private machine managed for you       | Your Mac, or an advanced Linux deployment           |
-| Start here       | Your account and the iPhone or iPad app | Install, connect a model, open the console          |
-| Models           | AI credits from your plan or account    | Your provider subscription, API key, or local model |
-| Who maintains it | The hosted service                      | You                                                 |
-
-[clankie.bot](https://clankie.bot) says whether hosted sign-up and app installs
-are open and lists current plans. The Discord calls and game night in the promo
-use the Mac setup.
-
-## Hosted: start in the app
-
-1. Check that you can install the iPhone or iPad app from the
-   [official app link](https://clankie.bot/#app).
-2. Open [Get Clankie](https://clankie.bot/#get), sign in or create an account,
-   and choose a plan with AI credits. A machine-only plan needs credits added
-   before Clankie can answer.
-3. When your account shows Clankie is ready, open its secure app link on your
-   phone (or scan its QR), review the access, and connect.
-4. Open **Messages**, choose **Clankie**, and say hello.
-
-Premium’s accepted availability promise is continuous Discord, voice and phone
-presence, with scheduled Auto rounds while your laptop is shut. The managed
-service rollout for this lifecycle is pending. AI work uses credits with spending
-limits; a sleeping Mac’s desktop and simulator remain unavailable. Burst workers
-are deferred from the first Premium release.
-
-Hosted Clankie uses AI credits only; customer model keys and subscription
-sign-ins are available when you run him yourself. You need no Mac install,
-model subscription, or API key. Add credits from your account if they run out. To use a terminal as well, run `clankie connect hosted`
-on a Mac ([connection modes](/cli/#local-and-hosted-connection-modes)).
+The software and Clankie accounts are free. An account supports pairing, phone
+steering while your Mac is awake and the official Discord bot. Model providers
+and connected services may charge. Check [clankie.bot](https://clankie.bot) for
+current account signup and app install availability; a source capability does
+not establish that a public install or account signup is open.
 
 ## DIY: start on your Mac
 
@@ -84,6 +58,16 @@ for checksums, pinning, and the installed layout,
 to run from source, or the
 [Linux deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md).
 
+## Existing hosted accounts
+
+If your account already has a hosted body, open its secure app link on your
+phone (or scan its QR), review the access, and connect. Open **Messages**, choose
+**Clankie**, and say hello. To reach that existing body from a terminal, use
+`clankie connect hosted` ([connection modes](/cli/#local-and-hosted-connection-modes)).
+See [hosted support](https://github.com/Volpestyle/clankie/blob/main/docs/hosted.md)
+for its limits and recovery. Signing into a free account does not create a
+hosted body.
+
 ## Linux release path
 
 Linux bundles support **Ubuntu 24.04 LTS or newer**, with glibc, on arm64 or x64.
@@ -127,7 +111,7 @@ cannot be reached. Pairing does not move your Clankie anywhere.
 
 ## Move your Clankie to another body
 
-`clankie transfer` moves the same Clankie to another body, such as a hosted one,
+`clankie transfer` moves the same Clankie to another body, that you already have access to,
 and back. One body holds him at a time: the old one freezes before anything is
 copied, and it serves only a note saying where he went. His identity, memory,
 conversations, projects and tracker move. Credentials, model and harness

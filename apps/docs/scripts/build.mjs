@@ -41,12 +41,12 @@ const PAGES = [
   {
     path: "/",
     title: "Clankie field guide",
-    description: "Everyday help and deeper possibilities, with clear paths for hosted and DIY users.",
+    description: "Everyday help, a free Mac setup, phone pairing and existing hosted support.",
   },
   {
     path: "/get-started/",
     title: "Get started",
-    description: "Start with hosted Clankie in the app, or install and configure your own Mac.",
+    description: "Run Clankie on your Mac and pair your phone with a free account.",
   },
   {
     path: "/using-clankie/",
@@ -1222,7 +1222,7 @@ async function slashCommands() {
       commands.push({
         name: "connection",
         aliases: ["settings"],
-        description: "Choose local or hosted Clankie",
+        description: "Choose local Clankie or an existing hosted body",
         argument: "",
       });
       continue;
@@ -1573,11 +1573,11 @@ function llmsIndex() {
   return [
     "# Clankie",
     "",
-    "> Clankie is a personal AI assistant with a personality, from clankie.bot. He remembers you, plans your work, leads coding agents like Claude Code and Codex, and owns the work until it lands. Run him on your own machine and he can also chat and talk in Discord and play Pokémon; hosted Clankie lives on a managed private machine you reach from the iPhone and iPad app.",
+    "> Clankie is a personal AI assistant with a personality, from clankie.bot. He remembers you, plans your work, leads coding agents like Claude Code and Codex, and owns the work until it lands. Start on your Mac with your own agent subscriptions. A free account supports phone pairing, steering while the Mac is awake and the official Discord bot; check clankie.bot for current account and install availability.",
     "",
-    "In more detail: Clankie is a persistent agent lead with a personality and memory. He plans work, delegates it to coding agents, owns it until it lands, and decides as much as his owner allows. He also helps with everyday and creative work. He can run on a managed private machine or a machine you maintain. The iPhone and iPad app reaches that service. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
+    "In more detail: Clankie is a persistent agent lead with a personality and memory. He plans work, delegates it to coding agents, owns it until it lands, and decides as much as his owner allows. He also helps with everyday and creative work. He runs on your machine. The desktop pet is the front door; the TUI, CLI and iPhone and iPad app reach that same service. Existing hosted bodies have their own support documentation. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
     "",
-    "The service (`apps/clankie`, HTTP on `127.0.0.1:4310` on its host) owns conversations, projects, memory, tools, and access. Clankie's built-in runtime is pi. Native harness channels carry agent messages; Herdr supplies the worker terminals. The CLI, API, and MCP projection serve technical users. The CLI reference documents JSON output and its exceptions. Hosted plans and availability live on clankie.bot; this library does not infer shipping support from a source-code capability.",
+    "The service (`apps/clankie`, HTTP on `127.0.0.1:4310` on its host) owns conversations, projects, memory, tools, and access. Clankie's built-in runtime is pi. Native harness channels carry agent messages; Herdr supplies the worker terminals. The CLI, API, and MCP projection serve technical users. The CLI reference documents JSON output and its exceptions. Account and install availability live on clankie.bot; this library does not infer shipping support from a source-code capability.",
     "",
     "## Docs",
     "",

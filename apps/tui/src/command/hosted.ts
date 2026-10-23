@@ -29,7 +29,7 @@ import {
 import { outputJson, type Writable } from "./io.ts";
 
 export const NO_HOSTED_CLANKIE_MESSAGE =
-  "This account has no hosted Clankie. Run `clankie login` to sign this Mac in for remote access to your own Clankie, Hosted machines are no longer sold.";
+  "This account has no hosted Clankie. Run `clankie login` to sign this Mac in for remote access to your own Clankie.";
 
 /** Why the hosted lookup failed, in the owner's words rather than "no hosted Clankie". */
 function hostedLookupFailedMessage(error: unknown): string {

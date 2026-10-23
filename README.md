@@ -54,9 +54,10 @@ required.
 - [Run on Linux](infra/hosted/README.md): advanced self-hosting, with its own capability limits
 - [Release details](docs/distribution.md): checksums, layout, pinning, and upgrades
 
-The software is free; model providers and connected services may charge.
-[Hosted Clankie](https://clankie.bot) runs the same foundation on a managed
-machine.
+Run Clankie on your Mac with your own agent subscriptions. The software is free;
+model providers and connected services may charge. A free Clankie account supports
+phone pairing, steering while your Mac is awake and the official Discord bot.
+Check [clankie.bot](https://clankie.bot) for account and install availability.
 
 ## What he does
 
