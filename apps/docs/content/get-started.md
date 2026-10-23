@@ -64,7 +64,7 @@ If your account already has a hosted body, open its secure app link on your
 phone (or scan its QR), review the access, and connect. Open **Messages**, choose
 **Clankie**, and say hello. To reach that existing body from a terminal, use
 `clankie connect hosted` ([connection modes](/cli/#local-and-hosted-connection-modes)).
-See [hosted support](https://github.com/Volpestyle/clankie/blob/main/docs/hosted.md)
+See [hosted support](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)
 for its limits and recovery. Signing into a free account does not create a
 hosted body.
 

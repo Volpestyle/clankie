@@ -106,15 +106,14 @@ Limits, stated plainly: this holds against idle sleep on AC power. Closing a
 laptop lid follows macOS's own clamshell rules and is part of the wake test, not
 something this guide promises. It does not survive a power cut, a restart, or
 the Mac being unplugged. For a free self-operated route, use your own always-on
-machine and network access. Clankie Plus is planned to add Presence, push and
-multiple machines; it is not a promise that these capabilities are deployed.
+machine and network access.
 
 ## Existing hosted bodies
 
 A hosted body already on your account runs independently of your Mac's power.
 Its actual deployed lifecycle, billing suspension and data limits determine
 availability; a free account does not provision one. See
-[hosted support](hosted.md) for the retained deployment and recovery details.
+[hosted support](../infra/hosted/README.md) for the retained deployment and recovery details.
 Sign in with `clankie login`, or `clankie connect hosted` to require an existing
 hosted body, then pair the app; see
 [local and hosted connection modes](cli.md#local-and-hosted-connection-modes).
