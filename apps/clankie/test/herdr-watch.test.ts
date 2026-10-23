@@ -2516,7 +2516,7 @@ it("captures only the reply following an explicit room prompt, not old or unrela
 it("captures a transcriptless room reply while chat display never reads terminal text", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-room-terminal-reply-"));
   roots.push(root);
-  const agent: HerdrAgentSnapshot = { ...done, status: "done", session: undefined };
+  const { session: _session, ...agent }: HerdrAgentSnapshot = done;
   let answer = "※ recap: Previous answer.";
   const read = vi.fn(async () => answer);
   const project = vi.fn();
