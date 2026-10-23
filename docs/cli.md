@@ -4483,7 +4483,13 @@ The API is `changes.autonomyLevel` on `POST /v1/operator/fleet-settings`. The
 level's leaves are written first, explicit leaves in the same change win, and
 snapshots report `autonomyLevel` and, for `custom`, `autonomyDrift`: the nearest
 preset and each differing leaf with its saved and preset values. Ties prefer
-High, then Off, Low and Full. Doctor, the console footer and the lead's fleet
+High, then Off, Low and Full. Any change that names `autonomyLevel` (the app's
+first-run choice, Settings, `clankie autonomy LEVEL` or `/setup`) also records
+`autonomyConfirmedAt`; a hand-set leaf never does. `changes.autonomyConfirmed:
+true` records it alone, without changing a leaf: an app that saved the owner's
+choice only on the device carries it over that way. Snapshots, `clankie fleet
+status` and `clankie autonomy` (`confirmedAt`) report it, and the apps ask for a level only while it is absent
+(VUH-2725). Doctor, the console footer and the lead's fleet
 card show this passive indicator; reads never change saved authority. A snapshot without it comes from an older
 service, so the CLI refuses to set a level there. In the console, `/autonomy
 LEVEL` sets the dial and `/autonomy clear` cancels the selected chat's scheduled

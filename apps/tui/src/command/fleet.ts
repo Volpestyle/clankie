@@ -77,6 +77,8 @@ export interface FleetCommandResult {
   readonly restart: string;
   /** The autonomy dial read back from the leaves; absent from an older service. */
   readonly autonomyLevel?: AutonomyLevelReading;
+  /** When the owner last chose a level explicitly; absent until then, and from an older service. */
+  readonly autonomyConfirmedAt?: string;
   /** Status only: who holds deploys, for how long, and how long until each hold lifts. */
   readonly deployHolds?:
     | { readonly holds: ReadonlyArray<DeployHold & { readonly summary: string }> }
@@ -265,6 +267,9 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
     ...(snapshot.resourceMachines ? { resourceMachines: snapshot.resourceMachines } : {}),
     fleet: { ...report.fleet, ...FleetAutonomySchema.parse(fleetAutonomyFields(snapshot.fleet)) },
     ...(snapshot.autonomyLevel === undefined ? {} : { autonomyLevel: snapshot.autonomyLevel }),
+    ...(snapshot.autonomyConfirmedAt === undefined
+      ? {}
+      : { autonomyConfirmedAt: snapshot.autonomyConfirmedAt }),
     deployHolds: await deployHoldStatus(api),
   };
 }
@@ -329,6 +334,7 @@ export interface AutonomyCommandResult {
   readonly description: string;
   readonly levels: Record<AutonomyLevel, string>;
   readonly drift?: AutonomyDrift;
+  readonly confirmedAt?: string;
 }
 
 /** The owner's one autonomy dial (ADR 0263), over the same fleet settings API. */
@@ -367,6 +373,7 @@ export async function runAutonomyCommand(
     level: report.autonomyLevel,
     description: autonomyLevelDescription(report.autonomyLevel, report.autonomyDrift),
     ...(report.autonomyDrift === undefined ? {} : { drift: report.autonomyDrift }),
+    ...(report.autonomyConfirmedAt === undefined ? {} : { confirmedAt: report.autonomyConfirmedAt }),
     levels: Object.fromEntries(
       AutonomyLevelSchema.options.map((level) => [level, AUTONOMY_LEVELS[level].description]),
     ) as Record<AutonomyLevel, string>,

@@ -59,6 +59,9 @@ function fleetSettingsSnapshot(
       .digest("hex"),
     fleet,
     autonomyLevel: matchingAutonomyLevel(settings.autonomy.fleet),
+    ...(settings.autonomy.confirmedAt === undefined
+      ? {}
+      : { autonomyConfirmedAt: settings.autonomy.confirmedAt }),
     ...(includeMaximumTrust ? { maximumTrustMode: settings.maximumTrustMode } : {}),
     ...(drift === undefined ? {} : { autonomyDrift: drift }),
   };
@@ -137,6 +140,7 @@ export function createFleetSettingsRoutes(
             autoTidy,
             hire,
             autonomyLevel,
+            autonomyConfirmed,
             maximumTrustMode,
             ...preferences
           } = input.data.changes;
@@ -182,6 +186,10 @@ export function createFleetSettingsRoutes(
             },
             autonomy: {
               ...current.autonomy,
+              // Only an owner's level choice confirms; a hand-set leaf or a default never does.
+              ...(autonomyLevel === undefined && autonomyConfirmed === undefined
+                ? {}
+                : { confirmedAt: current.autonomy.confirmedAt ?? new Date().toISOString() }),
               fleet: FleetAutonomySchema.parse({
                 ...current.autonomy.fleet,
                 ...(autonomyLevel === undefined ? {} : autonomyLevelFleet(autonomyLevel)),

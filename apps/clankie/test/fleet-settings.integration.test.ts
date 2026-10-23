@@ -775,6 +775,74 @@ it("sets the autonomy dial's leaves in one owner write and reads hand-set leaves
   expect(custom.status).toBe(400);
 });
 
+it("records the owner's explicit level choice once, for every device, and never from a leaf edit", async () => {
+  const f = await fixture();
+  const initial = await f.client.fleetSettings();
+  expect(initial.autonomyLevel).toBe("high");
+  expect(initial.autonomyConfirmedAt).toBeUndefined();
+
+  const leaf = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: initial.revision,
+    changes: { push: "owner" },
+  });
+  expect(leaf.autonomyConfirmedAt).toBeUndefined();
+
+  // Choosing the level that is already in effect still confirms it.
+  const before = Date.now();
+  const chosen = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: leaf.revision,
+    changes: { autonomyLevel: "high" },
+  });
+  expect(chosen.autonomyLevel).toBe("high");
+  expect(Date.parse(chosen.autonomyConfirmedAt ?? "")).toBeGreaterThanOrEqual(before);
+  expect((await new SettingsStore(f.settings.path).load()).autonomy.confirmedAt).toBe(
+    chosen.autonomyConfirmedAt,
+  );
+  // Any later read, from any device, carries it; a leaf edit keeps it.
+  const later = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: chosen.revision,
+    changes: { commit: "owner" },
+  });
+  expect(later.autonomyLevel).toBe("custom");
+  expect(later.autonomyConfirmedAt).toBe(chosen.autonomyConfirmedAt);
+  expect((await f.client.fleetSettings()).autonomyConfirmedAt).toBe(chosen.autonomyConfirmedAt);
+});
+
+it("carries over a choice an app kept only locally without changing a saved leaf", async () => {
+  const f = await fixture();
+  const initial = await f.client.fleetSettings();
+  const custom = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: initial.revision,
+    changes: { push: "owner" },
+  });
+  expect(custom.autonomyLevel).toBe("custom");
+  expect(custom.autonomyConfirmedAt).toBeUndefined();
+  const before = await new SettingsStore(f.settings.path).load();
+
+  const carried = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: custom.revision,
+    changes: { autonomyConfirmed: true },
+  });
+  expect(carried.autonomyConfirmedAt).toBeDefined();
+  expect(carried.autonomyLevel).toBe("custom");
+  expect(carried.fleet).toEqual(custom.fleet);
+  const after = await new SettingsStore(f.settings.path).load();
+  expect(after.autonomy.fleet).toEqual(before.autonomy.fleet);
+  expect(after.autonomy.confirmedAt).toBe(carried.autonomyConfirmedAt);
+  // A repeat keeps the first record.
+  const again = await f.client.updateFleetSettings({
+    schemaVersion: 1,
+    expectedRevision: carried.revision,
+    changes: { autonomyConfirmed: true },
+  });
+  expect(again.autonomyConfirmedAt).toBe(carried.autonomyConfirmedAt);
+});
+
 it("puts a project on Auto with a focus through the owner project API, hidden from the plain view", async () => {
   const f = await fixture();
   const initial = await f.client.projects();

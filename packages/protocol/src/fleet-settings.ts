@@ -57,6 +57,8 @@ export const FleetSettingsSnapshotSchema = z
     resourceMachines: z.array(FleetResourceMachineIdSchema).max(31).optional(),
     /** The owner's autonomy dial read back from the leaves (ADR 0263); absent on an older service. */
     autonomyLevel: AutonomyLevelReadingSchema.optional(),
+    /** Present once the owner has chosen a level, from any device; clients ask only while it is absent (VUH-2725). */
+    autonomyConfirmedAt: z.iso.datetime().optional(),
     autonomyDrift: AutonomyDriftSchema.optional(),
     /** Opt-in read; writes can change trust and autonomy together under one revision. */
     maximumTrustMode: z.boolean().optional(),
@@ -89,6 +91,11 @@ export const UpdateFleetSettingsSchema = z
         hire: HireProfileSchema.nullable().optional(),
         /** Writes the level's leaves first; explicit leaves in the same change win. */
         autonomyLevel: AutonomyLevelSchema.optional(),
+        /**
+         * Records a choice the owner already made on a client that kept it only locally,
+         * without changing a leaf (VUH-2725). A level change records it too.
+         */
+        autonomyConfirmed: z.literal(true).optional(),
         maximumTrustMode: z.boolean().optional(),
       })
       .refine(
