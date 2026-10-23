@@ -20,9 +20,14 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import {
   createVoiceRealtimePorts,
+  DiscordVoiceIngress,
+  DiscordVoiceSession,
+  DiscordVoiceTranscriptStore,
   parseVoiceRealtimeEnv,
   type RealtimeSocket,
 } from "../../../packages/discord-presence-core/src/index.ts";
+import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
+import { FakeVox } from "../../discord-bridge/test/fake-vox.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { BodyLeaseRouter } from "../../clankie/src/body-lease-router.ts";
 import { BodyLeaseStore } from "../../clankie/src/body-leases.ts";
@@ -303,6 +308,8 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const shutdown = new AbortController();
   const asked: string[] = [];
+  /** Every line a call asked the main conversation to record. */
+  const recorded: { speaker: string; text: string }[] = [];
   const store = new ConversationStore(join(directory, "conversations"), async (_id, message, publish) => {
     asked.push(message);
     publish({ type: "message", role: "captain", text: ANSWER, streaming: false });
@@ -332,7 +339,10 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
       voiceLaneInstructions: (surface) =>
         composeVoiceLaneInstructions("# Identity\nYou are Clankie.", surface),
       voiceCallHandoff: (input) => voiceCallHandoff(store, shutdown.signal, input),
-      voiceCallTranscript: (input) => voiceCallTranscript(store, input),
+      voiceCallTranscript: (input) => {
+        recorded.push(input);
+        return voiceCallTranscript(store, input);
+      },
       mainConversationId: () => store.defaultGlobalConversationId(),
     }),
     bodyLeases: {
@@ -460,7 +470,21 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
     await once(socket, "close");
     return answer;
   }
-  return { store, leases, provider, asked, logs, pair, call, refusal, mainEvents, post, brokenUpgrade };
+  return {
+    store,
+    leases,
+    provider,
+    asked,
+    recorded,
+    logs,
+    control,
+    pair,
+    call,
+    refusal,
+    mainEvents,
+    post,
+    brokenUpgrade,
+  };
 }
 
 it("calls Clankie from a paired device: he greets, hears, acts in the main conversation, speaks, and hangs up cleanly", async () => {
@@ -547,6 +571,111 @@ it("shows the call in the chat as it is spoken, both sides, and adds nothing whe
   device.send({ type: "hangup" });
   await until(() => device.closed, "the call closing");
   expect((await f.mainEvents()).filter((event) => event.type === "message")).toHaveLength(said.length);
+});
+
+it("keeps a spoken report marker from changing autonomy, and answers only a new text turn after the call (VUH-2752)", async () => {
+  const f = await fixture();
+  const reports: string[] = [];
+  f.store.reportBoundary = (_id, text) => reports.push(text);
+  // Said aloud, these are speech, not his written report.
+  f.provider.replies.push("continuation: paused", "blocked on owner: which colour?");
+  const device = await f.call((await f.pair()).token);
+  await until(
+    () => device.lines().some((line) => line.speaker === "clankie" && line.final),
+    "his first line",
+  );
+  f.provider.transcripts.push("Okay, carry on.");
+  device.say(600);
+  await until(
+    () => device.lines().filter((line) => line.speaker === "clankie" && line.final).length === 2,
+    "his second line",
+  );
+  device.send({ type: "hangup" });
+  await until(() => device.closed, "the call closing");
+  expect(f.recorded.map((line) => line.text)).toEqual([
+    "continuation: paused",
+    "Okay, carry on.",
+    "blocked on owner: which colour?",
+  ]);
+  expect(reports).toEqual([]);
+  expect(f.asked).toHaveLength(0);
+
+  // The next text turn runs on its own message alone; the call's lines are not asked again.
+  const main = f.store.defaultGlobalConversationId();
+  const sent = await f.store.serve({
+    op: "send",
+    schemaVersion: 1,
+    turn: {
+      schemaVersion: 1,
+      kind: "message",
+      conversationId: main,
+      surfaceClientId: "fixture",
+      expectedRevision: f.store.conversation(main)!.revision,
+      message: "What's next?",
+    },
+  });
+  if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("Text turn not admitted");
+  await f.store.awaitRun(sent.result.runId);
+  expect(f.asked).toEqual(["What's next?"]);
+  // His written answer is a report boundary as always.
+  expect(reports).toEqual([ANSWER]);
+});
+
+it("never writes a Discord room's speech into the chat, even with its transcript listeners on (VUH-2752)", async () => {
+  const f = await fixture();
+  const directory = await mkdtemp(join(tmpdir(), "relay-room-transcript-"));
+  cleanups.push(() => rm(directory, { recursive: true, force: true }));
+  // A room as the Discord bridge runs it: the real ingress to this service and
+  // the bridge's own opt-in retention listeners, with Vox faked.
+  const retention = new DiscordVoiceTranscriptStore(join(directory, "room.jsonl"));
+  const heard: string[] = [];
+  const vox = new FakeVox();
+  const owner = "444444444444444444";
+  const session = new DiscordVoiceSession({
+    vox,
+    ingress: new DiscordVoiceIngress(
+      new ClankieApiClient({ baseUrl: f.control, captainToken: CAPTAIN_TOKEN }),
+      {
+        characterId: "clankie",
+        credentialRef: "discord_bot",
+        transportKind: "bot",
+      },
+    ),
+    realtime: createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      socketFactory: f.provider.factory,
+    }),
+    briefing: async () => ({ instructions: "You are Clankie.", briefing: "" }),
+    floor: { names: ["clankie"], replyPolicy: "addressed", chattiness: "balanced" },
+    presenceSessionId: () => "room-presence",
+    emit: () => Promise.resolve(),
+  });
+  session.subscribeTranscript((_line, transcript) => {
+    heard.push(transcript.text);
+    void retention.append("bot", transcript);
+  });
+  session.subscribeSpokenTranscript((transcript) => void retention.append("bot", transcript));
+  cleanups.push(() => session.dispose());
+  f.provider.replies.push("Hi everyone!", "Hello to the room!");
+  await session.join({
+    guildId: "222222222222222222",
+    channelId: "333333333333333333",
+    invokingUserId: owner,
+  });
+
+  f.provider.transcripts.push("Clankie, say hi to the room.");
+  vox.emit({ type: "speaking_start", userId: owner });
+  await until(() => vox.subscriptions.length > 0, "the room capture");
+  for (const frame of utterance(600, 0)) vox.emitAudio(owner, frame);
+  vox.emit({ type: "user_audio_end", userId: owner, captureId: vox.subscriptions.at(-1)!.captureId });
+  await until(() => heard.length > 0, "the room hearing the owner");
+  await new Promise<void>((resolve) => setTimeout(resolve, 200));
+
+  // The room's speech reached its own listeners, and never the main conversation.
+  expect(heard).toEqual(["Clankie, say hi to the room."]);
+  expect(f.recorded).toEqual([]);
+  expect((await f.mainEvents()).filter((event) => event.type === "message")).toEqual([]);
 });
 
 it("refuses a call while his voice is in a Discord room, and says which room", async () => {

@@ -139,6 +139,17 @@ spoken conversation nowhere. For an owner's device call that no longer holds.
   and only `VoiceCall` subscribes to the live transcript, for the call's
   length. Discord rooms never subscribe, so a room's speech is still written
   nowhere unless the owner's retention toggle is on (ADR 0121).
+- **Spoken lines are not reports, and are not asked again.** His recorded
+  line never passes through the autonomy report boundary, so a
+  "continuation: …" or "blocked on owner: …" said aloud changes nothing. A
+  recorded line is not a turn, so the next text turn runs on its own message
+  alone.
+- **No wire marker yet.** Installed apps parse conversation pages strictly, so
+  a recorded line looks like any other message: a new field would make them
+  refuse the page. An opt-in replay field that lets newer apps show a line as
+  spoken can follow.
+- **No opt-out yet.** Every owner device call records its lines. A setting to
+  keep a call out of the chat is future work.
 - **Audio is still never retained.** Only text is kept, and only the owner's
   own call writes it, into the owner's own main conversation.
 
