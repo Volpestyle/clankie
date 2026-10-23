@@ -1034,12 +1034,14 @@ export class ConversationStore {
         await authorize();
         const observed = await this.nativeMessageHost.inspect(seatId);
         await authorize();
+        const result = observed
+          ? await this.nativeMessageHost.stop(seatId, observed.binding, authorize)
+          : { outcome: "unavailable" as const };
+        const { reason, ...legacy } = result;
         return {
           op: "stop_task",
           schemaVersion: 1,
-          result: observed
-            ? await this.nativeMessageHost.stop(seatId, observed.binding, authorize)
-            : { outcome: "unavailable" },
+          result: request.includeReason === true && reason !== undefined ? { ...legacy, reason } : legacy,
         };
       }
       case "cancel":

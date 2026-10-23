@@ -4639,6 +4639,11 @@ paths:
         reason `unsent_draft`, without sending a key or clearing the text; open
         the agent's terminal to review it. Clients match reason, never diagnostic
         detail. Other native stop controls currently return unsupported.
+        Typed reasons require request `includeReason: true`; absent or false
+        preserves the legacy result shape. Old strict services or relays reject
+        that field with HTTP 400 before dispatch; retry only that schema refusal
+        once without the field, never a lost response or other failure. After
+        Stop dispatch, unexpected errors return uncertain, never HTTP 400.
         The canonical schemas are in packages/protocol/src/operator-conversations.ts
         and packages/protocol/src/operator-service.ts.
         Project onboarding uses `project_proposal_get` for one defaults-first

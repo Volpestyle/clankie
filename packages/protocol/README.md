@@ -46,7 +46,13 @@ Esc into its exact working pane with an empty input line (VUH-2680); a bare
 terminal Escape key elsewhere still establishes nothing. A draft refusal returns
 `outcome: "unavailable", reason: "unsent_draft"` (VUH-2687). Clients use the typed
 `reason` to explain that Stop leaves the unsent terminal text intact and direct
-the owner to that terminal; `detail` is diagnostic prose, never a discriminator. `nextTurnOnly` means
+the owner to that terminal; `detail` is diagnostic prose, never a discriminator.
+The `stop_task` request must opt in with `includeReason: true`; otherwise the
+service omits `reason` for shipped strict parsers. Older services/relays reject
+the new request field with HTTP 400 before dispatch; a client may retry that
+schema refusal once with the legacy shape, never an uncertain Stop or other
+failure. Failures after Stop dispatch return `uncertain`, not HTTP 400.
+`nextTurnOnly` means
 Claude has only an authenticated next-UserPromptSubmit receiver: Queue can be
 stored, but Steer cannot wake or modify its current turn. A live exact-session
 Claude poll offers both modes; unverified Claude offers neither. Codex's native

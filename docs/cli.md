@@ -6221,7 +6221,13 @@ input line is provably empty; an idle seat returns `already_finished`, and a
 draft, an unreadable input line, a seat waiting on the owner or a changed
 binding returns `unavailable` without a key. A confirmed draft includes typed
 `reason: "unsent_draft"`; Stop leaves that text intact. Open the agent's terminal
-to review it. Clients match the reason, never the diagnostic `detail`. Owner authority and the binding are
+to review it. Clients match the reason, never the diagnostic `detail`.
+Typed reasons are opt-in on the `stop_task`
+request (`includeReason: true`); the default result retains the shipped strict
+shape. An old service/relay rejects that field with HTTP 400 before dispatch;
+clients may retry that schema refusal once without it, never another failure
+or lost Stop response. Unexpected errors after dispatch return `uncertain`,
+never HTTP 400. Owner authority and the binding are
 checked again just before the key. Exactly one Esc is sent per stop, concurrent
 requests share it, and `stopped` needs Claude seen idle within five seconds;
 otherwise the result is `uncertain` and nothing is repeated. Claude's draft

@@ -672,6 +672,12 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             { error: "service_restarting", message: error.message, ...SERVICE_RESTARTING_SEAT_HANDOFF },
             503,
           );
+        // Stop may already have sent Esc. Only request-schema rejection above
+        // may return 400, which clients use to retry the legacy projection.
+        if (parsed.data.op === "stop_task") {
+          logger.warn({ error, conversationId: parsed.data.conversationId }, "Native Stop result uncertain");
+          return context.json({ op: "stop_task", schemaVersion: 1, result: { outcome: "uncertain" } });
+        }
         throw error;
       }
     }

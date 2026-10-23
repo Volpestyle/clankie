@@ -872,6 +872,50 @@ it.each([false, true])(
   },
 );
 
+it.each([false, true])(
+  "Stop schema 400 is pre-dispatch; post-dispatch failures stay uncertain through relay (hosted=%s)",
+  async (hosted) => {
+    const f = await fixture(hosted);
+    const created = await f.store.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "seat", seatId: "stop-fixture" },
+    });
+    if (created.op !== "create") throw new Error("Expected a native conversation");
+    const conversationId = created.conversation.conversationId;
+    let stops = 0;
+    f.store.nativeMessageHost = {
+      inspect: async () => ({ binding: "stop-fixture", status: "working" }),
+      send: async () => {
+        throw new Error("No message send expected");
+      },
+      stop: async (_seat, _binding, guard) => {
+        await guard();
+        stops++;
+        // Hono's HTTP error contract, without adding Hono to the relay's dependencies.
+        throw Object.assign(new Error("Failure after Esc"), {
+          getResponse: () => new Response(null, { status: 400 }),
+        });
+      },
+    };
+    const invalid = await f.raw({
+      op: "stop_task",
+      schemaVersion: 1,
+      conversationId,
+      includeReason: "invalid",
+    } as unknown as OperatorConversationServiceRequest);
+    expect(invalid.status).toBe(400);
+    expect(stops).toBe(0);
+    expect(
+      f.seen.filter((read) => (read.body as { op?: string } | undefined)?.op === "stop_task"),
+    ).toHaveLength(0);
+    const response = await f.raw({ op: "stop_task", schemaVersion: 1, conversationId, includeReason: true });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ op: "stop_task", result: { outcome: "uncertain" } });
+    expect(stops).toBe(1);
+  },
+);
+
 it("turns Auto on as the paired owner device over the relay; chat-only and identity-less requests change nothing (VUH-2029)", async () => {
   const f = await fixture();
   const auto = (enabled: boolean, token?: string) =>

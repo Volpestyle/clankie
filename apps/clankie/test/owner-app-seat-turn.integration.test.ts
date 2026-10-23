@@ -6,11 +6,13 @@ import {
   OperatorSeatEventSchema,
   OperatorSeatEventKindSchema,
   TAKE_CONTROL_GRANTS,
+  StopNativeTaskResultSchema,
   type OperatorConversationServiceRequest,
 } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker } from "@clankie/work-items";
 import { afterEach, expect, it } from "vitest";
+import { HTTPException } from "hono/http-exception";
 import { createClankieApp } from "../src/app.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { createConversationRunner } from "../src/captain/captain-conversation-runner.ts";
@@ -507,4 +509,63 @@ it("native pending and stop controls require current owner authority, never a ca
     await f.revoke();
   };
   expect((await f.dispatch({ op: "stop_task", schemaVersion: 1, conversationId: ID })).status).toBe(403);
+});
+
+it("Stop reasons are opt-in for shipped strict clients; 400 always precedes dispatch (VUH-2687)", async () => {
+  const f = await fixture();
+  const created = await f.conversations.serve({
+    op: "create",
+    schemaVersion: 1,
+    scope: { kind: "seat", seatId: BINDING },
+  });
+  if (created.op !== "create") throw new Error("Expected a native conversation");
+  const conversationId = created.conversation.conversationId;
+  let stops = 0;
+  let failAfterDispatch = false;
+  f.conversations.nativeMessageHost = {
+    inspect: async () => ({ binding: BINDING, status: "working" }),
+    send: async () => {
+      throw new Error("No message send expected");
+    },
+    stop: async (_seat, _binding, guard) => {
+      await guard();
+      stops++;
+      if (failAfterDispatch) throw new HTTPException(400, { message: "Failure after Esc" });
+      return { outcome: "unavailable", reason: "unsent_draft", detail: "Draft diagnostic." };
+    },
+  };
+  // Exactly the shipped strict result schema, before reason was introduced.
+  const legacyResult = StopNativeTaskResultSchema.omit({ reason: true });
+  for (const includeReason of [undefined, false, true]) {
+    const response = await f.dispatch({
+      op: "stop_task",
+      schemaVersion: 1,
+      conversationId,
+      ...(includeReason === undefined ? {} : { includeReason }),
+    });
+    expect(response.status).toBe(200);
+    const { result } = await response.json();
+    expect(StopNativeTaskResultSchema.parse(result).reason).toBe(includeReason ? "unsent_draft" : undefined);
+    expect(legacyResult.safeParse(result).success).toBe(!includeReason);
+    expect(result.outcome).toBe("unavailable");
+  }
+  expect(stops).toBe(3);
+  const invalid = await f.dispatch({
+    op: "stop_task",
+    schemaVersion: 1,
+    conversationId,
+    includeReason: "invalid",
+  } as unknown as OperatorConversationServiceRequest);
+  expect(invalid.status).toBe(400);
+  expect(stops).toBe(3);
+  failAfterDispatch = true;
+  const uncertain = await f.dispatch({
+    op: "stop_task",
+    schemaVersion: 1,
+    conversationId,
+    includeReason: true,
+  });
+  expect(uncertain.status).toBe(200);
+  expect(await uncertain.json()).toMatchObject({ op: "stop_task", result: { outcome: "uncertain" } });
+  expect(stops).toBe(4);
 });

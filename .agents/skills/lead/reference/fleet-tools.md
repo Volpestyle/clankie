@@ -313,3 +313,8 @@ capabilities mean unknown. Capabilities never grant authority.
 For Claude, `outcome: "unavailable", reason: "unsent_draft"` means its terminal
 has unsent input. Stop sends no key and leaves that text intact; open the agent's
 terminal to review it. Match the typed reason, never free-text `detail`.
+The wire response includes `reason` only for `stop_task` requests with
+`includeReason: true`; legacy requests keep their original strict result shape.
+An old service/relay may reject that request field with HTTP 400 before Stop
+dispatch. Retry that schema refusal once without the field; never repeat a
+Stop after another failure or a lost response.

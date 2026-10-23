@@ -368,6 +368,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     op: z.literal("stop_task"),
     schemaVersion: z.literal(1),
     conversationId: OperatorConversationIdSchema,
+    /** Opt into typed refusal reasons; absent keeps the shipped strict response shape. */
+    includeReason: z.boolean().optional(),
   }),
   // `cancel` interrupts one accepted run: the captain aborts the live model
   // turn and the durable log settles that run as `cancelled`. Cancelling a run
