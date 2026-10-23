@@ -497,6 +497,7 @@ export class IntegrationQueue {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    await this.refuseIncomplete(request);
     const batch: IntegrationBatch = {
       schemaVersion: 1,
       id: request.id,
@@ -542,6 +543,81 @@ export class IntegrationQueue {
     this.pending.sort((a, b) => a.admission - b.admission);
     this.schedule();
     return batch;
+  }
+  /**
+   * Composition cherry-picks exactly the listed commits, so naming only a branch tip
+   * would land its diff without the unlanded commits beneath it (VUH-2745). Refuse
+   * before admission, naming what is missing and the complete ordered request.
+   */
+  private async refuseIncomplete(request: IntegrationRun): Promise<void> {
+    const problems: string[] = [];
+    const corrected = { core: [...request.core], app: [...(request.app ?? [])] };
+    // A stacked follow-up may build on a change still queued ahead of it, which composes first.
+    const ahead = [
+      ...this.pending,
+      ...this.retries.flatMap((job) => job.members),
+      ...(this.current?.job.members ?? []),
+    ].map(({ batch }) => batch.resolvedRequest ?? batch.request);
+    for (const [name, source, listed] of [
+      ["core", this.options.core, request.core],
+      ["app", this.options.app, request.app ?? []],
+    ] as const) {
+      if (!listed.length || !source) continue;
+      const shas = await Promise.all(
+        listed.map((sha) => this.git(source, ["rev-parse", "--verify", `${sha}^{commit}`])),
+      );
+      // The live origin tip may be newer than this checkout's tracking ref; use it when its objects are here.
+      let landed = "refs/remotes/origin/main";
+      const tip = (await this.git(source, ["ls-remote", "origin", "refs/heads/main"]).catch(() => "")).split(
+        /\s/,
+      )[0];
+      if (
+        tip &&
+        (await this.git(source, ["cat-file", "-e", `${tip}^{commit}`]).then(
+          () => true,
+          () => false,
+        ))
+      )
+        landed = tip;
+      // Patch-equivalent commits already landed by an earlier cherry-pick count as landed;
+      // merges carry no change of their own to cherry-pick.
+      const unlanded = async (sha: string) =>
+        (
+          await this.git(source, [
+            "rev-list",
+            "--reverse",
+            "--topo-order",
+            "--no-merges",
+            "--right-only",
+            "--cherry-pick",
+            `${landed}...${sha}`,
+          ])
+        )
+          .split("\n")
+          .filter(Boolean);
+      const queued = new Set(ahead.flatMap((r) => (name === "core" ? r.core : (r.app ?? []))));
+      const missing: string[] = [];
+      const complete: string[] = [];
+      for (const [index, sha] of shas.entries()) {
+        const before = new Set(shas.slice(0, index));
+        const needed = (await unlanded(sha)).filter((c) => !queued.has(c));
+        for (const commit of needed) if (!complete.includes(commit)) complete.push(commit);
+        for (const ancestor of needed.filter((c) => c !== sha))
+          if (!before.has(ancestor) && !missing.includes(ancestor)) missing.push(ancestor);
+      }
+      if (!missing.length) continue;
+      const short = (sha: string) => sha.slice(0, 12);
+      problems.push(
+        `${name}: ${missing.length} unlanded commit${missing.length === 1 ? "" : "s"} the listed commits build on ${missing.length === 1 ? "is" : "are"} missing or listed after ${missing.length === 1 ? "its" : "their"} dependents: ${missing.map(short).join(", ")}`,
+      );
+      corrected[name] = complete;
+    }
+    if (!problems.length) return;
+    const command = [...corrected.core, ...corrected.app.flatMap((sha) => ["--app", sha])].join(" ");
+    throw Error(
+      `Incomplete integration request: integrate cherry-picks only the listed commits. ${problems.join("; ")}. ` +
+        `List every unlanded commit of the change, oldest first, keeping your other flags:\n  clankie integrate ${command}`,
+    );
   }
   /** Withdraw waiting requests and isolated retries before their landing begins. */
   async cancel(id: string, actor: string, reason: string): Promise<IntegrationBatch> {

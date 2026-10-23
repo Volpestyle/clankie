@@ -1195,8 +1195,13 @@ clankie integrate hold --holder NAME --reason TEXT --minutes 1-60 [--pane ID|--s
 clankie integrate release UUID --actor NAME --reason TEXT
 ```
 
-To use the queue, push a branch, run `clankie integrate <sha> --push --no-wait`, then
-follow with `clankie integrate status`. With no UUID, status shows running batches, waiting
+To use the queue, push a branch, run `clankie integrate <sha>... --push --no-wait`, then
+follow with `clankie integrate status`. Composition cherry-picks exactly the listed
+commits, oldest first, so a request lists every unlanded commit of its change.
+`run` refuses a request whose listed commits build on an unlanded commit that is
+neither listed earlier nor in a request already queued ahead; the refusal names the
+missing commits and prints the complete command (VUH-2745). Commits already on
+`main` by patch, such as an earlier slice landed by cherry-pick, count as landed. With no UUID, status shows running batches, waiting
 requests, the last result and interrupted work. `status UUID` reads a request
 receipt, including its shared batch and attempts. `progress` shows the isolation
 chain, scheduled batch position and a conditional completion ETA from recent

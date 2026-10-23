@@ -59,7 +59,9 @@ are never weakened to pass.
 
 The optional `clankie integrate` queue composes and gates a batch; its batching,
 cancel, revert and deploy-hold commands are in
-[the CLI reference](../../../../docs/cli.md#integrate). Read the receipt before
+[the CLI reference](../../../../docs/cli.md#integrate). It cherry-picks only the
+listed commits and refuses a request missing an unlanded commit beneath them; run
+the corrected command the refusal prints. Read the receipt before
 claiming delivery: a passing gate is not a confirmed push, and a partial batch
 can land core while the app is still pending. Reconcile an uncertain send
 through origin first. Never switch a worktree while its gate runs, accept a pass

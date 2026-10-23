@@ -232,6 +232,39 @@ it("cancels a queued native gate before draining its expired fixture", async () 
   }
 });
 
+it("refuses a tip-only request before admission and names the unlanded commits beneath it (VUH-2745)", async () => {
+  const f = await fixture("", true);
+  const landed = await commit(f.core.source, "landed", "earlier slice");
+  const a = await commit(f.core.source, "first", "one");
+  const b = await commit(f.core.source, "second", "two");
+  const appCommit = await commit(f.app!.source, "feature", "app");
+  // The earlier slice reached main by cherry-pick, under a different SHA.
+  await git(f.core.source, "checkout", "-b", "remote", f.core.base);
+  await git(f.core.source, "cherry-pick", landed);
+  await git(f.core.source, "push", "origin", "HEAD:main");
+  await git(f.core.source, "checkout", "main");
+  const run = (core: string[]) =>
+    f.queue.start(
+      IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core, app: [appCommit] }),
+      guard,
+    );
+
+  for (const core of [[b], [b, a]]) {
+    const refusal = run(core);
+    await expect(refusal).rejects.toThrow(`core: 1 unlanded commit the listed commits build on is missing`);
+    await expect(refusal).rejects.toThrow(a.slice(0, 12));
+    await expect(refusal).rejects.toThrow(`clankie integrate ${a} ${b} --app ${appCommit}`);
+  }
+  expect(await f.queue.snapshot()).toMatchObject({ waiting: [] });
+
+  const accepted = await run([a, b]);
+  // A stacked follow-up builds on the change still queued ahead of it.
+  const c = await commit(f.core.source, "third", "three");
+  const stacked = await run([c]);
+  await f.queue.wait();
+  for (const batch of [accepted, stacked]) expect((await f.queue.status(batch.id)).state).toBe("passed");
+});
+
 it("composes in order on fresh origin, installs real siblings, gates privately and durably reloads exact HEAD", async () => {
   const f = await fixture(
     "assert.ok(existsSync('../clankie-app/package.json')); assert.ok(process.argv.includes('--retry-failed-tests'));",
@@ -1810,7 +1843,9 @@ it("reclaims a queue lock its dead earlier owner left, records that owner's batc
   };
   const [gating, waiting] = [await leftover("gating"), await leftover("queued")];
   await owner(dead, earlier);
-  const accepted = await request("accepted", true);
+  const next = await request("accepted", true);
+  // It builds on the gate-only change, which never landed, so it lists both (VUH-2745).
+  const accepted = IntegrationRunSchema.parse({ ...next, core: [...queued.core, ...next.core] });
   await f.queue.start(accepted, guard);
   await f.queue.wait();
   expect((await f.queue.status(accepted.id)).state).toBe("pushed");
