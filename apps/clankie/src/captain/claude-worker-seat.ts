@@ -706,6 +706,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
     if (!("paneId" in current)) return current;
     if (current.terminalId !== before.terminalId)
       return refused("The seat binding changed before the key; nothing was sent.");
+    // allow-swallowed-rejection -- an unreadable input line refuses the stop just below; no key is sent.
     const ansi = await pane.read(current.paneId).catch(() => undefined);
     const line = ansi === undefined ? undefined : paneInputLine("claude", ansi);
     if (line?.state === "draft")

@@ -2203,6 +2203,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const result = await herdrWatches.stopNativeTask(seatId, binding, guard);
       if (result.outcome !== "stopped") return result;
       // Settle only the occupant that was stopped, never one that replaced it since.
+      // allow-swallowed-rejection -- an unreadable occupant only skips settling; the stop result stands and the hold expires as before.
       const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
       if (
         agent?.session &&

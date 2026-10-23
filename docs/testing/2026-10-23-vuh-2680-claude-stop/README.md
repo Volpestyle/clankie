@@ -16,12 +16,12 @@ reaching Claude.
 
 ## Results (`run2-final/`)
 
-| Case | Observed |
-| --- | --- |
-| Stop mid-turn, 15 s into a streaming reply | `{"outcome":"stopped"}` in 563 ms; one `esc`; authority checked 3 times; the pane shows `Interrupted · What should Claude do instead?` ([after](run2-final/a-after-stop.txt)) |
-| Queued message held behind the turn | admitted `queued`, still held after 1 s; released 567 ms after Stop (4 ms after it returned) with no hold expiry; Claude answered `RECEIVED` ([answered](run2-final/a-queued-answered.txt)) |
-| Draft typed while Claude works | `unavailable`, "Claude's input line holds an unsent draft that Esc would clear; nothing was sent."; 0 keys; Claude still `working`, draft intact ([before](run2-final/b-draft-before.ansi), [after](run2-final/b-draft-after.txt)) |
-| Roster capability | `{"deliveryModes":[],"interrupt":true,"nextTurnOnly":false}` |
+| Case                                       | Observed                                                                                                                                                                                                                           |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stop mid-turn, 15 s into a streaming reply | `{"outcome":"stopped"}` in 563 ms; one `esc`; authority checked 3 times; the pane shows `Interrupted · What should Claude do instead?` ([after](run2-final/a-after-stop.txt))                                                      |
+| Queued message held behind the turn        | admitted `queued`, still held after 1 s; released 567 ms after Stop (4 ms after it returned) with no hold expiry; Claude answered `RECEIVED` ([answered](run2-final/a-queued-answered.txt))                                        |
+| Draft typed while Claude works             | `unavailable`, "Claude's input line holds an unsent draft that Esc would clear; nothing was sent."; 0 keys; Claude still `working`, draft intact ([before](run2-final/b-draft-before.ansi), [after](run2-final/b-draft-after.txt)) |
+| Roster capability                          | `{"deliveryModes":[],"interrupt":true,"nextTurnOnly":false}`                                                                                                                                                                       |
 
 The working screen with an empty input line ([`a-busy-empty.ansi`](run2-final/a-busy-empty.ansi))
 is now the golden `apps/clankie/test/fixtures/pane-draft/claude-busy-empty.ansi`.
