@@ -46,7 +46,7 @@ export class LocalCompanionBoundary {
     };
   }
 
-  fetch(forward: (request: Request) => Response | Promise<Response>) {
+  fetch(forward: (request: Request, env: HttpBindings | Http2Bindings) => Response | Promise<Response>) {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const url = new URL(request.url);
       const remote = env.incoming.socket.remoteAddress;
@@ -81,7 +81,8 @@ export class LocalCompanionBoundary {
         this.admitted.add(request);
       }
       try {
-        return await forward(request);
+        // The bindings carry the socket a WebSocket route upgrades (VUH-2727); never drop them.
+        return await forward(request, env);
       } finally {
         this.admitted.delete(request);
         this.sameMac.delete(request);

@@ -30,6 +30,7 @@ import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { voiceCallHandoff } from "../../clankie/src/captain/voice-call-handoff.ts";
 import { composeVoiceLaneInstructions } from "../../clankie/src/captain/voice-lane.ts";
+import { LocalCompanionBoundary } from "../../clankie/src/local-companion-boundary.ts";
 import { ControlPlaneDeviceAuthorizer } from "../src/device-auth.ts";
 import { createVoiceCallUpgrade } from "../src/voice-call.ts";
 
@@ -322,17 +323,23 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
   const server = serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch: service.app.fetch,
+    // The service's primary listener as index.ts composes it, so the call route upgrades through it.
+    fetch: new LocalCompanionBoundary().fetch(service.app.fetch),
     websocket: { server: new WebSocketServer({ noServer: true }) as unknown as WebSocketServerLike },
   }) as Server;
   if (!server.listening) await once(server, "listening");
   closeServer(server);
   const control = origin(server);
+  const logs: { level: string; message: string; fields: Readonly<Record<string, unknown>> }[] = [];
   const upgrade = createVoiceCallUpgrade({
     authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: control }),
     serviceUrl: control,
     captainToken: CAPTAIN_TOKEN,
     reauthorizeMs: 100,
+    logger: {
+      info: (fields, message) => logs.push({ level: "info", message, fields }),
+      warn: (fields, message) => logs.push({ level: "warn", message, fields }),
+    },
   });
   const relayServer = createServer((_request, response) => {
     response.statusCode = 404;
@@ -420,7 +427,7 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
     await once(socket, "close");
     return answer;
   }
-  return { store, leases, provider, asked, pair, call, refusal, mainEvents, post, brokenUpgrade };
+  return { store, leases, provider, asked, logs, pair, call, refusal, mainEvents, post, brokenUpgrade };
 }
 
 it("calls Clankie from a paired device: he greets, hears, acts in the main conversation, speaks, and hangs up cleanly", async () => {
@@ -552,7 +559,8 @@ it("ends the call when the device is revoked, and refuses devices without call a
   const f = await fixture();
   expect(await f.refusal(undefined)).toBe(401);
   expect(await f.refusal("not-a-device-token")).toBe(401);
-  expect(await f.refusal((await f.pair({ chat: false })).token)).toBe(403);
+  const listener = await f.pair({ chat: false });
+  expect(await f.refusal(listener.token)).toBe(403);
   const paired = await f.pair();
   const device = await f.call(paired.token);
   await until(() => device.spokenBytes() > 0, "the greeting");
@@ -561,4 +569,42 @@ it("ends the call when the device is revoked, and refuses devices without call a
   expect(device.ended()).toMatchObject({ reason: "revoked" });
   await until(() => f.leases.status("voice") === undefined, "the voice lease release");
   expect(await f.refusal(paired.token)).toBe(401);
+  // The relay says why each upgrade ended the way it did (VUH-2727), naming the device but never its bearer.
+  expect(f.logs.map(({ level, message, fields }) => ({ level, message, ...fields }))).toEqual([
+    expect.objectContaining({
+      message: "voice call relay refused",
+      statusCode: 401,
+      reason: "device_authentication_required",
+    }),
+    expect.objectContaining({
+      message: "voice call relay refused",
+      statusCode: 401,
+      reason: "device_invalid",
+    }),
+    expect.objectContaining({
+      message: "voice call relay refused",
+      deviceId: listener.id,
+      statusCode: 403,
+      reason: "voice_call_grant_required",
+    }),
+    expect.objectContaining({
+      level: "info",
+      message: "voice call relay connected",
+      deviceId: paired.id,
+      statusCode: 101,
+    }),
+    expect.objectContaining({
+      message: "voice call relay ended",
+      deviceId: paired.id,
+      reason: "revoked",
+      closedBy: "relay",
+      closeCode: 1008,
+    }),
+    expect.objectContaining({
+      message: "voice call relay refused",
+      statusCode: 401,
+      reason: "device_revoked",
+    }),
+  ]);
+  expect(JSON.stringify(f.logs)).not.toContain(paired.token);
 });

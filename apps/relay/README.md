@@ -124,6 +124,12 @@ rechecks the device; revocation or a lost grant sends `ended` with reason
 `revoked` and closes both sides. The gateway cannot carry the socket yet
 ([VUH-2683](https://linear.app/vuhlp/issue/VUH-2683)).
 
+Each upgrade logs one `route: "voice_call"` line to `relay.log`: `voice call
+relay refused` with the status and reason it answered (for a refused service
+call, `upstreamStatus` is the service's own status, or `0` when it could not be
+reached), `connected`, `abandoned`, and `ended` with `closedBy` and the close
+code. The lines carry the device ID but never audio or bearers.
+
 ## Run
 
 ```bash

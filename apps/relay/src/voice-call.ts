@@ -7,6 +7,7 @@ import {
   VOICE_CALL_PATH,
 } from "../../../packages/protocol/src/index.ts";
 import type { RelayDeviceAuthorizer } from "./device-auth.ts";
+import type { RelayConversationLogger } from "./operator-conversations.ts";
 
 export interface VoiceCallRelayOptions {
   readonly authorizeDevice: RelayDeviceAuthorizer;
@@ -15,6 +16,8 @@ export interface VoiceCallRelayOptions {
   readonly captainToken: string | undefined;
   /** How often an open call rechecks its device; revocation or a lost grant ends the call. */
   readonly reauthorizeMs?: number;
+  /** Each upgrade's outcome: who, the status and the reason. Never audio or bearers. */
+  readonly logger?: RelayConversationLogger;
 }
 
 const DEFAULT_REAUTHORIZE_MS = 30_000;
@@ -33,27 +36,42 @@ export function createVoiceCallUpgrade(
 ): (request: IncomingMessage, socket: Duplex, head: Buffer) => boolean {
   const server = new WebSocketServer({ noServer: true, maxPayload: VOICE_CALL_AUDIO_FRAME_MAX_BYTES });
   const reauthorizeMs = options.reauthorizeMs ?? DEFAULT_REAUTHORIZE_MS;
+  const logger = options.logger ?? silentLogger;
   return (request, socket, head) => {
     if (new URL(request.url ?? "/", "http://relay").pathname !== VOICE_CALL_PATH) return false;
+    let deviceId: string | undefined;
+    const fields = (reason: string, extra: Readonly<Record<string, unknown>> = {}) => ({
+      service: "clankie-relay",
+      route: "voice_call",
+      ...(deviceId === undefined ? {} : { deviceId }),
+      reason,
+      ...extra,
+    });
+    const refused = (status: number, reason: string, extra: Readonly<Record<string, unknown>> = {}) => {
+      logger.warn(fields(reason, { statusCode: status, ...extra }), "voice call relay refused");
+      refuse(socket, status, reason);
+    };
     void (async () => {
       const token = bearerToken(request);
-      if (token === undefined) return refuse(socket, 401, "device_authentication_required");
+      if (token === undefined) return refused(401, "device_authentication_required");
       const authorization = await options.authorizeDevice.authorize(token);
       if (!authorization.authorized)
-        return refuse(
-          socket,
-          authorization.denial === "unavailable" ? 503 : 401,
-          `device_${authorization.denial}`,
-        );
+        return refused(authorization.denial === "unavailable" ? 503 : 401, `device_${authorization.denial}`);
       // The pocket chat's own grant; hosting control and support access never speak as the owner.
       const device = authorization.device;
+      deviceId = device.deviceId;
       if (!device.grants.chat || device.controlScope === "hosted" || device.supportGrantId !== undefined)
-        return refuse(socket, 403, "voice_call_grant_required");
-      if (options.captainToken === undefined) return refuse(socket, 503, "voice_call_upstream_unavailable");
+        return refused(403, "voice_call_grant_required");
+      if (options.captainToken === undefined) return refused(503, "voice_call_upstream_unavailable");
       // Opening the call first means a refused or busy service is a status, not a dropped socket.
       const upstream = await openUpstream(options.serviceUrl, options.captainToken);
-      if (typeof upstream === "number") return refuse(socket, upstream, "voice_call_upstream_refused");
+      if (typeof upstream === "number")
+        return refused(upstream === 503 || upstream === 403 ? upstream : 502, "voice_call_upstream_refused", {
+          // 0: the service could not be reached at all.
+          upstreamStatus: upstream,
+        });
       if (socket.destroyed) {
+        logger.warn(fields("device_gone"), "voice call relay abandoned");
         upstream.socket.close(1001, "device_gone");
         return;
       }
@@ -64,6 +82,7 @@ export function createVoiceCallUpgrade(
         if (settled) return;
         settled = true;
         clearTimeout(handshake);
+        logger.warn(fields("device_handshake_incomplete"), "voice call relay abandoned");
         upstream.stopHolding();
         upstream.socket.close(1001, "device_gone");
         socket.destroy();
@@ -78,6 +97,7 @@ export function createVoiceCallUpgrade(
           return;
         }
         settled = true;
+        logger.info(fields("connected", { statusCode: 101 }), "voice call relay connected");
         bridge(
           client,
           upstream,
@@ -92,9 +112,11 @@ export function createVoiceCallUpgrade(
             );
           },
           reauthorizeMs,
+          (side, code, reason) =>
+            logger.info(fields(reason, { closedBy: side, closeCode: code }), "voice call relay ended"),
         );
       });
-    })().catch(() => refuse(socket, 500, "voice_call_relay_failed"));
+    })().catch(() => refused(500, "voice_call_relay_failed"));
     return true;
   };
 }
@@ -112,14 +134,17 @@ function bridge(
   opened: OpenUpstream,
   stillAuthorized: () => Promise<boolean>,
   everyMs: number,
+  ended: (side: "device" | "service" | "relay", code: number, reason: string) => void,
 ) {
   const upstream = opened.socket;
   opened.stopHolding();
   let closed = false;
-  const closeBoth = (code: number, reason: string) => {
+  const closeBoth = (code: number, reason: string, by: "device" | "service" | "relay" = "relay") => {
     if (closed) return;
     closed = true;
     clearInterval(recheck);
+    // A close reason is the peer's own text; only the protocol's short reason codes are kept.
+    ended(by, code, /^[a-z_]{1,64}$/u.test(reason) ? reason : "unspecified");
     const safe = code >= 1000 && code < 5000 && code !== 1005 && code !== 1006 ? code : 1000;
     for (const side of [client, upstream]) {
       if (side.readyState === WebSocket.OPEN || side.readyState === WebSocket.CONNECTING)
@@ -132,10 +157,10 @@ function bridge(
   client.on("message", forward(upstream));
   for (const { data, isBinary } of opened.early.splice(0)) forward(client)(data, isBinary);
   upstream.on("message", forward(client));
-  client.on("close", (code, reason) => closeBoth(code, reason.toString()));
-  upstream.on("close", (code, reason) => closeBoth(code, reason.toString()));
-  client.on("error", () => closeBoth(1011, "device_socket_error"));
-  upstream.on("error", () => closeBoth(1011, "service_socket_error"));
+  client.on("close", (code, reason) => closeBoth(code, reason.toString(), "device"));
+  upstream.on("close", (code, reason) => closeBoth(code, reason.toString(), "service"));
+  client.on("error", () => closeBoth(1011, "device_socket_error", "device"));
+  upstream.on("error", () => closeBoth(1011, "service_socket_error", "service"));
   const recheck = setInterval(() => {
     void stillAuthorized()
       .catch(() => false)
@@ -147,7 +172,8 @@ function bridge(
       });
   }, everyMs);
   recheck.unref();
-  if (opened.closedEarly !== undefined) closeBoth(opened.closedEarly.code, opened.closedEarly.reason);
+  if (opened.closedEarly !== undefined)
+    closeBoth(opened.closedEarly.code, opened.closedEarly.reason, "service");
 }
 
 function openUpstream(serviceUrl: string, captainToken: string): Promise<OpenUpstream | number> {
@@ -179,9 +205,9 @@ function openUpstream(serviceUrl: string, captainToken: string): Promise<OpenUps
     });
     upstream.once("unexpected-response", (_request, response) => {
       response.resume();
-      resolve(response.statusCode === 503 || response.statusCode === 403 ? response.statusCode : 502);
+      resolve(response.statusCode ?? 0);
     });
-    upstream.once("error", () => resolve(502));
+    upstream.once("error", () => resolve(0));
   });
 }
 
@@ -203,6 +229,11 @@ function refuse(socket: Duplex, status: number, error: string): void {
       body,
   );
 }
+
+const silentLogger: RelayConversationLogger = {
+  info() {},
+  warn() {},
+};
 
 function bearerToken(request: IncomingMessage): string | undefined {
   const header = request.headers.authorization;

@@ -71,6 +71,7 @@ const voiceCallUpgrade = createVoiceCallUpgrade({
   authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: controlPlaneUrl }),
   serviceUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310",
   captainToken,
+  logger: conversationLogger,
 });
 server.on("upgrade", (request, socket, head) => {
   if (!voiceCallUpgrade(request, socket, head)) socket.destroy();
