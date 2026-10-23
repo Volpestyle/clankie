@@ -1234,6 +1234,7 @@ export class ClankieFaceShell {
   }
 
   private loaderText(message: string): string {
+    if (this.activeTurn === undefined) return message;
     return `${message} (enter to steer · alt+enter to queue · ${this.options.expandedAgent?.() ? "esc conversation" : "esc to interrupt"})`;
   }
 

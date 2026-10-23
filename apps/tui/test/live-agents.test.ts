@@ -619,7 +619,7 @@ it.each(["mismatch", "unverified"] as const)(
       },
     ];
     const strip = new LiveAgentStrip(() => agents, theme);
-    expect(strip.selected()?.seat.seatId).toBe(status === "unverified" ? "healthy" : "native-gap");
+    expect(strip.selected()?.seat.seatId).toBe("healthy");
     strip.select("native-gap");
     expect(expandedRows(strip, 120)).toContain(`Clankie tools ${status}`);
     const picker = new LiveAgentPicker(() => agents, strip, theme, {

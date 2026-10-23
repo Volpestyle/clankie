@@ -67,11 +67,9 @@ function bridgeWarning({ seat }: LiveAgent, { ansi }: AgentTheme): string | unde
 
 function bridgeNeedsAction({ seat }: Pick<LiveAgent, "seat">): boolean {
   if (seat.harnessBridge?.status === "missing" || seat.harnessBridge?.status === "pane-mismatch") return true;
-  const skew =
-    seat.workerTools?.behind ||
-    seat.harnessBridge?.freshness === "older-than-runtime" ||
-    seat.harnessBridge?.operatorBridge?.freshness === "older-than-runtime";
-  return seat.toolCatalog?.status === "mismatch" && !(skew && seat.workerTools?.status === "ready");
+  // Catalog parity is diagnostic. Actual missing/stalled traffic and delivery
+  // failures are actionable; a healthy older catalog alone is not.
+  return seat.workerTools?.status === "missing" || seat.workerTools?.status === "stalled";
 }
 
 function actionableFlag(flag: string): boolean {
