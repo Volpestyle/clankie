@@ -213,7 +213,9 @@ describe("base64 on the wire (VUH-2700)", () => {
       onePad.slice(0, -1),
       `${twoPad.slice(0, 8)}\n${twoPad.slice(8)}`,
       ` ${onePad}`,
-      onePad.replace(/[+/]/u, "-"),
+      // A URL-safe '-' is never canonical base64: at a + or / when the random ciphertext has one,
+      // else in place of its first character, so the variant can never equal the canonical text.
+      /[+/]/u.test(onePad) ? onePad.replace(/[+/]/u, "-") : `-${onePad.slice(1)}`,
       `${onePad}=`,
     ];
     for (const sealed of variants) {
