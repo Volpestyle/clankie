@@ -17,7 +17,9 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   `voice-call.*` events in the service event log, under stream
   `voice-call:<callId>`: the same content-free evidence, with `guildId`
   `device-call` and DAVE version 0. Its `ask_clankie` handoffs are queued turns
-  in the main conversation (surface `voice-call`), not a voice lane tree. A
+  in the main conversation (surface `voice-call`), not a voice lane tree. Each
+  line said on the call, the owner's and his, is also an ordinary message in
+  the main conversation, recorded as it closes and never a turn (VUH-2752). A
   refused call that says `voice_busy` names the room holding his voice.
 
 - **A voice capability denial may never have reached the captain.** Join the

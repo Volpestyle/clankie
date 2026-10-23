@@ -4550,9 +4550,11 @@ paths:
         ADR 0288). Binary frames are 24 kHz mono s16le PCM both ways: microphone
         up, his speech down. Text frames are `VoiceCallClientEvent` (playback
         acknowledgements, hangup) and `VoiceCallServerEvent` (state, playback
-        start/finish/stop, ended) from `@clankie/protocol`. The call runs the
-        Discord rooms' realtime voice session; `ask_clankie` becomes a queued turn
-        in the main conversation, and the call holds his voice body lease.
+        start/finish/stop, transcript lines, ended) from `@clankie/protocol`.
+        The call runs the Discord rooms' realtime voice session; `ask_clankie`
+        becomes a queued turn in the main conversation, each closed transcript
+        line is recorded there without a turn (VUH-2752), and the call holds his
+        voice body lease.
       security: [{ captainBearer: [] }]
       responses:
         "101":

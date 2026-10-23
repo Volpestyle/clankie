@@ -53,3 +53,20 @@ export async function voiceCallHandoff(
     ) ?? { state: "failed", code: "captain_response_missing" }
   );
 }
+
+/**
+ * A line said on a device call (VUH-2752), recorded in the main conversation as
+ * it closes: the owner's speech as theirs, his spoken reply as his. It is never a
+ * turn: the call's voice already answered. Only a device call reaches this, so
+ * Discord rooms never write their speech into the chat.
+ */
+export async function voiceCallTranscript(
+  conversations: Pick<ConversationStore, "defaultGlobalConversationId" | "recordVoiceCallLine">,
+  input: { readonly speaker: "owner" | "clankie"; readonly text: string },
+): Promise<boolean> {
+  return conversations.recordVoiceCallLine(
+    conversations.defaultGlobalConversationId(),
+    input.speaker,
+    input.text,
+  );
+}

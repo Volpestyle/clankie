@@ -1514,6 +1514,27 @@ export class ConversationStore {
     return true;
   }
 
+  /**
+   * Record a line said on the owner's device call (VUH-2752): their speech as
+   * an owner message, or his spoken reply as his. The call's voice already
+   * answered, so this never queues a turn; it only keeps the call and the text
+   * thread one conversation, line by line as each is said.
+   */
+  public recordVoiceCallLine(conversationId: string, speaker: "owner" | "clankie", text: string): boolean {
+    const meta = this.metas.get(conversationId);
+    if (meta === undefined || !text.trim() || text.length > OPERATOR_CONVERSATION_TEXT_MAX) return false;
+    meta.revision += 1;
+    this.append(meta, {
+      type: "message",
+      role: speaker === "owner" ? "operator" : "captain",
+      text,
+      streaming: false,
+    });
+    meta.updatedAt = new Date().toISOString();
+    this.saveMeta(meta);
+    return true;
+  }
+
   /** Following disabled before admission consumes the queued wake without running it. */
   public discardLinearWake(id: string): void {
     return discardLinearWake(this, id);

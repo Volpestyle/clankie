@@ -687,7 +687,9 @@ describe("xAI voice sessions", () => {
       is_final: true,
       speech_final: true,
     });
-    expect(transcripts).toEqual([{ itemId: "xai-stt-1", text: "hey clankie", final: true }]);
+    expect(transcripts).toEqual([
+      { itemId: "xai-stt-1", text: "hey clankie", final: true, cumulative: true },
+    ]);
   });
 
   it("configures Grok for explicit text turns and handles xAI function-call events", async () => {

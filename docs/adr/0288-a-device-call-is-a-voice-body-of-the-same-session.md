@@ -110,3 +110,37 @@ flowchart LR
   his voice from the speakers can count as the owner talking over him.
 - Call receipts are the session's content-free evidence, recorded as
   `voice-call.*` events.
+
+## Amendment: the call and the chat are one conversation (VUH-2752)
+
+James, asking for the phone's call to work like Grok's
+([comment](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/activity#comment-2972464d)
+and its follow-up on [VUH-2752](https://linear.app/vuhlp/issue/VUH-2752)): "as
+it's talking you, and as you're speaking, you should see that dialog appearing
+in the chat like it should be very continuous". He also asked that nothing be
+dumped into the chat when the call ends. The Decision above wrote plain
+spoken conversation nowhere. For an owner's device call that no longer holds.
+
+- **Both sides stream to the device.** The session publishes a live
+  transcript (`subscribeLiveTranscript`): the owner's speech as the transcriber
+  hears it, and his reply as it is generated. Each event is the whole line so
+  far under a stable `lineId`, and `final` closes it. OpenAI streams deltas and
+  xAI the whole line each time, so the session builds the line either way. A
+  reply nobody heard (suppressed before any audio) closes empty, which retracts
+  it. One that was cut off keeps what he was saying. The call forwards every
+  event to the device as a `transcript` server event.
+- **Closed lines are recorded in the main conversation as they close.** The
+  owner's speech becomes an owner message and his reply becomes his message,
+  through `recordVoiceCallLine`. Neither is a turn: the call's voice already
+  answered. When the call ends the chat already holds it, so hanging up adds
+  nothing. A reply the hang-up cut off closes like any other line before the
+  call stops listening.
+- **Only owner device calls record.** Each device call builds its own session,
+  and only `VoiceCall` subscribes to the live transcript, for the call's
+  length. Discord rooms never subscribe, so a room's speech is still written
+  nowhere unless the owner's retention toggle is on (ADR 0121).
+- **Audio is still never retained.** Only text is kept, and only the owner's
+  own call writes it, into the owner's own main conversation.
+
+His text can arrive slightly ahead of his voice, because the provider
+transcribes his reply as it generates it. The device paces nothing yet.

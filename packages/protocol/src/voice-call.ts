@@ -22,6 +22,9 @@ export const VOICE_CALL_SAMPLE_RATE = 24_000;
 /** Largest binary frame either side sends: 200 ms of audio. Devices send 20 ms frames. */
 export const VOICE_CALL_AUDIO_FRAME_MAX_BYTES = (VOICE_CALL_SAMPLE_RATE * 2) / 5;
 
+/** Longest line of a call's transcript either side sends. */
+export const VOICE_CALL_TRANSCRIPT_TEXT_MAX = 4_000;
+
 const PlaybackIdSchema = z.string().min(1).max(128).regex(/^\S+$/u);
 
 /**
@@ -75,6 +78,24 @@ export const VoiceCallServerEventSchema = z.discriminatedUnion("type", [
       type: z.literal("playback"),
       playbackId: PlaybackIdSchema,
       action: z.enum(["start", "finish", "stop"]),
+    })
+    .strict(),
+  /**
+   * Both sides of the call as they are spoken (VUH-2752): the owner's speech as
+   * it is transcribed, and his reply as it is generated. Each event carries the
+   * whole line so far and replaces the last one with the same `lineId`; `final`
+   * closes the line. A final line with no text retracts it (speech that came to
+   * nothing, a reply that was never heard). Final lines are also recorded in the
+   * main conversation as they close, so hanging up adds nothing.
+   */
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      type: z.literal("transcript"),
+      speaker: z.enum(["owner", "clankie"]),
+      lineId: z.string().min(1).max(128),
+      text: z.string().max(VOICE_CALL_TRANSCRIPT_TEXT_MAX),
+      final: z.boolean(),
     })
     .strict(),
   z

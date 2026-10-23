@@ -28,7 +28,7 @@ import { BodyLeaseRouter } from "../../clankie/src/body-lease-router.ts";
 import { BodyLeaseStore } from "../../clankie/src/body-leases.ts";
 import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
-import { voiceCallHandoff } from "../../clankie/src/captain/voice-call-handoff.ts";
+import { voiceCallHandoff, voiceCallTranscript } from "../../clankie/src/captain/voice-call-handoff.ts";
 import { composeVoiceLaneInstructions } from "../../clankie/src/captain/voice-lane.ts";
 import { LocalCompanionBoundary } from "../../clankie/src/local-companion-boundary.ts";
 import { ControlPlaneDeviceAuthorizer } from "../src/device-auth.ts";
@@ -94,6 +94,8 @@ function utterance(speechMs: number, silenceMs: number): Buffer[] {
  */
 class ScriptedProvider {
   public readonly transcripts: string[] = [];
+  /** What he says, reply by reply, as the provider's transcript of his audio. */
+  public readonly replies: string[] = [];
   /** How long his spoken answer to a handoff runs. */
   public answerMs = 480;
   public readonly functionOutputs: string[] = [];
@@ -134,9 +136,15 @@ class ScriptedSocket implements RealtimeSocket {
       this.provider.transcribedBytes += Buffer.from(frame.audio ?? "", "base64").byteLength;
     if (frame.type === "input_audio_buffer.commit" && this.kind === "transcription") {
       const transcript = this.provider.transcripts.shift() ?? "";
+      const itemId = `tx_${String(++this.sequence)}`;
+      // Streamed like the real transcriber: deltas while it listens, then the whole line.
+      const half = Math.ceil(transcript.length / 2);
+      for (const delta of [transcript.slice(0, half), transcript.slice(half)])
+        if (delta)
+          this.later({ type: "conversation.item.input_audio_transcription.delta", item_id: itemId, delta });
       this.later({
         type: "conversation.item.input_audio_transcription.completed",
-        item_id: `tx_${String(++this.sequence)}`,
+        item_id: itemId,
         transcript,
       });
     }
@@ -185,6 +193,21 @@ class ScriptedSocket implements RealtimeSocket {
   }
 
   private speak(id: string, ms: number): void {
+    // His words stream as they are generated, ahead of and alongside the audio.
+    const words = this.provider.replies.shift() ?? "Mm-hm.";
+    for (const delta of words.match(/\S+\s*/gu) ?? [])
+      this.emit({
+        type: "response.output_audio_transcript.delta",
+        response_id: id,
+        item_id: `item_${id}`,
+        delta,
+      });
+    this.emit({
+      type: "response.output_audio_transcript.done",
+      response_id: id,
+      item_id: `item_${id}`,
+      transcript: words,
+    });
     const pcm = Buffer.alloc((24_000 * 2 * ms) / 1_000, 3);
     const chunks: Buffer[] = [];
     for (let offset = 0; offset < pcm.byteLength; offset += 24_000 * 2 * 0.24)
@@ -237,6 +260,15 @@ class Device {
       if (event.action === "finish") this.ack(event.playbackId, "drained");
       if (event.action === "stop") this.ack(event.playbackId, "stopped");
     });
+  }
+
+  /** Each line as the device shows it now: the latest text per line, in the order lines began. */
+  public lines(): { speaker: string; text: string; final: boolean }[] {
+    const lines = new Map<string, { speaker: string; text: string; final: boolean }>();
+    for (const event of this.events)
+      if (event.type === "transcript")
+        lines.set(event.lineId, { speaker: event.speaker, text: event.text, final: event.final });
+    return [...lines.values()];
   }
 
   public states(): string[] {
@@ -300,6 +332,7 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
       voiceLaneInstructions: (surface) =>
         composeVoiceLaneInstructions("# Identity\nYou are Clankie.", surface),
       voiceCallHandoff: (input) => voiceCallHandoff(store, shutdown.signal, input),
+      voiceCallTranscript: (input) => voiceCallTranscript(store, input),
       mainConversationId: () => store.defaultGlobalConversationId(),
     }),
     bodyLeases: {
@@ -463,6 +496,57 @@ it("calls Clankie from a paired device: he greets, hears, acts in the main conve
   await until(() => device.closed, "the call closing");
   expect(device.ended()).toMatchObject({ reason: "hung_up" });
   expect(f.leases.status("voice")).toBeUndefined();
+});
+
+it("shows the call in the chat as it is spoken, both sides, and adds nothing when it ends (VUH-2752)", async () => {
+  const f = await fixture();
+  f.provider.replies.push("Hey! Good to hear you.", "Sure, sounds good to me.");
+  const device = await f.call((await f.pair()).token);
+  await until(
+    () => device.lines().some((line) => line.speaker === "clankie" && line.final),
+    "his greeting's line",
+  );
+  // His words arrived as they were generated, not only once he finished.
+  const transcript = device.events.flatMap((event) => (event.type === "transcript" ? [event] : []));
+  const greeting = transcript.filter((event) => event.lineId === transcript[0]?.lineId);
+  expect(greeting.length).toBeGreaterThan(2);
+  expect(greeting.at(-1)).toMatchObject({ text: "Hey! Good to hear you.", final: true });
+
+  f.provider.transcripts.push("Let's grab lunch at noon.");
+  device.say(600);
+  await until(
+    () => device.lines().some((line) => line.speaker === "owner" && line.final),
+    "the owner's line",
+  );
+  const owner = device.events.filter((event) => event.type === "transcript" && event.speaker === "owner");
+  // A partial first, then the whole line: the owner sees their words appear as they talk.
+  expect(owner.map((event) => event.type === "transcript" && [event.text, event.final])).toEqual([
+    ["Let's grab lu", false],
+    ["Let's grab lunch at noon.", false],
+    ["Let's grab lunch at noon.", true],
+  ]);
+  await until(
+    () => device.lines().filter((line) => line.speaker === "clankie" && line.final).length === 2,
+    "his reply's line",
+  );
+
+  // Each line is in the main conversation as soon as it closed, in order.
+  const said = (await f.mainEvents()).flatMap((event) =>
+    event.type === "message" && (event.role === "operator" || event.role === "captain")
+      ? [`${event.role}: ${event.text}`]
+      : [],
+  );
+  expect(said).toEqual([
+    "captain: Hey! Good to hear you.",
+    "operator: Let's grab lunch at noon.",
+    "captain: Sure, sounds good to me.",
+  ]);
+  // Recording a line never ran a turn; the call's voice already answered.
+  expect(f.asked).toHaveLength(0);
+
+  device.send({ type: "hangup" });
+  await until(() => device.closed, "the call closing");
+  expect((await f.mainEvents()).filter((event) => event.type === "message")).toHaveLength(said.length);
 });
 
 it("refuses a call while his voice is in a Discord room, and says which room", async () => {

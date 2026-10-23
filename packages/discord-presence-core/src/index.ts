@@ -89,6 +89,7 @@ export {
   type DiscordVoiceAnnouncementResult,
   type DiscordVoiceGracefulEndResult,
   type DiscordVoiceTranscript,
+  type DiscordVoiceLiveTranscript,
   type DiscordVoiceSpokenTranscript,
   type JoinDiscordVoiceInput,
   type VoiceRoomOccupant,

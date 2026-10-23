@@ -102,6 +102,7 @@ export function registerVoiceCallRoute(ctx: VoiceBriefingRouteContext) {
           },
           briefing: () => composeVoiceCallBriefing(ctx),
           handoff: (input) => port.voiceCallHandoff(input),
+          transcript: (line) => port.voiceCallTranscript(line),
           selfTool: async (call) => {
             const result = await port.voiceCallSelfTool(call);
             return result.content

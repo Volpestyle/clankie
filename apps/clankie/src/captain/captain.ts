@@ -359,7 +359,7 @@ import {
   type TurnMetricsQuery,
 } from "./turn-metrics.ts";
 import { composeVoiceLaneInstructions } from "./voice-lane.ts";
-import { voiceCallHandoff } from "./voice-call-handoff.ts";
+import { voiceCallHandoff, voiceCallTranscript } from "./voice-call-handoff.ts";
 
 /**
  * Every assignment carries the one work-tracking contract (ADR 0191), so a
@@ -7173,6 +7173,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     voiceCallHandoff: (input) => voiceCallHandoff(conversations, shutdown.signal, input),
+    voiceCallTranscript: (input) => voiceCallTranscript(conversations, input),
 
     async voiceSelfTool({ guildId, channelId, speakerId, name, arguments: args }) {
       // The voice room's own attribution, stamped by the host exactly as a

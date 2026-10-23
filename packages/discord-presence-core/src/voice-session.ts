@@ -349,6 +349,19 @@ export interface DiscordVoiceTranscript {
   readonly text: string;
 }
 
+/**
+ * One side of the conversation as it is spoken (VUH-2752): the owner's speech
+ * as it is transcribed, or his reply as it is generated. Each event is the whole
+ * line so far and replaces the previous one with the same `lineId`; `final`
+ * closes it, and a final line with no text retracts it.
+ */
+export interface DiscordVoiceLiveTranscript {
+  readonly speaker: "owner" | "clankie";
+  readonly lineId: string;
+  readonly text: string;
+  readonly final: boolean;
+}
+
 export type DiscordVoiceSpokenTranscript = Omit<
   Extract<DiscordVoiceTranscriptLogEntry, { role: "assistant" }>,
   "schemaVersion" | "body"
@@ -735,6 +748,10 @@ export class DiscordVoiceSession {
   private transcriptRing: Buffer[] = [];
   /** Live consumers of the room; see {@link subscribeTranscript}. Never retains by itself. */
   private readonly spokenTranscriptListeners = new Set<(transcript: DiscordVoiceSpokenTranscript) => void>();
+  /** Live lines as they are spoken; see {@link subscribeLiveTranscript}. Never retains by itself. */
+  private readonly liveTranscriptListeners = new Set<(line: DiscordVoiceLiveTranscript) => void>();
+  /** A speaker's line so far, by transcription item, for providers that stream deltas. */
+  private readonly liveSpeechLines = new Map<string, string>();
   private readonly transcriptListeners = new Set<
     (line: string, transcript: DiscordVoiceTranscript) => void
   >();
@@ -1673,6 +1690,46 @@ export class DiscordVoiceSession {
         for (const pending of this.pendingResponses) delete pending.outputTranscript;
       }
     };
+  }
+
+  /**
+   * Both sides as they are spoken, for a surface that shows the conversation
+   * live (a device call, VUH-2752). Like the other transcript feeds this keeps
+   * nothing: a subscriber decides what, if anything, to retain.
+   */
+  public subscribeLiveTranscript(listener: (line: DiscordVoiceLiveTranscript) => void): () => void {
+    this.liveTranscriptListeners.add(listener);
+    return () => {
+      this.liveTranscriptListeners.delete(listener);
+      if (this.liveTranscriptListeners.size === 0) this.liveSpeechLines.clear();
+    };
+  }
+
+  private publishLiveTranscript(line: DiscordVoiceLiveTranscript): void {
+    for (const listener of this.liveTranscriptListeners) {
+      try {
+        listener(line);
+      } catch {
+        /* A live view must never disrupt the call. */
+      }
+    }
+  }
+
+  /** The owner's line so far: OpenAI streams deltas, xAI the whole line each time. */
+  private publishLiveSpeech(event: RealtimeTranscriptEvent): void {
+    if (this.liveTranscriptListeners.size === 0) return;
+    const text =
+      event.final || event.cumulative === true
+        ? event.text
+        : (this.liveSpeechLines.get(event.itemId) ?? "") + event.text;
+    if (event.final) this.liveSpeechLines.delete(event.itemId);
+    else this.liveSpeechLines.set(event.itemId, text);
+    this.publishLiveTranscript({
+      speaker: "owner",
+      lineId: `owner-${event.itemId}`,
+      text: event.final ? text.trim() : text,
+      final: event.final,
+    });
   }
 
   public canHear(userId: string): boolean {
@@ -2716,7 +2773,7 @@ export class DiscordVoiceSession {
         instructions: briefing.instructions,
         onOutputTranscript: (event, source) => {
           if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(event.itemId)) return;
-          if (this.spokenTranscriptListeners.size === 0) return;
+          if (this.spokenTranscriptListeners.size === 0 && this.liveTranscriptListeners.size === 0) return;
           const pending = this.pendingResponses.find((candidate) => !candidate.done);
           if (pending === undefined || pending.outputTranscript?.emitted) return;
           const output = (pending.outputTranscript ??= {
@@ -2732,6 +2789,13 @@ export class DiscordVoiceSession {
           const text = event.final ? event.text : output.text + event.text;
           output.text = text.slice(0, MAX_REALTIME_RESPONSE_TEXT_CHARACTERS);
           output.textComplete = event.final && text.length <= MAX_REALTIME_RESPONSE_TEXT_CHARACTERS;
+          if (output.text.length > 0)
+            this.publishLiveTranscript({
+              speaker: "clankie",
+              lineId: `clankie-${output.itemId}`,
+              text: output.text,
+              final: false,
+            });
         },
         onFirstText: (itemId) => {
           if (generation !== this.sessionGeneration || this.invalidPlaybackItemIds.has(itemId)) return;
@@ -4216,7 +4280,15 @@ export class DiscordVoiceSession {
     output.emitted = true;
     const text = output.text;
     output.text = "";
-    if (text.trim().length === 0) return;
+    // A reply nobody heard leaves no line; one cut off keeps what he was saying.
+    const heard = outcome !== "suppressed" && pending.firstAudioAtMs !== undefined;
+    this.publishLiveTranscript({
+      speaker: "clankie",
+      lineId: `clankie-${output.itemId}`,
+      text: heard ? text.trim() : "",
+      final: true,
+    });
+    if (text.trim().length === 0 || this.spokenTranscriptListeners.size === 0) return;
     const entry: DiscordVoiceSpokenTranscript = {
       occurredAt: new Date().toISOString(),
       guildId: output.guildId,
@@ -4406,7 +4478,9 @@ export class DiscordVoiceSession {
     }
     const port = await this.options.realtime.openTranscription({
       onTranscript: (event) => {
-        if (generation === this.sessionGeneration) this.handleTranscript(userId, event);
+        if (generation !== this.sessionGeneration) return;
+        this.publishLiveSpeech(event);
+        this.handleTranscript(userId, event);
       },
       onClose: (reason, detail) => {
         this.handleTranscriptionClose(userId, port, reason, generation, guildId, channelId, detail);

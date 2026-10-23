@@ -4,6 +4,7 @@ import {
   DiscordVoiceSession,
   pcmRms,
   type DiscordVoiceBriefing,
+  type DiscordVoiceLiveTranscript,
   type DiscordVoiceRealtimePorts,
   type DiscordVoiceSessionStatus,
   type DiscordVoiceTurn,
@@ -16,6 +17,7 @@ import {
 } from "@clankie/discord-presence-core";
 import {
   VOICE_CALL_SAMPLE_RATE,
+  VOICE_CALL_TRANSCRIPT_TEXT_MAX,
   VoiceCallClientEventSchema,
   VoiceCallServerEventSchema,
   type CaptainChannelTurnResult,
@@ -396,6 +398,12 @@ interface VoiceCallOptions {
   /** Content-free receipts, the same evidence a Discord stay records. */
   readonly record?: (evidence: DiscordVoiceEvidence, callId: string) => void;
   readonly ownerName?: string;
+  /**
+   * A line of the call closed (VUH-2752): the owner finished saying something,
+   * or his reply finished playing. The route records it in the main
+   * conversation, so the chat already holds the call when it ends.
+   */
+  readonly transcript?: (line: Pick<DiscordVoiceLiveTranscript, "speaker" | "text">) => Promise<unknown>;
   readonly onEnded?: (reason: VoiceCallEndReason) => void;
   /** Ends a call whose device stopped sending anything. Defaults to 15 seconds. */
   readonly silentPeerMs?: number;
@@ -418,6 +426,7 @@ export class VoiceCall {
   private readonly media: LocalCallMedia;
   private readonly timers: NonNullable<VoiceCallOptions["timers"]>;
   private session: DiscordVoiceSession | undefined;
+  private unsubscribeTranscript: (() => void) | undefined;
   private state: VoiceCallState | undefined;
   private leaseHeld = false;
   private renewTimer: unknown;
@@ -492,6 +501,7 @@ export class VoiceCall {
       },
     });
     this.session = session;
+    this.unsubscribeTranscript = session.subscribeLiveTranscript((line) => this.transcriptLine(line));
     try {
       await session.join({
         guildId: VOICE_CALL_ROOM,
@@ -554,6 +564,9 @@ export class VoiceCall {
       } catch {
         // Disposal is idempotent; the lease below is released only after it settles.
       }
+      // Disposal closes a reply the hang-up cut off, as that line already shows;
+      // only then does the call stop listening, so nothing else is added.
+      this.unsubscribeTranscript?.();
       this.releaseLease();
       this.send({ schemaVersion: 1, type: "ended", reason, ...(room === undefined ? {} : { room }) });
       this.options.peer.close(1000, reason);
@@ -564,6 +577,22 @@ export class VoiceCall {
 
   public status(): DiscordVoiceSessionStatus | undefined {
     return this.session?.status();
+  }
+
+  /** Each line to the device as it grows; a closed line to the main conversation once. */
+  private transcriptLine(line: DiscordVoiceLiveTranscript): void {
+    const text = line.text.slice(0, VOICE_CALL_TRANSCRIPT_TEXT_MAX);
+    this.send({
+      schemaVersion: 1,
+      type: "transcript",
+      speaker: line.speaker,
+      lineId: line.lineId,
+      text,
+      final: line.final,
+    });
+    if (!line.final || text.trim().length === 0) return;
+    // allow-swallowed-rejection -- a line the chat could not take is still on the device; the call goes on.
+    void this.options.transcript?.({ speaker: line.speaker, text }).catch(() => undefined);
   }
 
   private releaseLease(): void {

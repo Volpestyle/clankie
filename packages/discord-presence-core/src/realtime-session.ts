@@ -368,8 +368,11 @@ export interface RealtimeSessionCloseDetail {
 
 export interface RealtimeTranscriptEvent {
   readonly itemId: string;
+  /** A delta for providers that stream them; the whole line when `cumulative` or `final`. */
   readonly text: string;
   readonly final: boolean;
+  /** Each partial already carries the whole line so far (xAI streaming STT). */
+  readonly cumulative?: boolean;
 }
 
 export interface RealtimeFunctionCall {
@@ -802,6 +805,7 @@ export class XaiStreamingTranscriptionSession extends RealtimeSessionCore {
       itemId: `xai-stt-${this.utterance.toString()}`,
       text: text.slice(0, MAX_TRANSCRIPT_CHARACTERS),
       final,
+      cumulative: true,
     });
     if (final) this.utterance += 1;
   }

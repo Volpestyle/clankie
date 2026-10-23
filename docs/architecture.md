@@ -967,7 +967,10 @@ carries 24 kHz PCM frames to `/operator/v1/voice-call`. `LocalCallMedia`
 supplies the speaking edges Discord's packets would, and turns his playback
 into frames the device acknowledges. `ask_clankie` from a call is a queued turn
 in the main conversation, and the call holds the `voice` body lease while it
-runs.
+runs. Both sides stream to the device as `transcript` events while they are
+spoken, and each closed line is recorded in the main conversation, owner speech
+as the owner's and his reply as his, without a turn (ADR 0288 amendment,
+VUH-2752). Discord rooms never record their speech this way.
 
 Readiness is role-specific: versioned `process_ready` must exactly match the
 client IPC protocol and proves only that the child can serve IPC;

@@ -393,6 +393,15 @@ export interface CaptainPort {
     readonly request: string;
     readonly context?: string;
   }): Promise<import("@clankie/protocol").CaptainChannelTurnResult>;
+  /**
+   * A line said on a device call (VUH-2752), recorded in the main conversation
+   * as it closes: the owner's speech as theirs, his spoken reply as his. Never
+   * a turn; only owner device calls record lines, never Discord rooms.
+   */
+  voiceCallTranscript(input: {
+    readonly speaker: "owner" | "clankie";
+    readonly text: string;
+  }): Promise<boolean>;
   /** The main conversation a device call speaks for and holds his voice as. */
   mainConversationId(): string;
   /**
@@ -656,6 +665,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     voiceCallHandoff: async () => {
       throw new Error("stub captain: voiceCallHandoff not overridden");
     },
+    voiceCallTranscript: async () => false,
     mainConversationId: () => "global-default",
     syncSeatTranscript: () => true,
     createRemoteWorkspaceConversation: () => {
