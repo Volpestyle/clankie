@@ -107,8 +107,8 @@ This repository is public. Both neighbors are private and consume
   and business, App Store or production records go to `clankie-ops`, never here.
 - Managed account services handle their own infrastructure. Free accounts
   support pairing, awake-Mac phone steering and the official Discord bot.
-  Clankie Plus adds Presence, push and multiple machines through fleet-checked
-  account entitlements; it does not provision a hosted body. Preserve existing
+  Paid features are fleet-checked account entitlements and never provision a
+  hosted body. Preserve existing
   hosted-body support without steering new users into hosted sales.
 - The repository is Apache-2.0 except `apps/vox`, which retains its own
   AGPL-3.0-or-later license and provenance record.
