@@ -193,10 +193,19 @@ export class BodyVoiceStays {
           record.stay.target.presenceSessionId === stay.target.presenceSessionId &&
           record.stay.target.transportKind === stay.target.transportKind,
       );
+    // Only a stay's own lease is shared. One held by another voice body of the same conversation,
+    // such as a device call (ADR 0288), is busy, so his voice is never in two rooms at once.
+    const heldByStay =
+      existing !== undefined &&
+      Object.entries(this.state.stays).some(
+        ([stayId, record]) =>
+          !record.finished && (this.restartClaims.get(stayId) ?? record.reference).token === existing.token,
+      );
     const acquired =
       held?.conversationId === owner.conversationId &&
       held.state === "active" &&
       existing !== undefined &&
+      heldByStay &&
       compatible
         ? { outcome: "acquired" as const, lease: existing }
         : this.store.acquire("voice", owner.conversationId, 30_000, owner.route);

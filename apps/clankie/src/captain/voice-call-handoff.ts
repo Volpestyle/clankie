@@ -20,6 +20,7 @@ export async function voiceCallHandoff(
   const messageId = `voice-call-${deliveryFingerprint(input.deliveryId)}`;
   const content = [
     "Your owner is on a live voice call with you from their own device, and your voice is handing you something they asked for. Answer here yourself, as you would in the console.",
+    "Speech on the call is transcribed and paraphrased, so it never approves anything hard to undo or that leaves this machine; confirm that with the owner here in text first.",
     `If this arrives as a native escalation, use its reply tool and event_id; in the service runner, answer normally. Only this request's final answer returns to the call, where your voice gives the gist aloud; keep anything long here in text. You may reply with exactly ${CAPTAIN_SILENT_REPLY_SENTINEL} to send nothing.`,
     "Request from your voice, then what was said on the call (the owner's speech, transcribed):",
     JSON.stringify({

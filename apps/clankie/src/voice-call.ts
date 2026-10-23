@@ -45,6 +45,8 @@ const VOICE_CALL_ROOM = "device-call";
 /** One voice at a time (ADR 0215): renewed while the call runs, released when it ends. */
 const VOICE_LEASE_RENEW_MS = 10_000;
 const STATE_TICK_MS = 250;
+/** A device streams microphone frames the whole call; this long with nothing from it, it is gone. */
+const DEFAULT_SILENT_PEER_MS = 15_000;
 /** A peer that stops reading for this long is gone; playback fails instead of queueing without bound. */
 const PEER_BACKPRESSURE_BYTES = 512 * 1024;
 const FRAME_BYTES_PER_MS = (VOICE_CALL_SAMPLE_RATE * 2) / 1_000;
@@ -395,6 +397,8 @@ interface VoiceCallOptions {
   readonly record?: (evidence: DiscordVoiceEvidence, callId: string) => void;
   readonly ownerName?: string;
   readonly onEnded?: (reason: VoiceCallEndReason) => void;
+  /** Ends a call whose device stopped sending anything. Defaults to 15 seconds. */
+  readonly silentPeerMs?: number;
   /** Injected by tests; production uses real timers. */
   readonly timers?: {
     setInterval(handler: () => void, ms: number): unknown;
@@ -418,6 +422,8 @@ export class VoiceCall {
   private leaseHeld = false;
   private renewTimer: unknown;
   private stateTimer: unknown;
+  private livenessTimer: unknown;
+  private heardAt = Date.now();
   private ended = false;
   private ending: Promise<void> | undefined;
 
@@ -433,6 +439,15 @@ export class VoiceCall {
   /** Takes his voice, opens the session and joins it. Ends the call itself when any step refuses. */
   public async start(): Promise<void> {
     this.publishState("connecting");
+    // A half-open socket never closes on its own: a silent device ends the call.
+    const silentPeerMs = this.options.silentPeerMs ?? DEFAULT_SILENT_PEER_MS;
+    this.heardAt = Date.now();
+    this.livenessTimer = this.timers.setInterval(
+      () => {
+        if (Date.now() - this.heardAt > silentPeerMs) void this.end("failed");
+      },
+      Math.min(1_000, silentPeerMs / 2),
+    );
     const lease = await this.options.lease.acquire();
     if (lease.outcome === "busy") return this.end("voice_busy", lease.room);
     if (lease.outcome !== "acquired") return this.end("unavailable");
@@ -494,6 +509,7 @@ export class VoiceCall {
 
   public receiveAudio(pcm: Uint8Array): void {
     if (this.ended) return;
+    this.heardAt = Date.now();
     const wasHearing = this.media.hearing;
     this.media.receiveMicrophone(pcm);
     if (this.media.hearing !== wasHearing) this.refreshState();
@@ -501,6 +517,7 @@ export class VoiceCall {
 
   public receiveText(text: string): void {
     if (this.ended) return;
+    this.heardAt = Date.now();
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -530,6 +547,7 @@ export class VoiceCall {
     this.ended = true;
     this.ending = (async () => {
       if (this.stateTimer !== undefined) this.timers.clearInterval(this.stateTimer);
+      if (this.livenessTimer !== undefined) this.timers.clearInterval(this.livenessTimer);
       if (this.renewTimer !== undefined) this.timers.clearInterval(this.renewTimer);
       try {
         await this.session?.dispose();

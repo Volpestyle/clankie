@@ -52,6 +52,23 @@ it("binds a one-use ticket to exact gateway target and requesting conversation",
     { outcome: "rejected", reason: "stale_lease" },
   );
 });
+it("refuses a Discord stay while a device call holds his voice for the same conversation (ADR 0288)", async () => {
+  const { store, voice, stay } = fixture();
+  // The call holds the voice lease for the main conversation, with no stay behind it.
+  const call = store.acquire("voice", "global-default", 30_000, {
+    owner: { conversationId: "global-default" },
+    mode: "machine",
+  });
+  if (call.outcome !== "acquired") throw new Error("call lease");
+  expect(await voice.claim(stay, identity("global-default"))).toMatchObject({
+    outcome: "busy",
+    lease: { conversationId: "global-default" },
+  });
+  // The call keeps its lease and still releases it cleanly.
+  expect(store.recoveryReference("voice")?.token).toBe(call.lease.token);
+  expect(store.release(call.lease)).toEqual({ outcome: "released" });
+  expect(await voice.claim(stay, identity("global-default"))).toMatchObject({ outcome: "acquired" });
+});
 it("keeps an admitted stay over later same-conversation turns but rejects revoked grants", async () => {
   const { voice, stay } = fixture();
   let current = true;

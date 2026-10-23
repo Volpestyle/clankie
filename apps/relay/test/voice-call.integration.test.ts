@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -113,7 +114,7 @@ class ScriptedSocket implements RealtimeSocket {
   private heard: string[] = [];
   private output: string | undefined;
   private asked = false;
-  private closed = false;
+  public closed = false;
 
   public constructor(provider: ScriptedProvider) {
     this.provider = provider;
@@ -264,7 +265,7 @@ class Device {
   }
 }
 
-async function fixture() {
+async function fixture(options: { silentPeerMs?: number } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "relay-voice-call-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const shutdown = new AbortController();
@@ -314,6 +315,7 @@ async function fixture() {
         }),
         decayWindowMs: 60_000,
       }),
+      ...(options.silentPeerMs === undefined ? {} : { silentPeerMs: options.silentPeerMs }),
     },
   });
   cleanups.push(async () => service.close());
@@ -405,7 +407,20 @@ async function fixture() {
     if (result.op !== "replay" || result.result.status !== "page") throw new Error("Main replay failed");
     return result.result.events;
   }
-  return { store, leases, provider, asked, pair, call, refusal, mainEvents, post };
+  /** An upgrade that authorizes but never completes: no Sec-WebSocket-Key, so the handshake aborts. */
+  async function brokenUpgrade(token: string): Promise<string> {
+    const socket = connect(Number(new URL(relay).port), "127.0.0.1");
+    await once(socket, "connect");
+    socket.write(
+      `GET ${VOICE_CALL_PATH} HTTP/1.1\r\nHost: relay\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n` +
+        `Sec-WebSocket-Version: 13\r\nAuthorization: Bearer ${token}\r\n\r\n`,
+    );
+    let answer = "";
+    socket.on("data", (chunk: Buffer) => (answer += chunk.toString("utf8")));
+    await once(socket, "close");
+    return answer;
+  }
+  return { store, leases, provider, asked, pair, call, refusal, mainEvents, post, brokenUpgrade };
 }
 
 it("calls Clankie from a paired device: he greets, hears, acts in the main conversation, speaks, and hangs up cleanly", async () => {
@@ -498,6 +513,28 @@ it("yields when the owner talks over him, and the device drops what it had not p
   expect(device.audio.get(playbackId) ?? 0).toBeLessThan(24_000 * 2 * 2.5);
   device.send({ type: "hangup" });
   await until(() => device.closed, "the call closing");
+});
+
+it("an upgrade that never completes closes the call it opened and releases his voice", async () => {
+  const f = await fixture();
+  const answer = await f.brokenUpgrade((await f.pair()).token);
+  expect(answer).toMatch(/^HTTP\/1\.1 400/u);
+  // The relay had already opened the call; abandoning the device closes it.
+  await until(() => f.provider.sockets.length > 0, "the call it opened");
+  await until(
+    () => f.leases.status("voice") === undefined && f.provider.sockets.every((socket) => socket.closed),
+    "the abandoned call ending",
+  );
+});
+
+it("a device that goes silent ends the call", async () => {
+  const f = await fixture({ silentPeerMs: 600 });
+  const device = await f.call((await f.pair()).token);
+  // Nothing from the device after its greeting acknowledgements: no microphone frames at all.
+  await until(() => device.closed, "the silent call ending");
+  expect(device.ended()).toMatchObject({ reason: "failed" });
+  expect(f.leases.status("voice")).toBeUndefined();
+  expect(f.provider.sockets.every((socket) => socket.closed)).toBe(true);
 });
 
 it("lets Clankie end the call himself", async () => {

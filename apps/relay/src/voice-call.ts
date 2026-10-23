@@ -19,6 +19,8 @@ export interface VoiceCallRelayOptions {
 
 const DEFAULT_REAUTHORIZE_MS = 30_000;
 const UPSTREAM_OPEN_TIMEOUT_MS = 10_000;
+/** A device upgrade that has not completed by now never will; its call must not stay open. */
+const DEVICE_HANDSHAKE_TIMEOUT_MS = 5_000;
 
 /**
  * A device voice call through the relay (VUH-2682). The relay authorizes the
@@ -55,7 +57,27 @@ export function createVoiceCallUpgrade(
         upstream.socket.close(1001, "device_gone");
         return;
       }
+      // An upgrade that never completes (an aborted handshake, a vanished device) closes the
+      // call it opened, so the service ends it and releases his voice.
+      let settled = false;
+      const abandon = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(handshake);
+        upstream.stopHolding();
+        upstream.socket.close(1001, "device_gone");
+        socket.destroy();
+      };
+      const handshake = setTimeout(abandon, DEVICE_HANDSHAKE_TIMEOUT_MS);
+      socket.once("close", abandon);
       server.handleUpgrade(request, socket, head, (client) => {
+        socket.off("close", abandon);
+        clearTimeout(handshake);
+        if (settled) {
+          client.terminate();
+          return;
+        }
+        settled = true;
         bridge(
           client,
           upstream,

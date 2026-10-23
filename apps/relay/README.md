@@ -115,7 +115,9 @@ The relay checks the device bearer against `GET /v1/devices/self` before the
 upgrade. A call needs the `chat` grant, and hosting-control and support devices
 are refused. The relay then opens the service's `/operator/v1/voice-call` with
 the captain bearer, so a busy or unavailable service answers with an HTTP
-status. After that it carries frames both ways, unread and unkept: 24 kHz mono
+status. If the device's upgrade then aborts or has not completed within 5
+seconds, the relay closes that call again. After that it carries frames both
+ways, unread and unkept: 24 kHz mono
 s16le PCM as binary frames, and the `VoiceCallClientEvent` and
 `VoiceCallServerEvent` JSON from `@clankie/protocol`. Every 30 seconds it
 rechecks the device; revocation or a lost grant sends `ended` with reason

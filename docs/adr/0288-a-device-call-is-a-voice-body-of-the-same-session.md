@@ -71,11 +71,18 @@ flowchart LR
   the call. The service route takes only the captain bearer.
 - **One voice.** A call holds the `voice` body lease for the main conversation
   for its whole length. While a Discord stay holds his voice, the call is
-  refused (`voice_busy`) and names the room. Ending the call releases the
-  lease. There is no silent takeover; a one-tap "leave and call" is future work.
+  refused (`voice_busy`) and names the room. The reverse holds too: a Discord
+  stay shares a voice lease only when another stay holds it, so a join for the
+  main conversation during a call is busy rather than riding on the call's
+  lease. Ending the call releases the lease. There is no silent takeover; a
+  one-tap "leave and call" is future work.
 - **Lifecycle.** The device or Clankie (`voice_leave`) can hang up. So can a
-  lost socket, a failed lease renewal or a revoked device. Each ends the
-  session and releases the lease. Work the main conversation already accepted
+  lost socket, a failed lease renewal or a revoked device. A device streams
+  microphone frames the whole call, so 15 seconds with nothing from it ends the
+  call; a half-open socket cannot hold his voice. The relay opens the service
+  call before the device's upgrade completes, and closes it when that upgrade
+  aborts or has not completed within 5 seconds. Each ends the session and
+  releases the lease. Work the main conversation already accepted
   continues there. Provider credentials are read when a call starts, never at
   boot.
 
@@ -103,5 +110,3 @@ flowchart LR
   his voice from the speakers can count as the owner talking over him.
 - Call receipts are the session's content-free evidence, recorded as
   `voice-call.*` events.
-- Asking for a Discord voice join from inside a call is not fenced yet: the
-  join would reuse the main conversation's voice lease.

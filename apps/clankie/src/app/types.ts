@@ -341,6 +341,8 @@ export interface ClankieAppDependencies {
         }
       | undefined
     >;
+    /** Ends a call whose device stopped sending anything; tests shorten it. */
+    readonly silentPeerMs?: number;
   };
   bodyLeases?: {
     router: BodyLeaseRouter;

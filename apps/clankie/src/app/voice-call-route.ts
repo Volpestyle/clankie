@@ -129,6 +129,7 @@ export function registerVoiceCallRoute(ctx: VoiceBriefingRouteContext) {
             );
           },
           onEnded: (reason) => logger.info({ reason }, "Device voice call ended"),
+          ...(voice.silentPeerMs === undefined ? {} : { silentPeerMs: voice.silentPeerMs }),
         });
         void call.start();
       },
