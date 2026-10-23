@@ -77,7 +77,7 @@ export interface FleetCommandResult {
   readonly restart: string;
   /** The autonomy dial read back from the leaves; absent from an older service. */
   readonly autonomyLevel?: AutonomyLevelReading;
-  /** When the owner last chose a level explicitly; absent until then, and from an older service. */
+  /** When the owner first chose a level explicitly; absent until then, and from an older service. */
   readonly autonomyConfirmedAt?: string;
   /** Status only: who holds deploys, for how long, and how long until each hold lifts. */
   readonly deployHolds?:

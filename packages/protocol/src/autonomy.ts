@@ -246,7 +246,7 @@ export type FleetAutonomy = z.infer<typeof FleetAutonomySchema>;
 export const AutonomySettingsSchema = z
   .object({
     fleet: FleetAutonomySchema.default(() => FleetAutonomySchema.parse({})),
-    /** When the owner last chose a level explicitly; set by the service, never by a default (VUH-2725). */
+    /** When the owner first chose a level explicitly; set by the service, never by a default (VUH-2725). */
     confirmedAt: z.iso.datetime().optional(),
   })
   .strict();
