@@ -14,7 +14,9 @@ not establish that a public install or account signup is open.
 ## DIY: start on your Mac
 
 The bundle supports **Apple silicon and macOS 14 or newer** and includes its
-own runtime.
+own runtime. It also needs Apple's Command Line Tools, which provide `git` and
+`python3`; on a Mac without them the installer opens Apple's install window and
+asks you to run it again afterwards (or run `xcode-select --install` first).
 
 ```sh
 curl -fsSL https://clankie.bot/install | sh

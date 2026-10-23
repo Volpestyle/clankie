@@ -181,7 +181,11 @@ The shared fleet resource governor also ships `packages/fleet-resources/src/nati
 It uses Python 3's standard library for kernel file locks, process birth observations
 and command groups; macOS uses `/usr/bin/python3`, Linux uses `python3` on PATH.
 The hosted Linux image installs that interpreter. For self-hosted installations
-it is an explicit host prerequisite. A missing interpreter or helper
+it is an explicit host prerequisite. On macOS, `/usr/bin/python3` is only an
+installer stub until Apple's Command Line Tools are installed (the Keychain lock
+check needs it too), so the installer stops on a Mac without them, opens Apple's
+install window and asks to be run again; the helpers name the missing tools
+rather than reporting a Keychain or observer failure. A missing interpreter or helper
 refuses new heavy work and local builders without taking `/health` down. The
 helper path is resolved from the source or installed release, not a worker override.
 The journal lives in the OS account's `~/.clankie/fleet-resources` across releases

@@ -100,11 +100,25 @@ export interface CredentialStoreHealth {
 }
 
 export class KeychainLockedError extends Error {
+  constructor(
+    message = "Keychain locked: unlock it in Keychain Access; Clankie will retry without opening password dialogs.",
+  ) {
+    super(message);
+    this.name = "KeychainLockedError";
+  }
+}
+
+/**
+ * On a Mac without Apple's Command Line Tools, `/usr/bin/python3` is only their
+ * installer stub, so the lock check cannot run. Like a locked keychain, the
+ * refusal comes before `security` runs and nothing changes.
+ */
+export class CommandLineToolsMissingError extends KeychainLockedError {
   constructor() {
     super(
-      "Keychain locked: unlock it in Keychain Access; Clankie will retry without opening password dialogs.",
+      "Apple's Command Line Tools are missing, so Clankie can't check the Keychain: run `xcode-select --install`, then retry.",
     );
-    this.name = "KeychainLockedError";
+    this.name = "CommandLineToolsMissingError";
   }
 }
 
@@ -386,7 +400,13 @@ async function assertKeychainUnlocked(keychain?: string, observe?: KeychainComma
         try {
           result = JSON.parse(stdout);
         } catch {
-          reject(new Error("Keychain read unavailable (native helper failed or timed out)"));
+          execFileCallback("/usr/bin/xcode-select", ["-p"], { timeout: 3_000 }, (missing) =>
+            reject(
+              missing
+                ? new CommandLineToolsMissingError()
+                : new Error("Keychain read unavailable (native helper failed or timed out)"),
+            ),
+          );
           return;
         }
         if (result.code === -25308 || result.code === -25293) {
@@ -773,7 +793,10 @@ export class KeychainCredentialStore implements CredentialStore {
     const until = Date.now() + 30_000;
     this.state.failure = { error: failure, until };
     this.reportHealth({
-      state: error instanceof KeychainLockedError ? "locked" : "unavailable",
+      state:
+        error instanceof KeychainLockedError && !(error instanceof CommandLineToolsMissingError)
+          ? "locked"
+          : "unavailable",
       message: failure.message,
       retryAt: new Date(until).toISOString(),
     });

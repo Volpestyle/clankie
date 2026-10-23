@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -13,6 +13,13 @@ import type { ProcessIdentity, ProcessProof } from "./model.ts";
  */
 const helperTimeoutMs = 10_000;
 export const resourcePython = process.platform === "darwin" ? "/usr/bin/python3" : "python3";
+/** Without Apple's Command Line Tools, macOS's `/usr/bin/python3` is only their installer stub. */
+function commandLineToolsMissing(): boolean {
+  return (
+    process.platform === "darwin" &&
+    spawnSync("/usr/bin/xcode-select", ["-p"], { stdio: "ignore", timeout: 3_000 }).status !== 0
+  );
+}
 /** Source modules and installed entrypoints share the bounded repo-shaped helper path. */
 export function resourceNativeHelperPath(): string {
   const roots = [import.meta.dirname, process.argv[1] ? dirname(resolve(process.argv[1])) : undefined];
@@ -68,7 +75,13 @@ function nativeObserver() {
     current.pending.clear();
   };
   child.once("error", () => fail("Fleet resource native observer could not start; Python 3 is required"));
-  child.once("exit", () => fail("Fleet resource native observer exited"));
+  child.once("exit", () =>
+    fail(
+      commandLineToolsMissing()
+        ? "Fleet resources need Apple's Command Line Tools for python3: run `xcode-select --install`, then retry"
+        : "Fleet resource native observer exited",
+    ),
+  );
   child.stdin?.on("error", () => {});
   createInterface({ input: child.stdout! }).on("line", (line) => {
     let reply: unknown;

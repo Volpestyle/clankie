@@ -53,6 +53,14 @@ else
   exit 1
 fi
 command -v tar >/dev/null 2>&1 || { echo "clankie installer: tar is required" >&2; exit 1; }
+# A fresh Mac has no git, and its /usr/bin/python3 is only an installer stub; Clankie's Keychain and
+# fleet helpers need python3, and his workers need git. Apple's Command Line Tools provide both.
+if [ "$platform" = "Darwin" ] && ! /usr/bin/xcode-select -p >/dev/null 2>&1; then
+  echo "clankie installer: Clankie needs Apple's Command Line Tools (they provide git and python3)." >&2
+  /usr/bin/xcode-select --install >/dev/null 2>&1 || true
+  echo "Finish the install window that just opened (or run xcode-select --install), then run this installer again." >&2
+  exit 1
+fi
 if [ "$platform" = "Linux" ]; then
   for prerequisite in python3 git ps; do
     command -v "$prerequisite" >/dev/null 2>&1 || { echo "clankie installer: $prerequisite is required on Linux" >&2; exit 1; }
