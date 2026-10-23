@@ -34,6 +34,7 @@ import type {
   SeatStatus,
 } from "@clankie/agent-hosts";
 import {
+  type StopNativeTaskResult,
   CLAUDE_WORKER_PLUGIN,
   CLAUDE_WORKER_PLUGIN_ID,
   MAXIMUM_TRUST_HARNESS_ARGS,
@@ -43,6 +44,7 @@ import {
   type FleetGates,
 } from "@clankie/protocol";
 import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herdr-transcript.ts";
+import { paneInputLine } from "./pane-draft.ts";
 import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
 import { claudeWorkerMcpAllowlist, type ClaudeMcpPolicyEntry } from "./worker-mcp-profile.ts";
 
@@ -80,12 +82,22 @@ export interface ClaudeWorkerSeatDeps {
       recipientBinding?: string,
     ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" | "accepted" }>>;
   };
+  /**
+   * The seat's pane: its styled visible screen and one named key press there.
+   * Absent, the seat offers no Stop (VUH-2680).
+   */
+  readonly pane?: {
+    read(paneId: string): Promise<string>;
+    sendKeys(paneId: string, keys: readonly string[]): Promise<void>;
+  };
   readonly timing?: {
     readonly readyMs?: number;
     readonly receiptMs?: number;
     readonly pollMs?: number;
     /** How long a hire watches the brief's turn for a sign-in refusal before reporting it started. */
     readonly firstTurnMs?: number;
+    /** How long Stop watches for Claude to leave its working state after its one Esc. */
+    readonly stopConfirmMs?: number;
   };
   /** Deny rules for the tracker connectors a session in `cwd` would inherit. */
   readonly trackerDeny?: (
@@ -107,6 +119,8 @@ const RECEIPT_MS = 15_000;
 const POLL_MS = 250;
 /** Claude answers an expired sign-in with a StopFailure about a second after the brief (VUH-2241). */
 const FIRST_TURN_MS = 10_000;
+/** Claude normally leaves its working state within a second or two of Esc. */
+const STOP_CONFIRM_MS = 5_000;
 const SESSION_LIMIT = 256;
 /** Claude Code's machine policy: macOS, or Linux (the hosted image writes it, VUH-1767). */
 const CLAUDE_MANAGED_SETTINGS =
@@ -626,19 +640,104 @@ function sessionIdOf(agent: WorkerSeatAgent): string | undefined {
         ?.replace(/\.jsonl$/u, "");
 }
 
+/** One Stop in flight per Claude session: a second request joins it, never presses Esc again. */
+type StopReceipts = Map<string, Promise<StopNativeTaskResult>>;
+
 class ClaudeWorkerSeatControl implements SeatControl {
   public readonly ref: SeatRef;
   private readonly deps: ClaudeWorkerSeatDeps;
   private readonly receiptMs: number;
   private readonly pollMs: number;
   private terminalId: string | undefined;
+  public readonly stopTask?: (beforeDispatch: () => Promise<void>) => Promise<StopNativeTaskResult>;
 
-  public constructor(ref: SeatRef, deps: ClaudeWorkerSeatDeps, terminalId?: string) {
+  public constructor(ref: SeatRef, deps: ClaudeWorkerSeatDeps, terminalId?: string, stops?: StopReceipts) {
     this.ref = ref;
     this.deps = deps;
     this.terminalId = terminalId;
     this.receiptMs = deps.timing?.receiptMs ?? RECEIPT_MS;
     this.pollMs = deps.timing?.pollMs ?? POLL_MS;
+    const pane = deps.pane;
+    if (pane !== undefined) {
+      const receipts: StopReceipts = stops ?? new Map();
+      this.stopTask = (beforeDispatch) => {
+        const prior = receipts.get(ref.sessionId);
+        if (prior) return prior;
+        const receipt = this.stopTurn(pane, beforeDispatch).finally(() => {
+          if (receipts.get(ref.sessionId) === receipt) receipts.delete(ref.sessionId);
+        });
+        receipts.set(ref.sessionId, receipt);
+        return receipt;
+      };
+    }
+  }
+
+  /**
+   * Interactive Claude has no programmatic interrupt, so Stop presses the
+   * owner's own key: one Esc, only into this exact session while it works
+   * with an empty input line (VUH-2680). It never repeats the key, and it
+   * reports `stopped` only once Claude is seen idle again.
+   */
+  private async stopTurn(
+    pane: NonNullable<ClaudeWorkerSeatDeps["pane"]>,
+    beforeDispatch: () => Promise<void>,
+  ): Promise<StopNativeTaskResult> {
+    const refused = (detail: string): StopNativeTaskResult => ({ outcome: "unavailable", detail });
+    const working = async (): Promise<StopNativeTaskResult | WorkerSeatAgent> => {
+      const observed = await this.observe();
+      if (observed === undefined) return refused("Claude's status could not be read; nothing was sent.");
+      if (observed.agent === undefined)
+        return refused("The seat's Claude session is gone; nothing was sent.");
+      if (observed.status === "idle") return { outcome: "already_finished" };
+      if (observed.status === "blocked")
+        return refused("Claude is waiting on the owner in its pane; nothing was sent.");
+      return observed.agent;
+    };
+    const before = await working();
+    if (!("paneId" in before)) return before;
+    const ansi = await pane.read(before.paneId).catch(() => undefined);
+    const line = ansi === undefined ? undefined : paneInputLine("claude", ansi);
+    if (line?.state === "draft")
+      return refused("Claude's input line holds an unsent draft that Esc would clear; nothing was sent.");
+    if (line?.state !== "empty")
+      return refused(
+        "Claude's input line could not be read, so a draft can't be ruled out; nothing was sent.",
+      );
+    try {
+      await beforeDispatch();
+    } catch {
+      return refused("Native binding or owner authority changed; nothing was sent.");
+    }
+    // The last check before the key: the same session, still mid-turn.
+    const current = await working();
+    if (!("paneId" in current)) return current;
+    if (current.terminalId !== before.terminalId)
+      return refused("The seat binding changed before the key; nothing was sent.");
+    try {
+      await pane.sendKeys(current.paneId, ["esc"]);
+    } catch {
+      return {
+        outcome: "uncertain",
+        detail: "Esc may have reached Claude; check its pane before trying again.",
+      };
+    }
+    const settled = await until(
+      async () => {
+        const observed = await this.observe();
+        if (observed?.agent === undefined) return observed === undefined ? undefined : ("gone" as const);
+        return observed.status === "idle" ? ("idle" as const) : undefined;
+      },
+      this.deps.timing?.stopConfirmMs ?? STOP_CONFIRM_MS,
+      this.pollMs,
+    );
+    if (settled === "idle") return { outcome: "stopped" };
+    return {
+      outcome: "uncertain",
+      detail:
+        settled === "gone"
+          ? "Esc was sent once, then the seat's Claude session went away; check its pane."
+          : "Esc was sent once, but Claude was not seen to stop; check its pane before trying again.",
+    };
   }
 
   private matches(agent: WorkerSeatAgent): boolean {
@@ -842,7 +941,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
     }
   }
 
-  /** Interactive Claude has no programmatic interrupt; the owner presses Esc in the pane. */
+  /** Only the owner's exact-task Stop may press Esc for Claude (`stopTask`); nothing else interrupts it. */
   public async interrupt(): Promise<boolean> {
     return false;
   }
@@ -856,6 +955,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
   const receiptMs = deps.timing?.receiptMs ?? RECEIPT_MS;
   const pollMs = deps.timing?.pollMs ?? POLL_MS;
   const firstTurnMs = deps.timing?.firstTurnMs ?? FIRST_TURN_MS;
+  const stops: StopReceipts = new Map();
   return {
     harness: "claude",
     async start(launch, view): Promise<SeatStartResult> {
@@ -987,7 +1087,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
             : "brief_delivery_unverified: the resumed session's hook boundary could not be saved; no brief was sent",
         };
       }
-      const control = new ClaudeWorkerSeatControl(ref, deps, agent.terminalId);
+      const control = new ClaudeWorkerSeatControl(ref, deps, agent.terminalId, stops);
       if (launch.brief.length > 0) {
         await view.guard?.();
         // Watch from before the send, so a refusal that lands with the receipt is not missed.
@@ -1039,7 +1139,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
     },
     async attach(ref): Promise<SeatControl | undefined> {
       if (ref.harness !== "claude" || !deps.hooks.knows(ref.sessionId)) return undefined;
-      const control = new ClaudeWorkerSeatControl(ref, deps);
+      const control = new ClaudeWorkerSeatControl(ref, deps, undefined, stops);
       const status = await control.status();
       return status === "offline" || status === "released" ? undefined : control;
     },

@@ -6200,12 +6200,20 @@ send channel. Controlled Claude and Codex seats supply that boundary. Pi, OpenCo
 and external sessions without that controller cannot admit this host-owned Queue.
 Service-owned Pi queues keep their existing run cancellation. Stop currently
 supports **controller-owned Codex** through its exact native `turn/interrupt`
-RPC and terminal-turn observation. It returns `stopped`, `already_finished`,
+RPC and terminal-turn observation, and **controlled interactive Claude** through
+one Esc in its own pane (VUH-2680). It returns `stopped`, `already_finished`,
 `unsupported`, `unavailable` or `uncertain`. A natural completion race returns
 `already_finished`; a missing native terminal receipt returns `uncertain`, and
-that controller retains the original stop attempt. Claude's interactive channel,
-external Codex sessions, Pi, OpenCode and Grok currently return `unsupported`;
-there is no terminal-key, signal, pane-close or replacement-session fallback.
+that controller retains the original stop attempt. Claude's Esc goes out only
+while Herdr shows that exact pane, terminal and session working and its styled
+input line is provably empty; an idle seat returns `already_finished`, and a
+draft, an unreadable input line, a seat waiting on the owner or a changed
+binding returns `unavailable` without a key. Owner authority and the binding are
+checked again just before the key. Exactly one Esc is sent per stop, concurrent
+requests share it, and `stopped` needs Claude seen idle within five seconds;
+otherwise the result is `uncertain` and nothing is repeated. External Codex
+sessions, Pi, OpenCode and Grok currently return `unsupported`; there is no
+signal, pane-close or replacement-session fallback, and no other terminal key.
 
 The app's pending bubbles and Stop presentation are a follow-up in `clankie-app`;
 the service/CLI contract does not claim iPhone/iPad UI validation.

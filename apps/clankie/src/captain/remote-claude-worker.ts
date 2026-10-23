@@ -299,7 +299,7 @@ function remoteClaudeSettings(fleet: HerdrFleet, shell: FleetShellRun, prefix = 
 export function createRemoteClaudeWorkerSeatAdapter(
   fleet: HerdrFleet,
   shell: FleetShellRun,
-  deps: Pick<ClaudeWorkerSeatDeps, "hooks" | "agent" | "transcript" | "mailbox" | "timing">,
+  deps: Pick<ClaudeWorkerSeatDeps, "hooks" | "agent" | "transcript" | "pane" | "mailbox" | "timing">,
 ): HarnessSeatAdapter {
   return createClaudeWorkerSeatAdapter({
     ...deps,

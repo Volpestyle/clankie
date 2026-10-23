@@ -256,6 +256,8 @@ export interface HerdrWatchRunner {
   transcript?(agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined>;
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
   readPane?(target: string, source: "visible" | "recent-unwrapped", format: "text" | "ansi"): Promise<string>;
+  /** `herdr pane send-keys`: named key presses, never text. Claude's Stop presses one `esc` (VUH-2680). */
+  sendKeys?(paneId: string, keys: readonly string[]): Promise<void>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `herdr pane process-info --pane` → the pane's own shell and its foreground processes. */
@@ -711,6 +713,7 @@ export function createHerdrWatchRunner(
       ]),
     readPane: (target, source, format) =>
       runHerdr(["pane", "read", target, "--source", source, "--format", format]),
+    sendKeys: (paneId, keys) => runHerdr(["pane", "send-keys", paneId, ...keys]).then(() => undefined),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     paneShell: async (paneId) => {

@@ -1077,3 +1077,190 @@ describe("Claude completion evidence", () => {
     expect(delivery).toMatchObject({ state: "queued" });
   });
 });
+
+describe("Stop presses one Esc only into the exact working Claude with an empty input line (VUH-2680)", () => {
+  const golden = (state: string) =>
+    readFile(new URL(`./fixtures/pane-draft/claude-${state}.ansi`, import.meta.url), "utf8");
+  async function stopFixture(options: { screen?: string | Error; afterEsc?: string; keyError?: Error } = {}) {
+    const f = await fixture();
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "SessionStart", sessionId: SESSION });
+    f.agent.status = "working";
+    const screen = options.screen ?? (await golden("empty"));
+    const read = vi.fn(async (_paneId: string) => {
+      if (screen instanceof Error) throw screen;
+      return screen;
+    });
+    const sendKeys = vi.fn(async (_paneId: string, _keys: readonly string[]) => {
+      if (options.keyError) throw options.keyError;
+      if (options.afterEsc !== undefined) f.agent.status = options.afterEsc;
+    });
+    const adapter = createClaudeWorkerSeatAdapter({
+      ...f.deps,
+      pane: { read, sendKeys },
+      timing: { ...f.deps.timing, stopConfirmMs: 100 },
+    });
+    const control = await adapter.attach({ harness: "claude", sessionId: SESSION, paneId: "w1:p1" });
+    if (control?.stopTask === undefined) throw new Error("Claude control offered no Stop");
+    const guard = vi.fn(async () => {});
+    return { ...f, adapter, read, sendKeys, guard, stop: control.stopTask.bind(control) };
+  }
+
+  it("is absent without pane access, so the roster never advertises it", async () => {
+    const f = await fixture();
+    f.hooks.record("w1:p1", { schemaVersion: 1, event: "SessionStart", sessionId: SESSION });
+    const control = await f.adapter.attach({ harness: "claude", sessionId: SESSION, paneId: "w1:p1" });
+    expect(control).toBeDefined();
+    expect(control?.stopTask).toBeUndefined();
+    expect(await control?.interrupt()).toBe(false);
+  });
+
+  it("reports stopped only after Claude is seen idle again", async () => {
+    const f = await stopFixture({ afterEsc: "idle" });
+    expect(await f.stop(f.guard)).toEqual({ outcome: "stopped" });
+    expect(f.sendKeys.mock.calls).toEqual([["w1:p1", ["esc"]]]);
+    expect(f.guard).toHaveBeenCalledTimes(1);
+    expect(f.read).toHaveBeenCalledWith("w1:p1");
+  });
+
+  it("sends Esc once and reports it unconfirmed when Claude keeps working", async () => {
+    const f = await stopFixture();
+    expect(await f.stop(f.guard)).toEqual({
+      outcome: "uncertain",
+      detail: "Esc was sent once, but Claude was not seen to stop; check its pane before trying again.",
+    });
+    expect(f.sendKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls a session that goes away after the key unconfirmed, not stopped", async () => {
+    const f = await stopFixture();
+    f.sendKeys.mockImplementationOnce(async () => {
+      Object.assign(f.agent, { session: { kind: "id", value: "20000000-0000-4000-8000-000000000002" } });
+    });
+    expect(await f.stop(f.guard)).toEqual({
+      outcome: "uncertain",
+      detail: "Esc was sent once, then the seat's Claude session went away; check its pane.",
+    });
+    expect(f.sendKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it("a key press that fails may still have landed, so it is uncertain and never repeated", async () => {
+    const f = await stopFixture({ keyError: new Error("herdr timed out") });
+    expect(await f.stop(f.guard)).toEqual({
+      outcome: "uncertain",
+      detail: "Esc may have reached Claude; check its pane before trying again.",
+    });
+    expect(f.sendKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it("two requests at once share one Esc", async () => {
+    const f = await stopFixture({ afterEsc: "idle" });
+    const [first, second] = await Promise.all([f.stop(f.guard), f.stop(f.guard)]);
+    expect(first).toEqual({ outcome: "stopped" });
+    expect(second).toEqual({ outcome: "stopped" });
+    expect(f.sendKeys).toHaveBeenCalledTimes(1);
+    // Afterwards Claude is idle, so a later Stop has nothing to interrupt.
+    expect(await f.stop(f.guard)).toEqual({ outcome: "already_finished" });
+    expect(f.sendKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      name: "an idle Claude",
+      arrange: (f: Awaited<ReturnType<typeof stopFixture>>) => {
+        f.agent.status = "idle";
+      },
+      result: { outcome: "already_finished" },
+    },
+    {
+      name: "a Claude waiting on the owner in its pane",
+      arrange: (f: Awaited<ReturnType<typeof stopFixture>>) => {
+        f.agent.status = "blocked";
+      },
+      result: {
+        outcome: "unavailable",
+        detail: "Claude is waiting on the owner in its pane; nothing was sent.",
+      },
+    },
+    {
+      name: "a different session in the pane",
+      arrange: (f: Awaited<ReturnType<typeof stopFixture>>) => {
+        Object.assign(f.agent, { session: { kind: "id", value: "20000000-0000-4000-8000-000000000002" } });
+      },
+      result: { outcome: "unavailable", detail: "The seat's Claude session is gone; nothing was sent." },
+    },
+    {
+      name: "a different terminal in the pane",
+      arrange: (f: Awaited<ReturnType<typeof stopFixture>>) => {
+        Object.assign(f.agent, { terminalId: "term_other" });
+      },
+      result: { outcome: "unavailable", detail: "The seat's Claude session is gone; nothing was sent." },
+    },
+    {
+      name: "an unreadable Herdr status",
+      arrange: (f: Awaited<ReturnType<typeof stopFixture>>) => {
+        f.agent.status = "unknown";
+      },
+      result: { outcome: "unavailable", detail: "Claude's status could not be read; nothing was sent." },
+    },
+  ])("refuses $name without pressing a key", async ({ arrange, result }) => {
+    // Attach already observed the pane, binding its terminal, so a swap is visible.
+    const f = await stopFixture();
+    arrange(f);
+    expect(await f.stop(f.guard)).toEqual(result);
+    expect(f.sendKeys).not.toHaveBeenCalled();
+    expect(f.guard).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "an unsent draft",
+      screen: () => golden("draft"),
+      detail: "Claude's input line holds an unsent draft that Esc would clear; nothing was sent.",
+    },
+    {
+      name: "an unstyled screen",
+      // oxlint-disable-next-line no-control-regex -- strip the captured native styling
+      screen: async () => (await golden("empty")).replace(/\x1b\[[0-9;]*m/gu, ""),
+      detail: "Claude's input line could not be read, so a draft can't be ruled out; nothing was sent.",
+    },
+    {
+      name: "a failed pane read",
+      screen: async () => new Error("pane read failed"),
+      detail: "Claude's input line could not be read, so a draft can't be ruled out; nothing was sent.",
+    },
+  ])("refuses $name in the input line", async ({ screen, detail }) => {
+    const f = await stopFixture({ screen: await screen() });
+    expect(await f.stop(f.guard)).toEqual({ outcome: "unavailable", detail });
+    expect(f.sendKeys).not.toHaveBeenCalled();
+    expect(f.guard).not.toHaveBeenCalled();
+  });
+
+  it("refuses when owner authority or the binding fails its last check", async () => {
+    const f = await stopFixture({ afterEsc: "idle" });
+    f.guard.mockRejectedValueOnce(new Error("not the owner"));
+    expect(await f.stop(f.guard)).toEqual({
+      outcome: "unavailable",
+      detail: "Native binding or owner authority changed; nothing was sent.",
+    });
+    expect(f.sendKeys).not.toHaveBeenCalled();
+  });
+
+  it("re-observes the session after authority and refuses one that finished or changed meanwhile", async () => {
+    const finished = await stopFixture();
+    finished.guard.mockImplementationOnce(async () => {
+      finished.agent.status = "idle";
+    });
+    expect(await finished.stop(finished.guard)).toEqual({ outcome: "already_finished" });
+    expect(finished.sendKeys).not.toHaveBeenCalled();
+
+    const swapped = await stopFixture();
+    swapped.guard.mockImplementationOnce(async () => {
+      Object.assign(swapped.agent, { terminalId: "term_other" });
+    });
+    expect(await swapped.stop(swapped.guard)).toEqual({
+      outcome: "unavailable",
+      detail: "The seat's Claude session is gone; nothing was sent.",
+    });
+    expect(swapped.sendKeys).not.toHaveBeenCalled();
+  });
+});

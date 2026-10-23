@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -11,6 +11,7 @@ import {
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
 import { NextTurnMailbox } from "../src/captain/next-turn-mailbox.ts";
+import { SeatHookLog, createClaudeWorkerSeatAdapter } from "../src/captain/claude-worker-seat.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 
 const cleanup: (() => void)[] = [];
@@ -279,4 +280,64 @@ it("display session hints avoid file rediscovery but a send still refuses a chan
   });
   f.runner.paneProcesses = async () => [];
   expect((await f.roster()).inputCapabilities?.deliveryModes).toEqual([]);
+});
+
+it("a live Claude with pane access advertises Stop and stops through the exact-task route with one Esc (VUH-2680)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "seat-input-claude-stop-"));
+  cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+  const sessionId = randomUUID();
+  let agent: HerdrAgentSnapshot = {
+    agent: "claude",
+    paneId: "w1:p1",
+    terminalId: "seat1",
+    title: "worker",
+    status: "working",
+    session: { source: "herdr:claude", kind: "id", value: sessionId },
+  };
+  const hooks = new SeatHookLog(join(root, "hooks.json"));
+  hooks.record("w1:p1", { schemaVersion: 1, event: "SessionStart", sessionId });
+  const keys: string[][] = [];
+  const empty = readFileSync(new URL("./fixtures/pane-draft/claude-empty.ansi", import.meta.url), "utf8");
+  const adapter = createClaudeWorkerSeatAdapter({
+    consent: async () => ({ approved: true }),
+    hooks,
+    agent: async () => agent,
+    transcript: async () => undefined,
+    mailbox: { bound: () => false, deliver: async () => false },
+    pane: {
+      read: async () => empty,
+      sendKeys: async (_paneId, pressed) => {
+        keys.push([...pressed]);
+        agent = { ...agent, status: "idle" };
+      },
+    },
+    timing: { pollMs: 10, stopConfirmMs: 200 },
+  });
+  const runner: HerdrWatchRunner = {
+    get: async () => agent,
+    resolveTerminal: async () => agent,
+    wait: async () => agent,
+  };
+  const watch = new HerdrWatchStore(join(root, "watch.json"), { runner, seatAdapters: [adapter] });
+  cleanup.push(() => watch.close());
+  expect((await watch.inputCapabilities(agent)).interrupt).toBe(true);
+  const observed = await watch.nativeTaskObservation("seat1");
+  if (!observed) throw new Error("Claude seat was not observed");
+  // A changed occupant between observation and Stop is refused before any key.
+  const stale = observed.binding.replace(sessionId, randomUUID());
+  expect((await watch.stopNativeTask("seat1", stale, async () => {})).outcome).toBe("unavailable");
+  expect(keys).toEqual([]);
+  // Owner authority is checked before and again inside the dispatch guard.
+  let checks = 0;
+  expect(
+    await watch.stopNativeTask("seat1", observed.binding, async () => {
+      checks += 1;
+    }),
+  ).toEqual({ outcome: "stopped" });
+  expect(checks).toBe(3);
+  expect(keys).toEqual([["esc"]]);
+  expect((await watch.stopNativeTask("seat1", observed.binding, async () => {})).outcome).toBe(
+    "already_finished",
+  );
+  expect(keys).toEqual([["esc"]]);
 });

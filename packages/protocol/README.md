@@ -40,8 +40,10 @@ Every current roster/fleet seat publishes optional `inputCapabilities`:
 The source is `FleetSeatInputCapabilitiesSchema`. `deliveryModes` lists only
 explicit choices the current native connection can honor; array order has no
 meaning. `interrupt` means the existing authenticated `stop_task` operator
-operation can stop that exact task. A harness's generic interrupt method or
-terminal Escape key does not establish this capability. `nextTurnOnly` means
+operation can stop that exact task. A harness's generic interrupt method does
+not establish this capability. Interactive Claude's `stop_task` is one guarded
+Esc into its exact working pane with an empty input line (VUH-2680); a bare
+terminal Escape key elsewhere still establishes nothing. `nextTurnOnly` means
 Claude has only an authenticated next-UserPromptSubmit receiver: Queue can be
 stored, but Steer cannot wake or modify its current turn. A live exact-session
 Claude poll offers both modes; unverified Claude offers neither. Codex's native

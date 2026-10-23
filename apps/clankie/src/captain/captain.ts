@@ -679,6 +679,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     hookQuestions,
     agent: (paneId) => herdrRunner.get(paneId),
     transcript: async (agent) => herdrRunner.transcript?.(agent as HerdrAgentSnapshot),
+    pane: {
+      read: async (paneId) => {
+        if (herdrRunner.readPane === undefined) throw new Error("Herdr pane reads are unavailable");
+        return herdrRunner.readPane(paneId, "visible", "ansi");
+      },
+      sendKeys: async (paneId, keys) => {
+        if (herdrRunner.sendKeys === undefined) throw new Error("Herdr key presses are unavailable");
+        await herdrRunner.sendKeys(paneId, keys);
+      },
+    },
     mailbox: {
       bound: (seatId) => {
         const mailbox = fleetSeatMailbox(
@@ -715,7 +725,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             : delivery.outcome === "delivered";
       },
     },
-  } satisfies Pick<ClaudeWorkerSeatDeps, "hooks" | "agent" | "transcript" | "mailbox" | "hookQuestions">;
+  } satisfies Pick<
+    ClaudeWorkerSeatDeps,
+    "hooks" | "agent" | "transcript" | "pane" | "mailbox" | "hookQuestions"
+  >;
   const claudeWorkerSeats = createClaudeWorkerSeatAdapter({
     consent: () => claudeWorkerChannelConsent(),
     fleetGates: localFleetGates,

@@ -255,6 +255,18 @@ advertised only for a live control implementing the authenticated exact-task
 `stop_task` route, not a generic interrupt or terminal key. Current capabilities
 do not grant access and cannot override occupant, owner or machine checks.
 
+**Amendment (VUH-2680, 2026-10-23): Claude's exact-task Stop is one guarded
+Esc.** Interactive Claude has no native interrupt API, so a Claude-driven
+conversation, Clankie's own lead included, could not be stopped from the app.
+The lead approved one exception to "no terminal key": a controlled Claude
+seat's `stop_task` presses a single Esc in its own pane, only while Herdr shows
+that exact pane, terminal and session working and its input line reads
+provably empty. Owner authority and the binding are checked again just before
+the key; the key is never repeated, and `stopped` requires Claude seen idle
+afterwards, otherwise `uncertain`. Such a seat now advertises `interrupt`.
+Details and the remaining limits are in
+[ADR 0187's amendment](0187-clankie-hires-his-own-seats.md#amendment-the-owners-stop-presses-esc-for-claude-vuh-2680-2026-10-23).
+
 The [protocol contract](../../packages/protocol/README.md#seat-input-capabilities-vuh-1882-service-contract)
 documents the fields, older-service fallback, live changes and app usage.
 

@@ -144,7 +144,8 @@ withdrawn at James's direction before it landed).
   retried on the terminal.
 
 Interactive Claude has no programmatic interrupt; the owner presses Esc in the
-pane.
+pane. (Superseded for the owner's exact-task Stop by the VUH-2680 amendment
+below.)
 
 The terminal fallback launches Claude without any development channel, and the
 service never answers Claude's development-channel warning. It previously
@@ -167,3 +168,30 @@ launch. Before the change, 27 Codex worker app-servers and their MCP children
 held about 16.8 GB, mostly copies of the owner's video, IDE and 3D servers, one
 set per loaded Codex thread. Details and the opt-in commands are in
 [agent hosts](../../packages/agent-hosts/README.md#worker-mcp-servers).
+
+## Amendment: the owner's Stop presses Esc for Claude (VUH-2680, 2026-10-23)
+
+James asked to stop Clankie or a worker from the iPhone and to see clearly that
+it stopped. Clankie's own lead runs as interactive Claude, so without a Claude
+Stop the owner could never interrupt him from the app. The lead approved
+reversing "Interactive Claude has no programmatic interrupt" for exactly one
+route: the owner's authenticated `stop_task`
+([ADR 0207](0207-work-records-and-native-agent-delivery.md)).
+
+That route presses the owner's own key, one Esc, through `herdr pane send-keys`.
+It keeps `stop_task`'s authority and adds terminal-specific fences:
+
+- the pane, terminal and native session must match the observed binding,
+  checked again with owner authority immediately before the key;
+- Herdr must show the session working; idle is `already_finished`, and a seat
+  waiting on the owner is refused;
+- the styled input line must read provably empty
+  ([pane drafts](../../apps/clankie/src/captain/pane-draft.ts)); a draft, or a
+  line that cannot be read, is refused, because Esc would clear it;
+- one Esc per request, shared by concurrent requests and never retried;
+  `stopped` only after Claude is seen idle again, otherwise `uncertain`.
+
+Everything else stays as above: `interrupt()` remains false, a hire's brief and
+messages never use terminal keys, and no other automation types into a Claude
+pane.
+
