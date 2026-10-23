@@ -359,6 +359,7 @@ import {
   type TurnMetricsQuery,
 } from "./turn-metrics.ts";
 import { composeVoiceLaneInstructions } from "./voice-lane.ts";
+import { voiceCallHandoff } from "./voice-call-handoff.ts";
 
 /**
  * Every assignment carries the one work-tracking contract (ADR 0191), so a
@@ -7133,10 +7134,37 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     readIssueMetrics: (query) => readIssueMetrics(options.stateDir, query),
 
-    voiceLaneInstructions(): string {
+    voiceLaneInstructions(surface) {
       // The same Identity every lane starts from, then the one voice register.
-      return composeVoiceLaneInstructions(captainInstructions());
+      return composeVoiceLaneInstructions(captainInstructions(), surface);
     },
+
+    mainConversationId: () => conversations.defaultGlobalConversationId(),
+
+    async voiceCallSelfTool({ name, arguments: args }) {
+      // A device call is the owner's own private room, so its memory is the
+      // main conversation's: the operator lane's bank, attributed to it.
+      const conversationId = conversations.defaultGlobalConversationId();
+      const capture: TurnContext = {
+        conversationAuthority: {
+          owner: { conversationId },
+          current: () => true,
+          authorize: async () => true,
+        },
+      };
+      const memoryCall =
+        name === "recall_episodes"
+          ? { action: "search", query: args.query }
+          : name === "remember_episode"
+            ? { action: "write", text: args.summary }
+            : undefined;
+      const toolName = memoryCall === undefined ? name : "memory";
+      const [tool] = laneAuthoredToolsNamed(desktopDeps, capture, laneLog, "operator", [toolName]);
+      if (tool === undefined) throw new Error(`${name} is not in the operator tool bank`);
+      return tool.call(memoryCall ?? args);
+    },
+
+    voiceCallHandoff: (input) => voiceCallHandoff(conversations, shutdown.signal, input),
 
     async voiceSelfTool({ guildId, channelId, speakerId, name, arguments: args }) {
       // The voice room's own attribution, stamped by the host exactly as a

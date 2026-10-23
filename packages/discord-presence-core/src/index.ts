@@ -63,6 +63,7 @@ export {
   type DiscordVoiceIngressOptions,
   type DiscordVoiceTurn,
   type DiscordVoiceTurnOutcome,
+  type VoiceHandoffPort,
 } from "./voice-ingress.ts";
 export {
   CAPTAIN_UNREACHABLE_TEXT,
@@ -94,6 +95,7 @@ export {
   type VoiceConversationOpenInput,
   type VoiceConversationPort,
   type VoiceTranscriptionHandlers,
+  type VoiceMediaPort,
   type VoiceTranscriptionPort,
 } from "./voice-session.ts";
 export {

@@ -20,8 +20,8 @@ the `CLANKIE_RELAY_URL` override): when set, the service advertises it
 in pairing and session-refresh responses, so paired devices follow a moved
 relay without a rebuild.
 
-The relay is the HTTP-only operator-conversation boundary for remote Apple
-clients. Tailscale may carry the connection, but network identity is not
+The relay is the operator-conversation boundary for remote Apple clients: HTTP,
+plus one WebSocket route for device voice calls. Tailscale may carry the connection, but network identity is not
 authorization: every request carries a device-session bearer.
 
 ## Operator conversation boundary
@@ -106,6 +106,21 @@ flowchart LR
   A --> G[Device grant checks]
   B --> G
 ```
+
+## Device voice call
+
+`GET /v1/voice-call` upgrades to a WebSocket for a device calling Clankie
+([ADR 0288](../../docs/adr/0288-a-device-call-is-a-voice-body-of-the-same-session.md)).
+The relay checks the device bearer against `GET /v1/devices/self` before the
+upgrade. A call needs the `chat` grant, and hosting-control and support devices
+are refused. The relay then opens the service's `/operator/v1/voice-call` with
+the captain bearer, so a busy or unavailable service answers with an HTTP
+status. After that it carries frames both ways, unread and unkept: 24 kHz mono
+s16le PCM as binary frames, and the `VoiceCallClientEvent` and
+`VoiceCallServerEvent` JSON from `@clankie/protocol`. Every 30 seconds it
+rechecks the device; revocation or a lost grant sends `ended` with reason
+`revoked` and closes both sides. The gateway cannot carry the socket yet
+([VUH-2683](https://linear.app/vuhlp/issue/VUH-2683)).
 
 ## Run
 

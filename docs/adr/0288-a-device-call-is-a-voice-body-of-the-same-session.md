@@ -1,0 +1,107 @@
+# ADR 0288: A device call is a voice body of the same session
+
+Status: accepted for [VUH-2682](https://linear.app/vuhlp/issue/VUH-2682)
+(design approved by the lead, 2026-10-23, from James's request that the desktop
+pet's voice button be "like a voice call with him"). Extends
+[ADR 0057](0057-realtime-voice-with-captain-handoff.md) (realtime voice speaks,
+the captain acts) and [ADR 0215](0215-conversations-lease-one-body.md) (one
+voice), and reuses the main-conversation path of
+[ADR 0218](0218-native-seats-drive-their-attached-conversation.md). Learns from
+[ADR 0125](0125-the-menu-bar-is-a-private-local-voice-room.md), whose surface
+[ADR 0203](0203-clankie-keeps-what-better-models-cannot-absorb.md) retired.
+
+## Context
+
+The Mac pet's voice button dictated text into the pocket composer. James wanted
+a call: speak, hear Clankie answer in his own voice, turn by turn, with
+anything he does landing where the console sees it.
+
+ADR 0125 once built a local voice room for the menu bar. Its session shared the
+provider composition but was a second voice runtime: its own surface rules, no
+voice register, no self tools, and none of ADR 0057's floor, barge-in, stop,
+acknowledgement or stale-answer rules. Every one of those was tuned on live
+Discord calls, and a parallel runtime would drift from them again.
+
+## Decision
+
+**A device call runs the same `DiscordVoiceSession` as his Discord rooms, with
+the device as its media.** The session now takes a `VoiceMediaPort`: exactly
+the Vox calls it already made. Vox satisfies it unchanged. A port that isn't
+Discord skips the DAVE wait, and the joined receipt records DAVE version 0. The
+session's `ask_clankie` destination becomes a `VoiceHandoffPort`, the interface
+`DiscordVoiceIngress` already had in shape. Everything else is shared: the
+floor, barge-in, stop, handoff acknowledgement and joining, stale-reply
+cancellation, the spoken-answer cap, the self tools and `voice_leave`. So are
+the provider composition (`createVoiceRealtimePorts` and the owner's voice
+settings, the external mouth included) and the instruction composer: identity,
+persona, the one voice register (its opening sentence says where he is), surface
+rules and the private awareness card.
+
+```mermaid
+flowchart LR
+  Mic["Device mic<br/>voice processing"] -->|"24 kHz PCM16 · WebSocket"| Relay["Relay /v1/voice-call<br/>device bearer · chat grant"]
+  Relay -->|"captain bearer"| Route["Service /operator/v1/voice-call"]
+  Route --> Media["LocalCallMedia<br/>speech edges · playback frames"]
+  Media <--> Session["DiscordVoiceSession<br/>(the Discord rooms' session)"]
+  Session <--> Provider["Realtime provider<br/>same composition"]
+  Session -->|"ask_clankie"| Main["Main conversation<br/>native head or service runner"]
+  Main -->|"answer"| Session
+  Session -->|"his speech"| Media --> Relay --> Speaker["Device speaker"]
+```
+
+- **Media.** `LocalCallMedia` turns a continuous microphone stream into the
+  speaking edges and capture frames Vox reports for a Discord member. An energy
+  gate finds an onset and a 500 ms silence ends the utterance, matching
+  Discord's packet-silence capture end. An utterance that ends before the
+  session opens its capture is held whole and delivered. His speech goes back as
+  framed PCM that the device acknowledges as started (audible), drained or
+  stopped. Those acknowledgements drive turn-taking exactly as Vox playback
+  states do. Audio stays in memory only.
+- **Handoff and authority.** `ask_clankie` enters the main conversation through
+  the path a linked private Discord channel uses (`replyToLinkedChannel`, now
+  naming its surface). It becomes a queued turn there. A live native head
+  answers through a reply-bearing escalation; otherwise the service runner
+  answers. The final answer returns to the voice. Everything he does from a call
+  is therefore a turn in global-default, visible in the console and the app.
+  Voice approves nothing; an approval waits in that conversation. Plain spoken
+  conversation is not written anywhere (ADR 0121 keeps exact speech opt-in).
+- **Who may call.** The relay authorizes the device the way it authorizes chat.
+  A call needs the `chat` grant. Hosting-control and support devices are
+  refused. The relay rechecks the device every 30 seconds, and revocation ends
+  the call. The service route takes only the captain bearer.
+- **One voice.** A call holds the `voice` body lease for the main conversation
+  for its whole length. While a Discord stay holds his voice, the call is
+  refused (`voice_busy`) and names the room. Ending the call releases the
+  lease. There is no silent takeover; a one-tap "leave and call" is future work.
+- **Lifecycle.** The device or Clankie (`voice_leave`) can hang up. So can a
+  lost socket, a failed lease renewal or a revoked device. Each ends the
+  session and releases the lease. Work the main conversation already accepted
+  continues there. Provider credentials are read when a call starts, never at
+  boot.
+
+## Alternatives considered
+
+- **Revive ADR 0125's local session.** Rejected: it was the second runtime that
+  drifted.
+- **Extract a transport-neutral session first.** Rejected for now: a much larger
+  refactor of a 4,800-line class whose behaviour is pinned by its tests. The
+  media port is the seam that refactor would start from.
+- **WebRTC from the device straight to the provider.** Rejected: it moves the
+  conversation loop into the app and cannot carry the Anthropic brain or the
+  ElevenLabs mouth.
+- **A fake Discord room through Vox.** Rejected: it would record a false DAVE
+  session and Discord receipts for a call that never touched Discord.
+
+## Consequences
+
+- The Mac app (and any later device) reaches a call through its existing relay
+  route. The gateway's sealed-envelope HTTP cannot carry a socket. Hosted and
+  remote Macs therefore wait on
+  [VUH-2683](https://linear.app/vuhlp/issue/VUH-2683).
+- Speech-detection thresholds and echo behaviour are calibration knobs until
+  James's first live call. The device must run its own echo cancellation, or
+  his voice from the speakers can count as the owner talking over him.
+- Call receipts are the session's content-free evidence, recorded as
+  `voice-call.*` events.
+- Asking for a Discord voice join from inside a call is not fenced yet: the
+  join would reuse the main conversation's voice lease.

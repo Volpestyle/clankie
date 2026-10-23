@@ -691,7 +691,10 @@ export function parseYtDlpSearchJson(raw: string): YouTubeSearchHit[] {
 
 /** Native Vox music sink. Playback starts and ends only on matching native ids. */
 export function createVoxMusicSink(options: {
-  readonly vox: VoxClient;
+  readonly vox: Pick<
+    VoxClient,
+    "onEvent" | "onStatus" | "musicPlay" | "musicStop" | "musicPause" | "musicResume" | "musicSetGain"
+  >;
   readonly onEnded?: () => void;
   readonly trace?: VoiceMusicTrace;
 }): VoiceMusicSink {

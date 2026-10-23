@@ -96,7 +96,12 @@ import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { serve, type WebSocketServerLike } from "@hono/node-server";
 import { drainHttpServer } from "./http-drain.ts";
-import { discordActorOwnsServer, MAX_REALTIME_AUDIO_APPEND_BYTES } from "@clankie/discord-presence-core";
+import {
+  createVoiceRealtimePorts,
+  discordActorOwnsServer,
+  MAX_REALTIME_AUDIO_APPEND_BYTES,
+  parseVoiceRealtimeEnv,
+} from "@clankie/discord-presence-core";
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
@@ -2092,6 +2097,32 @@ const workMedia = new WorkMedia({
   log: (fields, message) => logger.warn(fields, message),
 });
 const clankie = await createClankieApp({
+  voiceCall: {
+    // Read when a call starts, never at boot: the broker is touched only when someone calls.
+    async realtime() {
+      const env = { ...process.env };
+      applyVoiceSettingsToEnvironment((await settingsStore.load()).voice, env);
+      const config = parseVoiceRealtimeEnv(env);
+      const realtime = await operatorCredentialStore.get(config.realtimeProvider);
+      const transcription =
+        config.realtimeProvider === "anthropic" ? await operatorCredentialStore.get("openai") : undefined;
+      const elevenLabs =
+        config.ttsProvider === "elevenlabs" ? await operatorCredentialStore.get("elevenlabs") : undefined;
+      // The same credential shapes a Discord body requires (ADR 0070): brokered API keys only.
+      if (realtime?.type !== "api") return undefined;
+      if (config.realtimeProvider === "anthropic" && transcription?.type !== "api") return undefined;
+      if (config.ttsProvider === "elevenlabs" && elevenLabs?.type !== "api") return undefined;
+      return {
+        ports: createVoiceRealtimePorts({
+          apiKey: realtime.key,
+          ...(transcription?.type === "api" ? { transcriptionApiKey: transcription.key } : {}),
+          ...(elevenLabs?.type === "api" ? { elevenLabsApiKey: elevenLabs.key } : {}),
+          config,
+        }),
+        decayWindowMs: config.decayWindowMs,
+      };
+    },
+  },
   workMedia,
   remoteProjectLeads: new RemoteProjectLeads({
     repoRoot,

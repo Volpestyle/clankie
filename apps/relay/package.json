@@ -11,11 +11,13 @@
   },
   "dependencies": {
     "@clankie/credential-broker": "workspace:*",
-    "@clankie/settings": "workspace:*"
+    "@clankie/settings": "workspace:*",
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@hono/node-server": "2.0.8",
     "@types/node": "24.12.4",
+    "@types/ws": "8.18.1",
     "tsx": "4.23.0",
     "typescript": "5.9.3",
     "vitest": "4.1.10"

@@ -59,6 +59,8 @@ import {
 
 class FakeVox implements VoxClient {
   public readonly available = true;
+  /** Unset is Discord media; false stands in for a device call's media port. */
+  public requiresDave?: boolean;
   public status: VoxProcessStatus = "ready";
   public detail = "fake Vox";
   public autoReady = true;
@@ -709,6 +711,20 @@ describe("lifecycle", () => {
     });
     await joining;
     expect(harness.session.status()).toMatchObject({ active: true, daveProtocolVersion: 2 });
+  });
+
+  it("joins media without DAVE on transport readiness and records that no DAVE was negotiated", async () => {
+    const harness = buildHarness();
+    harness.vox.autoReady = false;
+    harness.vox.requiresDave = false;
+    const joining = harness.join();
+    await flush();
+    const connectionId = at(harness.vox.joins, -1).connectionId;
+    harness.vox.emit({ type: "transport_state", role: "voice", connectionId, status: "ready" });
+    await joining;
+    expect(harness.session.status()).toMatchObject({ active: true });
+    expect(harness.session.status().daveProtocolVersion).toBeUndefined();
+    expect(at(harness.ofType("joined"), 0).daveProtocolVersion).toBe(0);
   });
 
   it("rejects join only for a matching primary voice error", async () => {

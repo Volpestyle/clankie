@@ -175,6 +175,7 @@ autonomous continuations re-enter the same conversation queue.
 flowchart LR
   Discord["Discord message<br/>exact delivery id"] -->|"durable receipt"| Lane
   Voice["Voice room floor"] -->|"realtime thread asks him to act"| Lane
+  Call["Device call"] -->|"ask_clankie → main conversation"| Lane
   Operator["TUI · app · CLI"] -->|"revision-fenced send"| Lane
   Auto["Auto round · self-wake ·<br/>worker report · watch"] --> Lane
   Lane["Authenticate → lane + grant<br/>→ conversation"] --> Busy{"Run already<br/>streaming?"}
@@ -956,6 +957,17 @@ through `@clankie/vox-client`; the AGPL executable owns DAVE, RTP/RTCP, codecs,
 capture, TTS/music pacing, screen-watch, and Go Live publishing. The TypeScript
 `DiscordVoiceSession` retains consent, attribution, floor, realtime-provider,
 and captain-handoff policy.
+
+A device voice call drives that same session with the device as its media
+([ADR 0288](adr/0288-a-device-call-is-a-voice-body-of-the-same-session.md)). The
+session takes a `VoiceMediaPort`, the Vox calls it already made, so Vox and the
+service's `LocalCallMedia` are interchangeable. The device opens
+`/v1/voice-call` on its relay. The relay authorizes it as it does chat and
+carries 24 kHz PCM frames to `/operator/v1/voice-call`. `LocalCallMedia`
+supplies the speaking edges Discord's packets would, and turns his playback
+into frames the device acknowledges. `ask_clankie` from a call is a queued turn
+in the main conversation, and the call holds the `voice` body lease while it
+runs.
 
 Readiness is role-specific: versioned `process_ready` must exactly match the
 client IPC protocol and proves only that the child can serve IPC;

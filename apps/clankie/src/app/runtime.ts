@@ -127,6 +127,7 @@ import { WorkHttpRequestSchema, WorkRequestError } from "../work-items.ts";
 import { WorkerGrantRequestSchema } from "../worker-mcp.ts";
 import { registerConversationRoutes } from "./conversation-routes.ts";
 import { PROFILE_HASH, discordPresenceBindingKey, registerDiscordRoutes } from "./discord-routes.ts";
+import { registerVoiceCallRoute } from "./voice-call-route.ts";
 import { authenticateCaptain, authenticateOperator, captainTransportKind, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
@@ -1933,6 +1934,38 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     },
     get authenticateLane() {
       return authenticateLane;
+    },
+  });
+  registerVoiceCallRoute({
+    get app() {
+      return app;
+    },
+    get dependencies() {
+      return dependencies;
+    },
+    get settingsSource() {
+      return settingsSource;
+    },
+    get clock() {
+      return clock;
+    },
+    get captainPresence() {
+      return captainPresence;
+    },
+    get discordPresenceSessions() {
+      return discordPresenceSessions;
+    },
+    get discordStreamWatch() {
+      return discordStreamWatch;
+    },
+    get embodiment() {
+      return embodiment;
+    },
+    get recordEvent() {
+      return recordEvent;
+    },
+    get idFactory() {
+      return idFactory;
     },
   });
   registerDiscordRoutes({

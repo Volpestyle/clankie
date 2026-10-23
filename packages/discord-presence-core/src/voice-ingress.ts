@@ -48,8 +48,13 @@ export interface DiscordVoiceIngressOptions {
   readonly transportKind: DiscordTransportKind;
 }
 
+/** Where a room's `ask_clankie` goes: the discord_voice lane, or a device call's main conversation. */
+export interface VoiceHandoffPort {
+  handle(turn: DiscordVoiceTurn): Promise<DiscordVoiceTurnOutcome>;
+}
+
 /** Routes one attributed ask to its own captain child; the service bounds all room work. */
-export class DiscordVoiceIngress {
+export class DiscordVoiceIngress implements VoiceHandoffPort {
   private readonly port: DiscordVoiceCaptainPort;
   private readonly options: DiscordVoiceIngressOptions;
 

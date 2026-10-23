@@ -4,6 +4,7 @@ export * from "./worker-reports.ts";
 export * from "./game-extensions.ts";
 export * from "./seat-efficiency.ts";
 export * from "./discord-server.ts";
+export * from "./voice-call.ts";
 export {
   HireEffortSchema,
   HireProfileSchema,

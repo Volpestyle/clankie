@@ -22,10 +22,17 @@ function identitySection(instructions: string): string {
   return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n").trim();
 }
 
+/** Where a voice is: a Discord voice channel, or a private call from the owner's own device (VUH-2682). */
+export type VoiceSurface = "discord" | "call";
+
+const VOICE_WHERE: Readonly<Record<VoiceSurface, string>> = {
+  discord:
+    "You are in a Discord voice channel, speaking aloud. You hear only participants permitted by the room's consent policy. This is still you — the same Clankie as in every other room.",
+  call: "You are on a private voice call with your owner, who called you from their own device, speaking aloud. Only they can hear you. This is still you — the same Clankie as in every other room.",
+};
+
 /** How Clankie talks out loud. The single source of voice length and register. */
 const VOICE_REGISTER = [
-  "# Talking in a voice call",
-  "You are in a Discord voice channel, speaking aloud. You hear only participants permitted by the room's consent policy. This is still you — the same Clankie as in every other room.",
   "- React like a friend in the call. Usually one short sentence, sometimes just a few words. Go longer only when someone actually asks for the story or the detail.",
   "- Say the thing. Have opinions and commit to them; your character is how you say it, not extra words around it.",
   "- Don't offer menus of options, don't restate what someone said, and skip assistant padding like 'Great question' or 'Happy to help'.",
@@ -38,6 +45,14 @@ const VOICE_REGISTER = [
 ].join("\n");
 
 /** Identity first, then the voice register; both from their single sources. */
-export function composeVoiceLaneInstructions(instructions: string): string {
-  return [identitySection(instructions), VOICE_REGISTER].filter((part) => part.length > 0).join("\n\n");
+export function composeVoiceLaneInstructions(
+  instructions: string,
+  surface: VoiceSurface = "discord",
+): string {
+  return [
+    identitySection(instructions),
+    ["# Talking in a voice call", VOICE_WHERE[surface], VOICE_REGISTER].join("\n"),
+  ]
+    .filter((part) => part.length > 0)
+    .join("\n\n");
 }

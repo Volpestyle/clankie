@@ -328,6 +328,20 @@ export interface ClankieAppDependencies {
   >;
   computer?: import("../computer-body.ts").ComputerBody;
   joinedComputer?: import("../joined-computer.ts").JoinedComputer;
+  /**
+   * Device voice calls (VUH-2682). Resolves the same realtime provider
+   * composition and credentials a Discord body uses, when a call starts;
+   * undefined means voice is not set up on this host.
+   */
+  voiceCall?: {
+    realtime(): Promise<
+      | {
+          readonly ports: import("@clankie/discord-presence-core").DiscordVoiceRealtimePorts;
+          readonly decayWindowMs: number;
+        }
+      | undefined
+    >;
+  };
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;

@@ -368,14 +368,33 @@ export interface CaptainPort {
     readonly runId?: string;
   }): Promise<readonly CaptainTurnSettledMetrics[]>;
   readIssueMetrics(query: IssueMetricsQuery): Promise<IssueMetricsReport>;
-  /** Prompt fragment describing the voice lane, for the realtime voice briefing. */
-  voiceLaneInstructions(): string;
+  /** Prompt fragment describing the voice lane, for the realtime voice briefing. A device call says where he is. */
+  voiceLaneInstructions(surface?: import("./voice-lane.ts").VoiceSurface): string;
   /**
    * One of the captain's own self tools (`recall_episodes`, `get_self_state`,
    * `remember_episode`) run in the `discord_voice` lane for this voice room,
    * from that lane's tool bank, so visibility and defaults are the lane's own.
    */
   voiceSelfTool(input: VoiceSelfToolInput): Promise<LaneToolResult>;
+  /**
+   * A device call's self tool (VUH-2682), run in the operator lane for the main
+   * conversation: the call is the owner's own, so it recalls and remembers as
+   * the console does.
+   */
+  voiceCallSelfTool(input: Pick<VoiceSelfToolInput, "name" | "arguments">): Promise<LaneToolResult>;
+  /**
+   * A device call's `ask_clankie` (VUH-2682): one request into the main
+   * conversation, answered there by its native head or the service runner,
+   * through the path a linked private Discord channel uses. It shows in that
+   * conversation like any other turn; only its final answer returns to the call.
+   */
+  voiceCallHandoff(input: {
+    readonly deliveryId: string;
+    readonly request: string;
+    readonly context?: string;
+  }): Promise<import("@clankie/protocol").CaptainChannelTurnResult>;
+  /** The main conversation a device call speaks for and holds his voice as. */
+  mainConversationId(): string;
   /**
    * The system prompt a lane's pi session starts from, readable outside a pi
    * session so a seat launcher or a per-turn hook can carry it into another
@@ -631,6 +650,13 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     voiceSelfTool: async () => {
       throw new Error("stub captain: voiceSelfTool not overridden");
     },
+    voiceCallSelfTool: async () => {
+      throw new Error("stub captain: voiceCallSelfTool not overridden");
+    },
+    voiceCallHandoff: async () => {
+      throw new Error("stub captain: voiceCallHandoff not overridden");
+    },
+    mainConversationId: () => "global-default",
     syncSeatTranscript: () => true,
     createRemoteWorkspaceConversation: () => {
       throw new Error("stub captain: remote workspace creation not overridden");

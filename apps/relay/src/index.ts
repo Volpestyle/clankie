@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { assertScratchNetwork, SettingsStore } from "@clankie/settings";
 import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
+import { createVoiceCallUpgrade } from "./voice-call.ts";
 import {
   createCaptainConversationDispatch,
   createCaptainFileDownload,
@@ -65,6 +66,14 @@ const conversationHandler = createOperatorConversationRelayHandler({
 });
 const server = createServer((request, response) => {
   void handleHttp(request, response);
+});
+const voiceCallUpgrade = createVoiceCallUpgrade({
+  authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: controlPlaneUrl }),
+  serviceUrl: process.env.CLANKIE_CAPTAIN_URL ?? "http://127.0.0.1:4310",
+  captainToken,
+});
+server.on("upgrade", (request, socket, head) => {
+  if (!voiceCallUpgrade(request, socket, head)) socket.destroy();
 });
 
 server.listen(port, host, () => {

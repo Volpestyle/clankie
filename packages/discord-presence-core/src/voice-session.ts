@@ -72,7 +72,7 @@ import { voiceAddressesCharacter } from "./voice-address.ts";
 import { pcmRms, PCM_SAMPLE_BYTES } from "./voice-audio.ts";
 import { DiscordVoiceConsentRegistry, type DiscordVoiceConsentPolicy } from "./voice-consent.ts";
 import { VoiceFloor, type FloorDecision, type FloorState, type VoiceFloorOptions } from "./voice-floor.ts";
-import type { DiscordVoiceIngress, DiscordVoiceTurnOutcome } from "./voice-ingress.ts";
+import type { DiscordVoiceTurnOutcome, VoiceHandoffPort } from "./voice-ingress.ts";
 import { DISCORD_ROOM_TEXT_MAX_CHARS, type DiscordVoiceRoomTextInput } from "./room-text.ts";
 import {
   createVoxMusicSink,
@@ -456,11 +456,41 @@ export interface VoiceRoomOccupant {
   readonly isBot?: boolean;
 }
 
+/**
+ * The media one voice session drives: exactly the Vox calls it makes. Vox, the
+ * sole Discord media owner, is one; a device call (VUH-2682) is another, so
+ * every room runs this one session rather than a second voice runtime.
+ */
+export type VoiceMediaPort = Pick<
+  VoxClient,
+  | "available"
+  | "status"
+  | "detail"
+  | "onStatus"
+  | "onEvent"
+  | "onUserAudio"
+  | "joinVoice"
+  | "leaveVoice"
+  | "sendAudio"
+  | "finishTtsPlayback"
+  | "stopTtsPlayback"
+  | "subscribeUserAudio"
+  | "unsubscribeUserAudio"
+  | "musicPlay"
+  | "musicStop"
+  | "musicPause"
+  | "musicResume"
+  | "musicSetGain"
+> & {
+  /** Only Discord media is DAVE-encrypted; omitted means Discord, which must reach DAVE before speech. */
+  readonly requiresDave?: boolean;
+};
+
 export interface DiscordVoiceSessionOptions {
-  /** Sole Discord voice media owner. The session never closes this shared process. */
-  readonly vox: VoxClient;
-  /** The UNCHANGED `discord_voice` captain lane; `ask_clankie` is its privileged caller. */
-  readonly ingress: DiscordVoiceIngress;
+  /** The room's media owner: Vox for Discord. The session never closes this shared process. */
+  readonly vox: VoiceMediaPort;
+  /** The UNCHANGED `discord_voice` captain lane for Discord; `ask_clankie` is its privileged caller. */
+  readonly ingress: VoiceHandoffPort;
   /**
    * Read-only glance at the live play screen (ADR 0099). Absent or a
    * not-playing result is spoken as "I cannot see the screen."
@@ -840,19 +870,22 @@ export class DiscordVoiceSession {
       readinessAbort.signal,
       connectionId,
     );
-    const daveReady = waitForVoxEvent(
-      this.options.vox,
-      (event): event is Extract<VoxControlEvent, { type: "dave_state" }> =>
-        event.type === "dave_state" &&
-        event.role === "voice" &&
-        event.connectionId === connectionId &&
-        event.status === "ready" &&
-        (event.protocolVersion ?? 0) > 0,
-      DAVE_READY_TIMEOUT_MS,
-      "Discord DAVE encryption did not become ready",
-      readinessAbort.signal,
-      connectionId,
-    );
+    const requiresDave = this.options.vox.requiresDave !== false;
+    const daveReady = !requiresDave
+      ? Promise.resolve(undefined)
+      : waitForVoxEvent(
+          this.options.vox,
+          (event): event is Extract<VoxControlEvent, { type: "dave_state" }> =>
+            event.type === "dave_state" &&
+            event.role === "voice" &&
+            event.connectionId === connectionId &&
+            event.status === "ready" &&
+            (event.protocolVersion ?? 0) > 0,
+          DAVE_READY_TIMEOUT_MS,
+          "Discord DAVE encryption did not become ready",
+          readinessAbort.signal,
+          connectionId,
+        );
     const readiness = Promise.all([transportReady, daveReady]);
     try {
       this.options.vox.joinVoice({
@@ -862,11 +895,12 @@ export class DiscordVoiceSession {
         selfMute: false,
       });
       const [, dave] = await readiness;
-      const protocolVersion = dave.protocolVersion;
-      if (protocolVersion === undefined || protocolVersion <= 0) {
+      // Zero records media without DAVE; Discord media must have negotiated a version.
+      const protocolVersion = dave === undefined ? 0 : (dave.protocolVersion ?? 0);
+      if (requiresDave && protocolVersion <= 0) {
         throw new Error("Discord DAVE encryption did not become ready");
       }
-      this.daveProtocolVersion = protocolVersion;
+      if (requiresDave) this.daveProtocolVersion = protocolVersion;
       // Prove the transcription boundary at join time. Actual ears are opened
       // per authenticated speaker, so overlap can never corrupt attribution.
       await this.probeTranscription();
@@ -4745,7 +4779,7 @@ function voxCommandFailureCode(error: unknown, fallback: string): string {
 }
 
 function waitForVoxEvent<T extends VoxControlEvent>(
-  vox: VoxClient,
+  vox: VoiceMediaPort,
   predicate: (event: VoxControlEvent) => event is T,
   timeoutMs: number,
   timeoutMessage: string,

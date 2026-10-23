@@ -68,6 +68,21 @@ const DISCORD_VOICE_REALTIME_SURFACE_RULES = [
   "- Follow the whole room conversation and decide whether each utterance calls for you. Your name is a clue, not a requirement: a direct request or contextual follow-up can be for you without it, even after a pause. You may stay silent. Use display names when they help make the recipient clear; speakerId keeps people distinct. Never infer identity from how they sound.",
 ].join("\n");
 
+/**
+ * A device call's surface (VUH-2682): a private call with the owner alone, so
+ * it carries the same private awareness an owner-only room gets, and its
+ * handoff reaches the main conversation rather than a room's lane.
+ */
+const VOICE_CALL_REALTIME_SURFACE_RULES = [
+  "# This surface",
+  "This voice is you, Clankie, on a private call with your owner, who called you from their own device. Nobody else is on the call.",
+  "- `ask_clankie` is how you think something through or act with your full tools. It is still you, not another mind or another assistant, and what you reach through it is yours. It goes to your main conversation, the same one as the console and the app, so what you do there is waiting for them in text afterwards. Use it for web browsing and research, code, the shell, files, the herdr agent fleet, messages, memory, settings, anything that touches the world; never say you cannot do or see something before asking through it.",
+  "- This call has no music player and no screen shares; songs and YouTube are for Discord rooms. `look_at_screen` is one still of the game when you are playing.",
+  REALTIME_MEMORY_AGENCY_RULE,
+  "- An interruption changes the conversation: respond to the latest intent instead of resuming an older speech. When they ask for quiet, silence is a complete response; you need not explain that you will stop.",
+  "- The call is yours to end too: `voice_leave` hangs up.",
+].join("\n");
+
 /** Keep whole lines while the budget lasts; projections list newest first, so drops are oldest. */
 function boundVoiceBriefingText(text: string, maxCharacters: number): string {
   if (text.length <= maxCharacters) return text;
@@ -202,6 +217,62 @@ export interface VoiceBriefingRouteContext {
     envelope?: { correlationId?: string },
   ) => DomainEvent;
   readonly idFactory: () => string;
+}
+
+/**
+ * The instructions and seeded briefing for a device call (VUH-2682), from the
+ * same composer as a Discord room: identity, persona, the voice register and
+ * his own state. The owner alone hears it, so the awareness card is the
+ * private one and recall is the operator lane's.
+ */
+export async function composeVoiceCallBriefing(
+  ctx: Omit<VoiceBriefingRouteContext, "app">,
+): Promise<{ readonly instructions: string; readonly briefing: string }> {
+  // A malformed settings file fails closed rather than voicing a default character.
+  const persona = (await ctx.settingsSource.load()).persona;
+  const now = ctx.clock();
+  const awareness = boundVoiceBriefingText(
+    renderVoiceAwareness(await readVoiceAwareness(ctx.dependencies.captain), "device-call", now),
+    VOICE_AWARENESS_MAX_CHARACTERS,
+  );
+  const instructions = boundVoiceBriefingText(
+    [
+      personaInstructions(persona, "social"),
+      ctx.dependencies.personaImages ? personaImageBriefing(await ctx.dependencies.personaImages()) : "",
+      ctx.dependencies.captain.voiceLaneInstructions("call"),
+      VOICE_CALL_REALTIME_SURFACE_RULES,
+      awareness,
+    ].join("\n\n"),
+    DISCORD_VOICE_INSTRUCTIONS_MAX_CHARACTERS,
+  );
+  const sections = [
+    renderVoiceBriefingSelfState(
+      ctx.captainPresence.snapshot(),
+      ctx.discordPresenceSessions.list(),
+      ctx.discordStreamWatch.current(),
+    ),
+  ];
+  const liveEmbodiment = ctx.embodiment.liveSession();
+  const embodimentCard = renderVoiceBriefingEmbodiment(liveEmbodiment);
+  if (embodimentCard !== undefined) sections.push(embodimentCard);
+  const playStory = liveEmbodiment === undefined ? undefined : ctx.dependencies.playSight?.story();
+  const playStoryCard = playStory !== undefined ? renderVoiceBriefingPlayStory(playStory) : undefined;
+  if (playStoryCard !== undefined) sections.push(playStoryCard);
+  const episodeCard = ctx.dependencies.memory?.episodeRecallCard({ lane: "operator" }) ?? "";
+  if (episodeCard.length > 0) sections.push(episodeCard);
+  const briefing = boundVoiceBriefingText(sections.join("\n\n"), DISCORD_VOICE_BRIEFING_MAX_CHARACTERS);
+  ctx.recordEvent(
+    "voice-call.briefing.projected",
+    "voice-call",
+    now.toISOString(),
+    {
+      instructionsLength: instructions.length,
+      awarenessLength: awareness.length,
+      briefingLength: briefing.length,
+    },
+    { correlationId: `voice-call-briefing:${ctx.idFactory()}` },
+  );
+  return { instructions, briefing };
 }
 
 export function registerVoiceBriefingRoute(ctx: VoiceBriefingRouteContext) {

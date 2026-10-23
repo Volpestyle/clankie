@@ -13,6 +13,13 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   handoff should not stop fast-path room responses. Recipient labels travel
   with each result; audible naming still requires listening evidence.
 
+- **A device call is the same session without Discord.** Its receipts are
+  `voice-call.*` events in the service event log, under stream
+  `voice-call:<callId>`: the same content-free evidence, with `guildId`
+  `device-call` and DAVE version 0. Its `ask_clankie` handoffs are queued turns
+  in the main conversation (surface `voice-call`), not a voice lane tree. A
+  refused call that says `voice_busy` names the room holding his voice.
+
 - **A voice capability denial may never have reached the captain.** Join the
   room delivery to `model_response`, `realtime_tool`, and `response`. A settled
   fast-path response with no `ask_clankie` receipt means the realtime mouth

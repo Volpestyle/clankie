@@ -1948,7 +1948,12 @@ export class ConversationStore {
   public async replyToLinkedChannel(
     conversationId: string,
     message: string,
-    input: { readonly messageId: string; readonly guard: () => Promise<void> },
+    input: {
+      readonly messageId: string;
+      readonly guard: () => Promise<void>;
+      /** Which owner surface asked: a linked Discord channel, or a device call (VUH-2682). */
+      readonly surfaceClientId?: "discord-main" | "voice-call";
+    },
   ): Promise<{ readonly response?: string; readonly deliveryStage?: DeliveryStage }> {
     const meta = this.metas.get(conversationId);
     if (meta?.scope.kind !== "global" || !meta.isDefault)
@@ -1982,7 +1987,7 @@ export class ConversationStore {
         );
         await input.guard();
       },
-      { surfaceClientId: "discord-main", delivery: "queue" },
+      { surfaceClientId: input.surfaceClientId ?? "discord-main", delivery: "queue" },
     );
     if (accepted.status !== "accepted") throw new Error("Linked owner turn was refused");
     const result = await this.awaitRunOutcome(accepted.runId);
