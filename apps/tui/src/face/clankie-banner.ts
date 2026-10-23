@@ -94,8 +94,14 @@ export function renderClankieBanner(
   if (caps.columns < WELCOME_MIN_COLUMNS || terminalRows < WELCOME_MIN_ROWS) {
     return renderCondensed(fields, caps);
   }
-  const sprite = leadSprite(fields.leadSkin);
-  const art = caps.unicode ? renderSprite(sprite, caps) : [...ASCII_SPROUT];
+  const fullSprite = leadSprite(fields.leadSkin);
+  const headTop = fullSprite.grid.findIndex((row) => row.includes("o"));
+  const bodyTop = fullSprite.grid.findIndex((row) => row.includes("b") || row.includes("B"));
+  const sprite = {
+    ...fullSprite,
+    grid: fullSprite.grid.slice(Math.max(0, headTop), bodyTop < 0 ? undefined : bodyTop - 1),
+  };
+  const art = caps.unicode ? renderSprite(sprite, caps) : [...ASCII_SPROUT.slice(-3)];
   const artWidth = caps.unicode
     ? spriteColumns(sprite)
     : Math.max(...ASCII_SPROUT.map((line) => line.length));
@@ -108,7 +114,8 @@ export function renderClankieBanner(
   ];
   // Keep the words centered beside the compact figure.
   const textTop = Math.max(0, Math.floor((art.length - text.length) / 2));
-  return art.map((line, row) => {
+  return Array.from({ length: Math.max(art.length, text.length) }, (_, row) => {
+    const line = art[row] ?? " ".repeat(artWidth);
     const words = text[row - textTop];
     if (words === undefined || words === "") return ` ${line}`;
     const gap = " ".repeat(Math.max(0, artWidth - visibleColumns(line)) + 4);

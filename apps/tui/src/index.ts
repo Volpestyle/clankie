@@ -250,6 +250,14 @@ try {
     selected.scope.kind === "room" ? `${selected.title} · read-only` : selected.title;
   currentContextUsage = selected.contextUsage;
   currentDriver = selected.driver;
+  if (selected.scope.kind === "persona")
+    expandedAgent = {
+      parent:
+        (await conversationClient.list()).find((chat) => chat.isDefault)?.conversationId ??
+        selected.conversationId,
+      personaId: selected.scope.personaId,
+      name: selected.title,
+    };
   currentWorkspace = conversationWorkspace(selected) ?? globalWorkspace;
 } catch (error) {
   // The service may not be ready yet; surface it and keep the console usable

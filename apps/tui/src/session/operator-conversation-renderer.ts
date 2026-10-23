@@ -32,6 +32,7 @@ export interface OperatorConversationRenderTarget {
   insertExternalActivity(text: string): void;
   refreshStatus(label: string): void;
   setTurnLoaderMessage?(message: string): void;
+  setObservedWorking?(working: boolean): void;
 }
 
 /**
@@ -143,6 +144,10 @@ export function createOperatorConversationShellSink(
       shell.setPendingPrompts?.(prompts);
     },
     event(event): void {
+      if (!options.historical) {
+        if (event.type === "activity") shell.setObservedWorking?.(event.phase !== "waiting");
+        else if (event.type === "turn") shell.setObservedWorking?.(event.phase === "accepted");
+      }
       if (options.historical) {
         // Historical pages only contribute transcript blocks.
       } else if (event.type === "activity" && activeToolMessages.size === 0) {

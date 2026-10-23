@@ -53,15 +53,47 @@ function statusText(status: string, text: string, { ansi }: AgentTheme): string 
 /** A pane whose harness bridge is missing or claims another pane, as doctor observed it (VUH-1587). */
 function bridgeWarning({ seat }: LiveAgent, { ansi }: AgentTheme): string | undefined {
   const catalog = seat.toolCatalog;
-  if (catalog && catalog.status !== "matched") return ansi.red(`Clankie tools ${clean(catalog.status)}`);
+  if (catalog && catalog.status !== "matched")
+    return (bridgeNeedsAction({ seat }) ? ansi.red : ansi.dim)(`Clankie tools ${clean(catalog.status)}`);
   const bridge = seat.harnessBridge;
   if (
     bridge?.freshness === "older-than-runtime" ||
     bridge?.operatorBridge?.freshness === "older-than-runtime"
   )
-    return ansi.red("seat bridge older than runtime");
+    return ansi.dim("seat bridge older than runtime");
   if (!bridge || bridge.status === "live-process" || bridge.status === "unobserved") return undefined;
   return ansi.red(`bridge ${clean(bridge.status)}`);
+}
+
+function bridgeNeedsAction({ seat }: Pick<LiveAgent, "seat">): boolean {
+  if (seat.harnessBridge?.status === "missing" || seat.harnessBridge?.status === "pane-mismatch") return true;
+  const skew =
+    seat.workerTools?.behind ||
+    seat.harnessBridge?.freshness === "older-than-runtime" ||
+    seat.harnessBridge?.operatorBridge?.freshness === "older-than-runtime";
+  return seat.toolCatalog?.status === "mismatch" && !(skew && seat.workerTools?.status === "ready");
+}
+
+function actionableFlag(flag: string): boolean {
+  return /^(?:reports failing|finished, unreported|no progress|off-scope|hire.*unconfirmed)/u.test(flag);
+}
+
+function flagMeaning(flag: string): string {
+  if (flag === "reports failing") return "Inspect receipt; repair the report route.";
+  if (flag === "finished, unreported") return "Ask for the result through its native channel.";
+  if (flag.startsWith("no progress")) return "Read chat; clear its blocker or refresh its task.";
+  if (flag === "off-scope") return "Reconcile its issue and current task.";
+  if (/hire.*unconfirmed/u.test(flag)) return "Inspect the original hire receipt before retrying.";
+  if (flag.startsWith("context ")) return "Context occupancy; continue fresh if needed.";
+  return "Observed native state; no action required.";
+}
+
+function agentLabel(agent: LiveAgent): string {
+  const issue =
+    agent.seat.assignment?.issue?.itemId ??
+    agent.seat.efficiency?.currentIssue ??
+    agent.seat.efficiency?.assignedDeliverable;
+  return `${clean(agent.name)}${issue ? ` · ${clean(issue)}` : ""}`;
 }
 
 function bridgeRemediation({ seat }: LiveAgent): string | undefined {
@@ -74,7 +106,7 @@ function bridgeRemediation({ seat }: LiveAgent): string | undefined {
 
 /** Catalog served is an observation of the bridge, not proof of native tool loading. */
 function workerToolsText({ seat }: LiveAgent, { ansi }: AgentTheme): string {
-  if (seat.workerTools?.restartNeeded) return ansi.yellow("tools restart needed");
+  if (seat.workerTools?.restartNeeded) return ansi.dim("tools restart needed");
   switch (seat.workerTools?.status) {
     case "ready":
       return ansi.dim("tools catalog served");
@@ -110,7 +142,9 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, detail = false): str
   return [
     paintHarness(harness),
     seat.messageReceiver && (detail || seat.messageReceiver.state === "next-turn-only")
-      ? (seat.messageReceiver.state === "next-turn-only" ? theme.ansi.red : theme.ansi.dim)(
+      ? (seat.messageReceiver.state === "next-turn-only" && !!seat.waitingMessages?.stored
+          ? theme.ansi.red
+          : theme.ansi.dim)(
           `messages ${seat.messageReceiver.state}${detail ? ` · ${clean(seat.messageReceiver.detail)}` : ""}`,
         )
       : undefined,
@@ -144,20 +178,20 @@ function agentMetadata(agent: LiveAgent, theme: AgentTheme, detail = false): str
       : (seat.efficiency?.flags
           .map(clean)
           .filter((flag) => flag !== clean(seat.status))
-          .map((flag) => theme.ansi.red(flag)) ?? [])),
+          .map((flag) => (actionableFlag(flag) ? theme.ansi.red : theme.ansi.dim)(flag)) ?? [])),
   ]
     .filter((part): part is string => part !== undefined)
     .join(theme.ansi.dim(" · "));
 }
 
 /** Blocked or broken first, then running, then finished; idle seats only count. */
-function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
+function attentionRank(agent: LiveAgent): number {
   if (
-    agent.seat.waitingMessages ||
-    agent.seat.messageReceiver?.state === "next-turn-only" ||
-    agent.seat.efficiency?.flags.length ||
+    (agent.seat.waitingMessages &&
+      (agent.seat.waitingMessages.stored > 0 || agent.seat.waitingMessages.unconfirmed > 0)) ||
+    agent.seat.efficiency?.flags.some(actionableFlag) ||
     agent.seat.status === "blocked" ||
-    bridgeWarning(agent, theme) !== undefined ||
+    bridgeNeedsAction(agent) ||
     workerToolsBroken(agent)
   )
     return 0;
@@ -173,12 +207,12 @@ function attentionRank(agent: LiveAgent, theme: AgentTheme): number {
   }
 }
 
-function attentionOrder(agents: readonly LiveAgent[], theme: AgentTheme): LiveAgent[] {
+function attentionOrder(agents: readonly LiveAgent[]): LiveAgent[] {
   return agents
     .map((agent, index) => ({
       agent,
       index,
-      rank: attentionRank(agent, theme),
+      rank: attentionRank(agent),
     }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .map(({ agent }) => agent);
@@ -221,9 +255,9 @@ function dockItems(
   // Active room jobs precede seats; settled jobs remain in the full picker.
   return [
     ...active,
-    ...attentionOrder(agents, theme).map((agent) => ({
+    ...attentionOrder(agents).map((agent) => ({
       id: agent.seat.seatId,
-      name: clean(agent.name),
+      name: agentLabel(agent),
       status: agent.seat.status,
       metadata: agentMetadata(agent, theme),
       ...(currentStep(agent) ? { step: currentStep(agent)! } : {}),
@@ -353,7 +387,7 @@ export class LiveAgentStrip implements Component {
       for (const item of agents) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
       // Blocked seats are already counted by status; the rest that want a look are named once.
       const attention = agents.filter(
-        (item) => item.agent && item.status !== "blocked" && attentionRank(item.agent, this.theme) === 0,
+        (item) => item.agent && item.status !== "blocked" && attentionRank(item.agent) === 0,
       ).length;
       return [
         fit(
@@ -460,7 +494,12 @@ export class LiveAgentPicker implements Component {
     const step = selected && currentStep(selected);
     const catalogDetail =
       selected?.seat.toolCatalog && selected.seat.toolCatalog.status !== "matched"
-        ? wrapTextWithAnsi(this.theme.ansi.red(clean(selected.seat.toolCatalog.detail)), contentWidth)
+        ? wrapTextWithAnsi(
+            (bridgeNeedsAction(selected) ? this.theme.ansi.red : this.theme.ansi.dim)(
+              clean(selected.seat.toolCatalog.detail),
+            ),
+            contentWidth,
+          )
         : [];
     // A whole rejected catalog can name dozens of tools. Keep the fixing
     // action visible; doctor retains the complete missing-tool list.
@@ -469,9 +508,13 @@ export class LiveAgentPicker implements Component {
       shownCatalogDetail[2] = `${truncateToWidth(shownCatalogDetail[2]!, Math.max(1, contentWidth - 1))}…`;
     const details = selected
       ? [
-          this.theme.ansi.bold(clean(selected.name)),
+          this.theme.ansi.bold(agentLabel(selected)),
           `${agentMetadata(selected, this.theme, true)} · ${this.theme.ansi.dim(clean(selected.seat.seatId))}`,
-          ...(selected.seat.efficiency?.flags.map((flag) => this.theme.ansi.red(clean(flag))) ?? []),
+          ...(selected.seat.efficiency?.flags.map((flag) =>
+            (actionableFlag(flag) ? this.theme.ansi.red : this.theme.ansi.dim)(
+              `${clean(flag)}: ${flagMeaning(flag)}`,
+            ),
+          ) ?? []),
           step ?? this.theme.ansi.dim("Step unavailable"),
           ...shownCatalogDetail,
           ...(selected.seat.checkout
@@ -491,7 +534,9 @@ export class LiveAgentPicker implements Component {
                 this.theme.ansi.dim("Worker tools: no authenticated observation; native catalog unverified."),
               ]),
           ...(bridgeRemediation(selected) && bridgeWarning(selected, this.theme)
-            ? [`${this.theme.ansi.red("Fix:")} ${clean(bridgeRemediation(selected)!)}`]
+            ? [
+                `${bridgeNeedsAction(selected) ? this.theme.ansi.red("Fix:") : this.theme.ansi.dim("Note:")} ${clean(bridgeRemediation(selected)!)}`,
+              ]
             : []),
         ].flatMap((line) => wrapTextWithAnsi(line, contentWidth))
       : handoff?.roomHandoff

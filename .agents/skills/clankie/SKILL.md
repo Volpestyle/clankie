@@ -67,6 +67,12 @@ your brief. Publish raw captures through `clankie evidence push` as
 [work-items](../work-items/SKILL.md) rule 3 describes, and cite the printed
 `clankie://evidence` links.
 
+In the TUI agent picker, version skew and an unverified catalog are observations,
+not proof a worker is broken. Read actionable flags and their fixing action;
+do not restart a healthy lane just to clear a muted version note. Rows carry
+the worker name and any recorded issue key. Native lead activity animates the
+console's working indicator without granting an interrupt or delivery channel.
+
 ## Connected tools
 
 Fleet tools expose `clankie_tools` and `clankie_call`. Search with `{query}` for

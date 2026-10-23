@@ -176,7 +176,11 @@ credential holder.
 - `/chats` (aliases `/chat`, `/conversation`, `/conversations`) opens only
   personal and workspace chats with Clankie. `/chats <name-or-path>` switches directly.
 - Live agents appear below the editor in a two-line dock with status counts and
-  a selected-agent preview. Statuses use the shell colors and machines are dim.
+  a selected-agent preview. Rows name the worker and its issue when available.
+  Version skew and unverified catalogs are muted notes; "need a look" counts
+  actionable failures, missing reports, stalled progress and unconfirmed hires.
+  The picker explains each flag and how to clear it.
+  Statuses use the shell colors and machines are dim.
   `Ctrl+G` opens a scrolling modal of every agent; Up/Down selects, and Enter opens
   the existing persona conversation. Escape returns without cancelling the
   worker; drafts stay with their conversation. `Ctrl+Y` opens that exact agent's
@@ -323,6 +327,8 @@ credential holder.
   stdout); do not edit `clankie.json` by hand. Full contract:
   [`docs/cli.md`](../../docs/cli.md).
 - `/layout` shows or hides the header banner.
+  The main welcome uses only Clankie's head; agent chats omit the welcome block.
+  Native lead turns use the same animated working indicator as service turns.
 - `/jump <pane|agent>` focuses a herdr agent (`herdr agent focus`), and any
   pane id in the transcript — `w18:p1J`, wherever Clankie or a tool wrote it —
   is clickable for the same jump. Only a refusal reaches the transcript; a

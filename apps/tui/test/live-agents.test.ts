@@ -5,6 +5,8 @@ import { ClankieFaceShell } from "../src/shell/shell.ts";
 import { OperatorConversationSchema } from "@clankie/protocol";
 import type { LiveAgent } from "../src/observation/herdr-roster.ts";
 import { createClankieFaceAnsiTheme } from "../src/face/clankie-face-theme.ts";
+import { createOperatorConversationShellSink } from "../src/session/operator-conversation-renderer.ts";
+import { OperatorConversationStreamEventSchema } from "@clankie/protocol";
 
 const ansi = createClankieFaceAnsiTheme({ color: true, trueColor: true });
 const theme = {
@@ -39,6 +41,72 @@ const agent = (id: string, remote = false): LiveAgent => ({
     title: "Checking native delivery",
     ...(remote ? { fleet: "pc", machine: "Office PC" } : {}),
   },
+});
+
+it("renders passive native turn activity with the service loader and hides welcome art in an agent chat", () => {
+  let viewingAgent: string | undefined;
+  const shell = new ClankieFaceShell({
+    commands: [],
+    cwd: process.cwd(),
+    env: {},
+    bannerFields: { title: "Clankie" },
+    expandedAgent: () => viewingAgent,
+  });
+  vi.spyOn(shell.tui, "start").mockImplementation(() => {});
+  shell.start();
+  const banner = (shell as unknown as { banner: { isVisible(): boolean } }).banner;
+  expect(banner.isVisible()).toBe(true);
+  viewingAgent = "Ivo";
+  shell.requestRender();
+  expect(banner.isVisible()).toBe(false);
+  const sink = createOperatorConversationShellSink(shell);
+  const activity = (phase: string) =>
+    OperatorConversationStreamEventSchema.parse({
+      schemaVersion: 1,
+      conversationId: "global-default",
+      cursor: "1",
+      revision: 0,
+      occurredAt: "2026-10-23T00:00:00.000Z",
+      type: "activity",
+      phase,
+    });
+  sink.event(activity("responding"));
+  expect(plain(shell.tui.render(120))).toContain("Responding");
+  // Native activity has no locally submitted prompt to steer or interrupt.
+  expect((shell as unknown as { respondingState: boolean }).respondingState).toBe(false);
+  sink.event(activity("waiting"));
+  expect(plain(shell.tui.render(120))).not.toContain("Responding");
+  shell.stopTurnLoader();
+});
+
+it("counts actionable flags while version skew and idle/context notes remain quiet", () => {
+  const quiet = agent("quiet");
+  quiet.seat.workerTools = { status: "ready", reason: "Native tools serving", behind: true };
+  quiet.seat.toolCatalog = {
+    status: "mismatch",
+    harness: "codex",
+    bridge: "worker",
+    missing: [],
+    detail: "Older plugin",
+    remediation: "Refresh when idle",
+  };
+  quiet.seat.efficiency = {
+    checkedAt: "2026-10-23T00:00:00.000Z",
+    ownerConversationId: "global-default",
+    flags: ["idle", "context 80%"],
+  };
+  const actionable = agent("action");
+  actionable.seat.efficiency = { ...quiet.seat.efficiency, flags: ["reports failing", "no progress in 2h"] };
+  actionable.seat.assignment = {
+    objective: "Fix the TUI",
+    issue: { repoId: "clankie", itemId: "VUH-2694" },
+    updatedAt: "2026-10-23T00:00:00.000Z",
+  };
+  const strip = new LiveAgentStrip(() => [quiet, actionable], theme);
+  expect(plain(strip.render(200))).toContain("1 needs a look");
+  const rows = expandedRows(strip, 200);
+  expect(rows).toContain("Worker action · VUH-2694");
+  expect(strip.selected()?.seat.seatId).toBe("action");
 });
 
 const roomHandoff = (id: string, source: "voice" | "text", completed = false) =>
@@ -551,7 +619,8 @@ it.each(["mismatch", "unverified"] as const)(
       },
     ];
     const strip = new LiveAgentStrip(() => agents, theme);
-    expect(strip.selected()?.seat.seatId).toBe("native-gap");
+    expect(strip.selected()?.seat.seatId).toBe(status === "unverified" ? "healthy" : "native-gap");
+    strip.select("native-gap");
     expect(expandedRows(strip, 120)).toContain(`Clankie tools ${status}`);
     const picker = new LiveAgentPicker(() => agents, strip, theme, {
       maxHeight: () => 30,

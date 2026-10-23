@@ -406,7 +406,7 @@ export class ClankieFaceShell {
     this.banner = new ClankieBannerComponent(
       options.bannerFields,
       this.theme.capabilities,
-      this.headerVisibleState,
+      this.headerVisibleState && options.expandedAgent?.() === undefined,
       () => this.tui.terminal.rows,
     );
     this.transcriptScrollView = new ConversationScrollView(this.document, () => this.loadOlderHistory(), {
@@ -595,6 +595,7 @@ export class ClankieFaceShell {
   }
 
   requestRender(): void {
+    this.banner.setVisible(this.headerVisibleState && this.options.expandedAgent?.() === undefined);
     this.tui.requestRender();
   }
 
@@ -771,6 +772,7 @@ export class ClankieFaceShell {
   }
 
   clearTranscript(): void {
+    this.setObservedWorking(false);
     this.historyGeneration += 1;
     this.historyLoading = false;
     this.setPendingPrompts([]);
@@ -789,7 +791,8 @@ export class ClankieFaceShell {
     if (position === "replace") {
       this.clearTranscript();
       render();
-      this.openOnFreshPage();
+      if (this.options.expandedAgent?.() === undefined) this.openOnFreshPage();
+      else this.freshPageOnOpen = false;
       this.transcriptScrollView.scrollToEnd();
       return;
     }
@@ -1116,6 +1119,7 @@ export class ClankieFaceShell {
   }
 
   refreshStatusView(): void {
+    this.banner.setVisible(this.headerVisibleState && this.options.expandedAgent?.() === undefined);
     if (!this.uiReady) return;
     this.tui.requestRender();
   }
@@ -1172,7 +1176,7 @@ export class ClankieFaceShell {
 
   setHeaderVisible(visible: boolean): void {
     this.headerVisibleState = visible;
-    this.banner.setVisible(visible);
+    this.banner.setVisible(visible && this.options.expandedAgent?.() === undefined);
     this.tui.requestRender();
   }
 
@@ -1183,7 +1187,20 @@ export class ClankieFaceShell {
 
   // --- turn loader ---
 
+  /** Passive native-seat activity animates without taking ownership of an interruptible turn. */
+  setObservedWorking(working: boolean): void {
+    if (this.activeTurn !== undefined) return;
+    if (!working) {
+      this.stopTurnLoader();
+      return;
+    }
+    if (this.activeLoader !== undefined) return;
+    this.startTurnLoader();
+    this.respondingState = false;
+  }
+
   startTurnLoader(message = "Working..."): void {
+    if (this.activeLoader !== undefined) this.stopTurnLoader();
     this.respondingState = true;
     const { ansi } = this.theme;
     const loader = new Loader(this.tui, ansi.accent, ansi.dim, this.loaderText(message));
