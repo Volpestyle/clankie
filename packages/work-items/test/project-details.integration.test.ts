@@ -24,17 +24,17 @@ it("reads persisted update threads through the existing comment tools, independe
     await tracker.call(
       "save_comment",
       { projectId: project.id, body: "Project only" },
-      { actor: TRACKER_OWNER },
+      { actor: { ...TRACKER_OWNER, onBehalfOf: [] } },
     );
     const first = (await tracker.call(
       "save_comment",
       { statusUpdateId: update.id, body: "First reply" },
-      { actor: TRACKER_OWNER },
+      { actor: { ...TRACKER_OWNER, onBehalfOf: [] } },
     )) as { id: string };
     const nested = (await tracker.call(
       "save_comment",
       { parentId: first.id, body: "Reply to reply" },
-      { actor: TRACKER_OWNER },
+      { actor: { ...TRACKER_OWNER, onBehalfOf: [] } },
     )) as { id: string };
     const convention = WorkConventionSchema.parse({
       schemaVersion: 1,
@@ -66,7 +66,7 @@ it("reads persisted update threads through the existing comment tools, independe
       await tracker.call(
         "save_comment",
         { statusUpdateId: update.id, body: `Reply ${index}` },
-        { actor: TRACKER_OWNER },
+        { actor: { ...TRACKER_OWNER, onBehalfOf: [] } },
       );
     const bounded = (await read()).updates[0]!;
     expect(bounded.replyCount).toBe(200);

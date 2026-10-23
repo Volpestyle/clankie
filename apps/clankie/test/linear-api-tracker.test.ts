@@ -92,6 +92,13 @@ describe("registered Linear OAuth through real broker and hosted tracker", () =>
     const comment = provider.rows.comments![0]!;
     comment.issue = comment.project = null;
     comment.projectUpdate = { id: UPDATE_ID };
+    comment.createdAt = "2026-10-23T16:00:00Z";
+    provider.rows.comments!.unshift({
+      ...comment,
+      id: "later-reply",
+      createdAt: "2026-10-23T17:00:00Z",
+      parent: { id: COMMENT_ID },
+    });
     const details = await readProjectDetails(
       directory,
       {
@@ -103,7 +110,11 @@ describe("registered Linear OAuth through real broker and hosted tracker", () =>
       },
       { linear: (name, args) => tracker.call(name, args) },
     );
-    expect(details.updates[0]).toMatchObject({ id: UPDATE_ID, replyCount: 1, replies: [{ id: COMMENT_ID }] });
+    expect(details.updates[0]).toMatchObject({
+      id: UPDATE_ID,
+      replyCount: 2,
+      replies: [{ id: COMMENT_ID }, { id: "later-reply", replyTo: COMMENT_ID }],
+    });
     const result = await host.call({
       server: "linear",
       tool: "save_comment",
