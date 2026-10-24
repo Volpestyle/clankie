@@ -8,6 +8,11 @@ Last N chat messages in a conversation:
 tail -n 40 ~/.clankie/captain/conversations/<id>/events.jsonl | jq -c '{type, role, text}'
 ```
 
+App navigation lag: `clankie metrics --app` reads each paired device/platform's
+last-64 destination windows (`firstFrameMs`/`longTaskMs` p50/p95 and `slowCount`).
+These are client reports, not cross-device percentiles. Null long-task timing is
+unsupported. Windows expire after one idle hour and reset on service restart.
+
 Per-turn survey vs implementation shape (survives conversation prune):
 
 ```bash

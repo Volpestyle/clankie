@@ -1,3 +1,4 @@
+import type { AppMetricsSnapshot } from "@clankie/protocol/app-metrics";
 /** Read existing turn records or observed issue/worker costs, with explicit coverage. */
 import { ClankieApiClient } from "@clankie/api-client";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
@@ -12,7 +13,7 @@ import {
 import { commandHost } from "./io.ts";
 
 const METRICS_USAGE =
-  "Usage: clankie metrics [--run ID] [--limit N] | --fleet | --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]";
+  "Usage: clankie metrics [--run ID] [--limit N] | --fleet | --app | --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]";
 
 export interface MetricsCliCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -25,16 +26,22 @@ export type MetricsCliResult =
   | { readonly ok: true; readonly items: readonly CaptainTurnSettledMetrics[] }
   | { readonly ok: true; readonly report: IssueMetricsReport }
   | { readonly ok: true; readonly fleet: FleetHealthMetricsSnapshot }
+  | { readonly ok: true; readonly app: AppMetricsSnapshot }
   | { readonly ok: false; readonly error: string };
 
 interface MetricsCliArgs {
   readonly issues?: IssueMetricsQuery;
   readonly fleet?: true;
+  readonly app?: true;
   readonly limit?: number;
   readonly runId?: string;
 }
 
 export function parseMetricsArgs(args: readonly string[]): MetricsCliArgs {
+  if (args.includes("--app")) {
+    if (args.length !== 1) throw new Error(METRICS_USAGE);
+    return { app: true };
+  }
   if (args.includes("--fleet")) {
     if (args.length !== 1) throw new Error(METRICS_USAGE);
     return { fleet: true };
@@ -99,6 +106,7 @@ export async function runMetricsCommand(
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   try {
+    if (parsed.app) return { ok: true, app: await client.readAppMetrics() };
     if (parsed.fleet) {
       return { ok: true, fleet: await client.readFleetHealthMetrics() };
     }

@@ -6389,6 +6389,24 @@ Notes stay until forgotten, without a retention flag or count quota.
 exposes the same controls in the console. See [Memory](memory.md) for lane
 privacy and migration behavior.
 
+### `metrics --app`
+
+Read operator-only `GET /v1/app/metrics` for Release app navigation timings.
+`app.devices` separates authenticated device IDs and closed platform names;
+`summaries` gives each destination's rolling sample `count`, nearest-rank
+`firstFrameMs` and `longTaskMs` p50/p95 in milliseconds, and `slowCount` (first
+frames over 100 ms). A null long-task measurement means unsupported, never zero.
+These are client-reported last-64 windows, not averaged fleet percentiles.
+
+Paired clients POST complete snapshots to `/v1/devices/self/app-metrics`.
+Only fixed destinations, timings and counts are accepted; the current session
+supplies the device ID. Reports are at most 4 KiB and eight destinations.
+Updates faster than once per second per device/platform return 429. The service
+keeps at most 64 device/platform snapshots, evicts the oldest, drops snapshots
+idle for an hour or belonging to revoked/expired automation devices, and resets
+on restart. There is no content, device name or durable activity history.
+See [the decision](adr/0290-app-switch-metrics-are-bounded-device-reports.md).
+
 ### `metrics --fleet`
 
 Local native workers on Linux use the same kernel-backed admission route as

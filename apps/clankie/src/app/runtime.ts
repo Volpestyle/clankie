@@ -135,6 +135,7 @@ import { registerPairingRoutes } from "./pairing-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
 import { remoteLeadRoutes } from "./remote-lead-routes.ts";
+import { registerAppMetricsRoutes } from "./app-metrics-routes.ts";
 import { registerFleetHealthMetricsRoutes } from "./fleet-health-metrics-routes.ts";
 import {
   type ClankieApp,
@@ -646,6 +647,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       sessionExpiresAt: new Date(claims.expiresAt * 1000).toISOString(),
     };
   };
+
+  registerAppMetricsRoutes(app, {
+    dependencies,
+    authenticateDevice,
+    active: (deviceId) => {
+      const record = devices.get(deviceId);
+      return record?.status === "active" && !isDeviceRunExpired(record, clock());
+    },
+    now: () => clock().getTime(),
+  });
 
   // Only requests created inside the authenticated device bridge acquire operator
   // authority. No header, client platform, or ordinary pairing link can assert it.

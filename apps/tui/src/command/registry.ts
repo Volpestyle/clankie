@@ -588,6 +588,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["metrics"],
     lines: [
       "  metrics [--run ID] [--limit N]",
+      "  metrics --app            App view-switch rolling p50/p95 and slow-switch counts (JSON)",
       "  metrics --fleet          Fleet proof/report failure counts and 5/60-minute rates (JSON)",
       "                           Recent settled captain turns: execution identity, tool shape,",
       "                           reported usage (JSON; newest first, limit 1-100, default 20)",

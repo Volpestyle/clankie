@@ -1,4 +1,9 @@
 import {
+  APP_METRICS_PATH,
+  AppMetricsSnapshotSchema,
+  type AppMetricsSnapshot,
+} from "@clankie/protocol/app-metrics";
+import {
   FLEET_ROSTER_WORK_PATH,
   FLEET_ROSTER_RETIRE_PATH,
   FLEET_ROSTER_UNDO_PATH,
@@ -947,6 +952,15 @@ export class ClankieApiClient {
     return IssueMetricsReportSchema.parse(
       await this.request<unknown>(`${ISSUE_METRICS_PATH}${suffix}`, {
         headers: this.operatorHeaders(),
+      }),
+    );
+  }
+
+  public async readAppMetrics(): Promise<AppMetricsSnapshot> {
+    return AppMetricsSnapshotSchema.parse(
+      await this.request(APP_METRICS_PATH, {
+        headers: this.operatorHeaders(),
+        redirect: "error",
       }),
     );
   }

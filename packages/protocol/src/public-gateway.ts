@@ -182,6 +182,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: "/v1/support/grants", target: "control" },
   { method: "POST", path: "/v1/support/grants", target: "control" },
   { method: "GET", path: "/v1/devices/self", target: "control" },
+  { method: "POST", path: "/v1/devices/self/app-metrics", target: "control" },
   { method: "GET", path: "/v1/devices", target: "control" },
   { method: "POST", path: "/v1/devices/:id/revoke", target: "control" },
   { method: "POST", path: DEVICE_PUSH_PATH, target: "control" },
