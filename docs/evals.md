@@ -300,8 +300,18 @@ clankie heavy --server -- node --import ./scripts/dependency-types.mjs \
   apps/clankie/scripts/lanes-eval.ts .local/vuh-2796/baseline --model openai/gpt-6.1-sol --max-turns 88
 ```
 
-It copies only an API credential, never an OAuth refresh token, and removes it from
-the scratch store afterwards. It refuses to run under `CI`. Results go to the
+Replies, tools and usage come only from records bound to their own turn: the
+console run's span in its journal, and metrics rows for the exact run or
+handoff session. The smoke run checks this itself. Its scripted model names the
+case it heard and makes one real `memory` call for `remember` in owner lanes, and
+the report's `isolation` list must stay empty. Each smoke repetition also
+resubmits a settled delivery, which must answer with a synchronous 200, and a
+refused one, which must report its status and body.
+
+It copies only an API credential, never an OAuth refresh token. It removes it
+from the scratch store in a `finally` that covers all setup after the copy;
+`--smoke --fail-after-credential` proves the removal. It refuses to run under
+`CI`. Results go to the
 [VUH-2796 record](testing/2026-10-24-vuh-2796-lane-folding/README.md).
 
 ## Statistics

@@ -8,7 +8,7 @@ export type Lane = "social-room" | "owner-dm" | "voice" | "console";
 export const LANES: readonly Lane[] = ["social-room", "owner-dm", "voice", "console"];
 
 /** Lanes holding the owner's private context in this fixture; the others must withhold it. */
-const PRIVATE_LANES: ReadonlySet<Lane> = new Set(["owner-dm", "console"]);
+export const PRIVATE_LANES: ReadonlySet<Lane> = new Set(["owner-dm", "console"]);
 
 export interface Observation {
   readonly lane: Lane;

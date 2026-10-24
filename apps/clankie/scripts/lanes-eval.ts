@@ -20,6 +20,7 @@ import { CaptainChannelTurnResultSchema, type DiscordPresenceChannelTurnRequest 
 import {
   CASES,
   LANES,
+  PRIVATE_LANES,
   SEEDED_EPISODES,
   shingles,
   type Lane,
@@ -39,6 +40,8 @@ const { values, positionals } = parseArgs({
     lanes: { type: "string" },
     cases: { type: "string" },
     smoke: { type: "boolean", default: false },
+    // Smoke-only regression: proves the copied credential is removed when setup fails.
+    "fail-after-credential": { type: "boolean", default: false },
     "dry-run": { type: "boolean", default: false },
   },
 });
@@ -58,6 +61,7 @@ console.log(
   ),
 );
 if (values["dry-run"]) process.exit(0);
+assert(!values["fail-after-credential"] || values.smoke, "--fail-after-credential is a --smoke regression");
 assert(!process.env.CI, "The lanes eval is manual-only; it refuses to run under CI");
 assert(model, "Pass --model PROVIDER/MODEL, or --smoke for the zero-cost plumbing check");
 assert(
@@ -75,26 +79,72 @@ assert(credential?.type === "api", `The eval needs an existing API credential fo
 const instructions = shingles(await readFile(join(repo, "apps/clankie/src/captain/instructions.md"), "utf8"));
 const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
 
-/** A scripted OpenAI-compatible endpoint for --smoke: proves plumbing, never answers well. */
+/**
+ * A scripted OpenAI-compatible endpoint for --smoke: proves plumbing, never answers well.
+ * Each reply names the case it heard, and the remember case makes one real `memory` call
+ * where the lane offers it, so the smoke can check every turn receives only its own data.
+ */
 async function fakeModel(): Promise<{ server: Server; baseURL: string; offered: Set<string> }> {
   // Tool names the service offered since the last turn: the smoke run's view of each lane's surface.
   const offered = new Set<string>();
+  const text = (content: unknown): string =>
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((part: { text?: unknown }) => (typeof part.text === "string" ? part.text : ""))
+            .join(" ")
+        : "";
   const server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk: Buffer) => (body += chunk));
     request.on("end", () => {
       const parsed = JSON.parse(body || "{}") as {
-        messages?: { content?: unknown }[];
+        messages?: { role?: string; content?: unknown }[];
         tools?: { function?: { name?: string } }[];
       };
-      for (const tool of parsed.tools ?? []) if (tool.function?.name) offered.add(tool.function.name);
-      const last = JSON.stringify(parsed.messages?.at(-1)?.content ?? "");
-      const text = `i'm clankie. smoke reply to ${last.length} characters.`;
+      const tools = (parsed.tools ?? []).flatMap((tool) => (tool.function?.name ? [tool.function.name] : []));
+      for (const name of tools) offered.add(name);
+      const messages = parsed.messages ?? [];
+      const heard = text(messages.findLast((message) => message.role === "user")?.content);
+      // The latest prompt or setup line the wrapped user message carries names the case.
+      const step = CASES.flatMap((c) => [
+        { id: c.id, line: c.prompt, at: heard.lastIndexOf(c.prompt) },
+        ...(c.setup ? [{ id: `${c.id}-setup`, line: c.setup, at: heard.lastIndexOf(c.setup) }] : []),
+      ])
+        .filter((candidate) => candidate.at >= 0)
+        .sort((a, b) => b.at - a.at)[0];
+      const afterTool = messages.at(-1)?.role === "tool";
       const chunk = (delta: object, finish: string | null) =>
         `data: ${JSON.stringify({ id: "smoke", object: "chat.completion.chunk", created: 0, model: "scripted", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
       response.writeHead(200, { "content-type": "text/event-stream" });
-      response.write(chunk({ role: "assistant", content: text }, null));
-      response.write(chunk({}, "stop"));
+      if (step?.id === "remember" && !afterTool && tools.includes("memory")) {
+        response.write(
+          chunk(
+            {
+              role: "assistant",
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "smoke-memory",
+                  type: "function",
+                  function: {
+                    name: "memory",
+                    arguments: JSON.stringify({ action: "write", text: "favorite color: teal" }),
+                  },
+                },
+              ],
+            },
+            null,
+          ),
+        );
+        response.write(chunk({}, "tool_calls"));
+      } else {
+        response.write(
+          chunk({ role: "assistant", content: `i'm clankie. smoke ${step?.id ?? "unknown"}.` }, null),
+        );
+        response.write(chunk({}, "stop"));
+      }
       response.write(
         `data: ${JSON.stringify({ id: "smoke", object: "chat.completion.chunk", created: 0, model: "scripted", choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`,
       );
@@ -106,6 +156,14 @@ async function fakeModel(): Promise<{ server: Server; baseURL: string; offered: 
   const address = server.address();
   assert(address !== null && typeof address === "object");
   return { server, baseURL: `http://127.0.0.1:${address.port}/v1`, offered };
+}
+
+/** The fields of a `captain.turn.settled` row the eval reads. */
+interface SettledRow {
+  readonly conversationId: string;
+  readonly runId: string;
+  readonly toolCount?: Record<string, number>;
+  readonly usage?: { totalTokens?: number };
 }
 
 interface Turn {
@@ -161,36 +219,38 @@ async function campaign(rep: number) {
           }),
     }),
   );
-  await new FileCredentialStore(preset.CLANKIE_CREDENTIALS_FILE!).set(provider, credential!);
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    LANG: process.env.LANG,
-    ...preset,
-    NODE_ENV: "test",
-    VITEST: "true",
-    CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(dir, "fleet-resources"),
-  };
-  // Seeded into the private store before start: the episode route only takes host-admitted sources.
-  const episodes = join(preset.CLANKIE_STATE!, "memory/captain-episodes");
-  await mkdir(episodes, { recursive: true });
-  await writeFile(
-    join(episodes, "operator.jsonl"),
-    SEEDED_EPISODES.map((episode) =>
-      JSON.stringify({
-        schemaVersion: 1,
-        ...episode,
-        visibility: "operator_private",
-        provenance: {
-          characterId: "clankie",
-          sessionId: "eval-seed",
-          selfAuthored: true,
-          rawTranscript: false,
-        },
-      }),
-    ).join("\n") + "\n",
-  );
   let child: ChildProcess | undefined;
+  // Everything after the credential copy sits inside the finally that removes it.
   try {
+    await new FileCredentialStore(preset.CLANKIE_CREDENTIALS_FILE!).set(provider, credential!);
+    if (values["fail-after-credential"]) throw new Error("injected setup failure after the credential copy");
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      LANG: process.env.LANG,
+      ...preset,
+      NODE_ENV: "test",
+      VITEST: "true",
+      CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(dir, "fleet-resources"),
+    };
+    // Seeded into the private store before start: the episode route only takes host-admitted sources.
+    const episodes = join(preset.CLANKIE_STATE!, "memory/captain-episodes");
+    await mkdir(episodes, { recursive: true });
+    await writeFile(
+      join(episodes, "operator.jsonl"),
+      SEEDED_EPISODES.map((episode) =>
+        JSON.stringify({
+          schemaVersion: 1,
+          ...episode,
+          visibility: "operator_private",
+          provenance: {
+            characterId: "clankie",
+            sessionId: "eval-seed",
+            selfAuthored: true,
+            rawTranscript: false,
+          },
+        }),
+      ).join("\n") + "\n",
+    );
     child = spawn(
       process.execPath,
       ["--import", join(repo, "scripts/dependency-types.mjs"), join(repo, "apps/clankie/src/index.ts")],
@@ -241,6 +301,33 @@ async function campaign(rep: number) {
         })
       ).stdout;
 
+    const submitted: { request: DiscordPresenceChannelTurnRequest; bridge: Record<string, string> }[] = [];
+    /** POST as the bridge does: a settled 200 answers at once, a 202 is polled, anything else fails loudly. */
+    async function submit(
+      request: DiscordPresenceChannelTurnRequest,
+      bridge: Record<string, string>,
+      label: string,
+    ) {
+      const response = await fetch(`${url}/v1/captain/channel-turns`, {
+        method: "POST",
+        headers: { ...bridge, "content-type": "application/json", prefer: "respond-async" },
+        body: JSON.stringify(request),
+      });
+      // The body is read once, whatever the status.
+      const text = await response.text();
+      assert([200, 202].includes(response.status), `${label}: ${response.status} ${text}`);
+      if (response.status === 200)
+        return { status: 200, result: CaptainChannelTurnResultSchema.parse(JSON.parse(text)) };
+      const result = await until(async () => {
+        const poll = await fetch(`${url}/v1/captain/channel-turns/${request.deliveryId}`, {
+          headers: bridge,
+        });
+        if (poll.status === 202) return undefined;
+        return CaptainChannelTurnResultSchema.parse(await poll.json());
+      }, 600_000);
+      return { status: 202, result };
+    }
+
     /** One Discord delivery through the bridge's own route, polled as the bridge polls. */
     async function discord(
       lane: Lane,
@@ -277,23 +364,10 @@ async function campaign(rep: number) {
         contextMessages: context,
       };
       const bridge = lane === "voice" ? voiceBridge : textBridge;
-      const response = await fetch(`${url}/v1/captain/channel-turns`, {
-        method: "POST",
-        headers: { ...bridge, "content-type": "application/json", prefer: "respond-async" },
-        body: JSON.stringify(request),
-      });
-      assert(
-        [200, 202].includes(response.status),
-        `${lane}/${c.id}: ${response.status} ${await response.text()}`,
-      );
-      const result =
-        response.status === 200
-          ? CaptainChannelTurnResultSchema.parse(await response.json())
-          : await until(async () => {
-              const poll = await fetch(`${url}/v1/captain/channel-turns/${deliveryId}`, { headers: bridge });
-              if (poll.status === 202) return undefined;
-              return CaptainChannelTurnResultSchema.parse(await poll.json());
-            }, 600_000);
+      submitted.push({ request, bridge });
+      const { result } = await submit(request, bridge, `${lane}/${c.id}`);
+      // The turn's metrics row carries the exact session the result names; nothing else is this turn's.
+      const session = result.captainSessionId;
       return {
         state: result.state,
         response:
@@ -303,12 +377,12 @@ async function campaign(rep: number) {
               ? `[failed: ${result.code}]`
               : "",
         messageId: deliveryId,
+        owns: (row: SettledRow) => session !== undefined && row.conversationId === session,
       };
     }
 
     /** One owner console message to the Pi head's main chat, read back from its journal. */
     async function console_(body: string) {
-      const before = Date.now();
       const receipt = JSON.parse(await cli("send", "--conversation", "global-default", body)) as {
         runId?: string;
       };
@@ -347,14 +421,30 @@ async function campaign(rep: number) {
         );
         return done ? all : undefined;
       }, 600_000);
-      const replies = events.filter(
-        (e) => e.type === "message" && e.role === "captain" && Date.parse(e.occurredAt) >= before - 1000,
+      // Only what the journal records between this run's acceptance and its end belongs to it.
+      const accepted = events.findIndex(
+        (e) => e.type === "turn" && e.runId === receipt.runId && e.phase === "accepted",
       );
+      const ended = events.findIndex(
+        (e, i) =>
+          i > accepted &&
+          e.type === "turn" &&
+          e.runId === receipt.runId &&
+          ["completed", "failed", "interrupted"].includes(e.phase ?? ""),
+      );
+      assert(accepted >= 0 && ended > accepted, `console run ${receipt.runId} has no bounded journal`);
+      const replies = events
+        .slice(accepted + 1, ended)
+        .filter((e) => e.type === "message" && e.role === "captain");
       const failed = events.some(
         (e) =>
           e.type === "turn" && e.runId === receipt.runId && ["failed", "interrupted"].includes(e.phase ?? ""),
       );
-      return { state: failed ? "failed" : "settled", response: replies.map((e) => e.text ?? "").join("\n") };
+      return {
+        state: failed ? "failed" : "settled",
+        response: replies.map((e) => e.text ?? "").join("\n"),
+        owns: (row: SettledRow) => row.runId === receipt.runId,
+      };
     }
 
     async function ask(
@@ -368,21 +458,13 @@ async function campaign(rep: number) {
       fake?.offered.clear();
       const result = lane === "console" ? await console_(body) : await discord(lane, c, body, context);
       const ms = Date.now() - started;
-      // Rows that settled inside this turn's window are this turn's (cases run one at a time).
       const rows = existsSync(settled)
         ? (await readFile(settled, "utf8"))
             .trim()
             .split("\n")
             .filter(Boolean)
-            .map(
-              (line) =>
-                JSON.parse(line) as {
-                  acceptedAt: string;
-                  toolCount?: Record<string, number>;
-                  usage?: { totalTokens?: number };
-                },
-            )
-            .filter((row) => Date.parse(row.acceptedAt) >= started - 2000)
+            .map((line) => JSON.parse(line) as SettledRow)
+            .filter(result.owns)
         : [];
       const tools: Record<string, number> = {};
       for (const row of rows)
@@ -440,6 +522,19 @@ async function campaign(rep: number) {
           answer.state === "settled" ? c.grade(observation) : { pass: false, why: `turn ${answer.state}` };
         graded.push({ ...observation, rep, caseId: c.id, ...verdict });
       }
+    if (fake !== undefined && submitted.length > 0) {
+      // Response-branch regressions on the real route: a settled delivery resubmitted answers
+      // with a synchronous 200, and a refused one reports its status and body.
+      const first = submitted[0]!;
+      const replay = await submit(first.request, first.bridge, "replay");
+      const original = turns.find((turn) => turn.rep === rep && turn.lane !== "console")!;
+      assert.equal(replay.status, 200, "a resubmitted settled delivery answers synchronously");
+      assert.equal(replay.result.state === "settled" ? replay.result.response : "", original.response);
+      await assert.rejects(
+        submit(first.request, { authorization: "Bearer not-a-bridge" }, "refused"),
+        (error: Error) => error.message.startsWith("refused: 401 "),
+      );
+    }
   } finally {
     if (child && child.exitCode === null) {
       const exited = once(child, "exit");
@@ -522,7 +617,25 @@ const report = {
   scope:
     "Real service, Pi lanes and channel-turn route on a private scratch stack. No Discord, no native seat: console is the Pi head.",
 };
-await writeFile(join(root, "report.json"), JSON.stringify(report, null, 2));
+// Smoke regression: every turn holds its own reply, tools and usage, and nothing from its neighbours.
+const isolation = values.smoke
+  ? turns.flatMap((turn) => {
+      const id = turn.step === "setup" ? `${turn.caseId}-setup` : turn.caseId;
+      const wrote = turn.step === "prompt" && turn.caseId === "remember" && PRIVATE_LANES.has(turn.lane);
+      const problems = [
+        ...(turn.response === `i'm clankie. smoke ${id}.` ? [] : [`reply ${JSON.stringify(turn.response)}`]),
+        ...(JSON.stringify(turn.tools) === JSON.stringify(wrote ? { memory: 1 } : {})
+          ? []
+          : [`tools ${JSON.stringify(turn.tools)}`]),
+        ...(turn.totalTokens === (wrote ? 4 : 2) ? [] : [`tokens ${turn.totalTokens}`]),
+      ];
+      return problems.length ? [`${turn.lane}#${turn.rep} ${id}: ${problems.join(", ")}`] : [];
+    })
+  : undefined;
+await writeFile(
+  join(root, "report.json"),
+  JSON.stringify(isolation === undefined ? report : { ...report, isolation }, null, 2),
+);
 // Side by side for the hand-scored "same Clankie" read: one case, every lane.
 const answers = cases
   .map((c) => {
@@ -548,4 +661,5 @@ await writeFile(
     "\n",
   ) + "\n",
 );
-console.log(JSON.stringify(report, null, 2));
+console.log(JSON.stringify(isolation === undefined ? report : { ...report, isolation }, null, 2));
+if (isolation !== undefined && isolation.length > 0) process.exitCode = 1;

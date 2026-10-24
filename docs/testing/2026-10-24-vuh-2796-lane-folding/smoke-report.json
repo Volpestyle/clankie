@@ -3,37 +3,37 @@
   "model": "evalfake/scripted",
   "effort": null,
   "smoke": true,
-  "revision": "06c10fdd85af0264ca3d17d06022c2f126e4bce2",
+  "revision": "a1cbf1c965519b79fdecc5d6d6458016b67c8bd0",
   "reps": 2,
   "score": {
-    "passed": 40,
+    "passed": 44,
     "of": 80
   },
-  "sameClankie": "3 of 10 cases pass in every lane and rep",
+  "sameClankie": "4 of 10 cases pass in every lane and rep",
   "byLane": {
     "social-room": {
       "passed": 14,
       "of": 20,
-      "p50Ms": 523,
-      "p95Ms": 528
+      "p50Ms": 524,
+      "p95Ms": 649
     },
     "owner-dm": {
-      "passed": 6,
+      "passed": 8,
       "of": 20,
-      "p50Ms": 524,
-      "p95Ms": 526
+      "p50Ms": 526,
+      "p95Ms": 530
     },
     "voice": {
       "passed": 14,
       "of": 20,
-      "p50Ms": 517,
-      "p95Ms": 519
+      "p50Ms": 519,
+      "p95Ms": 523
     },
     "console": {
-      "passed": 6,
+      "passed": 8,
       "of": 20,
-      "p50Ms": 1897,
-      "p95Ms": 1949
+      "p50Ms": 2128,
+      "p95Ms": 2818
     }
   },
   "byCase": {
@@ -113,15 +113,10 @@
     },
     "remember": {
       "measures": "tool-choice",
-      "passed": 4,
+      "passed": 8,
       "of": 8,
-      "everyLane": false,
-      "failures": [
-        "owner-dm#1: did not save",
-        "console#1: did not save",
-        "owner-dm#2: did not save",
-        "console#2: did not save"
-      ]
+      "everyLane": true,
+      "failures": []
     },
     "shell": {
       "measures": "tool-choice",
@@ -155,5 +150,6 @@
       "failures": []
     }
   },
-  "scope": "Real service, Pi lanes and channel-turn route on a private scratch stack. No Discord, no native seat: console is the Pi head."
+  "scope": "Real service, Pi lanes and channel-turn route on a private scratch stack. No Discord, no native seat: console is the Pi head.",
+  "isolation": []
 }
