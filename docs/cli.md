@@ -6886,11 +6886,15 @@ The pane/session and home proof are repeated after preparation. Caller authority
 is checked in full before the final observation and again after it, with a
 250 ms deadline immediately before sending. A full check that reads a linked
 machine takes seconds, so a check may split in two: its remote part (such as the
-sender's process proof) is re-read beside the final observation, and only its
-synchronous in-memory recheck (link, fleet revision and settings generation)
-runs under the deadline. Nothing remote is read between the final observation
-and the write. A check without that split runs in full under the deadline. A
-timeout reports undelivered and never sends on late approval (VUH-2779). Private, changed
+sender's process proof) is read again alongside the final observation, and only
+its synchronous in-memory recheck (link, fleet revision and settings
+generation) runs at the gate. Each final proof is stamped as it completes, and
+the write must follow the older one within 250 ms; waiting on the slower proof
+never restarts that clock. When they finish too far apart, both are read again,
+the faster one started later so they complete together, up to three times;
+otherwise nothing is sent. A check without the split runs in full under the same
+deadline. A timeout reports undelivered and never sends on late approval
+(VUH-2779). Private, changed
 or unproved homes refuse the fallback; a private native receipt cannot authorize
 a second send through CLI.
 Clankie checks the current pane/session, native process lifetimes and ancestry,

@@ -30,8 +30,9 @@ export interface PeerSeatAuthority {
  * A dispatch check may read remote state, which takes seconds on a linked
  * machine, so it cannot rerun inside the bounded gate before a native write
  * (VUH-2779). Instead it splits in two. `revalidate` re-proves its remote part
- * (a native process proof, say) alongside the final native observation, so
- * neither is older than that one round trip. `current` synchronously rechecks
+ * (a native process proof, say) alongside the final native observation; the
+ * write must follow the older of the two completions within the bound
+ * (remote-codex-app-server's finalProof). `current` synchronously rechecks
  * the rest (link and settings generations, no I/O) at the gate itself.
  * `undefined` from `current` means no synchronous proof: the full check gates
  * the write. A wrapper that adds its own check is a new function and so drops

@@ -301,14 +301,17 @@ rules assumed every check was local and every receipt prompt.
   write, so late approval cannot authorize it. A peer check reads the PC several
   times (sender, recipient and process proof, each an SSH round trip), so every
   peer message to a PC Codex seat timed out, and a lead's settings read
-  occasionally did too under load. The full check still runs before the final
-  native observation. A check may split in two: its remote part (for a peer,
-  the sender's fresh process proof and the owner's peer switch) is re-read
-  beside the final observation, and its synchronous recheck (link liveness,
-  fleet revision, settings generation) is the only thing bound to the write.
-  Nothing remote runs between the final observation and the write, so neither
-  the recipient's native proof nor the sender's authority is older than that
-  one round trip. A check without the split runs in full under the bound as
-  before. A wrapper that adds its own check is a new function, so it drops the
-  split and falls back to the full check. The lead approved this split over a
-  longer remote bound; review twice tightened it (VUH-2779).
+  occasionally did too under load. The rule now covers proof age, not check
+  duration: every final proof is stamped when it completes, and the write must
+  follow the oldest within 250 ms, a clock never restarted by waiting on a
+  slower proof. The full check still runs before the final native observation.
+  A check may split in two: its remote part (for a peer, the sender's fresh
+  process proof and the owner's peer switch) is read again alongside the final
+  observation, and its synchronous recheck (link liveness, fleet revision,
+  settings generation) runs at the gate. When the two final proofs finish too
+  far apart, both are read again with the faster one started later by the
+  measured gap, up to three times, and otherwise nothing is sent. A check
+  without the split runs in full under the same deadline. A wrapper that adds
+  its own check is a new function, so it drops the split and falls back to the
+  full check. The lead approved this split over a longer remote bound; three
+  review rounds narrowed it to this one freshness rule (VUH-2779).

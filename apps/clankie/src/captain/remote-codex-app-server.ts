@@ -15,6 +15,7 @@ import {
 } from "./external-codex-control.ts";
 import { openRemoteCodexConnection, type RemoteCodexConnection } from "./remote-codex-connection.ts";
 import { createRemoteCodexControlObserver, createRemoteCodexQueueObserver } from "../remote-project-proof.ts";
+import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
 import { posix, win32 } from "node:path";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
@@ -448,46 +449,84 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
   };
 }
 
+/** How many times the final proofs are read to complete within the bound of each other. */
+const FINAL_PROOF_ATTEMPTS = 3;
+
+type FinalProof =
+  | {
+      readonly outcome: "proven";
+      /** performance.now() when the older proof completed */ readonly oldest: number;
+    }
+  | { readonly outcome: "changed" | "denied" | "stale" };
+
 /**
- * The final native observation, with the caller's remote re-proof read beside
- * it (CurrentCheck): neither is older than that one round trip at the write.
- * A failed re-proof refuses.
+ * The final native observation and the caller's remote re-proof (CurrentCheck),
+ * stamped as each completes. The write must follow the older completion within
+ * FINAL_CODEX_AUTHORITY_TIMEOUT_MS; waiting on the slower proof never restarts
+ * that clock (VUH-2779). When one finishes first and goes stale, both are read
+ * again with the faster one started later by the measured gap, so they complete
+ * together; proofs that still can't do so refuse.
  */
-async function finalObservation<T>(
+async function finalProof<T>(
   observe: () => Promise<T>,
+  unchanged: (observed: T) => boolean,
   beforeDispatch: CurrentCheck | undefined,
-): Promise<{ readonly observed: T; readonly reproven: boolean }> {
+): Promise<FinalProof> {
   const revalidate = beforeDispatch?.current === undefined ? undefined : beforeDispatch.revalidate;
-  const [observed, reproven] = await Promise.all([
-    observe(),
-    revalidate === undefined
-      ? true
-      : revalidate().then(
-          (valid) => valid,
-          () => false,
-        ),
-  ]);
-  return { observed, reproven };
+  const timed = async <V>(after: number, read: () => Promise<V>) => {
+    if (after > 0) await delay(after);
+    const started = performance.now();
+    const value = await read();
+    return { value, took: performance.now() - started, completed: performance.now() };
+  };
+  let later = { observe: 0, revalidate: 0 };
+  for (let attempt = 0; attempt < FINAL_PROOF_ATTEMPTS; attempt++) {
+    const [native, authority] = await Promise.all([
+      timed(later.observe, observe),
+      revalidate === undefined
+        ? undefined
+        : timed(later.revalidate, () =>
+            revalidate().then(
+              (valid) => valid,
+              () => false,
+            ),
+          ),
+    ]);
+    if (!unchanged(native.value)) return { outcome: "changed" };
+    if (authority !== undefined && !authority.value) return { outcome: "denied" };
+    const oldest = Math.min(native.completed, authority?.completed ?? native.completed);
+    if (performance.now() - oldest < FINAL_CODEX_AUTHORITY_TIMEOUT_MS) return { outcome: "proven", oldest };
+    if (authority === undefined) return { outcome: "stale" };
+    later =
+      native.took < authority.took
+        ? { observe: authority.took - native.took, revalidate: 0 }
+        : { observe: 0, revalidate: native.took - authority.took };
+  }
+  return { outcome: "stale" };
 }
+
+const STALE_FINAL_PROOF = `The final native and authority proofs could not complete within ${String(FINAL_CODEX_AUTHORITY_TIMEOUT_MS)} ms of each other; nothing was sent.`;
 
 /**
  * A final authority read must finish promptly; late approval cannot authorize a write.
+ * Its deadline is the older final proof's completion plus the bound, never restarted.
  * A full check that reads a linked machine takes seconds and could never meet
- * this bound (VUH-2779). One with a synchronous recheck runs only that here,
- * its remote part having been re-proven beside the final native observation.
- * Any other check runs in full under the bound.
+ * it (VUH-2779). One with a synchronous recheck runs only that here, its remote
+ * part having been re-proven with the final native observation. Any other
+ * check runs in full under the deadline.
  */
 async function finalCodexAuthority(
   beforeDispatch: (() => Promise<boolean>) & CurrentCheck,
+  oldest: number,
 ): Promise<boolean> {
-  const deadline = performance.now() + FINAL_CODEX_AUTHORITY_TIMEOUT_MS;
+  const deadline = oldest + FINAL_CODEX_AUTHORITY_TIMEOUT_MS;
   const timeout = () => new Error("Final Codex authority check timed out; nothing was sent.");
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const allowed = await Promise.race([
       Promise.resolve().then(() => beforeDispatch.current?.() ?? beforeDispatch()),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(timeout()), FINAL_CODEX_AUTHORITY_TIMEOUT_MS);
+        timer = setTimeout(() => reject(timeout()), Math.max(0, deadline - performance.now()));
       }),
     ]);
     // A synchronous guard can delay timer delivery past the authority deadline.
@@ -630,24 +669,27 @@ export function remoteCodexQueue(
     }
     const final =
       original && pane !== undefined
-        ? await finalObservation(() => observeDefaultHome(fleet.id, pane, sessionId), beforeDispatch)
+        ? await finalProof(
+            () => observeDefaultHome(fleet.id, pane, sessionId),
+            (observed) => isDeepStrictEqual(original, observed),
+            beforeDispatch,
+          )
         : undefined;
-    if (final !== undefined && !isDeepStrictEqual(original, final.observed))
+    if (final !== undefined && final.outcome !== "proven")
       return {
         outcome: "undelivered",
         deliveryStage: "unavailable",
-        detail: "The Windows pane's default Codex home or native identity changed; nothing was sent.",
-      };
-    if (final !== undefined && !final.reproven)
-      return {
-        outcome: "undelivered",
-        deliveryStage: "unavailable",
-        detail: "Codex authority changed before queue dispatch; nothing was sent: Peer authority changed.",
+        detail:
+          final.outcome === "changed"
+            ? "The Windows pane's default Codex home or native identity changed; nothing was sent."
+            : final.outcome === "denied"
+              ? "Codex authority changed before queue dispatch; nothing was sent: Peer authority changed."
+              : STALE_FINAL_PROOF,
       };
     // The final SSH observation yields; peer authority may change while it runs.
-    if (original && beforeDispatch) {
+    if (final?.outcome === "proven" && beforeDispatch) {
       try {
-        if (!(await finalCodexAuthority(beforeDispatch)))
+        if (!(await finalCodexAuthority(beforeDispatch, final.oldest)))
           throw new Error("Peer authority changed; nothing was sent.");
       } catch (error) {
         return {
@@ -717,13 +759,15 @@ export function remoteCodexControl(
           // Both caller preparation and the final native observation may yield.
           if (beforeDispatch !== undefined && !(await beforeDispatch())) return false;
           const live = connection;
-          const final = await finalObservation(
+          const final = await finalProof(
             () => observe(fleet.id, qualified.id, sessionId, live.connection),
+            (observed) => isDeepStrictEqual(original, observed),
             beforeDispatch,
           );
-          if (!connection.alive() || !isDeepStrictEqual(original, final.observed) || !final.reproven)
+          if (final.outcome === "stale") throw new Error(STALE_FINAL_PROOF);
+          if (final.outcome !== "proven" || !connection.alive()) return false;
+          if (beforeDispatch !== undefined && !(await finalCodexAuthority(beforeDispatch, final.oldest)))
             return false;
-          if (beforeDispatch !== undefined && !(await finalCodexAuthority(beforeDispatch))) return false;
           return connection.alive();
         });
         // A proven private home must never fall through to the account-default queue.
