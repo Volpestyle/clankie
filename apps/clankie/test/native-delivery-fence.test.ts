@@ -174,12 +174,9 @@ it("keeps stable delivery fenced until an exact retry can reconcile its original
 
 it("linearizes concurrent stable retries before sending to the native channel", async () => {
   const { create, send } = fixture();
-  let release!: () => void;
-  const pending = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const sending = barrier();
   send.mockImplementation(async () => {
-    await pending;
+    await sending.pending;
     return { outcome: "accepted", messageId: "once", state: "started" };
   });
   const native = create();
@@ -189,17 +186,16 @@ it("linearizes concurrent stable retries before sending to the native channel", 
     stableReceiptKey: "linear:event",
   });
   await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-  expect(
-    await native.deliverToSeat("seat1", "approval", undefined, { guard, stableReceiptKey: "linear:event" }),
-  ).toMatchObject({
-    outcome: "unconfirmed",
+  // The concurrent retry waits its turn behind the original rather than contending (VUH-2779).
+  const retry = native.deliverToSeat("seat1", "approval", undefined, {
+    guard,
+    stableReceiptKey: "linear:event",
   });
-  release();
+  sending.release();
   expect(await first).toMatchObject({ outcome: "delivered" });
-  expect(
-    await native.deliverToSeat("seat1", "approval", undefined, { guard, stableReceiptKey: "linear:event" }),
-  ).toMatchObject({
+  expect(await retry).toMatchObject({
     outcome: "delivered",
+    detail: "Original native delivery was already confirmed; no message was sent again.",
   });
   expect(send).toHaveBeenCalledTimes(1);
 });
@@ -209,43 +205,39 @@ it.each([
   ["stable event before peer", { stableReceiptKey: "linear:first" }, { fence: async () => true }],
   ["peer before stable event", { fence: async () => true }, { stableReceiptKey: "linear:second" }],
 ] satisfies [string, PeerDeliveryOptions, PeerDeliveryOptions][])(
-  "reserves the recipient across held attachment for %s",
+  "holds the recipient for the whole delivery, so a second message waits its turn: %s",
   async (_name, firstOptions, secondOptions) => {
     const { create, send, adapter } = fixture();
-    const attaching = [barrier(), barrier()];
+    const attaching = barrier();
     const sending = barrier();
     const originalAttach = adapter.attach;
-    let attached = 0;
     const attach = vi.fn(async (...args: Parameters<HarnessSeatAdapter["attach"]>) => {
-      const held = attaching[attached];
-      attached += 1;
-      await held!.pending;
+      if (attach.mock.calls.length === 1) await attaching.pending;
       return originalAttach(...args);
     });
     adapter.attach = attach;
-    send.mockImplementation(async () => {
-      await sending.pending;
-      return { outcome: "accepted", messageId: "first-only", state: "started" };
+    const sent: string[] = [];
+    send.mockImplementation(async (text) => {
+      sent.push(text);
+      if (sent.length === 1) await sending.pending;
+      return { outcome: "accepted", messageId: `native-${String(sent.length)}`, state: "started" };
     });
     const native = create();
     const first = native.deliverToSeat("seat1", "first", undefined, firstOptions);
     const second = native.deliverToSeat("seat1", "second", undefined, secondOptions);
     try {
-      await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(2));
-      attaching[0]!.release();
+      await vi.waitFor(() => expect(attach).toHaveBeenCalledOnce());
+      // The second does not attach while the first holds attachment or its send.
+      attaching.release();
       await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
-      attaching[1]!.release();
-      expect(await second).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
-      // The losing caller must not clear the active winner's uncertainty.
-      expect(await native.deliverToSeat("seat1", "first", undefined, firstOptions)).toMatchObject({
-        outcome: "unconfirmed",
-      });
+      expect(attach).toHaveBeenCalledOnce();
     } finally {
-      for (const held of attaching) held.release();
+      attaching.release();
       sending.release();
     }
-    expect(await first).toMatchObject({ outcome: "delivered", messageId: "first-only" });
-    expect(send).toHaveBeenCalledOnce();
+    expect(await first).toMatchObject({ outcome: "delivered", messageId: "native-1" });
+    expect(await second).toMatchObject({ outcome: "delivered", messageId: "native-2" });
+    expect(sent).toEqual(["first", "second"]);
   },
 );
 

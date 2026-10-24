@@ -277,7 +277,8 @@ A bridge ACK proves transport delivery, not model consumption. A working
 Claude records a channel message only at its next pause between steps, so a
 message to a busy seat whose channel already proved itself comes back
 `delivered` with `status: queued_until_turn_end`: it waits in Claude's queue.
-Don't resend it or treat it as read. Reconcile an
+Don't resend it or treat it as read. Messages to one seat take turns: a send
+while another is in flight waits for it rather than being refused. Reconcile an
 unconfirmed `message_seat` by its exact native `messageId` (or MCP dispatch
 UUID) with `reconcile_seat_call` in the original conversation, and read
 `clankie seat-delivery list` for mailbox and native fences. Never resend to test

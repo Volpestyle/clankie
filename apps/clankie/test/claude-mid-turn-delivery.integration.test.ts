@@ -29,7 +29,7 @@ function channelPrompt(id: string, text: string): string {
   return `<channel source="${SERVER}" kind="message" conversation="pc/term_1" source="captain" event_id="${id}" created_at="${new Date().toISOString()}">\n${text}\n</channel>`;
 }
 
-function fixture(options: { earlierChannel: boolean; absorbAfterMs: number }) {
+function fixture(options: { earlierChannel: boolean; absorbAfterMs: number; inFlightWaitMs?: number }) {
   const home = mkdtempSync(join(tmpdir(), "claude-mid-turn-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
   const projects = join(home, ".claude", "projects", "-w");
@@ -109,11 +109,13 @@ function fixture(options: { earlierChannel: boolean; absorbAfterMs: number }) {
   let bridging = true;
   cleanups.push(() => (bridging = false));
   const absorbed: string[] = [];
+  const taken: string[] = [];
   void (async () => {
     while (bridging) {
       const events = await mailbox.poll(200);
       for (const event of events) {
         const arrivedAt = new Date().toISOString();
+        taken.push(event.content);
         mailbox.acknowledge(event.id);
         const prompt = channelPrompt(event.id, event.content);
         const timer = setTimeout(() => {
@@ -166,11 +168,18 @@ function fixture(options: { earlierChannel: boolean; absorbAfterMs: number }) {
     timing: { readyMs: 2_000, receiptMs: 600, pollMs: 25 },
     trackerDeny: () => [],
   });
+  // The fleet control's own reads (not the adapter's) can be held one at a time.
+  let held: Promise<void> | undefined;
   const runner: HerdrWatchRunner = {
     get: async () => agent(),
     resolveTerminal: async () => agent(),
     wait: async () => agent(),
-    transcript,
+    transcript: async (snapshot) => {
+      const hold = held;
+      held = undefined;
+      await hold;
+      return transcript(snapshot);
+    },
   };
   const control = createFleetSeatControl(
     runner,
@@ -179,11 +188,22 @@ function fixture(options: { earlierChannel: boolean; absorbAfterMs: number }) {
     undefined,
     undefined,
     join(home, "watches.json.delivery-receipts.json"),
+    undefined,
+    undefined,
+    options.inFlightWaitMs === undefined ? {} : { inFlightWaitMs: options.inFlightWaitMs },
   );
   return {
     adapter,
     control,
     absorbed,
+    /** Every message the bridge wrote to Claude, in order. */
+    taken,
+    /** Hold the fleet control's next transcript read until the returned release. */
+    holdControlRead: () => {
+      let release!: () => void;
+      held = new Promise<void>((resolve) => (release = resolve));
+      return release;
+    },
     hooks,
     setStatus: (next: string) => (status = next),
     /** Fail the read this many reads from now (1 = the next one). */
@@ -275,4 +295,50 @@ it("refuses definitively when the session can't be read before dispatch", async 
   expect(refused).toMatchObject({ definitive: "not_sent", code: "transcript_unavailable" });
   await new Promise((resolve) => setTimeout(resolve, 200));
   expect(f.absorbed).toEqual([]);
+});
+
+it("delivers a lead's and a peer's simultaneous messages to one seat in turn, not one refused", async () => {
+  const f = fixture({ earlierChannel: true, absorbAfterMs: 50 });
+  expect((await f.resume()).outcome).toBe("started");
+  const [lead, peer] = await Promise.all([
+    f.control.deliverToSeat("term_1", "VUH-2779 lead probe"),
+    f.control.deliverToSeat("term_1", "VUH-2779 peer probe", undefined, { source: "peer" }),
+  ]);
+  expect(lead).toMatchObject({ outcome: "delivered", deliveryStage: "consumed" });
+  expect(peer).toMatchObject({ outcome: "delivered", deliveryStage: "consumed" });
+  // Each was written exactly once, the second only after the first settled.
+  expect(f.taken).toEqual(["VUH-2779 lead probe", "VUH-2779 peer probe"]);
+});
+
+it("refuses definitively, not as uncertain, when another delivery holds the seat past the wait", async () => {
+  // The first message is still in its receipt window when the wait ends.
+  const f = fixture({ earlierChannel: true, absorbAfterMs: 400, inFlightWaitMs: 100 });
+  expect((await f.resume()).outcome).toBe("started");
+  const first = f.control.deliverToSeat("term_1", "VUH-2779 first probe");
+  await until(() => f.taken.length === 1);
+  const second = await f.control.deliverToSeat("term_1", "VUH-2779 second probe", undefined, {
+    source: "peer",
+  });
+  expect(second).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+  expect(await first).toMatchObject({ outcome: "delivered" });
+  expect(f.taken).toEqual(["VUH-2779 first probe"]);
+});
+
+it("never reports a message that lost the recipient at its dispatch recheck as uncertain", async () => {
+  const f = fixture({ earlierChannel: true, absorbAfterMs: 400, inFlightWaitMs: 0 });
+  expect((await f.resume()).outcome).toBe("started");
+  // The peer message passes the first check, then pauses on its session read
+  // while the lead's message to the same seat dispatches (f54cbcb2, 2026-10-24).
+  const release = f.holdControlRead();
+  const peer = f.control.deliverToSeat("term_1", "VUH-2779 peer probe", undefined, { source: "peer" });
+  const lead = f.control.deliverToSeat("term_1", "VUH-2779 lead probe");
+  await until(() => f.taken.length === 1);
+  release();
+  expect(await peer).toMatchObject({
+    outcome: "undelivered",
+    deliveryStage: "unavailable",
+    detail: expect.stringContaining("this message was not sent"),
+  });
+  expect(await lead).toMatchObject({ outcome: "delivered" });
+  expect(f.taken).toEqual(["VUH-2779 lead probe"]);
 });

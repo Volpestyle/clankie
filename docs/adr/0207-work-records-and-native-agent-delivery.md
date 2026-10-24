@@ -315,3 +315,10 @@ rules assumed every check was local and every receipt prompt.
   its own check is a new function, so it drops the split and falls back to the
   full check. The lead approved this split over a longer remote bound; three
   review rounds narrowed it to this one freshness rule (VUH-2779).
+- _Deliveries to one seat take turns._ The live acceptance found the lead's
+  probes and a peer's colliding on the recipient's receipt fence. One refusal
+  was recorded `uncertain` though nothing was sent, which held every later
+  peer message to that seat for the 15-minute supersede window (VUH-2100). A
+  message to a seat with a delivery in flight now waits for it, bounded at 45
+  seconds, then takes the ordinary checks. A message that still loses the seat
+  at its dispatch recheck is a definite not-sent.

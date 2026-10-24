@@ -6861,6 +6861,10 @@ to a seat still working (or blocked) whose session already took a channel event,
 therefore reports `delivered`, `state: queued` and `status: queued_until_turn_end`
 instead of uncertain; it is not proof Claude read it. An idle seat, or a session
 with no channel event yet, still needs the transcript entry (VUH-2779).
+Messages to one seat go out one at a time: a lead's or peer's message that
+arrives while another delivery to that seat is in flight waits its turn (up to
+45 seconds) instead of being refused, and one that still loses the seat is a
+definite `undelivered`, never `uncertain`.
 
 The hire records its observed session and hiring conversation before waiting
 for channel readiness or the first-prompt receipt. A failed startup retains that

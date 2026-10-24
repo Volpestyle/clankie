@@ -10,6 +10,7 @@ import { channelBody } from "./claude-worker-seat.ts";
 import type { ExternalCodexControl } from "./external-codex-control.ts";
 import type { HarnessSeatAdapter, SeatControl, SeatEvent } from "@clankie/agent-hosts";
 import { basename } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
 import { codexControlEndpoint, codexProcess, resolveCodexHome, resolveCodexSessionId } from "./codex-seat.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
@@ -47,7 +48,12 @@ export function createFleetSeatControl(
   >,
   receiver?: (agent: HerdrAgentSnapshot) => FleetSeatMessageReceiver,
   /** How long an original absent from its idle recipient's session blocks a different message (VUH-2358). */
-  settlement: { readonly unarrivedSettleMs?: number; readonly now?: () => number } = {},
+  settlement: {
+    readonly unarrivedSettleMs?: number;
+    readonly now?: () => number;
+    /** How long a message waits its turn behind another delivery to the same recipient (VUH-2779). */
+    readonly inFlightWaitMs?: number;
+  } = {},
 ) {
   const now = settlement.now ?? Date.now;
   const unarrivedSettleMs = settlement.unarrivedSettleMs ?? UNARRIVED_SETTLE_MS;
@@ -57,6 +63,34 @@ export function createFleetSeatControl(
     uncertaintyPath === undefined ? undefined : `${uncertaintyPath}.questions.json`,
   );
   const active = new Set<string>();
+  /** Each recipient's queue of deliveries: the tail settles when the last one finishes. */
+  const turns = new Map<string, Promise<void>>();
+  const inFlightWaitMs = settlement.inFlightWaitMs ?? IN_FLIGHT_WAIT_MS;
+  /**
+   * A lead's and a peer's message to one seat can arrive together. Rather than
+   * contend for its receipt fence, a later one waits its turn behind the
+   * earlier delivery, bounded, then goes through the ordinary checks (VUH-2779).
+   */
+  const takeTurn = async (seatId: string): Promise<() => void> => {
+    const ahead = turns.get(seatId);
+    let finish!: () => void;
+    const mine = new Promise<void>((resolve) => (finish = resolve));
+    const tail = (ahead ?? Promise.resolve()).then(() => mine);
+    turns.set(seatId, tail);
+    if (ahead !== undefined) {
+      const timeout = new AbortController();
+      await Promise.race([
+        ahead,
+        // allow-swallowed-rejection -- aborting this wait timer is how it ends; nothing else is waiting on it.
+        delay(inFlightWaitMs, undefined, { signal: timeout.signal }).catch(() => undefined),
+      ]);
+      timeout.abort();
+    }
+    return () => {
+      finish();
+      if (turns.get(seatId) === tail) turns.delete(seatId);
+    };
+  };
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
     const fleet = splitFleetQualified(agent.paneId)?.fleet;
     const available = fleet === undefined ? adapters : remoteAdapters?.(fleet);
@@ -523,7 +557,7 @@ export function createFleetSeatControl(
       detail: "Original acknowledgment is unresolved; nothing was sent.",
     };
   };
-  return {
+  const control = {
     inputCapabilities,
     async settled(
       agent: HerdrAgentSnapshot,
@@ -837,10 +871,13 @@ export function createFleetSeatControl(
         fence.pending(seatId) !== undefined ||
         fence.entries().some(([, receipt]) => receipt.seatId === seatId)
       )
+        // Nothing was dispatched, so this is a definite not-sent: an uncertain
+        // claim here wedged peer receipts behind it (VUH-2779).
         return {
-          outcome: "unconfirmed",
-          deliveryStage: "uncertain",
-          detail: "A delivery is already awaiting its receipt; no new message was sent.",
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail:
+            "Another delivery to this seat is still awaiting its receipt; this message was not sent. Send it again once that one settles.",
         };
       const receiptData = {
         fingerprint: deliveryFingerprint(text),
@@ -924,10 +961,24 @@ export function createFleetSeatControl(
       }
     },
   };
+  const deliverNow = control.deliverToSeat;
+  return {
+    ...control,
+    async deliverToSeat(...args: Parameters<typeof deliverNow>): ReturnType<typeof deliverNow> {
+      const release = await takeTurn(args[0]);
+      try {
+        return await deliverNow(...args);
+      } finally {
+        release();
+      }
+    },
+  };
 }
 
 /** An original absent from its idle recipient's session stops blocking a different message after this. */
 const UNARRIVED_SETTLE_MS = 5 * 60_000;
+/** Covers a Claude seat's transcript receipt window (15s) and a linked machine's proofs. */
+const IN_FLIGHT_WAIT_MS = 45_000;
 
 export function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
   return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";
