@@ -11,12 +11,15 @@ import {
   GatewayPlainRequestSchema,
   gatewayRequestAad,
   gatewayResponseAad,
+  gatewayStreamAad,
+  type GatewayEnvelope,
   type GatewayEncryptionCredential,
+  type GatewayPlainRequest,
   type GatewayPlainResponse,
 } from "@clankie/protocol/gateway-encryption";
 import { publicGatewayTargetFor, type PublicGatewayRoute } from "@clankie/protocol/public-gateway";
 import type { StoredPairingOffer } from "./pairing.ts";
-import { OperatorConversationServiceRequestSchema } from "@clankie/protocol";
+import { OperatorConversationServiceRequestSchema, VOICE_CALL_PATH } from "@clankie/protocol";
 import { validateRuntimeGatewayRoutes } from "./runtime-provider.ts";
 
 const INTERACTIVE_OPERATIONS = new Set([
@@ -74,6 +77,17 @@ const TicketSchema = z
   .strict();
 type Ticket = z.infer<typeof TicketSchema>;
 
+/**
+ * An opened stream: the status to answer with (101 to go ahead), the device's
+ * own authorization for the relay, and its record sealing, sequence by sequence.
+ */
+export interface GatewayStream {
+  readonly status: number;
+  readonly authorization?: string;
+  seal(kind: number, payload: Uint8Array, sequence: number): Buffer;
+  open(record: Uint8Array, sequence: number): { readonly kind: number; readonly payload: Buffer };
+}
+
 /** The broker owns the wrapping key; rotating it invalidates every old ticket. */
 export async function loadGatewayEncryptionKey(store: CredentialStore): Promise<Buffer> {
   const existing = await store.get(PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID);
@@ -94,6 +108,20 @@ export function sealGatewayValue(key: Uint8Array, plaintext: string, aad: string
   return Buffer.concat([iv, cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]).toString(
     "base64",
   );
+}
+export function sealGatewayBytes(key: Uint8Array, plaintext: Uint8Array, aad: string): Buffer {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(aad));
+  return Buffer.concat([iv, cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
+}
+export function openGatewayBytes(key: Uint8Array, sealed: Uint8Array, aad: string): Buffer {
+  if (sealed.length < 28) throw new Error("Invalid encrypted record");
+  const bytes = Buffer.from(sealed.buffer, sealed.byteOffset, sealed.byteLength);
+  const decipher = createDecipheriv("aes-256-gcm", key, bytes.subarray(0, 12));
+  decipher.setAAD(Buffer.from(aad));
+  decipher.setAuthTag(bytes.subarray(-16));
+  return Buffer.concat([decipher.update(bytes.subarray(12, -16)), decipher.final()]);
 }
 export function openGatewayValue(key: Uint8Array, sealed: string, aad: string): string {
   const bytes = Buffer.from(sealed, "base64");
@@ -145,6 +173,76 @@ export class GatewayEncryptionHost {
     );
   }
 
+  /** The envelope, its ticket and request; consumes the challenge, so it opens once. */
+  private openEnvelope(body: string): {
+    readonly envelope: GatewayEnvelope;
+    readonly ticket: Ticket;
+    readonly request: GatewayPlainRequest;
+  } {
+    const envelope = GatewayEnvelopeSchema.parse(JSON.parse(body));
+    const ticket = TicketSchema.parse(
+      JSON.parse(
+        openGatewayValue(this.wrappingKey, envelope.ticket, `clankie-gateway-ticket-v1:${this.hostId}`),
+      ),
+    );
+    if (ticket.expiresAt <= Date.now()) throw new Error("Expired encryption ticket");
+    const plaintext = openGatewayValue(
+      Buffer.from(ticket.key, "base64"),
+      envelope.sealed,
+      gatewayRequestAad(this.hostId, envelope),
+    );
+    const request = GatewayPlainRequestSchema.parse(JSON.parse(plaintext));
+    const expires = this.challenges.get(envelope.challenge);
+    // Synchronous consume before any await: duplicate concurrent requests cannot dispatch twice.
+    this.challenges.delete(envelope.challenge);
+    if (expires === undefined || expires <= Date.now()) throw new Error("Invalid encryption challenge");
+    return { envelope, ticket, request };
+  }
+
+  /**
+   * Opens a sealed stream's first message (VUH-2761). Only a paired device's
+   * call opens one; the caller connects it to the relay's call route with the
+   * headers returned here, so the relay authorizes the call as it would a direct
+   * one. Throws on anything else, before any local route sees it.
+   */
+  public async openStream(
+    body: string,
+    signal: AbortSignal,
+    forward: (request: Request) => Promise<Response>,
+  ): Promise<GatewayStream> {
+    const { envelope, ticket, request } = this.openEnvelope(body);
+    if (ticket.stage !== "device" || request.method !== "GET" || request.path !== VOICE_CALL_PATH)
+      throw new Error("Invalid encrypted stream");
+    const headers = new Headers(request.headers.map(({ name, value }): [string, string] => [name, value]));
+    const identity = await forward(new Request("http://control/v1/devices/self", { headers, signal }));
+    if (!identity.ok) return { status: identity.status, ...this.streamKeys(envelope, request) };
+    const { deviceId } = (await identity.json()) as { deviceId?: unknown };
+    if (deviceId !== ticket.subject) throw new Error("Wrong device");
+    this.onAuthenticatedRequest?.(true);
+    return {
+      status: 101,
+      authorization: headers.get("authorization") ?? "",
+      ...this.streamKeys(envelope, request),
+    };
+  }
+
+  private streamKeys(envelope: GatewayEnvelope, request: GatewayPlainRequest) {
+    const key = Buffer.from(request.responseKey, "base64");
+    return {
+      seal: (kind: number, payload: Uint8Array, sequence: number): Buffer =>
+        sealGatewayBytes(
+          key,
+          Buffer.concat([Buffer.of(kind), payload]),
+          gatewayStreamAad(this.hostId, envelope, "down", sequence),
+        ),
+      open: (record: Uint8Array, sequence: number): { readonly kind: number; readonly payload: Buffer } => {
+        const plain = openGatewayBytes(key, record, gatewayStreamAad(this.hostId, envelope, "up", sequence));
+        if (plain.length === 0) throw new Error("Empty stream record");
+        return { kind: plain[0]!, payload: plain.subarray(1) };
+      },
+    };
+  }
+
   public async handle(
     path: string,
     body: string,
@@ -163,23 +261,7 @@ export class GatewayEncryptionHost {
     if (path !== GATEWAY_ENCRYPTED_PATH && path !== GATEWAY_PUSH_AUTHORIZE_PATH)
       return Response.json({ error: "encryption_required" }, { status: 426 });
     try {
-      const envelope = GatewayEnvelopeSchema.parse(JSON.parse(body));
-      const ticket = TicketSchema.parse(
-        JSON.parse(
-          openGatewayValue(this.wrappingKey, envelope.ticket, `clankie-gateway-ticket-v1:${this.hostId}`),
-        ),
-      );
-      if (ticket.expiresAt <= Date.now()) throw new Error("Expired encryption ticket");
-      const plaintext = openGatewayValue(
-        Buffer.from(ticket.key, "base64"),
-        envelope.sealed,
-        gatewayRequestAad(this.hostId, envelope),
-      );
-      const request = GatewayPlainRequestSchema.parse(JSON.parse(plaintext));
-      const expires = this.challenges.get(envelope.challenge);
-      // Synchronous consume before any await: duplicate concurrent requests cannot dispatch twice.
-      this.challenges.delete(envelope.challenge);
-      if (expires === undefined || expires <= Date.now()) throw new Error("Invalid encryption challenge");
+      const { envelope, ticket, request } = this.openEnvelope(body);
       if (
         path === GATEWAY_PUSH_AUTHORIZE_PATH &&
         (ticket.stage !== "device" || request.path !== "/v1/devices/self" || request.method !== "GET")

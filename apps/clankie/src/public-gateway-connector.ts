@@ -9,6 +9,8 @@ import {
   PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
+  PUBLIC_GATEWAY_STREAMS_HEADER,
+  PUBLIC_GATEWAY_STREAMS_MAX,
   PublicGatewayHostIdSchema,
   PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
@@ -16,12 +18,20 @@ import {
   type PublicGatewayDoorwayState,
   type PublicGatewayPairingRouteFrame,
   type PublicGatewayRequestFrame,
+  type PublicGatewayStreamOpenFrame,
   type PublicGatewayTunnelFrame,
   type PublicGatewayRoute,
 } from "@clankie/protocol/public-gateway";
 import type { PublicGatewayPushWakeFrame } from "@clankie/protocol";
 import { WebSocket, type RawData } from "ws";
-import { GatewayEncryptionHost } from "./gateway-encryption.ts";
+import {
+  GATEWAY_STREAM_RECORD_BINARY,
+  GATEWAY_STREAM_RECORD_BYTES_MAX,
+  GATEWAY_STREAM_RECORD_START,
+  GATEWAY_STREAM_RECORD_TEXT,
+} from "@clankie/protocol/gateway-encryption";
+import { VOICE_CALL_PATH } from "@clankie/protocol";
+import { GatewayEncryptionHost, type GatewayStream } from "./gateway-encryption.ts";
 import { validateRuntimeGatewayRoutes } from "./runtime-provider.ts";
 import { pairingOfferWire, type StoredPairingOffer } from "./pairing.ts";
 import type { PairingOfferWire } from "@clankie/protocol";
@@ -90,6 +100,23 @@ export interface PublicGatewayPairingRoute {
   readonly expiresAt: string;
 }
 
+/**
+ * A device's sealed stream (VUH-2761), carried to the relay's call route over
+ * loopback. `up` and `down` are the next record sequence each way.
+ */
+interface LocalStream {
+  readonly id: string;
+  readonly abort: AbortController;
+  stream?: GatewayStream;
+  relay?: WebSocket;
+  started: boolean;
+  up: number;
+  down: number;
+}
+
+/** Sealed records hold the kind byte and the AES-GCM IV and tag beside the payload. */
+const STREAM_PAYLOAD_BYTES_MAX = GATEWAY_STREAM_RECORD_BYTES_MAX - 29;
+
 interface ConnectionWaiter {
   readonly resolve: (socket: WebSocket) => void;
   readonly reject: (error: Error) => void;
@@ -137,6 +164,9 @@ export class PublicGatewayConnector {
   private lastCloseCode: number | undefined;
   private readonly pairingRoutes = new Map<string, PublicGatewayPairingRouteFrame>();
   private readonly inFlight = new Map<string, AbortController>();
+  private readonly streams = new Map<string, LocalStream>();
+  /** A credential refresh that waits for open calls to end; the gateway's own expiry still binds. */
+  private refreshWhenIdle: WebSocket | undefined;
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly pairingRouteWaiters = new Map<string, PairingRouteWaiter>();
   private readonly pushWakeWaiters = new Map<string, PushWakeWaiter>();
@@ -308,6 +338,7 @@ export class PublicGatewayConnector {
     this.tokenRefreshTimer = undefined;
     for (const controller of this.inFlight.values()) controller.abort("gateway connector closed");
     this.inFlight.clear();
+    this.closeAllStreams();
     this.socket?.close(1001, "connector shutting down");
     this.socket = undefined;
     for (const waiter of this.connectionWaiters) {
@@ -360,7 +391,11 @@ export class PublicGatewayConnector {
     }
     if (!this.started || this.socket !== undefined) return;
     const socket = new WebSocket(this.connectUrl, {
-      headers: { authorization: `Bearer ${credential.token}` },
+      headers: {
+        authorization: `Bearer ${credential.token}`,
+        // Only a Mac that can open a device's envelope carries its calls.
+        ...(this.encryption === undefined ? {} : { [PUBLIC_GATEWAY_STREAMS_HEADER]: "1" }),
+      },
       handshakeTimeout: CONNECT_TIMEOUT_MS,
       maxPayload: WEBSOCKET_PAYLOAD_BYTES_MAX,
     });
@@ -391,7 +426,10 @@ export class PublicGatewayConnector {
         );
         this.tokenRefreshTimer = setTimeout(() => {
           this.tokenRefreshTimer = undefined;
-          if (this.socket === socket) socket.close(4000, "refreshing host credential");
+          if (this.socket !== socket) return;
+          // Reconnecting would drop a call on this socket; refresh once the calls end.
+          if (this.streams.size > 0) this.refreshWhenIdle = socket;
+          else socket.close(4000, "refreshing host credential");
         }, refreshInMs);
         this.tokenRefreshTimer.unref();
       }
@@ -416,6 +454,8 @@ export class PublicGatewayConnector {
     this.tokenRefreshTimer = undefined;
     for (const controller of this.inFlight.values()) controller.abort("public gateway disconnected");
     this.inFlight.clear();
+    this.closeAllStreams();
+    this.refreshWhenIdle = undefined;
     this.rejectPairingRouteWaiters("Public gateway disconnected before acknowledging the pairing route");
     this.settleAllPushWakes("unavailable");
     this.scheduleReconnect();
@@ -473,6 +513,19 @@ export class PublicGatewayConnector {
     }
     if (frame.kind === "cancel") {
       this.inFlight.get(frame.requestId)?.abort(frame.reason);
+      return;
+    }
+    if (frame.kind === "stream_open") {
+      this.openStream(socket, frame);
+      return;
+    }
+    if (frame.kind === "stream_data") {
+      this.streamRecord(frame.streamId, Buffer.from(frame.dataBase64, "base64"));
+      return;
+    }
+    if (frame.kind === "stream_close") {
+      // The device hung up or went away; a late close for a finished stream is nothing.
+      this.endStream(frame.streamId, frame.code);
       return;
     }
     if (frame.kind !== "request") {
@@ -597,6 +650,149 @@ export class PublicGatewayConnector {
     }
   }
 
+  private openStream(socket: WebSocket, frame: PublicGatewayStreamOpenFrame): void {
+    const id = frame.streamId;
+    if (
+      this.encryption === undefined ||
+      this.streams.size >= PUBLIC_GATEWAY_STREAMS_MAX ||
+      this.streams.has(id)
+    ) {
+      // 1013: try again later. The device's call ends as unreachable; nothing was opened.
+      // allow-swallowed-rejection -- a send fails only on a closed socket, whose close ends every stream
+      void sendStreamClose(socket, id, this.streams.has(id) ? 1008 : 1013).catch(() => undefined);
+      return;
+    }
+    const local: LocalStream = { id, abort: new AbortController(), started: false, up: 0, down: 0 };
+    this.streams.set(id, local);
+    void this.encryption
+      .openStream(frame.envelope, local.abort.signal, (request) => {
+        const url = new URL(request.url);
+        const forwarded = new Request(new URL(`${url.pathname}${url.search}`, this.controlPlaneUrl), request);
+        forwarded.headers.set(GATEWAY_FORWARDED_HEADER, "1");
+        return this.fetcher(forwarded);
+      })
+      .then(
+        (stream) => {
+          if (this.streams.get(id) !== local) return;
+          local.stream = stream;
+          if (stream.status !== 101 || stream.authorization === undefined) {
+            this.startStream(socket, local, stream.status);
+            this.endStream(id, 1000, true);
+            return;
+          }
+          this.connectRelay(socket, local, stream.authorization);
+        },
+        () => {
+          // Not a device's call envelope, or not this Mac's: refused unopened, with nothing to seal.
+          if (this.streams.get(id) === local) this.endStream(id, 1008, true);
+        },
+      );
+  }
+
+  /** The relay authorizes the call exactly as it would a device on this network. */
+  private connectRelay(socket: WebSocket, local: LocalStream, authorization: string): void {
+    const url = new URL(VOICE_CALL_PATH, this.relayUrl);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const relay = new WebSocket(url, {
+      headers: { authorization, [GATEWAY_FORWARDED_HEADER]: "1" },
+      handshakeTimeout: CONNECT_TIMEOUT_MS,
+      maxPayload: STREAM_PAYLOAD_BYTES_MAX,
+    });
+    local.relay = relay;
+    relay.once("unexpected-response", (_request, response) => {
+      response.resume();
+      this.startStream(socket, local, response.statusCode ?? 502);
+      relay.terminate();
+    });
+    relay.once("open", () => this.startStream(socket, local, 101));
+    relay.on("message", (data, isBinary) => {
+      const payload = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
+      this.sendRecord(
+        socket,
+        local,
+        isBinary ? GATEWAY_STREAM_RECORD_BINARY : GATEWAY_STREAM_RECORD_TEXT,
+        payload,
+      );
+    });
+    relay.once("error", () => undefined);
+    relay.once("close", (code) => {
+      if (this.streams.get(local.id) !== local) return;
+      // A relay that never answered is a call that could not start.
+      if (!local.started) this.startStream(socket, local, 502);
+      this.endStream(
+        local.id,
+        code >= 1000 && code < 5000 && code !== 1005 && code !== 1006 ? code : 1011,
+        true,
+      );
+    });
+  }
+
+  private startStream(socket: WebSocket, local: LocalStream, status: number): void {
+    if (local.started) return;
+    local.started = true;
+    this.sendRecord(socket, local, GATEWAY_STREAM_RECORD_START, Buffer.from(JSON.stringify({ status })));
+  }
+
+  private sendRecord(socket: WebSocket, local: LocalStream, kind: number, payload: Buffer): void {
+    if (local.stream === undefined || this.streams.get(local.id) !== local) return;
+    if (payload.byteLength > STREAM_PAYLOAD_BYTES_MAX) {
+      this.endStream(local.id, 1009, true);
+      return;
+    }
+    const frame: PublicGatewayTunnelFrame = {
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "stream_data",
+      streamId: local.id,
+      dataBase64: local.stream.seal(kind, payload, local.down++).toString("base64"),
+    };
+    // allow-swallowed-rejection -- a send fails only on a closed socket, whose close ends every stream
+    void sendFrame(socket, frame).catch(() => undefined);
+  }
+
+  /** One record from the device: opened in sequence, or the stream ends. */
+  private streamRecord(id: string, record: Buffer): void {
+    const local = this.streams.get(id);
+    if (local === undefined) return;
+    const relay = local.relay;
+    if (local.stream === undefined || relay?.readyState !== WebSocket.OPEN) {
+      // The device speaks only after its start record; anything earlier is out of contract.
+      this.endStream(id, 1008, true);
+      return;
+    }
+    let opened: { readonly kind: number; readonly payload: Buffer };
+    try {
+      opened = local.stream.open(record, local.up);
+    } catch {
+      this.endStream(id, 1008, true);
+      return;
+    }
+    local.up += 1;
+    if (opened.kind === GATEWAY_STREAM_RECORD_BINARY) relay.send(opened.payload, { binary: true });
+    else if (opened.kind === GATEWAY_STREAM_RECORD_TEXT) relay.send(opened.payload.toString("utf8"));
+    else this.endStream(id, 1008, true);
+  }
+
+  private endStream(id: string, code: number, tellGateway = false): void {
+    const local = this.streams.get(id);
+    if (local === undefined) return;
+    this.streams.delete(id);
+    local.abort.abort("stream ended");
+    const relay = local.relay;
+    if (relay?.readyState === WebSocket.OPEN) relay.close(code === 1005 || code === 1006 ? 1000 : code);
+    else relay?.terminate();
+    const socket = this.socket;
+    // allow-swallowed-rejection -- a send fails only on a closed socket, whose close ends every stream
+    if (tellGateway && socket !== undefined) void sendStreamClose(socket, id, code).catch(() => undefined);
+    if (this.streams.size === 0 && this.refreshWhenIdle !== undefined && this.refreshWhenIdle === socket) {
+      this.refreshWhenIdle = undefined;
+      socket.close(4000, "refreshing host credential");
+    }
+  }
+
+  private closeAllStreams(): void {
+    for (const id of Array.from(this.streams.keys())) this.endStream(id, 1001);
+  }
+
   private async replayPairingRoutes(socket: WebSocket): Promise<void> {
     const now = Date.now();
     for (const [offerHash, frame] of this.pairingRoutes) {
@@ -692,6 +888,15 @@ function sendFrame(socket: WebSocket, frame: PublicGatewayTunnelFrame): Promise<
     return Promise.reject(new Error("Public gateway is disconnected"));
   return new Promise<void>((resolve, reject) => {
     socket.send(JSON.stringify(frame), (error) => (error ? reject(error) : resolve()));
+  });
+}
+
+function sendStreamClose(socket: WebSocket, streamId: string, code: number): Promise<void> {
+  return sendFrame(socket, {
+    schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+    kind: "stream_close",
+    streamId,
+    code,
   });
 }
 
