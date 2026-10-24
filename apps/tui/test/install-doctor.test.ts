@@ -124,7 +124,7 @@ it("doctor reads the service's room voice and names a call the provider hung up 
     activeCaptureCount: 0,
     pipelines: {
       stayId: "stay",
-      ended: true,
+      endedAt: "2026-10-23T18:08:28.932Z",
       hearing: {
         state: "broken",
         losses: 7,
@@ -624,12 +624,12 @@ describe("install doctor", () => {
           ...voice,
           pipelines: {
             stayId: "stay",
-            ended: true,
+            endedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
             hearing: {
               state: "broken" as const,
               losses: 7,
               lastLoss: {
-                at: "2026-10-23T18:08:28.441Z",
+                at: new Date(Date.now() - 6 * 60_000).toISOString(),
                 code: "voice_listener_lost",
                 closeReason: "socket" as const,
                 closeCode: 1008,
@@ -641,15 +641,25 @@ describe("install doctor", () => {
         },
       };
       expect(formatDoctorSummary(deaf)).toBe(
-        "Clankie's last Discord call could not hear: the voice provider's session was lost — run `clankie discord call`.",
+        "Clankie's last Discord call could not hear: the voice provider ended its session with insufficient_quota — run `clankie discord call`.",
       );
       expect(formatDoctorReport(deaf)).toContain(
         "Discord voice · Last call: hearing broken (7 lost, last voice_listener_lost: socket, close 1008, insufficient_quota) · answering working",
       );
-      const heard = {
-        ...deaf.discordVoice.pipelines,
-        hearing: { ...deaf.discordVoice.pipelines.hearing, state: "working" as const },
+      const pipelines = deaf.discordVoice.pipelines;
+      const { endedAt: _ended, ...live } = pipelines;
+      const mute = { ...live, answering: { state: "broken" as const, losses: 1 } };
+      expect(formatDoctorSummary({ ...healthy, discordVoice: { ...voice, pipelines: mute } })).toBe(
+        "Clankie's Discord call could not hear or answer: the voice provider ended its session with insufficient_quota — run `clankie discord call`.",
+      );
+      // A bad call that ended hours ago stays on the detail line instead of heading the card.
+      const old = {
+        ...deaf,
+        discordVoice: { ...voice, pipelines: { ...pipelines, endedAt: "2026-10-23T18:08:28.932Z" } },
       };
+      expect(formatDoctorSummary(old)).toBe("ready");
+      expect(formatDoctorReport(old)).toContain("Discord voice · Last call: hearing broken (7 lost");
+      const heard = { ...pipelines, hearing: { ...pipelines.hearing, state: "working" as const } };
       expect(formatDoctorSummary({ ...healthy, discordVoice: { ...voice, pipelines: heard } })).toBe("ready");
 
       const probed: string[] = [];

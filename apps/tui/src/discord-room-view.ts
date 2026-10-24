@@ -27,5 +27,5 @@ export function formatVoiceStayPipelines(stay: DiscordVoiceStayPipelines): strin
     ].filter((value) => value !== undefined);
     return `${name} ${pipeline.state}${loss === undefined ? "" : ` (${pipeline.losses} lost, last ${loss.code}${how.length ? `: ${how.join(", ")}` : ""})`}`;
   };
-  return `${stay.ended ? "Last call" : "This call"}: ${leg("hearing", stay.hearing)} · ${leg("answering", stay.answering)}`;
+  return `${stay.endedAt === undefined ? "This call" : "Last call"}: ${leg("hearing", stay.hearing)} · ${leg("answering", stay.answering)}`;
 }

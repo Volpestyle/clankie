@@ -177,7 +177,7 @@ it("a call whose provider hung up says he could not hear or answer, and how the 
     await record("deaf", "left", { reason: "discord_gateway_left" });
     expect((await control.status()).pipelines).toEqual({
       stayId: "deaf",
-      ended: true,
+      endedAt: expect.any(String),
       hearing: {
         state: "broken",
         losses: 2,
@@ -202,11 +202,10 @@ it("a call whose provider hung up says he could not hear or answer, and how the 
       },
     });
 
-    // A later stay that lost its listener once and recovered works; the old stay no longer counts.
-    await record("recovered", "joined", { daveProtocolVersion: 1 });
-    await lost("recovered", "transcription_session", { closeReason: "lifetime" });
-    await lost("deaf", "transcription_session", { closeReason: "socket" });
-    await record("recovered", "transcription", {
+    // A later stay supersedes the old one. Scheduled lifetime rotations reconnect on their own:
+    // they count, but a quiet room after one stays healthy (Sage, VUH-2728).
+    await record("rotating", "joined", { daveProtocolVersion: 1 });
+    await record("rotating", "transcription", {
       userId: "100000000000000003",
       deliveryId: "u2",
       outcome: "accepted",
@@ -214,18 +213,22 @@ it("a call whose provider hung up says he could not hear or answer, and how the 
       latencyMs: 900,
       addressed: true,
     });
-    expect((await control.status()).pipelines).toMatchObject({
-      stayId: "recovered",
-      ended: false,
+    await lost("rotating", "transcription_session", { closeReason: "lifetime" });
+    await lost("rotating", "conversation_session", { closeReason: "lifetime", closeCode: 1000 });
+    await lost("deaf", "transcription_session", { closeReason: "socket" });
+    const rotated = (await control.status()).pipelines;
+    expect(rotated).toMatchObject({
+      stayId: "rotating",
       hearing: {
         state: "working",
         losses: 1,
         lastLoss: { code: "voice_listener_lost", closeReason: "lifetime" },
       },
-      answering: { state: "unproven", losses: 0 },
+      answering: { state: "unproven", losses: 1, lastLoss: { closeReason: "lifetime", closeCode: 1000 } },
     });
-    await record("recovered", "model_response", { deliveryId: "u2", phase: "completed", outcome: "audio" });
-    expect((await control.status()).pipelines?.answering).toEqual({ state: "working", losses: 0 });
+    expect(rotated?.endedAt).toBeUndefined();
+    await record("rotating", "model_response", { deliveryId: "u2", phase: "completed", outcome: "audio" });
+    expect((await control.status()).pipelines?.answering.state).toBe("working");
   } finally {
     leases.close();
     rmSync(root, { recursive: true, force: true });

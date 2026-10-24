@@ -149,7 +149,8 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   `joined` proves only that the sockets opened, not that the provider
   accepted the session. `clankie discord call` projects the latest stay as
   `pipelines.hearing` / `pipelines.answering` (`broken` = lost since that leg
-  last worked), and `clankie doctor` names a call that could not hear or answer.
+  last worked; a `lifetime` rotation never breaks it), and `clankie doctor`
+  names a live or just-ended call that could not hear or answer.
 
 - **An ElevenLabs byte-limit failure can follow audible speech.**
   `discord.voice.failed` with code

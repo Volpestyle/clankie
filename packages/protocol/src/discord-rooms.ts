@@ -112,6 +112,8 @@ export const DiscordRoomVoiceCommandSchema = z
  * One leg of a voice stay, read from its content-free receipts (VUH-2728).
  * `broken` means the provider's session was lost after the leg last worked:
  * hearing has had no transcription, answering no completed response, since.
+ * A scheduled `lifetime` rotation reconnects on its own: it counts as a loss
+ * but never breaks the leg.
  */
 export const DiscordVoicePipelineSchema = z
   .object({
@@ -133,7 +135,8 @@ export type DiscordVoicePipeline = z.infer<typeof DiscordVoicePipelineSchema>;
 export const DiscordVoiceStayPipelinesSchema = z
   .object({
     stayId: Id,
-    ended: z.boolean(),
+    /** When the stay left; absent while he is still in the call. */
+    endedAt: z.string().datetime().optional(),
     hearing: DiscordVoicePipelineSchema,
     answering: DiscordVoicePipelineSchema,
   })

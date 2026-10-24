@@ -147,14 +147,14 @@ export async function readVoiceStayPipelines(path: string): Promise<DiscordVoice
   if (stayId === undefined) return undefined;
   const hearing = new StayPipeline();
   const answering = new StayPipeline();
-  let ended = false;
+  let endedAt: string | undefined;
   for (const line of lines.slice(start)) {
     const receipt = parseVoiceEvidenceLine(line);
     if (receipt === undefined || receipt.evidence.stayId !== stayId) continue;
     const { evidence, occurredAt } = receipt;
     if (evidence.type === "transcription") hearing.worked();
     else if (evidence.type === "model_response" && evidence.phase === "completed") answering.worked();
-    else if (evidence.type === "left") ended = true;
+    else if (evidence.type === "left") endedAt ??= occurredAt;
     else if (evidence.type === "failed") {
       const { code, closeReason, closeCode, providerCode } = evidence;
       const loss = {
@@ -168,7 +168,12 @@ export async function readVoiceStayPipelines(path: string): Promise<DiscordVoice
       else if (evidence.stage === "conversation_session") answering.lost(loss);
     }
   }
-  return { stayId, ended, hearing: hearing.read(), answering: answering.read() };
+  return {
+    stayId,
+    ...(endedAt === undefined ? {} : { endedAt }),
+    hearing: hearing.read(),
+    answering: answering.read(),
+  };
 }
 
 class StayPipeline {
@@ -179,7 +184,8 @@ class StayPipeline {
   lost(loss: NonNullable<DiscordVoicePipeline["lastLoss"]>): void {
     this.losses += 1;
     this.lastLoss = loss;
-    this.broken = true;
+    // A scheduled rotation reconnects on its own; a quiet room after it is still healthy.
+    if (loss.closeReason !== "lifetime") this.broken = true;
   }
   worked(): void {
     this.proven = true;

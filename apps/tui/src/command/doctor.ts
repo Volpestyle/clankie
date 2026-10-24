@@ -1,6 +1,7 @@
 import {
   DiscordRoomVoiceStatusSchema,
   DiscordRoomsSnapshotSchema,
+  type DiscordVoiceStayPipelines,
   DISCORD_ROOM_VOICE_PATH,
   DISCORD_ROOMS_PATH,
   formatAutonomyDrift,
@@ -57,6 +58,23 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
   return report.autonomy?.drift === undefined
     ? summary
     : `${summary}\n${formatAutonomyDrift(report.autonomy.drift)}`;
+}
+
+/** An ended call stays on the card's detail line; only a live or just-ended one is the next step. */
+const RECENT_VOICE_CALL_MS = 60 * 60_000;
+
+function brokenVoiceCall(stay: DiscordVoiceStayPipelines | undefined): string | undefined {
+  if (stay === undefined) return undefined;
+  if (stay.endedAt !== undefined && Date.now() - Date.parse(stay.endedAt) > RECENT_VOICE_CALL_MS)
+    return undefined;
+  const legs = [
+    ...(stay.hearing.state === "broken" ? [{ verb: "hear", pipeline: stay.hearing }] : []),
+    ...(stay.answering.state === "broken" ? [{ verb: "answer", pipeline: stay.answering }] : []),
+  ];
+  if (legs.length === 0) return undefined;
+  const providerCode = legs.find((leg) => leg.pipeline.lastLoss?.providerCode)?.pipeline.lastLoss
+    ?.providerCode;
+  return `${stay.endedAt === undefined ? "Clankie's Discord call" : "Clankie's last Discord call"} could not ${legs.map((leg) => leg.verb).join(" or ")}: ${providerCode === undefined ? "the voice provider's session was lost" : `the voice provider ended its session with ${providerCode}`} — run \`clankie discord call\`.`;
 }
 
 function doctorSummary(report: InstallDoctorReport): string {
@@ -129,9 +147,8 @@ function doctorSummary(report: InstallDoctorReport): string {
     )
   )
     return "Discord delivery recovery status unknown — run `clankie discord rooms`.";
-  const stay = report.discordVoice?.pipelines;
-  if (stay?.hearing.state === "broken" || stay?.answering.state === "broken")
-    return `${stay.ended ? "Clankie's last Discord call" : "Clankie's Discord call"} ${stay.hearing.state === "broken" ? (stay.answering.state === "broken" ? "could not hear or answer" : "could not hear") : "could not answer"}: the voice provider's session was lost — run \`clankie discord call\`.`;
+  const brokenCall = brokenVoiceCall(report.discordVoice?.pipelines);
+  if (brokenCall) return brokenCall;
   const remediation = report.remediations[0];
   const sourceSetup = report.harnessBridges.profiles.codex.sourceSetup;
   if (sourceSetup?.state === "source-manager-required") return `${sourceSetup.detail}. ${sourceSetup.fix}`;
