@@ -237,6 +237,9 @@ system/config text also use native file forms;
 the channel carries resumed briefs and follow-ups. A stdout ACK alone cannot
 confirm prompt acceptance: the exact native transcript must contain the complete
 decoded file attachment (or whole channel brief for a resumed session). Missing evidence stays uncertain and must not trigger a replacement send.
+A follow-up that reaches a working Claude whose session already took a channel
+event reports `queued`: Claude records it only at its next pause between steps
+(VUH-2779).
 The observed session retains its hiring conversation when startup fails, with a
 persisted roster failure summary and a wake to that conversation.
 

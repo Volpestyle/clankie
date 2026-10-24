@@ -281,3 +281,30 @@ dropped. After that window, targeted reads omit the ID and exact-ID status
 reads as unknown or `uncertain` (from the admission fence), never `not_sent`. Worker retries happen
 within the admission deadline, far inside the window, so acceptance dedupe is
 unchanged in practice. Metadata is now written as compact JSON.
+
+**Amendment (VUH-2779, 2026-10-24): delivery to linked-machine seats.** Two
+rules assumed every check was local and every receipt prompt.
+
+- _Claude mid-turn arrivals are queued, not uncertain._ Claude writes a channel
+  event that arrives during a turn to its transcript only when it absorbs it at
+  the next tool boundary. On the PC, all four uncertain lead → Claude receipts
+  were acknowledged by the bridge in under a second and recorded 45–77 s later,
+  past the 15 s receipt window. A follow-up with an exact bridge ACK, to a seat
+  still working or blocked, whose session has already taken a channel event (in
+  its transcript, or confirmed by this service), now reports `delivered` /
+  `queued` with a detail, which leads read as `queued_until_turn_end`. A seat that
+  is idle, or a session with no proven channel receiver (VUH-2499's startup
+  loss), still needs the exact transcript entry. A failed transcript read is a
+  poll gap, and one that fails before dispatch is a definite not-sent.
+- _The final authority bound covers an in-memory recheck._ VUH-1563 bounded
+  the caller's authority check to 250 ms immediately before a native Codex
+  write, so late approval cannot authorize it. A peer check reads the PC several
+  times (sender, recipient and process proof, each an SSH round trip), so every
+  peer message to a PC Codex seat timed out, and a lead's settings read
+  occasionally did too under load. The full check still runs before the final
+  observation; the bounded gate after it now runs the checks' synchronous
+  recheck (link liveness, fleet revision, settings generation) when every check
+  provides one, and otherwise reruns the full check under the same bound. A
+  wrapper that adds its own check is a new function, so it drops the recheck
+  and falls back to the full check. The lead approved this split over a longer
+  remote bound.

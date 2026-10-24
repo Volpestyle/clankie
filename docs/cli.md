@@ -6845,7 +6845,13 @@ in that exact session’s active native transcript; a file-reference prompt alon
 partial attachment or changed contents cannot confirm it. Resumed briefs require
 the complete channel prompt. Slow or unavailable
 transcripts leave delivery uncertain, retaining the original receipt: inspection
-can reconcile a late prompt without sending it again.
+can reconcile a late prompt without sending it again. Claude records a channel
+follow-up that arrives mid-turn only when it absorbs it at its next pause
+between steps, often minutes later. A follow-up the bridge acknowledged exactly,
+to a seat still working (or blocked) whose session already took a channel event,
+therefore reports `delivered`, `state: queued` and `status: queued_until_turn_end`
+instead of uncertain; it is not proof Claude read it. An idle seat, or a session
+with no channel event yet, still needs the transcript entry (VUH-2779).
 
 The hire records its observed session and hiring conversation before waiting
 for channel readiness or the first-prompt receipt. A failed startup retains that
@@ -6877,8 +6883,12 @@ observations prove that its home is the SSH account's canonical default `~/.code
 and the CLI inherits that same home. The native projection must positively prove
 a standalone TUI; an absent or rejected remote endpoint is insufficient.
 The pane/session and home proof are repeated after preparation. Caller authority
-is checked again after the final observation, with a 250 ms deadline immediately
-before sending. A timeout reports undelivered and never sends on late approval. Private, changed
+is checked in full before the final observation and again after it, with a
+250 ms deadline immediately before sending. That final gate runs the caller's
+synchronous in-memory recheck (link, fleet revision and settings generation)
+when every check provides one, because a full check that reads a linked machine
+takes seconds; otherwise it reruns the full check. A timeout reports undelivered
+and never sends on late approval (VUH-2779). Private, changed
 or unproved homes refuse the fallback; a private native receipt cannot authorize
 a second send through CLI.
 Clankie checks the current pane/session, native process lifetimes and ancestry,
