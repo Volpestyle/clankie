@@ -300,9 +300,14 @@ clankie heavy --server -- node --import ./scripts/dependency-types.mjs \
   apps/clankie/scripts/lanes-eval.ts .local/vuh-2796/baseline --model openai/gpt-6.1-sol --max-turns 88
 ```
 
+`--room-loop` runs the [ADR 0291](adr/0291-a-room-thinks-in-one-loop.md) arm:
+the private service sets `CLANKIE_ROOM_LOOP=all`, and with `--smoke` it also
+checks that two speakers in one social room take turns in one loop. Compare
+arms on the same model, effort and repetitions.
+
 Replies, tools and usage come only from records bound to their own turn: the
-console run's span in its journal, and metrics rows for the exact run or
-handoff session. The smoke run checks this itself. Its scripted model names the
+console run's span in its journal, and metrics rows for the exact run and
+session. The smoke run checks this itself. Its scripted model names the
 case it heard and makes one real `memory` call for `remember` in owner lanes, and
 the report's `isolation` list must stay empty. Each smoke repetition also
 resubmits a settled delivery, which must answer with a synchronous 200, and a

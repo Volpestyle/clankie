@@ -173,3 +173,23 @@ Sources: [Claude Code MCP](https://code.claude.com/docs/en/mcp.md),
 [managed MCP](https://code.claude.com/docs/en/managed-mcp.md),
 [settings reference](https://code.claude.com/docs/en/settings-reference.md),
 [CLI reference](https://code.claude.com/docs/en/cli-reference.md).
+
+### Increment 1 smoke (2026-10-24)
+
+ADR 0291 decisions 1 and 3 for social rooms, behind `CLANKIE_ROOM_LOOP`
+(off by default). Scripted local model, two repetitions per arm:
+
+| Arm                | Turns settled | `isolation` | Social sessions                                                       |
+| ------------------ | ------------- | ----------- | --------------------------------------------------------------------- |
+| ADR 0229 (default) | 88 of 88      | empty       | one `:handoff:` session per message                                   |
+| `--room-loop`      | 88 of 88      | empty       | `:loop:` session per room and grant; continuity's two turns share one |
+
+The `--room-loop` smoke also sends two speakers to one social room at once.
+Both settle in one loop, and the second is accepted after the first completes.
+With serialization removed, the same check fails: only one turn settles as its
+own. The existing room-handoff, burst, hosted, native and room-skill
+integration suites pass with the switch off (23 tests, 2 skipped).
+
+Not shown yet: anything about quality or latency. That needs the real-model
+campaign on both arms, still waiting on James's spend decision, and the fork
+tool for long work.

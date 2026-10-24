@@ -1374,6 +1374,16 @@ URLs. Production stacks may use custom state directories and canonical ports. Ma
 configured scratch stacks must set the same peer variables as the preset;
 changing just `PORT` is insufficient.
 
+#### Room loop rollout (ADR 0291)
+
+A service host may route Pi social text rooms into one durable loop per room and
+grant with `CLANKIE_ROOM_LOOP=all` (or comma-separated `guildId:channelId`
+targets). It is off when absent and grants no authority. Machine turns,
+owner-audience rooms, voice and the linked main channel are unchanged. Turns of
+one loop run one at a time. Keep it on a scratch service until the
+[ADR 0291](adr/0291-a-room-thinks-in-one-loop.md) eval passes: the lanes eval's
+`--room-loop` flag sets it for its private service.
+
 #### Durable Pi room prototype (VUH-2574)
 
 A service host may opt one text-room target into restart recovery with

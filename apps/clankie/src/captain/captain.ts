@@ -1,5 +1,6 @@
 import { discordGuildSettings } from "@clankie/protocol";
 import { listedOnLane } from "./mcp-tool-surface.ts";
+import { RoomLoops } from "./room-loops.ts";
 import { createDurableSessions } from "./durable-sessions.ts";
 import { DurablePiRoom, PiTurnPausedError } from "./pi-turn-journal.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
@@ -2003,6 +2004,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     recoveryContext: (id) => conversations.compactionRecoveryContext(id),
   });
   const durablePiRoom = new DurablePiRoom(join(options.stateDir, "durable-pi-room"), options.durablePiRoom);
+  const roomLoops = new RoomLoops(options.roomLoop);
 
   function seatEventKind(
     conversationId: string,
@@ -6633,22 +6635,35 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     });
                   return result;
                 }
+                // ADR 0291: a social text room answers in its durable loop for this exact grant.
+                // Machine turns keep their own sessions; in a mixed room they stay one-shot (ADR 0251).
+                const loopKey =
+                  lane === "discord_presence" &&
+                  plan.kind === "social" &&
+                  roomLoops.accepts(`${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`)
+                    ? roomLoops.key(plan.sessionKey, key)
+                    : undefined;
+                const sessionKey = loopKey ?? `${plan.sessionKey}:handoff:${child.conversationId}`;
                 if (burst !== undefined) {
                   burst.handoff.grant = key;
-                  burst.handoff.sessionKey = `${plan.sessionKey}:handoff:${child.conversationId}`;
+                  burst.handoff.sessionKey = sessionKey;
                 }
                 const heard = await normalizeDiscordTurn(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
-                  carriesHistory: false,
-                  ...(access.privateContext
-                    ? { roomHistory: conversations.roomHandoffContext(parentId, request.deliveryId) }
-                    : {}),
+                  // A warm loop already holds the room; a cold one reads the bounded backlog once.
+                  carriesHistory: loopKey !== undefined && sessions.has(loopKey),
+                  ...(loopKey !== undefined
+                    ? { shownContextVisuals: roomLoops.shownVisuals(loopKey) }
+                    : access.privateContext
+                      ? { roomHistory: conversations.roomHandoffContext(parentId, request.deliveryId) }
+                      : {}),
                 });
                 const normalized: NormalizedDiscordTurn = {
                   ...heard,
-                  sessionKey: `${plan.sessionKey}:handoff:${child.conversationId}`,
-                  durable: false,
+                  sessionKey,
+                  durable: loopKey !== undefined,
                   handoffConversationId: child.conversationId,
+                  ...(loopKey === undefined ? {} : { loop: true as const }),
                   readAuthoritySettings,
                   ...(burst === undefined ? {} : { liveRun: burst.liveRun }),
                 };
@@ -6862,29 +6877,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     access.skillGrant !== undefined ||
                     (nativeRouteMode !== "owner" &&
                       (conversations.nativeSource(parentId)?.agent ?? headSeat?.harness) === "codex");
-                  if (preferPi)
+                  if (loopKey !== undefined)
+                    conversations.updateRoomHandoff(child.conversationId, {
+                      host: "pi",
+                      doing: "Answering in the room's loop",
+                    });
+                  else if (preferPi)
                     conversations.updateRoomHandoff(child.conversationId, {
                       host: "pi",
                       doing: "Working in Pi under the original room grant; native Codex is owner-only",
                     });
-                  const outcome = await dispatchDiscordTurn(
-                    {
-                      ...normalized,
-                      access,
-                      prompt: `${
-                        access.privateContext
-                          ? "This audience is owner-only."
-                          : "This room may contain non-owners. Keep fleet, work, machine and private owner details confidential even when an owner asks. Only household details explicitly shared through the granted skill belong here."
-                      }\n\n${normalized.prompt}`,
-                    },
-                    request.deliveryId,
-                    toolProgressEnabled,
-                    origin,
-                    plan.systemTools,
-                    guard,
-                    "escalation",
-                    preferPi,
-                  );
+                  const dispatch = (): Promise<CaptainChannelTurnResult> =>
+                    dispatchDiscordTurn(
+                      {
+                        ...normalized,
+                        access: loopKey === undefined ? access : roomLoops.access(loopKey, access),
+                        prompt: `${
+                          access.privateContext
+                            ? "This audience is owner-only."
+                            : "This room may contain non-owners. Keep fleet, work, machine and private owner details confidential even when an owner asks. Only household details explicitly shared through the granted skill belong here."
+                        }\n\n${normalized.prompt}`,
+                      },
+                      request.deliveryId,
+                      toolProgressEnabled,
+                      origin,
+                      plan.systemTools,
+                      guard,
+                      "escalation",
+                      preferPi,
+                    );
+                  const outcome = await (loopKey === undefined
+                    ? dispatch()
+                    : roomLoops.serialize(loopKey, dispatch));
                   await guard();
                   return outcome;
                 } finally {

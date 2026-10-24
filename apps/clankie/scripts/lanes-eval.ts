@@ -40,6 +40,8 @@ const { values, positionals } = parseArgs({
     lanes: { type: "string" },
     cases: { type: "string" },
     smoke: { type: "boolean", default: false },
+    // ADR 0291 arm: Pi text rooms answer in one durable loop per grant.
+    "room-loop": { type: "boolean", default: false },
     // Smoke-only regression: proves the copied credential is removed when setup fails.
     "fail-after-credential": { type: "boolean", default: false },
     "dry-run": { type: "boolean", default: false },
@@ -98,7 +100,9 @@ async function fakeModel(): Promise<{ server: Server; baseURL: string; offered: 
   const server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk: Buffer) => (body += chunk));
-    request.on("end", () => {
+    request.on("end", async () => {
+      // A fixed think time, so two runs sharing one session would visibly overlap.
+      await delay(150);
       const parsed = JSON.parse(body || "{}") as {
         messages?: { role?: string; content?: unknown }[];
         tools?: { function?: { name?: string } }[];
@@ -231,6 +235,7 @@ async function campaign(rep: number) {
       NODE_ENV: "test",
       VITEST: "true",
       CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(dir, "fleet-resources"),
+      ...(values["room-loop"] ? { CLANKIE_ROOM_LOOP: "all" } : {}),
     };
     // Seeded into the private store before start: the episode route only takes host-admitted sources.
     const episodes = join(preset.CLANKIE_STATE!, "memory/captain-episodes");
@@ -366,8 +371,10 @@ async function campaign(rep: number) {
       const bridge = lane === "voice" ? voiceBridge : textBridge;
       submitted.push({ request, bridge });
       const { result } = await submit(request, bridge, `${lane}/${c.id}`);
-      // The turn's metrics row carries the exact session the result names; nothing else is this turn's.
+      // The turn's metrics row carries the exact session and run the result names. A room
+      // loop (ADR 0291) holds several turns in one session, so the run decides.
       const session = result.captainSessionId;
+      const runId = result.turnId;
       return {
         state: result.state,
         response:
@@ -377,7 +384,8 @@ async function campaign(rep: number) {
               ? `[failed: ${result.code}]`
               : "",
         messageId: deliveryId,
-        owns: (row: SettledRow) => session !== undefined && row.conversationId === session,
+        owns: (row: SettledRow) =>
+          session !== undefined && row.conversationId === session && row.runId === runId,
       };
     }
 
@@ -534,6 +542,46 @@ async function campaign(rep: number) {
         submit(first.request, { authorization: "Bearer not-a-bridge" }, "refused"),
         (error: Error) => error.message.startsWith("refused: 401 "),
       );
+      if (values["room-loop"]) {
+        // ADR 0291 regression: two speakers in one social room take turns in one loop.
+        const delivery = (suffix: string, actorId: string): DiscordPresenceChannelTurnRequest => {
+          const deliveryId = `${rep}9${suffix}${Date.now()}`;
+          return {
+            ...first.request,
+            deliveryId,
+            identity: {
+              ...first.request.identity,
+              presenceSessionId: `discord:${GUILD}:99999500000`,
+              correlationId: deliveryId,
+            },
+            trigger: {
+              kind: "mention",
+              id: deliveryId,
+              guildId: GUILD,
+              channelId: "99999500000",
+              messageId: deliveryId,
+              actorId,
+              body: CASES[0]!.prompt,
+              attachments: [],
+            },
+            contextMessages: [],
+          };
+        };
+        const [a, b] = await Promise.all([
+          submit(delivery("1", GUEST), textBridge, "loop-a"),
+          submit(delivery("2", "99999000011"), textBridge, "loop-b"),
+        ]);
+        const rows = (await readFile(settled, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as SettledRow & { acceptedAt: string; completedAt?: string })
+          .filter((row) => row.runId === a.result.turnId || row.runId === b.result.turnId)
+          .sort((x, y) => x.acceptedAt.localeCompare(y.acceptedAt));
+        assert.equal(rows.length, 2, "both speakers' turns settled");
+        assert.equal(rows[0]!.conversationId, rows[1]!.conversationId, "one loop for the room's grant");
+        assert.match(rows[0]!.conversationId, /:loop:/u);
+        assert(rows[0]!.completedAt! <= rows[1]!.acceptedAt, "the second speaker waited for the first turn");
+      }
     }
   } finally {
     if (child && child.exitCode === null) {
@@ -605,6 +653,7 @@ const report = {
   suite: "vuh-2796-lanes",
   model,
   effort: values.effort ?? null,
+  roomLoop: values["room-loop"],
   smoke: values.smoke,
   revision,
   reps,

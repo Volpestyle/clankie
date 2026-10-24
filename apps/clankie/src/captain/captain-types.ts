@@ -29,6 +29,8 @@ import { type TurnContext } from "./tools.ts";
 export interface CaptainOptions {
   /** Prototype only: one guild:channel (or dm:channel) text lane; absent disables recovery. */
   readonly durablePiRoom?: string;
+  /** Rollout only (ADR 0291): `all` or comma-separated guild:channel targets answer in one loop per grant. */
+  readonly roomLoop?: string;
   readonly builtInTracker?: import("@clankie/work-items").TrackerToolBackend;
   /** Current owner-selected machine ceiling, separate from Discord actor authority. */
   readonly requireMachineAccess?: (

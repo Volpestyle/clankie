@@ -1,8 +1,12 @@
 # ADR 0291: A room thinks in one loop
 
-Status: proposed (VUH-2796, 2026-10-24). Draft for James's approval. Nothing is
-built. It would amend [ADR 0229](0229-room-handoffs-are-visible-parallel-threads.md)
-for Pi text rooms only.
+Status: proposed (VUH-2796, 2026-10-24). The lead approved building it, under
+James's go-ahead to adjust Clankie to the guidance. It would amend
+[ADR 0229](0229-room-handoffs-are-visible-parallel-threads.md) for Pi text rooms
+only. Increment 1 (decisions 1 and 3, social rooms) is built behind the rollout
+switch `CLANKIE_ROOM_LOOP`, which is off by default. The fork tool (decision 2)
+and owner-only system lanes are not built yet. Acceptance still waits for the
+eval below.
 
 ## Context
 
@@ -86,6 +90,30 @@ where the fold should differ. Compare room latency from `discord.text.reply`
 receipts and context tokens per turn from `turn-settled.jsonl`. Keep the fold
 only if the eval holds and p50 latency drops without a worse p95. Otherwise
 record why not on VUH-2796.
+
+## Increment 1 (built, off by default)
+
+`CLANKIE_ROOM_LOOP=all`, or comma-separated `guildId:channelId` targets, routes
+a Pi text handoff whose plan is `social` into
+[`RoomLoops`](../../apps/clankie/src/captain/room-loops.ts):
+
+- The durable session key is the room's social session plus a hash of the
+  exact grant fingerprint. A changed grant starts another loop.
+- The handoff child record, admission queue, burst steering and result path
+  are unchanged. The child shows "Answering in the room's loop", and the loop's
+  transcript projects into the room conversation.
+- Turns of one loop run one at a time. The session is built once, and a
+  per-turn access holder gives room-skill tools the running turn's actor and
+  grant.
+- Machine turns, owner-audience rooms, voice, the linked main channel and
+  native heads keep their ADR 0229 paths.
+
+Proof so far uses the [lanes eval](../evals.md#the-lanes-suite) `--smoke
+--room-loop` against the real service. Social turns settle in `:loop:`
+sessions. Two speakers sent to one room at once get two turns in one loop, the
+second accepted after the first completed. That check fails when serialization
+is removed. Every turn's reply, tools and usage stay its own. No real model has
+run it.
 
 ## Consequences
 

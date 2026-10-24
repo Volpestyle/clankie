@@ -1,6 +1,7 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import type { LaneSession } from "./captain-types.ts";
+import type { DiscordSessionAccess } from "./room-skill-tools.ts";
 import {
   ConversationRunStalledError,
   type ConversationServiceRun,
@@ -20,6 +21,7 @@ export function createDurableSessions(ctx: {
     sideConversation?: boolean,
     conversationId?: string,
     run?: ConversationServiceRun,
+    access?: DiscordSessionAccess,
   ) => Promise<LaneSession>;
   readonly recoveryContext: (conversationId: string) => string;
 }) {
@@ -36,6 +38,8 @@ export function createDurableSessions(ctx: {
     conversationId = key.startsWith("operator:") || key.startsWith("ask-social:")
       ? key.slice(key.indexOf(":") + 1)
       : undefined,
+    /** A Discord room loop's grant, fixed by its key (ADR 0291). */
+    access?: DiscordSessionAccess,
   ): Promise<LaneSession> {
     run?.signal.throwIfAborted();
     if (fresh) {
@@ -79,6 +83,7 @@ export function createDurableSessions(ctx: {
           sideConversation,
           key.startsWith("operator:") ? key.slice("operator:".length) : undefined,
           run,
+          access,
         );
       })();
       ctx.sessions.set(key, created);

@@ -1655,6 +1655,7 @@ const captain = createCaptain(
     ...(process.env.CLANKIE_DURABLE_PI_ROOM === undefined
       ? {}
       : { durablePiRoom: process.env.CLANKIE_DURABLE_PI_ROOM }),
+    ...(process.env.CLANKIE_ROOM_LOOP === undefined ? {} : { roomLoop: process.env.CLANKIE_ROOM_LOOP }),
     settings: settingsStore,
     joinedMachines: machineJoins,
     reportRoundMs: REPORT_ROUND_MS,

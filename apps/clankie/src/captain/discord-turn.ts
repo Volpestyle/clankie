@@ -28,6 +28,11 @@ export interface NormalizedDiscordTurn {
   readonly durable: boolean;
   /** Execution transcript identity only; room authority always remains canonical. */
   readonly handoffConversationId?: string;
+  /**
+   * ADR 0291: this handoff answers as a turn of its room's durable loop for one
+   * exact grant. The loop's history, not the child record, carries the room.
+   */
+  readonly loop?: true;
   /** Host-only proof, retained solely for this delivery; never persisted as authority. */
   readonly readAuthoritySettings?: () => Promise<Parameters<typeof planDiscordTurnSession>[0]["settings"]>;
   /**

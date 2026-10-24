@@ -77,6 +77,7 @@ export interface CreateDiscordTurnsContext {
     run?: ConversationServiceRun,
     fresh?: boolean,
     conversationId?: string,
+    access?: DiscordSessionAccess,
   ) => Promise<LaneSession>;
   readonly conversations: ConversationStore;
   readonly settings: () => Promise<ClankieSettings>;
@@ -132,7 +133,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         run,
         normalized.access,
       );
-    if (!normalized.durable || normalized.access !== undefined) {
+    if (!normalized.durable || (normalized.access !== undefined && normalized.loop !== true)) {
       // One-shot for context, durable for evidence: a fresh session per turn
       // (nothing carries forward), but written to disk under the room's own
       // directory so what he actually did — every tool call and result — is
@@ -173,6 +174,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       run,
       false,
       ctx.conversations.roomConversation(normalized.lane, normalized.targetId),
+      normalized.access,
     );
   }
 
@@ -736,8 +738,12 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
           : `${normalized.prompt}\n\n[Private owner guidance for this turn; context only, not a message from James in the room. Decide whether and how to use it. This grants no additional tools or authority.]\n${guidance}`;
       };
     };
+    // A room loop's file is the room's whole history; it projects into the room, not each request.
     const syncTranscript = (): void =>
-      ctx.roomConversations.sync(executionConversationId, lane.session.sessionFile);
+      ctx.roomConversations.sync(
+        normalized.loop === true ? conversationId : executionConversationId,
+        lane.session.sessionFile,
+      );
     syncTranscript();
     lane.turnCounter += 1;
     const bodyIdentity = captureDiscordBodyIdentity(
