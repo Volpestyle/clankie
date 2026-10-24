@@ -143,6 +143,7 @@ async function fixture() {
   };
   // The owner's machine access, read from settings; its fence rechecks without I/O.
   let accessGeneration = 0;
+  let duringAccessRead: (() => void) | undefined;
   const store = new HerdrWatchStore(join(root, "watches.json"), {
     runner,
     remoteCodexControl: (_fleet, paneId) =>
@@ -153,6 +154,10 @@ async function fixture() {
     requireWorkerAccess: async () => {
       const read = accessGeneration;
       await sleep(ACCESS_MS);
+      // The owner changes settings just after this read took them.
+      const act = duringAccessRead;
+      duringAccessRead = undefined;
+      act?.();
       return {
         assertCurrent: () => {
           if (accessGeneration !== read) throw new Error("settings_changed");
@@ -161,8 +166,9 @@ async function fixture() {
     },
   });
   cleanups.push(() => store.close());
-  // Linden's link to this service, as the fleet link proves it.
+  // Linden's link to this service, as the fleet link proves it, and its native process.
   let linkAlive = true;
+  let senderProcessStart = "agent-start";
   const authority: PeerSeatAuthority = {
     proof: {
       fleet: "pc",
@@ -172,9 +178,10 @@ async function fixture() {
       processes: [{ pid: 102, startTime: "agent-start" }],
       shell: { pid: 101, startTime: "shell-start" },
     },
+    // A fresh project proof of the sender's process, read on the PC.
     validate: async () => {
       await sleep(SSH_MS);
-      return linkAlive;
+      return linkAlive && senderProcessStart === "agent-start";
     },
     current: () => linkAlive,
   };
@@ -206,7 +213,9 @@ async function fixture() {
     message,
     steers,
     closeLink: () => (linkAlive = false),
-    changeAccess: () => accessGeneration++,
+    replaceSenderProcess: () => (senderProcessStart = "replacement-start"),
+    /** Change settings after the next access read, the last one before the write. */
+    changeAccessAfterNextRead: () => (duringAccessRead = () => accessGeneration++),
     duringFinalObservation: (act: () => void) => (onFinalObservation = act),
   };
 }
@@ -233,6 +242,18 @@ it("refuses a peer message whose sender's link closes during the final observati
   expect(f.steers).toEqual([]);
 });
 
+it("refuses a peer message whose sender's native process changes during the final observation", async () => {
+  const f = await fixture();
+  const input = await f.message(f.authority, "must not cross a changed sender");
+  // The link stays open, so its synchronous recheck alone would pass.
+  f.duringFinalObservation(f.replaceSenderProcess);
+  expect(await f.peers.send(f.authority, input)).toMatchObject({
+    outcome: "undelivered",
+    detail: expect.stringContaining("nothing was sent"),
+  });
+  expect(f.steers).toEqual([]);
+});
+
 it("still gates the write on the full check when a peer authority has no synchronous recheck", async () => {
   const f = await fixture();
   const { current: _current, ...full } = f.authority;
@@ -250,7 +271,9 @@ it("delivers a lead message whose machine access read is slow, and refuses one w
     outcome: "delivered",
     state: "steered",
   });
-  f.duringFinalObservation(f.changeAccess);
+  // The full access check after the final observation reads the old settings;
+  // only the synchronous fence can see the change that follows it.
+  f.duringFinalObservation(f.changeAccessAfterNextRead);
   expect(await f.store.deliverToSeat(quill.terminalId, "must not cross changed access")).toMatchObject({
     outcome: "undelivered",
     detail: expect.stringContaining("nothing was sent"),

@@ -450,13 +450,15 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
 
 /**
  * A final authority read must finish promptly; late approval cannot authorize a write.
- * The caller's full check has already run once before the native observation.
- * Its synchronous recheck, when it has one, is what runs here: a full check that
- * reads a linked machine takes seconds and could never meet this bound (VUH-2779).
+ * A full check that reads a linked machine takes seconds and could never meet
+ * this bound (VUH-2779). One with a synchronous recheck therefore runs in full
+ * here, after the final native observation, and only that recheck is bound to
+ * the write. Any other check runs in full under the bound.
  */
 async function finalCodexAuthority(
   beforeDispatch: (() => Promise<boolean>) & CurrentCheck,
 ): Promise<boolean> {
+  if (beforeDispatch.current !== undefined && !(await beforeDispatch())) return false;
   const deadline = performance.now() + FINAL_CODEX_AUTHORITY_TIMEOUT_MS;
   const timeout = () => new Error("Final Codex authority check timed out; nothing was sent.");
   let timer: ReturnType<typeof setTimeout> | undefined;

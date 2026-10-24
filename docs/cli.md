@@ -6884,10 +6884,11 @@ and the CLI inherits that same home. The native projection must positively prove
 a standalone TUI; an absent or rejected remote endpoint is insufficient.
 The pane/session and home proof are repeated after preparation. Caller authority
 is checked in full before the final observation and again after it, with a
-250 ms deadline immediately before sending. That final gate runs the caller's
-synchronous in-memory recheck (link, fleet revision and settings generation)
-when every check provides one, because a full check that reads a linked machine
-takes seconds; otherwise it reruns the full check. A timeout reports undelivered
+250 ms deadline immediately before sending. A full check that reads a linked
+machine takes seconds, so when every check has a synchronous in-memory recheck
+(link, fleet revision and settings generation), the full check runs after the
+final observation without the deadline and only that recheck runs under it.
+Otherwise the full check runs under the deadline. A timeout reports undelivered
 and never sends on late approval (VUH-2779). Private, changed
 or unproved homes refuse the fallback; a private native receipt cannot authorize
 a second send through CLI.

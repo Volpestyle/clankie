@@ -301,10 +301,13 @@ rules assumed every check was local and every receipt prompt.
   write, so late approval cannot authorize it. A peer check reads the PC several
   times (sender, recipient and process proof, each an SSH round trip), so every
   peer message to a PC Codex seat timed out, and a lead's settings read
-  occasionally did too under load. The full check still runs before the final
-  observation; the bounded gate after it now runs the checks' synchronous
-  recheck (link liveness, fleet revision, settings generation) when every check
-  provides one, and otherwise reruns the full check under the same bound. A
-  wrapper that adds its own check is a new function, so it drops the recheck
-  and falls back to the full check. The lead approved this split over a longer
-  remote bound.
+  occasionally did too under load. The full check still runs before and after
+  the final observation. When every check provides a synchronous recheck (link
+  liveness, fleet revision, settings generation), the full check after the
+  observation runs without the bound, so any authority change before its last
+  read refuses, and only the recheck is bound to the write. Otherwise the full
+  check runs under the bound as before. A recheck covers only in-memory state:
+  a native change during the full check's own remote reads is not seen, as no
+  remote read can be fresher than its round trip. A wrapper that adds its own
+  check is a new function, so it drops the recheck and falls back to the full
+  check. The lead approved this split over a longer remote bound.
