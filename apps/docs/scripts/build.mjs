@@ -970,6 +970,13 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/devices/self/app-metrics",
+      {
+        access: "Active paired device bearer",
+        purpose: "Replace this device/platform's bounded, content-free rolling navigation timing summaries.",
+      },
+    ],
+    [
       "GET /v1/devices/self",
       {
         access: "Device bearer",
