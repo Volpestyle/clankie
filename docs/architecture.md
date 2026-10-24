@@ -383,7 +383,13 @@ authored registry the pi session is built from, wrapped once at runtime and
 scoped by the bearer's lane, so a Codex pane with the same entry is the same
 seat. A connected service lists only its `initialTools`; the rest of its catalog
 is reached through `mcp_tool_search` and `mcp_tool_call`, so a harness does not
-carry every tracker schema on each request. All lane and fleet wire catalogs are
+carry every tracker schema on each request. The operator lane's MCP projection
+([`mcp-tool-surface.ts`](../apps/clankie/src/captain/mcp-tool-surface.ts),
+VUH-2796) also leaves his play and media tools (Minecraft, PokeAgent, music,
+images, video, diagrams) off the list, reachable through the same pair. It marks
+the lead's hot set with `_meta["anthropic/alwaysLoad"]` so Claude Code skips its
+tool search for them, and marks pure observations `readOnlyHint` so they can run
+in parallel. The pi session's tools are unchanged. All lane and fleet wire catalogs are
 checked by `pnpm mcp:check` in the fast push/PR gate, using Claude Code's strict
 MCP SDK contract and Codex's input-schema conversion shape. Failures identify
 the tool and field. Connected catalogs validate each tool before admission;

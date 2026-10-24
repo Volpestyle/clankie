@@ -320,6 +320,8 @@ async function defaultReadParentArgv(): Promise<string | undefined> {
 
 const REPLY_TOOL: Tool = {
   name: REPLY_TOOL_NAME,
+  // A lead's most time-sensitive call skips Claude Code's tool search (VUH-2796).
+  _meta: { "anthropic/alwaysLoad": true },
   description:
     'Answer a room that escalated to you, or your owner speaking through a linked private Discord channel: the event_id from the <channel kind="escalation"> tag and your reply, ' +
     "which goes back to that room as your own words.",

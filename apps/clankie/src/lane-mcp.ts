@@ -23,7 +23,8 @@ import {
   uncertainSeatCall,
   type CaptainSessionLaneV2,
 } from "@clankie/protocol";
-import type { CaptainPort, LaneTool } from "./captain/port.ts";
+import { laneToolHints, listedOnLane } from "./captain/mcp-tool-surface.ts";
+import type { CaptainPort, LaneTool, LaneToolResult } from "./captain/port.ts";
 import { assertMcpToolsList } from "./mcp-tool-schema.ts";
 import { SeatCallReceipts } from "./seat-call-receipts.ts";
 import { CLANKIE_VERSION } from "./app/log.ts";
@@ -115,6 +116,11 @@ export function createLaneMcpEndpoint({
   const open = async (lane: CaptainSessionLaneV2, conversationId?: string): Promise<LaneMcpSession> => {
     const bank = await captain.laneToolBank(lane, conversationId);
     const byName = new Map<string, LaneTool>(bank.tools.map((tool) => [tool.name, tool]));
+    // Unlisted tools stay reachable through the bank's own search and call pair.
+    const unlisted =
+      byName.has("mcp_tool_search") && byName.has("mcp_tool_call")
+        ? bank.tools.filter((tool) => !listedOnLane(lane, tool.name))
+        : [];
     const server = new Server(
       { name: "clankie", version: CLANKIE_VERSION },
       { capabilities: { tools: {} }, instructions: instructionsFor(lane) },
@@ -122,13 +128,19 @@ export function createLaneMcpEndpoint({
     server.setRequestHandler(ListToolsRequestSchema, () => {
       const result = {
         tools: [
-          ...bank.tools.map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            // TypeBox's union of objects omits its root type. Only those
-            // unions are adapted; an invalid authored root must stay visible.
-            inputSchema: objectUnionRoot(tool.inputSchema),
-          })),
+          ...bank.tools
+            .filter((tool) => !unlisted.includes(tool))
+            .map((tool) => ({
+              name: tool.name,
+              description:
+                tool.name === "mcp_tool_search" && unlisted.length > 0
+                  ? `${tool.description} It also finds his own play and media tools (Minecraft, PokeAgent, music, images, video, diagrams), which this list leaves out.`
+                  : tool.description,
+              // TypeBox's union of objects omits its root type. Only those
+              // unions are adapted; an invalid authored root must stay visible.
+              inputSchema: objectUnionRoot(tool.inputSchema),
+              ...laneToolHints(lane, tool.name),
+            })),
           ...(lane === "operator" ? [reconciliationTool] : []),
         ],
       };
@@ -220,14 +232,27 @@ export function createLaneMcpEndpoint({
           return failure(error);
         }
       }
-      const tool = byName.get(request.params.name);
+      if (unlisted.length > 0 && request.params.name === "mcp_tool_search") {
+        const result = await byName.get("mcp_tool_search")!.call(request.params.arguments ?? {});
+        const merged = withUnlistedTools(result, request.params.arguments ?? {}, unlisted);
+        return { content: [...merged.content], ...(merged.isError === true ? { isError: true } : {}) };
+      }
+      const offList =
+        request.params.name === "mcp_tool_call" && typeof request.params.arguments?.name === "string"
+          ? unlisted.find((tool) => tool.name === request.params.arguments?.name)
+          : undefined;
+      const tool = offList ?? byName.get(request.params.name);
       if (tool === undefined) {
         return {
           content: [{ type: "text" as const, text: `No tool named ${request.params.name} in this lane.` }],
           isError: true,
         };
       }
-      const args = request.params.arguments ?? {};
+      const input = offList === undefined ? request.params.arguments : request.params.arguments?.arguments;
+      const args =
+        input !== null && typeof input === "object" && !Array.isArray(input)
+          ? (input as Record<string, unknown>)
+          : {};
       const requestPriority = request.params._meta?.clankieRequestPriority;
       if (requestPriority !== undefined && requestPriority !== "background")
         return failure("Invalid request priority. Nothing dispatched.");
@@ -385,4 +410,63 @@ function objectUnionRoot(schema: Record<string, unknown>): { type: "object" } {
     return { ...schema, type: "object" };
   }
   return schema as { type: "object" };
+}
+
+/**
+ * `mcp_tool_search` over connected services, plus the lane's own tools this list
+ * leaves out, in the same result shape: a name lookup returns their schemas, a
+ * query ranks them by the words their name and description share with it.
+ */
+function withUnlistedTools(
+  result: LaneToolResult,
+  args: Record<string, unknown>,
+  unlisted: readonly LaneTool[],
+): LaneToolResult {
+  const block = result.content[0];
+  if (result.isError === true || block?.type !== "text") return result;
+  let body: { tools?: unknown[]; missing?: string[] } & Record<string, unknown>;
+  try {
+    body = JSON.parse(block.text);
+  } catch {
+    return result;
+  }
+  const names = Array.isArray(args.names) ? args.names.filter((name) => typeof name === "string") : [];
+  let tools: unknown[];
+  let missing = body.missing;
+  if (names.length > 0) {
+    const found = unlisted.filter((tool) => names.includes(tool.name));
+    tools = [
+      ...(body.tools ?? []),
+      ...found.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    ];
+    missing = missing?.filter((name) => !found.some((tool) => tool.name === name));
+  } else {
+    const terms = (typeof args.query === "string" ? args.query : "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/u)
+      .filter(Boolean);
+    const matches = unlisted.filter(
+      (tool) =>
+        terms.length === 0 ||
+        terms.some((term) => `${tool.name} ${tool.description}`.toLowerCase().includes(term)),
+    );
+    tools = [
+      ...(body.tools ?? []),
+      ...matches.map((tool) => ({
+        name: tool.name,
+        summary: tool.description.split("\n")[0]!.slice(0, 160),
+      })),
+    ].slice(0, 20);
+  }
+  const merged: Record<string, unknown> = { ...body, tools };
+  if (missing?.length) merged.missing = missing;
+  else delete merged.missing;
+  return {
+    ...result,
+    content: [{ type: "text", text: JSON.stringify(merged) }, ...result.content.slice(1)],
+  };
 }

@@ -1,5 +1,6 @@
 import { CaptainSessionLaneV2Schema } from "@clankie/protocol";
 import { assertMcpToolsList } from "../src/mcp-tool-schema.ts";
+import { listedOnLane } from "../src/captain/mcp-tool-surface.ts";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -259,6 +260,7 @@ describe("lane MCP endpoint", () => {
 
     const operator = await connect(app, "operator");
     const discord = await connect(app, "discord-text");
+    // Without a search and call pair in the bank, nothing leaves the list.
     expect(await toolNames(app, "operator", operator)).toEqual([
       "observe_room",
       "generate_image",
@@ -688,9 +690,36 @@ it("serves every real Captain schema with MCP's object root without losing union
       if (original) expect(tool.inputSchema, tool.name).toEqual({ ...original, type: "object" });
     }
     expect(listed.map((tool) => tool.name)).toEqual([
-      ...bank.tools.map((tool) => tool.name),
+      ...bank.tools.map((tool) => tool.name).filter((name) => listedOnLane("operator", name)),
       "reconcile_seat_call", // read-only receipt reconciliation
     ]);
+    // VUH-2796: the hot set skips Claude Code's tool search, observations may run in
+    // parallel, and play/media tools leave the list but stay reachable by search and call.
+    const byListedName = new Map(listed.map((tool) => [tool.name, tool]));
+    expect(byListedName.get("memory")?._meta).toEqual({ "anthropic/alwaysLoad": true });
+    expect(byListedName.get("get_self_state")?.annotations).toEqual({ readOnlyHint: true });
+    expect(byListedName.get("hire_agent")?.annotations).toBeUndefined();
+    const hidden = bank.tools.map((tool) => tool.name).filter((name) => !listedOnLane("operator", name));
+    expect(hidden).toContain("generate_image");
+    const searched = await client.callTool({ name: "mcp_tool_search", arguments: { query: "image" } });
+    expect(
+      JSON.parse((searched.content as Array<{ text: string }>)[0]!.text).tools.map(
+        (tool: { name: string }) => tool.name,
+      ),
+    ).toContain("generate_image");
+    const schema = await client.callTool({
+      name: "mcp_tool_search",
+      arguments: { names: ["generate_image"] },
+    });
+    const schemaBody = JSON.parse((schema.content as Array<{ text: string }>)[0]!.text);
+    expect(schemaBody.tools).toEqual([expect.objectContaining({ name: "generate_image" })]);
+    expect(schemaBody.missing).toBeUndefined();
+    const reached = await client.callTool({
+      name: "mcp_tool_call",
+      arguments: { name: "generate_image", arguments: {} },
+    });
+    // The bank's own validation answers, not "No connected tool named".
+    expect(JSON.stringify(reached.content)).toContain("Invalid arguments");
     const union = listed.find((tool) => Array.isArray(originals.get(tool.name)?.anyOf))!;
     expect(union).toBeDefined();
     expect(union.inputSchema.anyOf).toEqual(originals.get(union.name)!.anyOf);
@@ -932,7 +961,9 @@ it.each(CaptainSessionLaneV2Schema.options)("strict client contract: %s lane too
     const listed = await (await request({ jsonrpc: "2.0", id: 2, method: "tools/list" }, session)).json();
     if (listed.error) throw new Error(`${lane}: ${listed.error.message}`);
     assertMcpToolsList(listed.result, `${lane} lane wire catalog`);
-    expect(listed.result.tools.length).toBe(bank.tools.length + (lane === "operator" ? 1 : 0));
+    expect(listed.result.tools.length).toBe(
+      bank.tools.filter((tool) => listedOnLane(lane, tool.name)).length + (lane === "operator" ? 1 : 0),
+    );
   } finally {
     await endpoint.close();
   }

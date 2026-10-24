@@ -1,4 +1,5 @@
 import { discordGuildSettings } from "@clankie/protocol";
+import { listedOnLane } from "./mcp-tool-surface.ts";
 import { createDurableSessions } from "./durable-sessions.ts";
 import { DurablePiRoom, PiTurnPausedError } from "./pi-turn-journal.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
@@ -7662,7 +7663,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const operatorTools =
         report.bridge === "operator"
           ? [
-              ...(await this.laneToolBank("operator", report.conversationId)).tools.map((tool) => tool.name),
+              ...(await this.laneToolBank("operator", report.conversationId)).tools
+                .map((tool) => tool.name)
+                .filter((name) => listedOnLane("operator", name)),
               "reconcile_seat_call",
               "reply",
             ]
