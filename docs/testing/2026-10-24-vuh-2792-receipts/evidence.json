@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "receipt-proof.tar.gz",
+      "size": 325516,
+      "sha256": "1d545caf9c366d6707510138d82aabb1c300ebc0251e6df2e282f8ec92db73aa",
+      "url": "clankie://evidence/sha256/1d545caf9c366d6707510138d82aabb1c300ebc0251e6df2e282f8ec92db73aa"
+    }
+  ]
+}

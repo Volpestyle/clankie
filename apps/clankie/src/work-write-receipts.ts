@@ -157,7 +157,7 @@ export class WorkWriteReceipts {
   public read(id: string, scope: WorkWriteScope): WorkItemWriteReceipt {
     WorkItemWriteReceiptRequestSchema.shape.requestId.parse(id);
     const originalScope = WorkWriteScopeSchema.parse(scope);
-    const record = this.store.load().get(id);
+    const record = this.store.read(id);
     if (record === undefined || !this.matches(record, originalScope))
       return refused(
         id,

@@ -1002,7 +1002,7 @@ export class WorkerMcp {
     signal: AbortSignal,
   ) {
     receiptId = receiptId.toLowerCase();
-    const receipt = this.callReceipts.load().get(receiptId);
+    const receipt = this.callReceipts.read(receiptId);
     // The original may still be awaiting admission. Mere absence cannot prove
     // that it will never dispatch, and this read never permits a retry.
     if (!receipt) return undefined;
@@ -1031,7 +1031,7 @@ export class WorkerMcp {
     }
     signal.throwIfAborted();
     // Reload after fresh authorization: the original call may have settled meanwhile.
-    return this.callReceipts.load().get(receiptId);
+    return this.callReceipts.read(receiptId);
   }
 
   private async reconcileCallReceipt(receiptId: string, authority: WorkerAuthorization, signal: AbortSignal) {
@@ -1290,7 +1290,7 @@ export class WorkerMcp {
               operation: "abandon-read" as const,
               abandonmentId,
               ...this.receiptInspection(
-                this.callReceipts.load().get(receiptId)!,
+                this.callReceipts.read(receiptId)!,
                 { abandonable: true },
                 abandonmentId,
               ),
@@ -1873,7 +1873,7 @@ export class WorkerMcp {
             const fingerprint = createHash("sha256")
               .update(canonicalJson([name, args]))
               .digest("hex");
-            const previous = this.callReceipts.load().get(id);
+            const previous = this.callReceipts.read(id);
             if (previous) {
               this.assertCallReceipt(previous, authorityNow, current, rule.name, fingerprint);
               return workerCallResponse(await this.reconcileCallReceipt(id, authorityNow, signal));
@@ -2061,7 +2061,7 @@ export class WorkerMcp {
                 ),
               );
             if (result.outcome === "ok" && admitted) this.settleCallReceipt(id, result);
-            if (result.outcome !== "ok" && admitted && !this.callReceipts.load().get(id)?.result) {
+            if (result.outcome !== "ok" && admitted && !this.callReceipts.read(id)?.result) {
               const health = this.bridge(authorityNow);
               if (health)
                 health.last = {

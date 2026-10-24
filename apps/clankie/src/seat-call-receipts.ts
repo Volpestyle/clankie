@@ -104,7 +104,7 @@ export class SeatCallReceipts {
     lane: CaptainSessionLaneV2,
     conversationId?: string,
   ): CallToolResult {
-    const record = this.store.load().get(id);
+    const record = this.store.read(id);
     if (record === undefined || record.tool !== tool || !this.matches(record, lane, conversationId))
       return {
         content: [
