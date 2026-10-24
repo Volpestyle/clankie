@@ -899,7 +899,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     let settled: TurnSettledOutcome | undefined;
     let tokensEnd: number | undefined;
     try {
-      if (normalized.durable) {
+      if (normalized.durable && normalized.loop !== true) {
         if (lane.running === undefined && !lane.session.isStreaming)
           await serviceRun.wait("room model synchronization", ctx.syncModel(lane));
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
@@ -931,6 +931,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       } else {
         // A one-shot session was built with the current selection moments ago;
         // read it off that session rather than resolving the config a second time.
+        // A room loop (ADR 0291) runs each turn this way on its durable session, so
+        // it keeps the handoff's live-run steering and admission check, but reuses a
+        // session: take the current model and start with no previous turn's text.
+        if (normalized.loop === true) {
+          lane.lastAssistantText = "";
+          await serviceRun.wait("room model synchronization", ctx.syncModel(lane));
+        }
         metrics?.recordExecution(sessionExecutionIdentity(lane.session));
         const prepared = await serviceRun.wait("room guidance", guidancePrompt());
         const preparedPrompt = prepared();

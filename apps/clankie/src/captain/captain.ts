@@ -6887,8 +6887,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       host: "pi",
                       doing: "Working in Pi under the original room grant; native Codex is owner-only",
                     });
-                  const dispatch = (): Promise<CaptainChannelTurnResult> =>
-                    dispatchDiscordTurn(
+                  const dispatch = async (): Promise<CaptainChannelTurnResult> => {
+                    // A turn that waited for its loop is admitted only under the grant it
+                    // queued with; that loop's history and tools belong to that grant.
+                    if (loopKey !== undefined && (await resolveGrant()).key !== key)
+                      throw new Error("room_loop_grant_changed");
+                    return dispatchDiscordTurn(
                       {
                         ...normalized,
                         access: loopKey === undefined ? access : roomLoops.access(loopKey, access),
@@ -6906,6 +6910,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       "escalation",
                       preferPi,
                     );
+                  };
                   const outcome = await (loopKey === undefined
                     ? dispatch()
                     : roomLoops.serialize(loopKey, dispatch));

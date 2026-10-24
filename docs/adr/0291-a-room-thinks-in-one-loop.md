@@ -104,11 +104,19 @@ a Pi text handoff whose plan is `social` into
   transcript projects into the room conversation.
 - Turns of one loop run one at a time. The session is built once, and a
   per-turn access holder gives room-skill tools the running turn's actor and
-  grant.
+  grant. Each turn runs like a handoff on that session, so a sender's burst
+  still steers their running turn (ADR 0229's amendment).
+- A turn that waited for its loop re-resolves its grant before it runs. If the
+  grant changed, it fails as `room_loop_grant_changed` instead of reaching the
+  old grant's history and tools. The next message starts the new grant's loop.
 - Machine turns, owner-audience rooms, voice, the linked main channel and
   native heads keep their ADR 0229 paths.
 
-Proof so far uses the [lanes eval](../evals.md#the-lanes-suite) `--smoke
+[`room-loop.integration.test.ts`](../../apps/clankie/test/room-loop.integration.test.ts)
+covers both with the real Captain and Pi on a loopback model. A burst is
+absorbed, the next speaker's turn carries the loop's history, and a queued
+turn whose room skill was withdrawn is refused. Both cases fail without their
+fixes. Proof so far also uses the [lanes eval](../evals.md#the-lanes-suite) `--smoke
 --room-loop` against the real service. Social turns settle in `:loop:`
 sessions. Two speakers sent to one room at once get two turns in one loop, the
 second accepted after the first completed. That check fails when serialization
