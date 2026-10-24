@@ -1948,6 +1948,7 @@ export class DiscordVoiceSession {
         channelId,
         stage: "transcription_session",
         code: "voice_listener_open_failed",
+        userId,
       });
       return;
     }
@@ -4527,6 +4528,7 @@ export class DiscordVoiceSession {
       channelId,
       stage: "transcription_session",
       code: "voice_listener_lost",
+      userId,
       ...providerCloseEvidence(reason, detail),
     });
     this.scheduleListenerReconnect(userId);

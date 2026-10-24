@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import type { DiscordRoomStatus, DiscordVoicePipeline, DiscordVoiceStayPipelines } from "@clankie/protocol";
 
 /** Plain text works in the live TUI result pane and headless operator output. */
@@ -27,5 +28,13 @@ export function formatVoiceStayPipelines(stay: DiscordVoiceStayPipelines): strin
     ].filter((value) => value !== undefined);
     return `${name} ${pipeline.state}${loss === undefined ? "" : ` (${pipeline.losses} lost, last ${loss.code}${how.length ? `: ${how.join(", ")}` : ""})`}`;
   };
-  return `${stay.endedAt === undefined ? "This call" : "Last call"}: ${leg("hearing", stay.hearing)} · ${leg("answering", stay.answering)}`;
+  const unheard = formatUnheardSpeakers(stay.hearing);
+  return `${stay.endedAt === undefined ? "This call" : "Last call"}: ${leg("hearing", stay.hearing)}${unheard === undefined ? "" : ` [not heard: ${unheard}]`} · ${leg("answering", stay.answering)}`;
+}
+
+/** Gateway ids are metadata, not terminal control sequences or display-name authority. */
+export function formatUnheardSpeakers(hearing: DiscordVoiceStayPipelines["hearing"]): string | undefined {
+  return hearing.state !== "broken" || !hearing.brokenUserIds?.length
+    ? undefined
+    : hearing.brokenUserIds.map((id) => stripVTControlCharacters(id).replace(/[\r\n\t]/gu, " ")).join(", ");
 }

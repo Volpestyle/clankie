@@ -649,7 +649,9 @@ describe("install doctor", () => {
       const pipelines = deaf.discordVoice.pipelines;
       const { endedAt: _ended, ...live } = pipelines;
       const mute = { ...live, answering: { state: "broken" as const, losses: 1 } };
-      expect(formatDoctorSummary({ ...healthy, discordVoice: { ...voice, pipelines: mute } })).toBe(
+      expect(
+        formatDoctorSummary({ ...healthy, discordVoice: { ...voice, state: "active", pipelines: mute } }),
+      ).toBe(
         "Clankie's Discord call could not hear or answer: the voice provider ended its session with insufficient_quota — run `clankie discord call`.",
       );
       // A bad call that ended hours ago stays on the detail line instead of heading the card.
@@ -659,6 +661,40 @@ describe("install doctor", () => {
       };
       expect(formatDoctorSummary(old)).toBe("ready");
       expect(formatDoctorReport(old)).toContain("Discord voice · Last call: hearing broken (7 lost");
+      const staleOpen = {
+        ...live,
+        hearing: {
+          ...live.hearing,
+          lastLoss: { ...live.hearing.lastLoss, at: new Date(Date.now() - 2 * 60 * 60_000).toISOString() },
+        },
+      };
+      for (const state of ["idle", "unknown"] as const) {
+        const abandoned = { ...healthy, discordVoice: { ...voice, state, pipelines: staleOpen } };
+        expect(formatDoctorSummary(abandoned)).toBe("ready");
+        expect(formatDoctorReport(abandoned)).toContain("hearing broken");
+      }
+      expect(
+        formatDoctorSummary({
+          ...healthy,
+          discordVoice: { ...voice, state: "active", pipelines: staleOpen },
+        }),
+      ).toContain("could not hear");
+      expect(
+        formatDoctorSummary({ ...healthy, discordVoice: { ...voice, state: "unknown", pipelines: live } }),
+      ).toContain("could not hear");
+      expect(
+        formatDoctorSummary({
+          ...healthy,
+          discordVoice: { ...voice, state: "active", stayId: "replacement", pipelines: live },
+        }),
+      ).toBe("ready");
+      const perSpeaker = { ...live, hearing: { ...live.hearing, brokenUserIds: ["100000000000000003"] } };
+      const speakerReport = {
+        ...healthy,
+        discordVoice: { ...voice, state: "active" as const, pipelines: perSpeaker },
+      };
+      expect(formatDoctorSummary(speakerReport)).toContain("could not hear speakers 100000000000000003");
+      expect(formatDoctorReport(speakerReport)).toContain("not heard: 100000000000000003");
       const heard = { ...pipelines, hearing: { ...pipelines.hearing, state: "working" as const } };
       expect(formatDoctorSummary({ ...healthy, discordVoice: { ...voice, pipelines: heard } })).toBe("ready");
 

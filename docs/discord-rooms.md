@@ -143,13 +143,22 @@ listening/thinking state, consented participant count and active captain handoff
 They also show the latest stay's `pipelines`: whether his hearing and answering are
 `working`, `broken` or `unproven`, read from that stay's content-free receipts.
 `broken` means the realtime provider's session was lost after that leg last worked:
-no transcription (hearing) or completed response (answering) has arrived since. A
-scheduled `lifetime` rotation reconnects on its own, so it counts as a loss but
+no transcription from that speaker (hearing) or completed response (answering)
+has arrived since. Hearing stays broken while any eligible speaker's listener is
+lost; `pipelines.hearing.brokenUserIds` names the affected gateway user ids, also
+shown by `/discord call` and doctor. A transcription from another speaker never
+clears that loss. Consent withdrawal or departure retires that speaker's listener
+from the report; a later opt-in starts unproven. Legacy loss receipts without a
+`userId` stay unattributed and cannot be cleared by someone else's transcription.
+A scheduled `lifetime` rotation reconnects on its own, so it counts as a loss but
 never breaks a leg. The last loss carries its code, how the socket ended
 (`closeReason`), the provider's close code and its last error code, never message
 text. `clankie doctor` shows the latest stay on its card. Its next step names a
 call that could not hear or answer, with the provider's error code, only while that
-call is live or within an hour of its end (VUH-2728).
+call is live or within an hour of its recorded end. A missing `endedAt` alone is
+not proof of a live call: idle state suppresses that headline; unknown state
+requires a loss within the last hour; an active replacement stay does not revive
+old failures. Historical details remain on the card (VUH-2728, VUH-2765).
 `clankie discord call join CONVERSATION_ID` joins an existing exact voice room only
 when the configured owner is currently there. `leave`, `mute_output`, and
 `unmute_output` require both conversation id and exact stay id. **Mute Clankie

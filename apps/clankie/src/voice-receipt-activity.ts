@@ -145,14 +145,16 @@ export async function readVoiceStayPipelines(path: string): Promise<DiscordVoice
     if (receipt?.evidence.type === "joined") stayId = receipt.evidence.stayId;
   }
   if (stayId === undefined) return undefined;
-  const hearing = new StayPipeline();
+  const hearing = new SpeakerHearingPipeline();
   const answering = new StayPipeline();
   let endedAt: string | undefined;
   for (const line of lines.slice(start)) {
     const receipt = parseVoiceEvidenceLine(line);
     if (receipt === undefined || receipt.evidence.stayId !== stayId) continue;
     const { evidence, occurredAt } = receipt;
-    if (evidence.type === "transcription") hearing.worked();
+    if (evidence.type === "transcription") hearing.worked(evidence.userId);
+    else if (evidence.type === "consent") hearing.eligible(evidence.userId, evidence.consented);
+    else if (evidence.type === "participant") hearing.eligible(evidence.userId, evidence.action === "joined");
     else if (evidence.type === "model_response" && evidence.phase === "completed") answering.worked();
     else if (evidence.type === "left") endedAt ??= occurredAt;
     else if (evidence.type === "failed") {
@@ -164,7 +166,7 @@ export async function readVoiceStayPipelines(path: string): Promise<DiscordVoice
         ...(closeCode === undefined ? {} : { closeCode }),
         ...(providerCode === undefined ? {} : { providerCode }),
       };
-      if (evidence.stage === "transcription_session") hearing.lost(loss);
+      if (evidence.stage === "transcription_session") hearing.lost(evidence.userId, loss);
       else if (evidence.stage === "conversation_session") answering.lost(loss);
     }
   }
@@ -174,6 +176,50 @@ export async function readVoiceStayPipelines(path: string): Promise<DiscordVoice
     hearing: hearing.read(),
     answering: answering.read(),
   };
+}
+
+// Each consented speaker has a distinct realtime listener. Unknown legacy losses
+// remain unattributed; another person's transcription cannot prove their recovery.
+class SpeakerHearingPipeline {
+  private readonly summary = new StayPipeline();
+  private readonly listeners = new Map<string | undefined, StayPipeline>();
+  private readonly excluded = new Set<string>();
+  private proven = false;
+  eligible(userId: string, eligible: boolean): void {
+    if (eligible) this.excluded.delete(userId);
+    else {
+      this.excluded.add(userId);
+      this.listeners.delete(userId);
+    }
+  }
+  private listener(userId: string | undefined): StayPipeline | undefined {
+    if (userId !== undefined && this.excluded.has(userId)) return undefined;
+    let listener = this.listeners.get(userId);
+    if (listener === undefined) {
+      listener = new StayPipeline();
+      this.listeners.set(userId, listener);
+    }
+    return listener;
+  }
+  lost(userId: string | undefined, loss: NonNullable<DiscordVoicePipeline["lastLoss"]>): void {
+    this.summary.lost(loss);
+    this.listener(userId)?.lost(loss);
+  }
+  worked(userId: string): void {
+    const listener = this.listener(userId);
+    if (listener === undefined) return;
+    this.proven = true;
+    listener.worked();
+  }
+  read(): DiscordVoiceStayPipelines["hearing"] {
+    const broken = [...this.listeners].filter(([, listener]) => listener.read().state === "broken");
+    const brokenUserIds = broken.flatMap(([userId]) => (userId === undefined ? [] : [userId])).sort();
+    return {
+      ...this.summary.read(),
+      state: broken.length > 0 ? "broken" : this.proven ? "working" : "unproven",
+      ...(brokenUserIds.length === 0 ? {} : { brokenUserIds }),
+    };
+  }
 }
 
 class StayPipeline {

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "verification.json",
+      "size": 137719,
+      "sha256": "089f9c7bc1d708c86a59d9fd031d136f8fe5cf760aea5e6438f7970e37e5388f",
+      "url": "clankie://evidence/sha256/089f9c7bc1d708c86a59d9fd031d136f8fe5cf760aea5e6438f7970e37e5388f"
+    }
+  ]
+}

@@ -1681,6 +1681,7 @@ describe("consent boundary", () => {
     expect(at(harness.ofType("failed"), -1)).toMatchObject({
       stage: "transcription_session",
       code: "voice_listener_open_failed",
+      userId: ALICE,
     });
 
     // A later opt-in opens a new listener rather than reviving the invalid one.
@@ -3811,6 +3812,7 @@ describe("reconnect", () => {
         channelId: CHANNEL,
         stage: "transcription_session",
         code: "voice_listener_lost",
+        userId: ALICE,
       },
     ]);
     expect(harness.timers.pending().map((timer) => timer.delayMs)).toContain(1_000);

@@ -1,7 +1,7 @@
+import { formatUnheardSpeakers } from "../discord-room-view.ts";
 import {
   DiscordRoomVoiceStatusSchema,
   DiscordRoomsSnapshotSchema,
-  type DiscordVoiceStayPipelines,
   DISCORD_ROOM_VOICE_PATH,
   DISCORD_ROOMS_PATH,
   formatAutonomyDrift,
@@ -63,12 +63,26 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
 /** An ended call stays on the card's detail line; only a live or just-ended one is the next step. */
 const RECENT_VOICE_CALL_MS = 60 * 60_000;
 
-function brokenVoiceCall(stay: DiscordVoiceStayPipelines | undefined): string | undefined {
-  if (stay === undefined) return undefined;
+function brokenVoiceCall(voice: InstallDoctorReport["discordVoice"]): string | undefined {
+  const stay = voice?.pipelines;
+  if (stay === undefined || voice === undefined) return undefined;
+  if (stay.endedAt === undefined) {
+    if (voice.state === "idle") return undefined;
+    if (voice.stayId !== undefined && voice.stayId !== stay.stayId) return undefined;
+    // Unknown service state is not proof that an unclosed stay is still live.
+    const losses = [stay.hearing.lastLoss?.at, stay.answering.lastLoss?.at].flatMap((at) =>
+      at === undefined ? [] : [Date.parse(at)],
+    );
+    if (voice.state === "unknown" && !losses.some((at) => Date.now() - at <= RECENT_VOICE_CALL_MS))
+      return undefined;
+  }
   if (stay.endedAt !== undefined && Date.now() - Date.parse(stay.endedAt) > RECENT_VOICE_CALL_MS)
     return undefined;
+  const unheard = formatUnheardSpeakers(stay.hearing);
   const legs = [
-    ...(stay.hearing.state === "broken" ? [{ verb: "hear", pipeline: stay.hearing }] : []),
+    ...(stay.hearing.state === "broken"
+      ? [{ verb: unheard === undefined ? "hear" : `hear speakers ${unheard}`, pipeline: stay.hearing }]
+      : []),
     ...(stay.answering.state === "broken" ? [{ verb: "answer", pipeline: stay.answering }] : []),
   ];
   if (legs.length === 0) return undefined;
@@ -147,7 +161,7 @@ function doctorSummary(report: InstallDoctorReport): string {
     )
   )
     return "Discord delivery recovery status unknown — run `clankie discord rooms`.";
-  const brokenCall = brokenVoiceCall(report.discordVoice?.pipelines);
+  const brokenCall = brokenVoiceCall(report.discordVoice);
   if (brokenCall) return brokenCall;
   const remediation = report.remediations[0];
   const sourceSetup = report.harnessBridges.profiles.codex.sourceSetup;

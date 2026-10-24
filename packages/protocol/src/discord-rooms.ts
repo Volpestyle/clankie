@@ -135,9 +135,12 @@ export type DiscordVoicePipeline = z.infer<typeof DiscordVoicePipelineSchema>;
 export const DiscordVoiceStayPipelinesSchema = z
   .object({
     stayId: Id,
-    /** When the stay left; absent while he is still in the call. */
+    /** When a leave receipt was recorded; absence alone does not prove the stay is live. */
     endedAt: z.string().datetime().optional(),
-    hearing: DiscordVoicePipelineSchema,
+    hearing: DiscordVoicePipelineSchema.extend({
+      /** Known listeners still lost since that speaker last transcribed. Absent on older services. */
+      brokenUserIds: z.array(Id).optional(),
+    }),
     answering: DiscordVoicePipelineSchema,
   })
   .strict();

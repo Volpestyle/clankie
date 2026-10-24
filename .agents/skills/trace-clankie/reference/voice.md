@@ -149,8 +149,15 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   `joined` proves only that the sockets opened, not that the provider
   accepted the session. `clankie discord call` projects the latest stay as
   `pipelines.hearing` / `pipelines.answering` (`broken` = lost since that leg
-  last worked; a `lifetime` rotation never breaks it), and `clankie doctor`
-  names a live or just-ended call that could not hear or answer.
+  last worked; a `lifetime` rotation never breaks it). Listener loss/open-failure
+  receipts now carry the gateway `userId`; hearing recovers only when that
+  speaker transcribes. `pipelines.hearing.brokenUserIds` names known affected
+  speakers, also on `/discord call` and doctor. Revocation/departure retires that
+  listener; legacy losses with no id remain unattributed until the next stay.
+  `clankie doctor` names a live or just-ended call that could not hear or answer.
+  With no `endedAt`, idle state never headlines, unknown state needs a loss within
+  an hour, and an active replacement stay cannot revive an older stay's failure.
+  A recent recorded end can headline for one hour; old stays remain in details.
 
 - **An ElevenLabs byte-limit failure can follow audible speech.**
   `discord.voice.failed` with code
