@@ -88,6 +88,11 @@ marker validates. Native terminal observers verify each record before displaying
 its bytes and reject an incomplete stream; existing cursor recovery handles a
 subsequent connection. Deliberate caller cancellation is not a successful end.
 
+A device call is the one socket this boundary carries: a sealed stream opened
+by an ordinary envelope, its records sealed under that envelope's response key
+with direction and sequence in the AAD
+([ADR 0289](0289-a-call-through-the-gateway-is-a-sealed-stream.md)).
+
 ## Coverage and visible metadata
 
 The carrier permits only challenge, encrypted-exchange, and the separately

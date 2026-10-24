@@ -102,9 +102,11 @@ flowchart LR
 ## Consequences
 
 - The Mac app (and any later device) reaches a call through its existing relay
-  route. The gateway's sealed-envelope HTTP cannot carry a socket. Hosted and
-  remote Macs therefore wait on
-  [VUH-2683](https://linear.app/vuhlp/issue/VUH-2683).
+  route. The gateway's sealed-envelope HTTP cannot carry a socket. A phone that
+  reaches its Mac only through the gateway calls over a sealed stream instead
+  ([ADR 0289](0289-a-call-through-the-gateway-is-a-sealed-stream.md), VUH-2761).
+  Hosted bodies still have no device call
+  ([VUH-2766](https://linear.app/vuhlp/issue/VUH-2766)).
 - Speech-detection thresholds and echo behaviour are calibration knobs until
   James's first live call. The device must run its own echo cancellation, or
   his voice from the speakers can count as the owner talking over him.

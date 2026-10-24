@@ -191,3 +191,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0286: One body holds Clankie at a time](0286-one-body-holds-clankie-at-a-time.md) — VUH-2577.
 - [0287: A standing reviewer gates every landing](0287-a-standing-reviewer-gates-every-landing.md) — VUH-2616. Amends ADR 0240.
 - [0288: A device call is a voice body of the same session](0288-a-device-call-is-a-voice-body-of-the-same-session.md) — VUH-2682. Extends ADR 0057 and ADR 0215.
+- [0289: A call through the gateway is a sealed stream](0289-a-call-through-the-gateway-is-a-sealed-stream.md) — VUH-2761. Amends ADR 0173; extends ADR 0288.
