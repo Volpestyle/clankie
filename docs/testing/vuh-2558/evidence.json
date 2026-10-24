@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "core-landing.log",
+      "size": 859228,
+      "sha256": "17d4822c0d2da6b5e7bba205236cdc820386d0b9263fcd93a2b59b7b212da94d",
+      "url": "clankie://evidence/sha256/17d4822c0d2da6b5e7bba205236cdc820386d0b9263fcd93a2b59b7b212da94d"
+    }
+  ]
+}
