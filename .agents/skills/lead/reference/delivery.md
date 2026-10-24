@@ -63,7 +63,10 @@ cancel, revert and deploy-hold commands are in
 listed commits and refuses a request missing an unlanded commit beneath them; run
 the corrected command the refusal prints. Read the receipt before
 claiming delivery: a passing gate is not a confirmed push, and a partial batch
-can land core while the app is still pending. Reconcile an uncertain send
+can land core while the app is still pending. Each repo's `reviewChecks` in
+`clankie integrate status UUID` records the parent's exact-patch verdict after
+the gate and before push, including unavailable-verdict errors. Check those
+receipts even when an app gate has no review line. Reconcile an uncertain send
 through origin first. Never switch a worktree while its gate runs, accept a pass
 for another HEAD, gate against live shared state, or force push a rollback. A
 deploy hold keeps `clankie update` from replacing the running service for a live

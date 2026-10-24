@@ -150,6 +150,11 @@ recorded gate; the queue does not install or update the owner's toolchain.
 `~/.clankie/integration/batches/<UUID>/record.json` (under `CLANKIE_STATE` when
 configured) retains each install/gate exit code, signal, tested HEAD, times and
 log path. Atomic replacement and fsync finish before pass/landing admission.
+Each repository's `reviewChecks` also records the parent's verdict after its
+gate and immediately before its push: phase, time, base, HEAD and exact patch
+status. An unavailable verdict records its error and holds landing. These
+receipts appear in `clankie integrate status <UUID>` even when the repository's
+gate has no review step; they omit candidate contents and credentials.
 Both HEADs and clean worktrees must still match the durable zero-exit gate.
 Destination changes or a missing/failed record refuse landing.
 `--push` performs ordinary fast-forward SHA-to-main pushes, always core first,

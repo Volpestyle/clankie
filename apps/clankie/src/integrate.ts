@@ -1940,11 +1940,33 @@ export class IntegrationQueue {
     };
   }
 
-  private async assertReview(repo: IntegrationRepo): Promise<void> {
-    const record = JSON.parse((await this.reviewEnvironment(repo)).CLANKIE_INTEGRATE_REVIEW!);
-    if (!record.landing.landable)
+  private async assertReview(
+    batch: IntegrationBatch,
+    repo: IntegrationRepo,
+    phase: "after_gate" | "before_push",
+  ): Promise<void> {
+    const check: NonNullable<IntegrationRepo["reviewChecks"]>[number] = {
+      phase,
+      at: now(),
+      base: repo.base,
+      head: repo.head,
+    };
+    (repo.reviewChecks ??= []).push(check);
+    try {
+      const record = JSON.parse((await this.reviewEnvironment(repo)).CLANKIE_INTEGRATE_REVIEW!);
+      check.base = record.base;
+      check.head = record.head;
+      check.verdict = ReviewLandingSchema.omit({ candidate: true }).parse(record.landing);
+    } catch (error) {
+      check.error = String(error).slice(0, 2000);
+      await this.save(batch);
+      throw error;
+    }
+    // Persist the parent's decision before passing or holding, including before any push.
+    await this.save(batch);
+    if (!check.verdict.landable)
       throw Error(
-        `${repo.name}: review ${record.landing.status} for patch ${record.landing.patchId}; landing held`,
+        `${repo.name}: review ${check.verdict.status} for patch ${check.verdict.patchId}; landing held`,
       );
   }
 
@@ -1957,7 +1979,7 @@ export class IntegrationQueue {
       )
         throw Error(`${repo.name} gate failed or HEAD changed; see ${repo.gate?.log}`);
       await this.clean(repo);
-      await this.assertReview(repo);
+      await this.assertReview(batch, repo, "after_gate");
     }
     batch.state = "passed";
     await this.save(batch);
@@ -2178,7 +2200,7 @@ export class IntegrationQueue {
             }
             await guard();
             // Refresh even for reused/old passes and unchanged main; a saved CI skip is no waiver.
-            await this.assertReview(repo);
+            await this.assertReview(recorded, repo, "before_push");
             // Recheck both HEADs after each network operation, including the sibling dependency.
             for (const sibling of recorded.repos) {
               if (sibling.head !== (await this.head(sibling)))

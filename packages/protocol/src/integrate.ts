@@ -1,4 +1,5 @@
 import { CheckoutSyncResultSchema } from "./checkouts.ts";
+import { ReviewLandingSchema } from "./reviews.ts";
 import { z } from "zod";
 
 export const INTEGRATE_PATH = "/v1/integrate";
@@ -153,6 +154,19 @@ const IntegrationRepoSchema = z.object({
   ),
   install: CommandRecordSchema.optional(),
   gate: CommandRecordSchema.optional(),
+  /** Parent review decisions are independent of any review step in a repository's gate. */
+  reviewChecks: z
+    .array(
+      z.object({
+        phase: z.enum(["after_gate", "before_push"]),
+        at: z.iso.datetime(),
+        base: Sha,
+        head: Sha,
+        verdict: ReviewLandingSchema.omit({ candidate: true }).optional(),
+        error: z.string().max(2000).optional(),
+      }),
+    )
+    .optional(),
   /** The prior exact-tree pass retained after isolation, including its sibling core input. */
   gateReuse: z.object({ batchId: Id, tree: Sha, coreHead: Sha }).optional(),
   /**

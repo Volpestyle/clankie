@@ -1161,6 +1161,11 @@ the service returned `spawned`; completion still needs the matching native event
 
 ### `integrate`
 
+`clankie integrate status UUID` includes each repository's `reviewChecks`:
+the parent's exact-patch verdict after the gate and immediately before push,
+with the checked base, HEAD and time. Unavailable verdicts record their error
+and hold landing. These receipts cover app gates that have no review step.
+
 Default landing is direct: commit to `main`, `git pull --rebase origin main`,
 run `clankie heavy -- pnpm check:landing`, then push
 ([ADR 0240](adr/0240-changes-land-directly-on-main.md)). `integrate` is optional

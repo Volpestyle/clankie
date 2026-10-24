@@ -296,6 +296,19 @@ it("the parent enforces app review even when the app gate has no review step", a
   expect(await readFile(appGate.log, "utf8")).not.toMatch(/^\[landing\] review:/mu);
   expect(failed.state).toBe("failed");
   expect(failed.error).toContain("app: review not_submitted");
+  expect(failed.repos.find((repo) => repo.name === "core")!.reviewChecks).toContainEqual(
+    expect.objectContaining({
+      phase: "after_gate",
+      verdict: expect.objectContaining({ status: "not_required", landable: true }),
+    }),
+  );
+  expect(failed.repos.find((repo) => repo.name === "app")!.reviewChecks).toContainEqual(
+    expect.objectContaining({
+      phase: "after_gate",
+      head: failed.repos.find((repo) => repo.name === "app")!.head,
+      verdict: expect.objectContaining({ status: "not_submitted", landable: false }),
+    }),
+  );
   expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.base);
 
   // A real durable waiver covers only the app's exact patch; core has no
@@ -328,6 +341,10 @@ it("the parent enforces app review even when the app gate has no review step", a
   const held = await f.queue.land(waived.id, guard);
   expect(held.state).toBe("held");
   expect(held.error).toContain("app review service unreachable");
+  expect(held.repos.find((repo) => repo.name === "app")!.reviewChecks?.at(-1)).toMatchObject({
+    phase: "before_push",
+    error: "Error: app review service unreachable",
+  });
   expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.base);
 
   f.queue.options.review = review;
@@ -335,6 +352,16 @@ it("the parent enforces app review even when the app gate has no review step", a
   expect(landed.state, landed.error).toBe("pushed");
   const appRepo = landed.repos.find((repo) => repo.name === "app")!;
   expect(appRepo.head).not.toBe(app.base);
+  expect(appRepo.reviewChecks?.at(-1)).toMatchObject({
+    phase: "before_push",
+    base: app.base,
+    head: appRepo.head,
+    verdict: { status: "waived", patchId: patch.patchId, required: true, landable: true },
+  });
+  expect(appRepo.reviewChecks?.find((check) => check.phase === "after_gate")).toMatchObject({
+    verdict: { status: "waived", patchId: patch.patchId },
+  });
+  expect(appRepo.reviewChecks?.at(-1)?.verdict).not.toHaveProperty("candidate");
   expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(appRepo.head);
 });
 
