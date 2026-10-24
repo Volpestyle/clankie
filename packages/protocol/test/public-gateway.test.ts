@@ -14,6 +14,7 @@ import {
   publicGatewayTargetFor,
   derivePublicGatewayHostId,
 } from "../src/public-gateway.ts";
+import { GATEWAY_STREAM_RECORD_BYTES_MAX, gatewayStreamAad } from "../src/gateway-encryption.ts";
 
 const requestId = "request_12345678";
 
@@ -314,5 +315,40 @@ describe("public gateway protocol", () => {
         bodyBase64: Buffer.alloc(PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX + 1).toString("base64"),
       }),
     ).toThrow();
+  });
+  it("carries a sealed stream as bounded opaque frames, its records bound to direction and order", () => {
+    const streamId = "stream_123456789";
+    const open = { schemaVersion: 1, kind: "stream_open", streamId, envelope: "{}" } as const;
+    const data = (bytes: number) => ({
+      schemaVersion: 1,
+      kind: "stream_data",
+      streamId,
+      dataBase64: Buffer.alloc(bytes).toString("base64"),
+    });
+    const close = { schemaVersion: 1, kind: "stream_close", streamId, code: 1000 } as const;
+    for (const frame of [open, data(GATEWAY_STREAM_RECORD_BYTES_MAX), close])
+      expect(PublicGatewayTunnelFrameSchema.parse(frame)).toEqual(frame);
+    for (const frame of [
+      data(GATEWAY_STREAM_RECORD_BYTES_MAX + 1),
+      data(0),
+      { ...data(4), dataBase64: "AAA=" + "=" },
+      { ...close, code: 1005.5 },
+      { ...close, code: 5000 },
+      { ...close, reason: "revoked" },
+      { ...open, envelope: "x".repeat(16 * 1024 + 1) },
+      { ...open, path: "/v1/voice-call" },
+    ])
+      expect(PublicGatewayTunnelFrameSchema.safeParse(frame).success).toBe(false);
+
+    const envelope = { ticket: "t", challenge: "c", requestId: "r" };
+    const aads = new Set([
+      gatewayStreamAad("host", envelope, "up", 0),
+      gatewayStreamAad("host", envelope, "down", 0),
+      gatewayStreamAad("host", envelope, "up", 1),
+      gatewayStreamAad("other", envelope, "up", 0),
+      gatewayStreamAad("host", { ...envelope, requestId: "s" }, "up", 0),
+    ]);
+    expect(aads.size).toBe(5);
+    expect(gatewayStreamAad("host", envelope, "up", 7)).toMatch(/#7$/u);
   });
 });

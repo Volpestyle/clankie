@@ -3,10 +3,12 @@ import {
   GATEWAY_ENCRYPTED_PATH,
   GATEWAY_PLAINTEXT_BYTES_MAX,
   GATEWAY_RESPONSE_BYTES_MAX,
+  GATEWAY_STREAM_PATH,
   GatewayEncryptionCredentialSchema,
   GatewayPlainResponseSchema,
   gatewayRequestAad,
   gatewayResponseAad,
+  gatewayStreamAadBase,
   type GatewayEnvelope,
   type GatewayEncryptionCredential,
   type GatewayPlainRequest,
@@ -304,5 +306,79 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     });
     // React Native's Response treats UTF-8 bytes as Latin-1 in text()/json().
     return empty ? response : decodeUtf8Response(response);
+  };
+}
+
+/**
+ * What a device needs to open a sealed stream (VUH-2761): the gateway socket,
+ * its first message, and the key and AAD bases its records are sealed under.
+ * Record `n` each way is sealed with `key` and AAD `${base}#${n}`; the native
+ * call does that per frame, so the bearer and keys never leave the device.
+ */
+export interface GatewayStreamOpening {
+  readonly url: string;
+  readonly opening: string;
+  readonly key: string;
+  readonly aadUp: string;
+  readonly aadDown: string;
+}
+
+/** `target` is the host route through the gateway, e.g. `https://api.clankie.bot/h/{hostId}/v1/voice-call`. */
+export async function createGatewayStreamOpening(
+  options: GatewayEncryptedFetchOptions,
+  target: string,
+  authorization: string,
+): Promise<GatewayStreamOpening> {
+  const fetcher = options.fetchImpl ?? fetch;
+  const url = new URL(target);
+  const hostPath = /^\/h\/([A-Za-z0-9_-]{16,128})(\/.*)$/u.exec(url.pathname);
+  const credential = GatewayEncryptionCredentialSchema.parse(options.credential());
+  if (hostPath?.[1] !== credential.hostId || url.search || url.hash || url.username || url.password)
+    throw new Error("Gateway host identity mismatch");
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+  )
+    throw new Error("Gateway requires TLS");
+  const base = `${url.origin}/h/${credential.hostId}`;
+  const challengeResponse = await fetcher(`${base}${GATEWAY_CHALLENGE_PATH}`, { redirect: "error" });
+  if (!challengeResponse.ok)
+    throw new GatewayRequestError(challengeResponse.status, "Gateway challenge unavailable");
+  const challengeBody = (await challengeResponse.json()) as { version?: unknown; challenge?: unknown };
+  if (
+    challengeBody.version !== 1 ||
+    typeof challengeBody.challenge !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(challengeBody.challenge)
+  )
+    throw new Error("Invalid gateway challenge");
+  const key = base64(options.crypto.randomBytes(32));
+  const plaintext: GatewayPlainRequest = {
+    method: "GET",
+    path: hostPath[2]!,
+    headers: [{ name: "authorization", value: authorization }],
+    responseKey: key,
+  };
+  const context = {
+    ticket: credential.ticket,
+    challenge: challengeBody.challenge,
+    requestId: hex(options.crypto.randomBytes(32)),
+  };
+  const envelope: GatewayEnvelope = {
+    version: 1,
+    ...context,
+    sealed: await options.crypto.seal(
+      credential.key,
+      JSON.stringify(plaintext),
+      gatewayRequestAad(credential.hostId, context),
+    ),
+  };
+  const socket = new URL(`${base}${GATEWAY_STREAM_PATH}`);
+  socket.protocol = socket.protocol === "https:" ? "wss:" : "ws:";
+  return {
+    url: socket.toString(),
+    opening: JSON.stringify(envelope),
+    key,
+    aadUp: gatewayStreamAadBase(credential.hostId, context, "up"),
+    aadDown: gatewayStreamAadBase(credential.hostId, context, "down"),
   };
 }

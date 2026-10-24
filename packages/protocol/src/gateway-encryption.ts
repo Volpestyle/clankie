@@ -90,6 +90,54 @@ export function gatewayResponseAad(
   ]);
 }
 
+/**
+ * A sealed stream (VUH-2761): a device's call socket carried through the
+ * gateway. The device opens a socket to this path and its first message is an
+ * ordinary `GatewayEnvelope` naming the call route; the Mac opens it like a
+ * request. Every later message, both ways, is one binary sealed record under
+ * that envelope's `responseKey`: 12-byte IV || ciphertext || 16-byte tag, whose
+ * plaintext is a record kind byte and the payload. The Mac's first record is a
+ * `start` naming the status its local route answered (101 when the call is up).
+ */
+export const GATEWAY_STREAM_PATH = "/v1/gateway/stream";
+export const GATEWAY_STREAM_RECORD_START = 0;
+export const GATEWAY_STREAM_RECORD_TEXT = 1;
+export const GATEWAY_STREAM_RECORD_BINARY = 2;
+/** One sealed record, header included: a 20 ms audio frame with room to spare. */
+export const GATEWAY_STREAM_RECORD_BYTES_MAX = 16 * 1024;
+export const GatewayStreamStartSchema = z.object({ status: z.number().int().min(101).max(599) }).strict();
+export type GatewayStreamStart = z.infer<typeof GatewayStreamStartSchema>;
+
+/**
+ * A stream record's AAD: the envelope's transcript, its direction and its
+ * sequence, so a record can't be replayed, reordered, reflected or moved to
+ * another stream. `base#sequence`, so a native sealer only appends a number.
+ */
+export function gatewayStreamAadBase(
+  hostId: string,
+  envelope: Pick<GatewayEnvelope, "ticket" | "challenge" | "requestId">,
+  direction: "up" | "down",
+): string {
+  return JSON.stringify([
+    "clankie-gateway",
+    1,
+    "stream",
+    direction,
+    hostId,
+    envelope.ticket,
+    envelope.challenge,
+    envelope.requestId,
+  ]);
+}
+export function gatewayStreamAad(
+  hostId: string,
+  envelope: Pick<GatewayEnvelope, "ticket" | "challenge" | "requestId">,
+  direction: "up" | "down",
+  sequence: number,
+): string {
+  return `${gatewayStreamAadBase(hostId, envelope, direction)}#${sequence}`;
+}
+
 /** Deliberate delivery metadata projection; device names and bearer remain encrypted. */
 export const GatewayPushIdentitySchema = z.object({
   deviceId: z.string().min(1).max(128),

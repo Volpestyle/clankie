@@ -539,6 +539,57 @@ export const PublicGatewayResponseEndFrameSchema = z
   .strict();
 export type PublicGatewayResponseEndFrame = z.infer<typeof PublicGatewayResponseEndFrameSchema>;
 
+/**
+ * Sealed streams (VUH-2761). The Mac says it carries them with this header on
+ * its connect request: an older gateway ignores a header, where a query
+ * parameter or a new frame would refuse the Mac. The gateway opens a stream
+ * only to a Mac that said so, and never to a hosted body.
+ */
+export const PUBLIC_GATEWAY_STREAMS_HEADER = "x-clankie-gateway-streams";
+/** Open streams per Mac: a call, and room for one that is ending. */
+export const PUBLIC_GATEWAY_STREAMS_MAX = 2;
+/** Base64 of one sealed stream record (`GATEWAY_STREAM_RECORD_BYTES_MAX`). */
+const STREAM_RECORD_BYTES_MAX = 16 * 1024;
+const PublicGatewayStreamIdSchema = PublicGatewayRequestIdSchema;
+
+/** Gateway to Mac: a device opened a stream; `envelope` is its first message, unread. */
+export const PublicGatewayStreamOpenFrameSchema = z
+  .object({
+    schemaVersion: z.literal(PUBLIC_GATEWAY_SCHEMA_VERSION),
+    kind: z.literal("stream_open"),
+    streamId: PublicGatewayStreamIdSchema,
+    envelope: z
+      .string()
+      .min(1)
+      .max(16 * 1024),
+  })
+  .strict();
+export type PublicGatewayStreamOpenFrame = z.infer<typeof PublicGatewayStreamOpenFrameSchema>;
+
+/** Either way: one sealed record, carried as it arrived. */
+export const PublicGatewayStreamDataFrameSchema = z
+  .object({
+    schemaVersion: z.literal(PUBLIC_GATEWAY_SCHEMA_VERSION),
+    kind: z.literal("stream_data"),
+    streamId: PublicGatewayStreamIdSchema,
+    dataBase64: BoundedCanonicalBase64Schema(STREAM_RECORD_BYTES_MAX).refine((value) => value.length > 0, {
+      message: "expected a non-empty stream record",
+    }),
+  })
+  .strict();
+export type PublicGatewayStreamDataFrame = z.infer<typeof PublicGatewayStreamDataFrameSchema>;
+
+/** Either way: the stream is over. The code is a WebSocket close code; reasons stay sealed. */
+export const PublicGatewayStreamCloseFrameSchema = z
+  .object({
+    schemaVersion: z.literal(PUBLIC_GATEWAY_SCHEMA_VERSION),
+    kind: z.literal("stream_close"),
+    streamId: PublicGatewayStreamIdSchema,
+    code: z.number().int().min(1000).max(4999),
+  })
+  .strict();
+export type PublicGatewayStreamCloseFrame = z.infer<typeof PublicGatewayStreamCloseFrameSchema>;
+
 export const PublicGatewayTunnelFrameSchema = z.discriminatedUnion("kind", [
   PublicGatewayPushWakeFrameSchema,
   PublicGatewayPushWakeResultFrameSchema,
@@ -549,6 +600,9 @@ export const PublicGatewayTunnelFrameSchema = z.discriminatedUnion("kind", [
   PublicGatewayResponseStartFrameSchema,
   PublicGatewayResponseChunkFrameSchema,
   PublicGatewayResponseEndFrameSchema,
+  PublicGatewayStreamOpenFrameSchema,
+  PublicGatewayStreamDataFrameSchema,
+  PublicGatewayStreamCloseFrameSchema,
 ]);
 export type PublicGatewayTunnelFrame = z.infer<typeof PublicGatewayTunnelFrameSchema>;
 
