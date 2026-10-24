@@ -26,8 +26,15 @@ export interface GatewayCrypto {
   seal(key: string, plaintext: string, aad: string): Promise<string>;
   open(key: string, sealed: string, aad: string): Promise<string>;
 }
+/** Trusted platform bulk codec. It must reject noncanonical base64, enforce maxBytes,
+ * concatenate bytes before WHATWG UTF-8 decoding (replacement mode, leading BOM removed),
+ * and return independently owned bytes. It never authenticates or publishes partial records. */
+export interface GatewayResponseBodyCodec {
+  decode(chunks: readonly string[], maxBytes: number): { bytes: ArrayBuffer; text: string };
+}
 export interface GatewayEncryptedFetchOptions {
   crypto: GatewayCrypto;
+  bodyCodec?: GatewayResponseBodyCodec;
   fetchImpl?: typeof fetch;
   credential: () => GatewayEncryptionCredential | undefined;
 }
@@ -47,12 +54,18 @@ export class GatewayRequestError extends Error {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function decodeUtf8Response(response: Response): Response {
+function decodeUtf8Response(response: Response, text?: string): Response {
   const clone = response.clone.bind(response);
   Object.defineProperties(response, {
-    text: { configurable: true, value: async () => decoder.decode(await response.arrayBuffer()) },
+    text: {
+      configurable: true,
+      value: async () => {
+        const bytes = await response.arrayBuffer(); // Preserve bodyUsed, stream locking and read failures.
+        return text ?? decoder.decode(bytes);
+      },
+    },
     json: { configurable: true, value: async () => JSON.parse(await response.text()) as unknown },
-    clone: { configurable: true, value: () => decodeUtf8Response(clone()) },
+    clone: { configurable: true, value: () => decodeUtf8Response(clone(), text) },
   });
   return response;
 }
@@ -261,6 +274,7 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     let status: number | undefined;
     const headers = new Headers();
     const chunks: Uint8Array[] = [];
+    const encodedChunks: string[] = [];
     let total = 0;
     let ended = false;
     for (let sequence = 0; sequence < lines.length; sequence++) {
@@ -284,19 +298,29 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
         if (plain.ticket !== undefined) headers.set("x-clankie-encryption-ticket", plain.ticket);
         if (plain.key !== undefined) headers.set("x-clankie-encryption-key", plain.key);
       } else if (plain.kind === "chunk") {
-        const chunk = unbase64(plain.bodyBase64);
-        total += chunk.length;
+        // The schema checks alphabet/group/padding; the codec must also check trailing bits.
+        // Bound accumulation before invoking native code or allocating the completed body.
+        const chunk = options.bodyCodec ? undefined : unbase64(plain.bodyBase64);
+        total +=
+          chunk?.length ??
+          (plain.bodyBase64.length / 4) * 3 -
+            (plain.bodyBase64.endsWith("==") ? 2 : plain.bodyBase64.endsWith("=") ? 1 : 0);
         if (total > GATEWAY_RESPONSE_BYTES_MAX) throw new Error("Encrypted response too large");
-        chunks.push(chunk);
+        if (chunk) chunks.push(chunk);
+        else encodedChunks.push(plain.bodyBase64);
       } else if (plain.kind === "end") ended = true;
       else throw new Error("Unexpected encrypted response start");
     }
     if (!ended || status === undefined) throw new Error("Truncated encrypted response");
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.length;
+    const decoded = options.bodyCodec?.decode(encodedChunks, GATEWAY_RESPONSE_BYTES_MAX);
+    if (decoded && decoded.bytes.byteLength !== total) throw new Error("Invalid decoded response size");
+    const bytes = decoded ? new Uint8Array(decoded.bytes) : new Uint8Array(total);
+    if (!decoded) {
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
     }
     // Bounded HTTP/long-poll consumers see no unauthenticated partial result.
     const empty = status === 204 || status === 205 || status === 304;
@@ -305,7 +329,7 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
       headers,
     });
     // React Native's Response treats UTF-8 bytes as Latin-1 in text()/json().
-    return empty ? response : decodeUtf8Response(response);
+    return empty ? response : decodeUtf8Response(response, decoded?.text);
   };
 }
 

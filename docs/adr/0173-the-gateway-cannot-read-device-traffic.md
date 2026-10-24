@@ -214,3 +214,18 @@ client, encrypted transport and reusable body authorization remain public.
 Local tests cover signing, tampering, encryption, ordinary-device denial,
 revocation, continuing conversation work and forbidden local process commands.
 A real hosted Mac/phone rehearsal and deployment remain separate gates.
+
+## Bounded platform body decoding (VUH-2776)
+
+The api-client may use a trusted platform `GatewayResponseBodyCodec` after every
+record has authenticated and the terminal record and aggregate byte limit have
+passed. The codec must reject noncanonical base64, concatenate before WHATWG
+UTF-8 decoding, and return owned bytes with replacement-mode text (one leading
+BOM removed). The default remains the shared JS codec. A platform failure
+refuses the response rather than falling back. This changes no cryptography,
+wire schema, request retry, record sequencing or authorization.
+
+The returned Response retains the real byte body for binary/blob reads,
+consumption and clone behavior. Its text/json wrapper consumes that body before
+returning the platform-decoded string; each clone retains independent body
+consumption. Empty-body statuses still validate then discard any body bytes.
