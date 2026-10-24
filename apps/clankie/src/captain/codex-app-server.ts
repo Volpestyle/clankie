@@ -716,6 +716,9 @@ export async function startCodexAppServerSeat(options: {
       turnChanges.clear();
     };
     const terminalTurns = new Map<string, CodexSeatEvent>();
+    // Only an outstanding start reply can need a full completion replay. The
+    // settled history proves identity/status without retaining native item bodies.
+    let dispatchCompletions: Map<string, CodexSeatEvent> | undefined;
     let idleReconciliation: Promise<void> = Promise.resolve();
     const reconcileIdle = () => {
       const expected = activeTurn;
@@ -767,8 +770,16 @@ export async function startCodexAppServerSeat(options: {
           typeof turn.id === "string" &&
           ["completed", "interrupted", "failed"].includes(String(turn.status))
         ) {
-          terminalTurns.set(turn.id, event);
-          if (terminalTurns.size > 64) terminalTurns.delete(terminalTurns.keys().next().value!);
+          terminalTurns.set(turn.id, {
+            method: event.method,
+            params: { threadId, turn: { id: turn.id, status: turn.status } },
+          });
+          dispatchCompletions?.set(turn.id, event);
+          if (terminalTurns.size > 64) {
+            const oldest = terminalTurns.keys().next().value!;
+            terminalTurns.delete(oldest);
+            dispatchCompletions?.delete(oldest);
+          }
           if (turn.id === activeTurn) {
             activeTurn = undefined;
             changedTurn();
@@ -1239,27 +1250,36 @@ export async function startCodexAppServerSeat(options: {
         }
         dispatchedOnce = true;
         dispatched = true;
-        const response = record(
-          await client!.request(steering ? "turn/steer" : "turn/start", {
-            threadId,
-            input,
-            ...(steering ? { expectedTurnId: steering } : {}),
-            ...(answer === undefined ? {} : { clientUserMessageId: answer.clientUserMessageId }),
-          }),
-        );
-        const turnId = steering ? response.turnId : record(response.turn).id;
-        firstDispatch = false;
-        if (typeof turnId !== "string")
-          throw new Error("Codex did not confirm the turn identity; delivery is uncertain");
-        if (!steering && turnRevision === dispatchRevision) {
-          // The RPC itself is authentic turn identity, including when a
-          // subscription did not deliver its started notification.
-          observe({ method: "turn/started", params: { threadId, turn: { id: turnId } } });
-          const terminal = terminalTurns.get(turnId);
-          if (terminal) {
-            activeTurn = turnId;
-            observe(terminal);
+        const completions = steering ? undefined : new Map<string, CodexSeatEvent>();
+        dispatchCompletions = completions;
+        let turnId: string;
+        try {
+          const response = record(
+            await client!.request(steering ? "turn/steer" : "turn/start", {
+              threadId,
+              input,
+              ...(steering ? { expectedTurnId: steering } : {}),
+              ...(answer === undefined ? {} : { clientUserMessageId: answer.clientUserMessageId }),
+            }),
+          );
+          const returnedId = steering ? response.turnId : record(response.turn).id;
+          firstDispatch = false;
+          if (typeof returnedId !== "string")
+            throw new Error("Codex did not confirm the turn identity; delivery is uncertain");
+          turnId = returnedId;
+          if (!steering && turnRevision === dispatchRevision) {
+            // The RPC itself is authentic turn identity, including when a
+            // subscription did not deliver its started notification.
+            observe({ method: "turn/started", params: { threadId, turn: { id: turnId } } });
+            const terminal = completions?.get(turnId) ?? terminalTurns.get(turnId);
+            if (terminal) {
+              activeTurn = turnId;
+              observe(terminal);
+            }
           }
+        } finally {
+          dispatchCompletions = undefined;
+          completions?.clear();
         }
         await subscribe();
         return { turnId, state: steering ? ("steered" as const) : ("started" as const) };
