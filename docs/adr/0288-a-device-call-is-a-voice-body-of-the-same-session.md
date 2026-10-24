@@ -143,11 +143,15 @@ spoken conversation nowhere. For an owner's device call that no longer holds.
   line never passes through the autonomy report boundary, so a
   "continuation: …" or "blocked on owner: …" said aloud changes nothing. A
   recorded line is not a turn, so the next text turn runs on its own message
-  alone.
-- **No wire marker yet.** Installed apps parse conversation pages strictly, so
-  a recorded line looks like any other message: a new field would make them
-  refuse the page. An opt-in replay field that lets newer apps show a line as
-  spoken can follow.
+  alone. Text Clankie therefore hears nothing of the call beyond what its
+  `ask_clankie` handoffs carried; the lines are the owner's record, not his
+  context.
+- **The wire marker is deferred.** A recorded line goes out as an ordinary
+  message for now. Apps read conversation pages through
+  `parseProtocolResponse`, which drops unknown keys, so a `spoken` field on
+  these messages would most likely be ignored by apps that predate it rather
+  than refused. Adding it, and showing such lines as spoken, is
+  [VUH-2764](https://linear.app/vuhlp/issue/VUH-2764).
 - **No opt-out yet.** Every owner device call records its lines. A setting to
   keep a call out of the chat is future work.
 - **Audio is still never retained.** Only text is kept, and only the owner's
