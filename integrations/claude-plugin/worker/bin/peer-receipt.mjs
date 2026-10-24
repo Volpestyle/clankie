@@ -143,8 +143,17 @@ export function createPeerSender({ directory, scope, discover, request }) {
       // A delayed responder must not remove a newer original's claim.
       if (inspect(path)?.deliveryId === record.deliveryId) unlinkSync(path);
     });
-  /** Superseded settles the claim and lets this call's new message go out. */
+  /**
+   * A settled original frees its recipient: this call's different message goes
+   * out as new intent, carrying the original's outcome back with it (VUH-2779).
+   */
   const followUp = Symbol("follow-up");
+  const previous = (value) => ({
+    deliveryId: value.deliveryId,
+    deliveryStage: value.deliveryStage,
+    outcome: value.outcome,
+    ...(typeof value.detail === "string" ? { detail: value.detail } : {}),
+  });
   const reconcile = async (claim, target, text) => {
     const { record } = claim;
     const query = new URLSearchParams({ binding: record.binding, fingerprint: record.fingerprint });
@@ -172,11 +181,7 @@ export function createPeerSender({ directory, scope, discover, request }) {
       normalize(text) === normalize(record.text);
     if (same) return value;
     // The original is never resent; a different message is new intent.
-    if (value.deliveryStage === "superseded") return followUp;
-    return refused(
-      "unavailable",
-      "The original peer message is settled. This different follow-up was not sent.",
-    );
+    return { [followUp]: previous(value) };
   };
   const send = async (target, text) => {
     let record;
@@ -185,7 +190,10 @@ export function createPeerSender({ directory, scope, discover, request }) {
       const held = claims().find((claim) => claim.record.seatId === target || claim.record.paneId === target);
       if (held) {
         const reconciled = await reconcile(held, target, text);
-        if (reconciled !== followUp) return reconciled;
+        if (!(followUp in reconciled)) return reconciled;
+        const settled = reconciled[followUp];
+        const sent = await send(target, text);
+        return { ...sent, previous: settled };
       }
       if (typeof target !== "string" || !target.trim() || typeof text !== "string" || !normalize(text))
         return refused("rejected", "Name a peer seat and provide its message.");
@@ -223,7 +231,7 @@ export function createPeerSender({ directory, scope, discover, request }) {
         if (error?.code !== "EEXIST") throw error;
         const original = inspect(path);
         const reconciled = original ? await reconcile({ path, record: original }, target, text) : uncertain();
-        return reconciled === followUp ? uncertain() : reconciled;
+        return followUp in reconciled ? uncertain() : reconciled;
       }
       const sent = await request("", {
         method: "POST",

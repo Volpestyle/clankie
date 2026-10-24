@@ -977,8 +977,12 @@ export function createFleetSeatControl(
 
 /** An original absent from its idle recipient's session stops blocking a different message after this. */
 const UNARRIVED_SETTLE_MS = 5 * 60_000;
-/** Covers a Claude seat's transcript receipt window (15s) and a linked machine's proofs. */
-const IN_FLIGHT_WAIT_MS = 45_000;
+/**
+ * Covers a Claude seat's transcript receipt window (15s) and most of a linked
+ * machine's proofs, while the wait plus a delivery's own checks stay within a
+ * worker bridge's 50s peer request budget (VUH-2779).
+ */
+const IN_FLIGHT_WAIT_MS = 25_000;
 
 export function isMessageableSeat(agent: HerdrAgentSnapshot | undefined): agent is HerdrAgentSnapshot {
   return agent !== undefined && agent.agent !== "shell" && agent.agent !== "unknown";

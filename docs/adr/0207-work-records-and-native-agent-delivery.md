@@ -319,6 +319,15 @@ rules assumed every check was local and every receipt prompt.
   probes and a peer's colliding on the recipient's receipt fence. One refusal
   was recorded `uncertain` though nothing was sent, which held every later
   peer message to that seat for the 15-minute supersede window (VUH-2100). A
-  message to a seat with a delivery in flight now waits for it, bounded at 45
+  message to a seat with a delivery in flight now waits for it, bounded at 25
   seconds, then takes the ordinary checks. A message that still loses the seat
   at its dispatch recheck is a definite not-sent.
+- _Peer sends to a linked machine fit their request budget._ The live re-run
+  then showed the worker bridge abandoning peer sends to the PC Codex seat at
+  20 seconds while the service's remote proofs were still running (13–18 s
+  after the attempt for those that delivered). The seat reported uncertain;
+  the service's final check then found the sender's stream closed and refused.
+  The bridge now allows 50 seconds, under Codex's 60-second MCP tool limit.
+  After any settled original, a different message to that seat goes out in
+  the same call, and the result carries the original's outcome as `previous`;
+  only the same text never resends.

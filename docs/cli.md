@@ -5913,7 +5913,8 @@ What crosses the link, and what cannot:
   Both `mcp --seat` and `mcp --fleet` preserve an uncertain original across
   bridge/service replacement. Calling again reconciles that exact ID through
   a read; it never resends it. A different follow-up during reconciliation
-  remains unsent. Missing or mismatched evidence stays blocked; do not delete
+  remains unsent, except that a peer message goes out once its original has
+  settled, carrying that outcome as `previous` (VUH-2779). Missing or mismatched evidence stays blocked; do not delete
   the receipt files or switch bridges to bypass it. Older inbound writers
   without a delivery ID are rejected before dispatch.
 - Other remote seats' replies are read with `herdr agent read`. Terminal
@@ -6868,7 +6869,7 @@ instead of uncertain; it is not proof Claude read it. An idle seat, or a session
 with no channel event yet, still needs the transcript entry (VUH-2779).
 Messages to one seat go out one at a time: a lead's or peer's message that
 arrives while another delivery to that seat is in flight waits its turn (up to
-45 seconds) instead of being refused, and one that still loses the seat is a
+25 seconds) instead of being refused, and one that still loses the seat is a
 definite `undelivered`, never `uncertain`.
 
 The hire records its observed session and hiring conversation before waiting

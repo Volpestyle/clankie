@@ -19,6 +19,8 @@ interface PeerReceipt {
   retryable?: boolean;
   messageId?: string;
   state?: "queued" | "started" | "steered";
+  /** A settled original's outcome, returned with the different follow-up sent after it. */
+  previous?: Pick<PeerReceipt, "deliveryStage" | "outcome" | "deliveryId" | "detail">;
 }
 interface PeerSeat {
   seatId: string;

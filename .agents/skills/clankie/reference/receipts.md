@@ -82,8 +82,10 @@ classification and stay UNKNOWN for good.
 Keep an uncertain original receipt and reconcile it through the bridge's read
 path. Never send the same intent again, switch bridges or remove receipt state
 to bypass uncertainty. While the original is unresolved, another call reads only
-that receipt. After it settles, a different follow-up remains unsent; invoke again
-deliberately if that message is still needed. For `message_clankie`, a recovered
+that receipt. After it settles, a different `message_clankie` follow-up remains
+unsent; invoke again deliberately if that message is still needed. A different
+`message_peer` follow-up goes out in that same call, and its result carries the
+original's settled outcome as `previous`. For `message_clankie`, a recovered
 positive keeps a five-minute reconciliation window: matching text returns its
 original stored ID, including after a bridge restart. Starting a distinct fresh
 report closes that window; after expiry, the same text can be a new status report.

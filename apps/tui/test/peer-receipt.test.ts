@@ -67,7 +67,7 @@ const claim = (directory: string) =>
     readFileSync(join(directory, readdirSync(directory).find((name) => name.endsWith(".json"))!), "utf8"),
   );
 
-it("a restarted sender only reconciles its original recipient and text after a lost response", async () => {
+it("a restarted sender reconciles its original before sending a different message, never resending it", async () => {
   const directory = root();
   let accepted!: ReturnType<typeof receipt>;
   const discover = vi.fn(async () => response(catalog));
@@ -89,13 +89,18 @@ it("a restarted sender only reconciles its original recipient and text after a l
     text: "first\nline",
     fingerprint: accepted.fingerprint,
   });
+  const original = accepted.deliveryId;
   const restarted = createPeerSender({ directory, scope: "pane", discover, request });
   const replacement = await restarted("w1:p2", "different message");
-  expect(replacement.deliveryStage).toBe("unavailable");
-  expect(replacement.detail).toContain("different follow-up was not sent");
-  expect(request.mock.calls.filter(([, init]) => init)).toHaveLength(1);
-  expect(discover).toHaveBeenCalledTimes(1);
-  expect(readdirSync(directory)).toEqual([]);
+  // The original settled as delivered: the new message is new intent, sent now,
+  // and the caller learns the original's outcome with it (VUH-2779).
+  expect(replacement).toMatchObject({
+    previous: { deliveryId: original, deliveryStage: "consumed", outcome: "delivered" },
+  });
+  const posts = request.mock.calls.filter(([, init]) => init);
+  expect(posts).toHaveLength(2);
+  expect(JSON.parse(posts[1]![1]!.body)).toMatchObject({ text: "different message" });
+  expect(JSON.parse(posts[1]![1]!.body).delivery.id).not.toBe(original);
 });
 
 it.each(["original", "different follow-up"])(
@@ -141,11 +146,17 @@ it.each(["original", "different follow-up"])(
     );
     if (followUp === "original") expect(result).toEqual(terminalUnknown);
     else {
-      expect(result).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
-      expect(result.detail).toContain("different follow-up was not sent");
+      // The recipient is gone, so the fresh message finds no seat; it carries the original's outcome.
+      expect(result).toMatchObject({
+        outcome: "undelivered",
+        deliveryStage: "rejected",
+        previous: { deliveryId: terminalUnknown.deliveryId, deliveryStage: "recipient_gone" },
+      });
     }
     expect(posts).toHaveLength(1);
-    expect(discover).toHaveBeenCalledOnce();
+    // A different message is new intent, so it discovers the recipient afresh.
+    const discoveries = followUp === "original" ? 1 : 2;
+    expect(discover).toHaveBeenCalledTimes(discoveries);
     expect(readdirSync(directory)).toEqual([]);
     expect(await restarted(replacement.seatId, "fresh intent")).toMatchObject({
       outcome: "delivered",
@@ -153,7 +164,7 @@ it.each(["original", "different follow-up"])(
       seatId: replacement.seatId,
       recipientBinding: replacement.binding,
     });
-    expect(discover).toHaveBeenCalledTimes(2);
+    expect(discover).toHaveBeenCalledTimes(discoveries + 1);
     expect(posts).toHaveLength(2);
     expect(posts.filter((body) => body.delivery.id === terminalUnknown.deliveryId)).toHaveLength(1);
     expect(posts[1]).toMatchObject({
@@ -438,6 +449,39 @@ it("after a superseded original, a different message to the same seat is sent in
   });
   expect(posts.map((body) => body.text)).toEqual(["first", "second"]);
   expect(posts[1]!.delivery.id).not.toBe(posts[0]!.delivery.id);
+  expect(readdirSync(directory)).toEqual([]);
+});
+
+it("after an original that timed out and then settled as not sent, the next message goes out in one call", async () => {
+  // Live 2026-10-24: the bridge gave up before the PC's proofs finished; the
+  // service then refused the original. The next probe must not need two calls.
+  const directory = root();
+  const posts: PeerBody[] = [];
+  const request = vi.fn(async (_suffix: string, init?: { method: string; body: string }) => {
+    if (!init)
+      return response({
+        ...receipt(posts[0]!, "unavailable", "undelivered"),
+        detail: "Codex authority changed before dispatch; nothing was sent.",
+      });
+    const body: PeerBody = JSON.parse(init.body);
+    posts.push(body);
+    if (posts.length === 1)
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    return response(receipt(body));
+  });
+  const send = createPeerSender({
+    directory,
+    scope: "pane",
+    discover: async () => response(catalog),
+    request,
+  });
+  expect((await send("peer-seat", "VUH-2779 probe 1")).deliveryStage).toBe("uncertain");
+  expect(await send("peer-seat", "VUH-2779 probe 2")).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "consumed",
+    previous: { deliveryId: posts[0]!.delivery.id, deliveryStage: "unavailable", outcome: "undelivered" },
+  });
+  expect(posts.map((body) => body.text)).toEqual(["VUH-2779 probe 1", "VUH-2779 probe 2"]);
   expect(readdirSync(directory)).toEqual([]);
 });
 

@@ -38,6 +38,13 @@ import { approvesWorkerChannel, authorization, readLink, seatRoute, TEXT_MAX } f
 
 const WAIT_MS = 25_000;
 const RETRY_MS = 2_000;
+/**
+ * A peer send to a linked machine's seat runs several authority and native
+ * proofs there, each an SSH round trip of seconds: 20s cut off sends that then
+ * settled, reporting them uncertain and closing the sender's stream mid-check
+ * (VUH-2779). Codex ends an MCP tool call at 60s by default, so stay under it.
+ */
+const PEER_REQUEST_TIMEOUT_MS = 50_000;
 // The service waits 30s for an exact ack (FLEET_ACK_TIMEOUT_MS); retries end first.
 const ACK_RETRY_MS = 20_000;
 // Native clients can retain only their first catalog. Let a newly started pane
@@ -606,8 +613,8 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     if (membershipStopped) return refusedMembershipResponse();
     if (!link || !paneId) throw new Error("No linked fleet pane");
     const deadline = signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(20_000)])
-      : AbortSignal.timeout(20_000);
+      ? AbortSignal.any([signal, AbortSignal.timeout(PEER_REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(PEER_REQUEST_TIMEOUT_MS);
     try {
       return await observeMembership(
         await requestWithAdmissionRetry(
