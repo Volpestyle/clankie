@@ -1,6 +1,6 @@
 # VUH-2803 — decode each native telemetry append once
 
-[Published proof archive](clankie://evidence/sha256/fe71e8764f869dddeb3fc64c4130eb738023801505d534864a411e4c151c6179).
+[Published proof archive](clankie://evidence/sha256/2556a020bea7f7409393792c6a201d311fd32f74bf491b9821f664027f553d2f).
 
 Before this change, every append to a native Codex or Claude transcript made seat
 telemetry re-read the whole 2 MiB tail, decode it, serialize the records again, and
@@ -21,11 +21,15 @@ nothing is serialized and decoded again.
 The window, the filtering, the session/sidechain boundaries, the unchanged-stamp
 snapshot cache, shared in-flight reads and the before/after `fstat` fence are
 unchanged. An unterminated final line counts only if it parses, as before. It is
-never kept, so it is decoded again once the writer finishes it. The file is read
-whole again unless all of these hold: same device and inode, strictly larger size,
-an identical first 64 KiB, and an identical 4 KiB before the last decoded line.
-Truncation, a same-size rewrite in place, replacement, and a rewritten session
-header therefore each read the file whole. A concurrent read stores its tail only if
+never kept, so it is decoded again once the writer finishes it. The decoded lines
+are reused only if the device, inode and first 64 KiB are unchanged and the size
+grew. In addition, the SHA-256 of every byte in the decoded window must still
+match; malformed lines are part of that window. Otherwise the tail is read whole.
+That covers truncation, rewrites in place anywhere in the window (with or without
+growth), replacement, and a rewritten session header outside the window. The
+first candidate checked only the last 4 KiB before the decoded end. Review showed
+that an interior rewrite followed by an append left a stale model, and the
+window digest replaced that check. A concurrent read stores its tail only if
 no other read replaced the cached tail first. Results are frozen as before, and the
 retained records never leave the module.
 
@@ -52,11 +56,13 @@ in `source/`.
   with synthetic records.
 - **Committed integration test.** It is in `apps/clankie/test/seat-efficiency.integration.test.ts`.
   After each append, partial line, malformed line, truncation, same-size rewrite,
-  rewrite plus growth, replacement, session-header rewrite and Claude
+  interior rewrite plus growth, rewrite at the end plus growth, replacement,
+  rewrite of a session header outside the window, and Claude
   sidechain/foreign-session line, it compares the incremental read with a cold
   read of a copy of the same bytes. It also asserts the expected values.
-  `mutations.log` shows the test failing when any one of the four continuation
-  fences is removed (window trim, header, strict growth, end anchor).
+  `mutations.log` shows the test failing when the window trim, the header check
+  or the window digest is removed. The strict-growth condition is only a
+  shortcut: without it, the digest still decides correctly.
 - 153 tests pass across the 12 telemetry, transcript, watch, TUI and relay files
   (`focused.log`). The `apps/clankie` and `agent-transcript` typechecks pass.
 
@@ -70,18 +76,20 @@ identical in every run (`6211334761d9…`).
 
 | Uninstrumented process CPU, median of 3 alternating runs | Baseline | Candidate |
 | -------------------------------------------------------- | -------: | --------: |
-| `appends40`                                              |  1.115 s |   0.244 s |
-| `unchanged40` (includes the first, cold telemetry read)  |  0.025 s |   0.013 s |
-| cold transcript read (unchanged code)                    |  0.336 s |   0.341 s |
+| `appends40`                                              |  1.192 s |   0.326 s |
+| `unchanged40` (includes the first, cold telemetry read)  |  0.028 s |   0.014 s |
+| cold transcript read (unchanged code)                    |  0.365 s |   0.362 s |
+| process RSS at exit                                      | 496.3 MB |  430.0 MB |
 
 | `appends40`, separately instrumented run |     Baseline |  Candidate |
 | ---------------------------------------- | -----------: | ---------: |
 | `JSON.parse` calls                       |       96,576 |         80 |
 | bytes given to `JSON.parse`              |     285.9 MB |    13.6 KB |
-| GC pauses, median of 3 (count / total)   | 27 / 11.9 ms | 3 / 1.4 ms |
+| GC pauses, median of 3 (count / total)   | 27 / 13.0 ms | 3 / 1.7 ms |
 
-The parse-counting hook and the GC observer run separately from the CPU runs. The
-remaining candidate cost per append is mostly redaction (`cleanDetail`) in the
+The parse-counting hook and the GC observer run separately from the CPU runs.
+Each append rereads the decoded window and hashes it twice (about 0.7 ms per
+2 MiB each). The rest of the candidate's cost per append is mostly redaction (`cleanDetail`) in the
 report projection of the window (`profiles/candidate-selftime.txt`). It runs again
 for each generation because the projection's tool-name and dedupe state depends on
 where the window starts.
@@ -89,9 +97,9 @@ where the window starts.
 ## Retention
 
 This trades decoding work for retained heap. With `--expose-gc`, after the 40
-appends, the candidate holds 132.4 MB of JS heap against the baseline's 124.6 MB:
-7.8 MB more for one seat whose 2 MiB window is mostly tool output. Right after the
-first telemetry read the difference is 3.0 MB. The cap of 16 files bounds the worst
+appends, the candidate holds 132.2 MB of JS heap against the baseline's 124.6 MB:
+7.6 MB more for one seat whose 2 MiB window is mostly tool output. Right after the
+first telemetry read the difference is 2.8 MB. The cap of 16 files bounds the worst
 case at about 16 full windows, roughly 50 to 120 MB at this ratio. Those records are
 long-lived old-generation objects for major-GC marking, in exchange for no longer
 allocating about 7 MB of short-lived decoded records per seat append.

@@ -1,4 +1,5 @@
 import { constants } from "node:fs";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { open, readdir, lstat, realpath, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -33,8 +34,6 @@ const execFileAsync = promisify(execFile);
 const CACHE_LIMIT = 256;
 /** Decoded native tails retained for append continuation; each holds at most MAX_TAIL_BYTES of lines. */
 const TAIL_LIMIT = 16;
-/** Bytes before a tail's end that must still match before an append continues it. */
-const ANCHOR_BYTES = 4096;
 /** A bounded observation, not evidence that a forgotten tool is still running. */
 const ACTIVITY_MAX_AGE_MS = 5 * 60_000;
 const TOOL_KINDS = new Map<string, OperatorAgentActivityKind>([
@@ -378,8 +377,9 @@ async function smallFile(path: string, maxBytes = 8192): Promise<string> {
 }
 
 /**
- * Complete lines of one native file's bounded tail, decoded once. An append on the
- * same file decodes only its new bytes; anything else reads the tail again.
+ * Complete lines of one native file's bounded tail, decoded once. An append that
+ * leaves every decoded byte unchanged decodes only its new bytes; anything else
+ * reads the tail again.
  */
 type NativeTail = {
   readonly dev: bigint;
@@ -387,10 +387,12 @@ type NativeTail = {
   readonly size: number;
   readonly head: Buffer;
   readonly sessionId: string | undefined;
+  /** Where the decoded window starts: after the cut newline, or 0. */
+  readonly region: number;
   /** Byte offset just past the last complete line decoded. */
   readonly end: number;
-  /** The bytes just before `end`; an append continues only while they still match. */
-  readonly anchor: Buffer;
+  /** SHA-256 of the bytes from `region` to `end`, malformed lines included. */
+  readonly digest: Buffer;
   /** Ascending absolute line starts, parallel to `records`. */
   readonly starts: readonly number[];
   readonly records: readonly Record<string, unknown>[];
@@ -402,6 +404,7 @@ async function readAt(handle: FileHandle, position: number, length: number): Pro
   const read = await handle.read(bytes, 0, length, position);
   return bytes.subarray(0, read.bytesRead);
 }
+const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest();
 
 async function nativeSnapshot(
   path: string,
@@ -418,19 +421,30 @@ async function nativeSnapshot(
     const from = Math.max(0, size - MAX_TAIL_BYTES);
     const head = await readAt(handle, 0, Math.min(size, MAX_HEADER_BYTES));
     const prior = nativeTails.get(key);
-    // Only strict growth of the same file whose decoded head and end are unchanged is an append.
-    const continues =
+    const candidate =
       prior !== undefined &&
       prior.dev === before.dev &&
       prior.ino === before.ino &&
       size > prior.size &&
       prior.end > from &&
-      head.subarray(0, prior.head.length).equals(prior.head) &&
-      (await readAt(handle, prior.end - prior.anchor.length, prior.anchor.length)).equals(prior.anchor);
-    const start = continues ? prior.end : from;
-    const bytes = await readAt(handle, start, size - start);
+      head.subarray(0, prior.head.length).equals(prior.head)
+        ? prior
+        : undefined;
+    let base = candidate?.region ?? from;
+    let bytes = await readAt(handle, base, size - base);
+    // Reuse decoded lines only while every byte of their window is unchanged.
+    const reused =
+      candidate !== undefined &&
+      bytes.length >= candidate.end - base &&
+      digest(bytes.subarray(0, candidate.end - base)).equals(candidate.digest)
+        ? candidate
+        : undefined;
+    if (candidate !== undefined && reused === undefined) {
+      base = from;
+      bytes = await readAt(handle, from, size - from);
+    }
     if (fileStamp(await handle.stat({ bigint: true })) !== stamp) return undefined;
-    let sessionId = continues && head.length === prior.head.length ? prior.sessionId : undefined;
+    let sessionId = reused !== undefined && head.length === reused.head.length ? reused.sessionId : undefined;
     if (sessionId === undefined) {
       const header = rows(head.toString());
       const nativeId =
@@ -441,34 +455,38 @@ async function nativeSnapshot(
         harness === "codex" ? text(object(nativeId).id, 256) : text(object(nativeId).sessionId, 256);
     }
     if (sessionId === undefined) return undefined;
-    // Keep decoded lines still inside the tail; a cold read starts after its first newline.
+    // The window starts after the first newline at or past `from`, as a cold read cuts it.
+    let region: number;
+    let cursor: number;
     let kept = 0;
-    if (continues && from > 0) while (kept < prior.starts.length && prior.starts[kept]! <= from) kept++;
-    const starts = continues ? prior.starts.slice(kept) : [];
-    const records = continues ? prior.records.slice(kept) : [];
-    let cursor = !continues && from > 0 ? bytes.indexOf(0x0a) + 1 : 0;
+    if (reused !== undefined) {
+      region = from >= reused.region ? base + bytes.indexOf(0x0a, from - base) + 1 : reused.region;
+      while (kept < reused.starts.length && reused.starts[kept]! < region) kept++;
+      cursor = reused.end - base;
+    } else {
+      cursor = from > 0 ? bytes.indexOf(0x0a) + 1 : 0;
+      region = base + cursor;
+    }
+    const starts = reused ? reused.starts.slice(kept) : [];
+    const records = reused ? reused.records.slice(kept) : [];
     for (let newline = bytes.indexOf(0x0a, cursor); newline >= 0; newline = bytes.indexOf(0x0a, cursor)) {
       const record = row(bytes.toString("utf8", cursor, newline));
       if (record !== undefined) {
-        starts.push(start + cursor);
+        starts.push(base + cursor);
         records.push(record);
       }
       cursor = newline + 1;
     }
-    const end = start + cursor;
-    const anchor = Buffer.from(
-      cursor >= ANCHOR_BYTES || !continues
-        ? bytes.subarray(Math.max(0, cursor - ANCHOR_BYTES), cursor)
-        : Buffer.concat([prior.anchor, bytes.subarray(0, cursor)]).subarray(-ANCHOR_BYTES),
-    );
+    const end = base + cursor;
     const tail = {
       dev: before.dev,
       ino: before.ino,
       size,
       head: Buffer.from(head),
       sessionId,
+      region,
       end,
-      anchor,
+      digest: digest(bytes.subarray(region - base, cursor)),
       starts,
       records,
     };

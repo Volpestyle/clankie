@@ -708,9 +708,18 @@ it("continues native appends from decoded lines and answers exactly what a cold 
   await appendFile(path, bulk("bulk-3"));
   expect(await expectCold("codex")).toMatchObject({ reportFailures: 1, reportFailureIds: ["report-2"] });
 
-  // Each rewrite below is visible to only one fence: file growth, the decoded end, or the header.
+  // Rewrites inside the decoded window, past it and in a header outside it each read again.
   await writeFile(path, (await readFile(path, "utf8")).replaceAll("report-2", "report-9"));
   expect(await expectCold("codex")).toMatchObject({ reportFailureIds: ["report-9"] });
+  const context = (model: string) =>
+    JSON.stringify({ timestamp: at(7), type: "turn_context", payload: { model, effort: "high" } }) + "\n";
+  await appendFile(path, context("gpt-6-mid") + bulk("bulk-5"));
+  expect(await expectCold("codex")).toHaveProperty("model", "gpt-6-mid");
+  await writeFile(
+    path,
+    (await readFile(path, "utf8")).replace("gpt-6-mid", "gpt-6-mix") + call("read-4", "Read", 7),
+  );
+  expect(await expectCold("codex")).toHaveProperty("model", "gpt-6-mix");
   await appendFile(path, call("report-3", "message_clankie", 7) + output("report-3", "MCP error -32001", 8));
   await expectCold("codex");
   await writeFile(
@@ -723,7 +732,12 @@ it("continues native appends from decoded lines and answers exactly what a cold 
   const replacement = join(dir, "replacement.jsonl");
   await writeFile(
     replacement,
-    nativeCodex().replaceAll("gpt-6-sol", "gpt-6-new") + call("edit-1", "Edit", 10) + bulk("bulk-4"),
+    nativeCodex().replaceAll("gpt-6-sol", "gpt-6-new") +
+      bulk("bulk-4") +
+      bulk("bulk-6") +
+      bulk("bulk-7") +
+      nativeCodex().replaceAll("gpt-6-sol", "gpt-6-new") +
+      call("edit-1", "Edit", 10),
   );
   await rename(replacement, path);
   expect(await expectCold("codex")).toHaveProperty("model", "gpt-6-new");
