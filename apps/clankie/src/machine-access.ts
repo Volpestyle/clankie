@@ -28,16 +28,22 @@ export function machineAccessLevel(
     : "portal";
 }
 
+/** The settings generation an access check read; assertCurrent rechecks it synchronously. */
+export interface MachineAccessFence {
+  assertCurrent(): void;
+}
+
 export async function requireMachineAccess(
   settings: SettingsStore,
   id: string,
   required: MachineAccessLevel,
   joined?: JoinedMachineRegistry,
-): Promise<void> {
+): Promise<MachineAccessFence> {
   const policy = await settings.loadFenced();
   const level = machineAccessLevel(policy.settings, id, joined);
   if (!machineAccessAllows(level, required)) await refuseMachineAccess(settings, id, level, required);
   policy.assertCurrent();
+  return { assertCurrent: () => policy.assertCurrent() };
 }
 
 /** Resolve a fleet connection and its ceiling from one fenced registry generation. */
@@ -46,7 +52,7 @@ export async function requireRuntimeMachineAccess(
   fleet: string | undefined,
   required: MachineAccessLevel,
   joined?: JoinedMachineRegistry,
-): Promise<void> {
+): Promise<MachineAccessFence> {
   if (fleet === undefined || fleet === "default")
     return requireMachineAccess(settings, "local", required, joined);
   const policy = await settings.loadFenced();
@@ -58,6 +64,7 @@ export async function requireRuntimeMachineAccess(
   const level = machineAccessLevel(policy.settings, machine, joined);
   if (!machineAccessAllows(level, required)) await refuseMachineAccess(settings, machine, level, required);
   policy.assertCurrent();
+  return { assertCurrent: () => policy.assertCurrent() };
 }
 
 /** One durable owner observation per machine/required level; repeated refusals coalesce. */

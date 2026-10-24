@@ -34,7 +34,7 @@ export interface CaptainOptions {
   readonly requireMachineAccess?: (
     fleet: string | undefined,
     required: import("@clankie/protocol").MachineAccessLevel,
-  ) => Promise<void>;
+  ) => Promise<void | import("../machine-access.ts").MachineAccessFence>;
   /** Content-free native alert outcome; no raw provider exception or message text. */
   readonly onHealthAlertDelivery?: (result: {
     fingerprint: string;

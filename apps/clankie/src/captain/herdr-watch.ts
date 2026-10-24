@@ -35,7 +35,8 @@ import { channelBody } from "./claude-worker-seat.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { codexProxyControl, codexProxySettled, type ExternalCodexControl } from "./external-codex-control.ts";
 import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
-import type { PeerDeliveryOptions } from "./peer-seat-messages.ts";
+import { currentOf, withCurrent, type CurrentCheck, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
+import type { MachineAccessFence } from "../machine-access.ts";
 import {
   existingNativeSession,
   nativeResumeArgs,
@@ -982,7 +983,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private closed = false;
   private readonly nativeLaunchPolicy: NativeLaunchPolicy | undefined;
   private readonly fleetResources: FleetResourceRuntime | undefined;
-  private readonly requireWorkerAccess: ((fleet?: string) => Promise<void>) | undefined;
+  private readonly requireWorkerAccess: ((fleet?: string) => Promise<void | MachineAccessFence>) | undefined;
   private readonly hireDefaults: (() => Promise<HireProfile>) | undefined;
   private readonly maximumTrustMode: (() => Promise<boolean>) | undefined;
   private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
@@ -1004,7 +1005,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly messageReceiver?: (agent: HerdrAgentSnapshot) => FleetSeatMessageReceiver;
       readonly nativeLaunchPolicy?: NativeLaunchPolicy;
       readonly fleetResources?: FleetResourceRuntime;
-      readonly requireWorkerAccess?: (fleet?: string) => Promise<void>;
+      /** Its fence, when returned, lets a native write's final gate recheck it without I/O. */
+      readonly requireWorkerAccess?: (fleet?: string) => Promise<void | MachineAccessFence>;
       readonly projectHirePolicy?: ProjectHirePolicy;
       readonly fleetHireTools?: () => Promise<readonly string[]>;
       readonly hireDefaults?: () => Promise<HireProfile>;
@@ -1530,10 +1532,27 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<FleetSeatDelivery> {
     if (this.requireWorkerAccess) {
       const original = options;
-      const guard = async () => {
-        await original?.guard?.();
-        await this.requireWorkerAccess!(splitFleetQualified(seatId)?.fleet);
+      // The last access generation the guard read, for the write's synchronous final gate.
+      let access: MachineAccessFence | undefined;
+      const fenced: CurrentCheck = {
+        current: () => {
+          if (access === undefined) return undefined;
+          try {
+            access.assertCurrent();
+            return true;
+          } catch {
+            return false;
+          }
+        },
       };
+      const guard = withCurrent(
+        async () => {
+          access = undefined;
+          await original?.guard?.();
+          access = (await this.requireWorkerAccess!(splitFleetQualified(seatId)?.fleet)) ?? undefined;
+        },
+        currentOf(original?.guard, fenced),
+      );
       try {
         await this.requireWorkerAccess(splitFleetQualified(seatId)?.fleet);
       } catch (error) {

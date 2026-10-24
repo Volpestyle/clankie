@@ -16,7 +16,7 @@ import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { nativeSessionId } from "./native-session-resume.ts";
-import type { PeerDeliveryOptions } from "./peer-seat-messages.ts";
+import { currentOf, withCurrent, type CurrentCheck, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 
 /** Native control is shared by messages and watches; the adapters own its lifetime. */
 export function createFleetSeatControl(
@@ -32,7 +32,7 @@ export function createFleetSeatControl(
     fleet: string,
     sessionId: string,
     text: string,
-    beforeDispatch?: () => Promise<boolean>,
+    beforeDispatch?: (() => Promise<boolean>) & CurrentCheck,
     paneId?: string,
   ) => Promise<boolean | FleetSeatDelivery>,
   remoteCodexControl?: (fleet: string, paneId: string) => ExternalCodexControl | undefined,
@@ -175,7 +175,7 @@ export function createFleetSeatControl(
     agent: HerdrAgentSnapshot,
     text: string,
     begin: () => void,
-    authorized?: () => Promise<boolean>,
+    authorized?: (() => Promise<boolean>) & CurrentCheck,
     delivery?: "steer" | "queue",
   ): Promise<FleetSeatDelivery | undefined> => {
     const remote = splitFleetQualified(agent.paneId)?.fleet;
@@ -289,10 +289,13 @@ export function createFleetSeatControl(
   ): Promise<FleetSeatDelivery> => {
     const authorized =
       options?.guard || options?.fence
-        ? async () => {
-            await options.guard?.();
-            return options.fence ? options.fence(current) : true;
-          }
+        ? withCurrent(
+            async () => {
+              await options.guard?.();
+              return options.fence ? options.fence(current) : true;
+            },
+            currentOf(options.guard, options.fence),
+          )
         : undefined;
     // Only a live exact-session receiver can steer; a hook mailbox cannot.
     if (options?.delivery && isMessageableSeat(current) && current.agent === "claude" && uncontrolled) {
@@ -336,6 +339,7 @@ export function createFleetSeatControl(
             messageId: delivery.messageId,
             state: delivery.state,
             ...(delivery.deliveryStage === undefined ? {} : { deliveryStage: delivery.deliveryStage }),
+            ...(delivery.detail === undefined ? {} : { detail: delivery.detail }),
           };
         if (delivery.outcome === "unconfirmed" || delivery.outcome === "offline") return delivery;
         return {

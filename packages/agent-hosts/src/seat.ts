@@ -151,6 +151,8 @@ export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
       readonly outcome: "accepted";
       readonly messageId: string;
       readonly state: "queued" | "started" | "steered";
+      /** What a queued acceptance still waits on, such as the recipient's active turn. */
+      readonly detail?: string;
     }
   | { readonly outcome: "released" }
   | { readonly outcome: "offline"; readonly detail: string }

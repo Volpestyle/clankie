@@ -22,6 +22,45 @@ import type { FleetSeatDelivery } from "./fleet-seat.ts";
 export interface PeerSeatAuthority {
   readonly proof: ProjectProcessProof;
   validate(): Promise<boolean>;
+  /** Synchronous link revocation only, as LocalFleetIdentity.current; never grants authority. */
+  readonly current?: () => boolean;
+}
+
+/**
+ * A dispatch check may read remote state, which takes seconds on a linked
+ * machine. Its `current`, when present, synchronously rechecks what it proved
+ * (link and settings generations, no I/O), so the last gate before a native
+ * write stays immediate (VUH-2779). `undefined` from it means no synchronous
+ * proof: the full check gates the write. A wrapper that adds its own check is
+ * a new function and so drops `current` the same way.
+ */
+export interface CurrentCheck {
+  readonly current?: () => boolean | undefined;
+}
+
+/** The synchronous recheck for a set of checks, only when every one of them has one. */
+export function currentOf(
+  ...checks: readonly (CurrentCheck | undefined)[]
+): (() => boolean | undefined) | undefined {
+  const present = checks.filter((check) => check !== undefined);
+  if (present.some((check) => check.current === undefined)) return undefined;
+  return () => {
+    let proven: boolean | undefined = true;
+    for (const check of present) {
+      const value = check.current!();
+      if (value === false) return false;
+      if (value === undefined) proven = undefined;
+    }
+    return proven;
+  };
+}
+
+/** Attach a synchronous recheck to a check, or leave it a plain full check. */
+export function withCurrent<T extends (...args: never[]) => unknown>(
+  check: T,
+  current: (() => boolean | undefined) | undefined,
+): T & CurrentCheck {
+  return current === undefined ? check : Object.assign(check, { current });
 }
 export interface PeerDeliveryOptions {
   /** An owner restriction does not turn an operator message into peer output. */
@@ -29,7 +68,7 @@ export interface PeerDeliveryOptions {
   /** Owner send intent, absent for peer messages and automatic delivery. */
   readonly delivery?: "steer" | "queue";
   /** Host-only native author/admission check, combined with any peer fence. */
-  readonly guard?: () => Promise<void>;
+  readonly guard?: (() => Promise<void>) & CurrentCheck;
   /** Exact host-stamped original event key; retains confirmed native acceptance. */
   readonly stableReceiptKey?: string;
   readonly reconcileOnly?: boolean;
@@ -37,7 +76,7 @@ export interface PeerDeliveryOptions {
   readonly recipientBinding?: string;
   /** Service-authored lead attribution, never a peer request field. */
   readonly conversationId?: string;
-  readonly fence?: (agent: HerdrAgentSnapshot | undefined) => Promise<boolean>;
+  readonly fence?: ((agent: HerdrAgentSnapshot | undefined) => Promise<boolean>) & CurrentCheck;
 }
 const ReceiptRecordSchema = z
   .object({
@@ -312,7 +351,10 @@ export class PeerSeatMessages {
         final: false,
       });
       const result = await this.options.deliver(input.seatId, message, {
-        fence: (native) => this.fence(authority, input, native),
+        fence: withCurrent(
+          (native: HerdrAgentSnapshot | undefined) => this.fence(authority, input, native),
+          authority.current,
+        ),
         recipientBinding: input.recipientBinding,
       });
       return this.settle(record, result);

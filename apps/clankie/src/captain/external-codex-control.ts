@@ -7,6 +7,7 @@ import WebSocket from "ws";
 import { z } from "zod";
 import { CodexAppServerClient } from "./codex-app-server.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
+import type { CurrentCheck } from "./peer-seat-messages.ts";
 
 /** Undefined permits the native queue only because no mutating request was sent. */
 export type ExternalCodexControl = (
@@ -16,7 +17,7 @@ export type ExternalCodexControl = (
   /** Exact --remote endpoint observed on this pane, never a guessed socket. */
   endpoint?: string,
   /** Recheck peer authority after all native preparation and before the write. */
-  beforeDispatch?: () => Promise<boolean>,
+  beforeDispatch?: (() => Promise<boolean>) & CurrentCheck,
 ) => Promise<FleetSeatDelivery | undefined>;
 
 /** One already-selected native connection; this function never chooses an endpoint. */

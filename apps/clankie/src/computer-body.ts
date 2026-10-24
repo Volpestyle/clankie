@@ -103,7 +103,7 @@ const recoveryRefusal = (reason: string, detail: string, next: string) => ({
 export class ComputerBody {
   private readonly adapter: ComputerAdapter;
   private readonly store: BodyLeaseStore;
-  private readonly requireScreen: (() => Promise<void>) | undefined;
+  private readonly requireScreen: (() => Promise<unknown>) | undefined;
   private readonly journalPath: string;
   private readonly recoveryAuditPath: string;
   private journal: z.infer<typeof JournalSchema>;
@@ -120,7 +120,7 @@ export class ComputerBody {
     adapter: ComputerAdapter,
     store: BodyLeaseStore,
     directory: string,
-    requireScreen?: () => Promise<void>,
+    requireScreen?: () => Promise<unknown>,
   ) {
     this.adapter = adapter;
     this.store = store;

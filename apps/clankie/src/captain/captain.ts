@@ -300,7 +300,13 @@ import {
   prepareSeatIssueAttribution,
   warnSeatIssueUnavailable,
 } from "./seat-issue-status.ts";
-import { PeerSeatMessages, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
+import {
+  PeerSeatMessages,
+  currentOf,
+  withCurrent,
+  type CurrentCheck,
+  type PeerDeliveryOptions,
+} from "./peer-seat-messages.ts";
 import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
 import { PersonaStore, type PersonaRoleWrite } from "./personas.ts";
 import type { CaptainPort, FleetHealthAlertDelivery, HireSeat, MessageSeat } from "./port.ts";
@@ -1030,7 +1036,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               fleetId: string,
               sessionId: string,
               text: string,
-              beforeDispatch?: () => Promise<boolean>,
+              beforeDispatch?: (() => Promise<boolean>) & CurrentCheck,
               paneId?: string,
             ) => {
               await refreshFleets();
@@ -1071,11 +1077,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               return cached.queue(
                 sessionId,
                 text,
-                async () => {
-                  await refreshFleets();
-                  if ((fleetRevisions.get(fleetId) ?? 0) !== revision) return false;
-                  return beforeDispatch ? beforeDispatch() : true;
-                },
+                withCurrent(
+                  async () => {
+                    await refreshFleets();
+                    if ((fleetRevisions.get(fleetId) ?? 0) !== revision) return false;
+                    return beforeDispatch ? beforeDispatch() : true;
+                  },
+                  currentOf(beforeDispatch, {
+                    current: () => (fleetRevisions.get(fleetId) ?? 0) === revision,
+                  }),
+                ),
                 paneId,
               );
             };

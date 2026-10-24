@@ -26,8 +26,10 @@ export async function peerSeatAuthority(
     proof.fleet !== (identity.fleet ?? "default")
   )
     return undefined;
+  const current = identity.current?.bind(identity);
   return {
     proof,
     validate: async () => isDeepStrictEqual(await read(), proof),
+    ...(current === undefined ? {} : { current }),
   };
 }

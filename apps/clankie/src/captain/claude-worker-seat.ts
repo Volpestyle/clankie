@@ -43,6 +43,7 @@ import {
   type FleetSeatHook,
   type FleetGates,
 } from "@clankie/protocol";
+import { HerdrFleetError } from "../herdr-fleet.ts";
 import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herdr-transcript.ts";
 import { paneInputLine } from "./pane-draft.ts";
 import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
@@ -586,7 +587,14 @@ async function receipt(
   let rejectingRule = "transcript_unavailable";
   const id = await until(
     async () => {
-      const transcript = await deps.transcript(agent);
+      let transcript: HerdrSeatTranscript | undefined;
+      try {
+        transcript = await deps.transcript(agent);
+      } catch {
+        // One failed read over a fleet link is a poll gap, not an unknown delivery.
+        rejectingRule = "transcript_read_failed";
+        return undefined;
+      }
       if (transcript === undefined) {
         rejectingRule = "transcript_unavailable";
         return undefined;
@@ -625,8 +633,39 @@ function logReceiptRejection(agent: WorkerSeatAgent, rejectingRule: string): voi
   );
 }
 
-async function transcriptIds(deps: ClaudeWorkerSeatDeps, agent: WorkerSeatAgent): Promise<Set<string>> {
-  return new Set((await deps.transcript(agent))?.entries.map((entry) => entry.id));
+/**
+ * The session's entries before a send, and whether one of them is a channel
+ * event Claude already took. A read failure here comes before any dispatch.
+ */
+async function transcriptBefore(
+  deps: ClaudeWorkerSeatDeps,
+  agent: WorkerSeatAgent,
+): Promise<{ readonly ids: Set<string>; readonly channel: boolean }> {
+  let transcript: HerdrSeatTranscript | undefined;
+  try {
+    transcript = await deps.transcript(agent);
+  } catch (error) {
+    throw new HerdrFleetError(
+      "transcript_unavailable",
+      `The seat's session could not be read before dispatch; nothing was sent: ${String(error)}`,
+      "not_sent",
+    );
+  }
+  const entries = transcript?.entries ?? [];
+  return {
+    ids: new Set(entries.map((entry) => entry.id)),
+    channel: entries.some(
+      (entry) =>
+        entry.type === "message" && entry.role === "operator" && channelBody(entry.text) !== undefined,
+    ),
+  };
+}
+
+/** Keep a bounded set, dropping its oldest entry. */
+function remember(set: Set<string>, value: string): void {
+  set.delete(value);
+  if (set.size >= SESSION_LIMIT) set.delete(set.values().next().value!);
+  set.add(value);
 }
 
 function sessionIdOf(agent: WorkerSeatAgent): string | undefined {
@@ -649,12 +688,21 @@ class ClaudeWorkerSeatControl implements SeatControl {
   private readonly receiptMs: number;
   private readonly pollMs: number;
   private terminalId: string | undefined;
+  /** Sessions whose channel receiver took an exact message in this service's lifetime. */
+  private readonly channels: Set<string>;
   public readonly stopTask?: (beforeDispatch: () => Promise<void>) => Promise<StopNativeTaskResult>;
 
-  public constructor(ref: SeatRef, deps: ClaudeWorkerSeatDeps, terminalId?: string, stops?: StopReceipts) {
+  public constructor(
+    ref: SeatRef,
+    deps: ClaudeWorkerSeatDeps,
+    terminalId?: string,
+    stops?: StopReceipts,
+    channels: Set<string> = new Set(),
+  ) {
     this.ref = ref;
     this.deps = deps;
     this.terminalId = terminalId;
+    this.channels = channels;
     this.receiptMs = deps.timing?.receiptMs ?? RECEIPT_MS;
     this.pollMs = deps.timing?.pollMs ?? POLL_MS;
     const pane = deps.pane;
@@ -810,7 +858,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
       };
     if (!this.deps.mailbox.bound(agent.terminalId))
       return { outcome: "released", deliveryStage: "unavailable" };
-    const before = await transcriptIds(this.deps, agent);
+    const before = await transcriptBefore(this.deps, agent);
     const current = await this.observe();
     if (current?.agent === undefined || current.agent.terminalId !== agent.terminalId)
       return {
@@ -848,7 +896,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
       this.deps,
       agent,
       message,
-      before,
+      before.ids,
       options?.timeoutMs ?? this.receiptMs,
       this.pollMs,
     );
@@ -860,13 +908,34 @@ class ClaudeWorkerSeatControl implements SeatControl {
         messageId: id ?? "",
         detail: "The seat binding became unavailable after channel dispatch; completion is unknown",
       };
-    if (id === undefined)
+    if (id === undefined) {
+      // Claude writes a channel event that arrives mid-turn to its transcript
+      // only when it absorbs it at the next tool boundary, often minutes later
+      // (VUH-2779). The exact bridge ACK plus a receiver this session already
+      // proved, and a turn still running, is a queued delivery, not an unknown one.
+      const sessionId = sessionIdOf(agent);
+      if (
+        typeof delivery !== "boolean" &&
+        (after.status === "working" || after.status === "blocked") &&
+        (before.channel || (sessionId !== undefined && this.channels.has(sessionId)))
+      )
+        return {
+          outcome: "accepted",
+          deliveryStage: "delivered",
+          messageId: delivery.messageId,
+          state: "queued",
+          detail:
+            "Claude's channel took it during an active turn; Claude records it when it next pauses between steps. Not proof it was read.",
+        };
       return {
         outcome: "unconfirmed",
         deliveryStage: "uncertain",
         messageId: typeof delivery === "boolean" ? "" : delivery.messageId,
         detail: "The worker channel took the message, but it has not appeared in the session transcript",
       };
+    }
+    const sessionId = sessionIdOf(agent);
+    if (sessionId !== undefined) remember(this.channels, sessionId);
     return {
       outcome: "accepted",
       deliveryStage: "consumed",
@@ -962,6 +1031,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
   const pollMs = deps.timing?.pollMs ?? POLL_MS;
   const firstTurnMs = deps.timing?.firstTurnMs ?? FIRST_TURN_MS;
   const stops: StopReceipts = new Map();
+  const channels = new Set<string>();
   return {
     harness: "claude",
     async start(launch, view): Promise<SeatStartResult> {
@@ -1093,7 +1163,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
             : "brief_delivery_unverified: the resumed session's hook boundary could not be saved; no brief was sent",
         };
       }
-      const control = new ClaudeWorkerSeatControl(ref, deps, agent.terminalId, stops);
+      const control = new ClaudeWorkerSeatControl(ref, deps, agent.terminalId, stops, channels);
       if (launch.brief.length > 0) {
         await view.guard?.();
         // Watch from before the send, so a refusal that lands with the receipt is not missed.
@@ -1145,7 +1215,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
     },
     async attach(ref): Promise<SeatControl | undefined> {
       if (ref.harness !== "claude" || !deps.hooks.knows(ref.sessionId)) return undefined;
-      const control = new ClaudeWorkerSeatControl(ref, deps, undefined, stops);
+      const control = new ClaudeWorkerSeatControl(ref, deps, undefined, stops, channels);
       const status = await control.status();
       return status === "offline" || status === "released" ? undefined : control;
     },

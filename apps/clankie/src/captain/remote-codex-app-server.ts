@@ -18,6 +18,7 @@ import { createRemoteCodexControlObserver, createRemoteCodexQueueObserver } from
 import { isDeepStrictEqual } from "node:util";
 import { posix, win32 } from "node:path";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
+import type { CurrentCheck } from "./peer-seat-messages.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import {
@@ -447,14 +448,21 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
   };
 }
 
-/** A final authority read must finish promptly; late approval cannot authorize a write. */
-async function finalCodexAuthority(beforeDispatch: () => Promise<boolean>): Promise<boolean> {
+/**
+ * A final authority read must finish promptly; late approval cannot authorize a write.
+ * The caller's full check has already run once before the native observation.
+ * Its synchronous recheck, when it has one, is what runs here: a full check that
+ * reads a linked machine takes seconds and could never meet this bound (VUH-2779).
+ */
+async function finalCodexAuthority(
+  beforeDispatch: (() => Promise<boolean>) & CurrentCheck,
+): Promise<boolean> {
   const deadline = performance.now() + FINAL_CODEX_AUTHORITY_TIMEOUT_MS;
   const timeout = () => new Error("Final Codex authority check timed out; nothing was sent.");
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const allowed = await Promise.race([
-      Promise.resolve().then(beforeDispatch),
+      Promise.resolve().then(() => beforeDispatch.current?.() ?? beforeDispatch()),
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(timeout()), FINAL_CODEX_AUTHORITY_TIMEOUT_MS);
       }),
@@ -541,7 +549,7 @@ export function remoteCodexQueue(
   return async (
     sessionId: string,
     text: string,
-    beforeDispatch?: () => Promise<boolean>,
+    beforeDispatch?: (() => Promise<boolean>) & CurrentCheck,
     paneId?: string,
   ): Promise<boolean | FleetSeatDelivery> => {
     const qualified = paneId === undefined ? undefined : splitFleetQualified(paneId);
