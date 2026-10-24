@@ -445,22 +445,36 @@ function withUnlistedTools(
     ];
     missing = missing?.filter((name) => !found.some((tool) => tool.name === name));
   } else {
-    const terms = (typeof args.query === "string" ? args.query : "")
-      .toLowerCase()
-      .split(/[^a-z0-9]+/u)
-      .filter(Boolean);
-    const matches = unlisted.filter(
-      (tool) =>
-        terms.length === 0 ||
-        terms.some((term) => `${tool.name} ${tool.description}`.toLowerCase().includes(term)),
-    );
-    tools = [
-      ...(body.tools ?? []),
-      ...matches.map((tool) => ({
-        name: tool.name,
-        summary: tool.description.split("\n")[0]!.slice(0, 160),
-      })),
-    ].slice(0, 20);
+    const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+    const terms = query.split(/[^a-z0-9]+/u).filter(Boolean);
+    // The directory's own ranking: a term in the name counts twice, one in the
+    // text once, and the exact name outranks everything.
+    const score = (name: string, text: string) =>
+      (name.toLowerCase() === query ? 100 : 0) +
+      terms.reduce(
+        (total, term) =>
+          total + (name.toLowerCase().includes(term) ? 2 : text.toLowerCase().includes(term) ? 1 : 0),
+        0,
+      );
+    const connected = (body.tools ?? []).map((tool) => {
+      const entry = tool as { name?: unknown; summary?: unknown };
+      return {
+        tool,
+        score: score(String(entry.name ?? ""), `${String(entry.name ?? "")} ${String(entry.summary ?? "")}`),
+      };
+    });
+    const own = unlisted
+      .map((tool) => ({
+        tool: { name: tool.name, summary: tool.description.split("\n")[0]!.slice(0, 160) },
+        score: score(tool.name, `${tool.name} ${tool.description}`),
+      }))
+      .filter((entry) => terms.length === 0 || entry.score > 0);
+    // Rank both together before the shared cap, so a full connected page never hides them.
+    tools = [...connected, ...own]
+      .map((entry, order) => ({ ...entry, order }))
+      .sort((a, b) => b.score - a.score || a.order - b.order)
+      .slice(0, 20)
+      .map((entry) => entry.tool);
   }
   const merged: Record<string, unknown> = { ...body, tools };
   if (missing?.length) merged.missing = missing;

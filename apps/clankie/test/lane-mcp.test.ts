@@ -292,6 +292,73 @@ describe("lane MCP endpoint", () => {
     app.close();
   });
 
+  it("ranks the lead's unlisted tools with a full page of connected matches (VUH-2796)", async () => {
+    const connected = Array.from({ length: 20 }, (_, index) => ({
+      name: `service_${index}`,
+      summary: "Edits an image for the service.",
+    }));
+    const tool = (name: string, call: () => object) => ({
+      name,
+      description: `${name} fixture.`,
+      inputSchema: { type: "object" },
+      call: async () => ({ content: [{ type: "text" as const, text: JSON.stringify(call()) }] }),
+    });
+    const bank = {
+      lane: "operator" as const,
+      tools: [
+        tool("mcp_tool_search", () => ({ tools: connected, services: [] })),
+        tool("mcp_tool_call", () => ({})),
+        { ...tool("generate_image", () => ({ ok: true })), description: "Generate an image from a prompt." },
+      ],
+    };
+    const { createLaneMcpEndpoint } = await import("../src/lane-mcp.ts");
+    const endpoint = createLaneMcpEndpoint({ captain: { laneToolBank: async () => bank } as never });
+    const request = (body: unknown, session?: string) =>
+      endpoint.handle(
+        new Request("http://localhost/v1/mcp", {
+          method: "POST",
+          headers: { ...MCP_HEADERS, ...(session ? { "mcp-session-id": session } : {}) },
+          body: JSON.stringify(body),
+        }),
+        "operator",
+      );
+    try {
+      const opened = await request({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "crowded", version: "1" },
+        },
+      });
+      const session = opened.headers.get("mcp-session-id")!;
+      await request({ jsonrpc: "2.0", method: "notifications/initialized" }, session);
+      const search = async (query: string) => {
+        const response = await request(
+          {
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/call",
+            params: { name: "mcp_tool_search", arguments: { query } },
+          },
+          session,
+        );
+        const text = await response.text();
+        const payload = JSON.parse(text.slice(text.indexOf("{")).replace(/\n\n$/u, ""));
+        return JSON.parse(payload.result.content[0].text).tools.map((entry: { name: string }) => entry.name);
+      };
+      const exact = await search("generate_image");
+      expect(exact[0]).toBe("generate_image");
+      expect(exact).toHaveLength(20);
+      // A word only in the text still competes with connected matches on equal terms.
+      expect(await search("image")).toContain("generate_image");
+    } finally {
+      await endpoint.close();
+    }
+  });
+
   it("refuses an unauthenticated connection", async () => {
     const app = await mcpApp();
     const response = await app.app.request("/v1/mcp", { method: "GET" });
