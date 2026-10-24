@@ -1,10 +1,10 @@
 import { constants } from "node:fs";
 import { execFile } from "node:child_process";
-import { open, readdir, lstat, realpath } from "node:fs/promises";
+import { open, readdir, lstat, realpath, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, relative, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { parseHerdrSeatTranscript } from "@clankie/agent-transcript";
+import { herdrSeatTranscriptEntries } from "@clankie/agent-transcript";
 import type {
   OperatorAgentActivity,
   OperatorAgentActivityKind,
@@ -31,6 +31,10 @@ const MAX_TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
 const execFileAsync = promisify(execFile);
 const CACHE_LIMIT = 256;
+/** Decoded native tails retained for append continuation; each holds at most MAX_TAIL_BYTES of lines. */
+const TAIL_LIMIT = 16;
+/** Bytes before a tail's end that must still match before an append continues it. */
+const ANCHOR_BYTES = 4096;
 /** A bounded observation, not evidence that a forgotten tool is still running. */
 const ACTIVITY_MAX_AGE_MS = 5 * 60_000;
 const TOOL_KINDS = new Map<string, OperatorAgentActivityKind>([
@@ -59,13 +63,7 @@ function nativeActivity(
       : entry.type === "assistant" && object(entry.message).stop_reason === "end_turn",
   );
   const active = new Map<string, Extract<OperatorAgentActivity, { source: "native_tool" }> | undefined>();
-  for (const entry of parseHerdrSeatTranscript(
-    harness,
-    records
-      .slice(boundary + 1)
-      .map((row) => JSON.stringify(row))
-      .join("\n"),
-  )) {
+  for (const entry of herdrSeatTranscriptEntries(harness, records.slice(boundary + 1))) {
     if (entry.type === "message" && entry.role === "operator" && !entry.internal) active.clear();
     if (entry.type !== "tool") continue;
     if (entry.phase !== "started") {
@@ -96,10 +94,10 @@ function nativeActivity(
 const NativeId = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const preparedPaths = new Map<string, Promise<string | undefined>>();
 const resolvedPaths = new Map<string, string | undefined>();
-function boundedSet<T>(map: Map<string, T>, key: string, value: T): void {
+function boundedSet<T>(map: Map<string, T>, key: string, value: T, limit = CACHE_LIMIT): void {
   map.delete(key);
   map.set(key, value);
-  if (map.size > CACHE_LIMIT) map.delete(map.keys().next().value!);
+  if (map.size > limit) map.delete(map.keys().next().value!);
 }
 // Census may know the native session before it knows a profile. Resolve the
 // canonical primary home without consulting credentials or account settings.
@@ -233,13 +231,17 @@ const count = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 const timestamp = (value: unknown) =>
   typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined;
+const row = (line: string) => {
+  try {
+    return object(JSON.parse(line));
+  } catch {
+    return undefined;
+  }
+};
 const rows = (raw: string) =>
   raw.split("\n").flatMap((line) => {
-    try {
-      return [object(JSON.parse(line))];
-    } catch {
-      return [];
-    }
+    const value = row(line);
+    return value === undefined ? [] : [value];
   });
 const reportName = (name: string) => /(?:^|[._:])message_clankie$/u.test(name);
 const failureDetail = (detail: string | undefined) => {
@@ -262,12 +264,16 @@ const failureDetail = (detail: string | undefined) => {
 };
 
 /** A bounded native snapshot, not a prose classifier or accumulated usage report. */
-function parseSeatTelemetry(harness: "codex" | "claude", raw: string, sessionId?: string): SeatTelemetry {
+function parseSeatTelemetry(
+  harness: "codex" | "claude",
+  tail: readonly Record<string, unknown>[],
+  sessionId?: string,
+): SeatTelemetry {
   let model: string | undefined;
   let effort: string | undefined;
   let window: number | undefined;
   let occupancy: number | undefined;
-  const records = rows(raw).filter(
+  const records = tail.filter(
     (entry) =>
       harness !== "claude" ||
       (entry.isSidechain !== true &&
@@ -308,12 +314,11 @@ function parseSeatTelemetry(harness: "codex" | "claude", raw: string, sessionId?
       // report model only rather than guessing a capacity from its spelling.
     }
   }
-  const validRaw = records.map((entry) => JSON.stringify(entry)).join("\n");
   const reportCalls = new Set<string>();
   let lastReportAt: string | undefined;
   let reportFailedAt: string | undefined;
   const failed = new Set<string>();
-  for (const entry of parseHerdrSeatTranscript(harness, validRaw)) {
+  for (const entry of herdrSeatTranscriptEntries(harness, records)) {
     if (entry.type !== "tool") continue;
     if (reportName(entry.name)) reportCalls.add(entry.toolCallId);
     if (!reportCalls.has(entry.toolCallId) || entry.phase === "started") continue;
@@ -372,10 +377,37 @@ async function smallFile(path: string, maxBytes = 8192): Promise<string> {
   }
 }
 
+/**
+ * Complete lines of one native file's bounded tail, decoded once. An append on the
+ * same file decodes only its new bytes; anything else reads the tail again.
+ */
+type NativeTail = {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly size: number;
+  readonly head: Buffer;
+  readonly sessionId: string | undefined;
+  /** Byte offset just past the last complete line decoded. */
+  readonly end: number;
+  /** The bytes just before `end`; an append continues only while they still match. */
+  readonly anchor: Buffer;
+  /** Ascending absolute line starts, parallel to `records`. */
+  readonly starts: readonly number[];
+  readonly records: readonly Record<string, unknown>[];
+};
+const nativeTails = new Map<string, NativeTail>();
+
+async function readAt(handle: FileHandle, position: number, length: number): Promise<Buffer> {
+  const bytes = Buffer.alloc(length);
+  const read = await handle.read(bytes, 0, length, position);
+  return bytes.subarray(0, read.bytesRead);
+}
+
 async function nativeSnapshot(
   path: string,
   harness: "codex" | "claude",
   stamp: string,
+  key: string,
 ): Promise<NativeSnapshot | undefined> {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -383,32 +415,80 @@ async function nativeSnapshot(
     if (!before.isFile() || fileStamp(before) !== stamp || before.size > BigInt(Number.MAX_SAFE_INTEGER))
       return undefined;
     const size = Number(before.size);
-    const head = Buffer.alloc(Math.min(size, MAX_HEADER_BYTES));
-    const first = await handle.read(head, 0, head.length, 0);
-    const header = rows(head.subarray(0, first.bytesRead).toString());
-    const nativeId =
-      harness === "codex"
-        ? header.find((entry) => entry.type === "session_meta")?.payload
-        : header.find((entry) => typeof entry.sessionId === "string");
-    const id = harness === "codex" ? text(object(nativeId).id, 256) : text(object(nativeId).sessionId, 256);
-    if (id === undefined) return undefined;
     const from = Math.max(0, size - MAX_TAIL_BYTES);
-    const tail = Buffer.alloc(size - from);
-    const last = await handle.read(tail, 0, tail.length, from);
+    const head = await readAt(handle, 0, Math.min(size, MAX_HEADER_BYTES));
+    const prior = nativeTails.get(key);
+    // Only strict growth of the same file whose decoded head and end are unchanged is an append.
+    const continues =
+      prior !== undefined &&
+      prior.dev === before.dev &&
+      prior.ino === before.ino &&
+      size > prior.size &&
+      prior.end > from &&
+      head.subarray(0, prior.head.length).equals(prior.head) &&
+      (await readAt(handle, prior.end - prior.anchor.length, prior.anchor.length)).equals(prior.anchor);
+    const start = continues ? prior.end : from;
+    const bytes = await readAt(handle, start, size - start);
     if (fileStamp(await handle.stat({ bigint: true })) !== stamp) return undefined;
-    let raw = tail.subarray(0, last.bytesRead).toString();
-    if (from > 0) raw = raw.slice(raw.indexOf("\n") + 1);
-    const parsed = parseSeatTelemetry(harness, raw, id);
-    if (parsed.reportFailureIds) Object.freeze(parsed.reportFailureIds);
-    const records = rows(raw).filter((entry) =>
-      harness === "claude"
-        ? entry.isSidechain !== true && (entry.sessionId === undefined || entry.sessionId === id)
-        : object(entry.payload).thread_id === undefined || object(entry.payload).thread_id === id,
+    let sessionId = continues && head.length === prior.head.length ? prior.sessionId : undefined;
+    if (sessionId === undefined) {
+      const header = rows(head.toString());
+      const nativeId =
+        harness === "codex"
+          ? header.find((entry) => entry.type === "session_meta")?.payload
+          : header.find((entry) => typeof entry.sessionId === "string");
+      sessionId =
+        harness === "codex" ? text(object(nativeId).id, 256) : text(object(nativeId).sessionId, 256);
+    }
+    if (sessionId === undefined) return undefined;
+    // Keep decoded lines still inside the tail; a cold read starts after its first newline.
+    let kept = 0;
+    if (continues && from > 0) while (kept < prior.starts.length && prior.starts[kept]! <= from) kept++;
+    const starts = continues ? prior.starts.slice(kept) : [];
+    const records = continues ? prior.records.slice(kept) : [];
+    let cursor = !continues && from > 0 ? bytes.indexOf(0x0a) + 1 : 0;
+    for (let newline = bytes.indexOf(0x0a, cursor); newline >= 0; newline = bytes.indexOf(0x0a, cursor)) {
+      const record = row(bytes.toString("utf8", cursor, newline));
+      if (record !== undefined) {
+        starts.push(start + cursor);
+        records.push(record);
+      }
+      cursor = newline + 1;
+    }
+    const end = start + cursor;
+    const anchor = Buffer.from(
+      cursor >= ANCHOR_BYTES || !continues
+        ? bytes.subarray(Math.max(0, cursor - ANCHOR_BYTES), cursor)
+        : Buffer.concat([prior.anchor, bytes.subarray(0, cursor)]).subarray(-ANCHOR_BYTES),
     );
-    const activity = nativeActivity(harness, records);
+    const tail = {
+      dev: before.dev,
+      ino: before.ino,
+      size,
+      head: Buffer.from(head),
+      sessionId,
+      end,
+      anchor,
+      starts,
+      records,
+    };
+    if (nativeTails.get(key) === prior) boundedSet(nativeTails, key, tail, TAIL_LIMIT);
+    // An unterminated final line counts as a whole read would count it, but is decoded again next time.
+    const last = cursor < bytes.length ? row(bytes.toString("utf8", cursor)) : undefined;
+    const current = last === undefined ? records : [...records, last];
+    const parsed = parseSeatTelemetry(harness, current, sessionId);
+    if (parsed.reportFailureIds) Object.freeze(parsed.reportFailureIds);
+    const activity = nativeActivity(
+      harness,
+      current.filter((entry) =>
+        harness === "claude"
+          ? entry.isSidechain !== true && (entry.sessionId === undefined || entry.sessionId === sessionId)
+          : object(entry.payload).thread_id === undefined || object(entry.payload).thread_id === sessionId,
+      ),
+    );
     return {
       stamp,
-      sessionId: id,
+      sessionId,
       telemetry: Object.freeze(parsed),
       ...(activity === undefined ? {} : { activity: Object.freeze(activity) }),
     };
@@ -449,7 +529,7 @@ async function readNativeSeatSnapshot(
       const pendingKey = `${key}:${stamp}`;
       let reading = nativeReads.get(pendingKey);
       if (reading === undefined) {
-        reading = nativeSnapshot(path, harness, stamp);
+        reading = nativeSnapshot(path, harness, stamp, key);
         nativeReads.set(pendingKey, reading);
       }
       try {

@@ -635,7 +635,16 @@ export function parseHerdrSeatTranscript(
   includeChannelPrompts = false,
   claudeAgentId?: string,
 ): HerdrTranscriptEntry[] {
-  const records = parseRecords(jsonl);
+  return herdrSeatTranscriptEntries(agent, parseRecords(jsonl), includeChannelPrompts, claudeAgentId);
+}
+
+/** The same projection over records a caller already decoded and retains; it never modifies them. */
+export function herdrSeatTranscriptEntries(
+  agent: string,
+  records: readonly Record<string, unknown>[],
+  includeChannelPrompts = false,
+  claudeAgentId?: string,
+): HerdrTranscriptEntry[] {
   if (tailableAgent(agent)) return flatEntries(agent, records, freshState());
   if (agent === "claude")
     return claudeEntries(

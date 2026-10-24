@@ -22,6 +22,11 @@ flat Codex/Grok records incrementally. Native-seat hooks publish settled history
 not live model drafts. Older records outside that tail are not a full transcript
 archive; publishing a viewed image uses Clankie's existing file-delivery path.
 
+`herdrSeatTranscriptEntries` applies `parseHerdrSeatTranscript`'s projection to
+records a caller has already decoded, without modifying them. Seat telemetry
+keeps the complete lines of each native file's last 2 MiB decoded and, on an
+append, decodes only the new lines before projecting the window again.
+
 `sessions.ts` reads the same transcripts from any host that can list its
 Claude/Codex/Grok/Pi files and return a byte range of one (`AgentTranscriptHost`;
 `@clankie/agent-hosts` supplies local and SSH hosts). A tail widens from 256 KiB

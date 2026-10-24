@@ -10,6 +10,8 @@ import {
   rename,
   utimes,
   realpath,
+  truncate,
+  copyFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +25,7 @@ import {
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import {
   readSeatTelemetry,
+  readSeatActivity,
   prepareSeatTelemetry,
   readSeatCommitBaseline,
   readSeatCommitClaim,
@@ -651,6 +654,118 @@ it("reuses unchanged native snapshots and invalidates on append, mtime and repla
   await rename(replacement, path);
   expect(await readSeatTelemetry(seat)).toHaveProperty("model", "gpt-6-new");
   expect(await readSeatTelemetry(seat)).not.toBe(changed);
+});
+
+it("continues native appends from decoded lines and answers exactly what a cold read of the same bytes does", async () => {
+  const dir = await directory();
+  const path = join(dir, "native.jsonl");
+  let copies = 0;
+  // A fresh path has no decoded tail, so it is the whole-tail answer for the same bytes.
+  const expectCold = async (harness: string) => {
+    const cold = join(dir, `cold-${copies++}.jsonl`);
+    await copyFile(path, cold);
+    const [warm, fresh] = [observed(path, harness), observed(cold, harness)];
+    expect([await readSeatTelemetry(warm), await readSeatActivity(warm, "working")]).toEqual([
+      await readSeatTelemetry(fresh),
+      await readSeatActivity(fresh, "working"),
+    ]);
+    return readSeatTelemetry(warm);
+  };
+  const base = Date.now() - 60_000;
+  const at = (offset: number) => new Date(base + offset * 1_000).toISOString();
+  const call = (id: string, name: string, offset: number) =>
+    JSON.stringify({
+      timestamp: at(offset),
+      type: "response_item",
+      payload: { type: "function_call", call_id: id, name, arguments: "{}" },
+    }) + "\n";
+  const output = (id: string, text: string, offset: number) =>
+    JSON.stringify({
+      timestamp: at(offset),
+      type: "response_item",
+      payload: { type: "function_call_output", call_id: id, output: text },
+    }) + "\n";
+  const bulk = (id: string) => output(id, "x".repeat(700 * 1024), 0);
+
+  // Codex: the decoded window slides past 2MB while interleaved tool calls settle.
+  await writeFile(path, nativeCodex() + bulk("bulk-0") + bulk("bulk-1"));
+  await expectCold("codex");
+  await appendFile(path, call("report-1", "mcp__clankie__message_clankie", 1) + call("read-1", "Read", 2));
+  expect(await expectCold("codex")).not.toHaveProperty("lastReportAt");
+  // An unmapped report call beside a read is not one work kind.
+  expect(await readSeatActivity(observed(path), "working")).toBeUndefined();
+  await appendFile(path, output("report-1", '{"received":true}', 3) + bulk("bulk-2"));
+  expect(await expectCold("codex")).toHaveProperty("lastReportAt", at(3));
+  expect(await readSeatActivity(observed(path), "working")).toMatchObject({ kind: "reading" });
+  // A partial line counts only once it parses whole, and a malformed line never does.
+  const settled = output("read-1", "done", 4);
+  await appendFile(path, "{malformed\n" + settled.slice(0, 40));
+  await expectCold("codex");
+  await appendFile(path, settled.slice(40));
+  await expectCold("codex");
+  expect(await readSeatActivity(observed(path), "working")).toBeUndefined();
+  await appendFile(path, call("report-2", "message_clankie", 5) + output("report-2", "MCP error -32000", 6));
+  await appendFile(path, bulk("bulk-3"));
+  expect(await expectCold("codex")).toMatchObject({ reportFailures: 1, reportFailureIds: ["report-2"] });
+
+  // Each rewrite below is visible to only one fence: file growth, the decoded end, or the header.
+  await writeFile(path, (await readFile(path, "utf8")).replaceAll("report-2", "report-9"));
+  expect(await expectCold("codex")).toMatchObject({ reportFailureIds: ["report-9"] });
+  await appendFile(path, call("report-3", "message_clankie", 7) + output("report-3", "MCP error -32001", 8));
+  await expectCold("codex");
+  await writeFile(
+    path,
+    (await readFile(path, "utf8")).replaceAll("report-3", "report-4") + call("read-2", "Grep", 9),
+  );
+  expect(await expectCold("codex")).toMatchObject({ reportFailureIds: ["report-9", "report-4"] });
+  await truncate(path, (await stat(path)).size - 1024);
+  await expectCold("codex");
+  const replacement = join(dir, "replacement.jsonl");
+  await writeFile(
+    replacement,
+    nativeCodex().replaceAll("gpt-6-sol", "gpt-6-new") + call("edit-1", "Edit", 10) + bulk("bulk-4"),
+  );
+  await rename(replacement, path);
+  expect(await expectCold("codex")).toHaveProperty("model", "gpt-6-new");
+  expect(await readSeatActivity(observed(path), "working")).toMatchObject({ kind: "editing" });
+  const other = "01a107e9-f3b1-7181-ad0e-744661b18965";
+  const exact: ObservedFleetSeat = {
+    ...observed(path),
+    session: { source: "herdr:codex", kind: "id", value: sessionId },
+  };
+  await prepareSeatTelemetry(exact, { transcriptPath: path });
+  expect(await readSeatTelemetry(exact)).toHaveProperty("model", "gpt-6-new");
+  await writeFile(
+    path,
+    (await readFile(path, "utf8")).replace(sessionId, other) + call("read-3", "Read", 11),
+  );
+  await expectCold("codex");
+  expect(await readSeatTelemetry(exact)).toBeUndefined();
+
+  // Claude: sidechain and foreign-session lines stay out of an appended tail too.
+  const claude = (entry: Record<string, unknown>) =>
+    JSON.stringify({ sessionId, timestamp: at(10), ...entry }) + "\n";
+  const use = (id: string, name: string, extra: Record<string, unknown> = {}) =>
+    claude({
+      type: "assistant",
+      uuid: `use-${id}`,
+      ...extra,
+      message: {
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "tool_use", id, name, input: {} }],
+      },
+    });
+  await writeFile(path, claude({ type: "user", uuid: "prompt", message: { role: "user", content: "go" } }));
+  await expectCold("claude");
+  await appendFile(
+    path,
+    use("side", "Edit", { isSidechain: true, parentUuid: "prompt" }) +
+      use("foreign", "Edit", { sessionId: other, parentUuid: "prompt" }) +
+      use("grep", "Grep", { parentUuid: "prompt" }),
+  );
+  expect(await expectCold("claude")).toEqual({ model: "claude-opus-5-5" });
+  expect(await readSeatActivity(observed(path, "claude"), "working")).toMatchObject({ kind: "reading" });
 });
 
 it("keeps prepared missing IDs unknown without rediscovering directories during refresh", async () => {
