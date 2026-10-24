@@ -260,7 +260,10 @@ it("hearing recovers only for that speaker's listener over the real receipt writ
   );
   // The real headless command and protocol client read the production status projection over HTTP.
   const server = createServer(async (request, response) => {
-    if (request.headers.authorization !== "Bearer test-operator" || request.url !== "/v1/discord/room-voice") {
+    if (
+      request.headers.authorization !== "Bearer test-operator" ||
+      request.url !== "/v1/discord/room-voice"
+    ) {
       response.writeHead(403).end();
       return;
     }
