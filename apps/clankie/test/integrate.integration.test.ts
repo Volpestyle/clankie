@@ -37,6 +37,8 @@ import { createIntegrationRoutes } from "../src/integrate-routes.ts";
 import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
 import { fixtureWork, withFixtureWork } from "../../../scripts/testing/fixture-work.ts";
 import { fixtureGovernor } from "../../../scripts/testing/fixture-governor.ts";
+import { ReviewGate } from "../src/captain/review-gate.ts";
+import { readCandidatePatch } from "../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
 
 // Keep the real kernel proof, including every pre-deletion recheck. Churn is
 // unknown, never deletion authority; wait boundedly for a complete observation.
@@ -249,6 +251,91 @@ it("integrate holds unavailable review and rechecks a passed batch before any pu
   expect(unavailable.state).toBe("held");
   expect(unavailable.error).toContain("review service unreachable");
   expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+});
+
+it("the parent enforces app review even when the app gate has no review step", async () => {
+  const f = await fixture("", true);
+  const app = f.app!;
+  const change = await commit(app.source, "feature", "app requires its own verdict");
+  const reviews = new ReviewGate({
+    path: join(f.root, "reviews", "candidates.json"),
+    review: async (project) => (project === "app" ? { role: "reviewer" } : undefined),
+    directoryProject: async (directory) => {
+      if (directory === app.source) return "app";
+      if (directory === f.core.source) return "core";
+      throw Error(`Not an original source checkout: ${directory}`);
+    },
+    seat: async () => undefined,
+    resolve: async () => undefined,
+    seatProject: async () => undefined,
+    reviewers: async () => [],
+    lead: () => undefined,
+    deliver: async () => {
+      throw Error("This fixture only reads verdicts and records owner waivers");
+    },
+    notifyLead: async () => {},
+  });
+  const review = (directory: string, patchId: string) => reviews.landing(directory, patchId);
+  f.queue.options.review = review;
+  const request = () =>
+    IntegrationRunSchema.parse({
+      action: "run",
+      id: randomUUID(),
+      core: [f.core.base],
+      app: [change],
+    });
+
+  // The app's actual pnpm gate succeeds and emits no review line. The parent
+  // still refuses its unsubmitted patch before any app push can happen.
+  const unreviewed = request();
+  await f.queue.start(unreviewed, guard);
+  await f.queue.wait();
+  const failed = await f.queue.status(unreviewed.id);
+  const appGate = failed.repos.find((repo) => repo.name === "app")!.gate!;
+  expect(appGate.exitCode).toBe(0);
+  expect(await readFile(appGate.log, "utf8")).not.toMatch(/^\[landing\] review:/mu);
+  expect(failed.state).toBe("failed");
+  expect(failed.error).toContain("app: review not_submitted");
+  expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.base);
+
+  // A real durable waiver covers only the app's exact patch; core has no
+  // reviewer. The same review-free gate may pass once that verdict exists.
+  const patch = readCandidatePatch(app.source);
+  expect(
+    await reviews.waive(
+      {
+        schemaVersion: 1,
+        directory: app.source,
+        base: patch.base,
+        head: patch.head,
+        patchId: patch.patchId,
+        patch: patch.patch.toString("base64"),
+        reason: "isolated app fixture",
+      },
+      { actor: "owner" },
+    ),
+  ).toMatchObject({ status: "waived", patchId: patch.patchId });
+  const waived = request();
+  await f.queue.start(waived, guard);
+  await f.queue.wait();
+  expect((await f.queue.status(waived.id)).state).toBe("passed");
+
+  // Even a saved app pass must get a fresh verdict immediately before push.
+  f.queue.options.review = async (directory, patchId) => {
+    if (directory === app.source) throw Error("app review service unreachable");
+    return review(directory, patchId);
+  };
+  const held = await f.queue.land(waived.id, guard);
+  expect(held.state).toBe("held");
+  expect(held.error).toContain("app review service unreachable");
+  expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.base);
+
+  f.queue.options.review = review;
+  const landed = await f.queue.land(waived.id, guard);
+  expect(landed.state, landed.error).toBe("pushed");
+  const appRepo = landed.repos.find((repo) => repo.name === "app")!;
+  expect(appRepo.head).not.toBe(app.base);
+  expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(appRepo.head);
 });
 
 it("cancels a queued native gate before draining its expired fixture", async () => {
