@@ -28,39 +28,54 @@ export interface PeerSeatAuthority {
 
 /**
  * A dispatch check may read remote state, which takes seconds on a linked
- * machine. Its `current`, when present, synchronously rechecks what it proved
- * (link and settings generations, no I/O), so the last gate before a native
- * write stays immediate (VUH-2779). `undefined` from it means no synchronous
- * proof: the full check gates the write. A wrapper that adds its own check is
- * a new function and so drops `current` the same way.
+ * machine, so it cannot rerun inside the bounded gate before a native write
+ * (VUH-2779). Instead it splits in two. `revalidate` re-proves its remote part
+ * (a native process proof, say) alongside the final native observation, so
+ * neither is older than that one round trip. `current` synchronously rechecks
+ * the rest (link and settings generations, no I/O) at the gate itself.
+ * `undefined` from `current` means no synchronous proof: the full check gates
+ * the write. A wrapper that adds its own check is a new function and so drops
+ * both the same way.
  */
 export interface CurrentCheck {
   readonly current?: () => boolean | undefined;
+  readonly revalidate?: () => Promise<boolean>;
 }
 
-/** The synchronous recheck for a set of checks, only when every one of them has one. */
-export function currentOf(
-  ...checks: readonly (CurrentCheck | undefined)[]
-): (() => boolean | undefined) | undefined {
+/** The split recheck for a set of checks, only when every one of them has one. */
+export function currentOf(...checks: readonly (CurrentCheck | undefined)[]): CurrentCheck {
   const present = checks.filter((check) => check !== undefined);
-  if (present.some((check) => check.current === undefined)) return undefined;
-  return () => {
-    let proven: boolean | undefined = true;
-    for (const check of present) {
-      const value = check.current!();
-      if (value === false) return false;
-      if (value === undefined) proven = undefined;
-    }
-    return proven;
+  if (present.some((check) => check.current === undefined)) return {};
+  const remote = present.flatMap((check) => (check.revalidate === undefined ? [] : [check.revalidate]));
+  return {
+    current: () => {
+      let proven: boolean | undefined = true;
+      for (const check of present) {
+        const value = check.current!();
+        if (value === false) return false;
+        if (value === undefined) proven = undefined;
+      }
+      return proven;
+    },
+    ...(remote.length === 0
+      ? {}
+      : {
+          revalidate: async () =>
+            (await Promise.all(remote.map((revalidate) => revalidate()))).every(Boolean),
+        }),
   };
 }
 
-/** Attach a synchronous recheck to a check, or leave it a plain full check. */
+/** Attach a split recheck to a check, or leave it a plain full check. */
 export function withCurrent<T extends (...args: never[]) => unknown>(
   check: T,
-  current: (() => boolean | undefined) | undefined,
+  recheck: CurrentCheck,
 ): T & CurrentCheck {
-  return current === undefined ? check : Object.assign(check, { current });
+  if (recheck.current === undefined) return check;
+  return Object.assign(check, {
+    current: recheck.current,
+    ...(recheck.revalidate === undefined ? {} : { revalidate: recheck.revalidate }),
+  });
 }
 export interface PeerDeliveryOptions {
   /** An owner restriction does not turn an operator message into peer output. */
@@ -353,7 +368,14 @@ export class PeerSeatMessages {
       const result = await this.options.deliver(input.seatId, message, {
         fence: withCurrent(
           (native: HerdrAgentSnapshot | undefined) => this.fence(authority, input, native),
-          authority.current,
+          authority.current === undefined
+            ? {}
+            : {
+                current: authority.current,
+                // The sender's fresh process proof and the owner's switch; the
+                // final native observation re-proves the recipient.
+                revalidate: async () => (await authority.validate()) && (await this.options.enabled()),
+              },
         ),
         recipientBinding: input.recipientBinding,
       });

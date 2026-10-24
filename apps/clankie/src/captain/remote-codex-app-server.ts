@@ -449,16 +449,37 @@ export function remoteCodexTrackerOverrides(fleet: HerdrFleet, shell: FleetShell
 }
 
 /**
+ * The final native observation, with the caller's remote re-proof read beside
+ * it (CurrentCheck): neither is older than that one round trip at the write.
+ * A failed re-proof refuses.
+ */
+async function finalObservation<T>(
+  observe: () => Promise<T>,
+  beforeDispatch: CurrentCheck | undefined,
+): Promise<{ readonly observed: T; readonly reproven: boolean }> {
+  const revalidate = beforeDispatch?.current === undefined ? undefined : beforeDispatch.revalidate;
+  const [observed, reproven] = await Promise.all([
+    observe(),
+    revalidate === undefined
+      ? true
+      : revalidate().then(
+          (valid) => valid,
+          () => false,
+        ),
+  ]);
+  return { observed, reproven };
+}
+
+/**
  * A final authority read must finish promptly; late approval cannot authorize a write.
  * A full check that reads a linked machine takes seconds and could never meet
- * this bound (VUH-2779). One with a synchronous recheck therefore runs in full
- * here, after the final native observation, and only that recheck is bound to
- * the write. Any other check runs in full under the bound.
+ * this bound (VUH-2779). One with a synchronous recheck runs only that here,
+ * its remote part having been re-proven beside the final native observation.
+ * Any other check runs in full under the bound.
  */
 async function finalCodexAuthority(
   beforeDispatch: (() => Promise<boolean>) & CurrentCheck,
 ): Promise<boolean> {
-  if (beforeDispatch.current !== undefined && !(await beforeDispatch())) return false;
   const deadline = performance.now() + FINAL_CODEX_AUTHORITY_TIMEOUT_MS;
   const timeout = () => new Error("Final Codex authority check timed out; nothing was sent.");
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -607,15 +628,21 @@ export function remoteCodexQueue(
         };
       }
     }
-    if (
-      original &&
-      pane !== undefined &&
-      !isDeepStrictEqual(original, await observeDefaultHome(fleet.id, pane, sessionId))
-    )
+    const final =
+      original && pane !== undefined
+        ? await finalObservation(() => observeDefaultHome(fleet.id, pane, sessionId), beforeDispatch)
+        : undefined;
+    if (final !== undefined && !isDeepStrictEqual(original, final.observed))
       return {
         outcome: "undelivered",
         deliveryStage: "unavailable",
         detail: "The Windows pane's default Codex home or native identity changed; nothing was sent.",
+      };
+    if (final !== undefined && !final.reproven)
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: "Codex authority changed before queue dispatch; nothing was sent: Peer authority changed.",
       };
     // The final SSH observation yields; peer authority may change while it runs.
     if (original && beforeDispatch) {
@@ -689,8 +716,13 @@ export function remoteCodexControl(
           if (!connection?.alive()) return false;
           // Both caller preparation and the final native observation may yield.
           if (beforeDispatch !== undefined && !(await beforeDispatch())) return false;
-          const current = await observe(fleet.id, qualified.id, sessionId, connection.connection);
-          if (!connection.alive() || !isDeepStrictEqual(original, current)) return false;
+          const live = connection;
+          const final = await finalObservation(
+            () => observe(fleet.id, qualified.id, sessionId, live.connection),
+            beforeDispatch,
+          );
+          if (!connection.alive() || !isDeepStrictEqual(original, final.observed) || !final.reproven)
+            return false;
           if (beforeDispatch !== undefined && !(await finalCodexAuthority(beforeDispatch))) return false;
           return connection.alive();
         });

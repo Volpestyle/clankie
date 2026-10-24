@@ -6885,11 +6885,12 @@ a standalone TUI; an absent or rejected remote endpoint is insufficient.
 The pane/session and home proof are repeated after preparation. Caller authority
 is checked in full before the final observation and again after it, with a
 250 ms deadline immediately before sending. A full check that reads a linked
-machine takes seconds, so when every check has a synchronous in-memory recheck
-(link, fleet revision and settings generation), the full check runs after the
-final observation without the deadline and only that recheck runs under it.
-Otherwise the full check runs under the deadline. A timeout reports undelivered
-and never sends on late approval (VUH-2779). Private, changed
+machine takes seconds, so a check may split in two: its remote part (such as the
+sender's process proof) is re-read beside the final observation, and only its
+synchronous in-memory recheck (link, fleet revision and settings generation)
+runs under the deadline. Nothing remote is read between the final observation
+and the write. A check without that split runs in full under the deadline. A
+timeout reports undelivered and never sends on late approval (VUH-2779). Private, changed
 or unproved homes refuse the fallback; a private native receipt cannot authorize
 a second send through CLI.
 Clankie checks the current pane/session, native process lifetimes and ancestry,

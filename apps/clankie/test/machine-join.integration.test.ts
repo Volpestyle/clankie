@@ -343,7 +343,7 @@ test("claim ownership, independent canonical registry and directory intersection
     );
     await expect(
       requireMachineAccess(f.settings, credential.lease.machineId, "shell", f.joins),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ assertCurrent: expect.any(Function) });
     await f.machines.setAccess(credential.lease.machineId, { accessLevel: "portal" });
     await expect(
       requireMachineAccess(f.settings, credential.lease.machineId, "shell", f.joins),

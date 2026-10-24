@@ -70,6 +70,7 @@ async function fixture() {
   // The real Windows producer golden, pointed at the loopback backend.
   type Snapshot = {
     owners: number[];
+    processes: Array<{ pid: number; startTime: string }>;
     nativeProcesses: Array<{ pid: number; role: string; endpoint: string; listeners?: { port: number }[] }>;
   };
   const snapshots = JSON.parse(raw) as { first: Snapshot; last: Snapshot };
@@ -98,6 +99,7 @@ async function fixture() {
         result = { data: [{ id: "kh2-turn", status: "inProgress" }] };
       if (message.method === "turn/steer") {
         steers.push(message.params?.input?.[0]?.text ?? "");
+        reads.push("steer");
         result = { turnId: "kh2-turn" };
       }
       socket.send(JSON.stringify({ id: message.id, result }));
@@ -114,28 +116,40 @@ async function fixture() {
       close: () => socket.terminate(),
     };
   };
-  // Every read of the PC takes an SSH round trip; the final observation can be held.
+  // Every read of the PC takes an SSH round trip, logged in order with the write.
+  const reads: string[] = [];
   let observations = 0;
   let onFinalObservation: (() => void) | undefined;
+  let afterFirstObservation: (() => void) | undefined;
   const shell = async () => {
-    await sleep(SSH_MS);
     // Each send observes the pane twice; the second is the final observation.
     if (++observations % 2 === 0 && onFinalObservation) {
       const act = onFinalObservation;
       onFinalObservation = undefined;
       act();
     }
-    return JSON.stringify(snapshots);
+    reads.push("observe");
+    await sleep(SSH_MS);
+    const observed = JSON.stringify(snapshots);
+    reads.push("observed");
+    if (observations % 2 === 1 && afterFirstObservation) {
+      const act = afterFirstObservation;
+      afterFirstObservation = undefined;
+      act();
+    }
+    return observed;
   };
   const seats = new Map([quill, linden].map((seat) => [seat.terminalId, seat]));
   const runner: HerdrWatchRunner = {
     get: async (pane) => {
+      reads.push("pane");
       await sleep(SSH_MS);
       const seat = [...seats.values()].find((candidate) => candidate.paneId === pane);
       if (seat === undefined) throw new Error(`No pane ${pane}`);
       return seat;
     },
     resolveTerminal: async (seat) => {
+      reads.push("pane");
       await sleep(SSH_MS);
       return seats.get(seat);
     },
@@ -152,9 +166,10 @@ async function fixture() {
       throw new Error("A proven private backend never falls through to the CLI queue");
     },
     requireWorkerAccess: async () => {
+      reads.push("access");
       const read = accessGeneration;
       await sleep(ACCESS_MS);
-      // The owner changes settings just after this read took them.
+      // Something changes just after this read took the settings.
       const act = duringAccessRead;
       duringAccessRead = undefined;
       act?.();
@@ -180,6 +195,7 @@ async function fixture() {
     },
     // A fresh project proof of the sender's process, read on the PC.
     validate: async () => {
+      reads.push("proof");
       await sleep(SSH_MS);
       return linkAlive && senderProcessStart === "agent-start";
     },
@@ -212,10 +228,23 @@ async function fixture() {
     authority,
     message,
     steers,
+    reads,
     closeLink: () => (linkAlive = false),
     replaceSenderProcess: () => (senderProcessStart = "replacement-start"),
-    /** Change settings after the next access read, the last one before the write. */
-    changeAccessAfterNextRead: () => (duringAccessRead = () => accessGeneration++),
+    changeAccess: () => accessGeneration++,
+    /**
+     * Replace the recipient's TUI process during the caller's access read that
+     * follows the original native observation, just before the final one.
+     */
+    replaceRecipientDuringLastCheck: () =>
+      (afterFirstObservation = () =>
+        (duringAccessRead = () => {
+          for (const snapshot of [snapshots.first, snapshots.last]) {
+            const tui = snapshot.nativeProcesses.find((native) => native.role === "tui")!;
+            snapshot.processes.find((candidate) => candidate.pid === tui.pid)!.startTime =
+              "2026-10-24T15:40:00.0000000Z";
+          }
+        })),
     duringFinalObservation: (act: () => void) => (onFinalObservation = act),
   };
 }
@@ -271,12 +300,37 @@ it("delivers a lead message whose machine access read is slow, and refuses one w
     outcome: "delivered",
     state: "steered",
   });
-  // The full access check after the final observation reads the old settings;
-  // only the synchronous fence can see the change that follows it.
-  f.duringFinalObservation(f.changeAccessAfterNextRead);
+  // Only the synchronous settings fence can see a change after the last access read.
+  f.duringFinalObservation(f.changeAccess);
   expect(await f.store.deliverToSeat(quill.terminalId, "must not cross changed access")).toMatchObject({
     outcome: "undelivered",
     detail: expect.stringContaining("nothing was sent"),
   });
   expect(f.steers).toEqual(["VUH-2779 lead probe"]);
+});
+
+it("refuses when the recipient's native process changes during the caller's slow checks", async () => {
+  const f = await fixture();
+  // The owner's slow machine access read is followed by the final native observation.
+  f.replaceRecipientDuringLastCheck();
+  expect(await f.store.deliverToSeat(quill.terminalId, "must not cross a replaced recipient")).toMatchObject({
+    outcome: "undelivered",
+    detail: expect.stringContaining("nothing was sent"),
+  });
+  expect(f.steers).toEqual([]);
+});
+
+it("reads nothing remote between the final native observation and the write", async () => {
+  const f = await fixture();
+  await f.peers.send(f.authority, await f.message(f.authority, "VUH-2779 ordering probe"));
+  await f.store.deliverToSeat(quill.terminalId, "VUH-2779 lead ordering probe");
+  // Per write: the last observation finishes, and the next event is the write itself.
+  for (let at = f.reads.indexOf("steer"); at >= 0; at = f.reads.indexOf("steer", at + 1)) {
+    const final = f.reads.lastIndexOf("observed", at);
+    expect(f.reads.slice(final + 1, at)).toEqual([]);
+    // The sender's proof was re-read beside that observation, not before it.
+    const started = f.reads.lastIndexOf("observe", final);
+    expect(f.reads.slice(started, final + 1)).not.toContain("access");
+  }
+  expect(f.steers).toHaveLength(2);
 });
