@@ -18,12 +18,12 @@ JSON copies share immutable strings and recursively copy objects/arrays, followi
 
 The same frozen private journal copies are replayed without provider dispatch or external I/O. One process per arm, five warmup pairs, then200read pairs with10ms yields. Three alternating baseline/candidate runs; baseline substitutes only the four original production modules at their normal URLs. All other code, dependencies and bytes match. Process CPU is user+system delta (including V8 worker threads), not elapsed JS time or a percent of the live service. Profiles are enabled identically. Host contention is uncontrolled; these are process-local work comparisons, not fleet replay or statistical confidence.
 
-|200read pairs|Baseline median|Candidate median|
-|---|---:|---:|
-|Process CPU seconds|15.615539|0.057623|
-|Connected lookup elapsed ms|31.369813|0.033938|
-|Seat lookup elapsed ms|6.679938|0.017333|
-|Natural RSS bytes after run|514,161,752|355,504,152|
+| 200read pairs               | Baseline median | Candidate median |
+| --------------------------- | --------------: | ---------------: |
+| Process CPU seconds         |       15.615539 |         0.057623 |
+| Connected lookup elapsed ms |       31.369813 |         0.033938 |
+| Seat lookup elapsed ms      |        6.679938 |         0.017333 |
+| Natural RSS bytes after run |     514,161,752 |      355,504,152 |
 
 Including warmups, journal reads fall206+205→1+1; read bytes2,228,323,340→10,827,120. This is a warm unchanged-journal best case, not a promise for a fleet continuously writing receipts.
 
