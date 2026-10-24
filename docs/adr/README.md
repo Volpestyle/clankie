@@ -194,3 +194,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0289: A call through the gateway is a sealed stream](0289-a-call-through-the-gateway-is-a-sealed-stream.md) — VUH-2761. Amends ADR 0173; extends ADR 0288.
 
 - [0290: App switch metrics are bounded device reports](0290-app-switch-metrics-are-bounded-device-reports.md) — VUH-2558.
+- [0291: A room thinks in one loop](0291-a-room-thinks-in-one-loop.md) — VUH-2796 (Proposed). Would amend ADR 0229 for Pi text rooms.

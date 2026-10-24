@@ -16,6 +16,9 @@ subscriptions:
   Code seat plugin against a throwaway Clankie service, on work that needs his
   presence and integrations (memory, rooms, voice, the fleet, escalations and
   wakes).
+- **The lanes suite** ([`lanes-eval.ts`](../apps/clankie/scripts/lanes-eval.ts)):
+  ten golden prompts asked in each room lane of a private real service, for
+  comparing lane architecture changes (VUH-2796).
 
 Every case records its source, task, fixture and executable check. No private
 Discord messages or live conversation records are inputs. Results are trials, not
@@ -256,6 +259,50 @@ were on hold before its campaign could start; single development attempts passed
 inconclusive: it has no seat arm to compare with, and `current − bare` is within
 noise. That record also lists what building the harness showed about the seat's
 integrations.
+
+## The lanes suite
+
+[`lanes-eval.ts`](../apps/clankie/scripts/lanes-eval.ts) asks the same ten golden
+prompts ([`lanes-eval-cases.ts`](../apps/clankie/scripts/lanes-eval-cases.ts)) in
+every lane Clankie answers from, so a change to one lane, such as folding room
+handoffs into a parent loop ([VUH-2796](https://linear.app/vuhlp/issue/VUH-2796)),
+can be compared before and after.
+
+The runner starts the real service on a private scratch stack for each repetition.
+It uses the real channel-turn route with the bridges' own bearers and a live bot
+presence session, but no Discord connection. Its lanes:
+
+| Lane          | What runs                                             |
+| ------------- | ----------------------------------------------------- |
+| `social-room` | A guild mention from a non-owner: a social Pi handoff |
+| `owner-dm`    | An owner DM with machine access: a machine Pi handoff |
+| `voice`       | A guild `voice_event` from a non-owner                |
+| `console`     | The owner's console chat with the Pi head             |
+
+Each case measures one of four things: the same voice in every lane, a correct
+answer, the right trust boundary (owner-private memory and the fleet stay out of
+social lanes), or the right tool (memory and shell in owner lanes only). Grades
+are executable, with no model judge. A case counts toward **same Clankie** when it
+passes in every lane and repetition. `answers.md` puts each case's lanes side by
+side, and `same-clankie-grades.csv` holds the optional hand score.
+
+The suite does not exercise a native Claude lead seat. The console lane is the Pi
+head, and the owner's linked main channel needs an attached seat.
+
+```sh
+# Plan only, without credentials.
+node --import ./scripts/dependency-types.mjs apps/clankie/scripts/lanes-eval.ts --dry-run
+# Zero-cost plumbing check against a scripted local model.
+clankie heavy --server -- node --import ./scripts/dependency-types.mjs \
+  apps/clankie/scripts/lanes-eval.ts .local/vuh-2796/smoke --smoke --reps 1
+# A real campaign: an existing API credential, and an explicit turn budget.
+clankie heavy --server -- node --import ./scripts/dependency-types.mjs \
+  apps/clankie/scripts/lanes-eval.ts .local/vuh-2796/baseline --model openai/gpt-6.1-sol --max-turns 88
+```
+
+It copies only an API credential, never an OAuth refresh token, and removes it from
+the scratch store afterwards. It refuses to run under `CI`. Results go to the
+[VUH-2796 record](testing/2026-10-24-vuh-2796-lane-folding/README.md).
 
 ## Statistics
 
