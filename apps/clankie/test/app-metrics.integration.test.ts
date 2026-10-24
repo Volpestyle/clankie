@@ -19,9 +19,10 @@ const report: AppMetricsReport = { platform: "ios", summaries: [summary] };
 
 async function paired(host: Awaited<ReturnType<typeof createQaService>>, automation = true) {
   const offer = await (
-    await host.operator("/v1/pairing/offer", {
-      ...(automation ? { run: { runId: "app-metrics-test", purpose: "test", ttlSeconds: 900 } } : {}),
-    })
+    await host.operator(
+      "/v1/pairing/offer",
+      automation ? { run: { runId: "app-metrics-test", purpose: "test", ttlSeconds: 900 } } : {},
+    )
   ).json();
   const pending = await (
     await fetch(`${host.baseUrl}/v1/pairing/redeem`, {
