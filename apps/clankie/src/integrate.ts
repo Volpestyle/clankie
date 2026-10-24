@@ -55,6 +55,11 @@ interface IntegrationJob {
   regateReason?: string;
   reuse?: IntegrationBatch;
 }
+interface ReviewSnapshot {
+  base: string;
+  head: string;
+  patchId: string;
+}
 /** The scheduler and its status estimate use the same ordering, including restore barriers. */
 function nextJob(pending: PendingIntegration[], retries: IntegrationJob[]) {
   retries.sort((a, b) => a.members[0]!.admission - b.members[0]!.admission);
@@ -1922,21 +1927,39 @@ export class IntegrationQueue {
     await this.verifyGates(batch);
   }
 
-  private async reviewEnvironment(repo: IntegrationRepo, base = repo.base): Promise<NodeJS.ProcessEnv> {
-    if (!this.options.review) throw Error("Review status is unavailable; landing held");
-    let patchId = "empty";
+  private async reviewSnapshot(repo: IntegrationRepo, base = repo.base): Promise<ReviewSnapshot> {
+    // Capture HEAD before even the empty-patch fallback; never read a later HEAD into its verdict.
+    let snapshot = { base, head: await this.head(repo), patchId: "empty" };
     try {
-      patchId = readCandidatePatch(repo.directory, base).patchId;
+      const patch = readCandidatePatch(repo.directory, base);
+      snapshot = { base: patch.base, head: patch.head, patchId: patch.patchId };
     } catch (error) {
       if (!(error instanceof Error && error.message.startsWith("HEAD has no committed change"))) throw error;
     }
-    const landing = ReviewLandingSchema.parse(await this.options.review(repo.source, patchId));
-    if (landing.patchId !== patchId) throw Error("Review verdict names another patch; landing held");
+    return snapshot;
+  }
+
+  private async reviewVerdict(
+    repo: IntegrationRepo,
+    snapshot: ReviewSnapshot,
+  ): Promise<Omit<ReviewLanding, "candidate">> {
+    if (!this.options.review) throw Error("Review status is unavailable; landing held");
+    const landing = ReviewLandingSchema.parse(await this.options.review(repo.source, snapshot.patchId));
+    if (landing.patchId !== snapshot.patchId) throw Error("Review verdict names another patch; landing held");
+    const head = await this.head(repo);
+    if (head !== snapshot.head)
+      throw Error(`${repo.name}: HEAD changed during review from ${snapshot.head} to ${head}; landing held`);
     // No candidate contents, credentials, owner paths or fleet links enter the sandbox.
     const { candidate: _candidate, ...verdict } = landing;
+    return verdict;
+  }
+
+  private async reviewEnvironment(repo: IntegrationRepo, base = repo.base): Promise<NodeJS.ProcessEnv> {
+    const snapshot = await this.reviewSnapshot(repo, base);
+    const landing = await this.reviewVerdict(repo, snapshot);
     return {
       CLANKIE_INTEGRATE: "1",
-      CLANKIE_INTEGRATE_REVIEW: JSON.stringify({ base, head: await this.head(repo), landing: verdict }),
+      CLANKIE_INTEGRATE_REVIEW: JSON.stringify({ base: snapshot.base, head: snapshot.head, landing }),
     };
   }
 
@@ -1953,10 +1976,10 @@ export class IntegrationQueue {
     };
     (repo.reviewChecks ??= []).push(check);
     try {
-      const record = JSON.parse((await this.reviewEnvironment(repo)).CLANKIE_INTEGRATE_REVIEW!);
-      check.base = record.base;
-      check.head = record.head;
-      check.verdict = ReviewLandingSchema.omit({ candidate: true }).parse(record.landing);
+      const snapshot = await this.reviewSnapshot(repo);
+      check.base = snapshot.base;
+      check.head = snapshot.head;
+      check.verdict = await this.reviewVerdict(repo, snapshot);
     } catch (error) {
       check.error = String(error).slice(0, 2000);
       await this.save(batch);

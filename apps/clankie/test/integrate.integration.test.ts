@@ -365,6 +365,72 @@ it("the parent enforces app review even when the app gate has no review step", a
   expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(appRepo.head);
 });
 
+it("review receipts reject a HEAD changed while its exact-patch verdict is being read", async () => {
+  const f = await fixture("", true);
+  const app = f.app!;
+  const change = await commit(app.source, "feature", "reviewed app");
+  const request = IntegrationRunSchema.parse({
+    action: "run",
+    id: randomUUID(),
+    core: [f.core.base],
+    app: [change],
+  });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  const passed = await f.queue.status(request.id);
+  expect(passed.state).toBe("passed");
+  const appRepo = passed.repos.find((repo) => repo.name === "app")!;
+  const snapshot = readCandidatePatch(appRepo.directory, appRepo.base);
+  const reviews = new ReviewGate({
+    path: join(f.root, "receipt-reviews", "candidates.json"),
+    review: async (project) => (project === "app" ? { role: "reviewer" } : undefined),
+    directoryProject: async (directory) => (directory === app.source ? "app" : "core"),
+    seat: async () => undefined,
+    resolve: async () => undefined,
+    seatProject: async () => undefined,
+    reviewers: async () => [],
+    lead: () => undefined,
+    deliver: async () => {
+      throw Error("This fixture only reads verdicts and records owner waivers");
+    },
+    notifyLead: async () => {},
+  });
+  await reviews.waive(
+    {
+      schemaVersion: 1,
+      directory: app.source,
+      base: snapshot.base,
+      head: snapshot.head,
+      patchId: snapshot.patchId,
+      patch: snapshot.patch.toString("base64"),
+      reason: "isolated receipt race fixture",
+    },
+    { actor: "owner" },
+  );
+  let replacementHead = "";
+  f.queue.options.review = async (directory, patchId) => {
+    const verdict = await reviews.landing(directory, patchId);
+    if (directory === app.source) {
+      expect(verdict).toMatchObject({ required: true, status: "waived", landable: true });
+      replacementHead = await commit(appRepo.directory, "during-review", "unreviewed replacement");
+    }
+    return verdict;
+  };
+  const held = await f.queue.land(request.id, guard);
+  expect(held.state).toBe("held");
+  expect(replacementHead).not.toBe(snapshot.head);
+  const receipt = held.repos.find((repo) => repo.name === "app")!.reviewChecks!.at(-1)!;
+  expect(receipt.head).toBe(snapshot.head);
+  expect(receipt.base).toBe(snapshot.base);
+  expect(receipt.phase).toBe("before_push");
+  expect(receipt.error).toContain("HEAD changed during review");
+  expect(receipt.error).toContain(snapshot.head);
+  expect(receipt.error).toContain(replacementHead);
+  expect(receipt.verdict).toBeUndefined();
+  expect(held.error).toBe(receipt.error);
+  expect(await git(app.source, "ls-remote", "origin", "refs/heads/main")).toContain(app.base);
+});
+
 it("cancels a queued native gate before draining its expired fixture", async () => {
   const f = await fixture();
   const policy = (await f.governor.snapshot()).policy;

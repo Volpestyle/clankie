@@ -153,6 +153,8 @@ log path. Atomic replacement and fsync finish before pass/landing admission.
 Each repository's `reviewChecks` also records the parent's verdict after its
 gate and immediately before its push: phase, time, base, HEAD and exact patch
 status. An unavailable verdict records its error and holds landing. These
+decisions keep the base and HEAD used to calculate the patch; a HEAD move
+during the verdict lookup records a mismatch error and holds landing. These
 receipts appear in `clankie integrate status <UUID>` even when the repository's
 gate has no review step; they omit candidate contents and credentials.
 Both HEADs and clean worktrees must still match the durable zero-exit gate.
