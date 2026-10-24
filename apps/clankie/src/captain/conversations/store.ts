@@ -1524,15 +1524,15 @@ export class ConversationStore {
     const meta = this.metas.get(conversationId);
     if (meta === undefined || !text.trim() || text.length > OPERATOR_CONVERSATION_TEXT_MAX) return false;
     meta.revision += 1;
-    // His spoken words are not a written report: a "continuation:" or "blocked
-    // on owner:" said aloud must not change autonomy state.
-    this.append(
-      meta,
-      { type: "message", role: speaker === "owner" ? "operator" : "captain", text, streaming: false },
-      undefined,
-      true,
-      false,
-    );
+    // Marked spoken, so surfaces can show it as said aloud and his words never
+    // count as a written report (a "continuation:" said aloud changes nothing).
+    this.append(meta, {
+      type: "message",
+      role: speaker === "owner" ? "operator" : "captain",
+      text,
+      streaming: false,
+      spoken: true,
+    });
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
     return true;
@@ -3367,8 +3367,6 @@ export class ConversationStore {
     body: OperatorConversationEventBody,
     occurredAt?: string,
     livePresence = occurredAt === undefined,
-    /** Speech said aloud on a call is never his report: its words can't change autonomy (VUH-2752). */
-    reportMarkers = true,
   ): void {
     if (
       body.type === "turn" &&
@@ -3401,7 +3399,8 @@ export class ConversationStore {
       body.type === "message" &&
       (body.role === "captain" || body.role === "agent") &&
       !body.streaming &&
-      reportMarkers
+      // Speech said aloud on a call is never his report: its words can't change autonomy (VUH-2752).
+      body.spoken !== true
     )
       this.reportBoundary?.(meta.conversationId, body.text, event.occurredAt);
     // Captain owner threads are private to the authenticated operator. Room,

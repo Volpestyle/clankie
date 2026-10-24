@@ -1810,6 +1810,13 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
       .optional(),
     text: z.string().max(OPERATOR_CONVERSATION_TEXT_MAX),
     streaming: z.boolean(),
+    /**
+     * Said aloud on the owner's device call and recorded as it was said
+     * (VUH-2752, VUH-2764), so a surface can show it as spoken. Only the
+     * service's own record of a call line sets it, never a client's input.
+     * Older readers drop the key (ADR 0016) and show the line as text.
+     */
+    spoken: z.literal(true).optional(),
     /** Per-call observation, never reconstructed from today's settings. */
     modelUsage: TurnModelUsageSchema.optional(),
     /** Coordinator message identity, retained for duplicate delivery recovery. */

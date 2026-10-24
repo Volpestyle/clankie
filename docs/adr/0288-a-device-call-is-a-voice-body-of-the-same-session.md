@@ -146,12 +146,12 @@ spoken conversation nowhere. For an owner's device call that no longer holds.
   alone. Text Clankie therefore hears nothing of the call beyond what its
   `ask_clankie` handoffs carried; the lines are the owner's record, not his
   context.
-- **The wire marker is deferred.** A recorded line goes out as an ordinary
-  message for now. Apps read conversation pages through
-  `parseProtocolResponse`, which drops unknown keys, so a `spoken` field on
-  these messages would most likely be ignored by apps that predate it rather
-  than refused. Adding it, and showing such lines as spoken, is
-  [VUH-2764](https://linear.app/vuhlp/issue/VUH-2764).
+- **Recorded lines are marked spoken** (VUH-2764). Each carries `spoken: true`
+  on its message, set only by the store's own record of a call line; no
+  request can supply it. Surfaces that know the field show the line as said on
+  a call. Apps that predate it read it through `parseProtocolResponse`, which
+  drops the unknown key, so they show it as an ordinary message and keep the
+  page. The same marker keeps his spoken line out of the report boundary.
 - **No opt-out yet.** Every owner device call records its lines. A setting to
   keep a call out of the chat is future work.
 - **Audio is still never retained.** Only text is kept, and only the owner's

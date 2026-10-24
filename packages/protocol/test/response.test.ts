@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   OperatorConversationServiceRequestSchema,
+  OperatorConversationStreamEventSchema,
   OperatorFleetSeatSchema,
   OperatorFleetSnapshotSchema,
   OperatorSeatSubagentsSchema,
@@ -203,5 +204,43 @@ describe("additive protocol response reads", () => {
     expect(schema.safeParse({ ...value, primary: "future" }).error?.issues[0]?.message).toMatch(
       /expected one of text\|ids/u,
     );
+  });
+});
+
+// VUH-2764: a call line recorded as spoken. Apps built before the marker read
+// it as an ordinary message: the reader drops the key and keeps the page.
+describe("a spoken call line to an older reader", () => {
+  const message = OperatorConversationStreamEventSchema.options.find(
+    (option) => option.shape.type.value === "message",
+  )!;
+  // The message as apps before VUH-2764 have it: every field but the marker.
+  const { spoken: _marker, ...before } = message.shape as Record<string, z.ZodType>;
+  const oldPage = z.object({ events: z.array(z.object(before).strict()) }).strict();
+  const line = {
+    schemaVersion: 1,
+    conversationId: "global-default",
+    cursor: "000000000001",
+    revision: 1,
+    occurredAt: "2026-10-24T00:00:00.000Z",
+    type: "message",
+    role: "operator",
+    text: "Let's grab lunch.",
+    streaming: false,
+  } as const;
+
+  it("is a plain message to an app that predates the marker, and spoken to one that knows it", () => {
+    const page = {
+      events: [
+        { ...line, spoken: true },
+        { ...line, cursor: "000000000002", role: "captain", text: "Sure." },
+      ],
+    };
+    expect(oldPage.safeParse(page).success).toBe(false);
+    expect(parseProtocolResponse(oldPage, page)).toEqual({ events: [line, page.events[1]] });
+    expect(OperatorConversationStreamEventSchema.parse(page.events[0])).toMatchObject({ spoken: true });
+  });
+
+  it("is never anything but true", () => {
+    expect(OperatorConversationStreamEventSchema.safeParse({ ...line, spoken: false }).success).toBe(false);
   });
 });

@@ -557,13 +557,14 @@ it("shows the call in the chat as it is spoken, both sides, and adds nothing whe
   // Each line is in the main conversation as soon as it closed, in order.
   const said = (await f.mainEvents()).flatMap((event) =>
     event.type === "message" && (event.role === "operator" || event.role === "captain")
-      ? [`${event.role}: ${event.text}`]
+      ? [`${event.role}: ${event.text}${event.spoken === true ? " (spoken)" : ""}`]
       : [],
   );
+  // Each is marked spoken by the service's own record of the line (VUH-2764).
   expect(said).toEqual([
-    "captain: Hey! Good to hear you.",
-    "operator: Let's grab lunch at noon.",
-    "captain: Sure, sounds good to me.",
+    "captain: Hey! Good to hear you. (spoken)",
+    "operator: Let's grab lunch at noon. (spoken)",
+    "captain: Sure, sounds good to me. (spoken)",
   ]);
   // Recording a line never ran a turn; the call's voice already answered.
   expect(f.asked).toHaveLength(0);
@@ -619,6 +620,11 @@ it("keeps a spoken report marker from changing autonomy, and answers only a new 
   expect(f.asked).toEqual(["What's next?"]);
   // His written answer is a report boundary as always.
   expect(reports).toEqual([ANSWER]);
+  // A written turn and its answer are never marked spoken.
+  const written = (await f.mainEvents()).filter(
+    (event) => event.type === "message" && (event.text === "What's next?" || event.text === ANSWER),
+  );
+  expect(written.map((event) => event.type === "message" && event.spoken)).toEqual([undefined, undefined]);
 });
 
 it("never writes a Discord room's speech into the chat, even with its transcript listeners on (VUH-2752)", async () => {
