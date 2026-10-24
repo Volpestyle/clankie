@@ -31,9 +31,31 @@ it.runIf(process.platform === "darwin")(
     const git = async (cwd: string, ...args: string[]) =>
       (await execute("git", ["-C", cwd, ...args], { signal: work.signal })).stdout.trim();
     const governor = fixtureGovernor(join(root, "resources"), work.signal);
-    const queue = new IntegrationQueue({ directory, core: source, governor: () => governor });
+    const queue = new IntegrationQueue({
+      review: async (_directory, patchId) => ({
+        schemaVersion: 1,
+        required: false,
+        patchId,
+        status: "not_required",
+        landable: true,
+      }),
+      directory,
+      core: source,
+      governor: () => governor,
+    });
     // A separate queue instance proves the sweep does not depend on in-memory running/retry sets.
-    const observer = new IntegrationQueue({ directory, core: source, governor: () => governor });
+    const observer = new IntegrationQueue({
+      review: async (_directory, patchId) => ({
+        schemaVersion: 1,
+        required: false,
+        patchId,
+        status: "not_required",
+        landable: true,
+      }),
+      directory,
+      core: source,
+      governor: () => governor,
+    });
     const guard = async () => work.signal.throwIfAborted();
     try {
       await mkdir(source);

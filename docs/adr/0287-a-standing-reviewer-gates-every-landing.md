@@ -84,11 +84,10 @@ Otherwise:
   push.
 - A rebase that changes the patch changes its hash and needs a new review.
 
-There are two fallbacks:
-
-- **No answer from the service.** The gate holds only when the owner's settings
-  name a reviewer for some project.
-- **A service from before this ADR, or CI.** The review phase is skipped.
+**An unavailable verdict holds the landing.** This includes unsupported review
+routes, missing credentials and unreadable settings. Only external CI with no
+owner settings may skip an unavailable service. Integrate's `CI=1` controls test
+behavior and never waives review (VUH-2790).
 
 **Waivers are rare and on the record.** Only the owner (`clankie review waive
 --reason`, operator credential) and the lead (the `waive_review` tool on the
@@ -110,9 +109,13 @@ does not depend on peer messaging at all.
   `check:landing` is not stopped mechanically. ADR 0240 already accepted that
   exposure for the root gate itself. Landing history and the candidate records
   make a skipped review visible.
-- **`clankie integrate` is not gated in this slice.** It lands composed batches
-  whose combined patch matches no author's candidate. Checking each member is a
-  follow-up ([VUH-2621](https://linear.app/vuhlp/issue/VUH-2621)).
+- **`clankie integrate` checks the composed patch (VUH-2790).** The owning service
+  resolves the source checkout's project and supplies a verdict bound to the
+  sandbox's base, HEAD and patch-id. Local and linked-machine gates receive no
+  owner credentials. The service refreshes review after checks and immediately
+  before push, including reused passes. A composed patch needs its own approval
+  if it differs from every approved candidate; per-member coverage remains
+  [VUH-2621](https://linear.app/vuhlp/issue/VUH-2621).
 - **The operator credential is the owner's authority**, as everywhere else. A
   local process that holds it can file an owner waiver. The record names the
   actor so misuse is visible.

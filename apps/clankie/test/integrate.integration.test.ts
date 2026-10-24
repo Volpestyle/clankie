@@ -191,6 +191,13 @@ ${typeof extra === "function" ? extra(root) : extra}
     const governor = fixtureGovernor(join(root, "resources"), work.signal);
     cleanups.push(() => governor.close());
     const rawQueue = new IntegrationQueue({
+      review: async (_directory, patchId) => ({
+        schemaVersion: 1,
+        required: false,
+        patchId,
+        status: "not_required",
+        landable: true,
+      }),
       directory,
       core: core.source,
       ...(app ? { app: app.source } : {}),
@@ -210,6 +217,39 @@ async function commit(source: string, file: string, value: string) {
 const guard = async () => {
   fixtureWork().signal.throwIfAborted();
 };
+
+it("integrate holds unavailable review and rechecks a passed batch before any push", async () => {
+  const f = await fixture();
+  const change = await commit(f.core.source, "feature", "reviewed later");
+  const request = IntegrationRunSchema.parse({ action: "run", id: randomUUID(), core: [change] });
+  await f.queue.start(request, guard);
+  await f.queue.wait();
+  expect((await f.queue.status(request.id)).state).toBe("passed");
+  const seen: string[] = [];
+  f.queue.options.review = async (directory, patchId) => {
+    seen.push(directory);
+    return {
+      schemaVersion: 1,
+      required: true,
+      projectId: "clankie",
+      patchId,
+      status: "changes",
+      landable: false,
+    };
+  };
+  const held = await f.queue.land(request.id, guard);
+  expect(held.state, held.error).toBe("held");
+  expect(held.error).toContain("review changes");
+  expect(seen).toEqual([f.core.source]);
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+  f.queue.options.review = async () => {
+    throw Error("review service unreachable");
+  };
+  const unavailable = await f.queue.land(request.id, guard);
+  expect(unavailable.state).toBe("held");
+  expect(unavailable.error).toContain("review service unreachable");
+  expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(f.core.base);
+});
 
 it("cancels a queued native gate before draining its expired fixture", async () => {
   const f = await fixture();

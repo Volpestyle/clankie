@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { ReviewLandingSchema, type ReviewLanding } from "@clankie/protocol/reviews";
+import { readCandidatePatch } from "../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
 import { syncOwnerCheckout } from "@clankie/settings";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
@@ -74,6 +76,8 @@ function nextJob(pending: PendingIntegration[], retries: IntegrationJob[]) {
   return { members, fresh: false, regates: 0 };
 }
 interface IntegrationOptions {
+  /** Read in the owning service, against the source checkout's project, outside test isolation. */
+  review?: (directory: string, patchId: string) => Promise<ReviewLanding>;
   holds?: DeployHolds;
   deployPending?: () => boolean;
   notify?: (text: string) => Promise<unknown>;
@@ -1291,6 +1295,7 @@ export class IntegrationQueue {
     phase: "install" | "gate",
     base: string,
     out: Writable,
+    review?: string,
   ): Promise<{ exitCode: number | null; signal: string | null }> {
     const controller = new AbortController();
     const wallMs = this.options.remoteExecutionTimeoutMs ?? 5_400_000;
@@ -1328,7 +1333,7 @@ export class IntegrationQueue {
     out.once("error", fail);
     resetSilence();
     try {
-      return await Promise.race([runner.run(phase, base, relay, controller.signal), expired]);
+      return await Promise.race([runner.run(phase, base, relay, controller.signal, review), expired]);
     } finally {
       clearTimeout(wall);
       clearTimeout(silence);
@@ -1363,6 +1368,7 @@ export class IntegrationQueue {
     const landing = name === "install" ? undefined : await landingGateScript(repo.directory);
     const gateScript = landing?.script ?? "check";
     const batchId = basename(evidence);
+    if (name !== "install") env = { ...env, ...(await this.reviewEnvironment(repo, base)) };
     let remoteError: string | undefined;
     const result = await new Promise<{ exitCode: number | null; signal: string | null }>(
       (resolve, reject) => {
@@ -1370,7 +1376,7 @@ export class IntegrationQueue {
         out.on("error", reject);
         // A linked machine streams the same output into the same log.
         if (runner && name !== "revalidate") {
-          this.remoteCommand(batchId, runner, name, base, out).then(
+          this.remoteCommand(batchId, runner, name, base, out, env.CLANKIE_INTEGRATE_REVIEW).then(
             (result) => out.end(() => resolve(result)),
             (error: unknown) => {
               remoteError = error instanceof Error ? error.message : String(error);
@@ -1732,6 +1738,7 @@ export class IntegrationQueue {
         directory: repo.directory,
         env: {
           ...(await integrationEnvironment(join(root, "isolation", repo.name))),
+          ...(await this.reviewEnvironment(repo)),
           CLANKIE_LANDING_BASE: repo.base,
         },
         args: [
@@ -1915,6 +1922,32 @@ export class IntegrationQueue {
     await this.verifyGates(batch);
   }
 
+  private async reviewEnvironment(repo: IntegrationRepo, base = repo.base): Promise<NodeJS.ProcessEnv> {
+    if (!this.options.review) throw Error("Review status is unavailable; landing held");
+    let patchId = "empty";
+    try {
+      patchId = readCandidatePatch(repo.directory, base).patchId;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.startsWith("HEAD has no committed change"))) throw error;
+    }
+    const landing = ReviewLandingSchema.parse(await this.options.review(repo.source, patchId));
+    if (landing.patchId !== patchId) throw Error("Review verdict names another patch; landing held");
+    // No candidate contents, credentials, owner paths or fleet links enter the sandbox.
+    const { candidate: _candidate, ...verdict } = landing;
+    return {
+      CLANKIE_INTEGRATE: "1",
+      CLANKIE_INTEGRATE_REVIEW: JSON.stringify({ base, head: await this.head(repo), landing: verdict }),
+    };
+  }
+
+  private async assertReview(repo: IntegrationRepo): Promise<void> {
+    const record = JSON.parse((await this.reviewEnvironment(repo)).CLANKIE_INTEGRATE_REVIEW!);
+    if (!record.landing.landable)
+      throw Error(
+        `${repo.name}: review ${record.landing.status} for patch ${record.landing.patchId}; landing held`,
+      );
+  }
+
   private async verifyGates(batch: IntegrationBatch): Promise<void> {
     for (const repo of batch.repos) {
       if (
@@ -1924,6 +1957,7 @@ export class IntegrationQueue {
       )
         throw Error(`${repo.name} gate failed or HEAD changed; see ${repo.gate?.log}`);
       await this.clean(repo);
+      await this.assertReview(repo);
     }
     batch.state = "passed";
     await this.save(batch);
@@ -2143,6 +2177,8 @@ export class IntegrationQueue {
               continue;
             }
             await guard();
+            // Refresh even for reused/old passes and unchanged main; a saved CI skip is no waiver.
+            await this.assertReview(repo);
             // Recheck both HEADs after each network operation, including the sibling dependency.
             for (const sibling of recorded.repos) {
               if (sibling.head !== (await this.head(sibling)))

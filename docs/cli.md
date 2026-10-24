@@ -1208,6 +1208,14 @@ chain, scheduled batch position and a conditional completion ETA from recent
 completed gates (`null` until measurements exist). `/integrate` displays the chain
 and ETA in the TUI.
 
+Review applies to the exact composed patch. The owning service reads the source
+project's reviewer setting and supplies a verdict bound to the batch's base,
+HEAD and patch-id to local or linked-machine gates. Test isolation keeps its
+private HOME and credentials; `CI=1` never skips batch review. Missing review
+status holds the landing. Review is refreshed after checks and before pushing,
+including a saved or reused pass. If composition changes the patch, that exact
+composed patch needs review before it can land (ADR 0287).
+
 Local batches hold one governed full permit across installation and landing
 gates, admitted through the same FIFO queue and slots as ordinary full builds.
 They leave spare full slots, light jobs, servers and simulator work available
@@ -3950,12 +3958,13 @@ clankie review waive --reason TEXT [--directory DIR] [--base REF]
   `waive_review` tool. Both are rare.
 
 `check:landing` runs `status` after green checks. If review is pending or the
-service cannot answer while the owner's settings name a reviewer, it records
+service cannot answer, it records
 `checksExitCode: 0` and exits 3. `pnpm check:landing --revalidate` carries those
 green checks forward when only `main` moved, asks about review again and exits 3
 while it is held; exit 0 means push, exit 1 means rerun the gate. A rebase that
-changes the patch changes its hash and needs a new review. With no reviewer
-named, a service from before the gate, or CI, the review phase is skipped.
+changes the patch changes its hash and needs a new review. A live verdict that
+names no reviewer needs no approval. An unavailable service may be skipped only
+in external CI without owner settings; integrate always holds on a missing verdict.
 
 <a id="fleet-resource-governor"></a>
 

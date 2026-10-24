@@ -885,6 +885,10 @@ const stopDeployHoldExpiry = deployHolds.watch(
 const integration =
   hostedBody === undefined && existsSync(join(repoRoot, ".git"))
     ? new IntegrationQueue({
+        review: async (directory, patchId) => {
+          if (!captain.reviews) throw Error("Review service is unavailable; landing held");
+          return captain.reviews.landing(directory, patchId);
+        },
         directory: integrationDirectory,
         holds: deployHolds,
         deployPending: () => runtimeUpdater?.status().pending !== undefined,

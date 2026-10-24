@@ -24,7 +24,16 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 function createQueue(options: ConstructorParameters<typeof IntegrationQueue>[0]) {
-  const queue = new IntegrationQueue(options);
+  const queue = new IntegrationQueue({
+    review: async (_directory, patchId) => ({
+      schemaVersion: 1,
+      required: false,
+      patchId,
+      status: "not_required",
+      landable: true,
+    }),
+    ...options,
+  });
   queues.push(queue);
   return queue;
 }
@@ -204,11 +213,14 @@ async function fixture() {
   await writeFile(
     join(source, "gate.mjs"),
     `import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 mkdirSync('.local', { recursive: true });
 // The linked machine stands in for Linux: there the darwin-only file's cases skip.
 const linked = process.env.HOME.includes('.clankie-fleet');
 const skipped = linked && existsSync('darwin-only.test.ts') ? ['darwin-only.test.ts'] : [];
 writeFileSync('.local/landing-gate.json', JSON.stringify({ base: process.env.CLANKIE_LANDING_BASE, cwd: process.cwd(), tests: { platform: linked ? 'linux' : process.platform, skipped } }));
+const review = JSON.parse(process.env.CLANKIE_INTEGRATE_REVIEW);
+if (process.env.CLANKIE_INTEGRATE !== '1' || review.base !== process.env.CLANKIE_LANDING_BASE || review.head !== execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()) throw Error('review does not cover remote gate');
 console.log('gated-in', process.env.HOME);
 `,
   );

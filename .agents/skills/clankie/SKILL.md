@@ -162,6 +162,12 @@ and `review_verdict`.
   required change. Also post the verdict on the issue. You cannot review your own
   patch, and a verdict for another patch is refused.
 
+Integrate also requires review of its exact composed patch. Its private HOME,
+settings and `CI=1` do not waive review: the owning service supplies the verdict
+without sharing credentials and checks it again before push. A missing verdict
+holds the batch, including a reused gate. Only external CI without owner settings
+may skip an unavailable service.
+
 Never waive review yourself. Ask your lead, who can waive one exact patch with a
 recorded reason.
 

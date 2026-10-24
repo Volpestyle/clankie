@@ -29,6 +29,7 @@ export interface GateRunner {
     base: string,
     out: Writable,
     signal?: AbortSignal,
+    review?: string,
   ): Promise<{ exitCode: number | null; signal: string | null }>;
   /** Copy the gate's recorded selection into the local worktree. */
   collect(directory: string, signal?: AbortSignal): Promise<void>;
@@ -89,7 +90,7 @@ run() {
     CLANKIE_CREDENTIALS_FILE="$B/home/.config/clankie/credentials.json" \
     CLANKIE_CONTROL_PLANE_URL=http://127.0.0.1:1 CAPTAIN_URL=http://127.0.0.1:1 \
     npm_config_store_dir="$B/store" npm_config_package_import_method=copy RUSTUP_HOME="$RUST/rustup" \
-    CARGO_HOME="$RUST/cargo" TURBO_DAEMON=false CI=1 LANG=C.UTF-8 "$@"
+    CARGO_HOME="$RUST/cargo" TURBO_DAEMON=false CI=1 CLANKIE_INTEGRATE=1 LANG=C.UTF-8 "$@"
 }
 case "$op" in
   capacity)
@@ -101,7 +102,7 @@ case "$op" in
       "$(awk '/MemAvailable/{printf "%d", $2/1024}' /proc/meminfo)" "$gates" ;;
   stage)
     source="$3"; head="$4"
-    rm -rf "$B"; mkdir -p "$B/home" "$B/tmp" "$B/store" "$B/xdg/config" "$B/xdg/cache" "$B/xdg/data" "$B/xdg/state" || exit 3
+    rm -rf "${"$"}{ROOT:?}"/batches/"$batch"; mkdir -p "$B/home" "$B/tmp" "$B/store" "$B/xdg/config" "$B/xdg/cache" "$B/xdg/data" "$B/xdg/state" || exit 3
     [ -d "$REPO" ] || git clone -q --no-checkout "$source" "$REPO" || exit 3
     git -C "$REPO" fetch -q origin && git -C "$REPO" worktree prune || exit 3
     # A length line, then exactly that many bytes: stdin EOF does not always cross ssh, powershell and wsl.
@@ -112,7 +113,7 @@ case "$op" in
     git -C "$REPO" worktree add -q --detach "$B/clankie" "$head" || exit 3
     [ "$(git -C "$B/clankie" rev-parse HEAD)" = "$head" ] || exit 3 ;;
   install) run pnpm install --frozen-lockfile --store-dir "$B/store" --package-import-method=copy ;;
-  gate) touch "$B/gating"; run env CLANKIE_LANDING_BASE="$3" pnpm check:landing --retry-failed-tests; code=$?; rm -f "$B/gating"; exit $code ;;
+  gate) touch "$B/gating"; read -r size && [ "$size" -ge 0 ] 2>/dev/null || exit 3; review=$(head -c "$size" | base64 -d); run env CLANKIE_INTEGRATE_REVIEW="$review" CLANKIE_LANDING_BASE="$3" pnpm check:landing --retry-failed-tests; code=$?; rm -f "${"$"}{B:?}"/gating; exit $code ;;
   report)
     for name in landing-gate.json landing-gate.json.graph.json landing-gate.json.tests.json; do
       if [ -f "$B/clankie/.local/$name" ]; then printf '%s %s\n' "$name" "$(base64 < "$B/clankie/.local/$name" | tr -d '\n')"; fi
@@ -120,7 +121,7 @@ case "$op" in
     for path in "$B/clankie/.data/qa"/landing-rerun-*.json; do
       if [ -f "$path" ]; then printf '%s %s\n' "$(basename "$path")" "$(base64 < "$path" | tr -d '\n')"; fi
     done ;;
-  dispose) git -C "$REPO" worktree remove --force "$B/clankie" 2>/dev/null; rm -rf "$B" ;;
+  dispose) git -C "$REPO" worktree remove --force "$B/clankie" 2>/dev/null; rm -rf "${"$"}{ROOT:?}"/batches/"$batch" ;;
   *) exit 2 ;;
 esac
 `;
@@ -229,12 +230,12 @@ export function wslGateRunner(options: {
       );
       if (staged.exitCode !== 0) throw new Error(`Could not stage ${repo.head} on ${options.machine}`);
     },
-    async run(step, base, out, abortSignal) {
+    async run(step, base, out, abortSignal, review) {
       const { exitCode, signal } = await call(
         step,
         step === "gate" ? [base] : [],
         out,
-        undefined,
+        step === "gate" ? framed(Buffer.from(review ?? "").toString("base64")) : undefined,
         abortSignal,
       );
       return { exitCode, signal };

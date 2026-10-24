@@ -45,6 +45,8 @@ export async function integrationEnvironment(root: string): Promise<NodeJS.Proce
     TURBO_DAEMON: "false",
     TURBO_CACHE_DIR: join(root, "turbo-cache"),
     CI: "1",
+    // This is owner work, even though the tests need CI semantics and a private HOME.
+    CLANKIE_INTEGRATE: "1",
     LANG: "en_US.UTF-8",
   };
 }

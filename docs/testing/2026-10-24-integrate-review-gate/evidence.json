@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "audit.json",
+      "size": 313283,
+      "sha256": "a07e8a5ef54298ca621a4709737d1bc4d80f3057d82b233d263753e3f828d896",
+      "url": "clankie://evidence/sha256/a07e8a5ef54298ca621a4709737d1bc4d80f3057d82b233d263753e3f828d896"
+    }
+  ]
+}

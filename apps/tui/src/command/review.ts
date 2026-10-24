@@ -7,6 +7,7 @@ import {
   ReviewLandingSchema,
 } from "@clankie/protocol/reviews";
 import { realpath } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { readLink, seatRoute } from "../../../../integrations/claude-plugin/worker/bin/link.mjs";
 import {
   createReviewTools,
@@ -52,12 +53,12 @@ export async function runReviewCommand(
 ): Promise<{ ok: boolean; body: unknown }> {
   if (args[0] === "submit") return submitFromPane(args.slice(1), options);
   const env = options.env ?? process.env;
-  const credential = await resolveOperatorCredential({
-    env,
-    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-  });
-  if (!credential) throw new Error("Reviews need the operator credential. Run clankie doctor.");
   const request = async (path: string, init: RequestInit = {}) => {
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+    });
+    if (!credential) throw new Error("Reviews need the operator credential. Run clankie doctor.");
     const response = await (options.fetchImpl ?? fetch)(new URL(path, commandHost({ ...options, env })), {
       ...init,
       headers: {
@@ -115,6 +116,20 @@ export async function runReviewCommand(
       } catch (error) {
         if (!(error instanceof Error && error.message.startsWith("HEAD has no committed change")))
           throw error;
+      }
+      if (env.CLANKIE_INTEGRATE) {
+        // The parent service reads its live review store for the source project.
+        // The sandbox gets only that verdict, never owner credentials or HOME.
+        const record = JSON.parse(env.CLANKIE_INTEGRATE_REVIEW ?? "null");
+        const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+        const resolvedBase = execFileSync("git", ["rev-parse", base], {
+          cwd: directory,
+          encoding: "utf8",
+        }).trim();
+        const landing = ReviewLandingSchema.parse(record?.landing);
+        if (record.head !== head || record.base !== resolvedBase || landing.patchId !== patchId)
+          throw new Error("Integrate review does not cover this exact base, HEAD and patch; landing held.");
+        return { ok: landing.landable, body: landing };
       }
       const result = await request(
         `${OPERATOR_REVIEW_LANDING_PATH}?${new URLSearchParams({ directory, patchId }).toString()}`,

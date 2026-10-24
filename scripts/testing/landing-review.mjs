@@ -10,8 +10,8 @@ import { join } from "node:path";
  *
  * Returns `{ state: "landable" | "held" | "skipped" | "unavailable", checkout, ... }`;
  * `checkout` is the root the author names to submit_for_review (VUH-2662).
- * Without a reachable service the gate holds only when the owner's settings
- * name a reviewer for some project; CI has neither and skips.
+ * An unavailable verdict holds locally and in integrate. Only external CI
+ * with no owner settings may skip an unavailable service.
  */
 export function landingReview(root, base) {
   return { ...reviewState(root, base), checkout: root };
@@ -38,36 +38,35 @@ function reviewState(root, base) {
     .join("\n")
     .trim()
     .slice(-500);
-  // A service from before the review gate cannot hold a reviewer setting.
-  if (/reviews_unavailable|reviews_unsupported/u.test(detail))
-    return { state: "skipped", reason: "the service predates the review gate", detail };
-  if (process.env.CI) return { state: "skipped", reason: "CI has no Clankie service", detail };
-  if (!ownerNamesAReviewer()) return { state: "skipped", reason: "no project names a reviewer", detail };
+  if (!process.env.CLANKIE_INTEGRATE && process.env.CI && !ownerSettingsPresent())
+    return { state: "skipped", reason: "external CI has no owner settings", detail };
   return { state: "unavailable", reason: "review status is unavailable", detail };
 }
 
-function ownerNamesAReviewer() {
+function ownerSettingsPresent() {
   const path =
     process.env.CLANKIE_SETTINGS_FILE ??
     join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "clankie", "settings.json");
   try {
-    const settings = JSON.parse(readFileSync(path, "utf8"));
-    return (settings?.projects?.projects ?? []).some((project) => project?.review !== undefined);
-  } catch {
-    return false;
+    readFileSync(path, "utf8");
+    return true;
+  } catch (error) {
+    // An unreadable settings file is not evidence that this is external CI.
+    return error.code !== "ENOENT";
   }
 }
 
 /** One line telling the author what to do next. */
 export function landingReviewMessage(review) {
+  const candidate = review.landing?.candidate ? ` (candidate ${review.landing.candidate.id})` : "";
   if (review.state === "landable")
-    return `[landing] review: ${review.landing.status} for patch ${review.landing.patchId} (candidate ${review.landing.candidate?.id})`;
+    return `[landing] review: ${review.landing.status} for patch ${review.landing.patchId}${candidate}`;
   if (review.state === "skipped") return `[landing] review: not required (${review.reason ?? "no reviewer"})`;
   if (review.state === "held")
     return review.landing.status === "changes"
       ? `[landing] review: CHANGES on patch ${review.landing.patchId}; make the required changes, commit and submit_for_review again`
       : review.landing.status === "not_submitted"
         ? `[landing] review: project ${review.landing.projectId} requires review; checks are green, so submit_for_review with checkout ${JSON.stringify(review.checkout)} (no such tool in your catalog? from this pane run: clankie review submit --checkout ${JSON.stringify(review.checkout)} --issue KEY --summary TEXT), then run pnpm check:landing --revalidate after APPROVE`
-        : `[landing] review: ${review.landing.status} for patch ${review.landing.patchId} (candidate ${review.landing.candidate?.id}); run pnpm check:landing --revalidate after APPROVE`;
+        : `[landing] review: ${review.landing.status} for patch ${review.landing.patchId}${candidate}; run pnpm check:landing --revalidate after APPROVE`;
   return `[landing] review: ${review.reason}; landing held. ${review.detail ?? ""}`.trim();
 }
