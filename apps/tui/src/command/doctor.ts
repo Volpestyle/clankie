@@ -1,4 +1,11 @@
-import { DiscordRoomsSnapshotSchema, DISCORD_ROOMS_PATH, formatAutonomyDrift } from "@clankie/protocol";
+import {
+  DiscordRoomVoiceStatusSchema,
+  DiscordRoomsSnapshotSchema,
+  DISCORD_ROOM_VOICE_PATH,
+  DISCORD_ROOMS_PATH,
+  formatAutonomyDrift,
+  parseProtocolResponse,
+} from "@clankie/protocol";
 import { z } from "zod";
 import { MachineAccessRefusalSchema } from "@clankie/protocol";
 import { JoinedShellAuditSchema } from "@clankie/protocol/machine-join";
@@ -122,6 +129,9 @@ function doctorSummary(report: InstallDoctorReport): string {
     )
   )
     return "Discord delivery recovery status unknown — run `clankie discord rooms`.";
+  const stay = report.discordVoice?.pipelines;
+  if (stay?.hearing.state === "broken" || stay?.answering.state === "broken")
+    return `${stay.ended ? "Clankie's last Discord call" : "Clankie's Discord call"} ${stay.hearing.state === "broken" ? (stay.answering.state === "broken" ? "could not hear or answer" : "could not hear") : "could not answer"}: the voice provider's session was lost — run \`clankie discord call\`.`;
   const remediation = report.remediations[0];
   const sourceSetup = report.harnessBridges.profiles.codex.sourceSetup;
   if (sourceSetup?.state === "source-manager-required") return `${sourceSetup.detail}. ${sourceSetup.fix}`;
@@ -263,6 +273,27 @@ export async function doctorCommand(
       detail: error instanceof Error ? error.message : String(error),
     };
   }
+  let discordVoice: InstallDoctorReport["discordVoice"];
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (credential) {
+      const response = await (options.fetchImpl ?? fetch)(
+        `${commandHost(options)}${DISCORD_ROOM_VOICE_PATH}`,
+        {
+          headers: { authorization: `Bearer ${credential.token}` },
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+      // Without a Discord body the route answers 503 and the card has no voice line.
+      if (response.ok)
+        discordVoice = parseProtocolResponse(DiscordRoomVoiceStatusSchema, await response.json());
+    }
+  } catch {
+    /* An old or unreachable service has no voice observation. */
+  }
   let fleetHealthMetrics: InstallDoctorReport["fleetHealthMetrics"];
   try {
     const credential = await resolveOperatorCredential({
@@ -386,6 +417,7 @@ export async function doctorCommand(
     }),
     remoteHarnesses,
     discordRoomDelivery,
+    ...(discordVoice === undefined ? {} : { discordVoice }),
     toolCatalogHealth,
     workerTools,
     workerReports,

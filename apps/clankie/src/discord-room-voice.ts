@@ -5,11 +5,13 @@ import {
   DiscordVoicePresenceResultSchema,
   DiscordRoomVoiceStatusSchema,
   type DiscordRoomVoiceStatus,
+  type DiscordVoiceStayPipelines,
 } from "@clankie/protocol";
 import type { BodyVoiceStays } from "./body-voice-stays.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
 import type { RoomAuthorization } from "./discord-room-routes.ts";
 import { postToDiscordActiveBody } from "./discord-active-body.ts";
+import { defaultDiscordLiveReceiptPath, readVoiceStayPipelines } from "./voice-receipt-activity.ts";
 const Snapshot = z.object({
   active: z.boolean(),
   stayId: z.string().optional(),
@@ -37,14 +39,17 @@ export class DiscordRoomVoice {
   private readonly stays: BodyVoiceStays;
   private readonly leases: BodyLeaseStore;
   private readonly post: (path: string, body: unknown) => Promise<Response>;
+  private readonly pipelines: () => Promise<DiscordVoiceStayPipelines | undefined>;
   constructor(
     stays: BodyVoiceStays,
     leases: BodyLeaseStore,
     post = (path: string, body: unknown) => postToDiscordActiveBody(path, body, process.env, fetch),
+    pipelines = () => readVoiceStayPipelines(defaultDiscordLiveReceiptPath()),
   ) {
     this.stays = stays;
     this.leases = leases;
     this.post = post;
+    this.pipelines = pipelines;
   }
   async status(): Promise<DiscordRoomVoiceStatus> {
     const response = await this.post("/voice/status", {});
@@ -52,6 +57,8 @@ export class DiscordRoomVoice {
     const snapshot = Snapshot.parse(await response.json());
     const lease = this.leases.status("voice");
     const { active, outputControlUncertain, speakers, ...details } = snapshot;
+    // allow-swallowed-rejection -- unreadable receipts only omit the stay's hearing and answering
+    const pipelines = await this.pipelines().catch(() => undefined);
     const exact =
       active && lease?.state === "active" && this.stays.observesActiveAudio(lease.conversationId, snapshot);
     return DiscordRoomVoiceStatusSchema.parse({
@@ -67,6 +74,7 @@ export class DiscordRoomVoice {
       ...(lease === undefined ? {} : { conversationId: lease.conversationId }),
       ...details,
       ...(exact && speakers !== undefined ? { speakers } : {}),
+      ...(pipelines === undefined ? {} : { pipelines }),
     });
   }
   async join(

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DiscordSettingsSchema } from "./discord-settings.ts";
 import { DiscordSetupSnapshotSchema } from "./discord-setup.ts";
 import { ManagedDiscordPolicyStatusSchema } from "./managed-discord.ts";
+import { DiscordVoiceFailureCodeSchema } from "./discord-voice-evidence.ts";
 
 export const DISCORD_ROOMS_PATH = "/v1/discord/rooms";
 export const DISCORD_ROOM_GUIDANCE_PATH = "/v1/discord/room-guidance";
@@ -107,6 +108,37 @@ export const DiscordRoomVoiceCommandSchema = z
     stayId: Id.optional(),
   })
   .strict();
+/**
+ * One leg of a voice stay, read from its content-free receipts (VUH-2728).
+ * `broken` means the provider's session was lost after the leg last worked:
+ * hearing has had no transcription, answering no completed response, since.
+ */
+export const DiscordVoicePipelineSchema = z
+  .object({
+    state: z.enum(["working", "broken", "unproven"]),
+    losses: Count,
+    lastLoss: z
+      .object({
+        at: z.string().datetime(),
+        code: DiscordVoiceFailureCodeSchema,
+        closeReason: z.enum(["closed", "lifetime", "socket", "error"]).optional(),
+        closeCode: z.number().int().min(0).max(4999).optional(),
+        providerCode: DiscordVoiceFailureCodeSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type DiscordVoicePipeline = z.infer<typeof DiscordVoicePipelineSchema>;
+export const DiscordVoiceStayPipelinesSchema = z
+  .object({
+    stayId: Id,
+    ended: z.boolean(),
+    hearing: DiscordVoicePipelineSchema,
+    answering: DiscordVoicePipelineSchema,
+  })
+  .strict();
+export type DiscordVoiceStayPipelines = z.infer<typeof DiscordVoiceStayPipelinesSchema>;
 export const DiscordRoomVoiceStatusSchema = z
   .object({
     state: z.enum(["idle", "active", "unknown"]),
@@ -124,6 +156,8 @@ export const DiscordRoomVoiceStatusSchema = z
       .array(z.object({ userId: Id, displayName: z.string().max(128).optional() }).strict())
       .max(64)
       .optional(),
+    /** The latest stay's hearing and answering; absent before any stay or when receipts are unreadable. */
+    pipelines: DiscordVoiceStayPipelinesSchema.optional(),
   })
   .strict();
 export type DiscordRoomVoiceStatus = z.infer<typeof DiscordRoomVoiceStatusSchema>;

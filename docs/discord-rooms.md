@@ -140,6 +140,13 @@ observers, separate from public Discord messages.
 
 `clankie discord call` and TUI `/discord call` show the current call, speech,
 listening/thinking state, consented participant count and active captain handoffs.
+They also show the latest stay's `pipelines`: whether his hearing and answering are
+`working`, `broken` or `unproven`, read from that stay's content-free receipts.
+`broken` means the realtime provider's session was lost after that leg last worked:
+no transcription (hearing) or completed response (answering) has arrived since. The
+last loss carries its code, how the socket ended (`closeReason`), the provider's
+close code and its last error code, never message text. `clankie doctor` names a
+call that could not hear or answer and points here (VUH-2728).
 `clankie discord call join CONVERSATION_ID` joins an existing exact voice room only
 when the configured owner is currently there. `leave`, `mute_output`, and
 `unmute_output` require both conversation id and exact stay id. **Mute Clankie

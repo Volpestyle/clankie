@@ -7,6 +7,7 @@ import {
   OPERATOR_CREDENTIAL_PROVIDER_ID,
   mintOperatorToken,
 } from "@clankie/credential-broker";
+import { DISCORD_ROOM_VOICE_PATH } from "@clankie/protocol";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createFleetSettingsRoutes } from "../../clankie/src/fleet-settings-routes.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
@@ -107,6 +108,57 @@ it("doctor resolves current workspace preferences before any agent is started an
     effective: { release: { mode: "owner" } },
   });
   expect(formatDoctorReport(global)).toContain("global defaults (no approved project)");
+});
+
+it("doctor reads the service's room voice and names a call the provider hung up on (VUH-2728)", async () => {
+  const root = await realpath(await installRoot());
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const token = mintOperatorToken();
+  await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
+  const voice = {
+    state: "idle",
+    activity: "idle",
+    handoffCount: 0,
+    outputMuted: false,
+    consentedParticipantCount: 0,
+    activeCaptureCount: 0,
+    pipelines: {
+      stayId: "stay",
+      ended: true,
+      hearing: {
+        state: "broken",
+        losses: 7,
+        lastLoss: { at: "2026-10-23T18:08:28.441Z", code: "voice_listener_lost" },
+      },
+      answering: {
+        state: "broken",
+        losses: 1,
+        lastLoss: {
+          at: "2026-10-23T18:07:49.503Z",
+          code: "voice_conversation_lost",
+          closeReason: "socket",
+          closeCode: 1011,
+        },
+      },
+    },
+  };
+  const report = await doctorCommand({
+    repoRoot: root,
+    cwd: root,
+    settings: new SettingsStore(join(root, "settings.json")),
+    credentialStore: credentials,
+    env: { HOME: root, CLANKIE_OPERATOR_TOKEN: token },
+    execFileImpl: missing,
+    fetchImpl: (async (url: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(url)).pathname === DISCORD_ROOM_VOICE_PATH &&
+      new Headers(init?.headers).get("authorization") === `Bearer ${token}`
+        ? Response.json(voice)
+        : Response.json({}, { status: 404 })) as typeof fetch,
+  });
+  expect(report.discordVoice?.pipelines?.hearing.state).toBe("broken");
+  expect(formatDoctorReport(report)).toContain(
+    "Discord voice · Last call: hearing broken (7 lost, last voice_listener_lost) · answering broken (1 lost, last voice_conversation_lost: socket, close 1011)",
+  );
 });
 
 describe("install doctor", () => {
@@ -556,6 +608,49 @@ describe("install doctor", () => {
       expect(formatDoctorSummary({ ...healthy, discordRoomDelivery: { rooms: restarted.list() } })).toBe(
         "ready",
       );
+
+      // A call the provider hung up on reads as deaf or mute, with how the session ended (VUH-2728).
+      const voice = {
+        state: "idle" as const,
+        activity: "idle" as const,
+        handoffCount: 0,
+        outputMuted: false,
+        consentedParticipantCount: 0,
+        activeCaptureCount: 0,
+      };
+      const deaf = {
+        ...healthy,
+        discordVoice: {
+          ...voice,
+          pipelines: {
+            stayId: "stay",
+            ended: true,
+            hearing: {
+              state: "broken" as const,
+              losses: 7,
+              lastLoss: {
+                at: "2026-10-23T18:08:28.441Z",
+                code: "voice_listener_lost",
+                closeReason: "socket" as const,
+                closeCode: 1008,
+                providerCode: "insufficient_quota",
+              },
+            },
+            answering: { state: "working" as const, losses: 0 },
+          },
+        },
+      };
+      expect(formatDoctorSummary(deaf)).toBe(
+        "Clankie's last Discord call could not hear: the voice provider's session was lost — run `clankie discord call`.",
+      );
+      expect(formatDoctorReport(deaf)).toContain(
+        "Discord voice · Last call: hearing broken (7 lost, last voice_listener_lost: socket, close 1008, insufficient_quota) · answering working",
+      );
+      const heard = {
+        ...deaf.discordVoice.pipelines,
+        hearing: { ...deaf.discordVoice.pipelines.hearing, state: "working" as const },
+      };
+      expect(formatDoctorSummary({ ...healthy, discordVoice: { ...voice, pipelines: heard } })).toBe("ready");
 
       const probed: string[] = [];
       const builtin = await doctorWith(

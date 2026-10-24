@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  DiscordVoiceEvidenceSchema,
+  type DiscordVoicePipeline,
+  type DiscordVoiceStayPipelines,
+} from "@clankie/protocol";
 
 /**
  * Content-free projection of Discord voice receipts for `get_self_state`.
@@ -50,20 +55,22 @@ export function defaultDiscordLiveReceiptPath(env: NodeJS.ProcessEnv = process.e
   return join(stateHome, "clankie", "discord-live-receipts.jsonl");
 }
 
+async function readReceipts(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 export async function readVoiceSpeechSnapshot(
   path: string,
   limit: number,
   room?: VoiceRoomFilter,
 ): Promise<VoiceSpeechSnapshot> {
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { recent: [] };
-    }
-    throw error;
-  }
+  const raw = await readReceipts(path);
+  if (raw === undefined) return { recent: [] };
 
   const events: ParsedVoiceReceipt[] = [];
   for (const line of raw.split("\n")) {
@@ -119,6 +126,88 @@ export async function readVoiceSpeechSnapshot(
       outputTokens,
     },
   };
+}
+
+/**
+ * Hearing and answering of the latest voice stay (VUH-2728). A provider
+ * session lost after its leg last worked reads as broken, so a deaf or mute
+ * call shows in `clankie discord call` and doctor without reading the log.
+ */
+export async function readVoiceStayPipelines(path: string): Promise<DiscordVoiceStayPipelines | undefined> {
+  const raw = await readReceipts(path);
+  if (raw === undefined) return undefined;
+  const lines = raw.split("\n");
+  let stayId: string | undefined;
+  let start = lines.length;
+  while (stayId === undefined && start > 0) {
+    start -= 1;
+    const receipt = parseVoiceEvidenceLine(lines[start]!);
+    if (receipt?.evidence.type === "joined") stayId = receipt.evidence.stayId;
+  }
+  if (stayId === undefined) return undefined;
+  const hearing = new StayPipeline();
+  const answering = new StayPipeline();
+  let ended = false;
+  for (const line of lines.slice(start)) {
+    const receipt = parseVoiceEvidenceLine(line);
+    if (receipt === undefined || receipt.evidence.stayId !== stayId) continue;
+    const { evidence, occurredAt } = receipt;
+    if (evidence.type === "transcription") hearing.worked();
+    else if (evidence.type === "model_response" && evidence.phase === "completed") answering.worked();
+    else if (evidence.type === "left") ended = true;
+    else if (evidence.type === "failed") {
+      const { code, closeReason, closeCode, providerCode } = evidence;
+      const loss = {
+        at: occurredAt,
+        code,
+        ...(closeReason === undefined ? {} : { closeReason }),
+        ...(closeCode === undefined ? {} : { closeCode }),
+        ...(providerCode === undefined ? {} : { providerCode }),
+      };
+      if (evidence.stage === "transcription_session") hearing.lost(loss);
+      else if (evidence.stage === "conversation_session") answering.lost(loss);
+    }
+  }
+  return { stayId, ended, hearing: hearing.read(), answering: answering.read() };
+}
+
+class StayPipeline {
+  private losses = 0;
+  private lastLoss: DiscordVoicePipeline["lastLoss"];
+  private proven = false;
+  private broken = false;
+  lost(loss: NonNullable<DiscordVoicePipeline["lastLoss"]>): void {
+    this.losses += 1;
+    this.lastLoss = loss;
+    this.broken = true;
+  }
+  worked(): void {
+    this.proven = true;
+    this.broken = false;
+  }
+  read(): DiscordVoicePipeline {
+    return {
+      state: this.broken ? "broken" : this.proven ? "working" : "unproven",
+      losses: this.losses,
+      ...(this.lastLoss === undefined ? {} : { lastLoss: this.lastLoss }),
+    };
+  }
+}
+
+function parseVoiceEvidenceLine(line: string) {
+  if (!line.includes('"discord.voice.')) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  const { occurredAt, data } = value as Record<string, unknown>;
+  const evidence = DiscordVoiceEvidenceSchema.safeParse(data);
+  return evidence.success && typeof occurredAt === "string" && !Number.isNaN(Date.parse(occurredAt))
+    ? { occurredAt: new Date(occurredAt).toISOString(), evidence: evidence.data }
+    : undefined;
 }
 
 interface ParsedVoiceReceipt {

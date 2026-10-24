@@ -4844,7 +4844,6 @@ function parseAskClankieRequest(argumentsJson: string): string | undefined {
   }
 }
 
-/** Evidence codes are machine tokens; a captain code is normalized, never trusted. */
 /** Why the provider's session ended, in receipt terms: how, its close code and its last error code. */
 function providerCloseEvidence(
   reason: RealtimeSessionCloseReason,
@@ -4860,6 +4859,7 @@ function providerCloseEvidence(
   };
 }
 
+/** Evidence codes are machine tokens; a captain code is normalized, never trusted. */
 function sanitizeFailureCode(code: string, fallback = "voice_captain_turn_failed"): string {
   const normalized = code
     .toLowerCase()

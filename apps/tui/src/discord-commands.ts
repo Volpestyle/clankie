@@ -16,7 +16,7 @@ import type { ClankieApiClient } from "@clankie/api-client";
 import type { DiscordSetupApi } from "@clankie/api-client";
 import { DiscordSetupClient } from "@clankie/api-client";
 import { runDiscordSetup, showDiscordSetup } from "./discord-setup.ts";
-import { formatDiscordRoomStatus } from "./discord-room-view.ts";
+import { formatDiscordRoomStatus, formatVoiceStayPipelines } from "./discord-room-view.ts";
 import { parseDiscordSettingValue } from "./command/discord.ts";
 import {
   SettingsStore,
@@ -137,7 +137,7 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
           const voice = await services.rooms.discordRoomVoice();
           shell.insertCommandResult(
             "/discord call",
-            `${voice.state} · ${voice.activity} · speech output ${voice.state === "unknown" ? "unconfirmed" : voice.outputMuted ? "muted" : "audible"}\n${voice.consentedParticipantCount} consented participants · ${voice.activeCaptureCount} active captures · ${voice.handoffCount} captain handoffs\nSpeaking: ${voice.speakers === undefined ? "unknown" : voice.speakers.length === 0 ? "nobody observed" : voice.speakers.map((speaker) => stripVTControlCharacters(speaker.displayName ?? speaker.userId).replace(/[\r\n\t]/gu, " ")).join(", ")}\n${voice.conversationId ?? "Owner unknown"}\nOpt-in words: /voice transcripts. Music and Go Live audio use separate controls.`,
+            `${voice.state} · ${voice.activity} · speech output ${voice.state === "unknown" ? "unconfirmed" : voice.outputMuted ? "muted" : "audible"}\n${voice.consentedParticipantCount} consented participants · ${voice.activeCaptureCount} active captures · ${voice.handoffCount} captain handoffs\nSpeaking: ${voice.speakers === undefined ? "unknown" : voice.speakers.length === 0 ? "nobody observed" : voice.speakers.map((speaker) => stripVTControlCharacters(speaker.displayName ?? speaker.userId).replace(/[\r\n\t]/gu, " ")).join(", ")}\n${voice.pipelines === undefined ? "" : `${formatVoiceStayPipelines(voice.pipelines)}\n`}${voice.conversationId ?? "Owner unknown"}\nOpt-in words: /voice transcripts. Music and Go Live audio use separate controls.`,
             "success",
           );
           const flow = shell.setupFlow;

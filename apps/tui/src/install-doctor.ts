@@ -125,6 +125,8 @@ export interface InstallDoctorReport {
   readonly discordRoomDelivery?:
     | { rooms: import("@clankie/protocol").DiscordRoomStatus[] }
     | { status: "unavailable"; detail: string };
+  /** Room voice as the service reports it; absent when no Discord body answers it. */
+  readonly discordVoice?: import("@clankie/protocol").DiscordRoomVoiceStatus;
   readonly discord: {
     readonly activeBody: ClankieSettings["discord"]["activeBody"];
     readonly textIngressEnabled: boolean;
