@@ -13,6 +13,7 @@ import {
   PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   publicGatewayTargetFor,
   derivePublicGatewayHostId,
+  sendableStreamCloseCode,
 } from "../src/public-gateway.ts";
 import { GATEWAY_STREAM_RECORD_BYTES_MAX, gatewayStreamAad } from "../src/gateway-encryption.ts";
 
@@ -350,5 +351,12 @@ describe("public gateway protocol", () => {
     ]);
     expect(aads.size).toBe(5);
     expect(gatewayStreamAad("host", envelope, "up", 7)).toMatch(/#7$/u);
+  });
+
+  it("closes a stream only with a code a WebSocket can send", () => {
+    for (const code of [1000, 1001, 1003, 1007, 1008, 1011, 1013, 1014, 3000, 4000, 4999])
+      expect(sendableStreamCloseCode(code)).toBe(code);
+    for (const code of [1005, 1006]) expect(sendableStreamCloseCode(code)).toBe(1000);
+    for (const code of [1004, 1015, 1016, 2000, 2999]) expect(sendableStreamCloseCode(code)).toBe(1011);
   });
 });

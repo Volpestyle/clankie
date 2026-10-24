@@ -75,7 +75,7 @@ interface GatewaySide {
   send(frame: PublicGatewayTunnelFrame): void;
 }
 
-async function stack(options: { refreshAt?: () => number } = {}) {
+async function stack(options: { refreshAt?: () => number; carriesCalls?: boolean } = {}) {
   const app = await createClankieApp({
     captain: createStubCaptain(),
     deviceSessionKey: randomBytes(32),
@@ -176,6 +176,7 @@ async function stack(options: { refreshAt?: () => number } = {}) {
           }),
         }),
     encryptionKey: wrappingKey,
+    ...(options.carriesCalls === undefined ? {} : { carriesCalls: options.carriesCalls }),
     controlPlaneUrl: control,
     relayUrl: relay,
   });
@@ -309,8 +310,8 @@ function stream(side: GatewaySide, opening: GatewayStreamOpening) {
     sendRaw(dataBase64: string) {
       side.send({ schemaVersion: 1, kind: "stream_data", streamId, dataBase64 });
     },
-    hangUp() {
-      side.send({ schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION, kind: "stream_close", streamId, code: 1000 });
+    hangUp(code = 1000) {
+      side.send({ schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION, kind: "stream_close", streamId, code });
     },
   };
 }
@@ -439,6 +440,33 @@ it("refuses one phone's ticket carrying another phone's bearer, before the relay
   const call = await fixture.open({ ...first, token: second.token });
   await until(() => call.closed() !== undefined, "the refusal");
   expect(call.closed()!.code).toBe(1008);
+  expect(call.received()).toHaveLength(0);
+  expect(fixture.hungUp()).toBe(0);
+});
+
+it("survives a hang-up whose close code a WebSocket can't send, and carries the next call", async () => {
+  const fixture = await stack();
+  const side = fixture.connections[0]!;
+  const device = await fixture.phone();
+  for (const [index, code] of [1004, 1015, 2999].entries()) {
+    const call = await fixture.open(device);
+    await until(() => call.received().length >= 2, "the call");
+    call.hangUp(code);
+    await until(() => fixture.hungUp() === index + 1, "the relay's end of the call");
+  }
+  expect(fixture.connections).toHaveLength(1);
+  expect(side.socket.readyState).toBe(WebSocket.OPEN);
+  const next = await fixture.open(device);
+  await until(() => next.received().length >= 2, "the next call");
+  expect(startOf(next.received()[0])).toEqual({ status: 101 });
+});
+
+it("neither offers nor opens calls on a body that doesn't carry them", async () => {
+  const fixture = await stack({ carriesCalls: false });
+  const side = fixture.connections[0]!;
+  expect(side.request.headers[PUBLIC_GATEWAY_STREAMS_HEADER]).toBeUndefined();
+  const call = await fixture.open(await fixture.phone());
+  await until(() => call.closed() !== undefined, "the refusal");
   expect(call.received()).toHaveLength(0);
   expect(fixture.hungUp()).toBe(0);
 });

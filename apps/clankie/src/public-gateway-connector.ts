@@ -15,6 +15,7 @@ import {
   PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
   publicGatewayTargetFor,
+  sendableStreamCloseCode,
   type PublicGatewayDoorwayState,
   type PublicGatewayPairingRouteFrame,
   type PublicGatewayRequestFrame,
@@ -63,6 +64,11 @@ export interface PublicGatewayConnectorOptions {
   /** Work classification only; decrypted request content stays inside the public body. */
   readonly onAuthenticatedRequest?: (isWork: boolean) => void;
   readonly gatewayRoutes?: readonly PublicGatewayRoute[];
+  /**
+   * Whether this body carries a phone's call (VUH-2761). A hosted body says
+   * false: its voice is metered through the Discord edge (VUH-2766).
+   */
+  readonly carriesCalls?: boolean;
   /** Managed bodies stop after a forbidden host upgrade as well as a failed renewal. */
   readonly onHostRejected?: () => void;
   readonly installationId?: string;
@@ -146,6 +152,7 @@ export class PublicGatewayConnector {
 
   private readonly connectUrl: string;
   private readonly encryption: GatewayEncryptionHost | undefined;
+  private readonly carriesCalls: boolean;
   private readonly gatewayRoutes: readonly PublicGatewayRoute[];
   private readonly hostId: string;
   private readonly hostToken: string | undefined;
@@ -191,6 +198,7 @@ export class PublicGatewayConnector {
             options.onAuthenticatedRequest,
             this.gatewayRoutes,
           );
+    this.carriesCalls = this.encryption !== undefined && options.carriesCalls !== false;
     if ((options.hostToken === undefined) === (options.resolveHostToken === undefined)) {
       throw new Error("Configure one static or renewable gateway host token source");
     }
@@ -394,7 +402,7 @@ export class PublicGatewayConnector {
       headers: {
         authorization: `Bearer ${credential.token}`,
         // Only a Mac that can open a device's envelope carries its calls.
-        ...(this.encryption === undefined ? {} : { [PUBLIC_GATEWAY_STREAMS_HEADER]: "1" }),
+        ...(this.carriesCalls ? { [PUBLIC_GATEWAY_STREAMS_HEADER]: "1" } : {}),
       },
       handshakeTimeout: CONNECT_TIMEOUT_MS,
       maxPayload: WEBSOCKET_PAYLOAD_BYTES_MAX,
@@ -654,6 +662,7 @@ export class PublicGatewayConnector {
     const id = frame.streamId;
     if (
       this.encryption === undefined ||
+      !this.carriesCalls ||
       this.streams.size >= PUBLIC_GATEWAY_STREAMS_MAX ||
       this.streams.has(id)
     ) {
@@ -778,11 +787,12 @@ export class PublicGatewayConnector {
     this.streams.delete(id);
     local.abort.abort("stream ended");
     const relay = local.relay;
-    if (relay?.readyState === WebSocket.OPEN) relay.close(code === 1005 || code === 1006 ? 1000 : code);
+    if (relay?.readyState === WebSocket.OPEN) relay.close(sendableStreamCloseCode(code));
     else relay?.terminate();
     const socket = this.socket;
-    // allow-swallowed-rejection -- a send fails only on a closed socket, whose close ends every stream
-    if (tellGateway && socket !== undefined) void sendStreamClose(socket, id, code).catch(() => undefined);
+    if (tellGateway && socket !== undefined)
+      // allow-swallowed-rejection -- a send fails only on a closed socket, whose close ends every stream
+      void sendStreamClose(socket, id, sendableStreamCloseCode(code)).catch(() => undefined);
     if (this.streams.size === 0 && this.refreshWhenIdle !== undefined && this.refreshWhenIdle === socket) {
       this.refreshWhenIdle = undefined;
       socket.close(4000, "refreshing host credential");

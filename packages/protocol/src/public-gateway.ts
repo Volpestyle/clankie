@@ -590,6 +590,17 @@ export const PublicGatewayStreamCloseFrameSchema = z
   .strict();
 export type PublicGatewayStreamCloseFrame = z.infer<typeof PublicGatewayStreamCloseFrameSchema>;
 
+/**
+ * A stream close code either end can send on its own socket. The frame admits
+ * any code in range, so the reserved and unassigned ones (1004, 1015, 1016 to
+ * 2999), which a WebSocket refuses to send, become 1011; 1005 and 1006 (no
+ * status, gone) become 1000.
+ */
+export function sendableStreamCloseCode(code: number): number {
+  if (code === 1005 || code === 1006) return 1000;
+  return (code >= 1000 && code <= 1014 && code !== 1004) || (code >= 3000 && code <= 4999) ? code : 1011;
+}
+
 export const PublicGatewayTunnelFrameSchema = z.discriminatedUnion("kind", [
   PublicGatewayPushWakeFrameSchema,
   PublicGatewayPushWakeResultFrameSchema,

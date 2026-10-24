@@ -80,6 +80,7 @@ export async function connectBodyToGateway(options: {
         ...(options.onAuthenticatedRequest === undefined
           ? {}
           : { onAuthenticatedRequest: options.onAuthenticatedRequest }),
+        carriesCalls: false,
         onHostRejected: () => hostedBody.reject(),
         installationId: hostedBody.bootstrap.installationId,
         resolveHostToken: () => hostedBody.resolveHostToken(),

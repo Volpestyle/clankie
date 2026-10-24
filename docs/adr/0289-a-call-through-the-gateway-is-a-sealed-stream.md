@@ -76,6 +76,12 @@ sequenceDiagram
 - **The gateway forwards bytes and enforces limits.** It sees ids, sizes,
   timing and close codes, never a key, bearer, route or event. Close reasons
   stay sealed inside the `ended` event.
+- **A close code is sanitized before either end uses it.** `stream_close`
+  admits any code from 1000 to 4999. Before a socket closes with one, both the
+  Mac and the gateway pass it through `sendableStreamCloseCode`: codes a
+  WebSocket refuses to send (1004, 1015, 1016 to 2999) become 1011, and 1005
+  and 1006 become 1000. A peer's odd code ends that one call, never the
+  service.
 
   Timing does show when the device talks and when it listens. A muted phone
   still sends silent frames (ADR 0288), so the uplink keeps a steady rhythm, but
@@ -87,7 +93,15 @@ sequenceDiagram
   `stream_open` only to a Mac that sent the header, and never to a hosted body:
   hosted voice is credit-metered through the Discord edge, and pricing phone
   calls there is an owner decision
-  ([VUH-2766](https://linear.app/vuhlp/issue/VUH-2766)).
+  ([VUH-2766](https://linear.app/vuhlp/issue/VUH-2766)). A hosted body's
+  connector (`carriesCalls: false`) neither sends the header nor opens a
+  stream.
+
+  The gateway refuses the phone's upgrade with a status that says why: 404
+  for a Mac that doesn't carry calls yet (the phone says to update Clankie on
+  the Mac), and 403 for a hosted body (the phone says calls need the Mac's
+  own connection).
+
 - **A credential refresh waits for the call.** The Mac reconnects to the gateway
   to refresh its account credential, and a reconnect would drop every stream.
   It therefore holds the refresh while a call is open and reconnects once the
