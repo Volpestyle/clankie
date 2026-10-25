@@ -67,3 +67,14 @@ writes preserve navigation. Older readers ignore this additive field.
 
 CLI: `clankie navigation` reads the current list; `clankie navigation set
 work,messages,world` reads its revision and writes through the same API.
+
+## Default lead appearance (VUH-2785, 2026-10-25)
+
+An absent `appearance.leadSkin` now resolves to `clankie.lead.hoodie`, the
+canonical lead chosen in VUH-2715. Explicit `pack` (Classic), custom IDs and
+existing saved selections remain unchanged. The default applies both when the
+appearance document is absent and when only the lead field is absent. The
+schema version and appearance GET/POST shapes remain unchanged; clients still
+receive an ordinary valid skin ID. The private app retires the Red outfits and
+migrates those saved IDs to Hoodie through this revision-fenced API.
+`petSkin`, worker art and navigation are independent and unchanged.

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -7,6 +7,28 @@ import { APPEARANCE_SETTINGS_PATH, AppearanceSettingsSnapshotSchema } from "@cla
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { runNavigationCommand } from "../../tui/src/command/navigation.ts";
 import { createAppearanceRoutes } from "../src/appearance-routes.ts";
+
+it.each([{}, { appearance: {} }, { appearance: { petSkin: "clankie.pet.hoodie" } }])(
+  "serves Hoodie for an absent lead selection in persisted settings %j",
+  async (stored) => {
+    const root = await mkdtemp(join(tmpdir(), "appearance-default-"));
+    try {
+      const file = join(root, "settings.json");
+      await writeFile(file, JSON.stringify({ schemaVersion: 1, ...stored }));
+      const settings = new SettingsStore(file);
+      const app = createAppearanceRoutes(async () => true, settings);
+      const response = await app.fetch(new Request(`http://owner.test${APPEARANCE_SETTINGS_PATH}`));
+      expect(response.status).toBe(200);
+      const snapshot = AppearanceSettingsSnapshotSchema.parse(await response.json());
+      expect(snapshot.appearance.leadSkin).toBe("clankie.lead.hoodie");
+      expect(snapshot.appearance.petSkin).toBe(
+        "appearance" in stored && "petSkin" in stored.appearance ? stored.appearance.petSkin : undefined,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 it("stores Clankie's look once for every surface, fenced by revision and owner authority", async () => {
   const root = await mkdtemp(join(tmpdir(), "appearance-settings-"));
@@ -25,7 +47,8 @@ it("stores Clankie's look once for every surface, fenced by revision and owner a
       );
 
     const first = AppearanceSettingsSnapshotSchema.parse(await (await request("GET")).json());
-    expect(first.appearance).toEqual({ leadSkin: "pack" });
+    expect(first.appearance).toEqual({ leadSkin: "clankie.lead.hoodie" });
+    expect((await new SettingsStore(settings.path).load()).appearance.leadSkin).toBe("clankie.lead.hoodie");
 
     const saved = await request("POST", {
       schemaVersion: 1,
@@ -54,6 +77,7 @@ it("stores Clankie's look once for every surface, fenced by revision and owner a
     });
     const leadSnapshot = AppearanceSettingsSnapshotSchema.parse(await leadOnly.json());
     expect(leadSnapshot.appearance).toEqual({ leadSkin: "pack", petSkin: "hoodie" });
+    expect((await new SettingsStore(settings.path).load()).appearance.leadSkin).toBe("pack");
     const future = await request("POST", {
       schemaVersion: 1,
       expectedRevision: leadSnapshot.revision,

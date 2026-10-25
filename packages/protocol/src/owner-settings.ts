@@ -224,7 +224,7 @@ export type NavigationItems = z.infer<typeof NavigationItemsSchema>;
 
 export const AppearanceSettingsSchema = z
   .object({
-    leadSkin: LeadSkinIdSchema.default("pack"),
+    leadSkin: LeadSkinIdSchema.default("clankie.lead.hoodie"),
     petSkin: LeadSkinIdSchema.nullable().optional(),
     navigation: NavigationItemsSchema.optional(),
   })
