@@ -49,6 +49,7 @@ import {
   SAVED_ISSUE_VIEW_TOOLS,
   INBOX_TOOLS,
   type InboxPendingFence,
+  parseTrackerStoreSnapshot,
   refuseBuiltInTrackerFeatures,
   trackerArgumentReferences,
   TRACKER_OWNER,
@@ -506,20 +507,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         "backend_unavailable",
         "The built-in tracker that holds cut-over projects cannot be read, so this tracker call has nowhere safe to go.",
       );
-    let store: Record<string, unknown>;
+    // The tracker's own validation: a snapshot it would refuse never reads as "no cut-over item".
+    let store: Readonly<Record<string, unknown>>;
     try {
-      store = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      store = parseTrackerStoreSnapshot(await readFile(path, "utf8"));
     } catch {
       throw unusable();
     }
-    if (
-      store === null ||
-      typeof store !== "object" ||
-      store.version !== 1 ||
-      !Array.isArray(store.issues) ||
-      !Array.isArray(store.projects)
-    )
-      throw unusable();
     const index = new Map<string, Set<string>>();
     const records = (key: string) =>
       (Array.isArray(store[key]) ? store[key] : []) as Record<string, unknown>[];

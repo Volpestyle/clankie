@@ -5034,6 +5034,14 @@ async function readStoreText(path: string): Promise<string | undefined> {
   }
 }
 
+/**
+ * Host-only check of a `tracker.json` snapshot with the store's own validation: corrupt or
+ * unsupported bytes throw, exactly as they would for the tracker itself. Never seeds or writes.
+ */
+export function parseTrackerStoreSnapshot(content: string): Readonly<Record<string, unknown>> {
+  return parseStore(content) as unknown as Readonly<Record<string, unknown>>;
+}
+
 /** Host-only read of a store directory's `tracker.json`; never seeds or writes one. */
 export async function readTrackerStoreSummary(directory: string): Promise<TrackerStoreSummary> {
   const text = await readStoreText(join(resolve(directory), "tracker.json"));

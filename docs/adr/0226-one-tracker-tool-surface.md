@@ -832,8 +832,8 @@ are refused before any provider call, and never treated as "no cut-over item":
 - a call naming records of two cut-over projects;
 - a reference another project shares with a cut-over one, such as a duplicate
   project name, which must then be named by UUID;
-- a built-in store that is missing, unreadable or invalid while any cut-over
-  project is registered.
+- a built-in store that is missing, or that the tracker's own store validation
+  rejects, while any cut-over project is registered.
 
 What cannot be routed is refused with a pointer to the built-in tracker. It
 never reaches Linear:
@@ -887,8 +887,9 @@ update` from a Linear repo moves it as well. Every write lands in the
   or in variables, are refused before any request. `linearHistory` reads reach
   Linear and come back marked. The provider sees no write at all. A duplicate
   project name in either store order is refused while the UUID still routes. A
-  missing, `{}`, invalid-JSON or wrong-version store holds the write before the
-  provider, and the route returns once the store is restored.
+  missing, `{}`, invalid-JSON, wrong-version or store-shaped but incomplete
+  store holds the write before the provider, and the route returns once the
+  store is restored. Without a cut-over project the store is never consulted.
 
 ## Amendment: owner tracker settings (2026-10-20, VUH-2532)
 

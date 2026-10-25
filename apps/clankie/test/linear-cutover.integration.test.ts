@@ -1094,12 +1094,6 @@ it("holds a cut-over project's writes before Linear when a shared name or the bu
   const provider = await linearProvider();
   cleanups.push(provider.close);
   const f = await cutoverFixture(undefined, { linearUrl: provider.url });
-  const cut = await f.post("/v1/tracker/cutover/linear", {
-    worldProject: "clankie-work",
-    scratch: "work",
-    linearProjectId: f.projectId,
-  });
-  expect(cut.status, JSON.stringify(cut.body)).toBe(200);
   await f.credentials.set("linear", {
     type: "api",
     key: "fixture-linear-secret",
@@ -1114,6 +1108,26 @@ it("holds a cut-over project's writes before Linear when a shared name or the bu
       verifiedAt: new Date().toISOString(),
     },
   });
+  // No cut-over project yet: the built-in store is never consulted, so its absence changes nothing.
+  const seeded = await readFile(join(f.trackerDirectory, "tracker.json"), "utf8");
+  await rm(join(f.trackerDirectory, "tracker.json"));
+  expect(
+    await f.host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "get_issue",
+      arguments: { id: "VUH-1905" },
+    }),
+  ).toMatchObject({ outcome: "ok", isError: false });
+  expect(provider.calls).toEqual([{ name: "get_issue", args: { id: "VUH-1905" } }]);
+  provider.calls.length = 0;
+  await writeFile(join(f.trackerDirectory, "tracker.json"), seeded);
+  const cut = await f.post("/v1/tracker/cutover/linear", {
+    worldProject: "clankie-work",
+    scratch: "work",
+    linearProjectId: f.projectId,
+  });
+  expect(cut.status, JSON.stringify(cut.body)).toBe(200);
   const path = join(f.trackerDirectory, "tracker.json");
   const original = await readFile(path, "utf8");
   const lead = (tool: string, args: Record<string, unknown>) =>
@@ -1158,6 +1172,8 @@ it("holds a cut-over project's writes before Linear when a shared name or the bu
     ["empty object", () => writeFile(path, "{}")],
     ["invalid JSON", () => writeFile(path, "{")],
     ["unsupported version", () => writeFile(path, JSON.stringify({ ...JSON.parse(original), version: 999 }))],
+    // Store-shaped but incomplete: the tracker itself refuses these bytes.
+    ["schema-shaped empty", () => writeFile(path, JSON.stringify({ version: 1, issues: [], projects: [] }))],
   ] as const) {
     await damage();
     expect(await lead("save_comment", { issueId: "VUH-1905", body: `Held: ${kind}` }), kind).toMatchObject({
