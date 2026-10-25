@@ -1,6 +1,6 @@
 import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";

@@ -83,6 +83,16 @@ suites. The initial two fault probes failed because their filesystem spies did
 not intercept named imports; a passthrough namespace makes the intended faults
 reach the production commit boundary. No product change was needed for that.
 
+The review follow-up restores the base's pending-question activity projection
+byte for byte, including priority, full redacted prompt, stable identity,
+conversation target and underlying activity pruning. The existing HTTP case
+and recovery suite pass 17 tests. Absent optional receipt properties are deleted
+after commit rather than assigned `undefined`; stale test imports are removed.
+The full service typecheck passes its source program and all 15 test batches;
+focused lint passes. The follow-up evidence binds the corrected sources and
+these checks. The earlier component measurements exercise the same persistence
+workload and inputs.
+
 Durability has a measurable cost: 100 new reports through all three lifecycle
 commits take 13.12 seconds, including 9.40 seconds in 1,200 fsync calls on this
 shared Mac. The previous ordinary metadata writer did not sync. The existing
@@ -112,3 +122,5 @@ single-conversation command are archived with the measurements.
 C1's accepted rollback runbook and landing proof are [recorded separately](../2026-10-25-vuh-2827-rollback/README.md).
 
 [Content-free measurements, scripts, legacy sources and regression evidence](proof.json).
+
+[Review corrections, source bindings and verification](review-followup.json).

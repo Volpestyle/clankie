@@ -3,7 +3,8 @@ import { ConversationCommitError } from "./errors.ts";
 import { isDeepStrictEqual } from "node:util";
 import { PendingNativeMessages, type NativeMessageHost } from "../pending-native-messages.ts";
 import { OwnerUpdates } from "../owner-updates.ts";
-import { CurrentActivities } from "./current-activity.ts";
+import { CurrentActivities, safeCurrentActivityText } from "./current-activity.ts";
+import type { OperatorCurrentActivity, OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 import type { OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
 import type { InboundReport } from "../conversations.ts";
 import type {
@@ -1461,9 +1462,13 @@ export class ConversationStore {
     this.currentActivities.clear(conversationId);
   }
 
-  public currentPresenceActivity(nativeWorking: boolean) {
+  public currentPresenceActivity(
+    nativeWorking: boolean,
+    pendingOwnerItem: OperatorPresenceSnapshot["pendingOwnerItem"] | null = this.pendingPresenceOwnerItem() ??
+      null,
+  ): OperatorCurrentActivity | undefined {
     const voice = this.presenceVoiceLease?.();
-    return this.currentActivities.current((id, callIncarnation) => {
+    const liveActivity = this.currentActivities.current((id, callIncarnation) => {
       if (!this.metas.has(id)) return false;
       if (callIncarnation) return id === voice?.conversationId && callIncarnation === voice.incarnation;
       return (
@@ -1471,6 +1476,30 @@ export class ConversationStore {
         (nativeWorking && id === this.defaultGlobalConversationId())
       );
     });
+    if (pendingOwnerItem) {
+      const meta = this.metas.get(pendingOwnerItem.conversationId);
+      const question = meta?.questions?.records.find(
+        ({ question }) => question.requestId === pendingOwnerItem.questionId,
+      )?.question;
+      // The same owner thread boundary applies to questions and event glimpses.
+      if (
+        !meta ||
+        meta.parentConversationId !== undefined ||
+        !["global", "workspace"].includes(meta.scope.kind) ||
+        question?.status !== "pending"
+      )
+        return undefined;
+      const text = safeCurrentActivityText(question.prompt);
+      return text
+        ? {
+            id: `${meta.conversationId}:question:${question.requestId}:${question.incarnationId}`,
+            source: "chat",
+            text,
+            target: { kind: "conversation", conversationId: meta.conversationId },
+          }
+        : undefined;
+    }
+    return liveActivity;
   }
 
   /** One entry per unanswered owner question: the workspace it was raised in, when it has one. */
@@ -4005,8 +4034,10 @@ export class ConversationStore {
       }
       renameSync(temporary, path);
       committed = true;
-      meta.inboundReportStore = reference;
-      meta.inboundAcceptances = persisted.inboundAcceptances;
+      if (reference === undefined) delete meta.inboundReportStore;
+      else meta.inboundReportStore = reference;
+      if (persisted.inboundAcceptances === undefined) delete meta.inboundAcceptances;
+      else meta.inboundAcceptances = persisted.inboundAcceptances;
       if (durable || prepared.changed) {
         const file = openSync(directory, "r");
         try {
