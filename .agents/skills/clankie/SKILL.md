@@ -33,6 +33,10 @@ any decision needed.
 - Ask your lead with `message_clankie`. Your harness's own ask-the-user prompt
   reaches the lead only on a managed seat that routes it; otherwise it waits
   unseen in your pane.
+- Every report your lead reads adds to a turn over its whole context, and an
+  urgent one starts that turn at once. Send it outcomes, blockers and
+  decisions; keep progress on your work item, and coordinate with a peer
+  directly through `message_peer` where your catalog has it.
 - Durable state (what landed and at which commit, evidence, what is left,
   decisions) goes on your work item; a message is never its only copy. Before
   your seat is retired, put machine state (worktree, uncommitted work, background

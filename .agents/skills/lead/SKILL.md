@@ -127,12 +127,14 @@ On each watch wake and periodic round, check **every seat you own**
 - **Right-sized**: a worker that keeps struggling gets more effort or a stronger
   model, not more nudges. That is your call where the owner left no preference;
   where they set one, ask first and say what it is struggling with.
-- **Context**: at 80% of the window, retire the seat by the `work-items`
-  handoff protocol and start a fresh one from the item.
+- **Context**: past about 300K tokens, retire the seat by the `work-items`
+  handoff protocol and start a fresh one from the item, unless its current
+  deliverable needs that context. A seat's whole context is re-read on every
+  call, so a 1M window is a ceiling, not a budget.
 - **Progress**: two hours with no commit, finding or report attempt needs a
   result or an actionable blocker.
 - **Done or idle**: harvest once, then tidy or assign the next ready item, to
-  the same seat only when its context helps.
+  the same seat only for the same patch or its review changes.
 - **No overlap**: one producer per result across everything you own.
 - **Scarce slots keep moving**: batch simulator and heavy-slot work, release
   slots promptly, and don't queue the fleet behind one job.

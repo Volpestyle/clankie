@@ -197,3 +197,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0291: A room thinks in one loop](0291-a-room-thinks-in-one-loop.md) — VUH-2796 (Proposed). Would amend ADR 0229 for Pi text rooms.
 
 - [0292: Onboarding opens an explicit local seat](0292-onboarding-opens-an-explicit-local-seat.md) — VUH-2784. Extends ADR 0152 and ADR 0248.
+- [0293: A seat is sized by its work, not its window](0293-a-seat-is-sized-by-its-work-not-its-window.md) — VUH-2820 (Proposed). Extends ADR 0271.

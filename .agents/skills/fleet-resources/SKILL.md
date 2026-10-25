@@ -20,6 +20,10 @@ rules that matter on most turns:
 5. A wait is the governor working. Never bypass it with another registry,
    launch route or `HOME`, and never stop a job you can't prove is yours.
 6. Search with `rg`, or with `find` from a narrow directory and a `-maxdepth`.
+7. Wait outside your turn. Run a long heavy command, gate or lease touch loop
+   as your harness's background task and continue on its completion notice;
+   never loop on `sleep` in the foreground to poll a log or a status. Each
+   foreground step re-reads your whole context.
 
 ```sh
 clankie heavy -- pnpm --workspace-concurrency=1 --filter @clankie/clankie typecheck

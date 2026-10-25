@@ -70,6 +70,11 @@
       "pattern": "It sleeps when idle and the app or a Discord mention wakes",
       "adr": "0285",
       "now": "Managed presence has no automatic idle sleep or active-hour cap; confirm rollout on older deployments."
+    },
+    {
+      "pattern": "at 80% of the window",
+      "adr": "0293",
+      "now": "Leads retire a seat past about 300K tokens of context (lead skill). ADR 0293 proposes service-enforced token budgets, tracked in VUH-2820."
     }
   ]
 }
