@@ -998,6 +998,38 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/captain/seat",
+      {
+        access: "Owner operator or paired device holding terminal control",
+        purpose:
+          "Read the next explicit app, Claude Code or Codex launch choice and whether this Mac supports it.",
+      },
+    ],
+    [
+      "POST /v1/captain/seat",
+      {
+        access: "Owner operator or paired device holding terminal control",
+        purpose:
+          "Save a revision-fenced own-seat choice on this Mac, independently of worker preferences; does not launch or move a session.",
+      },
+    ],
+    [
+      "POST /v1/captain/seat/start",
+      {
+        access: "Owner operator or paired device holding terminal control",
+        purpose:
+          "Open the selected seat in a fresh local conversation and, for Claude Code or Codex, a new native Herdr tab; retain the caller's request UUID to prevent duplicate launches.",
+      },
+    ],
+    [
+      "POST /v1/captain/seat/status",
+      {
+        access: "Owner operator or paired device holding terminal control",
+        purpose:
+          "Reconcile the original start UUID after a lost reply or service restart; a created pane is only starting until its requested native bridge connects.",
+      },
+    ],
+    [
       "GET /v1/captain/readiness",
       {
         access: "Operator or paired device bearer",
