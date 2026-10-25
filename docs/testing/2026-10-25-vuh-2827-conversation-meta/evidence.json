@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "prehealthy-proof.json",
+      "size": 249458,
+      "sha256": "1cbbe5200b8326d78c9f0993ad294167559efe2becb20c5ade8042a5a38d9568",
+      "url": "clankie://evidence/sha256/1cbbe5200b8326d78c9f0993ad294167559efe2becb20c5ade8042a5a38d9568"
+    },
+    {
       "path": "proof.json",
       "size": 341005,
       "sha256": "f55976f27999a7630937b43fd8d7232080ef055a3b7efb3eedc3f9a29fc2aa1d",
