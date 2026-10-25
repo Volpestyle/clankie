@@ -105,6 +105,8 @@ class ScriptedProvider {
   public answerMs = 480;
   public readonly functionOutputs: string[] = [];
   public transcribedBytes = 0;
+  /** How the provider answers a session.update: confirms it, refuses it with this frame, or never answers. */
+  public answer: "confirm" | "silent" | Record<string, unknown> = "confirm";
   public readonly sockets: ScriptedSocket[] = [];
   public readonly factory = async (): Promise<RealtimeSocket> => {
     const socket = new ScriptedSocket(this);
@@ -137,8 +139,10 @@ class ScriptedSocket implements RealtimeSocket {
     };
     if (frame.type === "session.update") {
       this.kind = frame.session?.type === "transcription" ? "transcription" : "conversation";
-      // The provider confirms the configuration it accepted.
-      this.later({ type: "session.updated", session: {} });
+      // The provider confirms the configuration it accepted, or refuses it.
+      const answer = this.provider.answer;
+      if (answer === "confirm") this.later({ type: "session.updated", session: {} });
+      else if (answer !== "silent") this.later(answer);
     }
     if (frame.type === "input_audio_buffer.append")
       this.provider.transcribedBytes += Buffer.from(frame.audio ?? "", "base64").byteLength;
@@ -709,6 +713,48 @@ it("refuses a call while his voice is in a Discord room, and says which room", a
   // The Discord stay keeps his voice; nothing was opened toward the provider.
   expect(f.leases.status("voice")).toMatchObject({ conversationId: room });
   expect(f.provider.sockets).toHaveLength(0);
+});
+
+it("tells the device why his voice provider would not take the call (VUH-2809)", async () => {
+  const f = await fixture();
+  // What an OpenAI account with no credit answers on every realtime socket.
+  f.provider.answer = {
+    type: "error",
+    error: {
+      type: "insufficient_quota",
+      code: "credit_balance_exhausted",
+      message:
+        "You have no credits remaining. Add credits at https://platform.openai.com/settings/organization/billing/.",
+    },
+  };
+  const refused = await f.call((await f.pair()).token);
+  await until(() => refused.closed, "the refused call closing");
+  expect(refused.ended()).toEqual({
+    schemaVersion: 1,
+    type: "ended",
+    reason: "failed",
+    failure: "provider_refused",
+    providerCode: "credit_balance_exhausted",
+  });
+  // Codes only: no provider text, URL or key reaches the device.
+  const seen = JSON.stringify(refused.events);
+  for (const leak of ["no credits", "platform.openai.com", "fixture-realtime"])
+    expect(seen).not.toContain(leak);
+  expect(refused.spokenBytes()).toBe(0);
+  expect(f.leases.status("voice")).toBeUndefined();
+  expect(f.provider.sockets.every((socket) => socket.closed)).toBe(true);
+
+  // A provider that never confirms the session ends the call as unconfirmed.
+  f.provider.answer = "silent";
+  const unconfirmed = await f.call((await f.pair()).token);
+  await until(() => unconfirmed.closed, "the unconfirmed call closing", 10_000);
+  expect(unconfirmed.ended()).toEqual({
+    schemaVersion: 1,
+    type: "ended",
+    reason: "failed",
+    failure: "provider_unconfirmed",
+  });
+  expect(f.leases.status("voice")).toBeUndefined();
 });
 
 it("yields when the owner talks over him, and the device drops what it had not played", async () => {

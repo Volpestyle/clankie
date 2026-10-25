@@ -50,6 +50,14 @@ export const VoiceCallEndReasonSchema = z.enum([
 ]);
 export type VoiceCallEndReason = z.infer<typeof VoiceCallEndReasonSchema>;
 
+/**
+ * Why a `failed` call could not start (VUH-2809): his voice provider refused
+ * the session (`providerCode` says why, e.g. `credit_balance_exhausted`), or
+ * never confirmed it. Absent for any other failure.
+ */
+export const VoiceCallFailureSchema = z.enum(["provider_refused", "provider_unconfirmed"]);
+export type VoiceCallFailure = z.infer<typeof VoiceCallFailureSchema>;
+
 /** Device → service. Playback acks drive his turn-taking: started means audible, drained means finished. */
 export const VoiceCallClientEventSchema = z.discriminatedUnion("type", [
   z
@@ -105,6 +113,13 @@ export const VoiceCallServerEventSchema = z.discriminatedUnion("type", [
       reason: VoiceCallEndReasonSchema,
       /** For `voice_busy`: the room his voice is in, by its readable conversation name. */
       room: z.string().min(1).max(200).optional(),
+      /** For `failed`: why his voice provider would not take the call. */
+      failure: VoiceCallFailureSchema.optional(),
+      /** With `provider_refused`: the provider's machine-readable code, never its message text. */
+      providerCode: z
+        .string()
+        .regex(/^[a-z0-9_]{1,64}$/u)
+        .optional(),
     })
     .strict(),
 ]);

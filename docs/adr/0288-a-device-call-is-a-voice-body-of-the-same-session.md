@@ -84,7 +84,8 @@ flowchart LR
   aborts or has not completed within 5 seconds. Each ends the session and
   releases the lease. Work the main conversation already accepted
   continues there. Provider credentials are read when a call starts, never at
-  boot.
+  boot. A call whose voice provider refuses or never confirms the session ends
+  `failed` with that cause and the provider's code, never its text (VUH-2809).
 
 ## Alternatives considered
 

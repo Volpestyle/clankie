@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import {
   DiscordVoiceSession,
+  RealtimeSessionRefusedError,
   pcmRms,
   type DiscordVoiceBriefing,
   type DiscordVoiceLiveTranscript,
@@ -23,9 +24,23 @@ import {
   type CaptainChannelTurnResult,
   type DiscordVoiceEvidence,
   type VoiceCallEndReason,
+  type VoiceCallFailure,
   type VoiceCallServerEvent,
   type VoiceCallState,
 } from "@clankie/protocol";
+
+interface JoinFailure {
+  readonly failure: VoiceCallFailure;
+  readonly providerCode?: string;
+}
+
+/** What the device may learn about a join the provider refused: codes only (VUH-2809). */
+function joinFailure(error: unknown): JoinFailure | undefined {
+  if (!(error instanceof RealtimeSessionRefusedError)) return undefined;
+  if (error.unconfirmed) return { failure: "provider_unconfirmed" };
+  const { providerCode } = error.detail;
+  return { failure: "provider_refused", ...(providerCode === undefined ? {} : { providerCode }) };
+}
 
 /**
  * A device voice call (VUH-2682): his Discord rooms' own realtime session, with
@@ -404,7 +419,7 @@ interface VoiceCallOptions {
    * conversation, so the chat already holds the call when it ends.
    */
   readonly transcript?: (line: Pick<DiscordVoiceLiveTranscript, "speaker" | "text">) => Promise<unknown>;
-  readonly onEnded?: (reason: VoiceCallEndReason) => void;
+  readonly onEnded?: (reason: VoiceCallEndReason, failure?: JoinFailure) => void;
   /** Ends a call whose device stopped sending anything. Defaults to 15 seconds. */
   readonly silentPeerMs?: number;
   /** Injected by tests; production uses real timers. */
@@ -440,6 +455,8 @@ export class VoiceCall {
     this.options = options;
     this.timers = options.timers ?? defaultTimers;
     this.media = new LocalCallMedia(options.peer, (reason) => {
+      // A failed join is ended by start(), which knows why it failed.
+      if (reason === "join_failed") return;
       // The session left on its own: he ended his stay (voice_leave) or lost his media.
       void this.end(reason === "self_decided" ? "left" : "failed");
     });
@@ -509,8 +526,8 @@ export class VoiceCall {
         // Calling is the consent: the device's owner opted in by pressing call.
         invokingUserId: VOICE_CALL_SPEAKER_ID,
       });
-    } catch {
-      return this.end("failed");
+    } catch (error) {
+      return this.end("failed", undefined, joinFailure(error));
     }
     if (this.ended) return;
     this.stateTimer = this.timers.setInterval(() => this.refreshState(), STATE_TICK_MS);
@@ -551,7 +568,7 @@ export class VoiceCall {
     void this.end("hung_up");
   }
 
-  public end(reason: VoiceCallEndReason, room?: string): Promise<void> {
+  public end(reason: VoiceCallEndReason, room?: string, failure?: JoinFailure): Promise<void> {
     // Disposal below re-enters through the media's leave; the first reason stands.
     if (this.ended) return this.ending ?? Promise.resolve();
     this.ended = true;
@@ -568,9 +585,15 @@ export class VoiceCall {
       // only then does the call stop listening, so nothing else is added.
       this.unsubscribeTranscript?.();
       this.releaseLease();
-      this.send({ schemaVersion: 1, type: "ended", reason, ...(room === undefined ? {} : { room }) });
+      this.send({
+        schemaVersion: 1,
+        type: "ended",
+        reason,
+        ...(room === undefined ? {} : { room }),
+        ...failure,
+      });
       this.options.peer.close(1000, reason);
-      this.options.onEnded?.(reason);
+      this.options.onEnded?.(reason, failure);
     })();
     return this.ending;
   }

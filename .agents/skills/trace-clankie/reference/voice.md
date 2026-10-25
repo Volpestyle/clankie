@@ -20,7 +20,11 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   in the main conversation (surface `voice-call`), not a voice lane tree. Each
   line said on the call, the owner's and his, is also an ordinary message in
   the main conversation, recorded as it closes and never a turn (VUH-2752). A
-  refused call that says `voice_busy` names the room holding his voice.
+  refused call that says `voice_busy` names the room holding his voice. A
+  call that failed because his voice provider refused or never confirmed the
+  session ends `failed` with `failure: provider_refused` (plus `providerCode`,
+  e.g. `credit_balance_exhausted`) or `provider_unconfirmed`; the service logs
+  the same on "Device voice call ended" (VUH-2809).
 
 - **A voice capability denial may never have reached the captain.** Join the
   room delivery to `model_response`, `realtime_tool`, and `response`. A settled
