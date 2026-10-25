@@ -74,13 +74,42 @@ visible to the launcher).
 
 The launcher passes the permission allowlist for `clankie` commands, disables an
 older installed `clankie@clankie` for this session, enables the projected
-`clankie@inline`, and addresses that identity with the development channel flag.
+`clankie@inline`, and loads the explicit `server:clankie` development channel.
 Claude's [session plugin identity and precedence](https://code.claude.com/docs/en/plugins/loading)
 keep the old marketplace skill catalog from leaking into this seat. It starts
 with `--name Clankie`. A seat on the global chat names the Herdr pane
 `clankie` inside the service's fleet.
 `--plugin-dir` chooses the component source; the projection still supplies the
-shipped skills. `--dry-run` shows the plugin projection and catalog.
+shipped skills. `--dry-run` shows the plugin projection, catalog and private MCP config path.
+
+The seat loads only this plugin's declared MCP servers by default. The launcher
+uses Claude Code's documented [`--strict-mcp-config --mcp-config`](https://code.claude.com/docs/en/cli-reference)
+with a private per-launch `seat-mcp.json`. Strict mode also omits plugin-provided
+servers, so the launcher copies this plugin's declarations into that file: `lead`
+is exposed as `clankie`, and other declarations as `clankie-NAME`. The plugin still
+supplies identity, hooks, agents and skills. The documented
+[`server:` development channel](https://code.claude.com/docs/en/channels-reference#test-during-development)
+keeps the same bridge receiving events. The session's
+[`disableClaudeAiConnectors: true`](https://code.claude.com/docs/en/mcp#disable-claudeai-connectors)
+also prevents fetching the owner's claude.ai connectors. No owner MCP or settings
+file is edited; plain `claude` retains its configuration.
+
+Opt in only the configured servers this launch needs:
+
+```bash
+clankie claude --mcp-servers blender,pixel-mcp
+clankie claude --resume --mcp-servers blender
+clankie claude --mcp-servers none --dry-run
+```
+
+Names come from the selected profile's user/local `.claude.json` or the
+workspace's `.mcp.json`, with local > project > user precedence. Unknown names,
+reserved Clankie names and personal Linear servers are refused; tracker work
+uses Clankie's connected tools. No inherited project server loads automatically.
+This is a per-launch allowlist: repeat it on resume; `none` is the default.
+For a numbered account alias, set `CLAUDE_CONFIG_DIR` to that alias's profile
+when resolving named opt-ins. Credentials in copied definitions stay in the
+private launch file, rather than in argv or dry-run JSON.
 
 `--conversation ID` resolves an existing global/workspace or Discord room conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
@@ -121,7 +150,7 @@ claude plugin disable clankie@clankie  # if previously installed
 clankie claude --dry-run                # projected plugin, selected skills, channel: true
 ```
 
-In the session, `/mcp` lists the `lead` server, `/clankie:this-machine`
+In the session, `/mcp` lists the `clankie` server, `/clankie:this-machine`
 loads his install skill, and `clankie model status` runs without a prompt.
 
 ## Worker channel plugin (`clankie-worker`)
@@ -472,7 +501,7 @@ pane.
 ### MCP name and result migration
 
 New sessions register the operator server as `lead` and the worker server as
-`worker` (also in Codex). Claude displays `plugin:clankie:lead` and
+`worker` (also in Codex). The scoped Claude operator seat displays `clankie` (the plugin alone displays `plugin:clankie:lead`) and
 `plugin:clankie-worker:worker`. Existing `clankie` registrations retain their
 permission rules and catalog/receipt support until those sessions restart.
 Managed new Codex launches disable the old registration to avoid two bridges;

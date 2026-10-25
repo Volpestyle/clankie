@@ -101,7 +101,8 @@ describe("clankie claude (the operator seat)", () => {
     expect(names).toContain("this-machine");
     expect(names).not.toContain("linear-write");
     expect(plan.channel).toBe(true);
-    expect(plan.args).toContain("plugin:clankie@inline");
+    expect(plan.args).toContain("server:clankie");
+    expect(plan.args).toContain("--strict-mcp-config");
     const settings = JSON.parse(plan.args[plan.args.indexOf("--settings") + 1]!);
     expect(settings.enabledPlugins).toEqual({
       [SEAT_PLUGIN_ID]: false,
@@ -109,7 +110,13 @@ describe("clankie claude (the operator seat)", () => {
       "clankie@inline": true,
     });
     expect(settings.permissions).toEqual({
-      allow: ["Bash(clankie)", "Bash(clankie *)", "mcp__plugin_clankie_lead", "mcp__plugin_clankie_clankie"],
+      allow: [
+        "Bash(clankie)",
+        "Bash(clankie *)",
+        "mcp__plugin_clankie_lead",
+        "mcp__plugin_clankie_clankie",
+        "mcp__clankie",
+      ],
       deny: ["mcp__linear-server", "mcp__claude_ai_Linear"],
     });
   });
@@ -157,7 +164,7 @@ describe("clankie claude (the operator seat)", () => {
     const plan = JSON.parse(stdout.text()) as { ok: boolean; command: string; args: string[] };
     expect(plan.ok).toBe(true);
     expect(plan.command).toBe("claude");
-    expect(plan.args[0]).toBe("--name");
+    expect(plan.args).toContain("--name");
   });
 
   it("shows maximum trust mode's flags on --dry-run, and auto mode while it is off", async () => {
@@ -231,7 +238,7 @@ describe("clankie claude (the operator seat)", () => {
     expect(spawned[0]!.args).toContain("auto");
     expect(spawned[0]!.env?.SWARM_SESSION_CAPABILITY).toBeUndefined();
     expect(spawned[0]!.env?.SWARM_COORDINATOR_ENDPOINT).toBeUndefined();
-    expect(spawned[0]!.args).not.toContain("--mcp-config");
+    expect(spawned[0]!.args).toContain("--mcp-config");
     expect(spawned[0]!.args.join(" ")).not.toContain("inherited-worker");
     expect(env.SWARM_SESSION_CAPABILITY).toBe("inherited-worker");
 

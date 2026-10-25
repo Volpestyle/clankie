@@ -13,12 +13,12 @@ matching `claude<N>` shell command; numbered Claude commands resolve aliases and
 functions through the interactive `$SHELL` and accept the same seat flags.
 
 `clankie claude` opens Claude Code as you, on your person's own plan, with your
-tools over the `lead` MCP server, your persona and memory card injected by
+tools over the `clankie` MCP server, your persona and memory card injected by
 the plugin's hooks, and these skills as `/clankie:this-machine` and
 `/clankie:trace-clankie`. Doctor's `laneTools` says whether the service's
 `/v1/mcp` route answers; `clankie claude --dry-run` prints the launch plan
 (`plugin.source` is `plugin-dir`, with the selected catalog and the
-`clankie@inline` channel identity). The launcher allows this seat's Clankie CLI and plugin MCP tools while denying
+`server:clankie` channel identity). The launcher allows this seat's Clankie CLI and plugin MCP tools while denying
 independent tracker connectors. This avoids routine tool prompts; it does not
 expand the selected conversation's authority. Folder/hook/channel trust remains
 the owner's decision. The seat's own brain is Claude Code's `/model`;
@@ -29,6 +29,19 @@ watches follow its conversation as `<channel source="clankie">` events.
 `--resume` retains the last seat's chat for the selected Claude command.
 `--dry-run` creates no chat. A seat on the global chat inside the service's
 herdr fleet claims the agent name `clankie` and becomes the shared global head.
+
+Claude seats load only Clankie's declared MCP servers, using a private strict
+MCP config and disabling claude.ai connectors for the session. Plain `claude`
+keeps the owner's configuration. Opt in a configured user/local/project server
+with `clankie claude --mcp-servers NAME,...` (`none` is the default); repeat on
+resume. Personal Linear servers stay refused. For numbered aliases, set
+`CLAUDE_CONFIG_DIR` to the selected profile when resolving opt-ins. `--dry-run`
+prints the private config path, never copied server credentials.
+
+For a tool-list probe, use Claude's print/SDK mode: it does not poll the outbox.
+An interactive probe must select a fresh workspace conversation with `--new`;
+a bare operator MCP bridge defaults to the global conversation and can consume
+real queued work even from a throwaway Claude profile.
 
 Find the selected conversation with `clankie conversations list`; native
 `--conversation` accepts its stable ID, exact title or unambiguous Discord

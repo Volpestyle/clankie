@@ -4,10 +4,10 @@ import { bundledSkills, projectSkillPlugin } from "@clankie/settings";
  * ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)).
  *
  * The plugin carries everything a plugin can declare: the output style, the
- * hooks, the `clankie mcp` server, the skills. Two things it cannot, so this
- * launcher does them: the permission allowlist for `clankie` commands, and the
- * channel development flag the research preview needs. It also names the herdr
- * pane `clankie` when it is one, which is what makes that pane his head.
+ * hooks, the `clankie mcp` server, the skills. The launcher scopes MCP to
+ * Clankie and explicit opt-ins, sets permissions for `clankie` commands, and
+ * supplies the channel development flag the research preview needs. It also
+ * names the herdr pane `clankie` when it is one, which is what makes that pane his head.
  */
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -30,11 +30,12 @@ import { resolveSeatContext, type NewSeatConversation } from "./seat-context.ts"
 import { planExplicitResume } from "./seat-resume.ts";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
 import { operatorHarness } from "./harness-command.ts";
+import { writeClaudeSeatMcpConfig } from "./claude-seat-mcp.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const SEAT_USAGE =
-  "Usage: clankie claude|codex|opencode|grok|prime [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--model PROVIDER/MODEL] [--dry-run]";
+  "Usage: clankie claude|codex|opencode|grok|prime [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--model PROVIDER/MODEL] [--mcp-servers NAME,...|none] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -44,7 +45,13 @@ const SEAT_AGENT_NAME = "clankie";
 // Without the allow, auto mode's classifier can refuse his own tools mid-turn.
 const SEAT_PERMISSIONS = {
   permissions: {
-    allow: ["Bash(clankie)", "Bash(clankie *)", "mcp__plugin_clankie_lead", "mcp__plugin_clankie_clankie"],
+    allow: [
+      "Bash(clankie)",
+      "Bash(clankie *)",
+      "mcp__plugin_clankie_lead",
+      "mcp__plugin_clankie_clankie",
+      "mcp__clankie",
+    ],
     deny: ["mcp__linear-server"],
   },
 };
@@ -62,6 +69,8 @@ const SEAT_SETTINGS = {
   // His notes live in the service's `memory`, which every harness and room
   // reads; Claude Code's own memory would be a second copy only this seat sees.
   autoMemoryEnabled: false,
+  // Session-only: never fetch the owner's claude.ai connectors.
+  disableClaudeAiConnectors: true,
 };
 
 /** The seat's settings, also denying every other tracker connector this session would inherit. */
@@ -169,6 +178,8 @@ interface SeatFlags {
   readonly pluginDir?: string;
   /** Prime Agent only: the new session's `provider/model`. */
   readonly model?: string;
+  /** Claude only: explicitly copy these configured servers into this launch. */
+  readonly mcpServers?: readonly string[];
 }
 
 export function parseSeatArgs(args: readonly string[], command?: string): SeatFlags {
@@ -185,6 +196,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
   let dryRun = false;
   let pluginDir: string | undefined;
   let model: string | undefined;
+  let mcpServers: string[] | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--harness") {
@@ -221,6 +233,12 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
       if (value === undefined || value.length === 0 || value.startsWith("--")) throw new Error(usage);
       pluginDir = value;
       index += 1;
+    } else if (arg === "--mcp-servers") {
+      const value = args[++index];
+      if (!value || mcpServers !== undefined) throw new Error(usage);
+      mcpServers = value === "none" ? [] : [...new Set(value.split(","))];
+      if (mcpServers.some((name) => !/^[A-Za-z0-9_-]+$/u.test(name) || name === "none"))
+        throw new Error(usage);
     } else if (arg === "--model") {
       const value = args[++index]?.trim();
       if (!value || value.startsWith("--")) throw new Error(usage);
@@ -236,6 +254,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
     throw new Error(usage);
   if (fromConfigDir !== undefined && resumeSessionId === undefined) throw new Error(usage);
   if (model !== undefined && harness !== "prime") throw new Error(usage);
+  if (mcpServers !== undefined && harness !== undefined && harness !== "claude") throw new Error(usage);
   return {
     ...(harness === undefined ? {} : { harness }),
     ...(newConversation ? { newConversation } : {}),
@@ -246,6 +265,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
     ...(conversationId === undefined ? {} : { conversationId }),
     ...(pluginDir === undefined ? {} : { pluginDir }),
     ...(model === undefined ? {} : { model }),
+    ...(mcpServers === undefined ? {} : { mcpServers }),
   };
 }
 
@@ -451,7 +471,11 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   const trust: { enabled: boolean; unreadable?: string } = options.joinedSeat
     ? await options.joinedSeat.maximumTrust()
     : await readSeatMaximumTrust(options);
+  const mcpConfig = writeClaudeSeatMcpConfig(plugin.path, cwd, env, flags.mcpServers ?? []);
   const args = [
+    "--strict-mcp-config",
+    "--mcp-config",
+    mcpConfig,
     "--name",
     "Clankie",
     "--settings",
@@ -459,7 +483,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     "--plugin-dir",
     plugin.path,
     "--dangerously-load-development-channels",
-    "plugin:clankie@inline",
+    "server:clankie",
     ...(previous === undefined ? ["--session-id", sessionId] : ["--resume", sessionId]),
     ...(trust.enabled ? MAXIMUM_TRUST_HARNESS_ARGS.claude : ["--permission-mode", "auto"]),
   ];

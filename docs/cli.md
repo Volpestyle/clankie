@@ -6968,7 +6968,7 @@ control remains available; normal agent messages do not use it. See
 
 <a id="seat-commands"></a>
 
-### `claude[N] | codex[N] | opencode [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]`
+### `claude[N] | codex[N] | opencode [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--mcp-servers NAME,...|none] [--dry-run]`
 
 Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes-the-operator-seat.md)).
 `clankie claude` opens this seat with `claude`; `clankie claude2` uses your
@@ -6994,8 +6994,8 @@ Claude launches need a TTY and the selected Claude command available. The launch
 (or `--plugin-dir` source) into a private launch directory with only the selected
 skills. Identity, hooks, and MCP are retained. It passes the permission allowlist
 for `clankie` commands, disables an older installed `clankie@clankie` for this
-session, and enables `clankie@inline` with the development channel flag for that
-same identity. This also prevents a stale marketplace copy from restoring pruned
+session, and enables `clankie@inline`. Its explicit MCP bridge uses the
+`server:clankie` development channel. This also prevents a stale marketplace copy from restoring pruned
 or disabled skills. Keep any marketplace seat plugin disabled globally, since
 its forced output style makes every session answer as him when enabled there.
 When the seat holds the global chat, inside the service's herdr fleet it names
@@ -7003,6 +7003,25 @@ that pane `clankie` once Claude Code
 is detected there, which binds the pane to his own persona rather than a fleet
 contact; a second pane claiming the name stays an ordinary fleet agent and is
 told so on stderr. The pane is un-named again when the session ends.
+
+Claude seats use [`--strict-mcp-config --mcp-config`](https://code.claude.com/docs/en/cli-reference)
+with a private `seat-mcp.json` in the launch projection. Only the selected Clankie
+plugin's MCP declarations load by default: `lead` becomes `clankie`, other
+servers become `clankie-NAME`. The session also sets
+[`disableClaudeAiConnectors: true`](https://code.claude.com/docs/en/mcp#disable-claudeai-connectors).
+Owner user/local servers, workspace `.mcp.json` servers and other plugins' MCP
+servers are omitted. The owner's files stay untouched; plain `claude` keeps its
+MCP configuration. Identity, hooks, agents, skills and the bridge's channel remain.
+
+`--mcp-servers NAME,...` (Claude only) opts configured servers into this launch;
+`none` is the default. For example, `clankie claude --mcp-servers blender,pixel-mcp`.
+Names resolve from the selected Claude profile's `.claude.json` and workspace
+`.mcp.json`, with local > project > user precedence. Unknown names, Clankie's
+reserved names and personal Linear connectors are refused. With a numbered
+account alias, set `CLAUDE_CONFIG_DIR` to its profile to resolve opt-ins there.
+Repeat the flag on `--resume`; the allowlist is not saved in the resume record.
+Definitions are copied into a file readable only by the owner; `--dry-run` shows
+its path without printing server credentials. No owner MCP files are written.
 
 Every fresh Claude launch starts a new Claude Code session under a recorded id.
 Without a selection it takes the shared global chat (`global-default`) while no
@@ -7089,6 +7108,9 @@ later room message. See [ADR 0218](adr/0218-native-seats-drive-their-attached-co
   "ok": true,
   "command": "claude",
   "args": [
+    "--strict-mcp-config",
+    "--mcp-config",
+    "…/skill-projections/launch-…/seat-mcp.json",
     "--name",
     "Clankie",
     "--settings",
@@ -7096,7 +7118,7 @@ later room message. See [ADR 0218](adr/0218-native-seats-drive-their-attached-co
     "--plugin-dir",
     "…/skill-projections/launch-…",
     "--dangerously-load-development-channels",
-    "plugin:clankie@inline",
+    "server:clankie",
     "--session-id",
     "…",
     "--permission-mode",
