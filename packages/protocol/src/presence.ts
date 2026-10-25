@@ -74,6 +74,32 @@ export const OperatorPresenceActivitySchema = z
   })
   .strict();
 export type OperatorPresenceActivity = z.infer<typeof OperatorPresenceActivitySchema>;
+/** Owner-only glimpse of a live event, never a reconstructed arrival or a prompt. */
+export const OperatorCurrentActivitySchema = z
+  .object({
+    id: z.string().trim().min(1).max(1024),
+    source: z.enum(["chat", "discord", "issue", "coding", "call"]),
+    text: z.string().trim().min(1).max(32768),
+    target: z.discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("conversation"),
+          conversationId: z.string().trim().min(1).max(512),
+          entryId: z.string().trim().min(1).max(512).optional(),
+        })
+        .strict(),
+      z.object({ kind: z.literal("issue"), key: z.string().regex(/^[A-Z][A-Z0-9]*-\d+$/u) }).strict(),
+      z
+        .object({
+          kind: z.literal("worker"),
+          seatId: z.string().trim().min(1).max(512),
+          personaId: z.string().trim().min(1).max(512).optional(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+export type OperatorCurrentActivity = z.infer<typeof OperatorCurrentActivitySchema>;
 export const OperatorPresenceSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -92,6 +118,7 @@ export const OperatorPresenceSnapshotSchema = z
     expression: DesktopExpressionSchema.optional(),
     beats: z.array(OperatorPresenceBeatSchema).max(2).optional(),
     activities: z.array(OperatorPresenceActivitySchema).max(3).optional(),
+    currentActivity: OperatorCurrentActivitySchema.optional(),
   })
   .strict();
 export type OperatorPresenceSnapshot = z.infer<typeof OperatorPresenceSnapshotSchema>;
@@ -106,6 +133,8 @@ export const OperatorPresenceRequestSchema = z
     includeBeats: z.boolean().optional(),
     /** Opt in to bounded activity labels; strict legacy readers receive no new field. */
     includeActivities: z.boolean().optional(),
+    /** Private content: admitted only for an authenticated owner/API device. */
+    includeCurrentActivity: z.boolean().optional(),
     waitMs: z.number().int().min(0).max(OPERATOR_PRESENCE_WAIT_MS_MAX).optional(),
   })
   .strict();

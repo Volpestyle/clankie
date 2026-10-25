@@ -65,6 +65,46 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
+  it("routes private current activity with the owner device identity and refuses read-only/support devices", async () => {
+    const snapshot = {
+      schemaVersion: 1 as const,
+      cursor: "activity",
+      mood: "thinking" as const,
+      detail: "Thinking",
+      since: null,
+      activeSeats: 0,
+    };
+    const dispatch = vi.fn();
+    const deviceDispatch = vi.fn(async () => ({
+      op: "presence" as const,
+      schemaVersion: 1 as const,
+      snapshot,
+    }));
+    let device = { ...activeDevice, grants: { ...activeDevice.grants, terminalControl: true } };
+    const relay = await startRelay({
+      dispatch,
+      deviceDispatch,
+      authorizeDevice: { authorize: async () => ({ authorized: true, device }) },
+    });
+    const body = { op: "presence", schemaVersion: 1, includeCurrentActivity: true };
+    expect((await post(relay.url, "/operator/v1/dispatch", body)).status).toBe(200);
+    expect(deviceDispatch).toHaveBeenCalledWith(body, { deviceToken: TOKEN }, expect.any(AbortSignal));
+    expect(dispatch).not.toHaveBeenCalled();
+    device = { ...device, grants: { ...device.grants, terminalControl: false } };
+    expect((await post(relay.url, "/operator/v1/dispatch", body)).status).toBe(403);
+    const support = await startRelay({
+      dispatch,
+      deviceDispatch,
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...device, supportGrantId: "support", supportScope: "read-state" as const },
+        }),
+      },
+    });
+    expect((await post(support.url, "/operator/v1/dispatch", body)).status).toBe(403);
+    expect(deviceDispatch).toHaveBeenCalledTimes(1);
+  });
   it("passes a paired hosted device's presence read and rechecks authorization", async () => {
     const snapshot = {
       schemaVersion: 1,

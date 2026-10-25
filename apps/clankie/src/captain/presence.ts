@@ -4,6 +4,7 @@ import type { ObservedHeadSeat } from "./herdr-census.ts";
 import type { OperatorPresenceActivity, OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 
 export interface PresenceSources {
+  currentActivity?: OperatorPresenceSnapshot["currentActivity"];
   expression?: OperatorPresenceSnapshot["expression"];
   thinking: boolean;
   /** A live native captain/child can work outside Pi's loaded lanes. */
@@ -26,6 +27,7 @@ export function projectPresence(
   includeFace = true,
   includeBeats = false,
   includeActivities = false,
+  includeCurrentActivity = false,
 ): OperatorPresenceSnapshot {
   const { activeSeats, pendingOwnerItem } = sources;
   const [mood, detail, since] = pendingOwnerItem
@@ -93,6 +95,9 @@ export function projectPresence(
     ...(sources.expression === undefined ? {} : { expression: sources.expression }),
     ...(includeBeats && sources.beats?.length ? { beats: sources.beats } : {}),
     ...(includeActivities ? { activities } : {}),
+    ...(includeCurrentActivity && sources.currentActivity
+      ? { currentActivity: sources.currentActivity }
+      : {}),
   };
   return { ...projection, cursor: createHash("sha256").update(JSON.stringify(projection)).digest("hex") };
 }

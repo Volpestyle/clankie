@@ -24,8 +24,12 @@ it("folds whoami and the phone-access next step into status without reading cred
     captainCredentialStore: new FileCredentialStore(join(directory, "captain.json")),
     listProcessCommandsImpl: () => [],
     listPortOwnersImpl: () => [],
-    fetchImpl: (async (input: RequestInfo | URL) =>
-      String(input).endsWith("/operator/v1/dispatch")
+    fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/operator/v1/dispatch")) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ includeCurrentActivity: true });
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer operator-secret");
+      }
+      return String(input).endsWith("/operator/v1/dispatch")
         ? Response.json({
             op: "presence",
             schemaVersion: 1,
@@ -36,16 +40,24 @@ it("folds whoami and the phone-access next step into status without reading cred
               detail: "Thinking",
               since: null,
               activeSeats: 2,
+              currentActivity: {
+                id: "live",
+                source: "coding",
+                text: "pnpm check",
+                target: { kind: "conversation", conversationId: "global-default" },
+              },
             },
           })
         : Response.json({
             ok: true,
             doorway: { state: "sign_in_required", since: "2026-09-29T13:27:00Z" },
-          })) as typeof fetch,
+          });
+    }) as typeof fetch,
   });
 
   expect(status.presence).toMatchObject({ mood: "thinking", activeSeats: 2, since: null });
   expect(status.presenceState).toBeUndefined();
+  expect(status.presence?.currentActivity?.text).toBe("pnpm check");
   expect(status.connection).toEqual({ mode: "local", label: "This Mac" });
   expect(status.doorway).toEqual({ state: "sign_in_required", since: "2026-09-29T13:27:00Z" });
   expect(status.nextStep).toContain('"Sign this Mac back in"');

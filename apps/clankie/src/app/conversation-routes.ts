@@ -480,6 +480,25 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       }
     }
+    if (parsed.success && parsed.data.op === "presence" && parsed.data.includeCurrentActivity === true) {
+      context.header("cache-control", "private, no-store");
+      const ownerReader = () => {
+        if (!owner?.current()) return false;
+        if (owner.principal.kind === "operator") return true;
+        const record = ctx.devices.get(owner.principal.id);
+        return (
+          record !== undefined &&
+          record.supportGrantId === undefined &&
+          record.mintedBy !== "hosted-account" &&
+          !record.mintedBy.startsWith("support:")
+        );
+      };
+      if (!ownerReader() || !owner || !(await owner.authorize()))
+        return context.json({ error: "owner_required" }, 403);
+      const result = await ctx.dependencies.captain.serveOperatorConversation(parsed.data);
+      if (!ownerReader() || !(await owner.authorize())) return context.json({ error: "owner_required" }, 403);
+      return context.json(result);
+    }
     if (parsed.success && parsed.data.op === "fleet_room") {
       // The room carries coordination text, so only the owner reads it (VUH-2184): a paired
       // device holding Take Control, or this machine's operator. Never a support grant, a

@@ -709,6 +709,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       return true;
     }
     const nativeMessageOp = serviceRequest.op === "pending_messages" || serviceRequest.op === "stop_task";
+    const currentActivityOp =
+      serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true;
     const questionOp =
       serviceRequest.op === "project_proposal_get" ||
       serviceRequest.op === "project_proposal_confirm" ||
@@ -729,6 +731,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
         : nativeMessageOp ||
+            currentActivityOp ||
             questionOp ||
             workWriteOp ||
             // The fleet room is the owner's coordination record (VUH-2184).
@@ -764,6 +767,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // before that await is not authority to dispatch after it.
     const currentAuthorization = await authorizeGrant(options, token, response, grant, serviceRequest.op);
     if (currentAuthorization === undefined) return true;
+    // Support's legacy presence read carries public labels only, regardless of its read-state scope.
+    if (currentActivityOp && currentAuthorization.device.supportGrantId !== undefined) {
+      writeGrantDenial(response, "terminalControl");
+      return true;
+    }
     if (path === OPERATOR_CONVERSATION_TAIL_PATH && serviceRequest.op === "tracker_sync") {
       if (serviceRequest.command.action !== "subscribe") {
         writeJson(response, 400, { error: "subscription_required" });
@@ -818,6 +826,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // device's own signed identity, so a captain bearer can never fetch them.
     const ownerRoute =
       nativeMessageOp ||
+      currentActivityOp ||
       questionOp ||
       workWriteOp ||
       autoOnOp ||
@@ -847,6 +856,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "tracker_sync" ||
           serviceRequest.op === "evidence_fetch" ||
           serviceRequest.op === "fleet_room" ||
+          currentActivityOp ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "project_proposal_tweak" ||

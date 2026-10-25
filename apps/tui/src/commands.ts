@@ -1827,6 +1827,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                     ? []
                     : [
                         s.line("agents", String(launcher.presence.activeSeats), "normal"),
+                        ...(launcher.presence.currentActivity === undefined
+                          ? []
+                          : [s.line("doing", launcher.presence.currentActivity.text, "normal")]),
                         ...(launcher.presence.pendingOwnerItem === undefined
                           ? []
                           : [s.line("waiting for you", launcher.presence.pendingOwnerItem.title, "warn")]),

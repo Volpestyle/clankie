@@ -44,6 +44,16 @@ export class BodyLeaseRouter {
     this.store = store;
   }
 
+  /** Service observation only: no token, route or recovery authority leaves the lease store. */
+  public activeConversation(resource: BodyResource): string | undefined {
+    try {
+      const held = this.store.status(resource);
+      return held?.state === "active" ? held.conversationId : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   public async request(
     identity: BodyConversationIdentity,
     input: { kind: "queue" | "ask"; resource: BodyResource; text: string; ttlMs: number },

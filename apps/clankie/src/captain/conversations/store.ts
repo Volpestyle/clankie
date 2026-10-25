@@ -1,5 +1,6 @@
 import { PendingNativeMessages, type NativeMessageHost } from "../pending-native-messages.ts";
 import { OwnerUpdates } from "../owner-updates.ts";
+import { CurrentActivities } from "./current-activity.ts";
 import type { OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
 import type { InboundReport } from "../conversations.ts";
 import type {
@@ -276,6 +277,7 @@ function untilRoundOrAbort(round: Promise<void>, signal?: AbortSignal): Promise<
 }
 
 export class ConversationStore {
+  private readonly currentActivities = new CurrentActivities();
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
   /** A bounded explicit continuation declaration in a lead's settled report. */
@@ -1417,6 +1419,17 @@ export class ConversationStore {
         now >= this.recentPresenceError.at &&
         now - this.recentPresenceError.at < PRESENCE_ERROR_MS,
     };
+  }
+
+  public currentPresenceActivity(nativeWorking: boolean, voiceConversationId?: string) {
+    return this.currentActivities.current((id, call) => {
+      if (!this.metas.has(id)) return false;
+      if (call) return id === voiceConversationId;
+      return (
+        (this.activeInvocations.get(id) ?? 0) > 0 ||
+        (nativeWorking && id === this.defaultGlobalConversationId())
+      );
+    });
   }
 
   /** One entry per unanswered owner question: the workspace it was raised in, when it has one. */
@@ -3403,6 +3416,7 @@ export class ConversationStore {
       ...body,
     } as OperatorConversationStreamEvent;
     this.journal.append(meta.conversationId, event);
+    this.currentActivities.observe(meta, event, livePresence);
     if (
       (meta.scope.kind === "global" || meta.scope.kind === "workspace") &&
       meta.parentConversationId === undefined &&

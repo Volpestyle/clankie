@@ -380,6 +380,14 @@ export function createOperatorService(
             {
               expression: await ctx.desktop.current(),
               thinking,
+              ...(request.includeCurrentActivity
+                ? {
+                    currentActivity: ctx.conversations.currentPresenceActivity(
+                      head?.status === "working",
+                      ctx.deps.bodyLeases?.activeConversation("voice"),
+                    ),
+                  }
+                : {}),
               working: head?.status === "working" || (nativeSubagents ?? 0) > 0,
               inVoice,
               playing:
@@ -406,6 +414,7 @@ export function createOperatorService(
             request.includeFace === true,
             request.includeBeats === true,
             request.includeActivities === true,
+            request.includeCurrentActivity === true,
           );
         },
         request.cursor,

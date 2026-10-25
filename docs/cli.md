@@ -209,6 +209,16 @@ credential is present without an env/store mismatch. Exit 1 otherwise.
 the clankie row has them. The payload never includes fingerprints or secret
 values.
 
+`presence.currentActivity`, when available to the operator, contains a stable
+`id`, `source` (`chat`, `discord`, `issue`, `coding`, `call`), redacted full
+`text`, and a typed `target`. The status read opts in to the existing presence
+request with `includeCurrentActivity: true`; Take Control owner devices use the
+same contract. Support devices and non-owner bearers cannot opt in. Ordinary
+presence fields and labels stay unchanged. Missing activity means the host has
+no safe live event to show, not a guessed idle task. A settled tool/turn or a
+released call clears its glimpse. Older hosts retain their ordinary presence
+through the compatibility retry. See [ADR 0292](adr/0292-owner-activity-glimpses-follow-live-presence.md).
+
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
 `discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the
 keep-awake ([`awake`](#awake)), on by default on a self-hosted Mac; it reads

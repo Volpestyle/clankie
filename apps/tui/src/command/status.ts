@@ -1,7 +1,11 @@
 import { OperatorPresenceResultSchema, type OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
 import { createCaptainRouteClient, resolveCaptainRouteToken } from "../session/operator-conversations.ts";
-import { inspectOperatorCredential, type OperatorCredentialStatus } from "@clankie/credential-broker";
+import {
+  inspectOperatorCredential,
+  resolveOperatorCredential,
+  type OperatorCredentialStatus,
+} from "@clankie/credential-broker";
 import { createServiceOptions, inspectServices, type CreateServiceOptionsInput } from "../../bin/services.ts";
 import { SERVICE_ORDER, type ServiceStatus } from "../../bin/service-supervisor.ts";
 import { summarizeRecovery, type ServiceRecoverySummary } from "../../bin/service-recovery.ts";
@@ -84,12 +88,35 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
         ...(token === undefined ? {} : { captainToken: token }),
         ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
       });
-      const response = await route.fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ op: "presence", schemaVersion: 1 }),
-        signal: AbortSignal.timeout(3000),
+      const owner = await resolveOperatorCredential({
+        env,
+        ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
       });
+      const readPresence = (current: boolean) =>
+        (current && owner
+          ? createCaptainRouteClient({
+              host:
+                options.host ??
+                env.CLANKIE_CONTROL_PLANE_URL ??
+                env.CLANKIE_CAPTAIN_URL ??
+                DEFAULT_CONTROL_PLANE_URL,
+              captainToken: owner.token,
+              ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+            })
+          : route
+        ).fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            op: "presence",
+            schemaVersion: 1,
+            ...(current && owner ? { includeCurrentActivity: true } : {}),
+          }),
+          signal: AbortSignal.timeout(3000),
+        });
+      let response = await readPresence(owner !== undefined);
+      // Older strict hosts do not accept the opt-in. Ordinary presence remains available.
+      if (owner && [400, 401, 403].includes(response.status)) response = await readPresence(false);
       if (response.ok) presence = OperatorPresenceResultSchema.parse(await response.json()).snapshot;
     } catch {
       /* A failed read must never manufacture an idle mood. */

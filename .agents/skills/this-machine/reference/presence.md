@@ -18,6 +18,15 @@ replay historical notifications. They leave the body animation and `desktop`
 expressions separate. Reduce Motion keeps a static face. A published face
 does not establish that the owner saw it.
 
+The owner-only `includeCurrentActivity: true` presence read, also used by
+`clankie status`, adds the actual live event's stable ID, source, redacted full
+text and typed destination. It shares the existing presence update; do not add
+a polling loop or infer a task from the newest arrival. Only top-level owner
+threads qualify, never mixed-room content, worker history or reasoning. A
+completed task, disconnected source or ended call supplies no glimpse. Inspect
+`currentActivity` to distinguish a published fact from the pet's layout; API
+publication does not prove a bubble appeared on screen.
+
 ## Voice provider readiness
 
 Read `clankie doctor --json` → `voice.providerReadiness` before a call, or
