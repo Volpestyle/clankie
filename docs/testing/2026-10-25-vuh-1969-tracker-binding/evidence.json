@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "app-full-check.log",
+      "size": 89386,
+      "sha256": "46c77923516ace40ac25dff29581e514f3b82ac7e3add515dbfaeb972bb69409",
+      "url": "clankie://evidence/sha256/46c77923516ace40ac25dff29581e514f3b82ac7e3add515dbfaeb972bb69409"
+    },
+    {
+      "path": "before.png",
+      "size": 98899,
+      "sha256": "14e5d854db3c868e383969c11b92261e549d53e7396ad11c887be3d3d157dfae",
+      "url": "clankie://evidence/sha256/14e5d854db3c868e383969c11b92261e549d53e7396ad11c887be3d3d157dfae"
+    },
+    {
+      "path": "desktop-bound.png",
+      "size": 106163,
+      "sha256": "34d1dca91af60858e66760961f8f59c1b8a914fac67b8883bd6b5cb1d7e7f384",
+      "url": "clankie://evidence/sha256/34d1dca91af60858e66760961f8f59c1b8a914fac67b8883bd6b5cb1d7e7f384"
+    },
+    {
+      "path": "phone-bound.png",
+      "size": 95299,
+      "sha256": "e3de2f274f89684d8abec68c9407dd578cba3a844709622e028325d2640236b2",
+      "url": "clankie://evidence/sha256/e3de2f274f89684d8abec68c9407dd578cba3a844709622e028325d2640236b2"
+    },
+    {
+      "path": "preview.png",
+      "size": 122049,
+      "sha256": "2004fbd59807ed3c913049e933d56dcc87fb2006a952a9c29d4d209694b072a8",
+      "url": "clankie://evidence/sha256/2004fbd59807ed3c913049e933d56dcc87fb2006a952a9c29d4d209694b072a8"
+    },
+    {
+      "path": "proof-artifacts.tar",
+      "size": 67072,
+      "sha256": "e5e683056eb05814617e525e584eae5af16a8faecba4ad2e80fa56f340653382",
+      "url": "clankie://evidence/sha256/e5e683056eb05814617e525e584eae5af16a8faecba4ad2e80fa56f340653382"
+    },
+    {
+      "path": "tablet-bound.png",
+      "size": 101247,
+      "sha256": "ade4862d617baccc20f6bb709187da670026b285dbdc45b1571614cd60e47825",
+      "url": "clankie://evidence/sha256/ade4862d617baccc20f6bb709187da670026b285dbdc45b1571614cd60e47825"
+    }
+  ]
+}

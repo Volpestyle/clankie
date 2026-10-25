@@ -7999,6 +7999,16 @@ saved backend is built-in, changing or clearing this reference through the
 legacy route is refused: use the work tracker preview and explicit confirmation
 instead. Clearing an inactive reference leaves the project and its workspace
 tracker choice in place.
+In the app's Common-tier Project settings, choose **Built-in tracker**, enter
+**Built-in project ID**, then review and confirm the change. This uses the same
+work-tracker API and exact UUID validation. Empty input reuses the saved built-in
+binding, or creates a tracker project when none exists; it does not clear one.
+The UUID belongs to one tracker store and stays in project settings, never in
+committed `.clankie/tracking.json`. `work init` records the repository convention;
+use `project update` for an inactive binding or the confirmed tracker-settings
+flow for an active built-in project. Linear cutover applies the import report's
+mapping automatically.
+
 `linearProjectBinding: {"provider":"linear","projectId":"UUID"}` separately
 names an exact project in Clankie's connected Linear app. The service reads that
 provider directly, never the local tracker fallback; names, another provider,

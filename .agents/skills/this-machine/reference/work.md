@@ -160,6 +160,15 @@ Bind a built-in tracker project with `clankie project update PROJECT --changes-j
 then returns `trackerProjectId` on that project's repo. Built-in tracker sync
 mechanics are in `work-items`.
 
+For an active built-in backend, use the work-tracker preview/confirmation flow
+instead of the legacy binding edit (see `work-items`). The app's Common-tier
+Project settings exposes **Built-in project ID** in that same flow: choose the
+built-in tracker, enter the exact imported UUID, review and confirm. Empty input
+reuses a saved binding or creates a project; it does not clear the reference.
+`work init` records only the repo convention. Store-specific UUIDs remain in
+settings, never in committed `.clankie/tracking.json`. Linear import reports the
+mapping and cutover applies it automatically; names never establish a binding.
+
 A connected Linear reference is separate:
 `clankie project settings PROJECT --linear-project UUID` (or `clear`) writes
 `linearProjectBinding: {provider: "linear", projectId: UUID}` through the same
