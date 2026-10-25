@@ -48,7 +48,8 @@ child exists. Ctrl+C aborts an active child run, deletes the child directory,
 selects the parent, restores the exact parent UI snapshot, and replays any
 events that reached the parent while the side conversation was open. Service
 startup deletes orphaned side children because no console can resume their UI
-lifecycle.
+lifecycle, except a child with unread reports or report storage it cannot fully
+read, which stays on disk with a startup warning (VUH-2831).
 
 ## Consequences
 

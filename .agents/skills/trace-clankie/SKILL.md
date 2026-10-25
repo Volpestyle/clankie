@@ -49,7 +49,11 @@ The exact accepted payloads and delivery/read state live in that conversation's
 manifest. Legacy files keep them inline under `inboundAcceptances` until a save after
 the runtime update reports a durable healthy cutover. Before that point the old
 layout stays intact for automatic rollback. Only manifest-referenced shards are committed; unreferenced files
-are not report acceptance. Read reports older than 24 hours are compacted;
+are not report acceptance. Report storage stays inside `inbound*` metadata fields
+and `inbound-reports/`: a manifest, shard, field or file the reader cannot read
+never proves nothing is unread, so startup and retention keep that conversation's
+directory and log `Retaining conversation ID: why` (VUH-2831). An unreadable side
+fork is skipped, not loaded; any other unreadable inbox still stops boot. Read reports older than 24 hours are compacted;
 unread, delivered and uncertain reports are retained. The files are independent
 of event trimming and pane lifetime. Join `runId` to the
 accepted/completed/failed `events.jsonl` turns.

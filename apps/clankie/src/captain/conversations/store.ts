@@ -1,4 +1,8 @@
-import { InboundReportStore, InboundReportStorageError } from "./inbound-report-store.ts";
+import {
+  InboundReportStore,
+  InboundReportStorageError,
+  unrecognizedInboundReportStorage,
+} from "./inbound-report-store.ts";
 import { ConversationCommitError } from "./errors.ts";
 import { isDeepStrictEqual } from "node:util";
 import { PendingNativeMessages, type NativeMessageHost } from "../pending-native-messages.ts";
@@ -399,6 +403,8 @@ export class ConversationStore {
   private draftSequence = 0;
   private readonly questionIssuers = new Map<string, QuestionAuthority>();
   private readonly corruptQuestions = new Set<string>();
+  /** Conversations whose report storage this reader does not fully recognize. */
+  private readonly unrecognizedInboundStorage = new Set<string>();
   /** Native seat binding is owned by captain; no native question continuation. */
   public questionEligible: (id: string) => boolean = () => true;
   public readonly workerAnswerInFlight = new Set<string>();
@@ -538,11 +544,18 @@ export class ConversationStore {
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       let retainedReports = false;
+      let side = false;
       try {
         const meta = JSON.parse(
           readFileSync(join(root, entry.name, "meta.json"), "utf8"),
         ) as ConversationMeta;
+        side = meta.parentConversationId !== undefined;
         retainedReports = meta.inboundAcceptances !== undefined || meta.inboundReportStore !== undefined;
+        const unrecognized = unrecognizedInboundReportStorage(join(root, entry.name), meta);
+        if (unrecognized !== undefined) {
+          this.unrecognizedInboundStorage.add(meta.conversationId);
+          console.warn(`Retaining conversation ${entry.name}: ${unrecognized}`);
+        }
         if (meta.inboundReportStore !== undefined) {
           const directory = join(root, entry.name);
           const reports = new InboundReportStore(directory);
@@ -647,11 +660,15 @@ export class ConversationStore {
         }
       } catch (error) {
         // Never replace a retained inbox after a failed migration or shard read.
+        // Nothing recreates a side fork, so its directory waits on disk instead.
         if (
-          (retainedReports && (!(error instanceof z.ZodError) || entry.name === "global-default")) ||
-          error instanceof InboundReportStorageError
+          !side &&
+          ((retainedReports && (!(error instanceof z.ZodError) || entry.name === "global-default")) ||
+            error instanceof InboundReportStorageError)
         )
           throw error;
+        if (retainedReports || error instanceof InboundReportStorageError)
+          console.warn(`Retaining conversation ${entry.name}: its inbound reports are unreadable`, error);
         // An unreadable conversation is skipped, never fatal to boot.
       }
     }
@@ -2116,8 +2133,9 @@ export class ConversationStore {
     return restoreInboundReports(this, meta);
   }
 
+  /** Storage this reader cannot fully see never proves there is nothing unread. */
   private hasUnreadInboundReports(meta: ConversationMeta): boolean {
-    return hasUnreadInboundReports(meta);
+    return this.unrecognizedInboundStorage.has(meta.conversationId) || hasUnreadInboundReports(meta);
   }
 
   private notifyInboundReportChange(): void {

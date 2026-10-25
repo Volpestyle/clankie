@@ -196,6 +196,36 @@ export class InboundReportStore {
   }
 }
 
+const temporaryShard = /^[a-f0-9]{2}-[a-f0-9]{64}\.json\.[a-f0-9-]{36}\.tmp$/u;
+const knownReportFields = new Set(["inboundAcceptances", "inboundReportStore"]);
+
+/**
+ * Why a conversation may hold reports this reader cannot see, or undefined when
+ * it recognizes all of its report storage. Destructive cleanup treats an answer
+ * as possibly unread (VUH-2831). Report storage lives in `inbound*` metadata
+ * fields and the `inbound-reports` directory; a later format must stay inside
+ * them so this reader retains what it cannot read.
+ */
+export function unrecognizedInboundReportStorage(
+  conversationDirectory: string,
+  meta: object,
+): string | undefined {
+  const field = Object.keys(meta).find((key) => key.startsWith("inbound") && !knownReportFields.has(key));
+  if (field !== undefined) return `unrecognized report field ${field}`;
+  let entries;
+  try {
+    entries = readdirSync(join(conversationDirectory, "inbound-reports"), { withFileTypes: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" ? undefined : `report directory unreadable (${code ?? String(error)})`;
+  }
+  // Prepared shards admit nothing until meta.json references them.
+  const unknown = entries.find(
+    (entry) => !entry.isFile() || !(filename.test(entry.name) || temporaryShard.test(entry.name)),
+  );
+  return unknown === undefined ? undefined : `unrecognized report storage ${unknown.name}`;
+}
+
 /** Used by bounded diagnostic readers as well as the live conversation store. */
 export function decodeInboundReportShard(prefix: string, file: string, body: Buffer | string): Entries {
   if (!filename.test(file) || !file.startsWith(`${prefix}-`))
