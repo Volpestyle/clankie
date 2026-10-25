@@ -230,4 +230,6 @@ uses `clankie work --repo`. Clankie's own unhired operator calls without `repo`
 still reach connected Linear. A hire whose project has no saved convention is
 refused rather than guessed; an explicit `repo` always wins.
 `... --switch-back [--dry-run]` restores Linear as the project's tracker and
-reports the pilot writes Linear never saw.
+reports the pilot writes Linear never saw. Those writes, including every
+`LOCAL-TEAM-n` item, then exist only in the kept pilot file, never in Linear.
+Show the owner that count before a switch-back.

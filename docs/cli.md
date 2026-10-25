@@ -9785,6 +9785,16 @@ store's exact pre-cutover bytes and the previous binding. It keeps the pilot
 store as `tracker/cutover/<time>/pilot-<time>.json`. The mirror stays disabled.
 To cut over again, re-import into a new scratch name and cut over that import.
 
+Switch-back is lossy for everything written during the pilot. The restored live
+store is the pre-cutover one, so the project's issues leave the built-in tracker
+altogether. Items created after the cutover (`LOCAL-TEAM-n`), and the pilot's
+comments, events, bundles, runs and owner asks, survive only in the pilot file.
+Nothing is written to Linear; port what matters by hand. A re-import then takes
+Linear's state as it stands, including any Linear writes made after the cutover,
+and never the pilot's. The VUH-1987 rehearsal on a scratch copy of the real
+Clankie Work store shows both effects
+([record](testing/2026-10-25-vuh-1987-switch-back/README.md)).
+
 ### Work tracker settings
 
 `clankie fleet tracker` reads the default for new projects. `clankie project
