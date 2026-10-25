@@ -163,14 +163,20 @@ it.each(["claude", "claude2", "codex", "opencode"])(
   },
 );
 
-it("retires the seat alias; each harness is launched by its own name", () => {
-  expect(isHeadlessCaptainCommand("seat")).toBe(false);
+it("reserves seat for saved launch control and refuses the retired native --harness alias", async () => {
+  const f = await fixture();
+  expect(isHeadlessCaptainCommand("seat")).toBe(true);
+  expect(await runHeadlessCaptainCommand(["seat", "--harness", "claude"], f.options)).toBe(1);
+  expect(f.options.execFileImpl).not.toHaveBeenCalled();
+  expect(f.options.fetchImpl).not.toHaveBeenCalled();
+  expect(f.error()).toContain("clankie seat [show");
 });
 
 it("help and TUI expose harness names, with only supported numbered account mappings", () => {
   const help = commandHelp();
   for (const command of ["claude", "codex", "opencode"]) expect(help).toContain(command);
-  expect(help).not.toMatch(/^\s+seat(?:\s|\[)/mu);
+  expect(help).toContain("seat show | set app|claude|codex --revision REV");
+  expect(help).not.toMatch(/^\s+seat.*--harness/mu);
   expect(help).not.toContain("seat needs a TTY");
   const commands = buildConsoleCommands({});
   expect(commands.map((command) => command.name)).toEqual(
