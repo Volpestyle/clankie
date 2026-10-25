@@ -172,6 +172,7 @@ export interface ClankieAppDependencies {
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** Worker harness sign-in with each harness's own login (Claude, Codex). */
+  captainSeats?: import("../captain-seat.ts").CaptainSeats;
   harnessLogins?: import("../harness-logins.ts").HarnessSignIns;
   /** Proven by the primary listener socket, never a caller-supplied header. */
   isLocalCompanionRequest?: (request: Request) => boolean;

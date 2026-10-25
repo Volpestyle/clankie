@@ -1,4 +1,12 @@
 import {
+  CAPTAIN_SEAT_PATH,
+  CAPTAIN_SEAT_START_PATH,
+  CAPTAIN_SEAT_STATUS_PATH,
+  CaptainSeatSnapshotSchema,
+  CaptainSeatStartResultSchema,
+} from "../../../packages/protocol/src/captain-seat.ts";
+import { CaptainSeats, captainSeatSnapshot } from "../../clankie/src/captain-seat.ts";
+import {
   HOST_SETTINGS_PATH,
   HostSettingsSnapshotSchema,
 } from "../../../packages/protocol/src/owner-settings.ts";
@@ -73,6 +81,7 @@ async function listen(handler: (request: IncomingMessage, response: ServerRespon
 }
 async function fixture(
   options: {
+    captainSeat?: boolean;
     unavailableAwakeRegistry?: boolean;
     routineCommand?: CaptainPort["routineCommand"];
     fleetRoom?: CaptainPort["fleetRoom"];
@@ -141,6 +150,25 @@ async function fixture(
   const eventLogPath = join(root, "events.jsonl");
   await writeFile(eventLogPath, events.map((event) => JSON.stringify(event)).join("\n") + "\n");
   let captainCalls = 0;
+  let seatEffects = 0;
+  const captainSeats = options.captainSeat
+    ? new CaptainSeats({
+        directory: join(root, "seat-starts"),
+        supported: true,
+        snapshot: async () => captainSeatSnapshot(await settings.load(), true),
+        cwd: async () => root,
+        createConversation: async () => {
+          seatEffects++;
+          return "relay-seat-chat";
+        },
+        appReady: async () => true,
+        nativeReady: async () => false,
+        launch: async () => {
+          seatEffects++;
+          return "w1:p1";
+        },
+      })
+    : undefined;
   const service = await createClankieApp({
     captain: createStubCaptain({
       serveOperatorConversation: async () => {
@@ -151,6 +179,7 @@ async function fixture(
       ...(options.fleetRoom ? { fleetRoom: options.fleetRoom } : {}),
     }),
     settings,
+    ...(captainSeats ? { captainSeats } : {}),
     views: new ViewStore(join(root, "views"), () => hf.now),
     ...(options.workItems ? { workItems: options.workItems } : {}),
     ...(options.unavailableAwakeRegistry
@@ -262,6 +291,7 @@ async function fixture(
     controlUrl,
     now: hf.now,
     captainCalls: () => captainCalls,
+    seatEffects: () => seatEffects,
   };
 }
 
@@ -777,5 +807,45 @@ it("carries the fleet room to the hosted owner's device, live, and to no chat, s
     body: JSON.stringify(read),
   });
   expect(anonymous.status).toBe(403);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("round-trips own-seat control with the paired device bearer and refuses weaker or revoked grants before launch", async () => {
+  const f = await fixture({ captainSeat: true });
+  const call = (path: string, body?: unknown, device: keyof typeof f.tokens = "control") =>
+    fetch(`${f.relayUrl}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  const snapshot = CaptainSeatSnapshotSchema.parse(await (await call(CAPTAIN_SEAT_PATH)).json());
+  expect(snapshot).toMatchObject({ seat: "app", supported: true });
+  const requestId = randomUUID();
+  const input = { expectedRevision: snapshot.revision, requestId };
+  for (const device of ["chat", "steer", "hosted-read"] as const)
+    expect((await call(CAPTAIN_SEAT_START_PATH, input, device)).status).toBe(403);
+  expect((await call(CAPTAIN_SEAT_START_PATH, { ...input, paneId: "w1:pExisting" })).status).toBe(400);
+  expect(f.seatEffects()).toBe(0);
+  const started = await call(CAPTAIN_SEAT_START_PATH, input);
+  expect(started.status).toBe(200);
+  expect(CaptainSeatStartResultSchema.parse(await started.json()).requestId).toBe(requestId);
+  let status;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    status = CaptainSeatStartResultSchema.parse(
+      await (await call(CAPTAIN_SEAT_STATUS_PATH, { requestId })).json(),
+    );
+    if (status.outcome === "ready") break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(status).toMatchObject({ outcome: "ready", seat: "app", conversationId: "relay-seat-chat" });
+  expect(f.seatEffects()).toBe(1);
+  expect(
+    f.forwarded
+      .filter((entry) => entry.path.startsWith(CAPTAIN_SEAT_PATH))
+      .every((entry) => entry.token === f.tokens.control),
+  ).toBe(true);
+  await f.revoke("control");
+  expect((await call(CAPTAIN_SEAT_START_PATH, { ...input, requestId: randomUUID() })).status).toBe(401);
+  expect(f.seatEffects()).toBe(1);
   expect(f.captainCalls()).toBe(0);
 });

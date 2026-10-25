@@ -195,3 +195,5 @@ scope is archived; readers should follow the successor for its implementation.
 
 - [0290: App switch metrics are bounded device reports](0290-app-switch-metrics-are-bounded-device-reports.md) — VUH-2558.
 - [0291: A room thinks in one loop](0291-a-room-thinks-in-one-loop.md) — VUH-2796 (Proposed). Would amend ADR 0229 for Pi text rooms.
+
+- [0292: Onboarding opens an explicit local seat](0292-onboarding-opens-an-explicit-local-seat.md) — VUH-2784. Extends ADR 0152 and ADR 0248.

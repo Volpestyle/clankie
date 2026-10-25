@@ -63,6 +63,7 @@ turn. Newly added skills need no conversation reset; selected exclusions remain.
   `--permission-mode bypassPermissions`); deny rules still hold. Running seats
   keep the mode they started with (`seatsOnOtherMode` names them). It is separate
   from the autonomy dial.
+- **Opening his chosen seat.** `clankie seat show` reads the next explicit Mac launch choice; `seat set app|claude|codex --revision REV` saves it independently of worker defaults. `seat start --revision REV --request UUID` opens a fresh conversation and, for a terminal seat, a new Herdr tab through the existing native launcher. Keep the UUID and use `seat status UUID` after a lost reply; never open a second pane to compensate for uncertainty. A pane is only starting until its requested native bridge connects. Full contract: `docs/cli.md`.
 - **Uncertain is not permission to repeat.** An uncertain or lost result (update,
   hire, send, report, tool call) is reconciled through its original receipt
   first, and never falls back to typing into a terminal.

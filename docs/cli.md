@@ -6966,6 +6966,47 @@ follow terminal focus. Explicit owner terminal
 control remains available; normal agent messages do not use it. See
 [ADR 0207](adr/0207-work-records-and-native-agent-delivery.md).
 
+<a id="captain-seat-control"></a>
+
+### `seat show | set app|claude|codex --revision REV | start --revision REV --request UUID | status UUID`
+
+Choose where the next explicit launch opens Clankie on this Mac: the app,
+Claude Code or Codex. This choice is independent of `fleet hire` worker
+preferences. Reading or saving it does not move an existing conversation or
+restart a seat. It is available on a self-hosted Mac only.
+
+`seat show` returns `{schemaVersion:1, revision, seat, supported}`. Use that
+revision with `seat set`; a stale revision is refused. To open the saved choice,
+make a UUID, retain it, and pass it with the current revision to `seat start`.
+Poll `seat status UUID` after a lost reply; if no record exists, sending the
+same original start request is safe. Never make another UUID automatically to
+compensate for a timeout or an `uncertain` result.
+
+Each start creates a separate workspace conversation. App starts require a
+ready service model. Terminal starts create a new Herdr tab with the native
+`clankie claude|codex --conversation ID` initial command. They preserve the
+existing native sign-ins, plugins and account rules; no automated terminal
+input or existing-pane target is accepted. A new tab receives focus.
+
+Results carry `requestId`, `seat`, `outcome`, and, when known, `conversationId`
+and `paneId`. `starting` means the launch is pending or the native bridge is
+still connecting; a created pane alone is not `ready`. `ready` establishes the
+requested native harness bridge, or the app conversation after model readiness.
+`failed` is a definite pre-launch failure (`not_ready`, `unavailable`,
+`authority_revoked`, or `selection_changed`). `uncertain` with
+`launch_unconfirmed` means a pane may have opened; reconcile the original UUID.
+A bridge that later connects can turn its original uncertain result into ready.
+An unbound start becomes uncertain after two minutes. Settled results are the
+outcome of that start, not a live seat-health display.
+
+HTTP is the same contract: `GET`/`POST /v1/captain/seat`,
+`POST /v1/captain/seat/start` with `{expectedRevision, requestId}`, and
+`POST /v1/captain/seat/status` with `{requestId}`. Only the owner operator or a
+current Take Control device can use them, including through the paired-device
+relay. Saving takes `{expectedRevision, seat}`. Requests cannot choose a linked
+machine, command, account path or existing pane. The node-free schemas live in
+`@clankie/protocol/captain-seat` ([ADR 0292](adr/0292-onboarding-opens-an-explicit-local-seat.md)).
+
 <a id="seat-commands"></a>
 
 ### `claude[N] | codex[N] | opencode [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--mcp-servers NAME,...|none] [--dry-run]`

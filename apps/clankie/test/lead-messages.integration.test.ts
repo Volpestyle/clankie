@@ -15,9 +15,14 @@ const fixture = (remote: boolean) => leadChatFixture(remote, cleanup);
 it.each([false, true])(
   "a lead messages another lead (remote=%s) in its own conversation over its seat channel, and the reply comes back the same way",
   async (remote) => {
-    const f = await fixture(remote);
+    const f = await leadChatFixture(remote, cleanup, { nativeSourceProof: !remote });
     const [global, work] = f.leads as [string, string];
+    expect(f.captain.operatorSeatReady?.(work, "claude")).toBe(false);
     const workChannel = await f.bridge(work);
+    if (!remote) {
+      await expect.poll(() => f.captain.operatorSeatReady?.(work, "claude")).toBe(true);
+      expect(f.captain.operatorSeatReady?.(work, "codex")).toBe(false);
+    }
 
     const sent = await f.messageSeat(global, f.head.terminalId, "Deploy at 18:00?");
     expect(sent).toMatchObject({

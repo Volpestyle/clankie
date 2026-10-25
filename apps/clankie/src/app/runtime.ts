@@ -133,6 +133,7 @@ import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
+import { createCaptainSeatRoutes } from "../captain-seat-routes.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
 import { remoteLeadRoutes } from "./remote-lead-routes.ts";
 import { registerAppMetricsRoutes } from "./app-metrics-routes.ts";
@@ -1136,6 +1137,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }),
   );
 
+  app.route("/", createCaptainSeatRoutes(authorizeOwnerSecrets, settingsSource, dependencies.captainSeats));
   app.route("/", createHttpSettingsRoutes(authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",

@@ -1,3 +1,13 @@
+import {
+  CAPTAIN_SEAT_PATH,
+  CAPTAIN_SEAT_START_PATH,
+  CAPTAIN_SEAT_STATUS_PATH,
+  CaptainSeatSnapshotSchema,
+  UpdateCaptainSeatSchema,
+  StartCaptainSeatSchema,
+  CaptainSeatStatusRequestSchema,
+  CaptainSeatStartResultSchema,
+} from "../../../packages/protocol/src/captain-seat.ts";
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "../../../packages/protocol/src/integrate.ts";
 import {
   FLEET_ROSTER_PATH,
@@ -184,6 +194,10 @@ export interface OperatorConversationRelayOptions {
  * so the relay tests hold this list against `PUBLIC_GATEWAY_ROUTES`.
  */
 export const OPERATOR_RELAY_DEVICE_ROUTES = [
+  { method: "GET", path: CAPTAIN_SEAT_PATH },
+  { method: "POST", path: CAPTAIN_SEAT_PATH },
+  { method: "POST", path: CAPTAIN_SEAT_START_PATH },
+  { method: "POST", path: CAPTAIN_SEAT_STATUS_PATH },
   { method: "POST", path: OPERATOR_CONVERSATION_DISPATCH_PATH },
   { method: "POST", path: OPERATOR_CONVERSATION_TAIL_PATH },
   { method: "POST", path: OPERATOR_TERMINAL_TAIL_PATH },
@@ -290,6 +304,21 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     methods: ["GET", "POST"],
     update: UpdateFleetSettingsSchema,
     snapshot: FleetSettingsSnapshotSchema,
+  },
+  [CAPTAIN_SEAT_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateCaptainSeatSchema,
+    snapshot: CaptainSeatSnapshotSchema,
+  },
+  [CAPTAIN_SEAT_START_PATH]: {
+    methods: ["POST"],
+    update: StartCaptainSeatSchema,
+    snapshot: CaptainSeatStartResultSchema,
+  },
+  [CAPTAIN_SEAT_STATUS_PATH]: {
+    methods: ["POST"],
+    update: CaptainSeatStatusRequestSchema,
+    snapshot: CaptainSeatStartResultSchema,
   },
   [FLEET_HIRE_DEFAULTS_PATH]: {
     methods: ["GET", "POST"],

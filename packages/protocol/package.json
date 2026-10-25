@@ -67,7 +67,8 @@
     "./minecraft": "./src/minecraft.ts",
     "./runtime-health": "./src/runtime-health.ts",
     "./agent-roles": "./src/agent-roles.ts",
-    "./app-metrics": "./src/app-metrics.ts"
+    "./app-metrics": "./src/app-metrics.ts",
+    "./captain-seat": "./src/captain-seat.ts"
   },
   "scripts": {
     "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",

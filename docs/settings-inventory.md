@@ -65,6 +65,16 @@ changes, update this page.
 
 ## Inventory
 
+### Clankie's own seat (2026-10-25)
+
+`captain.seat` is a Common setting: `app` (the default), `claude` or `codex`.
+`GET`/`POST /v1/captain/seat` stores it behind owner or Take Control authority
+with a revision fence. `clankie seat show|set` covers the CLI; the desktop
+onboarding work in VUH-2784 consumes the same route. No new TUI or dashboard
+control is added. Saving never launches a harness; `seat start` is a separate,
+idempotent action on this Mac. Worker harness/model preferences remain under
+`fleet.hire`. See [the CLI contract](cli.md#captain-seat-control).
+
 ### 1. How he talks: Discord attention
 
 | Setting                                                        | Values (default)                                                    | API                                                                                             | CLI | TUI                                                  | App                                                       | Dash                                                        | Tier     |

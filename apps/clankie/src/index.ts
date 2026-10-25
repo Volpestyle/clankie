@@ -78,6 +78,8 @@ import { createServiceFleetResourceRuntime } from "./service-fleet-resources.ts"
 import { HostedDeviceSecurity } from "./hosted-device-security.ts";
 import { createHostedDiscordIngress, createHostedDiscordVoiceCallback } from "./discord-ingress.ts";
 import { OfficialDiscordControl, OfficialDiscordIngress } from "./official-discord.ts";
+import { CaptainSeats, captainSeatSnapshot } from "./captain-seat.ts";
+import { createCaptainSeatLauncher } from "./captain-seat-launcher.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
@@ -2118,6 +2120,44 @@ const voiceProviderReadiness = async () => {
     },
   });
 };
+const modelKeys = createModelKeys({
+  store: operatorCredentialStore,
+  cwd: repoRoot,
+  ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
+  ...(runtimeProvider.model === undefined
+    ? {}
+    : {
+        onModelChanged: () => runtimeProvider.model!.onChanged(),
+        includedMappings: runtimeProvider.model.includedMappings,
+      }),
+});
+const captainSeats = new CaptainSeats({
+  directory: join(stateRoot, "captain-seat-starts"),
+  supported: process.platform === "darwin" && hostedBody === undefined,
+  snapshot: async () =>
+    captainSeatSnapshot(
+      await settingsStore.load(),
+      process.platform === "darwin" && hostedBody === undefined,
+    ),
+  cwd: async () => captain.seatContext()?.cwd ?? homedir(),
+  createConversation: async (cwd, seat) => {
+    const result = await captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "create",
+      scope: { kind: "workspace", workspaceId: cwd },
+      title: `Clankie · ${seat === "claude" ? "Claude Code" : seat === "codex" ? "Codex" : "App"}`,
+    });
+    if (result.op !== "create") throw Error("Seat conversation unavailable");
+    return result.conversation.conversationId;
+  },
+  appReady: async () => (await modelKeys.readiness?.())?.ready === true,
+  nativeReady: async (conversationId, seat) => captain.operatorSeatReady?.(conversationId, seat) === true,
+  launch: createCaptainSeatLauncher({
+    repoRoot,
+    controlPlaneUrl: `http://127.0.0.1:${port}`,
+    binding: localFleetBinding,
+  }),
+});
 const clankie = await createClankieApp({
   voiceCall: {
     // Read when a call starts, never at boot: the broker is touched only when someone calls.
@@ -2345,17 +2385,8 @@ const clankie = await createClankieApp({
   },
   modelDeviceSetup: { platform: process.platform, hosted: hostedBody !== undefined },
   harnessLogins,
-  modelKeys: createModelKeys({
-    store: operatorCredentialStore,
-    cwd: repoRoot,
-    ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
-    ...(runtimeProvider.model === undefined
-      ? {}
-      : {
-          onModelChanged: () => runtimeProvider.model!.onChanged(),
-          includedMappings: runtimeProvider.model.includedMappings,
-        }),
-  }),
+  modelKeys,
+  captainSeats,
   ...(hostedPairing === undefined
     ? {}
     : { hostedPairing, onHostedPairing: () => runtimeProvider.heartbeat?.interactive() }),

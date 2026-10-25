@@ -7159,8 +7159,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     invalidateQuestionPrincipal: (deviceId) => conversations.invalidateQuestionPrincipal(deviceId),
 
-    operatorSeatReady: (conversationId = conversations.defaultGlobalConversationId()) =>
-      seatOutboxes.get(conversationId)?.bound() === true,
+    operatorSeatReady: (conversationId = conversations.defaultGlobalConversationId(), harness) =>
+      seatOutboxes.get(conversationId)?.bound() === true &&
+      (harness === undefined ||
+        (conversations.nativeSource(conversationId)?.agent ??
+          (conversationId === conversations.defaultGlobalConversationId()
+            ? headSeat?.harness
+            : undefined)) === harness),
     seatSessionState: (conversationId, sessionId) =>
       conversations.nativeSeatSessionState(conversationId, sessionId),
 

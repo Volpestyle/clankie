@@ -241,7 +241,7 @@ export interface CaptainPort {
   ): ReturnType<import("./pane-tidy.ts").PaneTidy["worktrees"]>;
   harnessProcesses?(retire?: boolean): Promise<unknown>;
   /** A live native operator bridge can answer independently of the fallback model (default: the global chat). */
-  operatorSeatReady?(conversationId?: string): boolean;
+  operatorSeatReady?(conversationId?: string, harness?: "claude" | "codex"): boolean;
   /** An explicitly closed joined launcher releases channel presence; uncertainty remains journaled. */
   releaseJoinedSeat?(conversationId: string): void;
   /** This machine's live seats and whether each launched under maximum trust mode (VUH-2048). */

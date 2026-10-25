@@ -1,3 +1,4 @@
+import { CaptainSeatSchema } from "@clankie/protocol/captain-seat";
 import { WorkTrackerSelectionSchema } from "@clankie/protocol";
 import { EvidenceSettingsSchema, HttpSettingsSchema } from "@clankie/protocol/owner-settings";
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
@@ -241,6 +242,8 @@ export const ExecutionConnectionSchema = z
 /** The captain's own runtime home, distinct from what he is allowed to do. */
 export const CaptainSettingsSchema = z
   .object({
+    /** Owner-selected surface for his next explicit launch; independent of workers. */
+    seat: CaptainSeatSchema.optional(),
     /**
      * Absolute directory his shell and sessions run in. Unset means the
      * operator's home directory — never the install root, which on a release

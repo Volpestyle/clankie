@@ -41,6 +41,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Fleet responsibility defaults          | `clankie fleet set --closure lead\|owner --machine-setup lead\|owner`; both default to lead                                                                        |
 | Project responsibility overrides       | `clankie project settings PROJECT --closure lead\|owner\|inherit --machine-setup lead\|owner\|inherit`                                                             |
 | Fleet connected tools / peer messages  | `clankie fleet status`, `clankie fleet set --tools off`, `clankie fleet set --peer-messages off`                                                                   |
+| Next explicit Mac seat                 | `clankie seat show`, `seat set app\|claude\|codex --revision REV`, `seat start --revision REV --request UUID`, `seat status UUID`                                  |
 | Native conversation seats              | `clankie claude`, `codex`, `opencode`, `grok`, `prime` with `--conversation ID`; inspect with `--dry-run`                                                          |
 | Herdr session                          | `clankie herdr status --json`, `clankie herdr use NAME`, `clankie herdr create`                                                                                    |
 | His working directory                  | `clankie workdir status`, `clankie workdir set PATH`, `clankie workdir clear`                                                                                      |

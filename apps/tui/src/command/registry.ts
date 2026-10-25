@@ -3,6 +3,12 @@ import { operatorHarness } from "./harness-command.ts";
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
 const HEADLESS_COMMAND_HELP = [
   {
+    nouns: ["seat"],
+    lines: [
+      "  seat show | set app|claude|codex --revision REV | start --revision REV --request UUID | status UUID  Choose and explicitly open Clankie on this Mac",
+    ],
+  },
+  {
     nouns: ["http"],
     lines: [
       "  http show | allow-origins [ORIGIN ...]  Read or replace the exact browser origin allowlist (owner API; empty clears)",

@@ -1,3 +1,4 @@
+import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
 import { SHIPPING_PATH } from "./integrate.ts";
 import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
@@ -43,6 +44,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       /^\/v1\/operator\/work-tracker\?projectId=[a-z][a-z0-9_-]{0,63}$/u.test(path))
   )
     return true;
+  if (path === CAPTAIN_SEAT_PATH) return method === "GET" || method === "POST";
+  if (path === CAPTAIN_SEAT_START_PATH || path === CAPTAIN_SEAT_STATUS_PATH) return method === "POST";
   if (isSkinDraftRoute(method, path)) return true;
   if (hostedDiscordAllows(method, path)) return true;
   // A self-hosted machine's free official bot (VUH-1766); never the edge's web permits.

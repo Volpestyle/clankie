@@ -33,7 +33,12 @@ export async function leadChatFixture(
   remote: boolean,
   cleanup: Array<() => Promise<void>>,
   /** A configured machine whose Herdr answers only after this delay, then fails. */
-  options: { slowFleetMs?: number; localUnavailable?: () => boolean; nativeStatus?: () => string } = {},
+  options: {
+    slowFleetMs?: number;
+    localUnavailable?: () => boolean;
+    nativeStatus?: () => string;
+    nativeSourceProof?: boolean;
+  } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
   cleanup.push(async () => rmSync(root, { recursive: true, force: true }));
@@ -91,7 +96,7 @@ export async function leadChatFixture(
   const adoption = vi.spyOn(HerdrWatchStore.prototype, "adoptSeat");
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const runner: HerdrWatchRunner = {
-    ...(options.slowFleetMs === undefined ? {} : { list: async () => [head] }),
+    ...(options.slowFleetMs === undefined && !options.nativeSourceProof ? {} : { list: async () => [head] }),
     get: async () => head,
     resolveTerminal: async (id) => (id === head.terminalId ? head : Promise.reject(new Error("gone"))),
     wait: async () => head,

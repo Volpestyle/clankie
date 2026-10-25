@@ -1,3 +1,4 @@
+import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
 import { SHIPPING_PATH } from "./integrate.ts";
 import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
@@ -214,6 +215,10 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: WORK_TRACKER_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: FLEET_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: FLEET_SETTINGS_PATH, target: "relay" },
+  { method: "GET", path: CAPTAIN_SEAT_PATH, target: "relay" },
+  { method: "POST", path: CAPTAIN_SEAT_PATH, target: "relay" },
+  { method: "POST", path: CAPTAIN_SEAT_START_PATH, target: "relay" },
+  { method: "POST", path: CAPTAIN_SEAT_STATUS_PATH, target: "relay" },
   { method: "GET", path: FLEET_HIRE_DEFAULTS_PATH, target: "relay" },
   { method: "POST", path: FLEET_HIRE_DEFAULTS_PATH, target: "relay" },
   { method: "GET", path: OPERATOR_PERSONA_PATH, target: "relay" },
