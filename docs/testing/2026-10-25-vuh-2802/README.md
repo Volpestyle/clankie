@@ -107,7 +107,10 @@ flowchart TD
 The ref is created only in the final close guard, after the closing record is saved, so a
 close refused before then (draft, provenance, report, dirty work) parks nothing. A keep or
 lost authority that arrives within that final guard can still refuse after the ref exists;
-the ref then only preserves the commits. Parking never moves an existing ref.
+the ref then only preserves the commits. Parking never moves an existing ref, and only
+a direct ref counts: a symbolic ref at the park name, whether it aliases the worker branch
+or dangles, refuses `unlanded_work` without following or changing its target. Creation
+uses `update-ref --no-deref`, then reads the name back as a direct ref at the exact HEAD.
 Dirty, unreadable, remote and missing work directories still refuse, as before.
 
 - **Native, real Herdr and Claude.** `apps/clankie/test/auto-tidy-parking-native.integration.test.ts`
@@ -120,12 +123,12 @@ Dirty, unreadable, remote and missing work directories still refuse, as before.
   - `close_worker_pane` path with a dirty detached worktree: refuses `unlanded_work`, with
     and without `unlandedReason`. No ref is created and the pane stays.
   - Two clean, unreferenced detached commits: closed, `parked` on
-    `keep/claude-code-6c15ade12fbb` with both SHAs, and the native pane is gone.
+    `keep/claude-code-c8571bb302c4` with both SHAs, and the native pane is gone.
   - Auto-tidy with a dirty branch worktree: held `unlanded_work` past the window. The lead
     round names the next step.
   - Auto-tidy when someone else's ref already holds the park name: held, and that ref is
     unchanged.
-  - Auto-tidy, clean: closed, `parked` on `keep/vuh-2802-spike-821ba41cc110`. The lead
+  - Auto-tidy, clean: closed, `parked` on `keep/vuh-2802-spike-afff5cf1954f`. The lead
     notice lists it, and a `closed_unreconciled` decision is recorded.
   - Both worktrees removed, the worker branch deleted, every reflog expired and
     `gc --prune=now`: both parked stacks still read back.
@@ -135,6 +138,13 @@ Dirty, unreadable, remote and missing work directories still refuse, as before.
   feature branch, partial pushes and a unique merge resolution. All now park. A fifth,
   rewritten case keeps the old explicit `unlandedReason` path for clean commits that
   cannot be parked.
+- **Symbolic park refs (Sage's review).** The first candidate reused a `keep/` alias of
+  the worker branch, which dangled after the branch was deleted and the repository
+  garbage-collected, and a dangling alias let `update-ref` create its target. Two
+  `pane-tidy.integration` cases (alias at HEAD, dangling alias) now refuse, leave the
+  alias and its target as they were, then park on a direct ref that survives worktree
+  removal, branch deletion, reflog expiry and `gc --prune=now`. Both fail on the first
+  candidate.
 
 Not changed: the operator `close_seat` route (TUI and app) keeps its existing
 `unlandedReason` hold. A rollback to a build before this change cannot parse close

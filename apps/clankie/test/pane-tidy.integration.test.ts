@@ -1413,6 +1413,50 @@ it("automatic tidy holds dirty work, then parks clean detached commits so they s
   f.watch.close();
 });
 
+it.each(["at HEAD", "dangling"] as const)(
+  "never parks on a symbolic keep ref (%s), leaves it and its target alone, then parks on a direct ref",
+  async (kind) => {
+    const w = await workerWorktree();
+    await writeFile(join(w.tree, "feature.txt"), "parked\n");
+    await git(w.tree, "add", "feature.txt");
+    await git(w.tree, "commit", "--quiet", "-m", "feature");
+    const head = await git(w.tree, "rev-parse", "HEAD");
+    const ref = `refs/heads/keep/vuh-1-${head.slice(0, 12)}`;
+    // An alias would follow the worker branch, or create its missing target, and preserve nothing.
+    const target = kind === "at HEAD" ? "refs/heads/pip/vuh-1" : "refs/heads/not-yet";
+    await git(w.repo, "symbolic-ref", ref, target);
+    const f = await fixture({ cwd: w.tree, socket: true });
+    expect(
+      await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority),
+    ).toMatchObject({ outcome: "refused", reason: "unlanded_work" });
+    expect(f.closes()).toBe(0);
+    expect(await git(w.repo, "symbolic-ref", ref)).toBe(target);
+    expect(await git(w.repo, "for-each-ref", "--format=%(refname) %(objectname)", target)).toBe(
+      kind === "at HEAD" ? `${target} ${head}` : "",
+    );
+    await git(w.repo, "symbolic-ref", "--delete", ref);
+    expect(
+      await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority),
+    ).toMatchObject({ outcome: "closed", entry: { handoffs: [{ kind: "parked", reference: ref, head }] } });
+    await expect(git(w.repo, "symbolic-ref", "--quiet", ref)).rejects.toThrow();
+    await git(w.repo, "worktree", "remove", w.tree);
+    await git(w.repo, "branch", "-D", "pip/vuh-1");
+    await git(
+      w.repo,
+      "-c",
+      "gc.reflogExpire=now",
+      "-c",
+      "gc.reflogExpireUnreachable=now",
+      "reflog",
+      "expire",
+      "--all",
+    );
+    await git(w.repo, "gc", "--quiet", "--prune=now");
+    expect(await git(w.repo, "show", `${ref}:feature.txt`)).toBe("parked");
+    f.watch.close();
+  },
+);
+
 it("automatic tidy parks a pushed feature branch on a keep ref instead of counting the push", async () => {
   const w = await workerWorktree();
   await fixtureOrigin(w);

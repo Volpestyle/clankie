@@ -463,8 +463,8 @@ export class PaneTidy {
   }
   /**
    * Preserve a clean worktree's HEAD on `refs/heads/keep/<deliverable>-<short>` (VUH-2802).
-   * Without `create` it only names the ref. It never moves an existing ref: one already at
-   * this HEAD is reused, and one anywhere else refuses.
+   * Without `create` it only names the ref. It never moves an existing ref: a direct one
+   * already at this HEAD is reused; a symbolic one, or one anywhere else, refuses.
    */
   private async parkRef(agent: HerdrAgentSnapshot, work: WorktreeReconciliation, create: boolean) {
     const head = work.head!;
@@ -479,21 +479,38 @@ export class PaneTidy {
         .replace(/[.-]+$/u, "") || "worker";
     const ref = `refs/heads/keep/${deliverable}-${head.slice(0, 12)}`;
     if (!create) return ref;
-    const existing = async () =>
-      (
+    // Only a direct ref preserves the commits by itself: an alias would follow, or create, its
+    // target. A symbolic ref at this name refuses, and nothing it names is touched.
+    const direct = async () => {
+      const symbolic = await checkoutGit(work.path, ["symbolic-ref", "--quiet", ref]).then(
+        () => true,
+        (error: unknown) => {
+          if ((error as { code?: unknown }).code === 1) return false;
+          throw error;
+        },
+      );
+      if (symbolic) throw Error(`Cannot park on symbolic ${ref}`);
+      return (
         await checkoutGit(work.path, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).catch(() => "")
       ).trim();
-    if ((await existing()) !== head)
+    };
+    // A racing writer can win the create; the read below decides either way.
+    let failure: unknown;
+    if ((await direct()) !== head)
       await checkoutGit(work.path, [
         "update-ref",
+        "--no-deref",
         "--create-reflog",
         "-m",
         `clankie: parked before closing ${agent.paneId}`,
         ref,
         head,
         "",
-      ]).catch(() => undefined);
-    if ((await existing()) !== head) throw Error(`Cannot park on ${ref}`);
+      ]).catch((error: unknown) => {
+        failure = error;
+      });
+    if ((await direct()) !== head)
+      throw Error(`Cannot park on ${ref}: ${failure ? errorText(failure) : "it names another commit"}`);
     return ref;
   }
   /**
