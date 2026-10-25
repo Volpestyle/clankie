@@ -4421,7 +4421,14 @@ requires ancestry in actual advertised `origin/main` or a retained merge-queue
 handoff/current-HEAD work decision covering every unlanded commit; a pushed
 feature branch, local ref or patch equivalence is insufficient. Missing or
 non-Git working directories and incomplete observations hold the pane.
-Hand-started and owner-interactive panes are never closed. A keep excludes held
+Hand-started and owner-interactive panes are never closed. A local project hire
+whose start never confirmed is first adopted, as the operator's
+`settle_hire_receipt` `adopt` does, only when its original receipt recorded the
+exact native session and occupant now in the pane and its hiring conversation
+is the one tidy closes it for; any other unconfirmed hire stays held. The notice
+names each adopted receipt. Hires idle past the window that it could not close
+(unread reports, no kept report, unlanded work, an unconfirmed start, an unsent
+draft) are listed in their lead's fleet round with the next step (VUH-2802). A keep excludes held
 time; releasing it starts a full new idle period, even between sweeps, and a keep
 arriving before native dispatch stops the automatic close. A refused close waits another
 period before it is tried again. Each close is in `worker_pane_history` with the
@@ -6876,7 +6883,11 @@ their native file forms. Remaining control-bearing arguments fail before launch.
 inspection of an uncertain start. They do not also send the brief over the channel. Resumed hires and follow-ups use the channel; its stdout ACK alone
 does not establish native prompt acceptance. A confirmed fresh Claude brief requires the complete decoded JSON file attachment
 in that exact session’s active native transcript; a file-reference prompt alone,
-partial attachment or changed contents cannot confirm it. Resumed briefs require
+partial attachment or changed contents cannot confirm it. Herdr's `agent start`
+readiness wait ends only when the agent is idle, so a fresh brief whose first
+turn outlasts it times out the launcher after launch. That one typed timeout
+still confirms from the transcript attachment; any other launcher error leaves
+the start unconfirmed (VUH-2802). Resumed briefs require
 the complete channel prompt. Slow or unavailable
 transcripts leave delivery uncertain, retaining the original receipt: inspection
 can reconcile a late prompt without sending it again. Claude records a channel

@@ -1,0 +1,104 @@
+[
+  {
+    "phase": "claude-start",
+    "agent": {
+      "paneId": "w1:p1",
+      "terminalId": "term_65ea0608b13b61",
+      "agent": "claude",
+      "status": "idle",
+      "title": "Claude Code",
+      "session": {
+        "source": "herdr:claude",
+        "kind": "id",
+        "value": "7c43834c-2bdc-4508-866b-d8adcfc9b5bb"
+      },
+      "workingDirectory": "/Users/james/dev/clankie-wt/vuh-2802",
+      "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802"
+    }
+  },
+  {
+    "phase": "native-claude",
+    "agent": {
+      "paneId": "w1:p1",
+      "terminalId": "term_65ea0608b13b61",
+      "agent": "claude",
+      "status": "idle",
+      "title": "Claude Code",
+      "session": {
+        "source": "herdr:claude",
+        "kind": "id",
+        "value": "7c43834c-2bdc-4508-866b-d8adcfc9b5bb"
+      },
+      "workingDirectory": "(fixture)",
+      "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802"
+    }
+  },
+  {
+    "phase": "tick+0m",
+    "closed": 0,
+    "held": []
+  },
+  {
+    "phase": "tick+61m",
+    "closed": 0,
+    "held": [
+      {
+        "paneId": "w1:p1",
+        "seatId": "term_65ea0608b13b61",
+        "harness": "claude",
+        "title": "Claude Code",
+        "idleSince": "2026-10-25T01:46:11.961Z",
+        "window": "1h",
+        "blocker": "reports_unread",
+        "unreadReports": 1
+      }
+    ]
+  },
+  {
+    "phase": "lead-round",
+    "text": "Finished hires idle past the 1h auto-tidy window that it could not close; close each yourself or clear its blocker, or keep_worker_pane to keep one. Untrusted seat context: [{\"pane\":\"w1:p1\",\"title\":\"Claude Code\",\"harness\":\"claude\",\"idleSince\":\"2026-10-25T01:46:11.961Z\",\"blocker\":\"reports_unread\",\"unreadReports\":1,\"next\":\"close_worker_pane, or acknowledge_worker_reports so auto-tidy closes it\"}]"
+  },
+  {
+    "phase": "tick+61m",
+    "closed": 0,
+    "held": [
+      {
+        "paneId": "w1:p1",
+        "seatId": "term_65ea0608b13b61",
+        "harness": "claude",
+        "title": "Claude Code",
+        "idleSince": "2026-10-25T01:46:11.961Z",
+        "window": "1h",
+        "blocker": "provenance_unknown"
+      }
+    ]
+  },
+  {
+    "phase": "tick+61m",
+    "closed": 1,
+    "held": []
+  },
+  {
+    "phase": "closed",
+    "result": [
+      {
+        "id": "f3e71025-960a-42d8-a6e1-5057d13c2328",
+        "paneId": "w1:p1",
+        "seatId": "term_65ea0608b13b61",
+        "title": "Claude Code",
+        "harness": "claude",
+        "reason": "Auto-tidy: idle 1h with its reports read and its work landed or explicitly handed off",
+        "reportPath": "/private/tmp/clankie-proof-mtusvR/tidy-reports/f928eb90-2687-477c-adbf-45211b5a4224.md",
+        "closedAt": "2026-10-25T01:46:13.531Z",
+        "undoUntil": "2026-10-25T01:51:13.531Z",
+        "state": "closed",
+        "input": {
+          "text": "Try \"how do I log an error?\"",
+          "typed": false
+        },
+        "handoffs": []
+      }
+    ],
+    "adopted": [["791f5e5e-b57f-454c-a7a2-737fb334db3b"]]
+  }
+]

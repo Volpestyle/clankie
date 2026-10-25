@@ -1101,7 +1101,10 @@ evidence in the configured state directory and rechecks complete local pane
 and Git inventories. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
 setting on two timers: every five minutes it closes settled local hires whose
 reports are kept and acknowledged through `PaneTidy.close` (same landed-work,
-draft and idle checks; kept panes in `pane-keeps.json` are skipped), and hourly
+draft and idle checks; kept panes in `pane-keeps.json` are skipped). First it
+adopts an unconfirmed local project hire through `HerdrWatchStore.adoptUnconfirmedForTidy`,
+only from the exact session its original receipt observed, and it hands the lead
+round the hires past the window it could not close. Hourly
 it prunes enrolled worktrees whose HEAD is in `origin/main` and that have been
 idle a day through the same exact-worktree removal. Managed pin/runtime/update namespaces and the running
 service checkout are protected independently of developer-root enrollment. Source runtime

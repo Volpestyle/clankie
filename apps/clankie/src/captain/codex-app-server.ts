@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import type { Duplex } from "node:stream";
+import { herdrStartupTimedOut } from "../herdr-fleet.ts";
 import { trustInstalledCodexWorkerHooks } from "./codex-hook-trust.ts";
 import { isolatedCodexConfig } from "./codex-catalog-refresh.ts";
 import type { SeatQuestion, SeatQuestionAnswer, SeatQuestionResult } from "@clankie/agent-hosts";
@@ -31,16 +32,6 @@ import {
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as RecordValue) : {};
-
-function herdrStartupTimedOut(error: unknown): boolean {
-  const text = String(error);
-  try {
-    const failure = record(record(JSON.parse(text.slice(text.indexOf("{")))).error);
-    return failure.code === "timeout" && failure.message === "timed out waiting for agent startup";
-  } catch {
-    return false;
-  }
-}
 
 export interface CodexSeatEvent {
   method: string;

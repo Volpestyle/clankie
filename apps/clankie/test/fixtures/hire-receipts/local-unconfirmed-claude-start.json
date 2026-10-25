@@ -1,0 +1,49 @@
+{
+  "_source": "Live VUH-2802 hire (Juniper, pane w48:p36) on 2026-10-25 before its manual adopt: herdr agent start timed out (start_unconfirmed) after the native session was observed and recorded. Settlement, launch proof, account and selection removed.",
+  "key": ["local", "claude", "/Users/james/dev/clankie-wt/vuh-2802", "new"],
+  "receipt": {
+    "fingerprint": "239fb9a329b158d0eefc46687ab05b696b84a9185fcba9b9c2713c62287b12cd",
+    "beforeIds": [],
+    "messageId": "791f5e5e-b57f-454c-a7a2-737fb334db3b",
+    "paneId": "w48:p36",
+    "agentName": "juniper-0dc6",
+    "occupantId": "session-6b853f6cfbf0312bcf437b18915d968b28bae6a23f07394cecbc3787e2898734",
+    "sessionId": "d06d07f1-592b-409c-83b4-a8ed930b5775"
+  },
+  "allocation": {
+    "id": "50096d42-edc2-4c2c-86b8-4888b2afe2ac",
+    "key": "[\"default\",\"/Users/james/dev/clankie-wt/vuh-2802\"]",
+    "projectId": "clankie",
+    "role": "builder",
+    "policy": "[null,null,null]",
+    "request": {
+      "schemaVersion": 1,
+      "harness": "claude",
+      "effort": "high",
+      "title": "Juniper",
+      "taskTitle": "Auto-tidy finished workers",
+      "workingDirectory": "/Users/james/dev/clankie-wt/vuh-2802",
+      "deliverable": "VUH-2802",
+      "role": "builder"
+    },
+    "started": true,
+    "pane": "w48:p36",
+    "seat": "term_65e9feec4620216a",
+    "occupantId": "session-6b853f6cfbf0312bcf437b18915d968b28bae6a23f07394cecbc3787e2898734",
+    "confirmed": false,
+    "gone": false
+  },
+  "owner": {
+    "id": "824f405b-2446-4e78-8790-c9460ea9cd01",
+    "paneId": "w48:p36",
+    "seatId": "term_65e9feec4620216a",
+    "occupantId": "session-6b853f6cfbf0312bcf437b18915d968b28bae6a23f07394cecbc3787e2898734",
+    "sessionKey": "[\"local\",\"claude\",\"d06d07f1-592b-409c-83b4-a8ed930b5775\"]",
+    "hired": true,
+    "hireConversationId": "global-default",
+    "hireProjectId": "clankie",
+    "owner": {
+      "conversationId": "global-default"
+    }
+  }
+}

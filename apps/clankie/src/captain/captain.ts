@@ -81,6 +81,7 @@ import {
   type SeatCommitBaseline,
 } from "./seat-telemetry.ts";
 import {
+  autoTidyHeldReview,
   fleetReviewContext,
   fleetRoundEvidence,
   pendingQuestionReview,
@@ -5079,12 +5080,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const diskNotice = disk?.diskWarning
           ? `Low disk: ${disk.freeDiskGb?.toFixed(1)} GiB free. Inspect clankie doctor before starting more work.\n`
           : "";
+        const held = autoTidyHeldReview(autoTidy.held(owner.conversationId));
         const evidence = fleetRoundEvidence(current, holds);
+        const roundKey = held.key ? `${evidence.fingerprint}:${held.key}` : evidence.fingerprint;
         if (
           !diskNotice &&
           !questionNotice &&
           !evidence.flagged &&
-          completedFleetRounds.get(ownerKey) === evidence.fingerprint
+          completedFleetRounds.get(ownerKey) === roundKey
         )
           continue;
         pendingFleetRounds.add(ownerKey);
@@ -5093,9 +5096,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           [
             diskNotice,
             questionNotice,
+            held.text,
             fleetReviewContext(
               current,
-              Math.max(0, 10_000 - diskNotice.length - questionNotice.length - 2),
+              Math.max(0, 10_000 - diskNotice.length - questionNotice.length - held.text.length - 3),
               holds,
             ),
           ]
@@ -5119,7 +5123,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           true,
         )
           .then((accepted) => {
-            if (accepted) completedFleetRounds.set(ownerKey, evidence.fingerprint);
+            if (accepted) completedFleetRounds.set(ownerKey, roundKey);
           })
           .catch((error: unknown) => {
             if (!shutdown.signal.aborted)
@@ -5654,7 +5658,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     unreadReports: (agent) => reportSummaries(undefined, agent).length,
     ownerValid: validateConversationOwner,
-    closed: async (owner, entries) => {
+    adoptUnconfirmed: (agent, owner, guard) => herdrWatches.adoptUnconfirmedForTidy(agent, owner, guard),
+    closed: async (owner, entries, adopted) => {
       for (const entry of entries) {
         const issue = await herdrWatches.issueStatus?.closed({ seatId: entry.seatId, reason: entry.reason });
         if (issue?.outcome === "failed")
@@ -5668,7 +5673,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         (entries.length > 20 ? ` and ${entries.length - 20} more in worker_pane_history` : "");
       conversations.recordServiceNotice(
         owner.conversationId,
-        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed or was explicitly handed off: ${panes}. undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
+        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed or was explicitly handed off: ${panes}.${adopted.length ? ` It first adopted ${adopted.length === 1 ? "an unconfirmed hire" : `${adopted.length} unconfirmed hires`} from the exact native session each original receipt observed (receipts ${adopted.slice(0, 20).join(", ")}).` : ""} undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
       );
     },
     checkouts: async () => {

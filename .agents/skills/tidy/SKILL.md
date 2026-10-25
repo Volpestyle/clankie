@@ -21,7 +21,11 @@ go. The service also tidies on its own under the owner's `autoTidy` fleet settin
 kept report, every report acknowledged, and landing proven by advertised
 `origin/main` ancestry or a retained current-HEAD decision covering every
 unlanded commit. Missing or non-Git working directories and incomplete
-observations hold the pane; never infer no work from an empty result. Where the
+observations hold the pane; never infer no work from an empty result. It adopts a
+local hire whose start never confirmed only from the exact native session its
+original receipt recorded. Your fleet round lists hires idle past the window that
+it could not close, with each blocker: close them yourself, acknowledge their
+reports, or keep them, rather than carrying them. Where the
 owner turned automatic tidy off, leave it off until they decide otherwise.
 When a worker's live context is worth keeping, or the owner asks, call
 `keep_worker_pane({ pane, reason })` (CLI `clankie agents keep PANE --conversation ID`);

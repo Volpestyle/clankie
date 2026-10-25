@@ -43,7 +43,7 @@ import {
   type FleetSeatHook,
   type FleetGates,
 } from "@clankie/protocol";
-import { HerdrFleetError } from "../herdr-fleet.ts";
+import { HerdrFleetError, herdrStartupTimedOut } from "../herdr-fleet.ts";
 import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herdr-transcript.ts";
 import { paneInputLine } from "./pane-draft.ts";
 import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
@@ -1134,7 +1134,10 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         };
       const ref: SeatRef = { harness: "claude", sessionId, paneId: view.paneId };
       await view.bound?.(ref);
-      if (startError !== undefined)
+      // A fresh brief starts Claude's first turn at launch, and Herdr's readiness wait only
+      // ends at idle, so a turn longer than that wait times out (VUH-2802). The exact native
+      // transcript receipt below then confirms the start; any other launcher error stays unconfirmed.
+      if (startError !== undefined && !(nativePrompt && herdrStartupTimedOut(startError)))
         return {
           outcome: "failed",
           reason: "not_ready",

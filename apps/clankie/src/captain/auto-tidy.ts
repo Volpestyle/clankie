@@ -4,7 +4,12 @@ import { FLEET_AUTO_TIDY_MS, type FleetAutoTidy } from "@clankie/protocol/fleet-
 import { checkoutGit, projectPathContains } from "@clankie/settings";
 import type { ConversationOwner } from "./conversation-owner.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
-import { tidySessionKey, type ClosedWorkerPaneHistory, type PaneTidy } from "./pane-tidy.ts";
+import {
+  tidySessionKey,
+  type ClosedWorkerPaneHistory,
+  type PaneTidy,
+  type TidyFailure,
+} from "./pane-tidy.ts";
 import type { PruneWorktreeResult } from "./prune-worktree.ts";
 import { tidyWorktreeInventory } from "./tidy-worktrees.ts";
 
@@ -17,6 +22,19 @@ const AUTO_TIDY_WORKTREE_IDLE_MS = 24 * 60 * 60_000;
 /** Bounds one sweep: removing a tree with its dependencies installed takes seconds to minutes. */
 const WORKTREES_PER_SWEEP = 16;
 const SETTLED = new Set(["idle", "done"]);
+
+/** A finished hire past the idle window that auto-tidy could not close, for its lead's round. */
+export interface AutoTidyHeld {
+  readonly paneId: string;
+  readonly seatId: string;
+  readonly harness: string;
+  readonly title: string;
+  readonly idleSince: string;
+  readonly window: string;
+  /** reports_unread, results_not_kept, or the close's own refusal. */
+  readonly blocker: "reports_unread" | "results_not_kept" | TidyFailure["reason"];
+  readonly unreadReports?: number;
+}
 const platform = process.platform === "win32" ? "windows" : "posix";
 
 export interface AutoTidyPorts {
@@ -27,8 +45,18 @@ export interface AutoTidyPorts {
   /** Reports from this exact seat that no lead has acknowledged yet. */
   readonly unreadReports: (agent: HerdrAgentSnapshot) => number;
   readonly ownerValid: (owner: ConversationOwner) => Promise<boolean>;
+  /** Operator adoption of an unconfirmed local hire whose receipt observed this exact session. */
+  readonly adoptUnconfirmed?: (
+    agent: HerdrAgentSnapshot,
+    owner: ConversationOwner,
+    guard: () => Promise<void>,
+  ) => Promise<{ state: string; receiptId: string } | undefined>;
   /** After closes: settle each seat's issue and tell its lead what closed. */
-  readonly closed: (owner: ConversationOwner, entries: readonly ClosedWorkerPaneHistory[]) => Promise<void>;
+  readonly closed: (
+    owner: ConversationOwner,
+    entries: readonly ClosedWorkerPaneHistory[],
+    adoptedReceipts: readonly string[],
+  ) => Promise<void>;
   /** Registered local owner checkouts with their enrolled worktree roots. */
   readonly checkouts: () => Promise<{ repository: string; roots: string[] }[]>;
   /** The guarded single-tree removal behind prune_tidy_worktree. */
@@ -66,18 +94,24 @@ export function createAutoTidy(ports: AutoTidyPorts) {
   const settledSince = new Map<string, number>();
   /** A close that was refused or failed waits for another settled period before it is retried. */
   const retryAt = new Map<string, number>();
+  /** Why each settled hire past its window is still open, by session key. */
+  const held = new Map<string, { owner: string; row: AutoTidyHeld }>();
 
   async function panes(): Promise<ClosedWorkerPaneHistory[]> {
     const setting = await ports.setting();
     if (setting === "off" || !ports.runner.list) {
       settledSince.clear();
       retryAt.clear();
+      held.clear();
       return [];
     }
     const delay = FLEET_AUTO_TIDY_MS[setting];
     const at = now();
     const seen = new Set<string>();
-    const closed = new Map<string, { owner: ConversationOwner; entries: ClosedWorkerPaneHistory[] }>();
+    const closed = new Map<
+      string,
+      { owner: ConversationOwner; entries: ClosedWorkerPaneHistory[]; adopted: string[] }
+    >();
     for (const agent of await ports.runner.list()) {
       if (ports.stopped()) break;
       if (!SETTLED.has(agent.status) || !["claude", "codex"].includes(agent.agent)) continue;
@@ -88,15 +122,56 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       if (ports.tidy.keptPane(agent)) {
         settledSince.delete(key);
         retryAt.delete(key);
+        held.delete(key);
         continue;
       }
       const since = settledSince.get(key) ?? at;
       settledSince.set(key, since);
-      if (at - since < delay || (retryAt.get(key) ?? 0) > at) continue;
+      if (at - since < delay) {
+        held.delete(key);
+        continue;
+      }
+      if ((retryAt.get(key) ?? 0) > at) continue;
       const owner = ports.provenance(agent);
       // Hand-started, owner-interactive and unproven panes are never closed automatically.
-      if (typeof owner !== "object") continue;
-      if (!ports.tidy.hasKeptReport(agent) || ports.unreadReports(agent) > 0) continue;
+      if (typeof owner !== "object") {
+        held.delete(key);
+        continue;
+      }
+      const hold = (blocker: AutoTidyHeld["blocker"], unreadReports?: number) =>
+        held.set(key, {
+          owner: owner.conversationId,
+          row: {
+            paneId: agent.paneId,
+            seatId: agent.terminalId,
+            harness: agent.agent,
+            title: agent.title,
+            idleSince: new Date(since).toISOString(),
+            window: setting,
+            blocker,
+            ...(unreadReports === undefined ? {} : { unreadReports }),
+          },
+        });
+      if (!ports.tidy.hasKeptReport(agent)) {
+        hold("results_not_kept");
+        continue;
+      }
+      const unread = ports.unreadReports(agent);
+      if (unread > 0) {
+        hold("reports_unread", unread);
+        continue;
+      }
+      const authorize = () => ports.ownerValid(owner);
+      // A hire that never confirmed its start holds its close until its original receipt
+      // settles; adopt it here only from the exact native session that receipt observed.
+      const adopted = await ports
+        .adoptUnconfirmed?.(agent, owner, async () => {
+          if (ports.stopped() || !(await authorize())) throw new Error("Auto-tidy stopped or lost its lead");
+        })
+        .catch((error: unknown) => {
+          console.warn("Auto-tidy adoption unavailable", String(error));
+          return undefined;
+        });
       const result = await ports.tidy.close(
         {
           pane: agent.paneId,
@@ -105,20 +180,24 @@ export function createAutoTidy(ports: AutoTidyPorts) {
           automatic: true,
           expected: { terminalId: agent.terminalId, sessionKey },
         },
-        { owner, current: () => !ports.stopped(), authorize: () => ports.ownerValid(owner) },
+        { owner, current: () => !ports.stopped(), authorize },
       );
       if (result.outcome !== "closed") {
+        hold(result.reason);
         retryAt.set(key, at + delay);
         continue;
       }
-      const group = closed.get(owner.conversationId) ?? { owner, entries: [] };
+      held.delete(key);
+      const group = closed.get(owner.conversationId) ?? { owner, entries: [], adopted: [] };
       group.entries.push(result.entry);
+      if (adopted?.state === "adopted") group.adopted.push(adopted.receiptId);
       closed.set(owner.conversationId, group);
     }
     for (const key of settledSince.keys()) if (!seen.has(key)) settledSince.delete(key);
     for (const key of retryAt.keys()) if (!seen.has(key)) retryAt.delete(key);
-    for (const { owner, entries } of closed.values())
-      await ports.closed(owner, entries).catch((error: unknown) => {
+    for (const key of held.keys()) if (!seen.has(key)) held.delete(key);
+    for (const { owner, entries, adopted } of closed.values())
+      await ports.closed(owner, entries, adopted).catch((error: unknown) => {
         console.warn("Auto-tidy close bookkeeping unavailable", String(error));
       });
     return [...closed.values()].flatMap((group) => group.entries);
@@ -163,5 +242,10 @@ export function createAutoTidy(ports: AutoTidyPorts) {
     return removed;
   }
 
-  return { panes, worktrees };
+  /** Seats this lead must close or acknowledge itself: auto-tidy found each one past its window. */
+  function heldFor(conversationId: string): AutoTidyHeld[] {
+    return [...held.values()].filter((entry) => entry.owner === conversationId).map((entry) => entry.row);
+  }
+
+  return { panes, worktrees, held: heldFor };
 }

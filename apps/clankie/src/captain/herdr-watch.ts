@@ -3703,6 +3703,49 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
   }
 
+  /**
+   * Auto-tidy's operator adoption (VUH-2802): a local project hire that never confirmed is
+   * adopted only when its original receipt observed this exact native session and occupant,
+   * and its hiring conversation is the one tidy would close it for. Everything else stays
+   * for the lead, and the close keeps every other refusal.
+   */
+  public async adoptUnconfirmedForTidy(
+    agent: HerdrAgentSnapshot,
+    owner: ConversationOwner,
+    guard: () => Promise<void>,
+  ): Promise<HireReceiptSettlement | undefined> {
+    if (this.closed || splitFleetQualified(agent.paneId) || !agent.session) return undefined;
+    const candidate = this.projectHires.retirementCandidate("default", agent.paneId);
+    if (!candidate || candidate.confirmed || candidate.request.freshIntent) return undefined;
+    const occupantId = occupantIdForHerdrSession(agent.session);
+    const sessionId = nativeSessionId(agent);
+    const claim = this.hireOwners.claim(agent.paneId, agent.terminalId, occupantId);
+    if (!claim?.hired || claim.owner.conversationId !== owner.conversationId) return undefined;
+    // The same single original the retirement guard requires to be settled.
+    let originals: readonly (readonly [string, UncertainReceipt])[];
+    try {
+      originals = this.hireReceipts
+        .all()
+        .filter(
+          ([, receipt]) => receipt.paneId === agent.paneId && receipt.occupantId === candidate.occupantId,
+        );
+    } catch {
+      return undefined;
+    }
+    const original = originals.length === 1 ? originals[0]![1] : undefined;
+    if (
+      !original ||
+      original.settlement ||
+      original.completed ||
+      original.abandoned ||
+      original.occupantId !== occupantId ||
+      sessionId === undefined ||
+      original.sessionId !== sessionId
+    )
+      return undefined;
+    return this.adoptLocalHire(original.messageId, guard);
+  }
+
   private async recoverHireReceipt(
     receiptId: string,
     guard: () => Promise<void>,

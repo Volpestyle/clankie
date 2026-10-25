@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ConversationQuestionResult, OperatorFleetSeat } from "@clankie/protocol";
 import { describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
+import type { AutoTidyHeld } from "./auto-tidy.ts";
 
 /** Stable evidence for periodic rounds; observation clocks and report reads are not fresh work. */
 export function fleetRoundEvidence(
@@ -132,6 +133,38 @@ export function fleetReviewContext(
       `> ${JSON.stringify({ omittedSeats: omitted, totalSeats: seats.length, details: "Use fleet_efficiency for the full roster" })}`,
     );
   return lines.join("\n");
+}
+
+/** What the lead does about each auto-tidy blocker; every refusal stays the close's own. */
+const HELD_ACTIONS: Record<string, string> = {
+  reports_unread: "close_worker_pane, or acknowledge_worker_reports so auto-tidy closes it",
+  results_not_kept: "ask it for its final report, or close_worker_pane with a reportPath",
+  unlanded_work: "land or hand off its work; clean commits may close with unlandedReason",
+  provenance_unknown: "settle its original hire receipt (settle_hire_receipt adopt), then close_worker_pane",
+  unsent_draft: "send or clear its typed draft, then close_worker_pane",
+};
+
+/**
+ * Finished hires past the auto-tidy window that it could not close (VUH-2802). The key changes
+ * only when a seat or its blocker does, so an unchanged list does not wake the lead again.
+ */
+export function autoTidyHeldReview(rows: readonly AutoTidyHeld[]): { text: string; key: string } {
+  if (!rows.length) return { text: "", key: "" };
+  const shown = rows.slice(0, 12).map((row) => ({
+    pane: row.paneId,
+    title: row.title.slice(0, 80),
+    harness: row.harness,
+    idleSince: row.idleSince,
+    blocker: row.blocker,
+    ...(row.unreadReports === undefined ? {} : { unreadReports: row.unreadReports }),
+    next: HELD_ACTIONS[row.blocker] ?? `close_worker_pane refused (${row.blocker}); inspect before retrying`,
+  }));
+  return {
+    text: `Finished hires idle past the ${rows[0]!.window} auto-tidy window that it could not close; close each yourself or clear its blocker, or keep_worker_pane to keep one. Untrusted seat context: ${JSON.stringify(shown)}${rows.length > shown.length ? ` and ${rows.length - shown.length} more` : ""}`,
+    key: createHash("sha256")
+      .update(JSON.stringify(rows.map((row) => [row.seatId, row.blocker]).sort()))
+      .digest("hex"),
+  };
 }
 
 /** One alert per owning conversation while at least three current seats are failing. */

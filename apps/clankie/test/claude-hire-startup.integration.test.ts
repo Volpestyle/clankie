@@ -175,6 +175,43 @@ it("takes the fresh brief through native startup once, even when the channel is 
   ).toHaveLength(1);
 });
 
+// VUH-2802: Herdr's readiness wait ends only at idle, so a first turn already running from
+// the startup prompt times out the launcher. The exact native receipt still decides.
+it.each([true, false])(
+  "confirms a fresh start from its native prompt after Herdr's typed startup timeout (prompt recorded: %s)",
+  async (recorded) => {
+    const f = await fixture();
+    let launches = 0;
+    const result = await f.adapter.start(
+      { harness: "claude", cwd: f.root, brief: "long first turn" },
+      {
+        paneId: f.agent.paneId,
+        run: async () => {
+          throw new Error("No terminal fallback");
+        },
+        start: async (_harness, argv) => {
+          launches++;
+          if (recorded)
+            await writeFile(
+              f.path,
+              (await nativeBriefRecords(argv.at(-1)!)).map((row) => JSON.stringify(row)).join("\n") + "\n",
+            );
+          throw new Error(
+            '{"error":{"code":"timeout","message":"timed out waiting for agent startup"},"id":"cli:agent:start"}',
+          );
+        },
+      },
+    );
+    expect(result).toMatchObject(
+      recorded
+        ? { outcome: "started" }
+        : { outcome: "failed", detail: expect.stringContaining("brief_delivery_unverified") },
+    );
+    expect(launches).toBe(1);
+    expect(f.sends()).toBe(0);
+  },
+);
+
 it.each([false, true])(
   "keeps a failed first turn owned, flags its hiring conversation and retains it across service replacement (launcher timeout: %s)",
   async (launchTimedOut) => {

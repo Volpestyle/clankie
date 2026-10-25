@@ -317,6 +317,21 @@ export class HerdrFleetError extends Error {
   }
 }
 
+/**
+ * `herdr agent start` exhausted its readiness wait. Herdr keeps waiting while the agent is
+ * `working`, so a harness that begins its first turn at launch times out after launching.
+ */
+export function herdrStartupTimedOut(error: unknown): boolean {
+  const text = String(error);
+  try {
+    const value: unknown = JSON.parse(text.slice(text.indexOf("{")));
+    const failure = (value as { error?: { code?: unknown; message?: unknown } } | null)?.error;
+    return failure?.code === "timeout" && failure.message === "timed out waiting for agent startup";
+  } catch {
+    return false;
+  }
+}
+
 /** Herdr answers errors as JSON on stdout; a transport failure has none. */
 function herdrError(stdout: string): HerdrFleetError | undefined {
   for (const line of stdout.split("\n")) {
