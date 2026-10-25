@@ -2575,6 +2575,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     (options.linearFollowing === undefined || (await options.linearFollowing()));
   conversations.onLinearWakeReceived = options.linearWakeReceived;
   conversations.linearWakeRouting = async () => (await settings()).linearWebhook;
+  conversations.presenceVoiceLease = () => deps.bodyLeases?.activeIncarnation("voice");
   conversations.linearWakeReceiverAvailable = (id) =>
     !conversations.hasNativeSeat(id) && !conversations.runsOnRemoteSeat(id)
       ? conversations.runsCaptainTurns(id)

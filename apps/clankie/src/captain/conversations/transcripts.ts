@@ -15,6 +15,7 @@ export function syncConversationTranscript(
   const meta = conversationId === undefined ? undefined : ctx["metas"].get(conversationId);
   if (meta === undefined) return;
   if (agentRole === "captain" && meta.nativeSeatSessionKey !== transcript.sessionKey) {
+    ctx["currentActivities"].clear(meta.conversationId);
     meta.nativeSeatSessionKey = transcript.sessionKey;
     ctx["saveMeta"](meta);
   }

@@ -382,10 +382,7 @@ export function createOperatorService(
               thinking,
               ...(request.includeCurrentActivity
                 ? {
-                    currentActivity: ctx.conversations.currentPresenceActivity(
-                      head?.status === "working",
-                      ctx.deps.bodyLeases?.activeConversation("voice"),
-                    ),
+                    currentActivity: ctx.conversations.currentPresenceActivity(head?.status === "working"),
                   }
                 : {}),
               working: head?.status === "working" || (nativeSubagents ?? 0) > 0,

@@ -278,6 +278,8 @@ function untilRoundOrAbort(round: Promise<void>, signal?: AbortSignal): Promise<
 
 export class ConversationStore {
   private readonly currentActivities = new CurrentActivities();
+  /** Service-owned live call binding; sampled at event publication, never inferred on the first read. */
+  public presenceVoiceLease?: () => { conversationId: string; incarnation: string } | undefined;
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
   /** A bounded explicit continuation declaration in a lead's settled report. */
@@ -1421,10 +1423,11 @@ export class ConversationStore {
     };
   }
 
-  public currentPresenceActivity(nativeWorking: boolean, voiceConversationId?: string) {
-    return this.currentActivities.current((id, call) => {
+  public currentPresenceActivity(nativeWorking: boolean) {
+    const voice = this.presenceVoiceLease?.();
+    return this.currentActivities.current((id, callIncarnation) => {
       if (!this.metas.has(id)) return false;
-      if (call) return id === voiceConversationId;
+      if (callIncarnation) return id === voice?.conversationId && callIncarnation === voice.incarnation;
       return (
         (this.activeInvocations.get(id) ?? 0) > 0 ||
         (nativeWorking && id === this.defaultGlobalConversationId())
@@ -3416,7 +3419,12 @@ export class ConversationStore {
       ...body,
     } as OperatorConversationStreamEvent;
     this.journal.append(meta.conversationId, event);
-    this.currentActivities.observe(meta, event, livePresence);
+    this.currentActivities.observe(
+      meta,
+      event,
+      livePresence,
+      body.type === "message" && body.spoken ? this.presenceVoiceLease?.() : undefined,
+    );
     if (
       (meta.scope.kind === "global" || meta.scope.kind === "workspace") &&
       meta.parentConversationId === undefined &&

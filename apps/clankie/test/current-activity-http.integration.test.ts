@@ -22,6 +22,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
   const settings = new SettingsStore(join(root, "settings.json"));
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
   const leases = new BodyLeaseStore(join(root, "leases"));
+  conversations.presenceVoiceLease = () => new BodyLeaseRouter(leases).activeIncarnation("voice");
   let working = true,
     validOwner = true;
   const service = createOperatorService({
@@ -145,6 +146,13 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       target: { kind: "conversation", conversationId: "global-default" },
     });
     leases.release(lease.lease);
+    // No presence sample in the gap: the next call must never inherit this call's speech.
+    const replacementCall = leases.acquire("voice", "global-default", 30000);
+    if (replacementCall.outcome !== "acquired") throw new Error("Replacement call unavailable");
+    expect((await read()).currentActivity).toBeUndefined();
+    conversations.recordVoiceCallLine("global-default", "clankie", "Fresh replacement call");
+    expect((await read()).currentActivity).toMatchObject({ source: "call", text: "Fresh replacement call" });
+    leases.release(replacementCall.lease);
     expect((await read()).currentActivity).toBeUndefined();
 
     const room = conversations.roomConversation("discord_presence", "mixed-room");
@@ -170,6 +178,30 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       entries: [first, { ...first, id: "new", text: "Live owner chat" }],
     });
     expect((await read()).currentActivity).toMatchObject({ source: "chat", text: "Live owner chat" });
+    conversations.publishHeadEvent({
+      type: "tool",
+      toolCallId: "old-session-tool",
+      name: "exec_command",
+      phase: "started",
+      detail: "OLD_SESSION_COMMAND",
+    });
+    // Remains working throughout; replacement's first historical fold is not live content.
+    conversations.syncHeadTranscript("head", {
+      sessionKey: "codex:replacement",
+      entries: [{ ...first, id: "replacement-history" }],
+    });
+    expect((await read()).currentActivity).toBeUndefined();
+    conversations.publishHeadEvent({
+      type: "tool",
+      toolCallId: "new-session-tool",
+      name: "exec_command",
+      phase: "started",
+      detail: "Fresh session command",
+    });
+    expect((await read()).currentActivity).toMatchObject({
+      source: "coding",
+      text: "exec_command\nFresh session command",
+    });
     const cursor = (await read()).cursor;
     const pending = fetch(`http://127.0.0.1:${address.port}/operator/v1/dispatch`, {
       method: "POST",
@@ -187,7 +219,6 @@ it("serves opt-in owner activity from live native events and call ownership, pre
     validOwner = false;
     expect((await pending).status).toBe(403);
   } finally {
-    server.closeAllConnections();
     await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
     app.close();
     await conversations.close();

@@ -1,4 +1,5 @@
 import type { BodyLeaseResult, BodyResource } from "@clankie/protocol";
+import { createHash } from "node:crypto";
 import { BodyLeaseStore, type BodyOwnerRoute } from "./body-leases.ts";
 
 type LeaseRef = NonNullable<ReturnType<BodyLeaseStore["recoveryReference"]>>;
@@ -45,10 +46,18 @@ export class BodyLeaseRouter {
   }
 
   /** Service observation only: no token, route or recovery authority leaves the lease store. */
-  public activeConversation(resource: BodyResource): string | undefined {
+  public activeIncarnation(
+    resource: BodyResource,
+  ): { conversationId: string; incarnation: string } | undefined {
     try {
       const held = this.store.status(resource);
-      return held?.state === "active" ? held.conversationId : undefined;
+      const ref = held?.state === "active" ? this.store.recoveryReference(resource) : undefined;
+      return ref
+        ? {
+            conversationId: ref.conversationId,
+            incarnation: createHash("sha256").update(ref.token).digest("hex"),
+          }
+        : undefined;
     } catch {
       return undefined;
     }

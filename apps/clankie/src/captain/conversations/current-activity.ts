@@ -45,9 +45,21 @@ function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "t
 
 /** Volatile event projection. No disk reads, transcript scans, timers or model calls on presence reads. */
 export class CurrentActivities {
-  private readonly entries = new Map<string, { activity: OperatorCurrentActivity; toolCallId?: string }>();
+  private readonly entries = new Map<
+    string,
+    { activity: OperatorCurrentActivity; toolCallId?: string; callIncarnation?: string }
+  >();
 
-  public observe(meta: ConversationMeta, event: OperatorConversationStreamEvent, live: boolean): void {
+  public clear(conversationId: string): void {
+    this.entries.delete(conversationId);
+  }
+
+  public observe(
+    meta: ConversationMeta,
+    event: OperatorConversationStreamEvent,
+    live: boolean,
+    voice?: { conversationId: string; incarnation: string },
+  ): void {
     // Matches desktop notices: no mixed-room, channel, worker, side-fork or replayed content.
     if (
       !live ||
@@ -81,6 +93,10 @@ export class CurrentActivities {
         target: tool.key ? { kind: "issue", key: tool.key } : { kind: "conversation", conversationId },
       };
     } else if (event.type === "message" && !event.streaming && (event.role === "captain" || event.spoken)) {
+      if (event.spoken && voice?.conversationId !== conversationId) {
+        this.entries.delete(conversationId);
+        return;
+      }
       const text = safeText(event.text);
       if (!text) return;
       activity = {
@@ -94,16 +110,17 @@ export class CurrentActivities {
     this.entries.set(conversationId, {
       activity,
       ...(event.type === "tool" ? { toolCallId: event.toolCallId } : {}),
+      ...(event.type === "message" && event.spoken && voice ? { callIncarnation: voice.incarnation } : {}),
     });
     if (this.entries.size > 64) this.entries.delete(this.entries.keys().next().value!);
   }
 
   public current(
-    active: (conversationId: string, call: boolean) => boolean,
+    active: (conversationId: string, callIncarnation?: string) => boolean,
   ): OperatorCurrentActivity | undefined {
     let latest: OperatorCurrentActivity | undefined;
     for (const [id, entry] of this.entries) {
-      if (!active(id, entry.activity.source === "call")) this.entries.delete(id);
+      if (!active(id, entry.callIncarnation)) this.entries.delete(id);
       else latest = entry.activity;
     }
     return latest;

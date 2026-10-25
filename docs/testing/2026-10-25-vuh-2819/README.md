@@ -10,6 +10,9 @@ coding, issue, Discord and chat/call sources; stable IDs/cursors; structured and
 free-text credential redaction; exact issue-key navigation; completed tools;
 idle-to-working without replay; voice lease release; withheld mixed rooms and
 first transcript folds; owner-only admission and revalidation after a wait.
+Regression controls release/reacquire voice for the same conversation without
+a read in between, then prove fresh-call text; and replace a working native
+session with a first historical fold, then prove its fresh tool event.
 This is a local dependency integration proof, not a live owner conversation.
 
 Focused command (governed):

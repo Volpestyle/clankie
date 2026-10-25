@@ -236,6 +236,11 @@ export function rememberNativeSource(
 ): void {
   const meta = ctx["metas"].get(conversationId);
   if (meta === undefined || JSON.stringify(meta.nativeSource) === JSON.stringify(source)) return;
+  if (
+    meta.nativeSource?.terminalId !== source.terminalId ||
+    JSON.stringify(meta.nativeSource?.session) !== JSON.stringify(source.session)
+  )
+    ctx["currentActivities"].clear(conversationId);
   // Driver attachment does not resolve an unanswered owner question.
   meta.nativeSource = source;
   ctx["saveMeta"](meta);
