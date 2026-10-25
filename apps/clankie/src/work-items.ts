@@ -490,8 +490,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       }));
-  // Which built-in tracker project each record reference belongs to, rebuilt when the store changes.
-  let recordProjects: { version: string; index: Map<string, string> } | undefined;
+  // Every built-in tracker project each record reference may belong to, rebuilt when the store
+  // changes. Only a readable, valid store is cached; anything else refuses (VUH-2829).
+  let recordProjects: { version: string; index: Map<string, Set<string>> } | undefined;
   const builtInRecordProjects = async () => {
     const path = join(
       options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"),
@@ -500,22 +501,32 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     // Taken before the read, so a racing write leaves a stale version and the next call rereads.
     const version = fileVersion(path);
     if (recordProjects?.version === version) return recordProjects.index;
-    const index = new Map<string, string>();
-    let store: Record<string, unknown> = {};
+    const unusable = () =>
+      new WorkRequestError(
+        "backend_unavailable",
+        "The built-in tracker that holds cut-over projects cannot be read, so this tracker call has nowhere safe to go.",
+      );
+    let store: Record<string, unknown>;
     try {
       store = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw new WorkRequestError(
-          "backend_unavailable",
-          "The built-in tracker cannot be read, so this tracker call has nowhere safe to go.",
-        );
+    } catch {
+      throw unusable();
     }
+    if (
+      store === null ||
+      typeof store !== "object" ||
+      store.version !== 1 ||
+      !Array.isArray(store.issues) ||
+      !Array.isArray(store.projects)
+    )
+      throw unusable();
+    const index = new Map<string, Set<string>>();
     const records = (key: string) =>
       (Array.isArray(store[key]) ? store[key] : []) as Record<string, unknown>[];
     const add = (value: unknown, projectId: unknown) => {
-      if (typeof value === "string" && typeof projectId === "string")
-        index.set(value.toLowerCase(), projectId);
+      if (typeof value !== "string" || typeof projectId !== "string") return;
+      const key = value.toLowerCase();
+      index.set(key, (index.get(key) ?? new Set()).add(projectId));
     };
     for (const project of records("projects"))
       for (const value of [project.id, project.name, project.slugId]) add(value, project.id);
@@ -659,7 +670,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
    * an imported `TEAM-n`, a `LOCAL-TEAM-n`, a record UUID, or the project's own id or name.
    * A cut-over project is bound to a built-in tracker project and its saved convention is
    * not `linear` (an unreadable one counts, so nothing falls back to Linear). Undefined
-   * when the references name none; refuses when they name two. With `fence`, the
+   * when the references name none; refuses when they name two, when a reference another
+   * project shares could name one, or when the store cannot be read. With `fence`, the
    * conventions it read are fenced; the default store is not, as in resolveTrackerRepo.
    */
   const cutoverRepoForReferences = async (
@@ -689,8 +701,16 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     const index = await builtInRecordProjects();
     const matched = new Set<string>();
     for (const reference of references) {
-      const projectId = index.get(reference.toLowerCase());
-      if (projectId !== undefined && cutover.has(projectId)) matched.add(projectId);
+      const owners = [...(index.get(reference.toLowerCase()) ?? [])];
+      const cutOver = owners.filter((owner) => cutover.has(owner));
+      if (cutOver.length === 0) continue;
+      // A name another project shares never decides the route: guessing could reach Linear.
+      if (owners.length > 1)
+        throw new WorkRequestError(
+          "invalid",
+          `${reference} names more than one tracker project's record, one of them cut over to the built-in tracker. Name it by its UUID.`,
+        );
+      matched.add(cutOver[0]!);
     }
     if (matched.size > 1)
       throw new WorkRequestError(

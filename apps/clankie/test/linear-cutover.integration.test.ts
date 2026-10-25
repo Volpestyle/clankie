@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -1088,6 +1088,98 @@ it("routes a cut-over project's items to its built-in tracker for a hire in a Li
   expect((await store()).comments.some((entry: { body: string }) => entry.body === "From a room")).toBe(
     false,
   );
+});
+
+it("holds a cut-over project's writes before Linear when a shared name or the built-in store cannot establish the route (VUH-2829)", async () => {
+  const provider = await linearProvider();
+  cleanups.push(provider.close);
+  const f = await cutoverFixture(undefined, { linearUrl: provider.url });
+  const cut = await f.post("/v1/tracker/cutover/linear", {
+    worldProject: "clankie-work",
+    scratch: "work",
+    linearProjectId: f.projectId,
+  });
+  expect(cut.status, JSON.stringify(cut.body)).toBe(200);
+  await f.credentials.set("linear", {
+    type: "api",
+    key: "fixture-linear-secret",
+    account: {
+      provider: "linear",
+      actor: "app",
+      connectionId: randomUUID(),
+      userId: randomUUID(),
+      workspaceId: randomUUID(),
+      name: "Fixture app",
+      workspaceName: "Cutover fixture",
+      verifiedAt: new Date().toISOString(),
+    },
+  });
+  const path = join(f.trackerDirectory, "tracker.json");
+  const original = await readFile(path, "utf8");
+  const lead = (tool: string, args: Record<string, unknown>) =>
+    f.host.call({ lane: "operator", server: "linear", tool, arguments: args });
+  const linearWrites = () => provider.calls.filter((call) => !/^(?:get|list)_/u.test(call.name));
+
+  // Another stored project shares Clankie Work's name, before or after it in the store.
+  for (const order of ["cutover-first", "cutover-last"] as const) {
+    const store = JSON.parse(original);
+    const project = store.projects.find((entry: { id: string }) => entry.id === f.projectId);
+    const twin = { ...project, id: randomUUID(), slugId: `twin-${order}` };
+    if (order === "cutover-first") store.projects.push(twin);
+    else store.projects.unshift(twin);
+    await writeFile(path, JSON.stringify(store));
+    const byName = await lead("save_issue", {
+      team: "VUH",
+      project: "Clankie Work",
+      title: `By name ${order}`,
+    });
+    expect(byName, order).toMatchObject({
+      outcome: "refused",
+      possiblyDispatched: false,
+      detail: expect.stringContaining("Name it by its UUID"),
+    });
+    // The exact UUID, and an item only Clankie Work holds, still route.
+    expect(await lead("get_project", { query: f.projectId }), order).toMatchObject({
+      outcome: "ok",
+      isError: false,
+    });
+    expect(await lead("get_issue", { id: "VUH-1905" }), order).toMatchObject({
+      outcome: "ok",
+      isError: false,
+    });
+    expect(linearWrites(), order).toEqual([]);
+    expect(provider.calls, order).toEqual([]);
+  }
+
+  // The store is missing, structurally empty, or another version: every call naming a
+  // reference is held before the provider, never treated as "no cut-over item".
+  for (const [kind, damage] of [
+    ["missing", () => rm(path)],
+    ["empty object", () => writeFile(path, "{}")],
+    ["invalid JSON", () => writeFile(path, "{")],
+    ["unsupported version", () => writeFile(path, JSON.stringify({ ...JSON.parse(original), version: 999 }))],
+  ] as const) {
+    await damage();
+    expect(await lead("save_comment", { issueId: "VUH-1905", body: `Held: ${kind}` }), kind).toMatchObject({
+      outcome: "refused",
+      possiblyDispatched: false,
+      detail: expect.stringContaining("cannot be read"),
+    });
+    expect(provider.calls, kind).toEqual([]);
+  }
+
+  // Once the store is readable again, the route comes back.
+  await writeFile(path, original);
+  expect(await lead("save_comment", { issueId: "VUH-1905", body: "After recovery" })).toMatchObject({
+    outcome: "ok",
+    isError: false,
+  });
+  expect(
+    JSON.parse(await readFile(path, "utf8")).comments.some(
+      (entry: { body: string }) => entry.body === "After recovery",
+    ),
+  ).toBe(true);
+  expect(provider.calls).toEqual([]);
 });
 
 it("a hired worker's READ commits only on the route its pre-lock fence saw (LOCAL-VUH-35)", async () => {
