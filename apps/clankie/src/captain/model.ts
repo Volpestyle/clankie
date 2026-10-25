@@ -84,6 +84,23 @@ export class BrokerCredentialStore {
     fn: (current: Credential | undefined) => Promise<Credential | undefined> | Credential | undefined,
   ): Promise<Credential | undefined> {
     const run = (this.locks.get(providerId) ?? Promise.resolve()).then(async () => {
+      // Another process (model keys, a hosted loopback, a second service) may
+      // refresh the same token. The broker's cross-process lock makes it re-read
+      // the rotated entry instead of sending the old refresh token again.
+      if (this.broker.update !== undefined) {
+        let result: { value: Credential | undefined } | undefined;
+        await this.broker.update(providerId, async (stored) => {
+          assertModelCredentialAllowed(providerId, stored, this.policy);
+          const next = await fn(toPiCredential(stored));
+          result = { value: next ?? toPiCredential(stored) };
+          if (next === undefined) return stored;
+          const mapped = fromPiCredential(next, stored);
+          assertModelCredentialAllowed(providerId, mapped, this.policy);
+          return mapped ?? stored;
+        });
+        // A missing entry stays missing in update(); creating one takes the path below.
+        if (result !== undefined) return result.value;
+      }
       const stored = await this.broker.get(providerId);
       assertModelCredentialAllowed(providerId, stored, this.policy);
       const next = await fn(toPiCredential(stored));

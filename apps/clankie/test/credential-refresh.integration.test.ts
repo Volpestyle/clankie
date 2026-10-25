@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import type { Api } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -23,12 +25,14 @@ const TEN_DAYS_MS = 10 * 24 * 60 * 60_000;
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "clankie-credential-refresh-"));
   const tokenRequests: string[] = [];
+  const endpoint = { delayMs: 0 };
   const server: Server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => (body += String(chunk)));
-    request.on("end", () => {
+    request.on("end", async () => {
       const refresh = (JSON.parse(body) as { refresh: string }).refresh;
       tokenRequests.push(refresh);
+      await new Promise((resolve) => setTimeout(resolve, endpoint.delayMs));
       response.setHeader("content-type", "application/json");
       if (refresh === "revoked") {
         response.statusCode = 400;
@@ -88,6 +92,9 @@ async function fixture() {
     rmSync(root, { recursive: true, force: true });
   });
   return {
+    root,
+    tokenUrl,
+    endpoint,
     broker,
     credentials,
     runtime,
@@ -135,3 +142,49 @@ it("has nothing to refresh for an API key", async () => {
   expect(f.tokenRequests).toEqual([]);
   expect(await f.broker.get("token-provider")).toEqual({ type: "api", key: "sk-rejected" });
 });
+
+it("two service processes refreshing one expired token send its refresh token once", async () => {
+  const f = await fixture();
+  await f.broker.set("token-provider", { type: "oauth", access: "stale", refresh: "r0", expires: 0 });
+  // A slow provider keeps the first refresh in flight while the second process asks.
+  f.endpoint.delayMs = 500;
+  const children = [0, 1].map(() => {
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        import.meta.resolve("tsx/esm"),
+        fileURLToPath(new URL("./fixtures/model-refresh-process.ts", import.meta.url)),
+        JSON.stringify({ path: join(f.root, "credentials.json"), tokenUrl: f.tokenUrl }),
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    let output = "";
+    let errors = "";
+    child.stderr.on("data", (chunk) => (errors += String(chunk)));
+    const ready = new Promise<void>((resolve) =>
+      child.stdout.on("data", (chunk) => {
+        output += String(chunk);
+        if (output.startsWith("ready\n")) resolve();
+      }),
+    );
+    const done = new Promise<string>((resolve, reject) =>
+      child.on("close", (code) =>
+        code === 0
+          ? resolve(output.slice("ready\n".length).trim())
+          : reject(new Error(`Refresh process failed ${String(code)}: ${errors}`)),
+      ),
+    );
+    cleanups.push(() => void child.kill());
+    return { child, ready, done };
+  });
+  await Promise.all(children.map((c) => c.ready));
+  for (const { child } of children) child.stdin.end("go\n");
+  expect(await Promise.all(children.map((c) => c.done))).toEqual(["r0-access", "r0-access"]);
+  expect(f.tokenRequests).toEqual(["r0"]);
+  expect(await f.broker.get("token-provider")).toMatchObject({
+    type: "oauth",
+    access: "r0-access",
+    refresh: "r0-next",
+  });
+}, 30_000);

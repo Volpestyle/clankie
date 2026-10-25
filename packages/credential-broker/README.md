@@ -46,8 +46,9 @@ Both stores implement `update(providerId, transform)`: read, transform and persi
 an existing credential while holding the same lock as set/delete. Missing entries
 remain missing. The transform returns a new credential to change it, or the
 unchanged input; it must not call back into the store. Linear MCP bearer refresh
-uses this operation, rechecking expiry after taking the lock. Concurrent clients
-spend one rotating refresh token once. A failed refresh only falls back to an
+and Pi's model OAuth refresh (through `BrokerCredentialStore.modify`) use this
+operation, rechecking expiry after taking the lock. Concurrent clients, including
+separate service processes, spend one rotating refresh token once. A failed refresh only falls back to an
 access token that has not expired; storage/locking failures propagate.
 
 Disconnect waits for an admitted refresh, then deletes its result. Once disconnect
