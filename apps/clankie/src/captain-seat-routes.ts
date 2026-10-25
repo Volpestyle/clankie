@@ -9,6 +9,7 @@ import {
   CaptainSeatStatusRequestSchema,
 } from "@clankie/protocol/captain-seat";
 import type { SettingsStore } from "@clankie/settings";
+import { readJson } from "./app/http-auth.ts";
 import { CaptainSeats, captainSeatSnapshot } from "./captain-seat.ts";
 
 export function createCaptainSeatRoutes(
@@ -32,7 +33,7 @@ export function createCaptainSeatRoutes(
   app.post(CAPTAIN_SEAT_PATH, async (context) => {
     if (!seats?.supported) return context.json({ error: "seat_unsupported" }, 403);
     if (!settings.update) return context.json({ error: "seat_unavailable" }, 503);
-    const input = UpdateCaptainSeatSchema.safeParse(await context.req.json().catch(() => undefined));
+    const input = UpdateCaptainSeatSchema.safeParse(await readJson(context.req.raw));
     if (!input.success) return context.json({ error: "malformed" }, 400);
     let before: string | undefined;
     try {
@@ -55,7 +56,7 @@ export function createCaptainSeatRoutes(
   });
   app.post(CAPTAIN_SEAT_START_PATH, async (context) => {
     if (!seats?.supported) return context.json({ error: "seat_unsupported" }, 403);
-    const input = StartCaptainSeatSchema.safeParse(await context.req.json().catch(() => undefined));
+    const input = StartCaptainSeatSchema.safeParse(await readJson(context.req.raw));
     if (!input.success) return context.json({ error: "malformed" }, 400);
     try {
       const result = await seats.start(input.data, async () => (await authorize(context.req.raw)) === true);
@@ -70,7 +71,7 @@ export function createCaptainSeatRoutes(
   });
   app.post(CAPTAIN_SEAT_STATUS_PATH, async (context) => {
     if (!seats?.supported) return context.json({ error: "seat_unsupported" }, 403);
-    const input = CaptainSeatStatusRequestSchema.safeParse(await context.req.json().catch(() => undefined));
+    const input = CaptainSeatStatusRequestSchema.safeParse(await readJson(context.req.raw));
     if (!input.success) return context.json({ error: "malformed" }, 400);
     const result = await seats.status(input.data.requestId);
     return result ? context.json(result) : context.json({ error: "seat_start_not_found" }, 404);

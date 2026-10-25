@@ -128,7 +128,7 @@ export class CaptainSeats {
     this.save(record);
     this.pending.add(input.requestId);
     void this.perform(record, guard)
-      .catch(() => undefined)
+      .catch(() => console.error("Captain seat start journal unavailable", input.requestId))
       .finally(() => this.pending.delete(input.requestId));
     return record.result;
   }
