@@ -31,8 +31,8 @@ export interface AutoTidyHeld {
   readonly title: string;
   readonly idleSince: string;
   readonly window: string;
-  /** reports_unread, results_not_kept, or the close's own refusal. */
-  readonly blocker: "reports_unread" | "results_not_kept" | TidyFailure["reason"];
+  /** reports_unread, results_not_kept, adoption_refused, or the close's own refusal. */
+  readonly blocker: "reports_unread" | "results_not_kept" | "adoption_refused" | TidyFailure["reason"];
   readonly unreadReports?: number;
 }
 const platform = process.platform === "win32" ? "windows" : "posix";
@@ -170,8 +170,14 @@ export function createAutoTidy(ports: AutoTidyPorts) {
         })
         .catch((error: unknown) => {
           console.warn("Auto-tidy adoption unavailable", String(error));
-          return undefined;
+          return { state: "refused", receiptId: "" };
         });
+      // An adoption that applies but did not complete leaves its original for the lead.
+      if (adopted !== undefined && adopted.state !== "adopted") {
+        hold("adoption_refused");
+        retryAt.set(key, at + delay);
+        continue;
+      }
       const result = await ports.tidy.close(
         {
           pane: agent.paneId,

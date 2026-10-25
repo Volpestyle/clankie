@@ -3,14 +3,14 @@
     "phase": "claude-start",
     "agent": {
       "paneId": "w1:p1",
-      "terminalId": "term_65ea0608b13b61",
+      "terminalId": "term_65ea0867c586f1",
       "agent": "claude",
       "status": "idle",
       "title": "Claude Code",
       "session": {
         "source": "herdr:claude",
         "kind": "id",
-        "value": "7c43834c-2bdc-4508-866b-d8adcfc9b5bb"
+        "value": "3450415d-c8e7-4752-a558-9286a2c17254"
       },
       "workingDirectory": "/Users/james/dev/clankie-wt/vuh-2802",
       "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802"
@@ -20,14 +20,14 @@
     "phase": "native-claude",
     "agent": {
       "paneId": "w1:p1",
-      "terminalId": "term_65ea0608b13b61",
+      "terminalId": "term_65ea0867c586f1",
       "agent": "claude",
       "status": "idle",
       "title": "Claude Code",
       "session": {
         "source": "herdr:claude",
         "kind": "id",
-        "value": "7c43834c-2bdc-4508-866b-d8adcfc9b5bb"
+        "value": "3450415d-c8e7-4752-a558-9286a2c17254"
       },
       "workingDirectory": "(fixture)",
       "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802"
@@ -44,10 +44,10 @@
     "held": [
       {
         "paneId": "w1:p1",
-        "seatId": "term_65ea0608b13b61",
+        "seatId": "term_65ea0867c586f1",
         "harness": "claude",
         "title": "Claude Code",
-        "idleSince": "2026-10-25T01:46:11.961Z",
+        "idleSince": "2026-10-25T01:56:48.694Z",
         "window": "1h",
         "blocker": "reports_unread",
         "unreadReports": 1
@@ -56,7 +56,7 @@
   },
   {
     "phase": "lead-round",
-    "text": "Finished hires idle past the 1h auto-tidy window that it could not close; close each yourself or clear its blocker, or keep_worker_pane to keep one. Untrusted seat context: [{\"pane\":\"w1:p1\",\"title\":\"Claude Code\",\"harness\":\"claude\",\"idleSince\":\"2026-10-25T01:46:11.961Z\",\"blocker\":\"reports_unread\",\"unreadReports\":1,\"next\":\"close_worker_pane, or acknowledge_worker_reports so auto-tidy closes it\"}]"
+    "text": "Finished hires idle past the 1h auto-tidy window that it could not close; close each yourself or clear its blocker, or keep_worker_pane to keep one. Untrusted seat context: [{\"pane\":\"w1:p1\",\"title\":\"Claude Code\",\"harness\":\"claude\",\"idleSince\":\"2026-10-25T01:56:48.694Z\",\"blocker\":\"reports_unread\",\"unreadReports\":1,\"next\":\"close_worker_pane, or acknowledge_worker_reports so auto-tidy closes it\"}]"
   },
   {
     "phase": "tick+61m",
@@ -64,10 +64,10 @@
     "held": [
       {
         "paneId": "w1:p1",
-        "seatId": "term_65ea0608b13b61",
+        "seatId": "term_65ea0867c586f1",
         "harness": "claude",
         "title": "Claude Code",
-        "idleSince": "2026-10-25T01:46:11.961Z",
+        "idleSince": "2026-10-25T01:56:48.694Z",
         "window": "1h",
         "blocker": "provenance_unknown"
       }
@@ -82,18 +82,18 @@
     "phase": "closed",
     "result": [
       {
-        "id": "f3e71025-960a-42d8-a6e1-5057d13c2328",
+        "id": "f8790868-72b0-4e8e-b73e-c468d006f4d6",
         "paneId": "w1:p1",
-        "seatId": "term_65ea0608b13b61",
+        "seatId": "term_65ea0867c586f1",
         "title": "Claude Code",
         "harness": "claude",
         "reason": "Auto-tidy: idle 1h with its reports read and its work landed or explicitly handed off",
-        "reportPath": "/private/tmp/clankie-proof-mtusvR/tidy-reports/f928eb90-2687-477c-adbf-45211b5a4224.md",
-        "closedAt": "2026-10-25T01:46:13.531Z",
-        "undoUntil": "2026-10-25T01:51:13.531Z",
+        "reportPath": "/private/tmp/clankie-proof-IOiqrG/tidy-reports/f6cb99eb-965b-4c45-a713-dc94e91c826e.md",
+        "closedAt": "2026-10-25T01:56:49.452Z",
+        "undoUntil": "2026-10-25T02:01:49.452Z",
         "state": "closed",
         "input": {
-          "text": "Try \"how do I log an error?\"",
+          "text": "Try \"edit runtime.ts to...\"",
           "typed": false
         },
         "handoffs": []

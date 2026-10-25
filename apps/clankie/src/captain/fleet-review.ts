@@ -141,6 +141,8 @@ const HELD_ACTIONS: Record<string, string> = {
   results_not_kept: "ask it for its final report, or close_worker_pane with a reportPath",
   unlanded_work: "land or hand off its work; clean commits may close with unlandedReason",
   provenance_unknown: "settle its original hire receipt (settle_hire_receipt adopt), then close_worker_pane",
+  adoption_refused:
+    "automatic adoption of its unconfirmed start failed; inspect its pane and receipt, then settle_hire_receipt adopt",
   unsent_draft: "send or clear its typed draft, then close_worker_pane",
 };
 

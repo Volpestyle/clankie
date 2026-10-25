@@ -62,6 +62,16 @@ sequenceDiagram
   `provenance_unknown`. Once the receipt records the observed session, the next sweep
   adopts it, settles the receipt `adopted`, confirms the allocation and closes the pane.
   Results: `auto-tidy/results.json`.
+- **Retirement fence (review).** Sage found that adoption confirmed the allocation
+  before it saved the receipt settlement, so a failed save released the retirement
+  barrier for good. Now the settlement is durable first. `retirementGuard` also refuses
+  any unsettled original for the pane's occupant, even with a confirmed allocation or an
+  unreadable journal, and auto-tidy holds (`adoption_refused`) when adoption refuses.
+  `auto-tidy-adoption-fence.integration.test.ts` forces the journal's rename to fail.
+  The fence holds immediately and after a restart, auto-tidy does not close, and later
+  adoption settles and releases it. A confirmed allocation with an unsettled original
+  stays fenced until operator adopt. Both tests fail on the first candidate, and Sage's
+  own probe passes.
 - **Regression.** `claude-hire-startup.integration.test.ts` adds the typed-timeout cases,
   with the prompt recorded (started) and not recorded (unverified). Both fail on the old
   adapter.

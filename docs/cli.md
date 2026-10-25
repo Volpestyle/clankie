@@ -4425,7 +4425,9 @@ Hand-started and owner-interactive panes are never closed. A local project hire
 whose start never confirmed is first adopted, as the operator's
 `settle_hire_receipt` `adopt` does, only when its original receipt recorded the
 exact native session and occupant now in the pane and its hiring conversation
-is the one tidy closes it for; any other unconfirmed hire stays held. The notice
+is the one tidy closes it for; any other unconfirmed hire stays held. An
+adoption that refuses holds the pane, and an unsettled original receipt fences
+retirement even after its allocation is confirmed. The notice
 names each adopted receipt. Hires idle past the window that it could not close
 (unread reports, no kept report, unlanded work, an unconfirmed start, an unsent
 draft) are listed in their lead's fleet round with the next step (VUH-2802). A keep excludes held

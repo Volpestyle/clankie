@@ -3647,10 +3647,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
           sessionId === undefined ? undefined : JSON.stringify(["local", harness, sessionId]),
           allocation?.projectId,
         );
-      if (allocation && !allocation.confirmed) {
-        this.projectHires.observe(allocation.id, agent.terminalId, occupantId, proof);
-        this.projectHires.confirmed(allocation.id);
-      }
       let evidence: LocalHireSettlementEvidence | undefined;
       if (original) {
         evidence = {
@@ -3676,6 +3672,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           },
         };
         this.hireReceipts.settleLocal(original[0], original[1].messageId, evidence);
+      }
+      // The settled original is the retirement barrier's release, so it is durable first:
+      // a failed save leaves the allocation unconfirmed and the original still fenced.
+      if (allocation && !allocation.confirmed) {
+        this.projectHires.observe(allocation.id, agent.terminalId, occupantId, proof);
+        this.projectHires.confirmed(allocation.id);
       }
       this.watchHiredSeat(agent.terminalId, occupantId, owner);
       return {
@@ -5184,6 +5186,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
         JSON.stringify(candidate)
       )
         throw new Error("Original project allocation changed");
+      // Independent of confirmation: an unsettled original for this occupant (or an unreadable
+      // journal) always holds retirement until it is settled, e.g. by settle_hire_receipt adopt.
+      if (
+        this.hireReceipts
+          .all()
+          .some(
+            ([, receipt]) =>
+              receipt.paneId === agent.paneId &&
+              receipt.occupantId === candidate.occupantId &&
+              !receipt.completed &&
+              !receipt.settlement &&
+              !receipt.abandoned,
+          )
+      )
+        throw new Error("Settle the original native hire receipt before retiring its unconfirmed pane");
       const proof = await this.projectPolicy?.proof?.(fleet, agent.paneId);
       if (this.projectHires.assignment(fleet, agent.paneId, proof).state !== "assigned")
         throw new Error("Original native process or connection changed");
