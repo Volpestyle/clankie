@@ -1,3 +1,4 @@
+import { createInboundReportMigrationGate } from "./captain/conversations/inbound-report-migration.ts";
 import { readProjectWorkQueue } from "./project-work-queue.ts";
 import { createDeliverableProjectReader } from "./fleet-project-deliverable.ts";
 import { MachineJoins } from "./machine-joins.ts";
@@ -1392,6 +1393,16 @@ const fleetHealthMetrics = new FleetHealthMetrics({
 });
 const captain = createCaptain(
   {
+    inboundReportMigrationReady:
+      runtimeUpdater === undefined
+        ? () => process.env.CLANKIE_UPDATE_OPERATION === undefined
+        : createInboundReportMigrationGate({
+            updater: runtimeUpdater,
+            updatesDirectory: join(process.env.HOME || homedir(), ".clankie", "updates"),
+            ...(process.env.CLANKIE_UPDATE_OPERATION === undefined
+              ? {}
+              : { operation: process.env.CLANKIE_UPDATE_OPERATION }),
+          }),
     harnessProcesses,
     refreshWorkerCatalogs: (input, authority) => workerToolRefresh.refresh(input, authority),
     activitySharing,

@@ -100,7 +100,11 @@ conversation's `inbound-reports/` directory. Each filename contains its bucket
 prefix and SHA-256 digest; verify the bytes before treating the keyed
 `deliveryId` records as committed. Orphan files and old context archives are
 not current admissions. Legacy inline `inboundAcceptances` remain readable
-until the next save migrates them; that field is an object keyed by delivery ID.
+until a save after the runtime update is durably healthy migrates them; that
+field is an object keyed by delivery ID. Before initial health succeeds, saves
+keep the inline payloads and defer compaction. Missing/unreadable cutover evidence
+also keeps legacy storage. Explicit rollback after migration still requires the
+offline conversion described in the C2 runbook before starting an older reader.
 
 The CLI `clankie agents reports --conversation ID` remains the preferred reader;
 acknowledgment is explicit. Repeated reads retain the first offered/taken proof

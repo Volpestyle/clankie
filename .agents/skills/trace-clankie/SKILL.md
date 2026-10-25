@@ -41,8 +41,9 @@ stage; transcript presence alone does not prove an effect or model awareness.
 Read retained worker results with `clankie agents reports --conversation ID`.
 The exact accepted payloads and delivery/read state live in that conversation's
 `inbound-reports/` shards, committed by `meta.json`'s `inboundReportStore`
-manifest. Legacy files keep them inline under `inboundAcceptances` until their
-next save. Only manifest-referenced shards are committed; unreferenced files
+manifest. Legacy files keep them inline under `inboundAcceptances` until a save after
+the runtime update reports a durable healthy cutover. Before that point the old
+layout stays intact for automatic rollback. Only manifest-referenced shards are committed; unreferenced files
 are not report acceptance. Read reports older than 24 hours are compacted;
 unread, delivered and uncertain reports are retained. The files are independent
 of event trimming and pane lifetime. Join `runId` to the

@@ -14,7 +14,7 @@ are synced before metadata is atomically renamed and the directory synced.
 Only after that commit may obsolete shards be collected. Failed preparations
 never admit reports. Missing/corrupt committed shards fail closed rather than
 becoming an empty inbox. Reads support legacy inline records; migration waits
-for the next successful commit. Context reset creates independent fresh shards
+for initial cutover to be durably healthy, then the next successful commit. Context reset creates independent fresh shards
 before archiving the old directory.
 
 The existing 24-hour read-report retention is preserved and applied inside the
@@ -103,7 +103,39 @@ now derive batch legacy rows from one real production receipt, retaining the
 30-second timeout. Ordinary smaller cases still admit every report normally.
 This fixture adjustment does not claim high-throughput live admission performance.
 
-## Rollback
+## Initial cutover and rollback
+
+The initial-health updater can automatically restart the previous runtime. A
+pre-C2 reader ignores the new manifest, sees no unread reports and can delete a
+side-conversation directory. An isolated unconverted real-ledger probe confirmed
+this; the separate cleanup bug is [VUH-2831](https://linear.app/vuhlp/issue/VUH-2831).
+The previously approved eager-migration patch is withdrawn and must not be pushed.
+
+Service composition now supplies the store with a cutover readiness callback.
+Before readiness, metadata retains its full inline receipt map, makes no shards,
+defers read compaction, and syncs inline admission commits. The callback requires
+the private update journal's matching healthy target and service receipt. A
+helper-launched boot also requires the exact operation, instance and PID. It
+syncs the validated healthy record and parent directories before allowing the
+format change. Missing, corrupt, changing or unsynced evidence leaves the legacy
+layout intact. An unavailable updater during a helper-tagged boot also defers.
+A fresh standalone install with no update operation has no automatic predecessor.
+Once the cutover is durably healthy, the helper cannot automatically roll back;
+the subsequent advisory canary is separate. The next metadata save migrates.
+
+The actual 2,753-record private global ledger plus a separate synthetic unread
+side admission was exercised through the real private journal and new store.
+An owned HTTP health endpoint failed with 503; exact pre-C2 production sources
+then started without conversion and read all 2,753 global records and the side
+report. No directory was deleted, every full record hash matched and no runner
+executed. In the healthy journal path, both conversations migrated to committed
+shards while preserving all receipt payload fields. This exercises journal,
+store, failed HTTP health and old-reader boundaries; it does not invoke the live
+launcher or claim an end-to-end updater deployment. Permanent integration cases
+also cover the wrong boot's receipt and a healthy-marker sync fault. The matching
+eager-patch replay sees zero reports and deletes the side directory; deferred
+migration prevents both. Four focused suites pass 52 tests; the full service
+typecheck passes its source program and all 15 test batches.
 
 The first save migrates disk layout. A pre-C2 reader does not follow shard
 references. The lead must stop the service, back up the current metadata and
@@ -124,3 +156,5 @@ C1's accepted rollback runbook and landing proof are [recorded separately](../20
 [Content-free measurements, scripts, legacy sources and regression evidence](proof.json).
 
 [Review corrections, source bindings and verification](review-followup.json).
+
+[Pre-healthy deferral, real-ledger old-reader replay and journal/store checks](prehealthy-proof.json).

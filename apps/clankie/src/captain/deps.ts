@@ -62,6 +62,8 @@ export interface CaptainDeps {
   readonly minecraft?: import("../minecraft.ts").MinecraftService;
   readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
   readonly desktop?: import("./desktop.ts").DesktopExpressions;
+  /** Retain the rollback reader's report layout until initial cutover is durably healthy. */
+  readonly inboundReportMigrationReady?: () => boolean;
   readonly runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   /** Current deploy holds, shown in the lead round with holder, age and time left. */
   readonly deployHolds?: () => Promise<import("@clankie/protocol/integrate").DeployHold[]>;

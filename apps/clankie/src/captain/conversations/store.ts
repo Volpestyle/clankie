@@ -281,6 +281,7 @@ function untilRoundOrAbort(round: Promise<void>, signal?: AbortSignal): Promise<
 }
 
 export class ConversationStore {
+  private readonly inboundReportMigrationReady: () => boolean;
   private readonly inboundReportStores = new Map<string, InboundReportStore>();
   private readonly writtenMetadata = new Map<string, { body: string; identity: string; durable: boolean }>();
 
@@ -495,7 +496,9 @@ export class ConversationStore {
     publishDeliveredFile?: DeliveredFilePublisher,
     defaultWorkingDirectory = process.cwd(),
     ownerAttachments?: OwnerAttachmentHost,
+    inboundReportMigrationReady: () => boolean = () => true,
   ) {
+    this.inboundReportMigrationReady = inboundReportMigrationReady;
     this.root = root;
     this.journal = new ConversationJournal(root);
     this.runner = runner;
@@ -3992,21 +3995,28 @@ export class ConversationStore {
   ): void {
     // Retention is part of this commit. Before the manifest rename, a failed
     // save must leave the caller's receipt map available for rollback.
+    const sharded = meta.inboundReportStore !== undefined || this.inboundReportMigrationReady();
     const persisted = { ...meta };
-    retainInboundReports(persisted, Date.now());
-    let reports = this.inboundReportStores.get(directory);
-    if (reports === undefined) {
-      reports = new InboundReportStore(directory);
-      if (meta.inboundReportStore !== undefined) reports.load(meta.inboundReportStore);
-      this.inboundReportStores.set(directory, reports);
+    if (sharded) retainInboundReports(persisted, Date.now());
+    let prepared: ReturnType<InboundReportStore["prepare"]> | undefined;
+    if (sharded) {
+      let reports = this.inboundReportStores.get(directory);
+      if (reports === undefined) {
+        reports = new InboundReportStore(directory);
+        if (meta.inboundReportStore !== undefined) reports.load(meta.inboundReportStore);
+        this.inboundReportStores.set(directory, reports);
+      }
+      prepared = reports.prepare(persisted.inboundAcceptances ?? {});
     }
-    const prepared = reports.prepare(persisted.inboundAcceptances ?? {});
-    const reference = Object.keys(prepared.reference.shards).length ? prepared.reference : undefined;
-    const body = JSON.stringify({
-      ...persisted,
-      inboundAcceptances: undefined,
-      inboundReportStore: reference,
-    });
+    const reference =
+      prepared && Object.keys(prepared.reference.shards).length ? prepared.reference : undefined;
+    const body = JSON.stringify(
+      sharded ? { ...persisted, inboundAcceptances: undefined, inboundReportStore: reference } : persisted,
+    );
+    // Pre-healthy admissions must also survive an old-reader restart. Sync the
+    // inline layout without migrating or compacting its retained records.
+    const sync =
+      durable || prepared?.changed === true || (!sharded && persisted.inboundAcceptances !== undefined);
     const path = join(directory, "meta.json");
     const identity = () => {
       const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
@@ -4016,10 +4026,10 @@ export class ConversationStore {
     };
     const previous = this.writtenMetadata.get(directory);
     if (
-      !prepared.changed &&
+      prepared?.changed !== true &&
       previous?.body === body &&
       previous.identity === identity() &&
-      (!durable || previous.durable)
+      (!sync || previous.durable)
     )
       return;
     const temporary = durable ? `${path}.${randomUUID()}.tmp` : `${path}.tmp`;
@@ -4028,7 +4038,7 @@ export class ConversationStore {
       const file = openSync(temporary, durable ? "wx" : "w", 0o600);
       try {
         writeFileSync(file, body);
-        if (durable || prepared.changed) fsyncSync(file);
+        if (sync) fsyncSync(file);
       } finally {
         closeSync(file);
       }
@@ -4038,7 +4048,7 @@ export class ConversationStore {
       else meta.inboundReportStore = reference;
       if (persisted.inboundAcceptances === undefined) delete meta.inboundAcceptances;
       else meta.inboundAcceptances = persisted.inboundAcceptances;
-      if (durable || prepared.changed) {
+      if (sync) {
         const file = openSync(directory, "r");
         try {
           fsyncSync(file);
@@ -4046,11 +4056,11 @@ export class ConversationStore {
           closeSync(file);
         }
       }
-      prepared.committed();
+      prepared?.committed();
       this.writtenMetadata.set(directory, {
         body,
         identity: identity(),
-        durable: durable || prepared.changed,
+        durable: sync,
       });
     } catch (error) {
       throw new ConversationCommitError(committed, error);

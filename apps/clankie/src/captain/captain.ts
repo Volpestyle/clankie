@@ -2206,6 +2206,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     options.deliveredFiles === undefined ? undefined : (input) => options.deliveredFiles!.publish(input),
     workingDirectory,
     ownerAttachmentHost(),
+    deps.inboundReportMigrationReady,
   );
   conversations.nativeMessageHost = {
     inspect: (seatId) => herdrWatches.nativeTaskObservation(seatId),
