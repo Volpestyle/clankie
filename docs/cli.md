@@ -8106,7 +8106,9 @@ shell pane, and not an error.
 of work for the World activity bubble. For example, before a generic shell test
 run: `clankie stance working --activity testing --for 60`. The roster/fleet read
 returns `seat.activity` with its kind and `source: stated`, or `native_tool` when
-a fresh outstanding known native tool establishes it. Unknown kinds are refused;
+a fresh outstanding known native tool establishes it. A Codex code-mode `exec`
+counts only when its whole source is one literal call of a known tool; shell and
+multi-call scripts stay unknown. Unknown kinds are refused;
 notes and shell arguments are never classified. Omitting `--activity` on the
 next stance clears it. The statement expires, belongs to this exact occupying
 session, and is absent for idle/offline seats. Unsupported native telemetry

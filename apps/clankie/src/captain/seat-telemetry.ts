@@ -61,8 +61,18 @@ function nativeActivity(
         )
       : entry.type === "assistant" && object(entry.message).stop_reason === "end_turn",
   );
+  const turn = records.slice(boundary + 1);
+  // Codex code mode wraps every call in `exec`; keep its raw source, never the redacted detail.
+  const sources = new Map<string, string>();
+  if (harness === "codex")
+    for (const entry of turn) {
+      const payload = object(entry.payload);
+      if (entry.type === "response_item" && payload.type === "custom_tool_call" && codeMode(payload.name))
+        if (typeof payload.call_id === "string" && typeof payload.input === "string")
+          sources.set(payload.call_id, payload.input);
+    }
   const active = new Map<string, Extract<OperatorAgentActivity, { source: "native_tool" }> | undefined>();
-  for (const entry of herdrSeatTranscriptEntries(harness, records.slice(boundary + 1))) {
+  for (const entry of herdrSeatTranscriptEntries(harness, turn)) {
     if (entry.type === "message" && entry.role === "operator" && !entry.internal) active.clear();
     if (entry.type !== "tool") continue;
     if (entry.phase !== "started") {
@@ -70,7 +80,11 @@ function nativeActivity(
       continue;
     }
     // Only native qualified namespaces are accepted, never a suffix guessed from MCP names.
-    const name = entry.name.replace(/^(?:functions|tools)\./u, "");
+    const source = sources.get(entry.toolCallId);
+    const name =
+      source === undefined
+        ? entry.name.replace(/^(?:functions|tools)\./u, "")
+        : (codeModeCall(source) ?? entry.name);
     const kind = TOOL_KINDS.get(name);
     const at = timestamp(entry.occurredAt);
     active.set(
@@ -80,7 +94,7 @@ function nativeActivity(
         : {
             source: "native_tool",
             kind,
-            toolName: entry.name,
+            toolName: name,
             startedAt: at,
           },
     );
@@ -89,6 +103,28 @@ function nativeActivity(
   // Parallel unknown or conflicting calls do not establish a single work kind.
   const first = calls[0];
   return first && calls.every((call) => call?.kind === first.kind) ? first : undefined;
+}
+const codeMode = (name: unknown) => name === "exec" || name === "functions.exec";
+/**
+ * The one tool a code-mode source calls, when the whole source is a single
+ * awaited call with a JSON literal argument. Source is never evaluated; any
+ * other statement, expression or truncated argument leaves the call unknown.
+ */
+function codeModeCall(source: string): string | undefined {
+  const snippet = source.replace(/^\s*\/\/ @exec:[^\n]*\n/u, "").trim();
+  if (snippet.length > 65_536) return undefined;
+  const call =
+    /^(?:text\(\s*(?:await\s+)?tools\.(\w+)\s*\(\s*("[\s\S]*"|\{[\s\S]*\})\s*\)\s*\)|(?:await\s+)?tools\.(\w+)\s*\(\s*("[\s\S]*"|\{[\s\S]*\})\s*\))\s*;?$/u.exec(
+      snippet,
+    );
+  if (!call) return undefined;
+  try {
+    // A JSON literal is one JavaScript literal, so the call cannot extend past it.
+    JSON.parse(call[2] ?? call[4]!);
+    return call[1] ?? call[3];
+  } catch {
+    return undefined;
+  }
 }
 const NativeId = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const preparedPaths = new Map<string, Promise<string | undefined>>();
@@ -272,6 +308,18 @@ function parseSeatTelemetry(
   let effort: string | undefined;
   let window: number | undefined;
   let occupancy: number | undefined;
+  const reportCalls = new Set<string>();
+  let lastReportAt: string | undefined;
+  let reportFailedAt: string | undefined;
+  const failed = new Set<string>();
+  const settle = (id: string, occurredAt: unknown, failure: boolean) => {
+    const at = timestamp(occurredAt);
+    if (at === undefined) return;
+    if (failure) {
+      failed.add(id);
+      if (reportFailedAt === undefined || at > reportFailedAt) reportFailedAt = at;
+    } else if (lastReportAt === undefined || at > lastReportAt) lastReportAt = at;
+  };
   const records = tail.filter(
     (entry) =>
       harness !== "claude" ||
@@ -297,6 +345,26 @@ function parseSeatTelemetry(
         (entry.type === "event_msg" && ["context_compacted", "compaction"].includes(String(payload.type)))
       )
         occupancy = undefined;
+      // Code mode records MCP calls only as completed native items, never as response calls.
+      const item =
+        entry.type === "event_msg" && payload.type === "item_completed" ? object(payload.item) : {};
+      if (
+        item.type === "McpToolCall" &&
+        typeof item.id === "string" &&
+        typeof item.tool === "string" &&
+        reportName(item.tool)
+      ) {
+        const result = object(item.result);
+        const content = Array.isArray(result.content) ? result.content.map((part) => object(part).text) : [];
+        settle(
+          item.id,
+          entry.timestamp,
+          item.status === "failed" ||
+            result.isError === true ||
+            object(result.structuredContent).received === false ||
+            failureDetail(content.filter((part) => typeof part === "string").join("\n") || undefined),
+        );
+      }
       if (entry.type === "event_msg" && payload.type === "task_started") {
         window = count(payload.model_context_window) ?? window;
       }
@@ -313,20 +381,11 @@ function parseSeatTelemetry(
       // report model only rather than guessing a capacity from its spelling.
     }
   }
-  const reportCalls = new Set<string>();
-  let lastReportAt: string | undefined;
-  let reportFailedAt: string | undefined;
-  const failed = new Set<string>();
   for (const entry of herdrSeatTranscriptEntries(harness, records)) {
     if (entry.type !== "tool") continue;
     if (reportName(entry.name)) reportCalls.add(entry.toolCallId);
     if (!reportCalls.has(entry.toolCallId) || entry.phase === "started") continue;
-    const at = timestamp(entry.occurredAt);
-    if (at === undefined) continue;
-    if (entry.phase === "failed" || failureDetail(entry.detail)) {
-      failed.add(entry.toolCallId);
-      if (reportFailedAt === undefined || at > reportFailedAt) reportFailedAt = at;
-    } else if (lastReportAt === undefined || at > lastReportAt) lastReportAt = at;
+    settle(entry.toolCallId, entry.occurredAt, entry.phase === "failed" || failureDetail(entry.detail));
   }
   return {
     ...(model === undefined ? {} : { model }),

@@ -155,3 +155,20 @@ world projection. The textual twin is: Reading or searching / Editing / Running
 tests or builds / Planning / Waiting on you, selected from `activity.kind`. The
 app owns icons and accessible figure labels. Supporting an additional native
 tool requires an explicit host mapping; an unknown name never becomes a guess.
+
+## Amendment: Codex code mode (VUH-2804)
+
+Current Codex runs every tool inside one `exec` custom tool whose input is
+JavaScript. That source is an interpreter's input and stays unknown, with one
+exception: when the whole source is a single `tools.NAME(...)` call, optionally
+awaited and printed, whose argument is a JSON literal, it is that tool's native
+call, and the existing mapping applies to `NAME`. The source is never evaluated;
+the JSON literal guarantees that nothing follows the one call. Shell
+(`exec_command`, `write_stdin`), MCP and multi-call scripts stay unknown.
+
+In five recorded October rollouts, cut just after each `exec` call, 2 of 579
+in-flight calls named a kind (a lone `apply_patch`). Codex activity is therefore
+stance-only in practice. Codex report outcomes come from the native
+`McpToolCall` items, never from the `exec` source: in 40 rollouts those items
+recorded all 723 `message_clankie` calls, and the single-call match would have
+found only 306 of them.

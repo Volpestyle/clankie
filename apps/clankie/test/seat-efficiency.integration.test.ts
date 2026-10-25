@@ -322,6 +322,105 @@ it("records preaccept native MCP report failures once and keeps acknowledged rep
   );
 });
 
+it("reads Codex code-mode reports from native MCP items and maps only a lone literal exec call", async () => {
+  const dir = await directory();
+  const path = join(dir, "native.jsonl");
+  // Recorded 0.163 code-mode records (VUH-2804); private text is replaced, shapes are not.
+  const recorded = await readFile(
+    new URL("./fixtures/codex-code-mode-telemetry.jsonl", import.meta.url),
+    "utf8",
+  );
+  await writeFile(path, recorded);
+  const seat = observed(path);
+  const telemetry = await readSeatTelemetry(seat);
+  expect(telemetry).toMatchObject({
+    model: "gpt-6.1-sol",
+    effort: "high",
+    lastReportAt: "2026-10-24T16:45:46.667Z",
+    reportFailedAt: "2026-10-24T18:30:35.701Z",
+    reportFailures: 2,
+    reportFailureIds: [
+      "exec-8f174aa2-25c3-4837-9aae-2d4f930ce153",
+      "exec-453b29ab-177c-4c9b-ac68-4dc41d262f6d",
+    ],
+  });
+  const store = new SeatEfficiencyStore(join(dir, "efficiency.json"), { now: () => now });
+  expect(
+    store.observe({ occupantId: "session-worker-1", seatId: "seat-1", owner, telemetry }).flags,
+  ).toContain("reports failing");
+  expect(await readSeatActivity(seat, "working")).toBeUndefined();
+
+  const lines = recorded
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { timestamp: string; payload: Record<string, unknown> });
+  const replay = (type: string, callId: string, id: string) => {
+    const line = lines.find((entry) => entry.payload.type === type && entry.payload.call_id === callId)!;
+    return (
+      JSON.stringify({
+        ...line,
+        timestamp: new Date().toISOString(),
+        payload: { ...line.payload, call_id: id },
+      }) + "\n"
+    );
+  };
+  const expectCold = async () => {
+    const cold = join(dir, `cold-${Math.random()}.jsonl`);
+    await copyFile(path, cold);
+    expect([await readSeatTelemetry(seat), await readSeatActivity(seat, "working")]).toEqual([
+      await readSeatTelemetry(observed(cold)),
+      await readSeatActivity(observed(cold), "working"),
+    ]);
+  };
+  // A lone literal apply_patch is that native edit; a multi-call script stays unknown.
+  const patch = "call_1c3acd7bee7f47ea912cedecdb44a6cc";
+  await appendFile(path, replay("custom_tool_call", patch, "patch-open"));
+  expect(await readSeatActivity(seat, "working")).toMatchObject({
+    source: "native_tool",
+    kind: "editing",
+    toolName: "apply_patch",
+  });
+  await expectCold();
+  await appendFile(
+    path,
+    replay("custom_tool_call_output", patch, "patch-open") +
+      replay("custom_tool_call", "call_43b56aa10da14a3cb4f4a91bc9fefd4d", "script-open"),
+  );
+  expect(await readSeatActivity(seat, "working")).toBeUndefined();
+  await expectCold();
+
+  // Another thread's report and a received:false transport answer follow the same boundaries.
+  const mcp = (id: string, thread: string, result: Record<string, unknown>) =>
+    JSON.stringify({
+      timestamp: "2026-10-24T19:00:00.000Z",
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        thread_id: thread,
+        item: {
+          type: "McpToolCall",
+          id,
+          server: "worker",
+          tool: "message_clankie",
+          status: "completed",
+          result,
+        },
+      },
+    }) + "\n";
+  const thread = "01a16eb5-2569-72b2-8273-cb284d80ba6d";
+  await appendFile(
+    path,
+    mcp("exec-foreign", "01a16eb5-2569-72b2-8273-cb284d80ba6e", { content: [], isError: false }) +
+      mcp("exec-refused", thread, { content: [], structuredContent: { received: false }, isError: false }),
+  );
+  expect(await readSeatTelemetry(seat)).toMatchObject({
+    lastReportAt: "2026-10-24T16:45:46.667Z",
+    reportFailedAt: "2026-10-24T19:00:00.000Z",
+    reportFailures: 3,
+  });
+  await expectCold();
+});
+
 it("requires fifteen minutes of inactivity and a stored report after the latest brief", async () => {
   const dir = await directory();
   const store = new SeatEfficiencyStore(join(dir, "efficiency.json"), { now: () => now });
