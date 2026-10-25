@@ -18,7 +18,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function repository() {
+function repository({ reviewCli = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "landing-revalidate-"));
   roots.push(root);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -37,6 +37,20 @@ function repository() {
   git("config", "commit.gpgsign", "false");
   write(".gitignore", "/.local/\n");
   write("package.json", "{}\n");
+  // The synthetic repository explicitly has no standing reviewer. Exercise the
+  // real review subprocess contract without borrowing this machine's account.
+  if (reviewCli)
+    write(
+      "apps/tui/bin/clankie.ts",
+      `
+if (process.argv[2] !== "review" || process.argv[3] !== "status") process.exit(64);
+console.log(JSON.stringify({ schemaVersion: 1, required: false, landable: true,
+  patchId: "fixture-no-review", status: "not_required" }));
+`,
+    );
+  // A real local owner file makes unavailable-review coverage hold in CI too;
+  // the external-CI-without-owner exception is a different contract.
+  write(".local/owner-settings.json", "{}\n");
   write("apps/one/src/changed.ts", "export const changed = 1;\n");
   write("apps/one/src/imported.ts", "export const imported = 1;\n");
   write("apps/one/src/compiled.ts", "export const compiled = 1;\n");
@@ -91,8 +105,12 @@ function moveMainAndRebase(repo: ReturnType<typeof repository>, edit: () => void
 function revalidate(root: string, base: string) {
   const result = spawnSync(process.execPath, [gate, "--revalidate", "--root", root, "--base", base], {
     encoding: "utf8",
+    env: { ...process.env, CLANKIE_SETTINGS_FILE: join(root, ".local/owner-settings.json") },
   });
-  const verdict = JSON.parse(result.stdout.slice(0, result.stdout.lastIndexOf("}") + 1));
+  // Human diagnostics can contain braces (e.g. MODULE_NOT_FOUND's requireStack).
+  // The verdict is the leading JSON document, before the first gate message.
+  const diagnostic = result.stdout.indexOf("\n[landing]");
+  const verdict = JSON.parse(diagnostic < 0 ? result.stdout : result.stdout.slice(0, diagnostic));
   return { status: result.status, verdict, stdout: result.stdout };
 }
 
@@ -117,6 +135,18 @@ it("keeps a green gate when the incoming commit touches nothing it checked, and 
     .trim()
     .split("\n");
   expect(JSON.parse(history.at(-1)!)).toMatchObject({ kind: "revalidate", valid: true, gateHead: repo.head });
+});
+
+it("keeps a valid cached gate held when the synthetic review CLI is unavailable", async () => {
+  const repo = repository({ reviewCli: false });
+  await recordGreenGate(repo.root, repo.base, repo.head);
+  const { status, verdict, stdout } = revalidate(repo.root, repo.base);
+  expect(verdict).toMatchObject({ valid: true, reasons: [] });
+  expect(status).toBe(3);
+  expect(stdout).toContain("review status is unavailable; landing held");
+  expect(stdout).not.toContain("push without rerunning");
+  const report = JSON.parse(readFileSync(join(repo.root, ".local/landing-gate.json"), "utf8"));
+  expect(report.revalidations.at(-1).review.state).toBe("unavailable");
 });
 
 it.each([
