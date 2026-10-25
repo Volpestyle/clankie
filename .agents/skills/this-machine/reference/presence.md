@@ -18,6 +18,21 @@ replay historical notifications. They leave the body animation and `desktop`
 expressions separate. Reduce Motion keeps a static face. A published face
 does not establish that the owner saw it.
 
+## Voice provider readiness
+
+Read `clankie doctor --json` → `voice.providerReadiness` before a call, or
+`clankie discord call` → `providerReadiness` on the service. This opens only the
+configured listener port: no audio, commit, response generation or Discord join.
+The five-second probe shares a five-minute disk cache across CLI/service reads;
+repeated doctor calls use it. `refused` with `credit_balance_exhausted` names
+exhausted provider credit and outranks unrelated seat warnings. `missing_key`
+requires a brokered API key; OAuth chat subscriptions do not qualify.
+`unconfirmed`, `unavailable` and `checking` are not readiness. `ready` proves
+listener admission only, not synthesis or a full call. Anthropic still needs
+OpenAI transcription. Never infer that the whole voice stack works, change
+accounts, top up credit, or join a room just from this read. No refresh switch
+bypasses the cache.
+
 ## Body leases
 
 `clankie body status` shows the stable conversation holding each of Discord

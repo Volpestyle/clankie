@@ -140,6 +140,27 @@ observers, separate from public Discord messages.
 
 `clankie discord call` and TUI `/discord call` show the current call, speech,
 listening/thinking state, consented participant count and active captain handoffs.
+Before anyone joins, `clankie doctor` checks the selected provider's listener
+admission. `clankie discord call` and `/discord call` expose the same
+`providerReadiness` through `GET /v1/discord/room-voice`. OpenAI (also Anthropic's
+OpenAI transcription dependency) and xAI use their real listener port. The probe
+sends no audio, commits no input and requests no generated response. It closes
+on acceptance/refusal or after five seconds, with no meaningful usage spend.
+A private disk cache under `CLANKIE_STATE/voice-provider-readiness` (default
+`~/.clankie/voice-provider-readiness`) shares results across processes for five
+minutes, including failures and in-flight reservations. A brokered API key or
+listener-model change selects a new cache; unreadable cache storage never causes
+an uncached provider request. There is no force-refresh switch.
+
+`providerReadiness` reports `ready`, `refused` (for example
+`credit_balance_exhausted`), `missing_key`, `unconfirmed`, `unavailable`, `checking`
+or `disabled`, with check/expiry timestamps and whether the result was cached.
+Only a normalized provider code is exposed; never the key or provider message.
+When voice is enabled, a provider refusal takes doctor's headline ahead of
+unrelated seat-bridge warnings. `ready` proves listener admission, not speech
+output, conversation-model quota, or a successful end-to-end call. No synthesis
+or paid response is attempted to establish those.
+
 They also show the latest stay's `pipelines`: whether his hearing and answering are
 `working`, `broken` or `unproven`, read from that stay's content-free receipts.
 `broken` means the realtime provider's session was lost after that leg last worked:

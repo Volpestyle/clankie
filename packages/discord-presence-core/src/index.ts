@@ -345,3 +345,8 @@ export {
   type DiscordServerAuthority,
   type DiscordServerRequest,
 } from "./server-actions.ts";
+
+export {
+  readVoiceProviderReadiness,
+  type VoiceProviderReadinessOptions,
+} from "./voice-provider-readiness.ts";

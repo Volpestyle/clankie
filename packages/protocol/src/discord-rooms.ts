@@ -154,6 +154,20 @@ export const DiscordVoiceJoinRefusalSchema = z
   })
   .strict();
 export type DiscordVoiceJoinRefusal = z.infer<typeof DiscordVoiceJoinRefusalSchema>;
+/** Listener admission only: no audio, generated response, or Discord join. */
+export const VoiceProviderReadinessSchema = z
+  .object({
+    provider: z.enum(["openai", "xai", "anthropic"]),
+    checkedProvider: z.enum(["openai", "xai"]),
+    scope: z.literal("transcription"),
+    state: z.enum(["ready", "refused", "missing_key", "unconfirmed", "unavailable", "checking", "disabled"]),
+    providerCode: DiscordVoiceFailureCodeSchema.optional(),
+    checkedAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+    cached: z.boolean(),
+  })
+  .strict();
+export type VoiceProviderReadiness = z.infer<typeof VoiceProviderReadinessSchema>;
 export const DiscordRoomVoiceStatusSchema = z
   .object({
     state: z.enum(["idle", "active", "unknown"]),
@@ -175,6 +189,7 @@ export const DiscordRoomVoiceStatusSchema = z
     pipelines: DiscordVoiceStayPipelinesSchema.optional(),
     /** A join the voice provider refused after the latest stay began, e.g. no credit (VUH-2728). */
     joinRefusal: DiscordVoiceJoinRefusalSchema.optional(),
+    providerReadiness: VoiceProviderReadinessSchema.optional(),
   })
   .strict();
 export type DiscordRoomVoiceStatus = z.infer<typeof DiscordRoomVoiceStatusSchema>;

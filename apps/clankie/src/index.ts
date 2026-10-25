@@ -101,6 +101,7 @@ import {
   discordActorOwnsServer,
   MAX_REALTIME_AUDIO_APPEND_BYTES,
   parseVoiceRealtimeEnv,
+  readVoiceProviderReadiness,
 } from "@clankie/discord-presence-core";
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
@@ -2101,6 +2102,22 @@ const workMedia = new WorkMedia({
   },
   log: (fields, message) => logger.warn(fields, message),
 });
+const voiceProviderReadiness = async () => {
+  const settings = await settingsStore.load();
+  const env = { ...process.env };
+  applyVoiceSettingsToEnvironment(settings.voice, env);
+  const config = parseVoiceRealtimeEnv(env);
+  const discord = resolveDiscordSettings(settings.discord, env).settings;
+  return readVoiceProviderReadiness({
+    provider: config.realtimeProvider,
+    enabled: discord.activeBody === "user_session" ? discord.userSessionVoiceEnabled : discord.voiceEnabled,
+    model: config.transcribeModel,
+    getApiKey: async (provider) => {
+      const credential = await operatorCredentialStore.get(provider);
+      return credential?.type === "api" ? credential.key : undefined;
+    },
+  });
+};
 const clankie = await createClankieApp({
   voiceCall: {
     // Read when a call starts, never at boot: the broker is touched only when someone calls.
@@ -2215,7 +2232,13 @@ const clankie = await createClankieApp({
   },
   refreshWorkerCatalogs: workerToolRefresh.refresh,
   roomObservations,
-  roomVoice: new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore),
+  roomVoice: new DiscordRoomVoice(
+    bodyVoiceStays,
+    bodyLeaseStore,
+    undefined,
+    undefined,
+    voiceProviderReadiness,
+  ),
   discordTurnReceipts,
   bodyVoiceStays,
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,

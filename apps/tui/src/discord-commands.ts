@@ -19,6 +19,7 @@ import { runDiscordSetup, showDiscordSetup } from "./discord-setup.ts";
 import {
   formatDiscordRoomStatus,
   formatVoiceJoinRefusal,
+  formatVoiceProviderReadiness,
   formatVoiceStayPipelines,
 } from "./discord-room-view.ts";
 import { parseDiscordSettingValue } from "./command/discord.ts";
@@ -141,7 +142,7 @@ export function buildDiscordCommands(services: DiscordCommandServices): FaceShel
           const voice = await services.rooms.discordRoomVoice();
           shell.insertCommandResult(
             "/discord call",
-            `${voice.state} · ${voice.activity} · speech output ${voice.state === "unknown" ? "unconfirmed" : voice.outputMuted ? "muted" : "audible"}\n${voice.consentedParticipantCount} consented participants · ${voice.activeCaptureCount} active captures · ${voice.handoffCount} captain handoffs\nSpeaking: ${voice.speakers === undefined ? "unknown" : voice.speakers.length === 0 ? "nobody observed" : voice.speakers.map((speaker) => stripVTControlCharacters(speaker.displayName ?? speaker.userId).replace(/[\r\n\t]/gu, " ")).join(", ")}\n${voice.joinRefusal === undefined ? "" : `${formatVoiceJoinRefusal(voice.joinRefusal)}\n`}${voice.pipelines === undefined ? "" : `${formatVoiceStayPipelines(voice.pipelines)}\n`}${voice.conversationId ?? "Owner unknown"}\nOpt-in words: /voice transcripts. Music and Go Live audio use separate controls.`,
+            `${voice.state} · ${voice.activity} · speech output ${voice.state === "unknown" ? "unconfirmed" : voice.outputMuted ? "muted" : "audible"}\n${voice.consentedParticipantCount} consented participants · ${voice.activeCaptureCount} active captures · ${voice.handoffCount} captain handoffs\nSpeaking: ${voice.speakers === undefined ? "unknown" : voice.speakers.length === 0 ? "nobody observed" : voice.speakers.map((speaker) => stripVTControlCharacters(speaker.displayName ?? speaker.userId).replace(/[\r\n\t]/gu, " ")).join(", ")}\n${voice.providerReadiness === undefined ? "" : `${formatVoiceProviderReadiness(voice.providerReadiness)}\n`}${voice.joinRefusal === undefined ? "" : `${formatVoiceJoinRefusal(voice.joinRefusal)}\n`}${voice.pipelines === undefined ? "" : `${formatVoiceStayPipelines(voice.pipelines)}\n`}${voice.conversationId ?? "Owner unknown"}\nOpt-in words: /voice transcripts. Music and Go Live audio use separate controls.`,
             "success",
           );
           const flow = shell.setupFlow;

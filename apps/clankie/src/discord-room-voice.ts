@@ -5,6 +5,7 @@ import {
   DiscordVoicePresenceResultSchema,
   DiscordRoomVoiceStatusSchema,
   type DiscordRoomVoiceStatus,
+  type VoiceProviderReadiness,
 } from "@clankie/protocol";
 import type { BodyVoiceStays } from "./body-voice-stays.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
@@ -43,16 +44,19 @@ export class DiscordRoomVoice {
   private readonly leases: BodyLeaseStore;
   private readonly post: (path: string, body: unknown) => Promise<Response>;
   private readonly health: () => Promise<VoiceCallHealth>;
+  private readonly readiness: (() => Promise<VoiceProviderReadiness>) | undefined;
   constructor(
     stays: BodyVoiceStays,
     leases: BodyLeaseStore,
     post = (path: string, body: unknown) => postToDiscordActiveBody(path, body, process.env, fetch),
     health = () => readVoiceCallHealth(defaultDiscordLiveReceiptPath()),
+    readiness?: () => Promise<VoiceProviderReadiness>,
   ) {
     this.stays = stays;
     this.leases = leases;
     this.post = post;
     this.health = health;
+    this.readiness = readiness;
   }
   async status(): Promise<DiscordRoomVoiceStatus> {
     const response = await this.post("/voice/status", {});
@@ -62,6 +66,7 @@ export class DiscordRoomVoice {
     const { active, outputControlUncertain, speakers, ...details } = snapshot;
     // allow-swallowed-rejection -- unreadable receipts only omit the stay's hearing and answering
     const { pipelines, joinRefusal } = await this.health().catch((): VoiceCallHealth => ({}));
+    const providerReadiness = await this.readiness?.();
     const exact =
       active && lease?.state === "active" && this.stays.observesActiveAudio(lease.conversationId, snapshot);
     return DiscordRoomVoiceStatusSchema.parse({
@@ -79,6 +84,7 @@ export class DiscordRoomVoice {
       ...(exact && speakers !== undefined ? { speakers } : {}),
       ...(pipelines === undefined ? {} : { pipelines }),
       ...(joinRefusal === undefined ? {} : { joinRefusal }),
+      ...(providerReadiness === undefined ? {} : { providerReadiness }),
     });
   }
   async join(

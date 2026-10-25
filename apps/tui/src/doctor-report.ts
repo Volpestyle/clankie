@@ -5,7 +5,11 @@ import type { InstallDoctorReport } from "./install-doctor.ts";
 import { formatWorkingPreferences } from "./command/working-preferences.ts";
 import { formatRuntimeHealth } from "./command/runtime-health.ts";
 import { formatSeatDeliveryAge } from "./command/seat-delivery.ts";
-import { formatVoiceJoinRefusal, formatVoiceStayPipelines } from "./discord-room-view.ts";
+import {
+  formatVoiceProviderReadiness,
+  formatVoiceJoinRefusal,
+  formatVoiceStayPipelines,
+} from "./discord-room-view.ts";
 
 const mark = (ok: boolean) => (ok ? "✓" : "✗");
 const clean = (text: string) =>
@@ -184,6 +188,9 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
         ? [`  Discord delivery · unavailable: ${report.discordRoomDelivery.detail}`]
         : []),
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
+    ...(report.voice.providerReadiness === undefined
+      ? []
+      : [`  Voice · ${formatVoiceProviderReadiness(report.voice.providerReadiness)}`]),
     ...(report.discordVoice?.joinRefusal === undefined
       ? []
       : [`  Discord voice · ${formatVoiceJoinRefusal(report.discordVoice.joinRefusal)}`]),

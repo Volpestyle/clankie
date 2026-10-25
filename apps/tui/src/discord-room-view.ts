@@ -52,3 +52,10 @@ export function formatUnheardSpeakers(hearing: DiscordVoiceStayPipelines["hearin
     ? undefined
     : hearing.brokenUserIds.map((id) => stripVTControlCharacters(id).replace(/[\r\n\t]/gu, " ")).join(", ");
 }
+
+/** Admission is deliberately narrower than a working call. */
+export function formatVoiceProviderReadiness(
+  value: import("@clankie/protocol").VoiceProviderReadiness,
+): string {
+  return `${value.checkedProvider} listener: ${value.state}${value.providerCode === undefined ? "" : ` (${value.providerCode})`} · ${value.cached ? "cached" : "checked"} ${value.checkedAt} · expires ${value.expiresAt} · no audio or response generated`;
+}

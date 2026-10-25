@@ -1,3 +1,4 @@
+import { readVoiceProviderReadiness } from "@clankie/discord-presence-core";
 import {
   autonomyDrift,
   matchingAutonomyLevel,
@@ -35,6 +36,8 @@ import {
   SettingsStore,
   defaultSettingsPath,
   keepAwakeEnabled,
+  resolveVoiceSettings,
+  resolveDiscordSettings,
   linearFollowStatus,
   type ClankieSettings,
 } from "@clankie/settings";
@@ -139,6 +142,7 @@ export interface InstallDoctorReport {
   readonly voice: {
     readonly realtimeProvider: ClankieSettings["voice"]["realtimeProvider"];
     readonly ttsProvider: ClankieSettings["voice"]["ttsProvider"];
+    readonly providerReadiness?: import("@clankie/protocol").VoiceProviderReadiness;
   };
   readonly gameplay: {
     readonly pokeagentMmoEnabled: boolean;
@@ -296,6 +300,18 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   const drift = autonomyDrift(settings.autonomy.fleet);
   const config = await (options.loadConfigImpl ?? loadConfig)({ cwd: options.repoRoot, env });
   const credentialStore = options.credentialStore ?? createDefaultCredentialStore({ env });
+  const voice = resolveVoiceSettings(settings.voice, env).settings;
+  const discord = resolveDiscordSettings(settings.discord, env).settings;
+  const providerReadiness = await readVoiceProviderReadiness({
+    provider: voice.realtimeProvider,
+    enabled: discord.activeBody === "user_session" ? discord.userSessionVoiceEnabled : discord.voiceEnabled,
+    ...(voice.openAiTranscribeModel === undefined ? {} : { model: voice.openAiTranscribeModel }),
+    env,
+    getApiKey: async (provider) => {
+      const credential = await credentialStore.get(provider);
+      return credential?.type === "api" ? credential.key : undefined;
+    },
+  });
   const linearServer = settings.mcp.servers.find((server) => server.id === "linear");
   const trackerCredential = linearServer?.credential ?? "linear";
   const [credentials, linearSecret] = await Promise.all([
@@ -455,8 +471,9 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       roomSkillGrants: settings.discord.roomSkills.length,
     },
     voice: {
-      realtimeProvider: settings.voice.realtimeProvider,
-      ttsProvider: settings.voice.ttsProvider,
+      realtimeProvider: voice.realtimeProvider,
+      ttsProvider: voice.ttsProvider,
+      providerReadiness,
     },
     gameplay: {
       pokeagentMmoEnabled: settings.gameplay.pokeagentMmoEnabled,

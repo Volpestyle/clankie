@@ -376,6 +376,9 @@ importers:
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker
+      '@clankie/discord-presence-core':
+        specifier: workspace:*
+        version: link:../../packages/discord-presence-core
       '@clankie/fleet-resources':
         specifier: workspace:*
         version: link:../../packages/fleet-resources

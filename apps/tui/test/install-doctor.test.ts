@@ -609,6 +609,41 @@ describe("install doctor", () => {
         "ready",
       );
 
+      // VUH-2811: a current provider refusal must beat an unrelated seat warning before any join.
+      const providerRefused = {
+        ...healthy,
+        voice: {
+          ...healthy.voice,
+          providerReadiness: {
+            provider: "openai" as const,
+            checkedProvider: "openai" as const,
+            scope: "transcription" as const,
+            state: "refused" as const,
+            providerCode: "credit_balance_exhausted",
+            cached: true,
+            checkedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 300_000).toISOString(),
+          },
+        },
+        seatBridges: {
+          bridges: [
+            {
+              conversationId: "unrelated",
+              state: "disconnected" as const,
+              eventKinds: [],
+              ownerOrigin: true,
+              detail: "unrelated disconnected seat",
+            },
+          ],
+        },
+      };
+      expect(formatDoctorSummary(providerRefused)).toContain("credit_balance_exhausted");
+      expect(formatDoctorSummary(providerRefused)).not.toContain("Seat bridge");
+      expect(formatDoctorReport(providerRefused)).toContain("listener: refused (credit_balance_exhausted)");
+      expect(formatDoctorSummary({ ...providerRefused, voice: healthy.voice })).toContain(
+        "Seat bridge disconnected",
+      );
+
       // A call the provider hung up on reads as deaf or mute, with how the session ended (VUH-2728).
       const voice = {
         state: "idle" as const,

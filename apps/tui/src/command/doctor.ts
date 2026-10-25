@@ -103,6 +103,11 @@ function doctorSummary(report: InstallDoctorReport): string {
       : undefined;
   if (refusal)
     return `Machine ${refusal.machine} refused ${refusal.required} access (${refusal.accessLevel}). ${refusal.fix}`;
+  const readiness = report.voice.providerReadiness;
+  if (readiness?.state === "refused")
+    return `Voice provider ${readiness.checkedProvider} refused the listener${readiness.providerCode === undefined ? "" : ` with ${readiness.providerCode}`} — run \`clankie discord call\` (cached check; no call joined).`;
+  if (readiness?.state === "missing_key")
+    return `Voice needs a brokered ${readiness.checkedProvider} API key — run \`clankie\`, then \`/auth ${readiness.checkedProvider}\`.`;
   const unavailableBridge =
     report.seatBridges && "bridges" in report.seatBridges
       ? report.seatBridges.bridges.find((bridge) => bridge.state !== "current")

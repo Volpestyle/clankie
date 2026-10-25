@@ -340,6 +340,7 @@ export interface RealtimeSocket {
 export type RealtimeSocketFactory = (
   url: string,
   headers: Readonly<Record<string, string>>,
+  signal?: AbortSignal,
 ) => Promise<RealtimeSocket>;
 
 /** Injected timer seam so the session lifetime cap is testable without wall-clock time. */
@@ -497,10 +498,10 @@ export interface RealtimeConversationSessionOptions extends RealtimeSessionCommo
 
 /**
  * Production socket factory over the global WebSocket (Node ≥ 22 ships one via
- * undici, whose init object accepts extra headers). Never used by tests —
- * they inject a fake — so this stays a thin, obviously-correct wrapper.
+ * undici, whose init object accepts extra headers). The readiness integration
+ * proof exercises this transport against a loopback provider.
  */
-export const openRealtimeWebSocket: RealtimeSocketFactory = (url, headers) => {
+export const openRealtimeWebSocket: RealtimeSocketFactory = (url, headers, signal) => {
   // The DOM lib types WebSocket's second parameter as protocols only; Node's
   // undici implementation additionally accepts an init object with headers,
   // which is the only way to attach the bearer token — hence the cast.
@@ -516,7 +517,17 @@ export const openRealtimeWebSocket: RealtimeSocketFactory = (url, headers) => {
     return Promise.reject(new Error("globalThis.WebSocket is unavailable; inject a RealtimeSocketFactory"));
   }
   return new Promise<RealtimeSocket>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("Realtime connection canceled"));
+      return;
+    }
     const socket = new WebSocketCtor(url, { headers });
+    const cancel = () => {
+      socket.close();
+      reject(new Error("Realtime connection canceled"));
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    socket.addEventListener("close", () => signal?.removeEventListener("abort", cancel), { once: true });
     const messageHandlers: ((data: string) => void)[] = [];
     const closeHandlers: ((code?: number) => void)[] = [];
     const errorHandlers: ((error: unknown) => void)[] = [];

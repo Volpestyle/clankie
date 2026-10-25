@@ -8935,7 +8935,7 @@ only after a definite refusal before acceptance. Revoked source authority or
 presence, a changed designation, and uncertain dispatch cannot trigger fallback.
 This forwards the explicit request/result only and grants no room privileges.
 
-Discord room inspection, private next-turn guidance, delivery health and exact-stay voice controls are documented in [Discord rooms](discord-rooms.md). Use `clankie discord rooms`, `clankie discord guide CONVERSATION_ID TEXT`, and `clankie discord call`.
+Discord room inspection, private next-turn guidance, delivery health and exact-stay voice controls are documented in [Discord rooms](discord-rooms.md). Use `clankie discord rooms`, `clankie discord guide CONVERSATION_ID TEXT`, and `clankie discord call`. Doctor and call status report listener-provider readiness before a join: a bounded, five-minute cached admission check with no audio or response generation; `credit_balance_exhausted` outranks unrelated seat warnings. Listener readiness does not prove that a full call can hear and answer.
 
 ### Project workspace removal
 
