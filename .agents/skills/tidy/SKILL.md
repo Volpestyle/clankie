@@ -18,9 +18,9 @@ without waiting for the owner to list panes or approve each close.
 Acknowledge a report only once you have its result; that is what lets the pane
 go. The service also tidies on its own under the owner's `autoTidy` fleet setting
 (default `1h`), through the same guards, and only with positive work proof: a
-kept report, every report acknowledged, and landing proven by advertised
-`origin/main` ancestry or a retained current-HEAD decision covering every
-unlanded commit. Missing or non-Git working directories and incomplete
+kept report, every report acknowledged, and every unlanded commit landed on
+advertised `origin/main`, covered by a retained current-HEAD decision, or parked
+(below). Missing or non-Git working directories, dirty files and incomplete
 observations hold the pane; never infer no work from an empty result. It adopts a
 local hire whose start never confirmed only from the exact native session its
 original receipt recorded. Your fleet round lists hires idle past the window that
@@ -48,9 +48,16 @@ unlanded commits allow close when every commit is in a live merge-queue request,
 reachable from a verified pushed remote ref, or covered by a `worth_landing` or
 `safe_to_drop` decision at the current HEAD. Stale tracking refs and stale
 decisions do not count, and `git cherry` skips merges, so unique merge
-resolutions need the same handoff. Dirty files always refuse, even with a
-decision or `unlandedReason`; pass `unlandedReason` only for a deliberate
-decision about clean commits. Unknown draft state or provenance is a technical
+resolutions count as unlanded. Any clean commits left over are **parked**: the
+close creates a local branch `keep/<deliverable>-<sha12>` (the worktree's branch
+name, or the pane title when detached) at the worktree's HEAD, records its ref,
+HEAD and commit SHAs as a `parked` handoff in the close receipt, issue comment
+and lead notice, and closes. The worktree stays; the branch survives its removal.
+Parking never moves an existing ref: a taken name refuses `unlanded_work`.
+Recover with `git log keep/...`; delete the branch once its work has landed or
+is dropped. Dirty files always refuse, even with a decision or
+`unlandedReason`; pass `unlandedReason` only for clean commits that could not be
+parked. Unknown draft state or provenance is a technical
 failure: leave that pane alone and explain the gap. A missing Herdr session on a
 reattached pane is not evidence that the worker is finished or that its results
 are lost. Never bypass a refusal with raw pane-close or keystrokes, and never

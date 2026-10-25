@@ -76,11 +76,75 @@ sequenceDiagram
   with the prompt recorded (started) and not recorded (unverified). Both fail on the old
   adapter.
 
+## Parking clean unlanded work (part d)
+
+A finished hire whose worktree holds clean commits that nothing hands off (no
+`origin/main` landing, merge-queue request, pushed ref or current-HEAD decision) no longer
+holds its close. `close_worker_pane` and auto-tidy park those commits on a new local
+branch, `refs/heads/keep/<deliverable>-<sha12>` (the worktree's branch name, or the pane
+title when detached), and record a `parked` handoff with the ref, HEAD and commit SHAs in
+the close receipt. The same refs go into the lead's auto-tidy notice, the seat issue
+comment and a `closed_unreconciled` worktree decision, and then the pane closes. This
+replaces the lead's manual `git branch -f keep/...` plus `unlandedReason`.
+
+```mermaid
+flowchart TD
+  A[close or auto-tidy sweep] --> B{worktree readable, clean, has HEAD?}
+  B -- no: dirty / unknown / remote --> R[refuse unlanded_work]
+  B -- yes --> C[cover commits: main, merge queue, pushed ref*, decision]
+  C --> D{commits left?}
+  D -- no --> G[close guards]
+  D -- yes --> P[plan keep/&lt;deliverable&gt;-&lt;sha12&gt;]
+  P --> G
+  G --> S[save closing record]
+  S --> F[final guard: create ref only if absent or already at HEAD]
+  F -- name taken at another commit --> R
+  F -- ok --> X[native close; receipt records parked ref + SHAs]
+```
+
+\* Pushed refs count for a manual close only; auto-tidy counts advertised `origin/main`.
+
+The ref is created only in the final close guard, after the closing record is saved, so a
+close refused before then (draft, provenance, report, dirty work) parks nothing. A keep or
+lost authority that arrives within that final guard can still refuse after the ref exists;
+the ref then only preserves the commits. Parking never moves an existing ref.
+Dirty, unreadable, remote and missing work directories still refuse, as before.
+
+- **Native, real Herdr and Claude.** `apps/clankie/test/auto-tidy-parking-native.integration.test.ts`
+  (manual: `AUTO_TIDY_PARKING_NATIVE_TEST=1`, `CLAUDE_NATIVE_CONFIG_DIR`). It runs two idle
+  real Claude TUIs (no prompt, Clankie plugins disabled, `DISABLE_AUTOUPDATER=1`, real XDG
+  directories, launcher asserted unchanged) in an isolated Herdr, with disposable
+  worktrees of a fixture repository. Each TUI runs in this trusted checkout, and the tidy
+  reads its fixture worktree through the production Git reconciliation. Results, run
+  with `CLAUDE_NATIVE_CONFIG_DIR=~/.claude-james` (`parking/results.json`):
+  - `close_worker_pane` path with a dirty detached worktree: refuses `unlanded_work`, with
+    and without `unlandedReason`. No ref is created and the pane stays.
+  - Two clean, unreferenced detached commits: closed, `parked` on
+    `keep/claude-code-6c15ade12fbb` with both SHAs, and the native pane is gone.
+  - Auto-tidy with a dirty branch worktree: held `unlanded_work` past the window. The lead
+    round names the next step.
+  - Auto-tidy when someone else's ref already holds the park name: held, and that ref is
+    unchanged.
+  - Auto-tidy, clean: closed, `parked` on `keep/vuh-2802-spike-821ba41cc110`. The lead
+    notice lists it, and a `closed_unreconciled` decision is recorded.
+  - Both worktrees removed, the worker branch deleted, every reflog expired and
+    `gc --prune=now`: both parked stacks still read back.
+- **Old-source regression.** The same native test against the pre-change source fails at
+  the clean manual close (`parking/results-old-source.json`). Four
+  `pane-tidy.integration.test.ts` cases fail on the old source: detached work, a pushed
+  feature branch, partial pushes and a unique merge resolution. All now park. A fifth,
+  rewritten case keeps the old explicit `unlandedReason` path for clean commits that
+  cannot be parked.
+
+Not changed: the operator `close_seat` route (TUI and app) keeps its existing
+`unlandedReason` hold. A rollback to a build before this change cannot parse close
+history that holds a `parked` handoff.
+
 ## Limits
 
 - The lead-round text is checked in the native test. A live 30-minute round was not observed.
-- Parking clean, unlanded work (the issue's third criterion) is not implemented.
-  Such seats now appear in the lead round as `unlanded_work`.
+- Parking (the third criterion) is proven in an isolated Herdr, not yet on the live fleet
+  over a real idle window. The service must restart onto this code first.
 - During development, one native run let the isolated Herdr's `XDG_DATA_HOME` reach
   Claude. Its installer repointed `~/.local/bin/claude` into the temporary directory for
   about a minute (01:40–01:41Z) until it was restored. The test now strips those

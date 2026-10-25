@@ -198,7 +198,9 @@ verified pushed remote head/tag, or covered by a `worth_landing`/`safe_to_drop`
 decision at its current HEAD. Its receipt and lead history record the handoff
 kind and request, remote ref or decision ID with covered commits. Queue history,
 cancelled/interrupted requests, stale remote-tracking refs and old-HEAD decisions
-do not count. Dirty or unreadable worktrees still refuse. Closing a pane keeps
+do not count. Clean commits none of these cover are parked on a new local
+`keep/<deliverable>-<sha12>` branch, recorded as a `parked` handoff, and the pane
+closes. Dirty or unreadable worktrees still refuse. Closing a pane keeps
 its worktree; it does not cancel the queue request or authorize pruning.
 
 ## Gates on a linked machine

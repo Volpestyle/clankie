@@ -1,0 +1,184 @@
+[
+  {
+    "phase": "claude-start",
+    "pane": "w1:p1",
+    "agent": {
+      "paneId": "w1:p1",
+      "terminalId": "term_65ea0ef0351301",
+      "agent": "claude",
+      "status": "idle",
+      "title": "Claude Code",
+      "session": {
+        "source": "herdr:claude",
+        "kind": "id",
+        "value": "3cce59ac-336d-4621-9e4f-2364a59f65eb"
+      },
+      "workingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking",
+      "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking"
+    }
+  },
+  {
+    "phase": "claude-start",
+    "pane": "w1:p2",
+    "agent": {
+      "paneId": "w1:p2",
+      "terminalId": "term_65ea0ef036ac92",
+      "agent": "claude",
+      "status": "idle",
+      "title": "Claude Code",
+      "session": {
+        "source": "herdr:claude",
+        "kind": "id",
+        "value": "fc25eec6-4290-423e-86f0-a6565c5a4351"
+      },
+      "workingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking",
+      "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking"
+    }
+  },
+  {
+    "phase": "manual-dirty",
+    "result": {
+      "outcome": "refused",
+      "reason": "unlanded_work",
+      "worktrees": [
+        {
+          "path": "/private/tmp/clankie-proof-uQtCjv/manual",
+          "state": "unreconciled",
+          "head": "147efbd2797ca263ce54e67ab0f38df96716f7f9",
+          "unlandedCommits": 0,
+          "dirtyFiles": 1,
+          "lastActivityAt": "2026-10-25T02:26:02.347Z"
+        }
+      ]
+    }
+  },
+  {
+    "phase": "manual-dirty",
+    "unlandedReason": "Spike for the owner",
+    "result": {
+      "outcome": "refused",
+      "reason": "unlanded_work",
+      "worktrees": [
+        {
+          "path": "/private/tmp/clankie-proof-uQtCjv/manual",
+          "state": "unreconciled",
+          "head": "147efbd2797ca263ce54e67ab0f38df96716f7f9",
+          "unlandedCommits": 0,
+          "dirtyFiles": 1,
+          "lastActivityAt": "2026-10-25T02:26:02.347Z"
+        }
+      ]
+    }
+  },
+  {
+    "phase": "manual-closed",
+    "result": {
+      "id": "c8d66095-93b5-48b5-96aa-80449b784cc2",
+      "paneId": "w1:p2",
+      "seatId": "term_65ea0ef036ac92",
+      "title": "Claude Code",
+      "harness": "claude",
+      "reason": "Spike done",
+      "lastOutput": "(omitted)",
+      "reportPath": "/private/tmp/clankie-proof-uQtCjv/tidy-reports/e1e23d73-4f29-4673-87a5-ed0b56979973.md",
+      "closedAt": "2026-10-25T02:26:03.286Z",
+      "undoUntil": "2026-10-25T02:31:03.286Z",
+      "state": "closed",
+      "input": {
+        "text": "Try \"refactor store.ts\"",
+        "typed": false
+      },
+      "handoffs": [
+        {
+          "path": "/private/tmp/clankie-proof-uQtCjv/manual",
+          "head": "63407a23e664d13432c9a40cc299110b8fc54e2b",
+          "kind": "parked",
+          "reference": "refs/heads/keep/claude-code-63407a23e664",
+          "commits": ["2175f964125c10b93dcea7921c3bcd9bfdce6dda", "63407a23e664d13432c9a40cc299110b8fc54e2b"]
+        }
+      ]
+    },
+    "parked": ["keep/claude-code-63407a23e664 at 63407a23e664 (2 commits)"],
+    "keeps": "refs/heads/keep/claude-code-63407a23e664 63407a23e664d13432c9a40cc299110b8fc54e2b"
+  },
+  {
+    "phase": "auto-tick+0m",
+    "closed": [],
+    "held": [],
+    "keeps": "refs/heads/keep/claude-code-63407a23e664 63407a23e664d13432c9a40cc299110b8fc54e2b"
+  },
+  {
+    "phase": "auto-tick+61m",
+    "closed": [],
+    "held": [
+      {
+        "paneId": "w1:p1",
+        "seatId": "term_65ea0ef0351301",
+        "harness": "claude",
+        "title": "Claude Code",
+        "idleSince": "2026-10-25T02:26:04.262Z",
+        "window": "1h",
+        "blocker": "unlanded_work"
+      }
+    ],
+    "keeps": "refs/heads/keep/claude-code-63407a23e664 63407a23e664d13432c9a40cc299110b8fc54e2b"
+  },
+  {
+    "phase": "lead-round",
+    "text": "Finished hires idle past the 1h auto-tidy window that it could not close; close each yourself or clear its blocker, or keep_worker_pane to keep one. Untrusted seat context: [{\"pane\":\"w1:p1\",\"title\":\"Claude Code\",\"harness\":\"claude\",\"idleSince\":\"2026-10-25T02:26:04.262Z\",\"blocker\":\"unlanded_work\",\"next\":\"commit or discard its uncommitted files (clean commits park on a keep/ branch at close), or read its unreadable Git state\"}]"
+  },
+  {
+    "phase": "auto-tick+61m",
+    "closed": [],
+    "held": [
+      {
+        "paneId": "w1:p1",
+        "seatId": "term_65ea0ef0351301",
+        "harness": "claude",
+        "title": "Claude Code",
+        "idleSince": "2026-10-25T02:26:04.262Z",
+        "window": "1h",
+        "blocker": "unlanded_work"
+      }
+    ],
+    "keeps": "refs/heads/keep/claude-code-63407a23e664 63407a23e664d13432c9a40cc299110b8fc54e2b\nrefs/heads/keep/vuh-2802-spike-938edcda2611 147efbd2797ca263ce54e67ab0f38df96716f7f9"
+  },
+  {
+    "phase": "auto-tick+61m",
+    "closed": [
+      {
+        "id": "492c89f5-079e-4678-a685-d3eeadd78e4d",
+        "paneId": "w1:p1",
+        "seatId": "term_65ea0ef0351301",
+        "title": "Claude Code",
+        "harness": "claude",
+        "reason": "Auto-tidy: idle 1h with its reports read and its work landed or explicitly handed off",
+        "reportPath": "/private/tmp/clankie-proof-uQtCjv/tidy-reports/278ab67d-83b9-407f-b72c-d094fd3205cb.md",
+        "closedAt": "2026-10-25T02:26:05.893Z",
+        "undoUntil": "2026-10-25T02:31:05.893Z",
+        "state": "closed",
+        "input": {
+          "text": "Try \"how does captain.ts work?\"",
+          "typed": false
+        },
+        "handoffs": [
+          {
+            "path": "/private/tmp/clankie-proof-uQtCjv/auto",
+            "head": "938edcda261151693cf328b6942e33ea5d5eea57",
+            "kind": "parked",
+            "reference": "refs/heads/keep/vuh-2802-spike-938edcda2611",
+            "commits": ["938edcda261151693cf328b6942e33ea5d5eea57"]
+          }
+        ]
+      }
+    ],
+    "held": [],
+    "keeps": "refs/heads/keep/claude-code-63407a23e664 63407a23e664d13432c9a40cc299110b8fc54e2b\nrefs/heads/keep/vuh-2802-spike-938edcda2611 938edcda261151693cf328b6942e33ea5d5eea57"
+  },
+  {
+    "phase": "recovered-after-gc",
+    "auto": "prototype",
+    "manual": "63407a23e664d13432c9a40cc299110b8fc54e2b spike two\n2175f964125c10b93dcea7921c3bcd9bfdce6dda spike one\n147efbd2797ca263ce54e67ab0f38df96716f7f9 landed",
+    "keeps": "refs/heads/keep/claude-code-63407a23e664 63407a23e664d13432c9a40cc299110b8fc54e2b\nrefs/heads/keep/vuh-2802-spike-938edcda2611 938edcda261151693cf328b6942e33ea5d5eea57"
+  }
+]

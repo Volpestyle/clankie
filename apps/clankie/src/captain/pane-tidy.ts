@@ -46,7 +46,8 @@ const HandoffSchema = z
     path: z.string(),
     head: z.string(),
     commits: z.array(z.string()),
-    kind: z.enum(["merge_queue", "remote_ref", "worth_landing", "safe_to_drop"]),
+    /** parked: clean unlanded commits preserved on a local keep/ branch at close (VUH-2802). */
+    kind: z.enum(["merge_queue", "remote_ref", "worth_landing", "safe_to_drop", "parked"]),
     reference: z.string(),
   })
   .strict();
@@ -166,6 +167,16 @@ function leadEntry(entry: Entry): ClosedWorkerPaneHistory {
     ...(entry.handoffs ? { handoffs: entry.handoffs } : {}),
     ...(entry.restoredHire ? { restoredHire: entry.restoredHire } : {}),
   };
+}
+
+/** Each ref a close parked clean unlanded commits on, for issue comments and lead notices. */
+export function parkedRefs(entry: Pick<ClosedWorkerPaneHistory, "handoffs">): string[] {
+  return (entry.handoffs ?? [])
+    .filter((handoff) => handoff.kind === "parked")
+    .map(
+      (handoff) =>
+        `${handoff.reference.replace(/^refs\/heads\//u, "")} at ${handoff.head.slice(0, 12)} (${handoff.commits.length} commit${handoff.commits.length === 1 ? "" : "s"})`,
+    );
 }
 
 /** Judgment is the lead's. This service checks only hard lines and technical admission. */
@@ -450,8 +461,47 @@ export class PaneTidy {
       fail("authority_unavailable");
     }
   }
-  /** Check every held commit, including merge resolutions, against an actual handoff. */
-  private async worktreeHandoffs(agent: HerdrAgentSnapshot, automatic = false) {
+  /**
+   * Preserve a clean worktree's HEAD on `refs/heads/keep/<deliverable>-<short>` (VUH-2802).
+   * Without `create` it only names the ref. It never moves an existing ref: one already at
+   * this HEAD is reused, and one anywhere else refuses.
+   */
+  private async parkRef(agent: HerdrAgentSnapshot, work: WorktreeReconciliation, create: boolean) {
+    const head = work.head!;
+    const deliverable =
+      (work.branch?.split("/").pop() || agent.title)
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/gu, "-")
+        .replace(/\.{2,}/gu, ".")
+        .replace(/-{2,}/gu, "-")
+        .replace(/^[.-]+|[.-]+$/gu, "")
+        .slice(0, 48)
+        .replace(/[.-]+$/u, "") || "worker";
+    const ref = `refs/heads/keep/${deliverable}-${head.slice(0, 12)}`;
+    if (!create) return ref;
+    const existing = async () =>
+      (
+        await checkoutGit(work.path, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).catch(() => "")
+      ).trim();
+    if ((await existing()) !== head)
+      await checkoutGit(work.path, [
+        "update-ref",
+        "--create-reflog",
+        "-m",
+        `clankie: parked before closing ${agent.paneId}`,
+        ref,
+        head,
+        "",
+      ]).catch(() => undefined);
+    if ((await existing()) !== head) throw Error(`Cannot park on ${ref}`);
+    return ref;
+  }
+  /**
+   * Check every held commit, including merge resolutions, against an actual handoff. Clean
+   * commits nothing else covers are parked on a keep/ ref; `park` creates it, otherwise the
+   * ref is only planned so a refused close leaves nothing behind.
+   */
+  private async worktreeHandoffs(agent: HerdrAgentSnapshot, automatic = false, park = false) {
     const held: WorktreeReconciliation[] = [];
     const handoffs: Handoff[] = [];
     const options = { requireProof: automatic };
@@ -572,6 +622,11 @@ export class PaneTidy {
         ) {
           const remaining = commits.filter((commit) => !covered.has(commit));
           proof.push(receipt(decision.decision as "worth_landing" | "safe_to_drop", decision.id, remaining));
+          for (const commit of remaining) covered.add(commit);
+        }
+        if (covered.size < commits.length) {
+          const remaining = commits.filter((commit) => !covered.has(commit));
+          proof.push(receipt("parked", await this.parkRef(agent, work, park), remaining));
           for (const commit of remaining) covered.add(commit);
         }
         // HEAD and cleanliness must still describe the proof we just read.
@@ -717,7 +772,8 @@ export class PaneTidy {
         if (entry && line) entry.input = line;
         // Work committed or written after the first look still holds the close.
         if (checkWorktrees) {
-          checked = await this.worktreeHandoffs(latest, input.automatic);
+          // Only the close itself parks: its record is already persisted.
+          checked = await this.worktreeHandoffs(latest, input.automatic, entry !== undefined);
           if (
             checked.held.length &&
             (input.automatic ||
@@ -784,12 +840,31 @@ export class PaneTidy {
       }
       entry.state = closed ? "closed" : "close_unconfirmed";
       this.save();
-      if (entry.unlanded)
-        try {
-          this.recordLeftBehind(entry.unlanded, `${authority.owner.conversationId}: ${entry.title}`);
-        } catch {
-          /* The close record already keeps the reason; the per-worktree index is secondary. */
-        }
+      try {
+        const by = `${authority.owner.conversationId}: ${entry.title}`;
+        if (entry.unlanded) this.recordLeftBehind(entry.unlanded, by);
+        for (const parked of entry.handoffs?.filter((handoff) => handoff.kind === "parked") ?? [])
+          this.recordLeftBehind(
+            {
+              reason: `Parked on ${parked.reference}${unlandedReason ? `: ${unlandedReason}` : ""}`.slice(
+                0,
+                512,
+              ),
+              worktrees: [
+                {
+                  path: parked.path,
+                  state: "unreconciled",
+                  head: parked.head,
+                  unlandedCommits: parked.commits.length,
+                  dirtyFiles: 0,
+                },
+              ],
+            },
+            by,
+          );
+      } catch {
+        /* The close record already keeps the reason and refs; the per-worktree index is secondary. */
+      }
       if (!closed) return fail("close_unconfirmed");
       this.ports.untrack(agent.terminalId);
       return { outcome: "closed", entry: leadEntry(entry) };

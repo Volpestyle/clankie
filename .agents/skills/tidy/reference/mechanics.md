@@ -7,11 +7,15 @@ restored hires, runtime and checkout maintenance, and cache reclaim.
 
 Automatic landing counts only actual advertised `origin/main` ancestry or an
 explicit retained merge-queue/current-HEAD work decision covering every unlanded
-commit; a feature branch, local ref or patch equivalence alone does not count.
+commit; a feature branch, pushed ref or patch equivalence alone does not count.
+Clean commits nothing covers are parked on a new `refs/heads/keep/` branch at the
+final close guard, after the closing record is saved, so a close refused earlier
+parks nothing (VUH-2802).
 Kept time does not count toward automatic retirement, and automatic close
 rechecks a new keep before native dispatch. Landed, clean worktrees idle for a
 day in enrolled roots are pruned. The close receipt and lead history keep the
-handoff kind, commit IDs and request/ref/decision reference.
+handoff kind, commit IDs and request/ref/decision/parked-branch reference; a
+parked close also records a `closed_unreconciled` decision for the worktree.
 
 A decided drop keeps its commits under `refs/clankie/dropped-worktrees/`;
 content-equivalent pruning preserves the exact original HEAD under

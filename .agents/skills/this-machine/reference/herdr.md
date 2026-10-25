@@ -94,8 +94,9 @@ bundled and not linked, doctor's `remediations` already has the link command.
 
 Clean up temporary worker panes you create once their results are saved and
 verified. Keep ownership in the existing brief, check the pane still holds your
-finished worker, then close it with `close_worker_pane` (it keeps the report and
-refuses unlanded work; a refusal never authorizes a raw `herdr pane close`). Keep panes
+finished worker, then close it with `close_worker_pane` (it keeps the report,
+parks clean unlanded commits on a `keep/` branch and refuses dirty work; a refusal
+never authorizes a raw `herdr pane close`). Keep panes
 needed for follow-up or requested by your person; leave borrowed or repurposed
 panes and operator drafts alone. Your own finished-worker cleanup is already
 authorized.

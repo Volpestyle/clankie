@@ -295,7 +295,7 @@ import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { fleetRosterWork } from "./fleet-roster-work.ts";
 import { FleetRoster } from "./fleet-roster.ts";
 import { fleetRosterAction } from "./fleet-roster-actions.ts";
-import { PaneTidy } from "./pane-tidy.ts";
+import { PaneTidy, parkedRefs } from "./pane-tidy.ts";
 import { AUTO_TIDY_PANE_CHECK_MS, AUTO_TIDY_WORKTREE_CHECK_MS, createAutoTidy } from "./auto-tidy.ts";
 import {
   SeatIssueKeeper,
@@ -5661,19 +5661,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     adoptUnconfirmed: (agent, owner, guard) => herdrWatches.adoptUnconfirmedForTidy(agent, owner, guard),
     closed: async (owner, entries, adopted) => {
       for (const entry of entries) {
-        const issue = await herdrWatches.issueStatus?.closed({ seatId: entry.seatId, reason: entry.reason });
+        const issue = await herdrWatches.issueStatus?.closed({
+          seatId: entry.seatId,
+          reason: entry.reason,
+          parked: parkedRefs(entry),
+        });
         if (issue?.outcome === "failed")
           console.warn("Seat issue status unavailable", issue.issue, issue.detail);
       }
       const panes =
         entries
           .slice(0, 20)
-          .map((entry) => `${entry.title || entry.harness} (${entry.paneId}, undo ${entry.id})`)
+          .map((entry) => {
+            const parked = parkedRefs(entry);
+            return `${entry.title || entry.harness} (${entry.paneId}, undo ${entry.id}${parked.length ? `; clean unlanded commits parked on ${parked.join(", ")}` : ""})`;
+          })
           .join(", ") +
         (entries.length > 20 ? ` and ${entries.length - 20} more in worker_pane_history` : "");
       conversations.recordServiceNotice(
         owner.conversationId,
-        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed or was explicitly handed off: ${panes}.${adopted.length ? ` It first adopted ${adopted.length === 1 ? "an unconfirmed hire" : `${adopted.length} unconfirmed hires`} from the exact native session each original receipt observed (receipts ${adopted.slice(0, 20).join(", ")}).` : ""} undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
+        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed, was explicitly handed off or was parked on a local keep/ branch: ${panes}.${adopted.length ? ` It first adopted ${adopted.length === 1 ? "an unconfirmed hire" : `${adopted.length} unconfirmed hires`} from the exact native session each original receipt observed (receipts ${adopted.slice(0, 20).join(", ")}).` : ""} undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
       );
     },
     checkouts: async () => {

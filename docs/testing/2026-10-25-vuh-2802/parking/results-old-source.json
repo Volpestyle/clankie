@@ -1,0 +1,73 @@
+[
+  {
+    "phase": "claude-start",
+    "pane": "w1:p1",
+    "agent": {
+      "paneId": "w1:p1",
+      "terminalId": "term_65ea0ec0387d51",
+      "agent": "claude",
+      "status": "idle",
+      "title": "Claude Code",
+      "session": {
+        "source": "herdr:claude",
+        "kind": "id",
+        "value": "7df0623a-19d7-4091-9673-8961f9fe2ecc"
+      },
+      "workingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking",
+      "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking"
+    }
+  },
+  {
+    "phase": "claude-start",
+    "pane": "w1:p2",
+    "agent": {
+      "paneId": "w1:p2",
+      "terminalId": "term_65ea0ec03a1042",
+      "agent": "claude",
+      "status": "idle",
+      "title": "Claude Code",
+      "session": {
+        "source": "herdr:claude",
+        "kind": "id",
+        "value": "9d0fb03a-48c1-446a-bfbf-ab275b9ad706"
+      },
+      "workingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking",
+      "foregroundWorkingDirectory": "/Users/james/dev/clankie-wt/vuh-2802-parking"
+    }
+  },
+  {
+    "phase": "manual-dirty",
+    "result": {
+      "outcome": "refused",
+      "reason": "unlanded_work",
+      "worktrees": [
+        {
+          "path": "/private/tmp/clankie-proof-Y08L2t/manual",
+          "state": "unreconciled",
+          "head": "5adebff922e7a10505a933e810a62233dfe4715f",
+          "unlandedCommits": 0,
+          "dirtyFiles": 1,
+          "lastActivityAt": "2026-10-25T02:25:12.021Z"
+        }
+      ]
+    }
+  },
+  {
+    "phase": "manual-dirty",
+    "unlandedReason": "Spike for the owner",
+    "result": {
+      "outcome": "refused",
+      "reason": "unlanded_work",
+      "worktrees": [
+        {
+          "path": "/private/tmp/clankie-proof-Y08L2t/manual",
+          "state": "unreconciled",
+          "head": "5adebff922e7a10505a933e810a62233dfe4715f",
+          "unlandedCommits": 0,
+          "dirtyFiles": 1,
+          "lastActivityAt": "2026-10-25T02:25:12.021Z"
+        }
+      ]
+    }
+  }
+]

@@ -309,6 +309,8 @@ export class SeatIssueKeeper {
     outcome?: SeatIssueOutcome | undefined;
     evidence?: string | undefined;
     unlanded?: boolean | undefined;
+    /** Refs this close parked clean unlanded commits on (VUH-2802). */
+    parked?: readonly string[] | undefined;
   }): Promise<SeatIssueSettlement> {
     const seat = this.seats.get(input.seatId);
     this.seats.delete(input.seatId);
@@ -330,6 +332,7 @@ export class SeatIssueKeeper {
       outcome: input.outcome,
       evidence: input.evidence,
       unlanded: input.unlanded,
+      parked: input.parked,
     });
   }
 
@@ -404,6 +407,8 @@ export class SeatIssueKeeper {
     outcome?: SeatIssueOutcome | undefined;
     evidence?: string | undefined;
     unlanded?: boolean | undefined;
+    /** Refs this close parked clean unlanded commits on (VUH-2802). */
+    parked?: readonly string[] | undefined;
   }): Promise<SeatIssueSettlement> {
     let successor: { seatId: string; title: string } | undefined;
     // Done needs evidence; a stated Done without it is proof pending.
@@ -429,6 +434,7 @@ export class SeatIssueKeeper {
         `${successor ? `Handed from ${input.seat} to ${successor.title}` : `${input.seat} left`}: ${oneLine(input.why)}.`,
         input.evidence ? ` Evidence: ${oneLine(input.evidence)}.` : "",
         input.unlanded ? " Unlanded work was left behind." : "",
+        input.parked?.length ? ` Unlanded commits parked on ${input.parked.join(", ")}.` : "",
       ].join("");
       const stage = text(issue.stage);
       if (scope.backend === "builtin" && ["landed", "delivered", "owner-verified"].includes(stage ?? "")) {

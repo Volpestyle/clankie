@@ -56,6 +56,7 @@ import { Type, type TSchema } from "typebox";
 import type { CaptainDeps } from "./deps.ts";
 import type { AutonomyStore } from "./autonomy.ts";
 import type { DiscordWatchOrigin, HerdrWatchPort } from "./herdr-watch.ts";
+import { parkedRefs } from "./pane-tidy.ts";
 import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, MessageSeat } from "./port.ts";
 import { SeatQuestionAnswerSchema } from "./codex-user-input.ts";
@@ -1500,7 +1501,7 @@ function herdrWatchTools(
             name: "close_worker_pane",
             label: "Close a finished worker pane",
             description:
-              "Retire your own finished or settled-abandoned hire pane, local or fleet-qualified remote, with a one-line reason; its issue moves to issueStatus with that reason as a comment. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts (returning the typed text as draft), owner-interactive/hand-started panes, unkept results, another lead's hire (not_owner, naming its conversation), and unlanded_work: dirty or unreadable worktrees, or commits not on origin/main by content without a handoff. Clean unlanded commits allow close when every commit is in a live merge-queue request, reachable from a verified pushed remote ref, or covered by a worth_landing/safe_to_drop decision at current HEAD. The close receipt records handoffs. Pass unlandedReason only for a deliberate decision about clean commits; dirty files always refuse. A restored completed remote hire can recover retirement authority from its explicit persisted hiring owner, exact completed receipt, unchanged host, unique idle-session census and fresh process proof pinned until close; restoredHire in lead history retains this evidence without rewriting launch provenance. Missing receipts or unknown hiring ownership refuse. Launched unconfirmed hires require their settled original receipt and retained exact process proof; retirement does not grant confirmed project membership. Complete native inventory must prove pane absence before its allocation releases. Unknown styled input, process, connection or work evidence fails closed. The record keeps the input line verbatim as input (typed: false is a faint native ghost such as Claude's suggested next prompt). Does not decide whether the work is done. Never bypass a refusal with a raw close.",
+              "Retire your own finished or settled-abandoned hire pane, local or fleet-qualified remote, with a one-line reason; its issue moves to issueStatus with that reason as a comment. Keeps its last output and saved report in roster history; undo_worker_pane reopens and resumes for five minutes. Refuses unsent drafts (returning the typed text as draft), owner-interactive/hand-started panes, unkept results, another lead's hire (not_owner, naming its conversation), and unlanded_work: dirty or unreadable worktrees, or commits not on origin/main by content without a handoff. Clean unlanded commits are handed off by a live merge-queue request, a verified pushed remote ref or a worth_landing/safe_to_drop decision at current HEAD; any clean commits left over are parked on a new local branch refs/heads/keep/<deliverable>-<sha12> at the worktree's HEAD (never moving an existing ref) and the pane closes. The close receipt records every handoff, including each parked ref, HEAD and commit SHAs; the worktree stays. Pass unlandedReason only for a deliberate decision about clean commits that could not be parked; dirty files always refuse. A restored completed remote hire can recover retirement authority from its explicit persisted hiring owner, exact completed receipt, unchanged host, unique idle-session census and fresh process proof pinned until close; restoredHire in lead history retains this evidence without rewriting launch provenance. Missing receipts or unknown hiring ownership refuse. Launched unconfirmed hires require their settled original receipt and retained exact process proof; retirement does not grant confirmed project membership. Complete native inventory must prove pane absence before its allocation releases. Unknown styled input, process, connection or work evidence fails closed. The record keeps the input line verbatim as input (typed: false is a faint native ghost such as Claude's suggested next prompt). Does not decide whether the work is done. Never bypass a refusal with a raw close.",
             parameters: Type.Object({
               pane: Type.String({ minLength: 1, maxLength: 256 }),
               reason: Type.String({ minLength: 1, maxLength: 512 }),
@@ -1548,6 +1549,7 @@ function herdrWatchTools(
                 outcome: issueStatus,
                 evidence,
                 unlanded: result.entry.unlanded !== undefined,
+                parked: parkedRefs(result.entry),
               });
               return json({ ...result, issue });
             },
