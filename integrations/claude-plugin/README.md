@@ -148,8 +148,15 @@ The repository prefix audit covers these remaining references:
 
 A read-only audit also found one owner rule, `~/.claude/settings.json` →
 `permissions.allow[5] = "mcp__plugin_clankie_clankie"`. It belongs to the owner
-and was reported to the lead without editing it. The new launch supplies its own
-`mcp__clankie` rule.
+and was reported to the lead without editing it. The replacement rule is
+`"mcp__clankie"` in `permissions.allow`. Seats launched by `clankie claude`
+retain pre-approval through the launcher's session rule, so the rename adds no
+permission prompt there. Existing running seats and direct-plugin registrations
+keep their names. A session manually reusing the new explicit config without the
+launcher settings no longer receives pre-approval from that old owner rule:
+normal permission policy applies (a prompt when approval is required), while
+bypass mode shows no prompt. The owner may choose whether to add the replacement;
+the launcher does not migrate user settings.
 
 ### Binding and the known unbound-bridge gap
 
