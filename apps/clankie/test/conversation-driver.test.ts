@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -370,8 +371,8 @@ it("reconciles a worker acceptance in its original conversation after adoption a
   expect(f.service.mock.calls).toEqual([["Agent output: report"]]);
   // Duplicate proof across conversations fails closed instead of choosing one.
   const globalPath = join(f.root, "conversations/global-default/meta.json");
-  const global = JSON.parse(readFileSync(globalPath, "utf8"));
-  const original = JSON.parse(readFileSync(join(f.root, "conversations", id, "meta.json"), "utf8"));
+  const global = readPersistedConversation(globalPath);
+  const original = readPersistedConversation(join(f.root, "conversations", id, "meta.json"));
   global.inboundAcceptances = original.inboundAcceptances;
   writeFileSync(globalPath, JSON.stringify(global));
   expect(() => restarted.inboundAcceptance(delivery.id)).toThrow("multiple conversations");

@@ -40,8 +40,13 @@ stage; transcript presence alone does not prove an effect or model awareness.
 
 Read retained worker results with `clankie agents reports --conversation ID`.
 The exact accepted payloads and delivery/read state live in that conversation's
-`meta.json` under `inboundAcceptances`, independently of event trimming and pane
-lifetime. Join their `runId` to the accepted/completed/failed `events.jsonl` turns.
+`inbound-reports/` shards, committed by `meta.json`'s `inboundReportStore`
+manifest. Legacy files keep them inline under `inboundAcceptances` until their
+next save. Only manifest-referenced shards are committed; unreferenced files
+are not report acceptance. Read reports older than 24 hours are compacted;
+unread, delivered and uncertain reports are retained. The files are independent
+of event trimming and pane lifetime. Join `runId` to the
+accepted/completed/failed `events.jsonl` turns.
 `stored` proves retention; a transport completion still does not prove reading.
 A service-interrupted attempt stays uncertain. Read first and acknowledge only
 fully reviewed offered IDs with `clankie agents reports ack ID... --conversation ID`.

@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -462,7 +463,7 @@ async function poll(service: Service, conversationId: string) {
 function metas(root: string) {
   return readdirSync(join(root, "conversations"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => JSON.parse(readFileSync(join(root, "conversations", entry.name, "meta.json"), "utf8")));
+    .map((entry) => readPersistedConversation(join(root, "conversations", entry.name, "meta.json")));
 }
 
 function accepted(root: string, id: string) {

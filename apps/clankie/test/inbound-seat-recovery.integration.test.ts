@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
@@ -163,7 +164,7 @@ function rows<T>(root: string, basename: string): T[] {
 const calls = (root: string) => rows<HttpCall>(root, "http.jsonl");
 const effects = (root: string) => rows<{ message: string }>(root, "effects.jsonl");
 function acceptance(root: string, id: string): unknown {
-  const meta = JSON.parse(readFileSync(join(root, "conversations/global-default/meta.json"), "utf8"));
+  const meta = readPersistedConversation(join(root, "conversations/global-default/meta.json"));
   return meta.inboundAcceptances?.[id];
 }
 function worker(

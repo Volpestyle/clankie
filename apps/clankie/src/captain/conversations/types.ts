@@ -1,3 +1,4 @@
+import type { InboundReportReference } from "./inbound-report-store.ts";
 import type { ConversationQuestionAnswer } from "@clankie/protocol";
 import {
   type BeginOperatorAttachmentUpload,
@@ -168,6 +169,8 @@ export interface ConversationMeta {
   designatedHeadConversationId?: string;
   /** Retained accepted inbound payloads; independent of event-log trimming. */
   inboundAcceptances?: Record<string, InboundAcceptance>;
+  /** Atomic on-disk manifest; full acceptances remain in memory only. */
+  inboundReportStore?: InboundReportReference;
   nativeSource?: HerdrAgentSnapshot;
   readonly conversationId: string;
   scope: OperatorConversationScope;

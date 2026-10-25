@@ -1,4 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { InboundReportStore } from "../src/captain/conversations/inbound-report-store.ts";
+import { InboundAcceptanceSchema } from "../src/captain/conversations/constants.ts";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, rm, appendFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -613,7 +615,49 @@ it("serves the real VUH-1608 golden through the production service, client and C
       leadReportedTokens: 77,
       leadUsageReports: 1,
     });
+    // The same production HTTP reader must attribute committed report shards
+    // exactly as it attributed the legacy retained references above.
+    const entries = Object.fromEntries(
+      Object.values(metadata.inboundAcceptances).map((value) => {
+        const row = value as { text: string; runId: string; paneId: string };
+        const deliveryId = randomUUID();
+        return [
+          deliveryId,
+          InboundAcceptanceSchema.parse({
+            ...row,
+            deliveryId,
+            binding: "a".repeat(64),
+            message: row.text,
+            fingerprint: createHash("sha256").update(row.text).digest("hex"),
+            acceptedCursor: "00000000000000000001",
+            acceptedAt: "2026-10-04T19:10:00.000Z",
+            reportDelivery: { state: "read", readAt: "2026-10-04T19:11:00.000Z" },
+          }),
+        ];
+      }),
+    );
+    const prepared = new InboundReportStore(conversation).prepare(entries);
+    metadata.inboundReportStore = prepared.reference;
     delete metadata.inboundAcceptances;
+    await writeFile(metaPath, JSON.stringify(metadata));
+    prepared.committed();
+    expect(
+      (
+        await unchanged(
+          [
+            metaPath,
+            ...Object.values(prepared.reference.shards).map((file) =>
+              join(conversation, "inbound-reports", file),
+            ),
+          ],
+          () => client.readIssueMetrics(query),
+        )
+      ).issues[0],
+    ).toMatchObject({
+      leadReportedTokens: 77,
+      leadUsageReports: 1,
+    });
+    delete metadata.inboundReportStore;
     await writeFile(metaPath, JSON.stringify(metadata));
     // Replay repeated native delivery/usage rows through the real reader: no
     // cumulative or duplicate reports, calls, or approvals may inflate totals.

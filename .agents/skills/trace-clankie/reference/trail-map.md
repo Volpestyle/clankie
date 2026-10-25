@@ -91,3 +91,21 @@ obsolete preparations, not admitted calls. The committed shards retain every
 uncertain call and identity tombstone; older settled response bodies may be
 trimmed. Prefer `clankie_call({receiptId})` for authorized reconciliation and
 never edit or delete receipt files to permit a retry.
+
+## Retained worker-report payloads
+
+Each conversation's `meta.json` references immutable report shards through
+`inboundReportStore: {version: 1, shards: {...}}`. Read the named files in that
+conversation's `inbound-reports/` directory. Each filename contains its bucket
+prefix and SHA-256 digest; verify the bytes before treating the keyed
+`deliveryId` records as committed. Orphan files and old context archives are
+not current admissions. Legacy inline `inboundAcceptances` remain readable
+until the next save migrates them; that field is an object keyed by delivery ID.
+
+The CLI `clankie agents reports --conversation ID` remains the preferred reader;
+acknowledgment is explicit. Repeated reads retain the first offered/taken proof
+and never acknowledge a report. Only read receipts older than 24 hours are
+compacted. Unread, delivered and uncertain receipts keep their complete payload.
+A missing/corrupt committed shard fails closed; never recreate an empty inbox
+or delete a shard to repair it. Context reset carries committed report shards
+into the fresh directory and preserves the old archive independently.

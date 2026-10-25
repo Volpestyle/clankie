@@ -1,3 +1,8 @@
+import {
+  InboundReportReferenceSchema,
+  decodeInboundReportShard,
+} from "./conversations/inbound-report-store.ts";
+import { isDeepStrictEqual } from "node:util";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { readFile, readdir, stat } from "node:fs/promises";
@@ -387,7 +392,22 @@ export async function readIssueMetrics(
     if (!entry.isDirectory()) continue;
     const raw = await read(join(stateDir, "conversations", entry.name, "meta.json"));
     try {
-      const parsed = MetaSchema.safeParse(JSON.parse(raw ?? "null"));
+      const metadata = JSON.parse(raw ?? "null");
+      if (metadata?.inboundReportStore !== undefined) {
+        const reference = InboundReportReferenceSchema.parse(metadata.inboundReportStore);
+        const entries = { ...metadata.inboundAcceptances };
+        for (const [prefix, file] of Object.entries(reference.shards)) {
+          const body = await read(join(stateDir, "conversations", entry.name, "inbound-reports", file));
+          if (body === undefined) throw new Error("Retained report shard unavailable");
+          for (const [id, receipt] of Object.entries(decodeInboundReportShard(prefix, file, body))) {
+            if (entries[id] !== undefined && !isDeepStrictEqual(entries[id], receipt))
+              throw new Error("Conflicting retained report identity");
+            entries[id] = receipt;
+          }
+        }
+        metadata.inboundAcceptances = entries;
+      }
+      const parsed = MetaSchema.safeParse(metadata);
       if (parsed.success) metas.push(parsed.data);
       else if (raw) warnings.push(`Unsupported conversation metadata: ${entry.name}`);
     } catch {

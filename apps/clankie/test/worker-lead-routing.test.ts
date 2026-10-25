@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -249,7 +250,7 @@ it("keeps a report's original conversation acceptance after adoption and service
   ).toMatchObject({ received: true, deliveryStage: "stored" });
   await restartedStore.close();
   expect(runner).toHaveBeenCalledOnce();
-  const meta = JSON.parse(readFileSync(join(root, conversationId, "meta.json"), "utf8"));
+  const meta = readPersistedConversation(join(root, conversationId, "meta.json"));
   expect(meta.inboundAcceptances[delivery.id]).toMatchObject({
     text: "report",
     message: "agent output: report",

@@ -1,3 +1,4 @@
+import { ConversationCommitError } from "./errors.ts";
 import {
   WorkerReportSummarySchema,
   type DeliveryStage,
@@ -193,23 +194,30 @@ export function readInboundReports(
   if (items.length === 0 && selected.length > 0)
     throw new Error("Worker report exceeds the inbox output budget; it remains unread.");
   const now = new Date().toISOString();
+  // Offering the same immutable payload again adds no new admission or take
+  // evidence. Persist the first offer once; repeated inbox polls are reads.
+  const changed = items.filter((report) => {
+    const delivery = meta.inboundAcceptances![report.deliveryId]!.reportDelivery;
+    return !delivery?.offeredAt || !delivery.takenAt || !delivery.senderNotifications;
+  });
   const before = new Map(
-    items.map((report) => [report.deliveryId, meta.inboundAcceptances![report.deliveryId]!.reportDelivery]),
+    changed.map((report) => [report.deliveryId, meta.inboundAcceptances![report.deliveryId]!.reportDelivery]),
   );
-  for (const report of items) {
+  for (const report of changed) {
     const receipt = meta.inboundAcceptances![report.deliveryId]!;
     receipt.reportDelivery = {
       ...receipt.reportDelivery!,
-      offeredAt: now,
+      offeredAt: receipt.reportDelivery?.offeredAt ?? now,
       takenAt: receipt.reportDelivery?.takenAt ?? now,
       senderNotifications: true,
     };
   }
-  if (items.length > 0) {
+  if (changed.length > 0) {
     try {
       ctx["saveMeta"](meta);
     } catch (error) {
-      for (const [id, delivery] of before) meta.inboundAcceptances![id]!.reportDelivery = delivery;
+      if (!(error instanceof ConversationCommitError && error.committed))
+        for (const [id, delivery] of before) meta.inboundAcceptances![id]!.reportDelivery = delivery;
       throw error;
     }
     ctx["notifyInboundReportChange"]();
@@ -240,7 +248,7 @@ export function acknowledgeInboundReports(
     receipts.some((receipt) => !receipt || (!options.reviewedHistory && !receipt.reportDelivery?.offeredAt))
   )
     return false;
-  const before = structuredClone(meta.inboundAcceptances);
+  const before = new Map(receipts.map((receipt) => [receipt!.deliveryId, receipt!.reportDelivery]));
   for (const receipt of receipts) {
     if (receipt!.reportDelivery?.state === "read") continue;
     receipt!.reportDelivery = {
@@ -254,8 +262,8 @@ export function acknowledgeInboundReports(
   try {
     ctx["saveMeta"](meta);
   } catch (error) {
-    if (before === undefined) delete meta.inboundAcceptances;
-    else meta.inboundAcceptances = before;
+    if (!(error instanceof ConversationCommitError && error.committed))
+      for (const [id, delivery] of before) meta.inboundAcceptances![id]!.reportDelivery = delivery;
     throw error;
   }
   ctx["notifyInboundReportChange"]();
@@ -286,7 +294,9 @@ export function retireInboundReports(
     : [];
   if (!meta || reports.length === 0) return [];
   audit(reports);
-  const before = structuredClone(meta.inboundAcceptances!);
+  const before = new Map(
+    reports.map((report) => [report.deliveryId, meta.inboundAcceptances![report.deliveryId]!.reportDelivery]),
+  );
   const now = new Date().toISOString();
   for (const report of reports) {
     const receipt = meta.inboundAcceptances![report.deliveryId]!;
@@ -295,7 +305,8 @@ export function retireInboundReports(
   try {
     ctx["saveMeta"](meta);
   } catch (error) {
-    meta.inboundAcceptances = before;
+    if (!(error instanceof ConversationCommitError && error.committed))
+      for (const [id, delivery] of before) meta.inboundAcceptances![id]!.reportDelivery = delivery;
     throw error;
   }
   ctx["notifyInboundReportChange"]();
@@ -323,12 +334,13 @@ export function recordInboundReportReply(
       receipt.reportDelivery.repliedAt === undefined,
   );
   if (!meta || replied.length === 0) return;
-  const before = structuredClone(meta.inboundAcceptances!);
+  const before = new Map(replied.map((receipt) => [receipt.deliveryId, receipt.reportDelivery]));
   for (const receipt of replied) receipt.reportDelivery = { ...receipt.reportDelivery!, repliedAt: now };
   try {
     ctx["saveMeta"](meta);
   } catch (error) {
-    meta.inboundAcceptances = before;
+    if (!(error instanceof ConversationCommitError && error.committed))
+      for (const [id, delivery] of before) meta.inboundAcceptances![id]!.reportDelivery = delivery;
     throw error;
   }
   ctx["notifyInboundReportChange"]();
@@ -365,6 +377,12 @@ export function recordInboundReportDelivery(
         : stage === "uncertain" || stage === "expired"
           ? "uncertain"
           : "delivered";
+  if (
+    before?.state === state &&
+    before.stage === stage &&
+    (!["consumed", "responded"].includes(stage) || before.takenAt !== undefined)
+  )
+    return true;
   receipt.reportDelivery = {
     ...before,
     state,
@@ -377,7 +395,7 @@ export function recordInboundReportDelivery(
   try {
     ctx["saveMeta"](meta);
   } catch (error) {
-    receipt.reportDelivery = before;
+    if (!(error instanceof ConversationCommitError && error.committed)) receipt.reportDelivery = before;
     throw error;
   }
   ctx["notifyInboundReportChange"]();

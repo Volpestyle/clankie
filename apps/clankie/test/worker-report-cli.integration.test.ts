@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -48,6 +49,9 @@ async function fixture(
   for (let index = 0; index < count; index++) {
     const id = randomUUID();
     ids.push(id);
+    // These cases read a restored historical inbox. Produce its legacy record
+    // shape once; bulk fixture construction need not fsync hundreds of live admissions.
+    if (options.directAcceptance && index > 0) continue;
     const reportText = options.reportText?.(index) ?? `Retained report ${index}`;
     // The large inbox proof needs retained acceptance, not each sender's separate delivery fence.
     if (options.directAcceptance) {
@@ -88,7 +92,21 @@ async function fixture(
   }
   await store.close();
   const metaPath = join(path, "global-default/meta.json");
-  const metadata = JSON.parse(await readFile(metaPath, "utf8"));
+  const metadata = readPersistedConversation(metaPath);
+  if (options.directAcceptance && ids.length > 0) {
+    const produced = metadata.inboundAcceptances[ids[0]!];
+    for (const [index, id] of ids.entries()) {
+      const reportText = options.reportText?.(index) ?? `Retained report ${index}`;
+      metadata.inboundAcceptances[id] = {
+        ...produced,
+        deliveryId: id,
+        runId: index === 0 ? produced.runId : `run-${randomUUID()}`,
+        text: reportText,
+        message: `Worker output: ${index}`,
+        fingerprint: deliveryFingerprint(reportText),
+      };
+    }
+  }
   for (const id of ids) {
     delete metadata.inboundAcceptances[id].reportDelivery;
     delete metadata.inboundAcceptances[id].acceptedAt;
@@ -207,7 +225,7 @@ it("projects a large restored inbox without offering or changing retained payloa
   expect(await readFile(metaPath, "utf8")).toBe(before);
   const corruptRoot = join(f.root, "corrupt-history");
   const corruptPath = join(corruptRoot, "invalid-report-history", "meta.json");
-  const corrupt = JSON.parse(before);
+  const corrupt = readPersistedConversation(metaPath);
   corrupt.conversationId = "invalid-report-history";
   corrupt.inboundAcceptances[selected.deliveryId].text = {};
   await mkdir(join(corruptRoot, "invalid-report-history"), { recursive: true });

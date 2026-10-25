@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,7 +94,7 @@ it("recovers accepted history after a crash between metadata and event append wi
   ]);
   await restartedStore.close();
   expect(f.runner).not.toHaveBeenCalled();
-  const metadata = JSON.parse(readFileSync(join(f.root, "conversations/global-default/meta.json"), "utf8"));
+  const metadata = readPersistedConversation(join(f.root, "conversations/global-default/meta.json"));
   expect(metadata.inboundAcceptances[f.original.id]).toMatchObject({
     text: "hello",
     message: "untrusted hello",
@@ -142,7 +143,7 @@ it("keeps attempted ID tombstones when conversation acceptance proof is removed"
   expect(receipts.accept("p1", f.original, "hello", "hello").received).toBe(true);
   await store.close();
   const path = join(f.root, "conversations/global-default/meta.json");
-  const meta = JSON.parse(readFileSync(path, "utf8"));
+  const meta = readPersistedConversation(path);
   delete meta.inboundAcceptances;
   writeFileSync(path, JSON.stringify(meta));
   const restarted = f.create(f.store());

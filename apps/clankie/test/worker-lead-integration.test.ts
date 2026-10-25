@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -354,9 +355,7 @@ it.each([false, true])(
     expect(await lead).toEqual([]);
     expect(await global).toEqual([]);
     expect(f.execute).not.toHaveBeenCalled();
-    const persisted = JSON.parse(
-      readFileSync(join(f.root, "conversations", f.leads[0]!, "meta.json"), "utf8"),
-    );
+    const persisted = readPersistedConversation(join(f.root, "conversations", f.leads[0]!, "meta.json"));
     expect(persisted.inboundAcceptances?.[receipt.id]).toBeUndefined();
     if (remote) expect(f.remoteRun).toHaveBeenCalledWith(["api", "snapshot"]);
     else expect(f.censusRun).toHaveBeenCalledWith("herdr", ["agent", "list"]);
@@ -413,7 +412,7 @@ it.each(
     for (const conversationId of readdirSync(join(f.root, "conversations"))) {
       const path = join(f.root, "conversations", conversationId, "meta.json");
       if (!existsSync(path)) continue;
-      const persisted = JSON.parse(readFileSync(path, "utf8"));
+      const persisted = readPersistedConversation(path);
       expect(persisted.inboundAcceptances?.[receipt.id]).toBeUndefined();
     }
     expect(f.remoteRun).toHaveBeenCalledWith(["api", "snapshot"]);
@@ -437,7 +436,7 @@ it("a remote reporter disappearing only at route revalidation refuses before per
   });
   expect(await lead).toEqual([]);
   expect(await global).toEqual([]);
-  const persisted = JSON.parse(readFileSync(join(f.root, "conversations", f.leads[0]!, "meta.json"), "utf8"));
+  const persisted = readPersistedConversation(join(f.root, "conversations", f.leads[0]!, "meta.json"));
   expect(persisted.inboundAcceptances?.[receipt.id]).toBeUndefined();
   expect(f.execute).not.toHaveBeenCalled();
 });
@@ -586,7 +585,7 @@ it("message_seat adopts another conversation's adopted worker before its immedia
   const [thirdEvent] = await thirdPoll;
   expect(thirdEvent).toMatchObject({ conversationId: f.leads[1] });
   await restarted.acknowledgeSeatEvent(thirdEvent!.id, f.leads[1]);
-  const original = JSON.parse(readFileSync(join(f.root, "conversations", f.leads[0]!, "meta.json"), "utf8"));
+  const original = readPersistedConversation(join(f.root, "conversations", f.leads[0]!, "meta.json"));
   expect(original.inboundAcceptances[first.id]).toMatchObject({ text: "First report" });
 });
 
@@ -641,7 +640,7 @@ it("a room-owned report reaches its attached room and posts its answer through t
       expect.any(Function),
     ),
   );
-  const persisted = JSON.parse(readFileSync(join(f.root, "conversations", f.room, "meta.json"), "utf8"));
+  const persisted = readPersistedConversation(join(f.root, "conversations", f.room, "meta.json"));
   expect(persisted.inboundAcceptances[receipt.id]).toMatchObject({ text: "Room worker done" });
   expect(await f.captain.receiveFleetSeatMessage(f.agent.paneId, "Room worker done", receipt)).toMatchObject({
     received: true,

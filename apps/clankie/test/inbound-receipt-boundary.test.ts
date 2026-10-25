@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { serve } from "@hono/node-server";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -177,9 +178,7 @@ it("settles the old bridge's sealed unknown original through HTTP after service 
       definitive: "not_sent",
       deliveryId: retained.deliveryId,
     });
-    const metadata = JSON.parse(
-      await readFile(join(f.root, "conversations/global-default/meta.json"), "utf8"),
-    );
+    const metadata = readPersistedConversation(join(f.root, "conversations/global-default/meta.json"));
     expect(metadata.inboundAcceptances?.[retained.deliveryId]).toBeUndefined();
   } finally {
     await f.close();

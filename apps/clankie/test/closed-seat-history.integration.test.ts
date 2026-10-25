@@ -1,3 +1,4 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -89,7 +90,7 @@ async function reportStore(
   }
   await store.close();
   const metaPath = join(path, "global-default/meta.json");
-  const metadata = JSON.parse(await readFile(metaPath, "utf8"));
+  const metadata = readPersistedConversation(metaPath);
   for (const [index, report] of reports.entries()) {
     const receipt = metadata.inboundAcceptances[ids[index]!];
     receipt.acceptedAt = new Date(now - report.ageMs).toISOString();

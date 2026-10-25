@@ -1,3 +1,4 @@
+import { ConversationCommitError } from "./errors.ts";
 import type { ConversationQuestionResult } from "@clankie/protocol";
 import {
   ProjectProposalDraftSchema,
@@ -8,7 +9,7 @@ import {
 import { projectsRevision, ProjectTrackerUnavailable } from "@clankie/settings";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   answerMessage,
@@ -23,7 +24,6 @@ import {
 } from "../conversation-questions.ts";
 import { ProjectCreationSchema, proposalHash, proposalResult } from "../project-onboarding.ts";
 import { QuestionCommitError } from "./errors.ts";
-import { retainInboundReports } from "./worker-reports.ts";
 import type { ConversationStore } from "./store.ts";
 import {
   type ConversationMeta,
@@ -943,29 +943,9 @@ export async function questionOperation(
 
 export function saveQuestionMeta(ctx: ConversationStore, meta: ConversationMeta): void {
   if (meta.questions) QuestionStateSchema.parse(meta.questions);
-  retainInboundReports(meta, Date.now());
-  const path = join(ctx["root"], meta.conversationId, "meta.json");
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  let committed = false;
   try {
-    const file = openSync(temporary, "wx", 0o600);
-    try {
-      writeFileSync(file, JSON.stringify(meta));
-      fsyncSync(file);
-    } finally {
-      closeSync(file);
-    }
-    renameSync(temporary, path);
-    committed = true;
-    const directory = openSync(join(ctx["root"], meta.conversationId), "r");
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
+    ctx["persistMeta"](meta, undefined, true);
   } catch (error) {
-    throw new QuestionCommitError(committed, error);
-  } finally {
-    rmSync(temporary, { force: true });
+    throw new QuestionCommitError(error instanceof ConversationCommitError && error.committed, error);
   }
 }

@@ -1,6 +1,8 @@
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
+import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,9 +13,13 @@ import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import { InboundAcceptanceSchema } from "../src/captain/conversations/constants.ts";
 
+// Passthrough namespace permits faulting only the selected commit operation.
+vi.mock("node:fs", async (original) => ({ ...(await original<typeof import("node:fs")>()) }));
+
 const roots: string[] = [];
 const children = new Set<ChildProcess>();
 afterEach(() => {
+  vi.useRealTimers();
   for (const child of children) child.kill("SIGKILL");
   children.clear();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -141,7 +147,7 @@ it("keeps original admitted recipients and legacy interrupted reports visible af
   ).toMatchObject({ received: true });
   await store.close();
   const metaPath = join(conversationRoot, "global-default/meta.json");
-  const metadata = JSON.parse(readFileSync(metaPath, "utf8"));
+  const metadata = readPersistedConversation(metaPath);
   delete metadata.inboundAcceptances[delivery.id].reportDelivery;
   delete metadata.inboundAcceptances[delivery.id].acceptedAt;
   writeFileSync(metaPath, JSON.stringify(metadata));
@@ -468,4 +474,243 @@ it("keeps unread reports and reports read within a day, and lets older read repo
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("migrates a large retained inbox into committed shards, compacts only expired read reports and coalesces native stage repeats", async () => {
+  const root = fixtureRoot();
+  const directory = join(root, "conversations");
+  let store = new ConversationStore(directory, async () => {});
+  let receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  const binding = "a".repeat(64);
+  const first = randomUUID();
+  receipts.accept(
+    "pane",
+    { id: first, binding },
+    "report",
+    "worker report",
+    "global-default",
+    async (_id, _text, _publish, context) => {
+      context.deliveryReceipt?.("delivered");
+    },
+  );
+  await store.close();
+  const path = join(directory, "global-default", "meta.json");
+  const metadata = readPersistedConversation(path);
+  const original = metadata.inboundAcceptances[first];
+  const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const ids = Array.from({ length: 512 }, () => randomUUID());
+  metadata.inboundAcceptances = Object.fromEntries(
+    ids.map((id, index) => [
+      id,
+      {
+        ...original,
+        deliveryId: id,
+        runId: randomUUID(),
+        acceptedAt: old,
+        fingerprint: deliveryFingerprint(`retained ${index} ` + "t".repeat(6144)),
+        text: `retained ${index} ` + "t".repeat(6144),
+        message: `retained ${index} ` + "m".repeat(6144),
+        reportDelivery:
+          index < 100
+            ? { state: "read", stage: "delivered", readAt: old }
+            : index < 400
+              ? { state: "delivered", stage: "delivered", deliveredAt: old }
+              : { state: "uncertain", stage: "uncertain" },
+      },
+    ]),
+  );
+  writeFileSync(path, JSON.stringify(metadata));
+  expect(statSync(path).size).toBeGreaterThan(6_000_000);
+  store = new ConversationStore(directory, async () => {});
+  receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  expect(store.inboundReportSummaries()).toHaveLength(412);
+  const committed = JSON.parse(readFileSync(path, "utf8"));
+  expect(committed.inboundAcceptances).toBeUndefined();
+  expect(committed.inboundReportStore.version).toBe(1);
+  expect(statSync(path).size).toBeLessThan(50_000);
+  expect(store.inboundAcceptance(ids[0]!)).toBeUndefined();
+  for (const index of [100, 399, 400, 511])
+    expect(store.inboundAcceptance(ids[index]!)).toMatchObject({
+      deliveryId: ids[index],
+      text: metadata.inboundAcceptances[ids[index]!].text,
+      reportDelivery: { state: index < 400 ? "delivered" : "uncertain" },
+    });
+  const next = randomUUID();
+  expect(
+    receipts.accept(
+      "pane",
+      { id: next, binding },
+      "new report",
+      "new worker report",
+      "global-default",
+      async (_id, _text, _publish, context) => {
+        context.deliveryReceipt?.("delivered");
+      },
+    ),
+  ).toMatchObject({ received: true });
+  await store.close();
+  const after = JSON.parse(readFileSync(path, "utf8"));
+  expect(
+    Object.values(after.inboundReportStore.shards).filter(
+      (file) => !Object.values(committed.inboundReportStore.shards).includes(file),
+    ),
+  ).toHaveLength(1);
+  store = new ConversationStore(directory, async () => {});
+  const identity = statSync(path, { bigint: true });
+  for (let index = 0; index < 20; index++)
+    expect(store.recordInboundReportDelivery(next, "delivered")).toBe(true);
+  expect(statSync(path, { bigint: true }).ino).toBe(identity.ino);
+  expect(statSync(path, { bigint: true }).mtimeNs).toBe(identity.mtimeNs);
+  const firstOffer = store.readInboundReports("global-default", { deliveryIds: [next] });
+  const offeredIdentity = statSync(path, { bigint: true });
+  const firstTake = store.inboundAcceptance(next)!.reportDelivery!;
+  for (let index = 0; index < 20; index++)
+    expect(store.readInboundReports("global-default", { deliveryIds: [next] })).toEqual(firstOffer);
+  expect(store.inboundAcceptance(next)!.reportDelivery).toEqual(firstTake);
+  expect(statSync(path, { bigint: true }).ino).toBe(offeredIdentity.ino);
+  expect(statSync(path, { bigint: true }).mtimeNs).toBe(offeredIdentity.mtimeNs);
+  expect(store.inboundReportSummaries()).toHaveLength(413);
+  expect(store.inboundAcceptance(ids[511]!)).toMatchObject({
+    text: metadata.inboundAcceptances[ids[511]!].text,
+  });
+  await store.close();
+});
+
+it("fails closed on a missing or corrupt committed report shard without replacing the unread inbox", async () => {
+  const root = fixtureRoot();
+  const directory = join(root, "conversations");
+  const store = new ConversationStore(directory, async () => {});
+  const id = randomUUID();
+  const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  receipts.accept(
+    "pane",
+    { id, binding: "a".repeat(64) },
+    "unread report",
+    "unread report",
+    "global-default",
+    async () => {},
+  );
+  await store.close();
+  const path = join(directory, "global-default", "meta.json");
+  const body = readFileSync(path, "utf8");
+  const manifest = JSON.parse(body).inboundReportStore;
+  const shard = join(
+    directory,
+    "global-default",
+    "inbound-reports",
+    String(Object.values(manifest.shards)[0]),
+  );
+  const bytes = readFileSync(shard);
+  writeFileSync(shard, "corrupt");
+  expect(() => new ConversationStore(directory, async () => {})).toThrow(
+    "Retained inbound reports are unreadable",
+  );
+  expect(readFileSync(path, "utf8")).toBe(body);
+  rmSync(shard);
+  expect(() => new ConversationStore(directory, async () => {})).toThrow(
+    "Retained inbound reports are unreadable",
+  );
+  expect(readFileSync(path, "utf8")).toBe(body);
+  writeFileSync(shard, bytes);
+  const recovered = new ConversationStore(directory, async () => {});
+  expect(recovered.inboundReports()).toMatchObject([{ deliveryId: id, text: "unread report" }]);
+  await recovered.close();
+});
+
+it("rolls back a pre-manifest failure without losing expired-read or unread receipt state", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const root = fixtureRoot();
+  const directory = join(root, "conversations");
+  const store = new ConversationStore(directory, async () => {});
+  const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  const ids = [randomUUID(), randomUUID()];
+  for (const id of ids)
+    receipts.accept(
+      "pane",
+      { id, binding: "a".repeat(64) },
+      id,
+      id,
+      "global-default",
+      async (_id, _text, _publish, context) => {
+        context.deliveryReceipt?.("delivered");
+      },
+    );
+  await store.close();
+  store.readInboundReports("global-default", { deliveryIds: [ids[0]!] });
+  expect(store.acknowledgeInboundReports("global-default", [ids[0]!])).toBe(true);
+  const path = join(directory, "global-default", "meta.json");
+  const committed = readFileSync(path, "utf8");
+  const before = store.inboundReports(undefined, { includeRead: true });
+  const rename = fs.renameSync;
+  vi.setSystemTime(Date.now() + 25 * 3_600_000);
+  const failure = vi.spyOn(fs, "renameSync").mockImplementation((source, target) => {
+    if (String(target) === path) throw new Error("fixture manifest commit unavailable");
+    rename(source, target);
+  });
+  try {
+    expect(() => store.recordInboundReportDelivery(ids[1]!, "consumed")).toThrow(
+      "fixture manifest commit unavailable",
+    );
+    expect(readFileSync(path, "utf8")).toBe(committed);
+    expect(store.inboundReports(undefined, { includeRead: true })).toEqual(before);
+    expect(store.inboundAcceptance(ids[0]!)).toMatchObject({ reportDelivery: { state: "read" } });
+  } finally {
+    failure.mockRestore();
+    vi.useRealTimers();
+  }
+  await store.close();
+});
+
+it("keeps a renamed inbound admission visible after directory-sync uncertainty without executing its runner", async () => {
+  const root = fixtureRoot();
+  const directory = join(root, "conversations");
+  let calls = 0;
+  const store = new ConversationStore(directory, async () => {
+    calls++;
+  });
+  const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  const path = join(directory, "global-default", "meta.json");
+  const rename = fs.renameSync;
+  const sync = fs.fsyncSync;
+  let renamed = false;
+  const renameProbe = vi.spyOn(fs, "renameSync").mockImplementation((source, target) => {
+    rename(source, target);
+    if (String(target) === path) renamed = true;
+  });
+  const failure = vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+    if (renamed) throw new Error("fixture post-rename sync unavailable");
+    sync(fd);
+  });
+  const id = randomUUID();
+  try {
+    const accepted = receipts.accept(
+      "pane",
+      { id, binding: "a".repeat(64) },
+      "retained despite sync uncertainty",
+      "retained despite sync uncertainty",
+      "global-default",
+      async () => {
+        calls++;
+      },
+    );
+    expect(renamed).toBe(true);
+    expect(accepted.definitive).not.toBe("not_sent");
+    expect(store.inboundReports()).toMatchObject([
+      { deliveryId: id, text: "retained despite sync uncertainty" },
+    ]);
+    expect(store.inboundAcceptance(id)).toMatchObject({ deliveryId: id });
+    expect(calls).toBe(0);
+  } finally {
+    failure.mockRestore();
+    renameProbe.mockRestore();
+    await store.close();
+  }
+  const restarted = new ConversationStore(directory, async () => {
+    calls++;
+  });
+  expect(restarted.inboundReports()).toMatchObject([
+    { deliveryId: id, text: "retained despite sync uncertainty" },
+  ]);
+  await restarted.close();
+  expect(calls).toBe(0);
 });

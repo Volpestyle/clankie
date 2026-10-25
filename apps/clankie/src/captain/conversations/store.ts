@@ -1,7 +1,9 @@
+import { InboundReportStore, InboundReportStorageError } from "./inbound-report-store.ts";
+import { ConversationCommitError } from "./errors.ts";
+import { isDeepStrictEqual } from "node:util";
 import { PendingNativeMessages, type NativeMessageHost } from "../pending-native-messages.ts";
 import { OwnerUpdates } from "../owner-updates.ts";
-import { CurrentActivities, safeCurrentActivityText } from "./current-activity.ts";
-import type { OperatorCurrentActivity, OperatorPresenceSnapshot } from "@clankie/protocol/presence";
+import { CurrentActivities } from "./current-activity.ts";
 import type { OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
 import type { InboundReport } from "../conversations.ts";
 import type {
@@ -278,6 +280,9 @@ function untilRoundOrAbort(round: Promise<void>, signal?: AbortSignal): Promise<
 }
 
 export class ConversationStore {
+  private readonly inboundReportStores = new Map<string, InboundReportStore>();
+  private readonly writtenMetadata = new Map<string, { body: string; identity: string; durable: boolean }>();
+
   private readonly currentActivities = new CurrentActivities();
   /** Service-owned live call binding; sampled at event publication, never inferred on the first read. */
   public presenceVoiceLease?: () => { conversationId: string; incarnation: string } | undefined;
@@ -528,10 +533,24 @@ export class ConversationStore {
     }
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
+      let retainedReports = false;
       try {
         const meta = JSON.parse(
           readFileSync(join(root, entry.name, "meta.json"), "utf8"),
         ) as ConversationMeta;
+        retainedReports = meta.inboundAcceptances !== undefined || meta.inboundReportStore !== undefined;
+        if (meta.inboundReportStore !== undefined) {
+          const directory = join(root, entry.name);
+          const reports = new InboundReportStore(directory);
+          const stored = reports.load(meta.inboundReportStore);
+          for (const [id, receipt] of Object.entries(meta.inboundAcceptances ?? {})) {
+            if (stored[id] !== undefined && !isDeepStrictEqual(stored[id], receipt))
+              throw new InboundReportStorageError("Conflicting inline and sharded inbound receipt");
+            stored[id] = receipt;
+          }
+          meta.inboundAcceptances = stored;
+          this.inboundReportStores.set(directory, reports);
+        }
         this.restoreInboundReports(meta);
         if (restoreServiceHandoff(meta)) this.saveMeta(meta);
         const legacy = meta as unknown as Record<string, unknown>;
@@ -622,7 +641,13 @@ export class ConversationStore {
             for (const record of cancelledQuestions) this.publishQuestionResolution(meta, record);
           }
         }
-      } catch {
+      } catch (error) {
+        // Never replace a retained inbox after a failed migration or shard read.
+        if (
+          (retainedReports && (!(error instanceof z.ZodError) || entry.name === "global-default")) ||
+          error instanceof InboundReportStorageError
+        )
+          throw error;
         // An unreadable conversation is skipped, never fatal to boot.
       }
     }
@@ -1436,13 +1461,9 @@ export class ConversationStore {
     this.currentActivities.clear(conversationId);
   }
 
-  public currentPresenceActivity(
-    nativeWorking: boolean,
-    pendingOwnerItem: OperatorPresenceSnapshot["pendingOwnerItem"] | null = this.pendingPresenceOwnerItem() ??
-      null,
-  ): OperatorCurrentActivity | undefined {
+  public currentPresenceActivity(nativeWorking: boolean) {
     const voice = this.presenceVoiceLease?.();
-    const liveActivity = this.currentActivities.current((id, callIncarnation) => {
+    return this.currentActivities.current((id, callIncarnation) => {
       if (!this.metas.has(id)) return false;
       if (callIncarnation) return id === voice?.conversationId && callIncarnation === voice.incarnation;
       return (
@@ -1450,30 +1471,6 @@ export class ConversationStore {
         (nativeWorking && id === this.defaultGlobalConversationId())
       );
     });
-    if (pendingOwnerItem) {
-      const meta = this.metas.get(pendingOwnerItem.conversationId);
-      const question = meta?.questions?.records.find(
-        ({ question }) => question.requestId === pendingOwnerItem.questionId,
-      )?.question;
-      // The same owner thread boundary applies to questions and event glimpses.
-      if (
-        !meta ||
-        meta.parentConversationId !== undefined ||
-        !["global", "workspace"].includes(meta.scope.kind) ||
-        question?.status !== "pending"
-      )
-        return undefined;
-      const text = safeCurrentActivityText(question.prompt);
-      return text
-        ? {
-            id: `${meta.conversationId}:question:${question.requestId}:${question.incarnationId}`,
-            source: "chat",
-            text,
-            target: { kind: "conversation", conversationId: meta.conversationId },
-          }
-        : undefined;
-    }
-    return liveActivity;
   }
 
   /** One entry per unanswered owner question: the workspace it was raised in, when it has one. */
@@ -2221,8 +2218,15 @@ export class ConversationStore {
     for (const entry of readdirSync(this.root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const raw = JSON.parse(readFileSync(join(this.root, entry.name, "meta.json"), "utf8"));
-      const entries = z.record(z.string(), InboundAcceptanceSchema).parse(raw.inboundAcceptances ?? {});
-      const candidate = entries[id];
+      const inline = raw.inboundAcceptances?.[id];
+      const sharded =
+        raw.inboundReportStore === undefined
+          ? undefined
+          : new InboundReportStore(join(this.root, entry.name)).read(raw.inboundReportStore, id);
+      if (inline !== undefined && sharded !== undefined && !isDeepStrictEqual(inline, sharded))
+        throw new InboundReportStorageError("Conflicting inline and sharded inbound receipt");
+      const value = sharded ?? inline;
+      const candidate = value === undefined ? undefined : InboundAcceptanceSchema.parse(value);
       if (candidate === undefined) continue;
       if (candidate.deliveryId !== id) throw new Error("Mismatched acceptance ID");
       if (receipt !== undefined) throw new Error("Inbound delivery accepted by multiple conversations");
@@ -3129,8 +3133,13 @@ export class ConversationStore {
       if (questionBefore && !(error instanceof QuestionCommitError && error.committed)) {
         Object.assign(meta, questionBefore);
       }
-      if (previousAcceptances === undefined) delete meta.inboundAcceptances;
-      else meta.inboundAcceptances = previousAcceptances;
+      if (
+        !(error instanceof ConversationCommitError && error.committed) &&
+        !(error instanceof QuestionCommitError && error.committed)
+      ) {
+        if (previousAcceptances === undefined) delete meta.inboundAcceptances;
+        else meta.inboundAcceptances = previousAcceptances;
+      }
       throw error;
     }
     if (provenance.inboundReceipt) this.notifyInboundReportChange();
@@ -3943,11 +3952,82 @@ export class ConversationStore {
   }
 
   private saveMeta(meta: ConversationMeta): void {
-    retainInboundReports(meta, Date.now());
-    const path = join(this.root, meta.conversationId, "meta.json");
-    // Compact: this file is rewritten on every change and read only by the store.
-    writeFileSync(path + ".tmp", JSON.stringify(meta), { mode: 0o600 });
-    renameSync(path + ".tmp", path);
+    this.persistMeta(meta);
+  }
+
+  /** Both ordinary and question commits use the same immutable receipt manifest. */
+  private persistMeta(
+    meta: ConversationMeta,
+    directory = join(this.root, meta.conversationId),
+    durable = false,
+  ): void {
+    // Retention is part of this commit. Before the manifest rename, a failed
+    // save must leave the caller's receipt map available for rollback.
+    const persisted = { ...meta };
+    retainInboundReports(persisted, Date.now());
+    let reports = this.inboundReportStores.get(directory);
+    if (reports === undefined) {
+      reports = new InboundReportStore(directory);
+      if (meta.inboundReportStore !== undefined) reports.load(meta.inboundReportStore);
+      this.inboundReportStores.set(directory, reports);
+    }
+    const prepared = reports.prepare(persisted.inboundAcceptances ?? {});
+    const reference = Object.keys(prepared.reference.shards).length ? prepared.reference : undefined;
+    const body = JSON.stringify({
+      ...persisted,
+      inboundAcceptances: undefined,
+      inboundReportStore: reference,
+    });
+    const path = join(directory, "meta.json");
+    const identity = () => {
+      const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
+      return stat === undefined
+        ? "missing"
+        : `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    };
+    const previous = this.writtenMetadata.get(directory);
+    if (
+      !prepared.changed &&
+      previous?.body === body &&
+      previous.identity === identity() &&
+      (!durable || previous.durable)
+    )
+      return;
+    const temporary = durable ? `${path}.${randomUUID()}.tmp` : `${path}.tmp`;
+    let committed = false;
+    try {
+      const file = openSync(temporary, durable ? "wx" : "w", 0o600);
+      try {
+        writeFileSync(file, body);
+        if (durable || prepared.changed) fsyncSync(file);
+      } finally {
+        closeSync(file);
+      }
+      renameSync(temporary, path);
+      committed = true;
+      meta.inboundReportStore = reference;
+      meta.inboundAcceptances = persisted.inboundAcceptances;
+      if (durable || prepared.changed) {
+        const file = openSync(directory, "r");
+        try {
+          fsyncSync(file);
+        } finally {
+          closeSync(file);
+        }
+      }
+      prepared.committed();
+      this.writtenMetadata.set(directory, {
+        body,
+        identity: identity(),
+        durable: durable || prepared.changed,
+      });
+    } catch (error) {
+      throw new ConversationCommitError(committed, error);
+    } finally {
+      // A successful rename already consumed the temporary path. Cleanup must
+      // not mask post-rename uncertainty and trigger an in-memory rollback.
+      if (!committed) rmSync(temporary, { force: true });
+    }
   }
 
   /**
@@ -4015,6 +4095,8 @@ export class ConversationStore {
     this.corruptQuestions.delete(meta.conversationId);
     this.discardProjection(meta.channelDiscord);
     rmSync(join(this.root, meta.conversationId), { recursive: true, force: true });
+    this.inboundReportStores.delete(join(this.root, meta.conversationId));
+    this.writtenMetadata.delete(join(this.root, meta.conversationId));
     this.metas.delete(meta.conversationId);
     this.chains.delete(meta.conversationId);
     this.runCounts.delete(meta.conversationId);
@@ -4082,7 +4164,7 @@ export class ConversationStore {
           }),
     };
     mkdirSync(staging, { recursive: true, mode: 0o700 });
-    writeFileSync(join(staging, "meta.json"), JSON.stringify(fresh), { mode: 0o600 });
+    this.persistMeta(fresh, staging, true);
     renameSync(live, archive);
     try {
       this.onPrune?.(conversationId, meta.scope);
@@ -4091,6 +4173,10 @@ export class ConversationStore {
       renameSync(archive, live);
       throw error;
     }
+    this.inboundReportStores.delete(staging);
+    this.inboundReportStores.delete(live);
+    this.writtenMetadata.delete(staging);
+    this.writtenMetadata.delete(live);
     this.metas.set(conversationId, fresh);
     this.chains.delete(conversationId);
     this.journal.forget(conversationId);
