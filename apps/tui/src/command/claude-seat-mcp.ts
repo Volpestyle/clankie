@@ -61,6 +61,15 @@ export function writeClaudeSeatMcpConfig(
     selected[key] = JSON.parse(
       JSON.stringify(entry).replaceAll("${CLAUDE_PLUGIN_ROOT}", JSON.stringify(pluginRoot).slice(1, -1)),
     ) as McpServerEntry;
+    // This new bare-server artifact must not default to the owner's global
+    // chat when reused without the launcher's binding (the broader direct
+    // unbound-bridge defect is VUH-2816). Claude expands the empty default;
+    // `mcp --conversation ""` fails before connecting to the service.
+    if (name === "lead") {
+      const args = selected[key]!.args;
+      if (!Array.isArray(args)) throw new Error("The Clankie lead bridge must declare its arguments");
+      selected[key] = { ...selected[key], args: [...args, "--conversation", "${CLANKIE_CONVERSATION_ID:-}"] };
+    }
   }
   if (optIns.length > 0) {
     const inherited = inheritedServers(cwd, env);

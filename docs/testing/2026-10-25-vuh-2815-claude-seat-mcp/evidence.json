@@ -3,9 +3,9 @@
   "objects": [
     {
       "path": "native-proof.json",
-      "size": 27152,
-      "sha256": "656cb7121568d05ae265d2c88699188737fbebc9ebcef6af6cda318a2241fc70",
-      "url": "clankie://evidence/sha256/656cb7121568d05ae265d2c88699188737fbebc9ebcef6af6cda318a2241fc70"
+      "size": 29148,
+      "sha256": "514a1afe91e1b96f0fa3bf43b559f188ccc61ae6ce115bf1dafeebf6bc4aa437",
+      "url": "clankie://evidence/sha256/514a1afe91e1b96f0fa3bf43b559f188ccc61ae6ce115bf1dafeebf6bc4aa437"
     }
   ]
 }

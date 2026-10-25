@@ -36,7 +36,10 @@ keeps the owner's configuration. Opt in a configured user/local/project server
 with `clankie claude --mcp-servers NAME,...` (`none` is the default); repeat on
 resume. Personal Linear servers stay refused. For numbered aliases, set
 `CLAUDE_CONFIG_DIR` to the selected profile when resolving opt-ins. `--dry-run`
-prints the private config path, never copied server credentials.
+prints the private config path, never copied server credentials. The generated
+bridge requires the launcher's conversation environment binding; reusing its
+config without that binding fails before connecting. Its native tool prefix is
+`mcp__clankie__`; identity, hooks and skills still come from the plugin.
 
 For a tool-list probe, use Claude's print/SDK mode: it does not poll the outbox.
 An interactive probe must select a fresh workspace conversation with `--new`;

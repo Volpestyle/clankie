@@ -7021,7 +7021,12 @@ reserved names and personal Linear connectors are refused. With a numbered
 account alias, set `CLAUDE_CONFIG_DIR` to its profile to resolve opt-ins there.
 Repeat the flag on `--resume`; the allowlist is not saved in the resume record.
 Definitions are copied into a file readable only by the owner; `--dry-run` shows
-its path without printing server credentials. No owner MCP files are written.
+its path without printing server credentials. The generated bridge requires the
+launcher's `CLANKIE_CONVERSATION_ID`; reusing the file with that binding absent
+fails before connecting. Its tools use `mcp__clankie__*`; the plugin still supplies
+identity, hooks, room-agent permissions and skills. Direct unbound operator
+bridges outside this launch retain the known [VUH-2816](https://linear.app/vuhlp/issue/VUH-2816)
+gap. No owner MCP files are written.
 
 Every fresh Claude launch starts a new Claude Code session under a recorded id.
 Without a selection it takes the shared global chat (`global-default`) while no

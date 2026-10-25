@@ -140,15 +140,18 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
       if (launches === 5) expect(args).toContain("--session-id");
       expect(cwd).toBe(directory);
       expect(args).toContain("--dangerously-skip-permissions");
-      expect(args).toContain("plugin:clankie@inline");
-      const plugin = args[args.indexOf("--plugin-dir") + 1]!;
-      expect(JSON.parse(await readFile(join(plugin, ".mcp.json"), "utf8")).mcpServers.lead.args).toEqual([
+      expect(args).toContain("server:clankie");
+      expect(args).toContain("--strict-mcp-config");
+      const config = args[args.indexOf("--mcp-config") + 1]!;
+      expect(JSON.parse(await readFile(config, "utf8")).mcpServers.clankie.args).toEqual([
         "mcp",
         "--lane",
         "operator",
+        "--conversation",
+        "${CLANKIE_CONVERSATION_ID:-}",
       ]);
       const permission = JSON.parse(args[args.indexOf("--settings") + 1]!).permissions.allow;
-      expect(permission).toContain("mcp__plugin_clankie_lead");
+      expect(permission).toContain("mcp__clankie");
       expect(childEnv?.CLANKIE_OPERATOR_TOKEN).toBeUndefined();
       const conversationId = childEnv!.CLANKIE_CONVERSATION_ID!;
       if (chat) expect(conversationId).toBe(chat);

@@ -4,7 +4,7 @@
 based on `2235beb2e`. Native probes ran through `clankie heavy --`, with
 `DISABLE_AUTOUPDATER=1`. The live lead seat was never restarted or relaunched.
 
-The [native proof bundle](clankie://evidence/sha256/656cb7121568d05ae265d2c88699188737fbebc9ebcef6af6cda318a2241fc70)
+The [native proof bundle](clankie://evidence/sha256/514a1afe91e1b96f0fa3bf43b559f188ccc61ae6ce115bf1dafeebf6bc4aa437)
 contains the named JSON/text records below as entries in `native-proof.json`.
 Fetch with `clankie evidence fetch docs/testing/2026-10-25-vuh-2815-claude-seat-mcp`.
 
@@ -57,7 +57,43 @@ against the copied baseline and byte-identical owner settings files. The whole
 still match. No owner configuration file was directly edited. No Claude binary,
 shim or owner MCP registration was changed.
 
-## Channel check and probe isolation incident
+## Retained plugin, binding and isolated channel proof
+
+`style-hooks-skills.json` records a native print-mode request from the real
+launcher and plugin against an owned loopback Clankie app and deterministic
+local API responder. The full Clankie output style is present as a request
+message reminder, both persona and memory hook markers are present, the lead
+hook guidance and `/clankie:this-machine` skill are present, and the actual tool
+is `mcp__clankie__reply`. There is no explicit style override. This probe made no
+external inference call. An earlier assertion looked only in the system block;
+its false negative was corrected by checking the complete native request.
+
+`channel-events.json` records a separate native TUI against that owned app,
+using a new non-global conversation. All three emitted `watch`, `wake` and
+`message` markers appeared in its native terminal and were acknowledged through
+the source bridge. Only that conversation was polled. Native channel policy
+requires normal Claude authentication/network; this mode did not intercept
+inference and is not claimed to have made zero external inference calls. It was
+interrupted after receipt. No live lead or real worker tools were provided.
+
+Both runs retained `CLANKIE_SEAT_HARNESS=claude`, a seat session id and the new
+conversation binding. `native-after-binding.json` rechecks all 82 tools with the
+final generated declaration. `native-unbound-binding.json` shows the generated
+server fails with zero tools when `CLANKIE_CONVERSATION_ID` is absent. The file
+adds `--conversation ${CLANKIE_CONVERSATION_ID:-}`, so an absent value is refused
+before upstream connection. This is a presence guard, not verified-seat authority.
+The private bare-server file is a new convenient reusable artifact; a same-user
+process can deliberately provide a binding. Direct unbound operator bridges
+still default to the lead under known [VUH-2816](https://linear.app/vuhlp/issue/VUH-2816),
+which is outside this patch.
+
+The [plugin README](../../../integrations/claude-plugin/README.md#what-the-scoped-launch-retains)
+lists every old-prefix reference and its disposition, including the owner rule
+that was reported without editing. `prefix-audit.txt`, `owner-prefix-rules.json`
+and `compatibility-tests.txt` retain the read-only inventory and focused boundary
+check results (27 passed, one skipped).
+
+## Earlier probe isolation incident
 
 An interactive throwaway profile confirmed the explicit `server:clankie`
 channel and `/mcp` showing exactly `clankie`, **82 tools**. Strict mode removes

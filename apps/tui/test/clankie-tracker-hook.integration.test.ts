@@ -27,6 +27,7 @@ const denied = [
 const retained = [
   "mcp__plugin_clankie-worker_worker__clankie_call",
   "mcp__plugin_clankie_lead__linear_create_comment",
+  "mcp__clankie__linear_create_comment",
   "mcp__github__create_issue",
   "Bash",
 ];

@@ -41,17 +41,11 @@ export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
 const SEAT_AGENT_NAME = "clankie";
 // Claude Code server-prefix rules cover every tool from one server: allow his own
-// operator bank (the inline seat plugin), deny the inherited Linear connector.
+// operator bank (the explicit clankie server), deny the inherited Linear connector.
 // Without the allow, auto mode's classifier can refuse his own tools mid-turn.
 const SEAT_PERMISSIONS = {
   permissions: {
-    allow: [
-      "Bash(clankie)",
-      "Bash(clankie *)",
-      "mcp__plugin_clankie_lead",
-      "mcp__plugin_clankie_clankie",
-      "mcp__clankie",
-    ],
+    allow: ["Bash(clankie)", "Bash(clankie *)", "mcp__clankie"],
     deny: ["mcp__linear-server"],
   },
 };

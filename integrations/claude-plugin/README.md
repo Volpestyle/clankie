@@ -111,6 +111,65 @@ For a numbered account alias, set `CLAUDE_CONFIG_DIR` to that alias's profile
 when resolving named opt-ins. Credentials in copied definitions stay in the
 private launch file, rather than in argv or dry-run JSON.
 
+### What the scoped launch retains
+
+The launcher still passes `--plugin-dir` and enables `clankie@inline`. Strict
+mode scopes MCP, not the rest of the plugin. The plugin forces its `Clankie` output style;
+native 2.1.310 includes it in a request message reminder. The output style,
+SessionStart/UserPromptSubmit/Stop and other hooks, room agent and selected
+`/clankie:*` skills remain loaded. The bridge uses the existing bare
+`server:clankie` development-channel route for `watch`, `wake` and `message`
+events. Its launcher-supplied `CLANKIE_SEAT_HARNESS`, `CLANKIE_SEAT_SESSION_ID`
+and selected `CLANKIE_CONVERSATION_ID` retain the operator seat's binding.
+
+The tool prefix changes from `mcp__plugin_clankie_lead__*` to
+`mcp__clankie__*`. The launch permissions allow only the new server prefix; obsolete plugin-prefix
+allow rules are removed from this launch's settings. User-owned rules are never
+edited. The room agent already
+allows both names. The tracker hook's matcher identifies external Linear server
+names, so it still allows Clankie's `linear_*` tools under the new prefix. The
+native catalog observer tries the plugin's `lead`, then the bare `clankie`
+registration. The generated output style names the scoped server and its direct
+plugin alias; historical captures retain the names they actually observed.
+
+The repository prefix audit covers these remaining references:
+
+| Surface                                                                                                             | Disposition                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Launcher settings and seat/joined-seat tests                                                                        | Allow `mcp__clankie`; assert the explicit server and channel.                                                                                    |
+| `agents/room.md`                                                                                                    | Already permits new and both older plugin prefixes; retain compatibility with direct plugin sessions.                                            |
+| `hooks/hooks.json`, tracker-hook integration test                                                                   | Server-name Linear matcher remains valid; test permits both old and new Clankie tool names.                                                      |
+| `worker/mods/tool-catalog.mjs` and its generated hook copies                                                        | Derive the actual namespace from `lead` or `clankie`; no fixed tool prefix to replace.                                                           |
+| `build.mjs`, generated `output-styles/clankie.md`                                                                   | Footer now names scoped `clankie` and direct-plugin `lead`. Captain `instructions.md` and the generated Codex seat have no old-prefix reference. |
+| Shipped skills and `docs/cli.md`                                                                                    | Seat reference and CLI explain the new scope, prefix and binding. Other shipped skills have no old-prefix reference.                             |
+| `command/mcp.ts`, `mcp-bridge.test.ts`, `fixtures/seat-pump-stdio.ts`                                               | Retain old channel aliases/fixture; bridge integration now covers `server:clankie` too.                                                          |
+| `eval-runner.test.ts`, `native-room-handoff.integration.test.ts`, `room-handoff-native-captain.integration.test.ts` | Old tool-name fixtures exercise supported legacy native journals; retained. No eval was run.                                                     |
+| `docs/verification/vuh-1887`, `docs/testing/VUH-1859-idle-claude-delivery.md`                                       | Historical observations retain their measured names. This README and VUH-2815 evidence describe the migration.                                   |
+
+A read-only audit also found one owner rule, `~/.claude/settings.json` →
+`permissions.allow[5] = "mcp__plugin_clankie_clankie"`. It belongs to the owner
+and was reported to the lead without editing it. The new launch supplies its own
+`mcp__clankie` rule.
+
+### Binding and the known unbound-bridge gap
+
+The generated `clankie` declaration appends `--conversation` with
+`${CLANKIE_CONVERSATION_ID:-}`. The launcher supplies that environment variable.
+Reusing the generated file without it expands the argument to an empty string,
+which the MCP CLI refuses before connecting. `--dry-run --new` describes a chat
+that has not been created yet; its generated file needs the real launch binding
+before it can serve tools.
+
+The new file is a convenient bare-server artifact in a private 0700 launch
+directory, mode 0600. It contains no operator bearer by default, but a same-user
+process could deliberately supply a conversation and invoke it. This is not a
+verified-seat authority boundary. A manually started, unbound operator bridge
+outside this generated launch still has the existing
+[VUH-2816](https://linear.app/vuhlp/issue/VUH-2816) defect: it can default to the
+owner's lead conversation. This patch does not fix that wider defect or claim
+that all unbound bridges fail closed. The operator plugin stays session-only;
+plain `claude` without it keeps its own identity and configuration.
+
 `--conversation ID` resolves an existing global/workspace or Discord room conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
 binds the prompt, MCP tools and channel to that conversation. The selected

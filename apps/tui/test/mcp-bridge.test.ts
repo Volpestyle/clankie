@@ -493,7 +493,7 @@ describe("clankie mcp", () => {
   });
 });
 
-it.each(["plugin:clankie@inline", "plugin:clankie@clankie"])(
+it.each(["plugin:clankie@inline", "plugin:clankie@clankie", "server:clankie"])(
   "polls the selected operator conversation when %s is loaded as its channel",
   async (entry) => {
     const upstream = fakeUpstream({ events: [[{ ...wakeEvent(), conversationId: "project-a" }]] });

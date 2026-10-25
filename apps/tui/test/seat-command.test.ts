@@ -110,13 +110,7 @@ describe("clankie claude (the operator seat)", () => {
       "clankie@inline": true,
     });
     expect(settings.permissions).toEqual({
-      allow: [
-        "Bash(clankie)",
-        "Bash(clankie *)",
-        "mcp__plugin_clankie_lead",
-        "mcp__plugin_clankie_clankie",
-        "mcp__clankie",
-      ],
+      allow: ["Bash(clankie)", "Bash(clankie *)", "mcp__clankie"],
       deny: ["mcp__linear-server", "mcp__claude_ai_Linear"],
     });
   });
