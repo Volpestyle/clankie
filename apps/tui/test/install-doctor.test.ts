@@ -697,6 +697,29 @@ describe("install doctor", () => {
       expect(formatDoctorReport(speakerReport)).toContain("not heard: 100000000000000003");
       const heard = { ...pipelines, hearing: { ...pipelines.hearing, state: "working" as const } };
       expect(formatDoctorSummary({ ...healthy, discordVoice: { ...voice, pipelines: heard } })).toBe("ready");
+      // A join the provider refused heads the card with its code, ahead of the older call.
+      const joinRefusal = {
+        at: new Date(Date.now() - 60_000).toISOString(),
+        code: "voice_provider_refused",
+        providerCode: "credit_balance_exhausted",
+      };
+      const refused = { ...old, discordVoice: { ...old.discordVoice, joinRefusal } };
+      expect(formatDoctorSummary(refused)).toBe(
+        "Clankie could not join Discord voice: the voice provider refused the session with credit_balance_exhausted — run `clankie discord call`.",
+      );
+      expect(formatDoctorReport(refused)).toContain(
+        `Discord voice · Join refused at ${joinRefusal.at}: voice_provider_refused (credit_balance_exhausted)`,
+      );
+      const unconfirmed = { at: joinRefusal.at, code: "voice_provider_unconfirmed" };
+      expect(
+        formatDoctorSummary({ ...old, discordVoice: { ...old.discordVoice, joinRefusal: unconfirmed } }),
+      ).toBe(
+        "Clankie could not join Discord voice: the voice provider never confirmed the session — run `clankie discord call`.",
+      );
+      const staleRefusal = { ...joinRefusal, at: "2026-10-23T18:13:00.000Z" };
+      expect(
+        formatDoctorSummary({ ...old, discordVoice: { ...old.discordVoice, joinRefusal: staleRefusal } }),
+      ).toBe("ready");
 
       const probed: string[] = [];
       const builtin = await doctorWith(

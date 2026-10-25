@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   DiscordVoiceEvidenceSchema,
+  type DiscordVoiceJoinRefusal,
   type DiscordVoicePipeline,
   type DiscordVoiceStayPipelines,
 } from "@clankie/protocol";
@@ -128,23 +129,58 @@ export async function readVoiceSpeechSnapshot(
   };
 }
 
+/** Join's listener probe: the provider refused it, or never confirmed it in time. */
+const JOIN_REFUSAL_CODES = new Set(["voice_provider_refused", "voice_provider_unconfirmed"]);
+
+export interface VoiceCallHealth {
+  readonly pipelines?: DiscordVoiceStayPipelines;
+  readonly joinRefusal?: DiscordVoiceJoinRefusal;
+}
+
 /**
  * Hearing and answering of the latest voice stay (VUH-2728). A provider
  * session lost after its leg last worked reads as broken, so a deaf or mute
  * call shows in `clankie discord call` and doctor without reading the log.
+ * A later join the provider refused never starts a stay, so it is read too:
+ * otherwise an account out of credit would show only the last call that worked.
  */
-export async function readVoiceStayPipelines(path: string): Promise<DiscordVoiceStayPipelines | undefined> {
+export async function readVoiceCallHealth(path: string): Promise<VoiceCallHealth> {
   const raw = await readReceipts(path);
-  if (raw === undefined) return undefined;
+  if (raw === undefined) return {};
   const lines = raw.split("\n");
   let stayId: string | undefined;
+  let joinRefusal: DiscordVoiceJoinRefusal | undefined;
   let start = lines.length;
   while (stayId === undefined && start > 0) {
     start -= 1;
     const receipt = parseVoiceEvidenceLine(lines[start]!);
     if (receipt?.evidence.type === "joined") stayId = receipt.evidence.stayId;
+    else if (
+      joinRefusal === undefined &&
+      receipt?.evidence.type === "failed" &&
+      JOIN_REFUSAL_CODES.has(receipt.evidence.code)
+    ) {
+      const { code, closeCode, providerCode } = receipt.evidence;
+      joinRefusal = {
+        at: receipt.occurredAt,
+        code,
+        ...(closeCode === undefined ? {} : { closeCode }),
+        ...(providerCode === undefined ? {} : { providerCode }),
+      };
+    }
   }
-  if (stayId === undefined) return undefined;
+  const pipelines = stayId === undefined ? undefined : readStayPipelines(lines, start, stayId);
+  return {
+    ...(pipelines === undefined ? {} : { pipelines }),
+    ...(joinRefusal === undefined ? {} : { joinRefusal }),
+  };
+}
+
+function readStayPipelines(
+  lines: readonly string[],
+  start: number,
+  stayId: string,
+): DiscordVoiceStayPipelines {
   const hearing = new SpeakerHearingPipeline();
   const answering = new StayPipeline();
   let endedAt: string | undefined;

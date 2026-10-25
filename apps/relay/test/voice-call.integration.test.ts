@@ -135,8 +135,11 @@ class ScriptedSocket implements RealtimeSocket {
       audio?: string;
       item?: { type: string; output?: string; content?: { text?: string }[] };
     };
-    if (frame.type === "session.update")
+    if (frame.type === "session.update") {
       this.kind = frame.session?.type === "transcription" ? "transcription" : "conversation";
+      // The provider confirms the configuration it accepted.
+      this.later({ type: "session.updated", session: {} });
+    }
     if (frame.type === "input_audio_buffer.append")
       this.provider.transcribedBytes += Buffer.from(frame.audio ?? "", "base64").byteLength;
     if (frame.type === "input_audio_buffer.commit" && this.kind === "transcription") {

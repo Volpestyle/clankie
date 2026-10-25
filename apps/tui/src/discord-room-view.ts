@@ -1,5 +1,10 @@
 import { stripVTControlCharacters } from "node:util";
-import type { DiscordRoomStatus, DiscordVoicePipeline, DiscordVoiceStayPipelines } from "@clankie/protocol";
+import type {
+  DiscordRoomStatus,
+  DiscordVoiceJoinRefusal,
+  DiscordVoicePipeline,
+  DiscordVoiceStayPipelines,
+} from "@clankie/protocol";
 
 /** Plain text works in the live TUI result pane and headless operator output. */
 export function formatDiscordRoomStatus(room: DiscordRoomStatus): string {
@@ -30,6 +35,15 @@ export function formatVoiceStayPipelines(stay: DiscordVoiceStayPipelines): strin
   };
   const unheard = formatUnheardSpeakers(stay.hearing);
   return `${stay.endedAt === undefined ? "This call" : "Last call"}: ${leg("hearing", stay.hearing)}${unheard === undefined ? "" : ` [not heard: ${unheard}]`} · ${leg("answering", stay.answering)}`;
+}
+
+/** A join the provider refused before any stay began, with its codes (VUH-2728). */
+export function formatVoiceJoinRefusal(refusal: DiscordVoiceJoinRefusal): string {
+  const how = [
+    refusal.providerCode,
+    refusal.closeCode === undefined ? undefined : `close ${refusal.closeCode}`,
+  ].filter((value) => value !== undefined);
+  return `Join refused at ${refusal.at}: ${refusal.code}${how.length ? ` (${how.join(", ")})` : ""}`;
 }
 
 /** Gateway ids are metadata, not terminal control sequences or display-name authority. */

@@ -145,9 +145,18 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   (transport or a safety bound) or `lifetime`. `closeCode` is the provider's
   WebSocket close code. `providerCode` is the code of its last error frame,
   such as a refused key, quota or model; its message text is never kept.
-  Receipts from before VUH-2728 lack these three fields. A join that returns
-  `joined` proves only that the sockets opened, not that the provider
-  accepted the session. `clankie discord call` projects the latest stay as
+  Receipts from before VUH-2728 lack these three fields. Join waits up to five
+  seconds for the provider to confirm its listener probe (`session.updated`).
+  A refusal there, such as an OpenAI account with no credit
+  (`providerCode: credit_balance_exhausted`), fails the join with code
+  `voice_provider_refused`; no answer in time fails it with
+  `voice_provider_unconfirmed`. Either way there is no `joined`, and
+  `voice_join` returns `join_refused` / `provider_refused`, with `providerCode`
+  when the provider gave one.
+  To confirm a suspected account problem, open a real session with the
+  brokered key and read its error frame. `clankie discord call` shows the
+  newest refusal after the latest stay as `joinRefusal`, and doctor headlines
+  it for an hour. It also projects the latest stay as
   `pipelines.hearing` / `pipelines.answering` (`broken` = lost since that leg
   last worked; a `lifetime` rotation never breaks it). Listener loss/open-failure
   receipts now carry the gateway `userId`; hearing recovers only when that

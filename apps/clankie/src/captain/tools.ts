@@ -1778,12 +1778,15 @@ function discordVoicePresenceTools(
           "join, hop in, come talk, or otherwise enter their call. The live Discord body—not you—finds that " +
           "channel from gateway state and enforces allowlists. You never pick a guild or channel. A refusal " +
           "reason is a fact to explain, not a reason to retry: not_in_voice means they are not in a call, " +
-          "ambiguous means they are in more than one, no_owner means nobody is configured as the owner. " +
+          "ambiguous means they are in more than one, no_owner means nobody is configured as the owner, " +
+          "provider_refused means the voice provider refused to hear (providerCode names why, such as " +
+          "credit_balance_exhausted for an account out of credit). " +
           "On success, actorCanBeHeard says whether the owner can be heard under the room's current consent policy. " +
           VOICE_JOIN_CONSENT_STATE
         : "Join the Discord voice channel the person speaking to you is in now. Use this when they ask you to " +
           "join, hop in, come talk, or otherwise enter their call. The live Discord body—not you—resolves the " +
-          "channel and enforces authority and allowlists. A refusal reason is a fact to explain, not a reason to retry. " +
+          "channel and enforces authority and allowlists. A refusal reason is a fact to explain, not a reason to retry; " +
+          "provider_refused means the voice provider refused to hear, and providerCode names why. " +
           "On success, actorCanBeHeard says whether the speaker can be heard under the room's current consent policy. " +
           VOICE_JOIN_CONSENT_STATE,
       parameters: Type.Object({}),

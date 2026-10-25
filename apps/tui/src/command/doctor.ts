@@ -64,6 +64,9 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
 const RECENT_VOICE_CALL_MS = 60 * 60_000;
 
 function brokenVoiceCall(voice: InstallDoctorReport["discordVoice"]): string | undefined {
+  const refusal = voice?.joinRefusal;
+  if (refusal !== undefined && Date.now() - Date.parse(refusal.at) <= RECENT_VOICE_CALL_MS)
+    return `Clankie could not join Discord voice: ${refusal.code === "voice_provider_unconfirmed" ? "the voice provider never confirmed the session" : refusal.providerCode === undefined ? "the voice provider refused the session" : `the voice provider refused the session with ${refusal.providerCode}`} — run \`clankie discord call\`.`;
   const stay = voice?.pipelines;
   if (stay === undefined || voice === undefined) return undefined;
   if (stay.endedAt === undefined) {

@@ -21,6 +21,7 @@ import {
 } from "@clankie/protocol";
 import {
   MAX_REALTIME_AUDIO_APPEND_BYTES,
+  RealtimeSessionRefusedError,
   type RealtimeSessionCloseReason,
   type RealtimeResponseMeta,
   type RealtimeFunctionCall,
@@ -36,6 +37,7 @@ import {
   DEFAULT_VOICE_RECORDING_LIMIT_MS,
   ENGAGED_HOLD_MS,
   ENGAGED_TICK_MS,
+  PROBE_ACCEPTANCE_TIMEOUT_MS,
   SPEAKER_TRANSCRIPTION_IDLE_MS,
   FLOOR_WORK_HEARTBEAT_MS,
   FLOOR_WORK_MAX_MS,
@@ -3916,6 +3918,134 @@ describe("a provider that hangs up says how (VUH-2728)", () => {
     ]);
     expect(JSON.stringify(harness.ofType("failed"))).not.toContain("private provider text");
     await harness.session.leave("fixture_done");
+  });
+});
+
+describe("a provider that refuses the join says so (VUH-2728)", () => {
+  // The frames an OpenAI account with no credit sends on every realtime
+  // socket, captured live on 2026-10-25: the socket opens, then the session
+  // is refused. Join must fail on it instead of sitting in the call deaf.
+  const noCredit = {
+    type: "error",
+    error: {
+      type: "insufficient_quota",
+      code: "credit_balance_exhausted",
+      message: "You have no credits remaining. Add credits to continue using the API.",
+      param: null,
+      event_id: null,
+    },
+  };
+
+  function scriptListener(
+    harness: ReturnType<typeof buildHarness>,
+    reply: readonly Record<string, unknown>[],
+  ): VoiceRecoverySocket[] {
+    const sockets: VoiceRecoverySocket[] = [];
+    harness.ports.openTranscription = createVoiceRealtimePorts({
+      apiKey: "fixture-realtime",
+      config: parseVoiceRealtimeEnv({}),
+      timers: harness.timers,
+      socketFactory: async () => {
+        const socket = new VoiceRecoverySocket();
+        sockets.push(socket);
+        // The provider answers once the session has sent its session.update.
+        setImmediate(() => {
+          for (const frame of reply) socket.emit(frame);
+        });
+        return socket;
+      },
+    }).openTranscription;
+    return sockets;
+  }
+
+  it("fails the join with the provider's code when the account is out of credit", async () => {
+    const harness = buildHarness();
+    const sockets = scriptListener(harness, [{ type: "session.created", session: {} }, noCredit]);
+    const joining = harness.session.join({ guildId: GUILD, channelId: CHANNEL, invokingUserId: OWNER });
+    await expect(joining).rejects.toBeInstanceOf(RealtimeSessionRefusedError);
+    await expect(joining).rejects.toMatchObject({ detail: { providerCode: "credit_balance_exhausted" } });
+    expect(at(sockets, 0).sent.map((frame) => frame.type)).toEqual(["session.update"]);
+    expect(at(sockets, 0).closed).toBe(true);
+    expect(harness.ofType("joined")).toEqual([]);
+    expect(harness.ofType("failed")).toMatchObject([
+      {
+        stage: "transcription_session",
+        code: "voice_provider_refused",
+        providerCode: "credit_balance_exhausted",
+      },
+    ]);
+    expect(JSON.stringify(harness.evidence)).not.toContain("no credits remaining");
+    expect(harness.session.status().active).toBe(false);
+    expect(harness.conversations).toEqual([]);
+  });
+
+  it("joins once the provider confirms the listener session", async () => {
+    const harness = buildHarness();
+    const sockets = scriptListener(harness, [
+      { type: "session.created", session: {} },
+      { type: "session.updated", session: {} },
+    ]);
+    await harness.session.join({ guildId: GUILD, channelId: CHANNEL, invokingUserId: OWNER });
+    expect(at(sockets, 0).closed).toBe(true);
+    expect(harness.ofType("joined")).toHaveLength(1);
+    expect(harness.ofType("failed")).toEqual([]);
+    await harness.session.leave("fixture_done");
+  });
+
+  /** Join with a provider that has opened but not yet answered its probe. */
+  async function awaitingProbe() {
+    const harness = buildHarness();
+    const sockets = scriptListener(harness, [{ type: "session.created", session: {} }]);
+    let settled = false;
+    const joining = harness.session.join({ guildId: GUILD, channelId: CHANNEL, invokingUserId: OWNER });
+    void joining.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await expect
+      .poll(() => harness.timers.pending().some((timer) => timer.delayMs === PROBE_ACCEPTANCE_TIMEOUT_MS))
+      .toBe(true);
+    await flush();
+    expect(settled).toBe(false);
+    return { harness, probe: at(sockets, 0), joining };
+  }
+
+  it("fails the join when the provider never confirms the listener in time", async () => {
+    const { harness, probe, joining } = await awaitingProbe();
+    harness.timers.fire(PROBE_ACCEPTANCE_TIMEOUT_MS);
+    await expect(joining).rejects.toMatchObject({ unconfirmed: true });
+    expect(probe.closed).toBe(true);
+    expect(harness.ofType("joined")).toEqual([]);
+    expect(harness.ofType("failed")).toMatchObject([
+      { stage: "transcription_session", code: "voice_provider_unconfirmed" },
+    ]);
+    expect(harness.session.status().active).toBe(false);
+  });
+
+  it("joins on a confirmation that arrives before the deadline", async () => {
+    const { harness, probe, joining } = await awaitingProbe();
+    probe.emit({ type: "session.updated", session: {} });
+    await joining;
+    expect(harness.timers.pending().some((timer) => timer.delayMs === PROBE_ACCEPTANCE_TIMEOUT_MS)).toBe(
+      false,
+    );
+    expect(harness.ofType("joined")).toHaveLength(1);
+    expect(harness.ofType("failed")).toEqual([]);
+    await harness.session.leave("fixture_done");
+  });
+
+  it("fails the join on a refusal that arrives before the deadline", async () => {
+    const { harness, probe, joining } = await awaitingProbe();
+    probe.emit(noCredit);
+    await expect(joining).rejects.toMatchObject({
+      unconfirmed: false,
+      detail: { providerCode: "credit_balance_exhausted" },
+    });
+    expect(probe.closed).toBe(true);
+    expect(harness.ofType("joined")).toEqual([]);
+    expect(harness.ofType("failed")).toMatchObject([
+      { code: "voice_provider_refused", providerCode: "credit_balance_exhausted" },
+    ]);
   });
 });
 

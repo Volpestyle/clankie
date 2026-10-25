@@ -1,4 +1,4 @@
-import { VoiceBodyLeaseDenied } from "@clankie/discord-presence-core";
+import { RealtimeSessionRefusedError, VoiceBodyLeaseDenied } from "@clankie/discord-presence-core";
 import type { JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
 import type { DiscordVoicePresenceResult } from "@clankie/protocol";
 import {
@@ -97,6 +97,13 @@ export async function executeVoicePresenceIntent(
       },
     });
   } catch (error) {
+    if (error instanceof RealtimeSessionRefusedError) {
+      return {
+        action: "join_refused",
+        reason: "provider_refused",
+        ...(error.detail.providerCode === undefined ? {} : { providerCode: error.detail.providerCode }),
+      };
+    }
     return {
       action: "join_refused",
       reason: "failed",

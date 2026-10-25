@@ -366,6 +366,31 @@ export interface RealtimeSessionCloseDetail {
   readonly providerCode?: string;
 }
 
+/**
+ * The provider refused the session before confirming its configuration: an
+ * error frame or a hang-up arrived first. An account with no credit opens the
+ * socket and then refuses this way (VUH-2728). `unconfirmed` means it never
+ * answered within the caller's deadline. Carries codes, never message text.
+ */
+export class RealtimeSessionRefusedError extends Error {
+  public readonly detail: RealtimeSessionCloseDetail;
+  public readonly unconfirmed: boolean;
+
+  public constructor(detail: RealtimeSessionCloseDetail, options: { readonly unconfirmed?: boolean } = {}) {
+    const unconfirmed = options.unconfirmed === true;
+    super(
+      unconfirmed
+        ? "Realtime provider did not confirm the session"
+        : detail.providerCode === undefined
+          ? "Realtime provider refused the session"
+          : `Realtime provider refused the session (${detail.providerCode})`,
+    );
+    this.name = "RealtimeSessionRefusedError";
+    this.detail = detail;
+    this.unconfirmed = unconfirmed;
+  }
+}
+
 export interface RealtimeTranscriptEvent {
   readonly itemId: string;
   /** A delta for providers that stream them; the whole line when `cumulative` or `final`. */
@@ -564,12 +589,24 @@ abstract class RealtimeSessionCore {
   private closed = false;
   private remoteCloseCode: number | undefined;
   private lastProviderCode: string | undefined;
+  private acceptance: { resolve: () => void; reject: (error: Error) => void } | undefined;
+  /**
+   * Settles once the provider confirms this session's configuration, or
+   * rejects with {@link RealtimeSessionRefusedError} if it refuses or hangs up
+   * first. An open socket alone proves nothing about the account behind it.
+   */
+  public readonly accepted: Promise<void>;
 
   protected constructor(init: RealtimeSessionCoreInit) {
     this.socket = init.socket;
     this.timers = init.timers;
     this.onCloseCallback = init.onClose;
     this.onErrorCallback = init.onError;
+    this.accepted = new Promise<void>((resolve, reject) => {
+      this.acceptance = { resolve, reject };
+    });
+    // allow-swallowed-rejection -- only a caller that awaits acceptance is told; a session nobody probes must not crash the process
+    this.accepted.catch(() => undefined);
     init.socket.onMessage((data) => {
       this.receive(data);
     });
@@ -658,10 +695,27 @@ abstract class RealtimeSessionCore {
     } catch {
       // Already closing; the reason we report is the one that got here first.
     }
-    this.onCloseCallback?.(reason, {
+    const detail = this.closeDetail();
+    this.refuse(detail);
+    this.onCloseCallback?.(reason, detail);
+  }
+
+  /** The event that confirms the session.update this session sent on open. */
+  protected isAcceptance(type: string): boolean {
+    return type === "session.updated";
+  }
+
+  private closeDetail(): RealtimeSessionCloseDetail {
+    return {
       ...(this.remoteCloseCode === undefined ? {} : { closeCode: this.remoteCloseCode }),
       ...(this.lastProviderCode === undefined ? {} : { providerCode: this.lastProviderCode }),
-    });
+    };
+  }
+
+  private refuse(detail: RealtimeSessionCloseDetail): void {
+    const acceptance = this.acceptance;
+    this.acceptance = undefined;
+    acceptance?.reject(new RealtimeSessionRefusedError(detail));
   }
 
   protected assertOpen(): void {
@@ -683,8 +737,15 @@ abstract class RealtimeSessionCore {
     if (type === undefined) return;
     if (type === "error") {
       this.lastProviderCode = providerErrorCode(event) ?? this.lastProviderCode;
+      // Before the provider confirms the session, an error refuses it.
+      this.refuse(this.closeDetail());
       this.handleServerError(event);
       return;
+    }
+    if (this.acceptance !== undefined && this.isAcceptance(type)) {
+      const acceptance = this.acceptance;
+      this.acceptance = undefined;
+      acceptance.resolve();
     }
     this.handleServerEvent(type, event);
   }
@@ -788,6 +849,10 @@ export class XaiStreamingTranscriptionSession extends RealtimeSessionCore {
 
   public commitAudio(): void {
     // xAI's streaming STT endpoint owns turn finalization.
+  }
+
+  protected override isAcceptance(type: string): boolean {
+    return type === "transcript.created";
   }
 
   protected override handleServerEvent(type: string, event: Record<string, unknown>): void {

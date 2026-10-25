@@ -145,6 +145,15 @@ export const DiscordVoiceStayPipelinesSchema = z
   })
   .strict();
 export type DiscordVoiceStayPipelines = z.infer<typeof DiscordVoiceStayPipelinesSchema>;
+export const DiscordVoiceJoinRefusalSchema = z
+  .object({
+    at: z.string().datetime(),
+    code: DiscordVoiceFailureCodeSchema,
+    closeCode: z.number().int().min(0).max(4999).optional(),
+    providerCode: DiscordVoiceFailureCodeSchema.optional(),
+  })
+  .strict();
+export type DiscordVoiceJoinRefusal = z.infer<typeof DiscordVoiceJoinRefusalSchema>;
 export const DiscordRoomVoiceStatusSchema = z
   .object({
     state: z.enum(["idle", "active", "unknown"]),
@@ -164,6 +173,8 @@ export const DiscordRoomVoiceStatusSchema = z
       .optional(),
     /** The latest stay's hearing and answering; absent before any stay or when receipts are unreadable. */
     pipelines: DiscordVoiceStayPipelinesSchema.optional(),
+    /** A join the voice provider refused after the latest stay began, e.g. no credit (VUH-2728). */
+    joinRefusal: DiscordVoiceJoinRefusalSchema.optional(),
   })
   .strict();
 export type DiscordRoomVoiceStatus = z.infer<typeof DiscordRoomVoiceStatusSchema>;

@@ -12,7 +12,7 @@ import type { DiscordBridgeReceiptType } from "@clankie/discord-presence-core";
 import { BodyLeaseStore } from "../src/body-leases.ts";
 import { BodyVoiceStays } from "../src/body-voice-stays.ts";
 import { DiscordRoomVoice } from "../src/discord-room-voice.ts";
-import { defaultDiscordLiveReceiptPath, readVoiceStayPipelines } from "../src/voice-receipt-activity.ts";
+import { defaultDiscordLiveReceiptPath, readVoiceCallHealth } from "../src/voice-receipt-activity.ts";
 it("only one exact host nonce controls an admitted audio stay and forged, repeated, or revoked commands have no effect", async () => {
   const root = mkdtempSync(join(tmpdir(), "room-voice-"));
   const leases = new BodyLeaseStore(root);
@@ -256,7 +256,7 @@ it("hearing recovers only for that speaker's listener over the real receipt writ
         activeCaptureCount: 0,
         handoffCount: 0,
       }),
-    () => readVoiceStayPipelines(path),
+    () => readVoiceCallHealth(path),
   );
   // The real headless command and protocol client read the production status projection over HTTP.
   const server = createServer(async (request, response) => {
@@ -349,6 +349,75 @@ it("hearing recovers only for that speaker's listener over the real receipt writ
     expect((await control.status()).pipelines?.hearing.brokenUserIds).toBeUndefined();
     await record("joined", { stayId: "new-stay", daveProtocolVersion: 1 });
     expect((await control.status()).pipelines?.hearing).toEqual({ state: "unproven", losses: 0 });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    leases.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("a join the provider refused shows over the real receipt writer and headless command (VUH-2728)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "refused-join-"));
+  const leases = new BodyLeaseStore(root);
+  const path = join(root, "receipts.jsonl");
+  const receipts = new DiscordBridgeReceiptStore({ path });
+  const control = new DiscordRoomVoice(
+    new BodyVoiceStays(leases, join(root, "stays.json")),
+    leases,
+    async () =>
+      Response.json({
+        active: false,
+        outputMuted: false,
+        activity: "idle",
+        consentedParticipantCount: 0,
+        activeCaptureCount: 0,
+        handoffCount: 0,
+      }),
+    () => readVoiceCallHealth(path),
+  );
+  const server = createServer(async (request, response) => {
+    if (
+      request.headers.authorization !== "Bearer test-operator" ||
+      request.url !== "/v1/discord/room-voice"
+    ) {
+      response.writeHead(403).end();
+      return;
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify(await control.status()));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (address === null || typeof address === "string") throw Error("No test listener");
+  const room = { guildId: "100000000000000001", channelId: "100000000000000002" };
+  const record = (type: string, data: Record<string, unknown>) =>
+    receipts.append(`discord.voice.${type}` as DiscordBridgeReceiptType, { type, ...room, ...data });
+  try {
+    await record("joined", { stayId: "worked", daveProtocolVersion: 1 });
+    await record("left", { stayId: "worked", reason: "self_decided" });
+    // Join's listener probe refused by an account with no credit: no stay begins.
+    await record("failed", {
+      stayId: "refused",
+      stage: "transcription_session",
+      code: "voice_provider_refused",
+      providerCode: "credit_balance_exhausted",
+    });
+    const command = await runDiscordCommand(["call"], {
+      host: `http://127.0.0.1:${address.port}`,
+      env: { CLANKIE_OPERATOR_TOKEN: "test-operator" },
+    });
+    expect(command).toMatchObject({
+      pipelines: { stayId: "worked" },
+      joinRefusal: { code: "voice_provider_refused", providerCode: "credit_balance_exhausted" },
+    });
+    // A later stay that began supersedes the refusal.
+    await record("joined", { stayId: "after", daveProtocolVersion: 1 });
+    const status = await control.status();
+    expect(status.joinRefusal).toBeUndefined();
+    expect(status.pipelines?.stayId).toBe("after");
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

@@ -181,6 +181,7 @@ export {
   openXaiStreamingTranscriptionSession,
   REALTIME_AUDIO_SAMPLE_RATE,
   RealtimeConversationSession,
+  RealtimeSessionRefusedError,
   RealtimeTranscriptionSession,
   XAI_REALTIME_BASE_URL,
   XAI_STREAMING_STT_BASE_URL,

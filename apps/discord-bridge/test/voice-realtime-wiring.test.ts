@@ -44,8 +44,12 @@ class FakeRealtimeSocket implements RealtimeSocket {
   }
 
   public send(data: string | Uint8Array): void {
-    if (typeof data === "string") this.sent.push(data);
-    else this.binary.push(Buffer.from(data));
+    if (typeof data === "string") {
+      this.sent.push(data);
+      // The provider confirms the configuration it accepted.
+      if ((JSON.parse(data) as { type?: string }).type === "session.update")
+        setImmediate(() => this.serverEvent({ type: "session.updated", session: {} }));
+    } else this.binary.push(Buffer.from(data));
   }
 
   public close(): void {

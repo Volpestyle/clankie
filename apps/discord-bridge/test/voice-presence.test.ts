@@ -1,4 +1,5 @@
-import type { JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
+import { RealtimeSessionRefusedError, type JoinDiscordVoiceInput } from "@clankie/discord-presence-core";
+import { DiscordVoicePresenceResultSchema } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import {
   executeVoicePresenceIntent,
@@ -98,5 +99,18 @@ describe("captain voice presence execution", () => {
       channelId: "voice-1",
     });
     expect(session.leaves).toBe(1);
+  });
+
+  it("names a provider's refusal instead of a bare failure (VUH-2728)", async () => {
+    const session = new FakeVoiceSession();
+    session.join = () =>
+      Promise.reject(new RealtimeSessionRefusedError({ providerCode: "credit_balance_exhausted" }));
+    const result = await executeVoicePresenceIntent(config(session), input("join"));
+    expect(result).toEqual({
+      action: "join_refused",
+      reason: "provider_refused",
+      providerCode: "credit_balance_exhausted",
+    });
+    expect(DiscordVoicePresenceResultSchema.parse(result)).toEqual(result);
   });
 });

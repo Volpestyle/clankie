@@ -60,6 +60,7 @@ import {
   MAX_REALTIME_RESPONSE_TEXT_CHARACTERS,
   MAX_REALTIME_TEXT_ITEM_CHARACTERS,
   REALTIME_AUDIO_SAMPLE_RATE,
+  RealtimeSessionRefusedError,
   type RealtimeFunctionCall,
   type RealtimeResponseMeta,
   type RealtimeResponseAttempt,
@@ -154,6 +155,8 @@ const BARGE_IN_SPEECH_RMS = 1_200;
 const ONSET_YIELD_PCM_BYTES = Math.round(REALTIME_AUDIO_SAMPLE_RATE * PCM_SAMPLE_BYTES * 0.7);
 const VOICE_READY_TIMEOUT_MS = 20_000;
 const DAVE_READY_TIMEOUT_MS = 10_000;
+/** A provider that has not confirmed the join probe by then cannot be shown to hear. */
+export const PROBE_ACCEPTANCE_TIMEOUT_MS = 5_000;
 const PLAYBACK_TIMEOUT_MS = 2 * 60_000;
 /** A continuously open mic is one bounded recording, even when Discord never sends silence. */
 export const DEFAULT_VOICE_RECORDING_LIMIT_MS = 3 * 60_000;
@@ -374,6 +377,8 @@ export type DiscordVoiceSpokenTranscript = Omit<
  */
 export interface VoiceTranscriptionPort {
   readonly isOpen: boolean;
+  /** Settles when the provider confirms the session; rejects when it refuses first. */
+  readonly accepted?: Promise<void>;
   appendAudio(pcm: Buffer): void;
   commitAudio(): void;
   close(): void;
@@ -921,7 +926,7 @@ export class DiscordVoiceSession {
       if (requiresDave) this.daveProtocolVersion = protocolVersion;
       // Prove the transcription boundary at join time. Actual ears are opened
       // per authenticated speaker, so overlap can never corrupt attribution.
-      await this.probeTranscription();
+      await this.probeTranscription(input.guildId, input.channelId);
       if (
         generation !== this.sessionGeneration ||
         this.connectionId !== connectionId ||
@@ -4445,13 +4450,50 @@ export class DiscordVoiceSession {
   // Speaker-bound dormant listeners: open, reconnect, never cross identities.
   // ------------------------------------------------------------------
 
-  private async probeTranscription(): Promise<void> {
+  private async probeTranscription(guildId: string, channelId: string): Promise<void> {
     const port = await this.options.realtime.openTranscription({
       onTranscript: () => undefined,
       onClose: () => undefined,
       onError: () => undefined,
     });
-    port.close();
+    try {
+      // An open socket is not an account that can transcribe: a provider with
+      // no credit opens, then refuses every session (VUH-2728). Join only
+      // after it confirms, so a refusal or silence fails the join instead of sitting deaf.
+      if (port.accepted !== undefined) await this.awaitAcceptance(port.accepted);
+    } catch (error) {
+      if (error instanceof RealtimeSessionRefusedError) {
+        await this.emitSafely({
+          type: "failed",
+          guildId,
+          channelId,
+          stage: "transcription_session",
+          code: error.unconfirmed ? "voice_provider_unconfirmed" : "voice_provider_refused",
+          ...providerDetailEvidence(error.detail),
+        });
+      }
+      throw error;
+    } finally {
+      port.close();
+    }
+  }
+
+  private awaitAcceptance(accepted: Promise<void>): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const handle = this.timers.setTimeout(() => {
+        reject(new RealtimeSessionRefusedError({}, { unconfirmed: true }));
+      }, PROBE_ACCEPTANCE_TIMEOUT_MS);
+      accepted.then(
+        () => {
+          this.timers.clearTimeout(handle);
+          resolve();
+        },
+        (error: unknown) => {
+          this.timers.clearTimeout(handle);
+          reject(error instanceof Error ? error : new Error("Realtime provider refused the session"));
+        },
+      );
+    });
   }
 
   private ensureSpeakerTranscription(userId: string): Promise<VoiceTranscriptionPort> {
@@ -4851,9 +4893,15 @@ function providerCloseEvidence(
   reason: RealtimeSessionCloseReason,
   detail: RealtimeSessionCloseDetail | undefined,
 ): { closeReason: RealtimeSessionCloseReason; closeCode?: number; providerCode?: string } {
+  return { closeReason: reason, ...providerDetailEvidence(detail) };
+}
+
+function providerDetailEvidence(detail: RealtimeSessionCloseDetail | undefined): {
+  closeCode?: number;
+  providerCode?: string;
+} {
   const closeCode = detail?.closeCode;
   return {
-    closeReason: reason,
     ...(closeCode !== undefined && Number.isSafeInteger(closeCode) && closeCode >= 0 && closeCode <= 4999
       ? { closeCode }
       : {}),

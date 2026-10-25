@@ -522,6 +522,8 @@ export const DiscordVoicePresenceResultReasonSchema = z.enum([
   "other_guild",
   "no_owner",
   "ambiguous",
+  /** The voice provider refused the session at join, e.g. an account out of credit (VUH-2728). */
+  "provider_refused",
   "failed",
 ]);
 export type DiscordVoicePresenceResultReason = z.infer<typeof DiscordVoicePresenceResultReasonSchema>;
@@ -548,6 +550,11 @@ export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("join_refused"),
       reason: DiscordVoicePresenceResultReasonSchema,
+      /** The provider's machine-readable refusal code with `provider_refused`; never its message text. */
+      providerCode: z
+        .string()
+        .regex(/^[a-z0-9_]{1,64}$/u)
+        .optional(),
       bodyLease: BodyLeaseResultSchema.optional(),
     })
     .strict(),

@@ -159,6 +159,11 @@ call is live or within an hour of its recorded end. A missing `endedAt` alone is
 not proof of a live call: idle state suppresses that headline; unknown state
 requires a loss within the last hour; an active replacement stay does not revive
 old failures. Historical details remain on the card (VUH-2728, VUH-2765).
+Join waits up to five seconds for the voice provider to confirm a listener session.
+When it refuses (for example an account with no credit) or never answers, the join
+fails as `provider_refused`, with the provider's code when it gave one, and no stay
+begins. `joinRefusal` then shows the newest such
+refusal since the latest stay, and doctor names it as the next step for an hour.
 `clankie discord call join CONVERSATION_ID` joins an existing exact voice room only
 when the configured owner is currently there. `leave`, `mute_output`, and
 `unmute_output` require both conversation id and exact stay id. **Mute Clankie
