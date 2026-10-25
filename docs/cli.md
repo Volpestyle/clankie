@@ -2983,6 +2983,15 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
 - `clankie work close ID [--canceled]` sets `done` (or `canceled`).
 - `clankie work attach ID --url URL --caption TEXT [--kind image|video|log|link]`
   appends evidence; the kind is inferred from the URL when omitted.
+- `show`, `activity`, `update`, `close` and `attach` take `--project P` for an
+  item in the built-in tracker, with the project UUID or name that
+  `work ready --project` takes. The item resolves by its `LOCAL-…` identifier or
+  UUID in that project, whatever repo the command runs from; an item outside it
+  answers `not_found`. The selector wins over `--repo`, including `linear-…` and
+  `project-…` references. Only this machine's CLI and agents use it; devices
+  read through their repo IDs. Done still follows the built-in tracker's
+  lead-closure policy (landed, checked evidence bundle, lead authority), which
+  `work close` does not carry; it answers `owner_verification_required`.
 
 `clankie work write ID --owner NAME|--no-owner|--add-label ROLE|--remove-label
 ROLE|--add-blocker ID [--request-id UUID]` performs exactly one owner-authorized

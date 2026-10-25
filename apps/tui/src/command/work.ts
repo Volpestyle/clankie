@@ -22,10 +22,10 @@ import { commandHost } from "./io.ts";
 const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
   "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]",
-  "  | project | project-details | list [--status S,S] [--owner O] [--label L] | show ID | activity ID | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S] [--priority 0..4|none|urgent|high|medium|low]",
-  "  | update ID [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
+  "  | project | project-details | list [--status S,S] [--owner O] [--label L] | show ID [--project P] | activity ID [--project P] | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S] [--priority 0..4|none|urgent|high|medium|low]",
+  "  | update ID [--project P] [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
-  "  | close ID [--canceled] | attach ID --url URL --caption TEXT [--kind image|video|log|link]",
+  "  | close ID [--project P] [--canceled] | attach ID [--project P] --url URL --caption TEXT [--kind image|video|log|link]",
   "  | releases [--lane L] [--item KEY] [--limit N] | releases sync | release ID|VERSION",
   "  | view save|get|list|apply|delete [ID] --project UUID --store-id ID [--json DEFINITION] [--limit N] [--cursor C]",
   "  | inbox list|get|snooze|unsnooze --project UUID --store-id ID [--target JSON] [--until RFC3339] [--revision N] [--if-updated-at RFC3339|null] [--idempotency-key KEY] [--attention active|snoozed|all] [--limit N] [--cursor C]",
@@ -103,6 +103,8 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
   if (parsed.flags.has("--linear-label") && verb !== "init")
     throw new Error("--linear-label only applies to init");
   const status = one(parsed, "--status");
+  // An item in the built-in tracker, named by the project `work ready --project` takes (VUH-2805).
+  const builtInProject = one(parsed, "--project") === undefined ? {} : { project: one(parsed, "--project") };
   const rawPriority = one(parsed, "--priority");
   const priority =
     rawPriority === undefined
@@ -152,12 +154,12 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
       };
     case "show":
       if (rest[0] === undefined) throw new Error(WORK_USAGE);
-      return { action: "show", repo, id: rest[0] };
+      return { action: "show", repo, id: rest[0], ...builtInProject };
     case "project-details":
       return { action: "project-details", repo };
     case "activity":
       if (rest[0] === undefined) throw new Error(WORK_USAGE);
-      return { action: "activity", repo, id: rest[0] };
+      return { action: "activity", repo, id: rest[0], ...builtInProject };
     case "create":
       if (rest.length === 0) throw new Error(WORK_USAGE);
       return {
@@ -178,6 +180,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         action: "update",
         repo,
         id: rest[0],
+        ...builtInProject,
         ...(priority === undefined ? {} : { priority }),
         ...(closing
           ? { status: one(parsed, "--canceled") === "true" ? "canceled" : "done" }
@@ -258,6 +261,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         action: "attach",
         repo,
         id: rest[0],
+        ...builtInProject,
         evidence: { kind: one(parsed, "--kind") ?? inferKind(url), url, caption },
       };
     }

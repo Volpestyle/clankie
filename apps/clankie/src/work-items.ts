@@ -108,13 +108,21 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
     })
     .strict(),
   z
-    .object({ action: z.literal("show"), repo: z.string().min(1).max(4096), id: z.string().min(1).max(64) })
+    .object({
+      action: z.literal("show"),
+      repo: z.string().min(1).max(4096),
+      id: z.string().min(1).max(64),
+      // A built-in tracker project UUID or name, as `work ready --project` takes it (VUH-2805).
+      project: z.string().trim().min(1).max(200).optional(),
+    })
     .strict(),
   z
     .object({
       action: z.literal("activity"),
       repo: z.string().min(1).max(4096),
       id: z.string().min(1).max(64),
+      // A built-in tracker project UUID or name, as `work ready --project` takes it (VUH-2805).
+      project: z.string().trim().min(1).max(200).optional(),
     })
     .strict(),
   z
@@ -136,6 +144,8 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       action: z.literal("update"),
       repo: z.string().min(1).max(4096),
       id: z.string().min(1).max(64),
+      // A built-in tracker project UUID or name, as `work ready --project` takes it (VUH-2805).
+      project: z.string().trim().min(1).max(200).optional(),
       status: WorkItemStatusSchema.optional(),
       priority: WorkItemPrioritySchema.optional(),
       owner: z.string().trim().min(1).max(128).nullable().optional(),
@@ -151,6 +161,8 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       action: z.literal("attach"),
       repo: z.string().min(1).max(4096),
       id: z.string().min(1).max(64),
+      // A built-in tracker project UUID or name, as `work ready --project` takes it (VUH-2805).
+      project: z.string().trim().min(1).max(200).optional(),
       evidence: WorkEvidenceSchema,
     })
     .strict(),
@@ -227,6 +239,17 @@ export type WorkResult =
   | { readonly repo: WorkRepo; readonly items: WorkItem[] }
   | { readonly repo: WorkRepo; readonly item: WorkItem }
   | { readonly repo: WorkRepo; readonly itemId: string; readonly entries: WorkActivityEntry[] };
+
+const workPatch = (request: Extract<WorkRequest, { action: "update" }>): WorkItemPatch => ({
+  ...(request.status === undefined ? {} : { status: request.status }),
+  ...(request.priority === undefined ? {} : { priority: request.priority }),
+  ...(request.owner === undefined ? {} : { owner: request.owner }),
+  ...(request.title === undefined ? {} : { title: request.title }),
+  ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
+  ...(request.check === undefined ? {} : { check: request.check }),
+  ...(request.uncheck === undefined ? {} : { uncheck: request.uncheck }),
+  ...(request.addCriteria === undefined ? {} : { addCriteria: request.addCriteria }),
+});
 
 export class WorkRequestError extends Error {
   readonly code:
@@ -528,6 +551,65 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         throw new WorkRequestError("backend_unavailable", error.message);
       throw error;
     }
+  };
+
+  /**
+   * A built-in tracker item named with its project, as `work ready --project` lists it
+   * (VUH-2805): the shared store scoped to that project, whatever repo the caller stands in.
+   * An item outside the project is not found there; writes are scope-checked again.
+   */
+  const builtInProjectItem = async (project: string, id: string) => {
+    const store = openBuiltIn();
+    // The store's own lookup misses are answers; any other failure propagates.
+    const lookup = async (name: string, args: Record<string, unknown>, missing: string) => {
+      try {
+        return await store.call(name, args);
+      } catch (error) {
+        if (error instanceof Error && /^(?:Issue|Project) not found:/u.test(error.message))
+          throw new WorkRequestError("not_found", missing);
+        if (error instanceof Error && error.message.startsWith("Project name is ambiguous:"))
+          throw new WorkRequestError("invalid", error.message);
+        throw error;
+      }
+    };
+    const view = (await lookup(
+      "get_project",
+      { query: project },
+      `No built-in tracker project ${project}`,
+    )) as { id?: unknown; name?: unknown; leadTeam?: { id?: unknown } } | undefined;
+    if (typeof view?.id !== "string" || typeof view.leadTeam?.id !== "string")
+      throw new WorkRequestError("not_found", `No built-in tracker project ${project}`);
+    const issue = (await lookup(
+      "get_issue",
+      { id },
+      `No work item ${id} in built-in tracker project ${project}`,
+    )) as { projectId?: unknown } | undefined;
+    if (issue?.projectId !== view.id)
+      throw new WorkRequestError("not_found", `No work item ${id} in built-in tracker project ${project}`);
+    const builtIn = { projectId: view.id, teamId: view.leadTeam.id, open: openBuiltIn };
+    const convention: WorkConvention = {
+      schemaVersion: 1,
+      backend: "builtin",
+      decidedBy: "owner",
+      decidedAt: clock().toISOString(),
+    };
+    const repo: WorkRepo = {
+      id: "builtin",
+      name: typeof view.name === "string" ? view.name.slice(0, 200) : "Built-in tracker",
+      trackerProjectId: view.id,
+      backend: "builtin",
+      needsDecision: false,
+    };
+    return {
+      repo,
+      backend: backendFor(options.stateDirectory, convention, {
+        run,
+        clock,
+        builtIn,
+        actor: CLANKIE_FOR_OWNER,
+        scopedWrites: true,
+      }),
+    };
   };
 
   const authorizeWrite = async (authority: WorkWriteAuthority) => {
@@ -1539,6 +1621,36 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           throw new WorkRequestError("result_too_large", "There are too many work trackers to list at once.");
         return { repos };
       }
+      if (
+        (request.action === "show" ||
+          request.action === "activity" ||
+          request.action === "update" ||
+          request.action === "attach") &&
+        request.project !== undefined
+      ) {
+        // An explicit project wins over whatever repo, or repo reference, the caller names.
+        if (!local) throw new WorkRequestError("invalid", "Devices read work items through their repo");
+        const { repo, backend } = await builtInProjectItem(request.project, request.id);
+        try {
+          switch (request.action) {
+            case "show": {
+              const item = await backend.get(request.id);
+              if (item === undefined) throw new WorkRequestError("not_found", `No work item ${request.id}`);
+              return { repo, item };
+            }
+            case "activity":
+              return { repo, itemId: request.id, entries: await backend.activity!(request.id) };
+            case "update":
+              return { repo, item: await backend.update(request.id, workPatch(request)) };
+            case "attach":
+              return { repo, item: await backend.attach(request.id, request.evidence) };
+          }
+        } catch (error) {
+          if (error instanceof Error && error.name === "WorkItemNotFoundError")
+            throw new WorkRequestError("not_found", error.message);
+          throw error;
+        }
+      }
       if (/^linear-[a-f0-9-]{36}$/u.test(request.repo)) {
         if (
           !linearProjects ||
@@ -1725,18 +1837,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "update": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
           const { backend } = await tracker(entry.path, true);
-          const patch = {
-            ...(request.status === undefined ? {} : { status: request.status }),
-            ...(request.priority === undefined ? {} : { priority: request.priority }),
-            ...(request.owner === undefined ? {} : { owner: request.owner }),
-            ...(request.title === undefined ? {} : { title: request.title }),
-            ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
-            ...(request.check === undefined ? {} : { check: request.check }),
-            ...(request.uncheck === undefined ? {} : { uncheck: request.uncheck }),
-            ...(request.addCriteria === undefined ? {} : { addCriteria: request.addCriteria }),
-          };
           try {
-            return { repo: await describe(entry), item: await backend.update(request.id, patch) };
+            return {
+              repo: await describe(entry),
+              item: await backend.update(request.id, workPatch(request)),
+            };
           } catch (error) {
             if (error instanceof Error && error.name === "WorkItemNotFoundError")
               throw new WorkRequestError("not_found", error.message);
