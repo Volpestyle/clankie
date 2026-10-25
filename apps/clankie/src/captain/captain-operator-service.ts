@@ -346,6 +346,7 @@ export function createOperatorService(
           // Native children can change without a worker roster change. Re-observe
           // the captain parent on every sample rather than retaining its session.
           const { head } = await ctx.observeFleet(true);
+          if (request.includeCurrentActivity) ctx.conversations.observePresenceHead(head?.occupantId);
           const nativeSubagents = await captainNativeSubagents(head, ctx.deps.agentSessions?.subagents);
           const thinking = await captainIsThinking(ctx.sessions.values());
           const inVoice = voice.some(

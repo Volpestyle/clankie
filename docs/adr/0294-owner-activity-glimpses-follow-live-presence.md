@@ -29,7 +29,8 @@ A completed tool/turn or waiting event clears it. Call text additionally require
 the same conversation's exact active voice-lease incarnation, captured when
 the line is published, and disappears after hang-up, replacement or expiry.
 A native source/session change invalidates its cached activity even if the
-replacement remains working throughout. Neither fence depends on a presence
+replacement remains working throughout. The fresh presence census also fences
+the head occupant before a replacement transcript arrives. Neither fence depends on a presence
 read observing an idle gap. Unavailable state provides no glimpse.
 
 Presence reads this projection in memory during its existing update. It adds

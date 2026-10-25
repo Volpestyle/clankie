@@ -280,6 +280,7 @@ export class ConversationStore {
   private readonly currentActivities = new CurrentActivities();
   /** Service-owned live call binding; sampled at event publication, never inferred on the first read. */
   public presenceVoiceLease?: () => { conversationId: string; incarnation: string } | undefined;
+  private readonly presenceHeadIncarnations = new Map<string, string>();
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
   /** A bounded explicit continuation declaration in a lead's settled report. */
@@ -1421,6 +1422,17 @@ export class ConversationStore {
         now >= this.recentPresenceError.at &&
         now - this.recentPresenceError.at < PRESENCE_ERROR_MS,
     };
+  }
+
+  /** Fresh census identity fences the interval before the replacement's transcript arrives. */
+  public observePresenceHead(
+    occupantId: string | undefined,
+    conversationId = this.defaultGlobalConversationId(),
+  ): void {
+    if (this.presenceHeadIncarnations.get(conversationId) === occupantId) return;
+    if (occupantId === undefined) this.presenceHeadIncarnations.delete(conversationId);
+    else this.presenceHeadIncarnations.set(conversationId, occupantId);
+    this.currentActivities.clear(conversationId);
   }
 
   public currentPresenceActivity(nativeWorking: boolean) {

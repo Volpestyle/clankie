@@ -23,6 +23,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
   const conversations = new ConversationStore(join(root, "conversations"), async () => {});
   const leases = new BodyLeaseStore(join(root, "leases"));
   conversations.presenceVoiceLease = () => new BodyLeaseRouter(leases).activeIncarnation("voice");
+  let headOccupant: string | undefined;
   let working = true,
     validOwner = true;
   const service = createOperatorService({
@@ -37,7 +38,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
     fleetChanges: new FleetChangeClock(),
     liveSeats: [],
     refreshFleet: async () => [],
-    observeFleet: async () => ({ head: { status: working ? "working" : "idle" } }),
+    observeFleet: async () => ({ head: { status: working ? "working" : "idle", occupantId: headOccupant } }),
     sessions: new Map(),
     desktop: new DesktopExpressions(async () => (await settings.load()).desktop),
     shutdown: new AbortController(),
@@ -202,6 +203,30 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       source: "coding",
       text: "exec_command\nFresh session command",
     });
+    headOccupant = "native-A";
+    conversations.rememberNativeHead("global-default", headOccupant);
+    conversations.publishHeadEvent({
+      type: "tool",
+      toolCallId: "head-A-tool",
+      name: "exec_command",
+      phase: "started",
+      detail: "HEAD_A_COMMAND",
+    });
+    const headA = (await read()).currentActivity;
+    expect(headA?.text).toContain("HEAD_A_COMMAND");
+    expect((await read()).currentActivity).toEqual(headA);
+    // Census observes B before B has a transcript, while working remains true.
+    headOccupant = "native-B";
+    expect((await read()).currentActivity).toBeUndefined();
+    conversations.rememberNativeHead("global-default", headOccupant);
+    conversations.publishHeadEvent({
+      type: "tool",
+      toolCallId: "head-B-tool",
+      name: "exec_command",
+      phase: "started",
+      detail: "HEAD_B_COMMAND",
+    });
+    expect((await read()).currentActivity?.text).toContain("HEAD_B_COMMAND");
     const cursor = (await read()).cursor;
     const pending = fetch(`http://127.0.0.1:${address.port}/operator/v1/dispatch`, {
       method: "POST",

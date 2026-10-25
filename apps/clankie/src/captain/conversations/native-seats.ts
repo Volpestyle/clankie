@@ -501,6 +501,7 @@ export function hasNativeSeat(ctx: ConversationStore, conversationId: string): b
 
 /** Retain host-observed head ownership without changing transcript checkpoints. */
 export function rememberNativeHead(ctx: ConversationStore, conversationId: string, occupantId: string): void {
+  ctx.observePresenceHead(occupantId, conversationId);
   const meta = ctx["metas"].get(conversationId);
   if (meta === undefined || meta.nativeSeatSessions?.[occupantId] === "current") return;
   (meta.nativeSeatSessions ??= {})[occupantId] = "current";

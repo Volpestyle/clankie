@@ -12,7 +12,9 @@ idle-to-working without replay; voice lease release; withheld mixed rooms and
 first transcript folds; owner-only admission and revalidation after a wait.
 Regression controls release/reacquire voice for the same conversation without
 a read in between, then prove fresh-call text; and replace a working native
-session with a first historical fold, then prove its fresh tool event.
+session with a first historical fold, then prove its fresh tool event. A fresh
+census replacement also invalidates the prior occupant before any new transcript;
+unchanged-head and fresh-replacement controls retain the correct event.
 This is a local dependency integration proof, not a live owner conversation.
 
 Focused command (governed):
