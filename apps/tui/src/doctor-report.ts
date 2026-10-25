@@ -188,7 +188,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
         ? [`  Discord delivery · unavailable: ${report.discordRoomDelivery.detail}`]
         : []),
     `  Discord · ${report.discord.activeBody ?? "no body"}${report.discord.voiceEnabled ? " · voice" : ""}`,
-    ...(report.voice.providerReadiness === undefined
+    ...(report.voice?.providerReadiness === undefined
       ? []
       : [`  Voice · ${formatVoiceProviderReadiness(report.voice.providerReadiness)}`]),
     ...(report.discordVoice?.joinRefusal === undefined

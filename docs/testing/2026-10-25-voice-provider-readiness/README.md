@@ -36,3 +36,14 @@ output readiness. No money/account decision was made.
 `verification.json` is stored through the evidence store; `evidence.json` records
 its immutable link and checksum. It includes sanitized live observations, real
 provider-fixture results, baseline red output and the relevant source digests.
+
+## Landing correction
+
+The first root gate on `00eed3e3b` exited **1**, after 255 passing files and
+4,787 passing tests. `seat-capabilities.integration.test.ts` caught a defect in
+this change: its partial doctor report has no `voice`, and the new headline lookup
+unconditionally read `providerReadiness`. The lookup now tolerates missing voice.
+The existing reconnect-health expectation is unchanged. The affected suite,
+doctor and provider integration then passed **32/32** (three files).
+`gate-correction.json` retains the failed gate's phase receipt and the focused
+results. A new full root gate is required; no timing exception is requested.

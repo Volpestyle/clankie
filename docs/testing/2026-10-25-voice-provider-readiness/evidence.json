@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "gate-correction.json",
+      "size": 22696,
+      "sha256": "fe4bc527a5202586afd55364b84496c943e575bebe37a6cdecd15bd74b2c6108",
+      "url": "clankie://evidence/sha256/fe4bc527a5202586afd55364b84496c943e575bebe37a6cdecd15bd74b2c6108"
+    },
+    {
       "path": "verification.json",
       "size": 24278,
       "sha256": "60a3bacaac7bfecfd4017f2ed31d9fabeffc3857a29a7940ad895dde8fd5002a",
