@@ -1,16 +1,21 @@
+import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
+import { dirname } from "node:path";
+import { splitFleetQualified } from "../herdr-fleet.ts";
 import {
   assertConversationAuthority,
   type ConversationAuthority,
   type ConversationOwner,
   type NativeSeatRecipient,
 } from "./conversation-owner.ts";
-import { ConversationStore, type ConversationRunner } from "./conversations.ts";
+import { ConversationStore, type ConversationRunner, type InboundReport } from "./conversations.ts";
 import { deliveryFingerprint } from "./delivery-fence.ts";
 import { type FleetSeatDelivery, type FleetSeatMessageContext } from "./fleet-seat.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import type { WorkerReportAcknowledgment } from "./worker-report-tools.ts";
+/** A report from a seat that just closed stays unread this long, so its lead still sees it (VUH-2806). */
+const CLOSED_SEAT_REPORT_GRACE_MS = 60 * 60_000;
 export interface WorkerReportsContext {
   readonly conversations: ConversationStore;
   readonly seatOutboxes: Map<string, SeatOutbox>;
@@ -20,6 +25,8 @@ export interface WorkerReportsContext {
   readonly validateConversationOwner: (owner: ConversationOwner) => Promise<boolean>;
   readonly herdrRunner: HerdrWatchRunner;
   readonly herdrWatches: HerdrWatchStore;
+  /** Append-only audit record of reports retired because their seat is gone. */
+  readonly retiredReportsPath: string;
   readonly inboundBinding: (agent: HerdrAgentSnapshot | undefined) => string | undefined;
   readonly nativeRecipientCurrent: (recipient: NativeSeatRecipient) => Promise<boolean>;
   readonly deliverToSeat: (
@@ -216,11 +223,84 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
     );
     for (const conversationId of pending) void recoverWorkerReports(conversationId).catch(() => undefined);
   }
+  /**
+   * Retire unread reports whose sending pane a complete listing of its own fleet no
+   * longer shows (VUH-2806). A fleet that cannot be listed retires nothing, and any
+   * pane still present keeps every report it ever sent, whatever session it now runs.
+   */
+  async function retireClosedSeatReports(now = Date.now()) {
+    const cutoff = now - CLOSED_SEAT_REPORT_GRACE_MS;
+    const candidates = ctx.conversations
+      .inboundReports()
+      .filter(
+        (report) =>
+          (report.reportDelivery.state === "delivered" || report.reportDelivery.state === "uncertain") &&
+          Date.parse(report.acceptedAt) <= cutoff,
+      );
+    const inventories = new Map<string, Set<string> | undefined>();
+    for (const fleet of new Set(candidates.map((report) => splitFleetQualified(report.paneId)?.fleet))) {
+      if (ctx.shutdown.signal.aborted || !ctx.herdrRunner.list) return [];
+      const panes = await ctx.herdrRunner.list(fleet).then(
+        (inventory) => new Set(inventory.map((agent) => agent.paneId)),
+        () => undefined,
+      );
+      inventories.set(fleet ?? "", panes);
+    }
+    const gone = new Map<string, string[]>();
+    for (const report of candidates) {
+      const panes = inventories.get(splitFleetQualified(report.paneId)?.fleet ?? "");
+      if (panes === undefined || panes.has(report.paneId)) continue;
+      gone.set(report.conversationId, [...(gone.get(report.conversationId) ?? []), report.deliveryId]);
+    }
+    const retired: { conversationId: string; deliveryIds: string[] }[] = [];
+    for (const [conversationId, ids] of gone) {
+      if (ctx.shutdown.signal.aborted) break;
+      const deliveryIds = ctx.conversations.retireInboundReports(conversationId, ids, (reports) =>
+        appendRetiredReports(ctx.retiredReportsPath, reports, new Date(now).toISOString()),
+      );
+      if (deliveryIds.length === 0) continue;
+      retired.push({ conversationId, deliveryIds });
+      ctx.conversations.recordServiceNotice(
+        conversationId,
+        `Retired ${deliveryIds.length === 1 ? "an unread worker report" : `${deliveryIds.length} unread worker reports`} whose seat has closed, so worker_reports shows live seats. Their full text is kept in ${ctx.retiredReportsPath}.`,
+      );
+    }
+    return retired;
+  }
   return {
+    retireClosedSeatReports,
     workerReportActions,
     reportSummaries,
     conversationReportRunner,
     recoverWorkerReports,
     recoverAllWorkerReports,
   };
+}
+
+/** One JSON line per retired report, durable before the store marks any of them read. */
+function appendRetiredReports(path: string, reports: readonly InboundReport[], retiredAt: string) {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const lines = reports
+    .map((report) =>
+      JSON.stringify({
+        retiredAt,
+        reason: "sender_pane_closed",
+        conversationId: report.conversationId,
+        deliveryId: report.deliveryId,
+        paneId: report.paneId,
+        binding: report.binding,
+        acceptedAt: report.acceptedAt,
+        state: report.reportDelivery.state,
+        ...(report.reportDelivery.stage === undefined ? {} : { stage: report.reportDelivery.stage }),
+        text: report.text,
+      }),
+    )
+    .join("\n");
+  const fd = openSync(path, "a", 0o600);
+  try {
+    writeSync(fd, `${lines}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }

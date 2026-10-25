@@ -52,6 +52,12 @@ export class PaneKeeps {
     this.save(keeps);
     return true;
   }
+  /** Release every keep the predicate selects, in one write; returns what it released. */
+  releaseWhere(selected: (keep: PaneKeep) => boolean): PaneKeep[] {
+    const released = this.state.keeps.filter(selected);
+    if (released.length > 0) this.save(this.state.keeps.filter((item) => !released.includes(item)));
+    return released;
+  }
   kept(sessionKey: string): PaneKeep | undefined {
     return this.state.keeps.find((item) => item.sessionKey === sessionKey);
   }

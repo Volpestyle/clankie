@@ -238,6 +238,7 @@ import {
   recordInboundReportReply,
   restoreInboundReports,
   retainInboundReports,
+  retireInboundReports,
   retryInboundReport,
   unansweredInboundReports,
 } from "./worker-reports.ts";
@@ -2079,6 +2080,15 @@ export class ConversationStore {
   /** The operator explicitly retires selected history; native receipts never call this. */
   public acknowledgeInboundReportHistory(conversationId: string, deliveryIds: readonly string[]): boolean {
     return acknowledgeInboundReports(this, conversationId, deliveryIds, { reviewedHistory: true });
+  }
+
+  /** Unread reports from a seat that is gone, after the caller's audit record (VUH-2806). */
+  public retireInboundReports(
+    conversationId: string,
+    deliveryIds: readonly string[],
+    audit: (reports: readonly InboundReport[]) => void,
+  ): string[] {
+    return retireInboundReports(this, conversationId, deliveryIds, audit);
   }
 
   /** A native transport receipt is progress, never an acknowledgment that the lead read it. */

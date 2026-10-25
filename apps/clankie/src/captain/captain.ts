@@ -5613,8 +5613,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     conversationReportRunner,
     recoverWorkerReports,
     recoverAllWorkerReports,
+    retireClosedSeatReports,
   } = createWorkerReports({
     observedSeats: () => liveEdgeSeats,
+    retiredReportsPath: join(options.stateDir, "retired-worker-reports.jsonl"),
     get conversations() {
       return conversations;
     },
@@ -5695,6 +5697,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   const stopAutoTidyPanes = startFleetRounds(async () => {
     await autoTidy.panes();
+  }, options.autoTidyPaneCheckMs ?? AUTO_TIDY_PANE_CHECK_MS);
+  // VUH-2806: history from seats that are gone, whatever the auto-tidy setting. Reports and
+  // keeps of any pane still listed in its fleet, or of a fleet that cannot be listed, stay.
+  const stopClosedSeatHistory = startFleetRounds(async () => {
+    if (shutdown.signal.aborted) return;
+    await retireClosedSeatReports();
+    await paneTidy.dropGoneKeeps();
   }, options.autoTidyPaneCheckMs ?? AUTO_TIDY_PANE_CHECK_MS);
   const stopAutoTidyWorktrees = startFleetRounds(async () => {
     await autoTidy.worktrees();
@@ -8382,6 +8391,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       stopLeadFailbacks();
       stopAutoTidyPanes();
       stopAutoTidyWorktrees();
+      stopClosedSeatHistory();
       unsubscribeFleets?.();
       censusBreaker.close();
       evaluator.close();

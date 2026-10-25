@@ -275,6 +275,17 @@ export class PaneTidy {
       await this.authority(authority);
       const reason = input.reason?.trim() || (input.keep ? "Kept open" : "Released");
       if (!validReason(reason)) return fail("invalid_reason");
+      // A keep outlives its pane until the next sweep; releasing that gone pane by its id
+      // drops the keeps recorded for it instead of refusing pane_unknown (VUH-2806).
+      if (!input.keep && (await this.paneGone(input.pane))) {
+        const released = this.keeps.releaseWhere((keep) => keep.paneId === input.pane);
+        if (released.length > 0) this.ports.changed();
+        return {
+          outcome: released.length > 0 ? "released" : "not_kept",
+          paneId: input.pane,
+          keeps: this.keeps.list(),
+        };
+      }
       const agent = await this.fresh(input.pane);
       const key = tidySessionKey(agent);
       if (!input.keep) {
@@ -302,6 +313,51 @@ export class PaneTidy {
     } catch (error) {
       return error instanceof Failure ? error.result : { outcome: "failed", reason: "history_unavailable" };
     }
+  }
+  /**
+   * Drop keeps whose pane and native session are both gone from a complete listing of
+   * their own fleet (VUH-2806). A fleet that cannot be listed keeps every keep, and a
+   * listed pane keeps its keep even while Herdr shows it without a session.
+   */
+  async dropGoneKeeps(): Promise<PaneKeep[]> {
+    const listings = new Map<string, { panes: Set<string>; sessions: Set<string> } | undefined>();
+    for (const keep of this.keeps.list()) {
+      const fleet = splitFleetQualified(keep.paneId)?.fleet;
+      if (listings.has(fleet ?? "") || !this.ports.runner.list) continue;
+      listings.set(
+        fleet ?? "",
+        await this.ports.runner.list(fleet).then(
+          (inventory) => ({
+            panes: new Set(inventory.map((agent) => agent.paneId)),
+            sessions: new Set(inventory.filter((agent) => agent.session).map(tidySessionKey)),
+          }),
+          () => undefined,
+        ),
+      );
+    }
+    const dropped = this.keeps.releaseWhere((keep) => {
+      const listing = listings.get(splitFleetQualified(keep.paneId)?.fleet ?? "");
+      return (
+        listing !== undefined && !listing.panes.has(keep.paneId) && !listing.sessions.has(keep.sessionKey)
+      );
+    });
+    if (dropped.length > 0) this.ports.changed();
+    return dropped;
+  }
+  /** Gone only when a complete listing of its fleet omits it and Herdr cannot find it either. */
+  private async paneGone(pane: string): Promise<boolean> {
+    if (!this.ports.runner.list) return false;
+    const listed = await this.ports.runner.list(splitFleetQualified(pane)?.fleet).then(
+      (inventory) => inventory.some((agent) => agent.paneId === pane || agent.terminalId === pane),
+      () => true,
+    );
+    return (
+      !listed &&
+      (await this.ports.runner.get(pane).then(
+        () => false,
+        () => true,
+      ))
+    );
   }
   /** List merged, clean, unused linked worktrees; never remove one. */
   worktrees(repositoryPath: string, mergedInto = "origin/main"): Promise<TidyWorktreesResult> {

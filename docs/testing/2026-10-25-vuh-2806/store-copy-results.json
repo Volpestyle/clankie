@@ -1,0 +1,86 @@
+{
+  "ranAt": "2026-10-25T05:56:55.271Z",
+  "listedFleets": ["local", "pc"],
+  "fleetErrors": [],
+  "listedPanes": 13,
+  "unreadBefore": {
+    "conv-7687818a-09c3-4f37-bf7b-9d201c2e1932": 359,
+    "global-default": 2520
+  },
+  "unreadAfter": {
+    "global-default": 354
+  },
+  "retired": 2525,
+  "remaining": {
+    "fromListedPanes": 354,
+    "fromUnlistedFleets": 0,
+    "withinGraceHour": 0,
+    "pending": 0
+  },
+  "keeps": {
+    "before": 16,
+    "dropped": [
+      {
+        "paneId": "w4F:p13",
+        "at": "2026-10-18T09:02:35.724Z"
+      },
+      {
+        "paneId": "w48:p19",
+        "at": "2026-10-18T15:38:07.532Z"
+      },
+      {
+        "paneId": "w5A:p1",
+        "at": "2026-10-18T17:12:57.724Z"
+      },
+      {
+        "paneId": "w48:p1A",
+        "at": "2026-10-18T17:42:22.870Z"
+      },
+      {
+        "paneId": "w5B:p1",
+        "at": "2026-10-18T21:32:05.402Z"
+      },
+      {
+        "paneId": "w59:p1",
+        "at": "2026-10-19T01:10:11.484Z"
+      },
+      {
+        "paneId": "w5C:p1",
+        "at": "2026-10-19T01:10:11.591Z"
+      },
+      {
+        "paneId": "w5J:p1",
+        "at": "2026-10-19T01:16:27.390Z"
+      },
+      {
+        "paneId": "pc/w18:pN",
+        "at": "2026-10-19T06:16:15.877Z"
+      },
+      {
+        "paneId": "w48:p1F",
+        "at": "2026-10-19T07:22:41.941Z"
+      },
+      {
+        "paneId": "w4F:p16",
+        "at": "2026-10-19T23:01:06.742Z"
+      },
+      {
+        "paneId": "w48:p1J",
+        "at": "2026-10-19T23:20:13.528Z"
+      },
+      {
+        "paneId": "w48:p1K",
+        "at": "2026-10-19T23:33:51.181Z"
+      },
+      {
+        "paneId": "w5J:pF",
+        "at": "2026-10-19T23:47:28.125Z"
+      },
+      {
+        "paneId": "w48:p1Z",
+        "at": "2026-10-20T06:01:31.465Z"
+      }
+    ],
+    "after": ["w4F:p2G"]
+  }
+}

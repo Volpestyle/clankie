@@ -31,6 +31,11 @@ When a worker's live context is worth keeping, or the owner asks, call
 `keep_worker_pane({ pane, reason })` (CLI `clankie agents keep PANE --conversation ID`);
 `keep: false` (or `clankie agents unkeep`) releases it and starts a new idle
 period. A keep never closes anything and never stops your own `close_worker_pane`.
+Keeps and unread reports outlive their seat only briefly: every five minutes the
+service drops keeps whose pane and session its fleet no longer lists, and
+retires unread reports from panes gone for over an hour, keeping their text in
+`retired-worker-reports.jsonl` (VUH-2806). Release a gone pane's keep early by
+its old pane id.
 
 ## Closing panes
 

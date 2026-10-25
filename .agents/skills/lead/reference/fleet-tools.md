@@ -125,7 +125,10 @@ behind a backlog) and acknowledge each one you reviewed with
 in `receipt.links`. Never acknowledge truncated output. Acknowledgment adds no
 progress, and an unread report does not prove a stall. The worker sees your
 summary only after a reply reached it; the result lists acknowledged reports
-still `unanswered`.
+still `unanswered`. Reports from a pane its fleet no longer lists are retired
+unread an hour after they arrive, with a notice in the conversation, so the
+backlog holds live seats; their text stays in the service's
+`retired-worker-reports.jsonl`.
 
 A Claude channel losing its poll binding says only that live delivery is
 unavailable. Neither Claude's subagent switcher nor `UserPromptSubmit` proves

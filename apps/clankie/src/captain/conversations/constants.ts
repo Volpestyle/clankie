@@ -20,7 +20,8 @@ export const LINEAR_REPLAY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /**
  * How long a read worker report stays in its conversation's metadata (VUH-2410).
- * Unread reports stay until read; every save rewrites the retained set.
+ * Unread reports stay until read, or until their sending seat is gone (VUH-2806);
+ * every save rewrites the retained set.
  */
 export const READ_REPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
 

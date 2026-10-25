@@ -263,6 +263,46 @@ export function acknowledgeInboundReports(
 }
 
 /**
+ * Retires unread reports whose sending seat is gone (VUH-2806): no lead can still
+ * answer them, and they buried live seats' reports. Only reports already handed to
+ * the lead or of uncertain handoff qualify; a pending one is still owed a delivery.
+ * The caller's audit record is written first, so a failure there changes nothing.
+ * Like reviewed history, a retirement sends no acknowledgment to the gone sender.
+ */
+export function retireInboundReports(
+  ctx: ConversationStore,
+  conversationId: string,
+  deliveryIds: readonly string[],
+  audit: (reports: readonly InboundReport[]) => void,
+): string[] {
+  const meta = ctx["metas"].get(conversationId);
+  const wanted = new Set(deliveryIds);
+  const reports = meta
+    ? ctx["inboundReports"](conversationId).filter(
+        (report) =>
+          wanted.has(report.deliveryId) &&
+          (report.reportDelivery.state === "delivered" || report.reportDelivery.state === "uncertain"),
+      )
+    : [];
+  if (!meta || reports.length === 0) return [];
+  audit(reports);
+  const before = structuredClone(meta.inboundAcceptances!);
+  const now = new Date().toISOString();
+  for (const report of reports) {
+    const receipt = meta.inboundAcceptances![report.deliveryId]!;
+    receipt.reportDelivery = { ...receipt.reportDelivery!, state: "read", readAt: now };
+  }
+  try {
+    ctx["saveMeta"](meta);
+  } catch (error) {
+    meta.inboundAcceptances = before;
+    throw error;
+  }
+  ctx["notifyInboundReportChange"]();
+  return reports.map((report) => report.deliveryId);
+}
+
+/**
  * A lead message reached this worker, so its earlier reports to that lead have
  * a reply (VUH-2065). Only a delivered message counts: an answer given
  * elsewhere, such as the owner's chat, never reaches the worker.

@@ -1561,7 +1561,7 @@ function herdrWatchTools(
               "Keep one worker pane's current native session open, or release it (keep: false), with a one-line reason. " +
               "Automatic tidy (fleet autoTidy, default 1h) closes a hire's pane once it has sat idle that long with a kept report, every report acknowledged and its work landed; a kept pane is skipped until released. " +
               "Use it when the owner asks to keep a pane, or when follow-up work needs the worker's live context. A new session in the pane is not kept. " +
-              "Keeping closes nothing; close_worker_pane still closes a kept pane. Returns every current keep.",
+              "Keeping closes nothing; close_worker_pane still closes a kept pane. A keep whose pane and session are gone is dropped automatically; until then, release it by its old pane id. Returns every current keep.",
             parameters: Type.Object({
               pane: Type.String({ minLength: 1, maxLength: 256 }),
               keep: Type.Optional(

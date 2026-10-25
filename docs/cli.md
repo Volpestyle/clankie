@@ -4415,7 +4415,9 @@ leaves the seat's session alone ([ADR 0271](adr/0271-the-lead-seat-restarts-fres
 finished hires on its own (VUH-2392). Every five minutes it closes a local hire's
 pane once the pane has sat idle or done for that long, its authenticated report
 is kept, every report it sent has been acknowledged, and no one kept it with
-`keep_worker_pane` (`clankie agents keep`). The close runs `close_worker_pane`'s
+`keep_worker_pane` (`clankie agents keep`); a keep whose pane and session are
+both gone from their fleet's listing is dropped by the same five-minute round,
+and `unkeep` releases a gone pane's keep by its old pane id. The close runs `close_worker_pane`'s
 guards: no unsent draft, still idle, and positive work proof. Automatic landing
 requires ancestry in actual advertised `origin/main` or a retained merge-queue
 handoff/current-HEAD work decision covering every unlanded commit; a pushed
@@ -7389,7 +7391,13 @@ returns that bounded envelope directly, without a second clipping step. Only com
 offered. Unknown, already acknowledged and foreign-conversation IDs are omitted
 without distinguishing them. `unreadCount` still counts the conversation’s entire
 unread backlog, and only returned `ackDeliveryIds` are eligible for acknowledgment.
-Reading does not mark them read. After reviewing every offered report, run
+Reading does not mark them read. A report whose sending pane a complete
+listing of its own fleet no longer shows is retired once it is an hour old
+(VUH-2806): it is marked read without an acknowledgment to the gone sender, its
+full record is appended to `retired-worker-reports.jsonl` in the service's state
+directory first, and the conversation gets one notice per sweep. Pending
+reports, reports from any pane still listed and reports from a fleet that
+cannot be listed are never retired. After reviewing every offered report, run
 `clankie agents reports ack DELIVERY_ID... --conversation ID` (or
 `acknowledge_worker_reports`). Only fully offered IDs can be acknowledged.
 The original sender receives durable channel events for stored, taken into a

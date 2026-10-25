@@ -193,6 +193,7 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
   };
   const reports = createWorkerReports({
     conversations,
+    retiredReportsPath: join(root, "retired-worker-reports.jsonl"),
     seatOutboxes: outboxes,
     shutdown,
     onChange: () => {},
