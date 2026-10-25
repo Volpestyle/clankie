@@ -98,11 +98,23 @@ export function externalCodexQuestions(
       }),
     status: () =>
       connected(async (client) => {
-        const { thread } = await read(client);
+        // Roster polls need live status, not every historical item. In a
+        // restarted service all surviving native seats take this path; full
+        // history here repeatedly decodes tool output and drives background GC.
+        const value = await client.request("thread/read", { threadId: ref.sessionId, includeTurns: false });
+        const thread = object(object(value).thread);
+        if (thread.id !== ref.sessionId)
+          throw new Error("Original Codex status thread identity is unavailable");
         const status = object(thread.status);
         if (status.type === "idle") return "idle";
-        if (status.type === "active")
-          return client.hasPendingBlockingQuestion(ref.sessionId) ? "blocked" : "working";
+        if (status.type === "active") {
+          if (
+            !Array.isArray(status.activeFlags) ||
+            status.activeFlags.some((flag) => flag !== "waitingOnApproval" && flag !== "waitingOnUserInput")
+          )
+            throw new Error("Original Codex active status flags are unavailable");
+          return status.activeFlags.length ? "blocked" : "working";
+        }
         return "offline";
       }),
     async answerQuestion(answer, guard): Promise<SeatQuestionResult> {

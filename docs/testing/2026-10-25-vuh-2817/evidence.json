@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "live-before.sample.txt",
+      "size": 509288,
+      "sha256": "f86d5c76ac9dbbb0b87250d1704bc04813bce8121c269f89ae862fa4e38f5bc8",
+      "url": "clankie://evidence/sha256/f86d5c76ac9dbbb0b87250d1704bc04813bce8121c269f89ae862fa4e38f5bc8"
+    },
+    {
+      "path": "live-current.sample.txt",
+      "size": 753820,
+      "sha256": "b12e0fa4e8fbd5eb50e19209de25cda72a6127703ec4ef6588e997913341682d",
+      "url": "clankie://evidence/sha256/b12e0fa4e8fbd5eb50e19209de25cda72a6127703ec4ef6588e997913341682d"
+    },
+    {
+      "path": "live-profile-summary.json",
+      "size": 22270,
+      "sha256": "ebdb48a9634a49f38d3fe54c657787f437977ec958879f20f940f7ee9ff2ba21",
+      "url": "clankie://evidence/sha256/ebdb48a9634a49f38d3fe54c657787f437977ec958879f20f940f7ee9ff2ba21"
+    },
+    {
+      "path": "proof.json",
+      "size": 40313,
+      "sha256": "621c7b23f690eef81012e1e9f4aefc0ab76edd44655666ae002ed45d6791e91e",
+      "url": "clankie://evidence/sha256/621c7b23f690eef81012e1e9f4aefc0ab76edd44655666ae002ed45d6791e91e"
+    }
+  ]
+}

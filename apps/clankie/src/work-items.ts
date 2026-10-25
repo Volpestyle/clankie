@@ -1272,7 +1272,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         if (
           !saved.length ||
           saved.some((entry) => entry.convention?.backend !== "linear") ||
-          new Set(saved.map((entry) => JSON.stringify(entry.convention))).size !== 1
+          // Decision provenance and repo docs differ across workspaces sharing
+          // one tracker. Only the Linear routing scope must agree.
+          new Set(saved.map((entry) => JSON.stringify(entry.convention?.linear))).size !== 1
         )
           throw new WorkRequestError("needs_decision", "No unambiguous saved hire tracker scope.");
         path = saved[0]!.path;
@@ -1283,7 +1285,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             JSON.stringify(current) !== JSON.stringify(project) ||
             (
               await Promise.all(saved.map(async (entry) => JSON.stringify(await readConvention(entry.path))))
-            ).some((value) => value !== JSON.stringify(convention))
+            ).some((value, index) => value !== JSON.stringify(saved[index]!.convention))
           )
             throw new Error("Saved hire tracker scope changed.");
         };

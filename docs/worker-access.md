@@ -175,6 +175,10 @@ not seen until that connection is proven again
 registrations retain their separate live checks. See the
 [native helper](../integrations/fleet-proof/README.md) for build and verification.
 
+After a service restart, Codex roster status reads live thread metadata and its
+native waiting flags. It does not reload historical tool output on each poll;
+explicit question reads and answers still validate their current native items.
+
 The body owns one persistent native helper over private pipes. Every job still
 checks fresh kernel facts; the helper itself retains no admission. Herdr foreground and session reads use its socket API directly.
 No helper, Herdr CLI or `ps` process is launched for ordinary mailbox/catalog

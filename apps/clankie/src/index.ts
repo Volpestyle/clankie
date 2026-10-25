@@ -2025,7 +2025,10 @@ const fleetProgress = new FleetProgressObserver({
   ],
   notify: (text) => captain.notifyRuntimeHealthAlert(text),
   onError: (error) =>
-    logger.warn({ event: "fleet.progress.unavailable", error }, "Fleet progress observation unavailable"),
+    logger.warn(
+      { event: "fleet.progress.unavailable", err: error },
+      "Fleet progress observation unavailable",
+    ),
 });
 fleetProgress.start();
 // Launcher crash recovery restarted this process: tell the owner once (ADR 0055).

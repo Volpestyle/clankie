@@ -86,6 +86,12 @@ issue effect even if the pane itself closed successfully; inspect the returned
 `issue` settlement. A saved Linear scope needs its original connected account;
 disconnection does not select a local compatibility store.
 
+Local workspaces sharing a saved Linear team, project and label share the
+retirement scope even when their convention provenance or docs differ. Each
+saved file is still revalidated before issue effects. Failed roster lookups
+back off from 30 seconds to five minutes for the same occupant and assignment;
+a present seat with unavailable attribution is unknown, not an observed exit.
+
 Built-in retirement cannot set Done or impersonate owner verification, and it
 cannot move delivery backwards. Existing evidence, independent-check and owner
 verification gates still apply. Report the actual refusal and leave the lead to

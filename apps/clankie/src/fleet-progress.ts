@@ -101,7 +101,9 @@ export class FleetProgressObserver {
         if (observations.length > 256 || observations.some((o) => !o.id.startsWith(`${source.prefix}:`)))
           throw Error("Invalid fleet progress source");
       } catch (error) {
-        this.options.onError(error);
+        this.options.onError(
+          new Error(`Fleet progress source ${source.prefix} unavailable`, { cause: error }),
+        );
         continue; // Unknown does not resolve an incident.
       }
       for (const observation of observations) {
