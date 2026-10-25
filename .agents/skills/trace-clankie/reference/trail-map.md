@@ -80,3 +80,15 @@ The special inbox conversation, read/ack cursors and
 `~/.clankie/linear-notifications.json` checkpoint are retired. Upgrade drops
 existing unread inbox items once with a service log entry; it never replays them
 into fresh wakes. Do not edit runtime journals to manufacture a delivery.
+
+
+## Worker connected-call receipts
+
+`~/.clankie/worker-grants/receipts/connected-calls.json` is either a legacy
+receipt array or a `clankie-receipts-v1` manifest. For a manifest, read only its
+named files from the sibling `connected-calls.json.d/` directory and verify
+the SHA-256 digest encoded in each filename. Unreferenced files are failed or
+obsolete preparations, not admitted calls. The committed shards retain every
+uncertain call and identity tombstone; older settled response bodies may be
+trimmed. Prefer `clankie_call({receiptId})` for authorized reconciliation and
+never edit or delete receipt files to permit a retry.

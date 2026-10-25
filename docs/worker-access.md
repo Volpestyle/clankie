@@ -546,6 +546,15 @@ admitted calls retain their bounded original completion lifetime so a late
 response can settle the receipt. The bridge chooses its receipt ID before
 forwarding, preserving reconciliation when the HTTP response is lost.
 
+Connected-call receipts live under `~/.clankie/worker-grants/receipts/`.
+`connected-calls.json` commits a small manifest of immutable, content-addressed
+buckets in `connected-calls.json.d/`. A receipt change rewrites its bucket and
+the manifest, rather than the whole retained ledger. Legacy array journals
+migrate on their next save. Shards are synced before the manifest is committed;
+missing or changed committed shards refuse dispatch. All uncertain records and
+identity tombstones survive retention; only older settled response bodies and
+optional recovery detail are trimmed. Never delete these files to retry a call.
+
 Inbound message claims remain exclusive through timeouts and lost accepted
 responses. A definitely refused connection before POST delivery releases only
 the matching claim. An exact authenticated unknown-delivery response releases

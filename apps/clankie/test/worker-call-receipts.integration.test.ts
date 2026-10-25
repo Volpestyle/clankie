@@ -1,5 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -505,6 +507,152 @@ async function fixture(
 
 const invocation = { name: "linear_save_issue", arguments: { id: "VUH-FIXTURE", state: "Done" } };
 
+/** Read the committed root, never unreferenced shard preparations. Also supports legacy fixtures. */
+async function receiptRows(path: string): Promise<Record<string, unknown>[]> {
+  const root = JSON.parse(await readFile(path, "utf8"));
+  if (Array.isArray(root)) return root;
+  expect(root.format).toBe("clankie-receipts-v1");
+  const rows = await Promise.all(
+    Object.values(root.shards).map(
+      async (file) =>
+        JSON.parse(await readFile(join(`${path}.d`, String(file)), "utf8")) as Record<string, unknown>[],
+    ),
+  );
+  return rows.flat();
+}
+
+it("migrates a large legacy connected-call ledger, changes one bucket, and preserves recovery across restart", async () => {
+  const f = await fixture();
+  f.release.release();
+  let session = await f.initialize();
+  const originalId = randomUUID();
+  expect(await f.call(invocation, session, undefined, originalId)).toMatchObject({ outcome: "ok" });
+  const journal = join(f.root, "grants", "receipts", "connected-calls.json");
+  const [original] = await receiptRows(journal);
+  const retained = Array.from({ length: 900 }, (_, index) => ({
+    ...original,
+    id: randomUUID(),
+    createdAt: Date.now() + index,
+    result: { outcome: "ok", isError: false, content: "retained provider response ".repeat(400) },
+  }));
+  const unknownId = randomUUID();
+  const legacy = [...retained, { ...original, id: unknownId, state: "uncertain", result: undefined }];
+  await writeFile(journal, JSON.stringify(legacy));
+  await rm(`${journal}.d`, { recursive: true, force: true });
+  const legacyBytes = (await stat(journal)).size;
+  expect(legacyBytes).toBeGreaterThan(8_000_000);
+  expect(await f.call(invocation, session, undefined, randomUUID())).toMatchObject({ outcome: "ok" });
+  const before = JSON.parse(await readFile(journal, "utf8"));
+  expect((await stat(journal)).size).toBeLessThan(30_000);
+  const settledId = randomUUID();
+  expect(await f.call(invocation, session, undefined, settledId)).toMatchObject({ outcome: "ok" });
+  const after = JSON.parse(await readFile(journal, "utf8"));
+  const changed = Object.values(after.shards).filter((file) => !Object.values(before.shards).includes(file));
+  expect(changed).toHaveLength(1);
+  const changedBytes =
+    (await stat(journal)).size + (await stat(join(`${journal}.d`, String(changed[0])))).size;
+  expect(changedBytes).toBeLessThan(legacyBytes / 20);
+  expect(await readdir(`${journal}.d`)).toHaveLength(Object.keys(after.shards).length);
+  const identity = await stat(journal, { bigint: true });
+  const unchanged = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      fileURLToPath(new URL("../../../scripts/dependency-types.mjs", import.meta.url)),
+      fileURLToPath(new URL("./fixtures/connected-receipt-crash.mjs", import.meta.url)),
+      journal,
+      "unchanged",
+    ],
+    { encoding: "utf8" },
+  );
+  expect(unchanged.status, unchanged.stderr).toBe(0);
+  const unchangedIdentity = await stat(journal, { bigint: true });
+  expect(unchangedIdentity.ino).toBe(identity.ino);
+  expect(unchangedIdentity.mtimeNs).toBe(identity.mtimeNs);
+  const committed = await receiptRows(journal);
+  expect(committed).toHaveLength(903);
+  for (const row of retained) expect(committed.find((record) => record.id === row.id)).toEqual(row);
+  const effects = f.effects.length;
+  await f.restartWorker();
+  session = await f.initialize();
+  expect(await f.call({ receiptId: unknownId }, session)).toMatchObject({
+    outcome: "uncertain",
+    receiptId: unknownId,
+  });
+  expect(await f.call(invocation, session, undefined, unknownId)).toMatchObject({ outcome: "uncertain" });
+  expect(await f.call(invocation, session, undefined, settledId)).toMatchObject({ outcome: "ok" });
+  expect(f.effects).toHaveLength(effects);
+  expect(await readFile(journal, "utf8")).toBe(JSON.stringify(after) + "\n");
+});
+
+it("recovers only committed connected admissions after a real process crash, never orphan preparations", async () => {
+  const f = await fixture();
+  f.release.release();
+  let session = await f.initialize();
+  expect(await f.call(invocation, session, undefined, randomUUID())).toMatchObject({ outcome: "ok" });
+  const journal = join(f.root, "grants", "receipts", "connected-calls.json");
+  const rootBefore = await readFile(journal, "utf8");
+  const uncommitted = randomUUID();
+  const run = (mode: string, id: string) =>
+    spawnSync(
+      process.execPath,
+      [
+        "--import",
+        fileURLToPath(new URL("../../../scripts/dependency-types.mjs", import.meta.url)),
+        fileURLToPath(new URL("./fixtures/connected-receipt-crash.mjs", import.meta.url)),
+        journal,
+        mode,
+        id,
+      ],
+      { encoding: "utf8" },
+    );
+  const failed = run("before", uncommitted);
+  expect(failed.status).toBe(1);
+  expect(failed.stderr).toContain("fixture manifest commit failure");
+  expect(await readFile(journal, "utf8")).toBe(rootBefore);
+  expect((await receiptRows(journal)).some((row) => row.id === uncommitted)).toBe(false);
+  const admitted = randomUUID();
+  const crashed = run("after", admitted);
+  expect(crashed.signal).toBe("SIGKILL");
+  await f.restartWorker();
+  session = await f.initialize();
+  expect(await f.call(invocation, session, undefined, admitted)).toMatchObject({
+    outcome: "uncertain",
+    receiptId: admitted,
+  });
+  expect(f.effects).toHaveLength(1);
+  expect((await receiptRows(journal)).some((row) => row.id === admitted && row.state === "uncertain")).toBe(
+    true,
+  );
+  expect((await receiptRows(journal)).some((row) => row.id === uncommitted)).toBe(false);
+});
+
+it("refuses connected dispatch when a committed shard is corrupt or missing, including a warmed receipt cache", async () => {
+  const f = await fixture();
+  f.release.release();
+  const session = await f.initialize();
+  const id = randomUUID();
+  expect(await f.call(invocation, session, undefined, id)).toMatchObject({ outcome: "ok" });
+  const journal = join(f.root, "grants", "receipts", "connected-calls.json");
+  const manifest = JSON.parse(await readFile(journal, "utf8"));
+  const path = join(`${journal}.d`, String(Object.values(manifest.shards)[0]));
+  const body = await readFile(path, "utf8");
+  await writeFile(path, body.replace('"settled"', '"unknown"'));
+  expect(await f.call(invocation, session, undefined, id)).toMatchObject({
+    outcome: "refused",
+    detail: expect.stringContaining("receipts are unreadable"),
+  });
+  await rm(path);
+  expect(await f.call(invocation, session, undefined, randomUUID())).toMatchObject({
+    outcome: "refused",
+    detail: expect.stringContaining("receipts are unreadable"),
+  });
+  expect(f.effects).toHaveLength(1);
+  await writeFile(path, body);
+  expect(await f.call(invocation, session, undefined, id)).toMatchObject({ outcome: "ok" });
+  expect(f.effects).toHaveLength(1);
+});
+
 it("a manual grant revoked after its read recheck refuses dispatch without a provider effect", async () => {
   const f = await fixture({ manual: true });
   const session = await f.initialize();
@@ -994,9 +1142,7 @@ it("a route or grant change during recovery refuses without recording an abandon
   f.revoke();
   held.release.release();
   expect(await revoked).toMatchObject({ outcome: "refused", detail: "Fleet admission unavailable" });
-  const retained = JSON.parse(
-    await readFile(join(f.root, "grants", "receipts", "connected-calls.json"), "utf8"),
-  ) as { id: string; abandonment?: unknown }[];
+  const retained = await receiptRows(join(f.root, "grants", "receipts", "connected-calls.json"));
   expect(retained.find((record) => record.id === receiptId)?.abandonment).toBeUndefined();
 });
 
@@ -1058,7 +1204,7 @@ it("a settled READ keeps its classification after retention trims its recovery p
   await read(receiptId);
   // A thousand newer settled bodies push this one out at the next journal write.
   const journal = join(f.root, "grants", "receipts", "connected-calls.json");
-  const records = JSON.parse(await readFile(journal, "utf8")) as Record<string, unknown>[];
+  const records = await receiptRows(journal);
   const [original] = records.filter((record) => record.id === receiptId);
   await writeFile(
     journal,

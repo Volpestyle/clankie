@@ -478,6 +478,7 @@ export class WorkerMcp {
     this.requestTimeoutMs = Math.min(timeout, WORKER_REQUEST_TIMEOUT_MS);
     this.callReceipts = new DurableReceiptStore({
       path: join(options.directory, "receipts", "connected-calls.json"),
+      sharded: true,
       schema: WorkerCallReceiptSchema,
       unreadableMessage: "Worker call receipts are unreadable; no connected call was dispatched",
       // Old settled reads keep their tombstone and READ classification but not their
