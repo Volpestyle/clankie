@@ -3,9 +3,9 @@
   "objects": [
     {
       "path": "proof.tar.gz",
-      "size": 65506,
-      "sha256": "2556a020bea7f7409393792c6a201d311fd32f74bf491b9821f664027f553d2f",
-      "url": "clankie://evidence/sha256/2556a020bea7f7409393792c6a201d311fd32f74bf491b9821f664027f553d2f"
+      "size": 66941,
+      "sha256": "55a8ddd83f47f2feb0510d9876bea8996a9fda453034e058d895c6e80c8111cf",
+      "url": "clankie://evidence/sha256/55a8ddd83f47f2feb0510d9876bea8996a9fda453034e058d895c6e80c8111cf"
     }
   ]
 }

@@ -12,6 +12,7 @@ import {
   realpath,
   truncate,
   copyFile,
+  open,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -781,6 +782,131 @@ it("continues native appends from decoded lines and answers exactly what a cold 
   expect(await expectCold("claude")).toEqual({ model: "claude-opus-5-5" });
   expect(await readSeatActivity(observed(path, "claude"), "working")).toMatchObject({ kind: "reading" });
 });
+
+it("answers what a cold read does across random appends, rewrites and inserts around the window", async () => {
+  const dir = await directory();
+  const window = 2 * 1024 * 1024;
+  const base = Date.now() - 60_000;
+  for (const seed of [2803, 2804, 2805, 2806]) {
+    // mulberry32: a seeded sequence whose low bits do not cycle.
+    let state = seed;
+    const pick = (n: number) => {
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 2 ** 32) * n);
+    };
+    // The native shapes the readers project, plus padding that moves the 2 MiB cut.
+    const line = (step: number) => {
+      const at = new Date(base + step * 100).toISOString();
+      const id = `call-${pick(6)}`;
+      const shapes = [
+        { timestamp: at, type: "turn_context", payload: { model: `gpt-${100 + pick(900)}`, effort: "high" } },
+        {
+          timestamp: at,
+          type: "event_msg",
+          payload: { type: "task_started", model_context_window: 100_000 },
+        },
+        {
+          timestamp: at,
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            thread_id: sessionId,
+            info: { last_token_usage: { input_tokens: 10_000 + pick(80_000) } },
+          },
+        },
+        {
+          timestamp: at,
+          type: "response_item",
+          payload: { type: "function_call", call_id: id, name: ["message_clankie", "Read", "Edit"][pick(3)] },
+        },
+        {
+          timestamp: at,
+          type: "response_item",
+          payload: { type: "function_call_output", call_id: id, output: pick(2) ? "MCP error -1" : "ok" },
+        },
+        { timestamp: at, type: "event_msg", payload: { type: "task_complete" } },
+        { type: "response_item", payload: { type: "reasoning", text: "x".repeat(pick(3) * 300 * 1024) } },
+      ];
+      return JSON.stringify(shapes[pick(shapes.length)]);
+    };
+    const path = join(dir, `native-${seed}.jsonl`);
+    // The first line carries a fact, so an untrimmed window must keep it.
+    await writeFile(
+      path,
+      `${JSON.stringify({ type: "turn_context", payload: { model: "gpt-first" } })}\n${JSON.stringify({ timestamp: startedAt, type: "session_meta", payload: { id: sessionId } })}\n`,
+    );
+    expect(await readSeatTelemetry(observed(path))).toEqual({ model: "gpt-first" });
+    const overwrite = async (offset: number, text: string) => {
+      const handle = await open(path, "r+");
+      try {
+        await handle.write(Buffer.from(text), 0, Buffer.byteLength(text), offset);
+      } finally {
+        await handle.close();
+      }
+    };
+    for (let step = 0; step < 120; step++) {
+      const content = await readFile(path);
+      const size = content.length;
+      const cut = content.indexOf(0x0a, Math.max(0, size - window));
+      const op = pick(12);
+      if (op < 6) {
+        // Append whole lines, sometimes leaving the last one partial for the next step.
+        let text = "";
+        for (let count = 1 + pick(4); count > 0; count--) text += line(step) + "\n";
+        await appendFile(path, pick(5) === 0 ? text.slice(0, -1 - pick(20)) : text);
+      } else if (op < 8) {
+        // End a whole record exactly at a newline: the cut, or any line end.
+        let newline = cut;
+        for (let skip = op === 6 ? 0 : pick(40); skip > 0 && newline >= 0; skip--)
+          newline = content.indexOf(0x0a, newline + 1);
+        const record = "\n" + line(step);
+        const offset = newline - Buffer.byteLength(record);
+        if (newline > 0 && offset > 0) await overwrite(offset, record);
+        // A short append keeps the new cut search starting before the rewritten record.
+        if (op === 6)
+          await appendFile(
+            path,
+            JSON.stringify({ type: "event_msg", payload: { type: "task_complete" } }) + "\n",
+          );
+        else if (pick(3)) await appendFile(path, line(step) + "\n");
+      } else if (op === 8) {
+        // Change one digit of a fact in place, then usually grow.
+        const facts = [...content.toString("latin1").matchAll(/gpt-(\d)|"input_tokens":(\d)/gu)];
+        const fact = facts[pick(Math.max(1, facts.length))];
+        if (fact?.index !== undefined)
+          await overwrite(fact.index + fact[0].length - 1, String((Number(fact.at(-1) ?? fact[1]) + 1) % 10));
+        if (pick(3)) await appendFile(path, line(step) + "\n");
+      } else if (op === 9) {
+        // A different session in the header, which may sit outside the window.
+        const at = content.indexOf(sessionId);
+        await overwrite(at, pick(2) ? sessionId : sessionId.slice(0, -1) + "0");
+        await appendFile(path, line(step) + "\n");
+      } else if (op === 10) {
+        // Insert or delete bytes before the end, then grow.
+        const at = pick(size);
+        await writeFile(
+          path,
+          Buffer.concat([
+            content.subarray(0, at),
+            pick(2) ? Buffer.from(line(step) + "\n") : Buffer.alloc(0),
+            content.subarray(at + pick(2) * pick(4096)),
+          ]),
+        );
+        await appendFile(path, line(step) + "\n");
+      } else await truncate(path, Math.max(1, size - pick(256 * 1024)));
+      const cold = join(dir, `cold-${seed}-${step}.jsonl`);
+      await copyFile(path, cold);
+      const [warm, fresh] = [observed(path), observed(cold)];
+      expect(
+        [await readSeatTelemetry(warm), await readSeatActivity(warm, "working")],
+        `seed ${seed} step ${step} op ${op}`,
+      ).toEqual([await readSeatTelemetry(fresh), await readSeatActivity(fresh, "working")]);
+      await rm(cold);
+    }
+  }
+}, 120_000);
 
 it("keeps prepared missing IDs unknown without rediscovering directories during refresh", async () => {
   const dir = await directory();

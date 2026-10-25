@@ -393,8 +393,6 @@ type NativeTail = {
   readonly end: number;
   /** SHA-256 of the bytes from `region` to `end`, malformed lines included. */
   readonly digest: Buffer;
-  /** Ascending absolute line starts, parallel to `records`. */
-  readonly starts: readonly number[];
   readonly records: readonly Record<string, unknown>[];
 };
 const nativeTails = new Map<string, NativeTail>();
@@ -430,18 +428,24 @@ async function nativeSnapshot(
       head.subarray(0, prior.head.length).equals(prior.head)
         ? prior
         : undefined;
-    let base = candidate?.region ?? from;
+    // A cold read cuts its window after the first newline at or past `from`.
+    const cut = (at: number, buffer: Buffer) => (from === 0 ? 0 : at + buffer.indexOf(0x0a, from - at) + 1);
+    // Read from the earlier of `from` and the decoded window, so the current cut is observed too.
+    let base = candidate === undefined ? from : Math.min(from, candidate.region);
     let bytes = await readAt(handle, base, size - base);
-    // Reuse decoded lines only while every byte of their window is unchanged.
+    let region = cut(base, bytes);
+    // Reuse decoded lines only for the same cut, with every byte from it to their end unchanged.
     const reused =
       candidate !== undefined &&
+      region === candidate.region &&
       bytes.length >= candidate.end - base &&
-      digest(bytes.subarray(0, candidate.end - base)).equals(candidate.digest)
+      digest(bytes.subarray(candidate.region - base, candidate.end - base)).equals(candidate.digest)
         ? candidate
         : undefined;
-    if (candidate !== undefined && reused === undefined) {
+    if (reused === undefined && base !== from) {
       base = from;
       bytes = await readAt(handle, from, size - from);
+      region = cut(base, bytes);
     }
     if (fileStamp(await handle.stat({ bigint: true })) !== stamp) return undefined;
     let sessionId = reused !== undefined && head.length === reused.head.length ? reused.sessionId : undefined;
@@ -455,26 +459,11 @@ async function nativeSnapshot(
         harness === "codex" ? text(object(nativeId).id, 256) : text(object(nativeId).sessionId, 256);
     }
     if (sessionId === undefined) return undefined;
-    // The window starts after the first newline at or past `from`, as a cold read cuts it.
-    let region: number;
-    let cursor: number;
-    let kept = 0;
-    if (reused !== undefined) {
-      region = from >= reused.region ? base + bytes.indexOf(0x0a, from - base) + 1 : reused.region;
-      while (kept < reused.starts.length && reused.starts[kept]! < region) kept++;
-      cursor = reused.end - base;
-    } else {
-      cursor = from > 0 ? bytes.indexOf(0x0a) + 1 : 0;
-      region = base + cursor;
-    }
-    const starts = reused ? reused.starts.slice(kept) : [];
-    const records = reused ? reused.records.slice(kept) : [];
+    let cursor = reused === undefined ? region - base : reused.end - base;
+    const records = reused ? [...reused.records] : [];
     for (let newline = bytes.indexOf(0x0a, cursor); newline >= 0; newline = bytes.indexOf(0x0a, cursor)) {
       const record = row(bytes.toString("utf8", cursor, newline));
-      if (record !== undefined) {
-        starts.push(base + cursor);
-        records.push(record);
-      }
+      if (record !== undefined) records.push(record);
       cursor = newline + 1;
     }
     const end = base + cursor;
@@ -487,7 +476,6 @@ async function nativeSnapshot(
       region,
       end,
       digest: digest(bytes.subarray(region - base, cursor)),
-      starts,
       records,
     };
     if (nativeTails.get(key) === prior) boundedSet(nativeTails, key, tail, TAIL_LIMIT);
