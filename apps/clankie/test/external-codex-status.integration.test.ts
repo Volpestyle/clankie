@@ -15,7 +15,7 @@ it("reads restored-seat status without transferring historical tool output and p
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
   const address = server.address();
-  if (typeof address === "string") throw Error("No fixture address");
+  if (address === null || typeof address === "string") throw Error("No fixture address");
   let status: Record<string, unknown> = { type: "active", activeFlags: [] };
   let loaded = true;
   let identity = "native-thread";
