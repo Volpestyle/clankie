@@ -277,3 +277,72 @@ it("drops keeps only when their pane and session are gone from a listed fleet, a
   fleets.set("pc", []);
   expect((await reopened.dropGoneKeeps()).map((keep) => keep.paneId)).toEqual(["pc/w2:pFar"]);
 });
+
+it("never drops a keep made or refreshed while the sweep's listing was in flight", async () => {
+  const root = await mkdtemp(join(tmpdir(), "closed-seat-keep-race-"));
+  roots.push(root);
+  const refreshed = agent("w1:pRefreshed", "term_refreshed", "10000000-0000-4000-8000-000000000011");
+  const added = agent("w1:pAdded", "term_added", "10000000-0000-4000-8000-000000000012");
+  const keepFor = (paneId: string, sessionKey: string) => ({
+    sessionKey,
+    paneId,
+    title: paneId,
+    reason: "Kept for follow-up",
+    by: "global-default",
+    at: "2026-10-18T09:02:35.724Z",
+  });
+  await writeFile(
+    join(root, "pane-keeps.json"),
+    JSON.stringify({
+      version: 1,
+      keeps: [
+        keepFor("w1:pDead", JSON.stringify(["local", "codex", "10000000-0000-4000-8000-000000000019"])),
+        keepFor(refreshed.paneId, tidySessionKey(refreshed)),
+      ],
+    }),
+  );
+  const current = inventoryRunner(new Map([[undefined, [refreshed, added]]]));
+  // The sweep's own listing is stale (taken before either pane showed) and held open.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let first = true;
+  const runner = {
+    ...current,
+    list: async (fleet?: string) => {
+      if (!first) return current.list!(fleet);
+      first = false;
+      await held;
+      return [];
+    },
+  } as HerdrWatchRunner;
+  const tidy = new PaneTidy(join(root, "pane-tidy.json"), {
+    runner,
+    changed: () => undefined,
+  } as unknown as ConstructorParameters<typeof PaneTidy>[1]);
+  const sweep = tidy.dropGoneKeeps();
+  expect(
+    await tidy.keep({ pane: added.paneId, keep: true, reason: "New follow-up" }, authority),
+  ).toMatchObject({
+    outcome: "kept",
+  });
+  expect(
+    await tidy.keep({ pane: refreshed.paneId, keep: true, reason: "Still needed" }, authority),
+  ).toMatchObject({ outcome: "kept" });
+  release();
+  expect((await sweep).map((keep) => keep.paneId)).toEqual(["w1:pDead"]);
+  const durable = () =>
+    readFile(join(root, "pane-keeps.json"), "utf8").then((text) =>
+      JSON.parse(text).keeps.map((keep: { paneId: string; reason: string }) => [keep.paneId, keep.reason]),
+    );
+  expect(await durable()).toEqual([
+    ["w1:pAdded", "New follow-up"],
+    ["w1:pRefreshed", "Still needed"],
+  ]);
+  // After a reopen, a fresh listing that shows both panes keeps both.
+  const reopened = new PaneTidy(join(root, "pane-tidy.json"), {
+    runner: current,
+    changed: () => undefined,
+  } as unknown as ConstructorParameters<typeof PaneTidy>[1]);
+  expect(await reopened.dropGoneKeeps()).toEqual([]);
+  expect(await durable()).toHaveLength(2);
+});

@@ -317,11 +317,14 @@ export class PaneTidy {
   /**
    * Drop keeps whose pane and native session are both gone from a complete listing of
    * their own fleet (VUH-2806). A fleet that cannot be listed keeps every keep, and a
-   * listed pane keeps its keep even while Herdr shows it without a session.
+   * listed pane keeps its keep even while Herdr shows it without a session. Only keeps
+   * recorded before the listings were read can go, and only while unchanged: a keep made
+   * or refreshed meanwhile was proven against a newer listing than this sweep's.
    */
   async dropGoneKeeps(): Promise<PaneKeep[]> {
+    const observed = [...this.keeps.list()];
     const listings = new Map<string, { panes: Set<string>; sessions: Set<string> } | undefined>();
-    for (const keep of this.keeps.list()) {
+    for (const keep of observed) {
       const fleet = splitFleetQualified(keep.paneId)?.fleet;
       if (listings.has(fleet ?? "") || !this.ports.runner.list) continue;
       listings.set(
@@ -335,12 +338,14 @@ export class PaneTidy {
         ),
       );
     }
-    const dropped = this.keeps.releaseWhere((keep) => {
+    const gone = observed.filter((keep) => {
       const listing = listings.get(splitFleetQualified(keep.paneId)?.fleet ?? "");
       return (
         listing !== undefined && !listing.panes.has(keep.paneId) && !listing.sessions.has(keep.sessionKey)
       );
     });
+    // Identity, not value: keep() always writes a new record, even for a same-millisecond refresh.
+    const dropped = this.keeps.releaseWhere((keep) => gone.includes(keep));
     if (dropped.length > 0) this.ports.changed();
     return dropped;
   }
