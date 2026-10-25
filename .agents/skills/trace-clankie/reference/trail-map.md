@@ -81,7 +81,6 @@ The special inbox conversation, read/ack cursors and
 existing unread inbox items once with a service log entry; it never replays them
 into fresh wakes. Do not edit runtime journals to manufacture a delivery.
 
-
 ## Worker connected-call receipts
 
 `~/.clankie/worker-grants/receipts/connected-calls.json` is either a legacy

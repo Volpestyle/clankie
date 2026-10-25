@@ -37,16 +37,16 @@ Migration/warmup precedes measurement. Sixty updates occur at 500ms intervals,
 with three public receipt reads per update. Passthrough filesystem counters
 count actual write bytes and fsync calls. No I/O is stubbed and no GC is forced.
 
-| Measurement | Original | Patch C1 |
-| --- | ---: | ---: |
-| Elapsed seconds | 30.0001 | 30.0014 |
-| CPU seconds | 3.665683 | 1.776301 |
-| Process CPU | 12.219% | 5.921% |
+| Measurement        |      Original |      Patch C1 |
+| ------------------ | ------------: | ------------: |
+| Elapsed seconds    |       30.0001 |       30.0014 |
+| CPU seconds        |      3.665683 |      1.776301 |
+| Process CPU        |       12.219% |        5.921% |
 | Natural RSS at end | 356,542,288 B | 170,351,704 B |
-| Actual write bytes | 534,629,174 B | 3,442,155 B |
-| Writes | 60 | 120 |
-| fsync calls | 0 | 240 |
-| Root size at end | 8,911,076 B | 20,524 B |
+| Actual write bytes | 534,629,174 B |   3,442,155 B |
+| Writes             |            60 |           120 |
+| fsync calls        |             0 |           240 |
+| Root size at end   |   8,911,076 B |      20,524 B |
 
 Write bytes fall **99.36%**, despite adding durable file/directory syncs.
 This is one sequential pair on an uncontrolled shared host, not a confidence
