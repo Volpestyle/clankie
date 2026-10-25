@@ -216,7 +216,10 @@ request with `includeCurrentActivity: true`; Take Control owner devices use the
 same contract. Support devices and non-owner bearers cannot opt in. Ordinary
 presence fields and labels stay unchanged. Missing activity means the host has
 no safe live event to show, not a guessed idle task. A settled tool/turn or a
-released call clears its glimpse. Older hosts retain their ordinary presence
+released call clears its glimpse. A pending owner question instead shows its
+full redacted prompt and its own thread target, and disappears once answered or
+cancelled. The same presence read supplies it; no new poller is added. Older hosts
+retain their ordinary presence
 through the compatibility retry. See [ADR 0294](adr/0294-owner-activity-glimpses-follow-live-presence.md).
 
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,

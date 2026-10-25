@@ -4,7 +4,7 @@ import type { OperatorCurrentActivity } from "@clankie/protocol/presence";
 import type { OperatorConversationStreamEvent } from "@clankie/protocol";
 import type { ConversationMeta } from "./types.ts";
 
-function safeText(text: string): string {
+export function safeCurrentActivityText(text: string): string {
   return redactSensitiveText(stripVTControlCharacters(text)).trim().slice(0, 32768);
 }
 
@@ -38,7 +38,7 @@ function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "t
   const key = source === "issue" ? (args?.issueId ?? args?.id ?? args?.issue) : undefined;
   return {
     source,
-    text: safeText(`${operation}${detail ? `\n${detail}` : ""}`),
+    text: safeCurrentActivityText(`${operation}${detail ? `\n${detail}` : ""}`),
     ...(typeof key === "string" && /^[A-Z][A-Z0-9]*-\d+$/u.test(key) ? { key } : {}),
   };
 }
@@ -97,7 +97,7 @@ export class CurrentActivities {
         this.entries.delete(conversationId);
         return;
       }
-      const text = safeText(event.text);
+      const text = safeCurrentActivityText(event.text);
       if (!text) return;
       activity = {
         id: `${conversationId}:${event.cursor}`,

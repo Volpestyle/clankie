@@ -23,7 +23,9 @@ The owner-only `includeCurrentActivity: true` presence read, also used by
 text and typed destination. It shares the existing presence update; do not add
 a polling loop or infer a task from the newest arrival. Only top-level owner
 threads qualify, never mixed-room content, worker history or reasoning. A
-completed task, disconnected source or ended call supplies no glimpse. Inspect
+completed task, disconnected source or ended call supplies no glimpse. A pending
+owner question takes priority: its full redacted prompt targets its own thread,
+and clears when answered or cancelled on the same presence read. Inspect
 `currentActivity` to distinguish a published fact from the pet's layout; API
 publication does not prove a bubble appeared on screen.
 

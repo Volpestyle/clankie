@@ -377,13 +377,18 @@ export function createOperatorService(
             beatsEnabled && reportAge !== undefined && reportAge >= 0 && reportAge < 10_000
               ? recentReport
               : undefined;
+          const expression = await ctx.desktop.current();
+          const pendingOwnerItem = ctx.conversations.pendingPresenceOwnerItem();
           return projectPresence(
             {
-              expression: await ctx.desktop.current(),
+              expression,
               thinking,
               ...(request.includeCurrentActivity
                 ? {
-                    currentActivity: ctx.conversations.currentPresenceActivity(head?.status === "working"),
+                    currentActivity: ctx.conversations.currentPresenceActivity(
+                      head?.status === "working",
+                      pendingOwnerItem ?? null,
+                    ),
                   }
                 : {}),
               working: head?.status === "working" || (nativeSubagents ?? 0) > 0,
@@ -394,7 +399,7 @@ export function createOperatorService(
               ...(play === undefined ? {} : { playingSince: play.requestedAt }),
               activeSeats,
               ...(nativeSubagents === undefined ? {} : { nativeSubagents }),
-              pendingOwnerItem: ctx.conversations.pendingPresenceOwnerItem(),
+              pendingOwnerItem,
               ...ctx.conversations.recentPresenceActivity(),
               beats: [
                 ...(hire ? [hire] : []),

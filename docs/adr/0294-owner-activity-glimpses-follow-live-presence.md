@@ -23,9 +23,17 @@ The conversation store retains a bounded, volatile projection when live events
 arrive. Only top-level owner global/workspace threads qualify. Mixed rooms,
 channels, worker conversations, side forks, reasoning and historical transcript
 folds are excluded. The existing diagnostic structured-key sanitization and
-free-text credential redaction apply before publication. The latest active
-tool or committed message supplies the text; there is no invented task caption.
-A completed tool/turn or waiting event clears it. Call text additionally requires
+free-text credential redaction apply before publication. A pending owner question
+takes priority over the volatile event projection.
+Its canonical receipt supplies the full redacted prompt, a stable question/incarnation
+ID and its own conversation target. Answering or cancelling it removes that
+glimpse on the next existing presence read. Mixed-room and side-fork questions
+remain withheld. The same pending-question selection already used by presence
+is reused, without another question scan or a new cache. Otherwise the latest
+active tool or committed message supplies the text; there is no invented task
+caption.
+Underlying event lifetimes are still checked while a question is visible.
+A completed tool/turn or waiting event clears its event glimpse. Call text additionally requires
 the same conversation's exact active voice-lease incarnation, captured when
 the line is published, and disappears after hang-up, replacement or expiry.
 A native source/session change invalidates its cached activity even if the

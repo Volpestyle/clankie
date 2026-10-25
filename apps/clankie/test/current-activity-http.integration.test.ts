@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -8,6 +8,7 @@ import { OperatorPresenceResultSchema } from "@clankie/protocol/presence";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import { QuestionDraftSchema } from "../src/captain/conversation-questions.ts";
 import {
   createOperatorService,
   type CreateOperatorServiceContext,
@@ -227,6 +228,113 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       detail: "HEAD_B_COMMAND",
     });
     expect((await read()).currentActivity?.text).toContain("HEAD_B_COMMAND");
+    conversations.publishHeadEvent({
+      type: "tool",
+      toolCallId: "head-B-tool",
+      name: "exec_command",
+      phase: "completed",
+    });
+    const workspace = join(root, "question-workspace");
+    await mkdir(workspace);
+    const made = await conversations.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "workspace", workspaceId: workspace },
+      title: "Owner question",
+    });
+    if (made.op !== "create") throw new Error("Question thread unavailable");
+    const questionThread = made.conversation.conversationId;
+    const admission = { current: () => true, authorize: async () => true };
+    const owner = { ...admission, principal: { kind: "operator" as const, id: "fixture" } };
+    const prompt =
+      "Which project should I use? " +
+      "Keep the complete question available in its own thread. ".repeat(12) +
+      "api_key=private-question-secret";
+    const ask = (conversationId: string, text: string) =>
+      conversations.requestSurfaceQuestion(
+        conversationId,
+        QuestionDraftSchema.parse({
+          purpose: "decision",
+          kind: "choice",
+          prompt: text,
+          waitingOn: "The project selection",
+          recommendation: "This project",
+          options: [{ label: "This project" }, { label: "Another project" }],
+        }),
+        admission,
+      );
+    const asked = await ask(questionThread, prompt);
+    if (!asked.question || asked.revision === undefined) throw new Error("Question not published");
+    conversations.publishHeadEvent({
+      type: "tool",
+      toolCallId: "question-interrupted-tool",
+      name: "exec_command",
+      phase: "started",
+      detail: "STALE_QUESTION_TOOL",
+    });
+    const questionActivity = (await read()).currentActivity;
+    // Waiting on a question must not suspend the underlying event's lifetime checks.
+    working = false;
+    expect((await read()).currentActivity).toEqual(questionActivity);
+    working = true;
+    expect(questionActivity).toMatchObject({
+      source: "chat",
+      target: { kind: "conversation", conversationId: questionThread },
+    });
+    expect(questionActivity?.text).toBe(prompt.replace("api_key=private-question-secret", "[REDACTED]"));
+    expect(questionActivity!.text.length).toBeGreaterThan(200);
+    expect((await read()).currentActivity).toEqual(questionActivity);
+    const ordinary = OperatorPresenceResultSchema.parse(
+      await (await request(false, "captain")).json(),
+    ).snapshot;
+    expect(ordinary.currentActivity).toBeUndefined();
+    expect(ordinary.pendingOwnerItem).toMatchObject({
+      conversationId: questionThread,
+      questionId: asked.question.requestId,
+      title: prompt.slice(0, 200),
+    });
+    expect((await request(true, "captain")).status).toBe(403);
+    const answered = await conversations.serve(
+      {
+        op: "input_answer",
+        schemaVersion: 1,
+        conversationId: questionThread,
+        requestId: asked.question.requestId,
+        incarnationId: asked.question.incarnationId,
+        expectedRevision: asked.revision,
+        answer: { kind: "choice", optionId: asked.question.options[0]!.optionId },
+      },
+      owner,
+    );
+    expect(answered).toMatchObject({ op: "input_answer", result: { question: { status: "submitted" } } });
+    expect((await read()).currentActivity).toBeUndefined();
+    const replacement = await ask(questionThread, "Which project should I use instead?");
+    if (!replacement.question || replacement.revision === undefined)
+      throw new Error("Replacement question unavailable");
+    expect((await read()).currentActivity?.id).not.toBe(questionActivity?.id);
+    await conversations.cancelSurfaceQuestion(
+      questionThread,
+      {
+        requestId: replacement.question.requestId,
+        incarnationId: replacement.question.incarnationId,
+        expectedRevision: replacement.revision,
+      },
+      admission,
+    );
+    expect((await read()).currentActivity).toBeUndefined();
+    const roomQuestion = await ask(room, "PRIVATE_MIXED_ROOM_QUESTION");
+    if (!roomQuestion.question || roomQuestion.revision === undefined)
+      throw new Error("Room question unavailable");
+    expect((await read()).currentActivity).toBeUndefined();
+    await conversations.cancelSurfaceQuestion(
+      room,
+      {
+        requestId: roomQuestion.question.requestId,
+        incarnationId: roomQuestion.question.incarnationId,
+        expectedRevision: roomQuestion.revision,
+      },
+      admission,
+    );
     const cursor = (await read()).cursor;
     const pending = fetch(`http://127.0.0.1:${address.port}/operator/v1/dispatch`, {
       method: "POST",

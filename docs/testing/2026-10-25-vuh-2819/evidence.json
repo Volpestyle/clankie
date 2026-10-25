@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "core-activity-landing-gate.json",
+      "size": 13576777,
+      "sha256": "42e078e0dca42481229d796552120546ce07cd16602d2e6db146e2849905aeb0",
+      "url": "clankie://evidence/sha256/42e078e0dca42481229d796552120546ce07cd16602d2e6db146e2849905aeb0"
+    },
+    {
+      "path": "core-activity-landing.log",
+      "size": 826078,
+      "sha256": "9381557e41e391abec6e6008d663b96a75c61cd4fc067b421e629d9df76ec4a7",
+      "url": "clankie://evidence/sha256/9381557e41e391abec6e6008d663b96a75c61cd4fc067b421e629d9df76ec4a7"
+    }
+  ]
+}
