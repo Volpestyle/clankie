@@ -1,4 +1,4 @@
-# ADR 0292: Owner activity glimpses follow live presence
+# ADR 0294: Owner activity glimpses follow live presence
 
 Status: accepted (VUH-2819, 2026-10-25).
 

@@ -217,7 +217,7 @@ same contract. Support devices and non-owner bearers cannot opt in. Ordinary
 presence fields and labels stay unchanged. Missing activity means the host has
 no safe live event to show, not a guessed idle task. A settled tool/turn or a
 released call clears its glimpse. Older hosts retain their ordinary presence
-through the compatibility retry. See [ADR 0292](adr/0292-owner-activity-glimpses-follow-live-presence.md).
+through the compatibility retry. See [ADR 0294](adr/0294-owner-activity-glimpses-follow-live-presence.md).
 
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
 `discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the

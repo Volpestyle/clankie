@@ -22,9 +22,10 @@ clankie heavy -- node_modules/.bin/vitest run \
   apps/clankie/test/presence-events.integration.test.ts
 ```
 
-Result: **4 files / 169 cases pass**. The relay's HTTP checks verify private
+Result: **4 files / 170 cases pass**. The relay's HTTP checks verify private
 activity uses the exact owner-device route and refuses read-only/support
-identities before dispatch. The CLI checks verify the operator bearer, opt-in
+identities before dispatch. A real upstream HTTP adapter check carries the
+private presence opt-in and original device bearer to the service. The CLI checks verify the operator bearer, opt-in
 request and decoded activity. Existing presence event checks stay green.
 
 The required exact-head root landing gate and Sage review are pending at this

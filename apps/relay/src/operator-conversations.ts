@@ -731,7 +731,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
         ? "terminalObserve"
         : nativeMessageOp ||
-            currentActivityOp ||
+            (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
             questionOp ||
             workWriteOp ||
             // The fleet room is the owner's coordination record (VUH-2184).
@@ -856,7 +856,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "tracker_sync" ||
           serviceRequest.op === "evidence_fetch" ||
           serviceRequest.op === "fleet_room" ||
-          currentActivityOp ||
+          (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "project_proposal_tweak" ||

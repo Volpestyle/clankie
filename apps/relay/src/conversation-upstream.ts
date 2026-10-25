@@ -92,6 +92,7 @@ export type DeviceConversationRequest = Extract<
       | "tracker_sync"
       | "evidence_fetch"
       | "fleet_room"
+      | "presence"
       | "autonomy";
   }
 >;
@@ -137,10 +138,13 @@ export function createDeviceConversationDispatch(options: {
         "tracker_sync",
         "evidence_fetch",
         "fleet_room",
+        "presence",
         "autonomy",
       ].includes(request.op)
     )
       throw new Error("Unsupported device conversation operation");
+    if (request.op === "presence" && request.includeCurrentActivity !== true)
+      throw new Error("Private presence requires the current-activity opt-in");
     const hosted = authority.controlScope === "hosted";
     const requestSignal = dispatchSignal(signal);
     requestSignal.throwIfAborted();

@@ -18,6 +18,7 @@ import {
 import {
   ConversationServiceRestarting,
   createCaptainConversationDispatch,
+  createDeviceConversationDispatch,
   DeviceConversationRefusal,
 } from "../src/conversation-upstream.ts";
 import { ControlPlaneDeviceAuthorizer, type RelayDeviceAuthorizer } from "../src/device-auth.ts";
@@ -65,6 +66,47 @@ afterEach(async () => {
 });
 
 describe("authenticated operator conversation relay", () => {
+  it("carries the private presence opt-in through the real device upstream HTTP adapter", async () => {
+    const received: unknown[] = [];
+    const snapshot = {
+      schemaVersion: 1,
+      cursor: "current",
+      mood: "thinking",
+      detail: "Thinking",
+      since: null,
+      activeSeats: 0,
+    };
+    const upstream = createServer(async (request, response) => {
+      expect(request.headers.authorization).toBe(`Bearer ${TOKEN}`);
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      received.push(JSON.parse(Buffer.concat(chunks).toString()));
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ op: "presence", schemaVersion: 1, snapshot }));
+    });
+    servers.push(upstream);
+    upstream.listen(0, "127.0.0.1");
+    await once(upstream, "listening");
+    const address = upstream.address();
+    if (!address || typeof address === "string") throw new Error("No upstream address");
+    const dispatch = vi.fn();
+    const relay = await startRelay({
+      dispatch,
+      deviceDispatch: createDeviceConversationDispatch({ baseUrl: `http://127.0.0.1:${address.port}` }),
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, grants: { ...activeDevice.grants, terminalControl: true } },
+        }),
+      },
+    });
+    const body = { op: "presence", schemaVersion: 1, includeCurrentActivity: true };
+    const response = await post(relay.url, "/operator/v1/dispatch", body);
+    expect(response.status).toBe(200);
+    expect(received).toEqual([body]);
+    expect(await response.json()).toMatchObject({ snapshot });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
   it("routes private current activity with the owner device identity and refuses read-only/support devices", async () => {
     const snapshot = {
       schemaVersion: 1 as const,
