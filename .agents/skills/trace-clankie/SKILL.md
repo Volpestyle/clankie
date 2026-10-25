@@ -8,6 +8,11 @@ description: Use when tracing what Clankie said, did, or observed after the fact
 Start from the owning conversation and its source references. Read durable
 journals and receipts; never alter runtime state files to repair a missing trail.
 A snapshot or presence card describes an observation, not completion evidence.
+Exact Codex message watches poll retained turn IDs/statuses, then verify against
+a fresh full-history response when those change or after 30 seconds unchanged.
+Native summary pages omit later queued input IDs and earlier result text, so they
+cannot establish exact completion. An unresolved identity stays pending; inspect
+the retained receipt rather than sending the input again.
 
 ## Start with the conversation
 

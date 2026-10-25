@@ -161,21 +161,18 @@ export function codexProxyControl(
 
 /** A native queue input ID is distinct from the turn ID assigned when it runs. */
 function codexRecordedCompletion(
-  value: unknown,
-  sessionId: string,
+  turns: z.infer<typeof completionTurn>[],
   messageId: string,
 ): SeatEvent | undefined {
-  const parsed = completionThread.safeParse(value);
-  if (!parsed.success || parsed.data.thread.id !== sessionId) return undefined;
   const clientId = messageId.startsWith("codex-input:") ? messageId.slice("codex-input:".length) : undefined;
-  const turns = parsed.data.thread.turns.filter((turn) =>
+  const matching = turns.filter((turn) =>
     clientId === undefined
       ? turn.id === messageId
       : turn.items.some((item) => item.type === "userMessage" && item.clientId === clientId),
   );
   // Ambiguous/missing identity is never settled by the latest pane status or equal text.
-  if (turns.length !== 1) return undefined;
-  const turn = turns[0]!;
+  if (matching.length !== 1) return undefined;
+  const turn = matching[0]!;
   if (!["completed", "failed", "interrupted"].includes(turn.status)) return undefined;
   return {
     type: "turn_completed",
@@ -192,26 +189,64 @@ function codexRecordedCompletion(
   };
 }
 
-const completionThread = z.object({
-  thread: z.object({
-    id: z.string(),
-    turns: z.array(
-      z.object({
-        id: z.string(),
-        status: z.string(),
-        items: z.array(
-          z
-            .object({
-              type: z.string(),
-              clientId: z.string().nullable().optional(),
-              text: z.string().optional(),
-            })
-            .passthrough(),
-        ),
-      }),
-    ),
-  }),
+const completionTurn = z.object({
+  id: z.string(),
+  status: z.string(),
+  items: z.array(
+    z.object({
+      type: z.string(),
+      clientId: z.string().nullable().optional(),
+      text: z.string().optional(),
+    }),
+  ),
 });
+const completionTurnShell = completionTurn.pick({ id: true, status: true });
+const completionThread = z.object({
+  thread: z.object({ id: z.string(), turns: z.array(completionTurn).max(10_000) }),
+});
+
+/** Cursors and metadata are read hints, never cached completion authority. */
+async function codexCompletionTurns(
+  read: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  sessionId: string,
+): Promise<z.infer<typeof completionTurnShell>[]> {
+  const pageSchema = z.object({
+    data: z.array(completionTurnShell).max(100),
+    nextCursor: z.string().nullable().optional(),
+  });
+  const turns: z.infer<typeof completionTurnShell>[] = [];
+  const ids = new Set<string>();
+  const cursors = new Set<string>();
+  const started = performance.now();
+  let cursor: string | undefined;
+  do {
+    if (turns.length >= 10_000 || performance.now() - started > 10_000)
+      throw new Error("Codex completion history exceeds the bounded read budget");
+    const page = pageSchema.parse(
+        await read("thread/turns/list", {
+          threadId: sessionId,
+          itemsView: "notLoaded",
+          sortDirection: "asc",
+          limit: 100,
+          ...(cursor === undefined ? {} : { cursor }),
+        }),
+      ),
+      next = page.nextCursor ?? undefined;
+    for (const turn of page.data) {
+      if (ids.has(turn.id)) throw new Error("Codex completion history contains duplicate turns");
+      ids.add(turn.id);
+      turns.push(turn);
+    }
+    if (next !== undefined && (cursors.has(next) || page.data.length === 0))
+      throw new Error("Codex completion history cursor did not advance");
+    if (next !== undefined) cursors.add(next);
+    cursor = next;
+  } while (cursor !== undefined);
+  return turns;
+}
+
+const completionTurnShape = (turns: z.infer<typeof completionTurnShell>[]) =>
+  JSON.stringify(turns.map(({ id, status }) => [id, status]));
 
 /** Read retained turns on the exact observed server. Never resumes, sends or answers anything. */
 export async function codexSocketSettled(
@@ -221,6 +256,7 @@ export async function codexSocketSettled(
   signal: AbortSignal,
   guard: () => Promise<void>,
   intervalMs = 500,
+  historyAuditMs = 30_000,
 ): Promise<SeatEvent> {
   signal.throwIfAborted();
   await guard();
@@ -250,15 +286,35 @@ export async function codexSocketSettled(
       });
     signal.throwIfAborted();
     client = new CodexAppServerClient(socket, () => {}, 5000);
-    await client.initialize();
+    await client.initialize(true);
+    const read = async (method: string, params: Record<string, unknown>) => {
+      signal.throwIfAborted();
+      await guard();
+      signal.throwIfAborted();
+      const result = await client!.request(method, params);
+      signal.throwIfAborted();
+      await guard();
+      signal.throwIfAborted();
+      return result;
+    };
+    let auditedShape: string | undefined;
+    let auditedAt = 0;
     for (;;) {
-      signal.throwIfAborted();
-      await guard();
-      const read = await client.request("thread/read", { threadId: sessionId, includeTurns: true });
-      signal.throwIfAborted();
-      await guard();
-      const completed = codexRecordedCompletion(read, sessionId, messageId);
-      if (completed) return completed;
+      const observed = completionTurnShape(await codexCompletionTurns(read, sessionId));
+      if (observed !== auditedShape || performance.now() - auditedAt >= historyAuditMs) {
+        // Summary view omits later user client IDs and all but the last agent
+        // message. Only full retained items can establish identity and result.
+        // A single retained-history response also preserves the original
+        // unambiguous identity check: native pages have no common revision.
+        const { thread } = completionThread.parse(
+          await read("thread/read", { threadId: sessionId, includeTurns: true }),
+        );
+        if (thread.id !== sessionId) throw new Error("Codex completion returned another thread");
+        const completed = codexRecordedCompletion(thread.turns, messageId);
+        if (completed) return completed;
+        auditedShape = observed;
+        auditedAt = performance.now();
+      }
       await delay(intervalMs, undefined, { signal });
     }
   } finally {

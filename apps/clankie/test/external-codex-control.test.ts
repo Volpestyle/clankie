@@ -29,6 +29,7 @@ async function fixture(
     approval?: boolean;
     mismatchedReceipt?: boolean;
     beforeReply?: (method: string) => Promise<void>;
+    turnPage?: (params: Record<string, unknown>) => unknown;
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "codex-proxy-test-"));
@@ -55,7 +56,19 @@ async function fixture(
             turns: options.turns?.() ?? [],
           },
         };
-      if (request.method === "thread/turns/list") result = { data: [{ id: "turn", status: "inProgress" }] };
+      if (request.method === "thread/turns/list") {
+        const all = options.turns?.() as Record<string, unknown>[] | undefined;
+        const start = Number(request.params.cursor ?? 0);
+        const limit = request.params.limit ?? 100;
+        const page = all?.slice(start, start + limit);
+        result = options.turnPage?.(request.params) ?? {
+          data: page?.map((turn) => ({
+            ...turn,
+            ...(request.params.itemsView === "notLoaded" ? { items: [] } : {}),
+          })) ?? [{ id: "turn", status: "inProgress" }],
+          nextCursor: all && start + limit < all.length ? String(start + limit) : null,
+        };
+      }
       if (request.method === "thread/queue/add")
         result = {
           queuedSubmission: {
@@ -479,7 +492,7 @@ it("recovers a fast completed input after watch admission and excludes another i
     expect(b).toMatchObject({ outcome: "watching", messageId: "codex-input:input-B" });
     // Wait until the B observer has actually read A's retained completion.
     await vi.waitFor(() =>
-      expect(f.requests.filter((r) => r.method === "thread/read").length).toBeGreaterThan(1),
+      expect(f.requests.filter((r) => r.method === "thread/turns/list").length).toBeGreaterThan(3),
     );
     expect(wakes).toHaveLength(1);
     turns.push({
@@ -502,9 +515,11 @@ it("recovers a fast completed input after watch admission and excludes another i
     });
     expect(wakes).toHaveLength(2);
     expect(runner.wait).not.toHaveBeenCalled();
-    expect(f.requests.every((r) => ["initialize", "initialized", "thread/read"].includes(r.method!))).toBe(
-      true,
-    );
+    expect(
+      f.requests.every((r) =>
+        ["initialize", "initialized", "thread/turns/list", "thread/read"].includes(r.method!),
+      ),
+    ).toBe(true);
   } finally {
     store.close();
   }
@@ -522,12 +537,147 @@ it("aborts a pending exact native input wait without a completion or another sen
     5,
   );
   const rejected = expect(waiting).rejects.toThrow();
-  await vi.waitFor(() => expect(f.requests.some((r) => r.method === "thread/read")).toBe(true));
+  await vi.waitFor(() => expect(f.requests.some((r) => r.method === "thread/turns/list")).toBe(true));
   abort.abort(new Error("watch canceled"));
   await rejected;
   expect(f.requests.some((r) => ["turn/start", "turn/steer", "thread/queue/add"].includes(r.method!))).toBe(
     false,
   );
+});
+
+it("polls shells without rereading unchanged history and recovers a later merged input with its complete result", async () => {
+  const turns: { id: string; status: string; items: { type: string; clientId?: string; text?: string }[] }[] =
+    Array.from({ length: 123 }, (_, index) => ({
+      id: `old-${index}`,
+      status: "completed",
+      items: [{ type: "userMessage", clientId: `other-${index}` }],
+    }));
+  const f = await fixture({ turns: () => turns, approval: true });
+  const abort = new AbortController();
+  const waiting = codexSocketSettled(
+    f.connect,
+    "thread",
+    "codex-input:target",
+    abort.signal,
+    async () => {},
+    5,
+  );
+  const fullReads = () => f.requests.filter((r) => r.method === "thread/read");
+  const shellReads = () => f.requests.filter((r) => r.params?.itemsView === "notLoaded");
+  try {
+    await vi.waitFor(() => expect(shellReads().length).toBeGreaterThanOrEqual(8));
+    expect(fullReads()).toHaveLength(1);
+    expect(shellReads().some((r) => r.params?.cursor === "100")).toBe(true);
+    expect(fullReads()[0]?.params).toEqual({ threadId: "thread", includeTurns: true });
+    turns.push({
+      id: "merged",
+      status: "completed",
+      items: [
+        { type: "userMessage", clientId: "first-input" },
+        { type: "agentMessage", text: "first result" },
+        { type: "userMessage", clientId: "target" },
+        { type: "agentMessage", text: "last result" },
+      ],
+    });
+    expect(await waiting).toMatchObject({
+      nativeTurnId: "merged",
+      ok: true,
+      text: "first result\nlast result",
+    });
+    expect(
+      f.requests.every((r) =>
+        ["initialize", "initialized", "thread/turns/list", "thread/read"].includes(r.method!),
+      ),
+    ).toBe(true);
+    expect(f.requests.some((r) => r.id === 9876)).toBe(false);
+  } finally {
+    abort.abort();
+    await waiting.catch(() => {});
+  }
+});
+
+it("freshly audits unchanged metadata without letting an ambiguous queued identity settle", async () => {
+  const turns = Array.from({ length: 12 }, (_, index) => ({
+    id: `turn-${index}`,
+    status: "completed",
+    items: [{ type: "userMessage", clientId: index === 0 || index === 11 ? "target" : "other" }],
+  }));
+  const f = await fixture({ turns: () => turns });
+  const abort = new AbortController();
+  let settled = false;
+  const waiting = codexSocketSettled(
+    f.connect,
+    "thread",
+    "codex-input:target",
+    abort.signal,
+    async () => {},
+    5,
+    100,
+  ).then((event) => {
+    settled = true;
+    return event;
+  });
+  try {
+    await vi.waitFor(() =>
+      expect(f.requests.filter((r) => r.method === "thread/read").length).toBeGreaterThanOrEqual(2),
+    );
+    expect(settled).toBe(false);
+    // Same IDs/statuses: only a fresh full-item audit can discover this change.
+    turns[0]!.items[0]!.clientId = "different";
+    expect(await waiting).toMatchObject({ nativeTurnId: "turn-11" });
+  } finally {
+    abort.abort();
+    await waiting.catch(() => {});
+  }
+});
+
+it.each(["cursor", "duplicate", "oversized", "malformed"])(
+  "refuses %s history pages without settling or sending",
+  async (kind) => {
+    const f = await fixture({
+      turnPage: () => ({
+        data:
+          kind === "malformed"
+            ? [{ id: "a" }]
+            : Array.from({ length: kind === "oversized" ? 101 : kind === "duplicate" ? 2 : 1 }, (_, i) => ({
+                id: kind === "duplicate" ? "same" : String(i),
+                status: "completed",
+                items: [],
+              })),
+        nextCursor: kind === "cursor" ? "repeated" : null,
+      }),
+    });
+    await expect(
+      codexSocketSettled(f.connect, "thread", "a", new AbortController().signal, async () => {}, 5),
+    ).rejects.toThrow();
+    expect(
+      f.requests.every((r) =>
+        ["initialize", "initialized", "thread/turns/list", "thread/read"].includes(r.method!),
+      ),
+    ).toBe(true);
+  },
+);
+
+it("rechecks authority after a full read before publishing a retained completion", async () => {
+  let authorized = true;
+  const f = await fixture({
+    turns: () => [{ id: "done", status: "completed", items: [] }],
+    beforeReply: async (method) => {
+      if (method === "thread/read") authorized = false;
+    },
+  });
+  await expect(
+    codexSocketSettled(
+      f.connect,
+      "thread",
+      "done",
+      new AbortController().signal,
+      async () => {
+        if (!authorized) throw new Error("seat replaced");
+      },
+      5,
+    ),
+  ).rejects.toThrow("seat replaced");
 });
 
 it("automatically watches a queued turn that completed before its send receipt returned", async () => {

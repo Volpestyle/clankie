@@ -914,6 +914,14 @@ An unavailable exact native controller reports unconfirmed correlation rather
 than substituting another turn or terminal input. Remote queue transports that
 provide only legacy boolean receipts still lack message-scoped correlation.
 
+Codex completion watches poll retained turn IDs/statuses without loading items.
+They refresh full history on a change or after 30 seconds unchanged, to recover
+late queued-input attribution. Only a fresh, unambiguous full-item response
+settles a watch; native summary pages omit later inputs and earlier result text.
+Reads are sequential and bounded to 10,000 turns, with a 10-second metadata
+pagination budget (an in-flight request has its own 5-second timeout).
+Unsupported or invalid native pagination reports unavailable correlation.
+
 Protected `message_seat` and `hire_agent` calls receive a `deliveryId` or `hireId`
 before dispatch, carried in MCP `_meta["clankie/seat-call"]`. The service persists
 the scoped receipt before the native effect. A lost result returns typed

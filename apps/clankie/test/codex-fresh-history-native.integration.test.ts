@@ -1,5 +1,6 @@
 // Manual native boundary proof; no model provider, credentials or owner stores are substituted.
 import { RemoteCodexSeats } from "../src/remote-codex-seats.ts";
+import { codexSocketSettled } from "../src/captain/external-codex-control.ts";
 import { spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -148,7 +149,15 @@ async function nativeFixture(managedNaming = false) {
       startView,
       ...(resumeThreadId === undefined ? {} : { resumeThreadId }),
     });
-  return { root, home, view, createRoot, materialize, start };
+  return {
+    root,
+    home,
+    view,
+    createRoot,
+    materialize,
+    start,
+    connect: () => openCodexSocket(`ws+unix://${socketPath}:/`),
+  };
 }
 
 nativeIt(
@@ -207,6 +216,28 @@ nativeIt(
     expect(turns[0]?.id).toBe(sent.turnId);
     expect(JSON.stringify(turns[0])).toContain(brief);
     expect(await readFile(String(root.path), "utf8")).toContain(brief);
+    expect(sent.turnId).toBeTypeOf("string");
+    // stopTask can race native turn startup. Establish a real terminal turn
+    // before asking the read-only observer to recover its retained completion.
+    await f.view
+      .request("turn/interrupt", { threadId: root.id, turnId: sent.turnId })
+      .catch((error: unknown) => {
+        if (!(error instanceof Error) || !error.message.includes("no active turn to interrupt")) throw error;
+      });
+    const completion = await codexSocketSettled(
+      f.connect,
+      String(root.id),
+      sent.turnId!,
+      AbortSignal.timeout(15_000),
+      async () => {},
+    );
+    expect(completion).toMatchObject({
+      type: "turn_completed",
+      messageId: sent.turnId,
+      nativeTurnId: sent.turnId,
+    });
+    if (completion.type !== "turn_completed") throw new Error("Native completion unavailable");
+    expect(["completed", "interrupted", "failed"]).toContain(completion.stopReason);
   },
   60_000,
 );
