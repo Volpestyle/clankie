@@ -39,6 +39,14 @@ function styledLines(ansi: string): Cell[][] | undefined {
  */
 export type PaneInputLine = { state: PaneDraftState; text?: string; typed?: boolean };
 
+/**
+ * The composer's top rule, which `claude --name` labels in place (`──── Clankie ─`,
+ * VUH-2821). Only the top: a labeled line below the prompt can be typed draft text.
+ */
+function composerTopRule(plain: string): boolean {
+  return /^[─━]{8,}$/u.test(plain.replace(/(?<=[─━]) [^─━]+ (?=[─━])/u, ""));
+}
+
 export function paneDraftState(harness: string, ansi: string): PaneDraftState {
   return paneInputLine(harness, ansi).state;
 }
@@ -62,7 +70,7 @@ export function paneInputLine(harness: string, ansi: string): PaneInputLine {
   const at = row.findIndex((cell) => cell.text === marker);
   if (
     harness === "claude" &&
-    !/^[─━]{8,}$/u.test(
+    !composerTopRule(
       rows[start - 1]
         ?.map((cell) => cell.text)
         .join("")

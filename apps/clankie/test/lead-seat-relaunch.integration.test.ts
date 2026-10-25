@@ -8,6 +8,7 @@ import {
   readClaudeSessionUsage,
   type RelaunchLeadSeatInput,
 } from "../src/captain/lead-seat-relaunch.ts";
+import { paneInputLine } from "../src/captain/pane-draft.ts";
 
 // ADR 0271 (VUH-2274): the lead seat restarts fresh in its own pane. The old
 // harness is a real process the relaunch must end with a real signal; Herdr's
@@ -161,6 +162,33 @@ it("refuses before any effect while the owner has a draft or wrote recently", as
     expect(f.alive()).toBe(true);
     expect(f.launched).toEqual([]);
   }
+});
+
+// VUH-2821: `clankie claude` launches the lead with `--name Clankie`, and Claude
+// Code 2.1.310 draws that name into the composer's top rule. Live captures from a
+// throwaway `claude --name Clankie` pane (one settings-warning line removed).
+it("restarts a named seat whose composer rule carries its label, and still refuses its draft", async () => {
+  const drafted = await fixture({ ansi: await golden("labeled-draft") });
+  expect(await drafted.relaunch.relaunchLeadSeat(restart)).toEqual({ outcome: "refused", reason: "draft" });
+  expect(drafted.alive()).toBe(true);
+  expect(drafted.launched).toEqual([]);
+  const named = await fixture({ ansi: await golden("labeled-empty") });
+  expect(await named.relaunch.relaunchLeadSeat(restart)).toMatchObject({ outcome: "relaunched" });
+  expect(named.alive()).toBe(false);
+  expect(named.briefs).toEqual([restart.handoffBrief]);
+});
+
+it("keeps a typed labeled rule below the prompt inside the draft", async () => {
+  // The label tolerance is the top border's only: an owner can type `─── x ─`.
+  const ansi = (await golden("labeled-draft")).replace(
+    "❯ unsent owner draft\n",
+    "❯ \n──────── Draft notes ─\nmore unsent text\n",
+  );
+  expect(paneInputLine("claude", ansi)).toMatchObject({ state: "draft", typed: true });
+  const f = await fixture({ ansi });
+  expect(await f.relaunch.relaunchLeadSeat(restart)).toEqual({ outcome: "refused", reason: "draft" });
+  expect(f.alive()).toBe(true);
+  expect(f.launched).toEqual([]);
 });
 
 it("leaves an uncertain receipt, and launches nothing, when the old session will not exit", async () => {
