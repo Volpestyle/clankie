@@ -632,55 +632,24 @@ it("retains saved Linear retirement for bound and legacy projects through a disp
         mcpHost: host,
         localMachineId: "local",
       });
-      let now = 0;
-      let resolutions = 0;
       const keeper = new SeatIssueKeeper(host, join(root, `keeper-${index}.json`), {
         requireAttribution: true,
-        now: () => now,
-        exitGraceMs: 1,
       });
       const key = String(provider.rows.issues![index]!.identifier);
-      const seats = [
-        {
-          seatId: `s-${index}`,
-          occupantId: `occupant-${index}`,
-          title: "Linear fixture",
-          keys: [key],
-          attribution: {
-            resolve: () => {
-              resolutions++;
-              return service.prepareSeatIssueTracker(`p-${index}`, async () => {});
-            },
+      expect(
+        await keeper.observe([
+          {
+            seatId: `s-${index}`,
+            title: "Linear fixture",
+            keys: [key],
+            attribution: { resolve: () => service.prepareSeatIssueTracker(`p-${index}`, async () => {}) },
           },
-        },
-      ];
+        ]),
+      ).toEqual([]);
       if (!bound) {
-        await writeConvention(secondPath, { ...secondConvention, linear: { team: "OTHER" } });
-        expect(await keeper.observe(seats)).toMatchObject([
-          { outcome: "failed", detail: expect.stringContaining("unambiguous") },
-        ]);
-        for (let tick = 0; tick < 100; tick++) {
-          now += 200;
-          expect(await keeper.observe(seats)).toEqual([]);
-        }
-        expect(resolutions).toBe(1);
-        // Repairing the real saved scope recovers at the next backoff deadline.
-        await writeConvention(secondPath, secondConvention);
-        now = 30_000;
-      }
-      expect(await keeper.observe(seats)).toEqual([]);
-      if (!bound) {
-        expect(resolutions).toBe(2);
         const captured = await service.prepareSeatIssueTracker(`p-${index}`, async () => {});
         await writeConvention(secondPath, { ...secondConvention, linear: { team: "OTHER" } });
         await expect(captured.call("get_issue", { id: key }, "background")).rejects.toThrow("changed");
-        expect(await keeper.observe(seats)).toMatchObject([{ outcome: "failed" }]);
-        now++;
-        await keeper.observe([]);
-        now += 2;
-        // A returning native seat with an unreadable scope must retain its
-        // tracked issue, rather than be settled as an observed exit.
-        expect(await keeper.observe(seats)).toMatchObject([{ outcome: "failed" }]);
         await writeConvention(secondPath, secondConvention);
       }
       expect(await keeper.closed({ seatId: `s-${index}`, reason: "saved Linear retirement" })).toMatchObject({

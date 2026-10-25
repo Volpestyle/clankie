@@ -75,10 +75,9 @@ Separately, core/app workspace conventions already name the same Linear team,
 project and label, but have different decision provenance and documentation.
 The old full-record equality falsely refused that shared tracker scope.
 Comparison now uses Linear routing fields while validating each original saved
-file independently before effects. Failed roster lookups back off from 30s to
-five minutes for the same native occupant/assignment. A present seat with
-unavailable attribution is unknown, never an observed exit; retirement resolves
-its current scope afresh even during observation backoff.
+file independently before effects. Attribution backoff is deferred to a separate
+patch: review found that skipping an unavailable seat could hide a live successor
+and prematurely settle its shared issue. No backoff is included in this landing.
 
 `fleet.progress.unavailable` now uses Pino's `err` serializer and identifies the
 source while retaining the original exception as its cause. The observer's
@@ -119,10 +118,10 @@ and the subsequent live steady-state CPU measurement.
   working, idle, both native waiting flags, unknown flags, replacement identity
   and unloaded-thread cases with under 10KB total transfer.
 - Real convention files and a disposable OAuth/GraphQL provider prove shared
-  Linear scope, bounded refusal lookup, recovery after repair, per-file
-  revalidation and fresh retirement resolution during backoff. The original
-  source made 101 lookups for 101 observations; the candidate makes one within
-  the backoff window.
+  Linear scope and per-file revalidation. The archive also retains the initial
+  backoff experiment (101 lookups reduced to one); that change was deferred
+  after review found a shared-issue successor regression. It is not part of
+  the landed CPU fix.
 - The real HTTP progress regression times out twice, retains exactly one
   background request, observes the healthy source, recovers, and records a real
   HTTP 503 cause with message/type/stack.

@@ -49,7 +49,6 @@ export function warnSeatIssueUnavailable(settlement: SeatIssueSettlement): void 
 }
 export interface LiveSeatIssue {
   readonly seatId: string;
-  readonly occupantId?: string;
   readonly title: string;
   /** The seat's deliverable or current issue; only a single tracker key counts. */
   readonly keys: readonly (string | undefined)[];
@@ -153,7 +152,6 @@ export function liveSeatIssue(seat: OperatorFleetSeat): LiveSeatIssue {
     : (nativeIssue ?? efficiency?.assignedDeliverable);
   return {
     seatId: seat.seatId,
-    occupantId: seat.occupantId,
     title: seat.title,
     keys: [current],
     ownedKeys: [
@@ -171,9 +169,6 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 const oneLine = (value: string) => value.replace(/\s+/gu, " ").trim().slice(0, 400);
 
 export class SeatIssueKeeper {
-  // Cache refusals only, never an authority-bearing scope. Retirement and
-  // resumption still resolve their current scope immediately before effects.
-  private readonly unavailable = new Map<string, { attempts: number; retryAt: number }>();
   private readonly seats = new Map<
     string,
     {
@@ -246,12 +241,7 @@ export class SeatIssueKeeper {
       }
     >();
     this.liveOwners.clear();
-    const observedKeys = new Set<string>();
     for (const seat of seats) {
-      const observationKey = JSON.stringify([seat.seatId, seat.occupantId, seat.keys, seat.ownedKeys]);
-      observedKeys.add(observationKey);
-      const unavailable = this.unavailable.get(observationKey);
-      if (unavailable && now < unavailable.retryAt) continue;
       const keys = [...new Set(seat.keys.map(issueKey).filter((key) => key !== undefined))];
       const issue = keys.length === 1 ? keys[0] : undefined;
       const attribution =
@@ -275,22 +265,14 @@ export class SeatIssueKeeper {
             { seatId: seat.seatId, title: seat.title },
           ]);
         }
-        this.unavailable.delete(observationKey);
       } catch (error) {
-        const result: SeatIssueSettlement = {
+        results.push({
           outcome: "failed",
           ...(issue ? { issue } : {}),
           detail: error instanceof Error ? error.message : String(error),
-        };
-        const attempts = Math.min((unavailable?.attempts ?? 0) + 1, 5);
-        this.unavailable.set(observationKey, {
-          attempts,
-          retryAt: now + Math.min(30_000 * 2 ** (attempts - 1), 300_000),
         });
-        results.push(result);
       }
     }
-    for (const key of this.unavailable.keys()) if (!observedKeys.has(key)) this.unavailable.delete(key);
     this.live = new Set(this.liveOwners.keys());
     for (const [seatId, seat] of present)
       this.seats.set(seatId, {
@@ -301,11 +283,6 @@ export class SeatIssueKeeper {
       });
     for (const [seatId, seat] of this.seats) {
       if (present.has(seatId)) continue;
-      // A present seat with unavailable attribution has not exited.
-      if (seats.some((observed) => observed.seatId === seatId)) {
-        delete seat.goneSince;
-        continue;
-      }
       seat.goneSince ??= now;
       if (now - seat.goneSince < this.exitGraceMs) continue;
       this.seats.delete(seatId);
