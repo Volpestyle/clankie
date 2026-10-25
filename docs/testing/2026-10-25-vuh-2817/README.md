@@ -75,9 +75,17 @@ Separately, core/app workspace conventions already name the same Linear team,
 project and label, but have different decision provenance and documentation.
 The old full-record equality falsely refused that shared tracker scope.
 Comparison now uses Linear routing fields while validating each original saved
-file independently before effects. Attribution backoff is deferred to a separate
-patch: review found that skipping an unavailable seat could hide a live successor
-and prematurely settle its shared issue. No backoff is included in this landing.
+file independently before effects. Patch A landed at `5f8fcf34a` with this
+scope fix, metadata-only status and real error logging; it excluded backoff.
+
+The separate backoff follow-up retains unresolved live assignments as possible
+owners. Observation failures retry after 30s, doubling to a five-minute cap for
+the same occupant and assignment. A still-present unreadable seat has not exited.
+Before retirement without a known successor, each unresolved possible owner is
+freshly resolved; a recovered owner keeps its shared issue In Progress and is
+named in the handoff, while a still-unreadable owner defers tracker effects.
+The daily orphan check also defers until ownership observations are complete.
+Success clears the failure backoff; none of these records caches write authority.
 
 `fleet.progress.unavailable` now uses Pino's `err` serializer and identifies the
 source while retaining the original exception as its cause. The observer's
@@ -118,10 +126,15 @@ and the subsequent live steady-state CPU measurement.
   working, idle, both native waiting flags, unknown flags, replacement identity
   and unloaded-thread cases with under 10KB total transfer.
 - Real convention files and a disposable OAuth/GraphQL provider prove shared
-  Linear scope and per-file revalidation. The archive also retains the initial
-  backoff experiment (101 lookups reduced to one); that change was deferred
-  after review found a shared-issue successor regression. It is not part of
-  the landed CPU fix.
+  Linear scope, per-file revalidation and fresh retirement during backoff.
+  The original made 101 failing lookups for 101 observations; the follow-up
+  makes one within the backoff window and recovers after scope repair.
+- Review caught a shared-issue retirement bug in the initial backoff. Its
+  real-provider regression now fails on that original change (two cases mark
+  the active issue Done) and passes on the follow-up: 100 observations add no
+  lookup, retirement rechecks the successor fresh, unreadable ownership defers
+  effects and orphan claims, and recovery allows a final legitimate close.
+  [Backoff regression and Patch A landing receipts](backoff-proof.json).
 - The real HTTP progress regression times out twice, retains exactly one
   background request, observes the healthy source, recovers, and records a real
   HTTP 503 cause with message/type/stack.

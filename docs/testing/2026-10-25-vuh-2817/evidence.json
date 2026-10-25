@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "backoff-proof.json",
+      "size": 59429,
+      "sha256": "7d5d420de0797ab0d2ee830bf4f39465aa50bc8cbfd1ad63c7a3bb7ced7aacc5",
+      "url": "clankie://evidence/sha256/7d5d420de0797ab0d2ee830bf4f39465aa50bc8cbfd1ad63c7a3bb7ced7aacc5"
+    },
+    {
       "path": "live-before.sample.txt",
       "size": 509288,
       "sha256": "f86d5c76ac9dbbb0b87250d1704bc04813bce8121c269f89ae862fa4e38f5bc8",

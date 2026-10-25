@@ -49,6 +49,7 @@ export function warnSeatIssueUnavailable(settlement: SeatIssueSettlement): void 
 }
 export interface LiveSeatIssue {
   readonly seatId: string;
+  readonly occupantId?: string;
   readonly title: string;
   /** The seat's deliverable or current issue; only a single tracker key counts. */
   readonly keys: readonly (string | undefined)[];
@@ -152,6 +153,7 @@ export function liveSeatIssue(seat: OperatorFleetSeat): LiveSeatIssue {
     : (nativeIssue ?? efficiency?.assignedDeliverable);
   return {
     seatId: seat.seatId,
+    occupantId: seat.occupantId,
     title: seat.title,
     keys: [current],
     ownedKeys: [
@@ -169,6 +171,11 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 const oneLine = (value: string) => value.replace(/\s+/gu, " ").trim().slice(0, 400);
 
 export class SeatIssueKeeper {
+  // Cache refusals only, never an authority-bearing scope. Retirement and
+  // resumption still resolve their current scope immediately before effects.
+  private readonly unavailable = new Map<string, { attempts: number; retryAt: number }>();
+  // Unresolved observations are possible owners, never evidence of absence.
+  private readonly unknownOwners = new Map<string, LiveSeatIssue>();
   private readonly seats = new Map<
     string,
     {
@@ -241,9 +248,17 @@ export class SeatIssueKeeper {
       }
     >();
     this.liveOwners.clear();
+    this.unknownOwners.clear();
+    const observedKeys = new Set<string>();
     for (const seat of seats) {
+      const observationKey = JSON.stringify([seat.seatId, seat.occupantId, seat.keys, seat.ownedKeys]);
+      observedKeys.add(observationKey);
+      const unavailable = this.unavailable.get(observationKey);
       const keys = [...new Set(seat.keys.map(issueKey).filter((key) => key !== undefined))];
       const issue = keys.length === 1 ? keys[0] : undefined;
+      if (keys.length || (seat.ownedKeys ?? []).some((key) => issueKey(key)) || this.seats.has(seat.seatId))
+        this.unknownOwners.set(seat.seatId, seat);
+      if (unavailable && now < unavailable.retryAt) continue;
       const attribution =
         seat.attribution ?? (this.requireAttribution ? undefined : { resolve: async () => this.legacyScope });
       if (!attribution) {
@@ -265,14 +280,23 @@ export class SeatIssueKeeper {
             { seatId: seat.seatId, title: seat.title },
           ]);
         }
+        this.unavailable.delete(observationKey);
+        this.unknownOwners.delete(seat.seatId);
       } catch (error) {
-        results.push({
+        const result: SeatIssueSettlement = {
           outcome: "failed",
           ...(issue ? { issue } : {}),
           detail: error instanceof Error ? error.message : String(error),
+        };
+        const attempts = Math.min((unavailable?.attempts ?? 0) + 1, 5);
+        this.unavailable.set(observationKey, {
+          attempts,
+          retryAt: this.now() + Math.min(30_000 * 2 ** (attempts - 1), 300_000),
         });
+        results.push(result);
       }
     }
+    for (const key of this.unavailable.keys()) if (!observedKeys.has(key)) this.unavailable.delete(key);
     this.live = new Set(this.liveOwners.keys());
     for (const [seatId, seat] of present)
       this.seats.set(seatId, {
@@ -283,6 +307,11 @@ export class SeatIssueKeeper {
       });
     for (const [seatId, seat] of this.seats) {
       if (present.has(seatId)) continue;
+      // A present seat with unavailable attribution has not exited.
+      if (seats.some((observed) => observed.seatId === seatId)) {
+        delete seat.goneSince;
+        continue;
+      }
       seat.goneSince ??= now;
       if (now - seat.goneSince < this.exitGraceMs) continue;
       this.seats.delete(seatId);
@@ -314,6 +343,7 @@ export class SeatIssueKeeper {
   }): Promise<SeatIssueSettlement> {
     const seat = this.seats.get(input.seatId);
     this.seats.delete(input.seatId);
+    this.unknownOwners.delete(input.seatId);
     for (const [key, owners] of this.liveOwners) {
       const remaining = owners.filter((owner) => owner.seatId !== input.seatId);
       if (remaining.length) this.liveOwners.set(key, remaining);
@@ -341,6 +371,9 @@ export class SeatIssueKeeper {
    * resolve. Returns undefined when the check is not due or found nothing.
    */
   public async dailyCheck(force = false): Promise<string | undefined> {
+    // An unreadable live assignment cannot prove an orphan. Leave the check due
+    // so the next successful roster observation can make a complete report.
+    if (this.unknownOwners.size) return;
     const now = this.now();
     const last = this.state.lastCheckAt === undefined ? undefined : Date.parse(this.state.lastCheckAt);
     if (!force && last !== undefined && now - last < DAY_MS) return;
@@ -423,6 +456,28 @@ export class SeatIssueKeeper {
       const targetId = input.canonicalId;
       const identity = scopedKey(scope, targetId);
       successor = this.liveOwners.get(identity)?.[0];
+      if (!successor)
+        for (const seat of this.unknownOwners.values()) {
+          // Observation backoff is not retirement authority. Recheck each
+          // possible successor now; if still unknown, defer without effects.
+          const attribution =
+            seat.attribution ??
+            (this.requireAttribution ? undefined : { resolve: async () => this.legacyScope });
+          if (!attribution) throw new Error("Live successor tracker attribution is unavailable");
+          const candidate = await attribution.resolve();
+          if (candidate.identity !== scope.identity) continue;
+          const keys = [...seat.keys, ...(seat.ownedKeys ?? [])]
+            .map(issueKey)
+            .filter((key) => key !== undefined);
+          if (!keys.length) throw new Error("Live successor assignment is unavailable");
+          for (const key of keys) {
+            if ((await this.canonicalId(candidate, key)) === targetId) {
+              successor = { seatId: seat.seatId, title: seat.title };
+              break;
+            }
+          }
+          if (successor) break;
+        }
       if (successor) intended = "In Progress";
       const call = async (tool: string, args: Row) => (await scope.call(tool, args, "interactive")) as Row;
       const issue = await call("get_issue", { id: targetId });

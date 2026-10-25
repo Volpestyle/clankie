@@ -88,7 +88,11 @@ disconnection does not select a local compatibility store.
 
 Local workspaces sharing a saved Linear team, project and label share the
 retirement scope even when their convention provenance or docs differ. Each
-saved file is still revalidated before issue effects.
+saved file is still revalidated before issue effects. Failed roster lookups
+back off from 30 seconds to five minutes for the same occupant and assignment.
+Unreadable live assignments defer the daily orphan check. Retirement rechecks
+possible successors fresh even during observation backoff; if ownership is still
+unknown it defers the tracker effect. No cached scope grants write authority.
 
 Built-in retirement cannot set Done or impersonate owner verification, and it
 cannot move delivery backwards. Existing evidence, independent-check and owner

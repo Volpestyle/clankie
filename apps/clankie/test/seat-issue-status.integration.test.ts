@@ -10,7 +10,11 @@ import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { OperatorFleetSeatSchema } from "@clankie/protocol";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
-import { SeatIssueKeeper, liveSeatIssue } from "../src/captain/seat-issue-status.ts";
+import {
+  SeatIssueKeeper,
+  liveSeatIssue,
+  type SeatIssueTrackerScope,
+} from "../src/captain/seat-issue-status.ts";
 import { createLinearApiProvider, TEAM_ID } from "./fixtures/linear-api-provider.ts";
 
 /**
@@ -25,6 +29,7 @@ afterEach(async () => {
 
 async function setup(
   humanOwners?: () => Promise<{ ownerUserIds: readonly string[]; ownerUserEmails: readonly string[] }>,
+  requireAttribution = false,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "seat-issue-status-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -68,6 +73,7 @@ async function setup(
   let now = Date.parse("2026-10-09T12:00:00Z");
   const keeper = new SeatIssueKeeper(host, join(directory, "seat-issue-status.json"), {
     now: () => now,
+    requireAttribution,
     exitGraceMs: 60_000,
     ...(humanOwners ? { humanOwners } : {}),
   });
@@ -76,6 +82,7 @@ async function setup(
     provider.rows.comments!.filter((row) => row.issueId === issue(key).id).map((row) => String(row.body));
   return {
     keeper,
+    host,
     provider,
     issue,
     status: (key: string) => (issue(key).state as { name: string }).name,
@@ -318,3 +325,96 @@ it("uses current work, evidence-backed lead follow-ups and live native children 
   // Daily-only child ownership never authorizes changing that child's tracker status.
   expect(status("VUH-1385")).toBe("In Progress");
 });
+
+it.each([false, true])(
+  "rechecks a live shared-issue successor before retirement during backoff (still unavailable=%s)",
+  async (stillUnavailable) => {
+    const f = await setup(undefined, true);
+    let unavailable = false;
+    let resolutions = 0;
+    const scope: SeatIssueTrackerScope = {
+      identity: "shared-proof-scope",
+      backend: "linear",
+      call: async (tool, args, requestPriority) => {
+        const result = await f.host.call({
+          lane: "operator",
+          server: "linear",
+          tool,
+          arguments: args,
+          resultMode: "data",
+          requestPriority,
+        });
+        if (result.outcome !== "ok" || result.isError) throw Error("Fixture tracker refused");
+        return JSON.parse(result.content);
+      },
+    };
+    const a = {
+      seatId: "a",
+      occupantId: "occupant-a",
+      title: "A",
+      keys: ["VUH-1383"],
+      attribution: { resolve: async () => scope },
+    };
+    const b = {
+      seatId: "b",
+      occupantId: "occupant-b",
+      title: "B still working",
+      keys: ["VUH-1383"],
+      attribution: {
+        resolve: async () => {
+          resolutions++;
+          if (unavailable) throw Error("Temporary attribution read failed");
+          return scope;
+        },
+      },
+    };
+    expect(await f.keeper.observe([a, b])).toEqual([]);
+    unavailable = true;
+    expect(await f.keeper.observe([a, b])).toMatchObject([{ outcome: "failed" }]);
+    unavailable = stillUnavailable;
+    for (let tick = 0; tick < 100; tick++) {
+      f.advance(200);
+      expect(await f.keeper.observe([a, b])).toEqual([]);
+    }
+    expect(resolutions).toBe(2);
+    // A failed/backed-off assignment cannot establish daily orphan absence.
+    const dailyDuringBackoff = await f.keeper.dailyCheck(true);
+    expect(resolutions).toBe(2);
+    const result = await f.keeper.closed({
+      seatId: "a",
+      reason: "A finished; B continues",
+      outcome: "done",
+      evidence: "fixture completed proof",
+    });
+    expect(f.status("VUH-1383")).toBe("In Progress");
+    expect(resolutions).toBe(3); // Retirement checks fresh despite roster backoff.
+    expect(dailyDuringBackoff).toBeUndefined();
+    if (stillUnavailable) {
+      expect(result).toMatchObject({
+        outcome: "failed",
+        detail: expect.stringContaining("Temporary attribution"),
+      });
+      expect(f.comments("VUH-1383")).toEqual([]);
+    } else {
+      expect(result).toMatchObject({ outcome: "updated", intended: "In Progress", status: "In Progress" });
+      expect(f.comments("VUH-1383")[0]).toContain("B still working");
+    }
+    unavailable = false;
+    f.advance(10_000);
+    expect(await f.keeper.observe([b])).toEqual([]);
+    expect(resolutions).toBe(4);
+    expect(f.status("VUH-1383")).toBe("In Progress");
+    expect(await f.keeper.dailyCheck(true)).not.toContain("- VUH-1383:");
+    // Recovery does not leave a stale conservative owner or block a real close.
+    expect(
+      await f.keeper.closed({
+        seatId: "b",
+        reason: "B also finished",
+        outcome: "done",
+        evidence: "fixture final proof",
+      }),
+    ).toMatchObject({ outcome: "updated", intended: "Done", status: "Done" });
+    expect(f.status("VUH-1383")).toBe("Done");
+    expect(f.provider.validationErrors).toEqual([]);
+  },
+);
