@@ -401,15 +401,24 @@ it("gates explicit linked refresh with canonical current source policy, per-targ
 
 it("opts new project clients into current autonomy while preserving legacy wire shapes and the revision of full policy", async () => {
   const f = await fixture();
+  // An owner who already chose an autonomy level (VUH-2725) must still read project settings.
+  await f.settings.update((settings) => ({
+    ...settings,
+    autonomy: { ...settings.autonomy, confirmedAt: "2026-10-24T02:28:38.418Z" },
+  }));
   const current = await f.settings.load();
+  const policy = { fleet: current.autonomy.fleet };
+  expect(current.autonomy.confirmedAt).toBe("2026-10-24T02:28:38.418Z");
   const legacy = await (await f.request(PROJECTS_PATH)).json();
   expect(legacy.settings.projects[0]).not.toHaveProperty("autonomy");
   expect(legacy).not.toHaveProperty("autonomyDefaults");
   expect(legacy).not.toHaveProperty("workingPreferences");
   expect(legacy.revision).toBe(projectsRevision(current.projects));
+  const raw = await (await f.request(`${PROJECTS_PATH}?includeAutonomy=true`)).json();
+  expect(ProjectsSnapshotSchema.safeParse(raw).error?.issues ?? []).toEqual([]);
   const snapshot = await f.client.projects();
   expect(snapshot.workingPreferences).toBe(true);
-  expect(snapshot.autonomyDefaults).toEqual(current.autonomy);
+  expect(snapshot.autonomyDefaults).toEqual(policy);
   expect(snapshot.settings.projects[0]!.autonomy).toEqual({
     fleet: { closure: "owner", machineSetup: "owner" },
   });
@@ -419,7 +428,7 @@ it("opts new project clients into current autonomy while preserving legacy wire 
     changes: { autonomy: { fleet: { closure: null } } },
   });
   expect(updated.settings.projects[0]!.autonomy).toEqual({ fleet: { machineSetup: "owner" } });
-  expect(updated.autonomyDefaults).toEqual(current.autonomy);
+  expect(updated.autonomyDefaults).toEqual(policy);
   const legacyMutation = await (
     await f.request(PROJECT_UPDATE_SETTINGS_PATH, {
       projectId: "garden",

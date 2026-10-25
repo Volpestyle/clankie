@@ -63,7 +63,8 @@ function projectSnapshot(
   return {
     settings: { ...current.projects, projects },
     ...(current.fleet.hire ? { hireDefaults: current.fleet.hire } : {}),
-    ...(includeAutonomy ? { autonomyDefaults: current.autonomy } : {}),
+    // The wire shape carries only policy; confirmedAt stays on the fleet settings route.
+    ...(includeAutonomy ? { autonomyDefaults: { fleet: current.autonomy.fleet } } : {}),
     ...(includeAutonomy
       ? {
           workingPreferences: true,
