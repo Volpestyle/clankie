@@ -34,6 +34,7 @@ import {
   type OwnerSettingsApiOptions,
 } from "./owner-settings-api.ts";
 import { FLEET_AUTO_TIDY, FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema } from "@clankie/protocol";
+import { FLEET_LEAD_RESTART_PATH, LeadRestartStatusSchema, type LeadRestartStatus } from "@clankie/protocol";
 import { DeployHoldSchema, describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
 import { z } from "zod";
 import type { machineSetupContext } from "./machine-setup.ts";
@@ -83,6 +84,43 @@ export interface FleetCommandResult {
   readonly deployHolds?:
     | { readonly holds: ReadonlyArray<DeployHold & { readonly summary: string }> }
     | { readonly unavailable: string };
+  /** Status only: the lead seat's fresh-restart check and any refused wait (VUH-2821). */
+  readonly leadRestart?: LeadRestartStatus | { readonly unavailable: string };
+}
+
+async function leadRestartStatus(
+  api: OwnerSettingsApi,
+): Promise<NonNullable<FleetCommandResult["leadRestart"]>> {
+  try {
+    return await api.get(FLEET_LEAD_RESTART_PATH, LeadRestartStatusSchema);
+  } catch (error) {
+    // An older service has no such read; the rest of the status stands.
+    return { unavailable: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function formatLeadRestartLines(status: FleetCommandResult["leadRestart"]): string[] {
+  if (!status) return [];
+  if ("unavailable" in status) return [`lead restart: unavailable (${status.unavailable})`];
+  const budget = `${String(status.budget.contextTokens / 1000)}K tokens or ${String(status.budget.ageHours)}h`;
+  const check = status.check;
+  const seen =
+    check === undefined
+      ? "not checked since the service started"
+      : `${check.contextTokens === undefined ? "context unknown" : `${String(Math.round(check.contextTokens / 1000))}K tokens`}${check.sessionStartedAt === undefined ? "" : `, session since ${check.sessionStartedAt}`}, ${check.due ? "due" : "not due"} (checked ${check.at})`;
+  const wait = status.waiting;
+  return [
+    `lead restart: ${status.setting} · budget ${budget} · ${seen}`,
+    ...(wait === undefined
+      ? []
+      : [
+          `  refused since ${wait.since}: latest ${wait.lastReason}${wait.lastDetail === undefined ? "" : ` (${wait.lastDetail})`} at ${wait.lastAt}; ${Object.entries(
+            wait.counts,
+          )
+            .map(([reason, count]) => `${reason} ×${String(count)}`)
+            .join(", ")}${wait.noticedAt === undefined ? "" : `; owner told ${wait.noticedAt}`}`,
+        ]),
+  ];
 }
 
 /** Read through runtime-update status: a GET, and holds only matter where updates run. */
@@ -271,6 +309,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
       ? {}
       : { autonomyConfirmedAt: snapshot.autonomyConfirmedAt }),
     deployHolds: await deployHoldStatus(api),
+    leadRestart: await leadRestartStatus(api),
   };
 }
 

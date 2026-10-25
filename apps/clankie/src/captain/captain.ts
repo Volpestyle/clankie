@@ -64,6 +64,7 @@ import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
 import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
+import type { LeadRestartStatus } from "@clankie/protocol";
 import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
@@ -5474,9 +5475,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS,
   );
   let leadRestartAskedAt: number | undefined;
+  /** The latest restart check, for `clankie fleet status` (VUH-2821). */
+  let leadRestartCheck: LeadRestartStatus["check"];
   const stopLeadRestarts = startFleetRounds(async () => {
     const conversationId = conversations.defaultGlobalConversationId();
-    if (shutdown.signal.aborted || (await settings()).fleet.leadRestarts === "off") return;
+    if (shutdown.signal.aborted) return;
+    if ((await settings()).fleet.leadRestarts === "off") return leadSeats.restartSettled(conversationId);
     if (leadRestartAskedAt !== undefined && Date.now() - leadRestartAskedAt < LEAD_RESTART_RETRY_MS) return;
     const source = await operatorNativeSource(conversationId);
     if (source?.agent !== "claude" || source.session === undefined) return;
@@ -5484,9 +5488,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const usage = path === undefined ? {} : await readClaudeSessionUsage(path);
     const large = (usage.contextTokens ?? 0) >= LEAD_RESTART_CONTEXT_TOKENS;
     const old = usage.startedAt !== undefined && Date.now() - usage.startedAt >= LEAD_RESTART_AGE_MS;
-    if (!large && !old) return;
+    leadRestartCheck = {
+      at: new Date().toISOString(),
+      ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
+      ...(usage.startedAt === undefined ? {} : { sessionStartedAt: new Date(usage.startedAt).toISOString() }),
+      due: large || old,
+    };
+    if (!large && !old) return leadSeats.restartSettled(conversationId);
     const launch = await leadSeats.leadSeatLaunch(conversationId);
-    if (launch === undefined) return;
+    if (launch === undefined) return leadSeats.restartRefused(conversationId, "no_launch");
     const input = {
       conversationId,
       harness: launch.harness,
@@ -5494,7 +5504,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       reason: "fresh_restart" as const,
       guards: { requireNoDraft: true, quietOwnerMs: LEAD_RESTART_QUIET_OWNER_MS, requireIdle: true },
     };
-    if ((await leadSeats.preflight(input)) !== undefined) return;
+    const refused = await leadSeats.preflight(input);
+    if (refused?.outcome === "refused")
+      return leadSeats.restartRefused(conversationId, refused.reason, refused.detail);
+    if (refused !== undefined) return;
     leadRestartAskedAt = Date.now();
     const brief = await seatOutbox(conversationId).deliver({
       kind: "escalation",
@@ -5504,15 +5517,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       wantsReply: true,
       signal: shutdown.signal,
     });
-    if (brief.outcome !== "replied" || brief.text.trim() === "") return;
+    if (brief.outcome !== "replied" || brief.text.trim() === "")
+      return leadSeats.restartRefused(conversationId, "no_brief", brief.outcome);
     // The brief's own turn has to end before the seat counts as idle again.
     for (let waited = 0; waited < 5 * 60_000 && !shutdown.signal.aborted; waited += 2_000) {
       if (seatOutboxes.get(conversationId)?.responding() === false) break;
       await new Promise((resolve) => setTimeout(resolve, 2_000).unref());
     }
     const result = await leadSeats.relaunchLeadSeat({ ...input, handoffBrief: brief.text });
+    if (result.outcome === "refused")
+      return leadSeats.restartRefused(conversationId, result.reason, result.detail);
+    // Relaunched, or uncertain with its own notice: either way this wait is over.
+    leadSeats.restartSettled(conversationId);
     if (result.outcome === "relaunched") leadRestartAskedAt = undefined;
-    else if (result.outcome === "uncertain")
+    else
       conversations.recordServiceNotice(
         conversationId,
         `Clankie's seat restart is unconfirmed (receipt ${result.receiptId}): ${result.detail} It is never retried automatically; check the pane.`,
@@ -7478,6 +7496,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     recordRuntimeHealthNotice: (text: string) =>
       conversations.recordServiceNotice(conversations.defaultGlobalConversationId(), text),
 
+    async leadRestartStatus() {
+      return leadSeats.restartStatus({
+        conversationId: conversations.defaultGlobalConversationId(),
+        setting: (await settings()).fleet.leadRestarts ?? "on",
+        budget: { contextTokens: LEAD_RESTART_CONTEXT_TOKENS, ageMs: LEAD_RESTART_AGE_MS },
+        ...(leadRestartCheck === undefined ? {} : { check: leadRestartCheck }),
+      });
+    },
     async fleetEfficiency(conversationId, review) {
       const owner = { conversationId };
       return efficiencyActions.run(

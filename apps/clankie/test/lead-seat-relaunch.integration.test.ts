@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import {
   readClaudeSessionUsage,
   type RelaunchLeadSeatInput,
 } from "../src/captain/lead-seat-relaunch.ts";
+import { ConversationStore } from "../src/captain/conversations/store.ts";
 import { paneInputLine } from "../src/captain/pane-draft.ts";
 
 // ADR 0271 (VUH-2274): the lead seat restarts fresh in its own pane. The old
@@ -20,8 +22,18 @@ afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
-async function fixture(options: { ignoresTerm?: boolean; ansi?: string; ownerAt?: number } = {}) {
-  const root = await mkdtemp(join(tmpdir(), "lead-seat-relaunch-"));
+async function fixture(
+  options: {
+    ignoresTerm?: boolean;
+    ansi?: string;
+    ownerAt?: number;
+    now?: () => number;
+    root?: string;
+    notice?: (conversationId: string, text: string) => void;
+  } = {},
+) {
+  // A shared root is the same service state seen by a restarted service.
+  const root = options.root ?? (await mkdtemp(join(tmpdir(), "lead-seat-relaunch-")));
   const harness: ChildProcess = spawn(
     process.execPath,
     [
@@ -71,8 +83,9 @@ async function fixture(options: { ignoresTerm?: boolean; ansi?: string; ownerAt?
       briefs.push(text);
       return true;
     },
-    notice: (_id, text) => notices.push(text),
+    notice: options.notice ?? ((_id, text) => notices.push(text)),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 50))),
+    ...(options.now === undefined ? {} : { now: options.now }),
     exitTimeoutMs: 1_500,
     bindTimeoutMs: 1_500,
   });
@@ -189,6 +202,108 @@ it("keeps a typed labeled rule below the prompt inside the draft", async () => {
   expect(await f.relaunch.relaunchLeadSeat(restart)).toEqual({ outcome: "refused", reason: "draft" });
   expect(f.alive()).toBe(true);
   expect(f.launched).toEqual([]);
+});
+
+// VUH-2821: a due restart's refusals were dropped silently, so a seat could stay
+// past its budget for a week with nobody told. The service now keeps the wait.
+it("keeps a due restart's refused wait across a service restart, tells the owner once at two hours, and ends it on relaunch", async () => {
+  let clock = Date.parse("2026-10-25T12:00:00.000Z");
+  const now = () => clock;
+  const budget = { contextTokens: 500_000, ageMs: 24 * 3_600_000 };
+  const refuse = async (f: Awaited<ReturnType<typeof fixture>>) => {
+    const refused = await f.relaunch.preflight(restart);
+    expect(refused).toEqual({ outcome: "refused", reason: "draft" });
+    if (refused?.outcome === "refused") f.relaunch.restartRefused("global-default", refused.reason);
+  };
+  const drafted = await fixture({ ansi: await golden("labeled-draft"), now });
+  await refuse(drafted);
+  clock += 119 * 60_000;
+  await refuse(drafted);
+  expect(drafted.notices).toEqual([]);
+  clock += 60_000;
+  await refuse(drafted);
+  expect(drafted.notices).toHaveLength(1);
+  expect(drafted.notices[0]).toContain("since 2026-10-25T12:00:00.000Z, 120 minutes");
+  expect(drafted.notices[0]).toContain(
+    "The latest: draft (the pane held an unsent draft). All refusals: draft ×3.",
+  );
+
+  const restarted = await fixture({ root: drafted.root, ansi: await golden("labeled-draft"), now });
+  clock += 30 * 60_000;
+  await refuse(restarted);
+  expect(restarted.notices).toEqual([]);
+  expect(
+    restarted.relaunch.restartStatus({ conversationId: "global-default", setting: "on", budget }),
+  ).toEqual({
+    schemaVersion: 1,
+    conversationId: "global-default",
+    setting: "on",
+    budget: { contextTokens: 500_000, ageHours: 24 },
+    noticeAfterMinutes: 120,
+    waiting: {
+      since: "2026-10-25T12:00:00.000Z",
+      lastAt: "2026-10-25T14:30:00.000Z",
+      lastReason: "draft",
+      counts: { draft: 4 },
+      noticedAt: "2026-10-25T14:00:00.000Z",
+    },
+  });
+
+  const cleared = await fixture({ root: drafted.root, now });
+  expect(await cleared.relaunch.relaunchLeadSeat(restart)).toMatchObject({ outcome: "relaunched" });
+  cleared.relaunch.restartSettled("global-default");
+  expect(
+    cleared.relaunch.restartStatus({ conversationId: "global-default", setting: "on", budget }).waiting,
+  ).toBeUndefined();
+});
+
+it("records the two-hour notice once when saving it as sent fails, and still sends one never sent", async () => {
+  let clock = Date.parse("2026-10-25T12:00:00.000Z");
+  const now = () => clock;
+  const budget = { contextTokens: 500_000, ageMs: 24 * 3_600_000 };
+  const root = await mkdtemp(join(tmpdir(), "lead-seat-restart-notice-"));
+  const store = new ConversationStore(join(root, "conversations"), async () => {});
+  // Each notice the conversation records bumps its revision; a repeat of the same words does not.
+  const base = store.conversation("global-default")!.revision;
+  const recorded = () => store.conversation("global-default")!.revision - base;
+  // The wait file's temporary path; a directory there makes the next save fail with EISDIR.
+  const temporary = `${join(root, "lead-seat-relaunches.json")}.restart-waits.json.${String(process.pid)}.tmp`;
+  let afterNotice: (() => void) | undefined;
+  const notice = (conversationId: string, text: string) => {
+    store.recordServiceNotice(conversationId, text);
+    afterNotice?.();
+  };
+  const first = await fixture({ root, now, notice });
+  first.relaunch.restartRefused("global-default", "draft");
+  clock += 120 * 60_000;
+  afterNotice = () => mkdirSync(temporary);
+  expect(() => first.relaunch.restartRefused("global-default", "draft")).toThrow(/EISDIR/u);
+  expect(recorded()).toBe(1);
+  afterNotice = undefined;
+  rmSync(temporary, { recursive: true });
+
+  // A restarted service retries with the stored words, which the conversation already holds.
+  clock += 5 * 60_000;
+  const restarted = await fixture({ root, now, notice });
+  restarted.relaunch.restartRefused("global-default", "busy");
+  expect(recorded()).toBe(1);
+  expect(
+    restarted.relaunch.restartStatus({ conversationId: "global-default", setting: "on", budget }).waiting,
+  ).toMatchObject({ noticedAt: "2026-10-25T14:05:00.000Z", counts: { draft: 2, busy: 1 } });
+  restarted.relaunch.restartRefused("global-default", "busy");
+  expect(recorded()).toBe(1);
+
+  // A notice whose words could not be stored was never sent; the next refusal sends it.
+  restarted.relaunch.restartSettled("global-default");
+  restarted.relaunch.restartRefused("global-default", "draft");
+  clock += 120 * 60_000;
+  mkdirSync(temporary);
+  expect(() => restarted.relaunch.restartRefused("global-default", "draft")).toThrow(/EISDIR/u);
+  expect(recorded()).toBe(1);
+  rmSync(temporary, { recursive: true });
+  clock += 60_000;
+  restarted.relaunch.restartRefused("global-default", "draft");
+  expect(recorded()).toBe(2);
 });
 
 it("leaves an uncertain receipt, and launches nothing, when the old session will not exit", async () => {

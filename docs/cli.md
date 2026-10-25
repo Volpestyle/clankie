@@ -4423,6 +4423,13 @@ brief, which becomes the new session's first message; the old session stays
 resumable and each restart leaves a notice in the conversation. Only a seat
 started with `clankie <command>` from the pane's shell is restarted. `off`
 leaves the seat's session alone ([ADR 0271](adr/0271-the-lead-seat-restarts-fresh-in-its-own-pane.md)).
+`fleet status` reports `leadRestart` from `GET /v1/fleet/lead-restart`: the
+budget, the latest check (context, session start, whether a restart is due) and,
+while a due restart keeps being refused, its wait: when it began, the latest
+reason (such as `busy`, `owner_active`, `draft` or `draft_unknown`) and a count
+per reason. The wait survives service restarts. After two hours of refusals the
+conversation gets one notice naming the reason; the wait ends when the seat
+relaunches or is no longer due (VUH-2821).
 
 `--auto-tidy 1h` (the default; also `30m`, `4h`, `1d`) lets the service tidy
 finished hires on its own (VUH-2392). Every five minutes it closes a local hire's

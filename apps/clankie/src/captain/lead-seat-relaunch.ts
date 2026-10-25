@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { basename, dirname, isAbsolute } from "node:path";
+import { LeadRestartStatusSchema, type LeadRestartStatus, type LeadRestartWait } from "@clankie/protocol";
 import { z } from "zod";
 import type { HerdrForegroundProcess } from "./codex-seat.ts";
 import { paneInputLine } from "./pane-draft.ts";
@@ -106,11 +107,28 @@ export interface LeadSeatRelaunchDeps {
   /** How long the old session gets to exit, and the new one to bind. */
   readonly exitTimeoutMs?: number;
   readonly bindTimeoutMs?: number;
+  /** A due fresh restart refused this long tells the owner once (VUH-2821). */
+  readonly restartNoticeAfterMs?: number;
 }
 
 const POLL_MS = 500;
 const EXIT_TIMEOUT_MS = 30_000;
 const BIND_TIMEOUT_MS = 120_000;
+const RESTART_NOTICE_AFTER_MS = 2 * 60 * 60_000;
+/** What each refusal of a due restart means, in the owner's notice. */
+const RESTART_REFUSALS: Readonly<Record<string, string>> = {
+  busy: "the seat was in a turn",
+  owner_active: "you had written in the last 15 minutes",
+  draft: "the pane held an unsent draft",
+  draft_unknown: "the pane's input line could not be read",
+  no_seat: "no native seat was bound",
+  no_launch: "the pane's `clankie` launcher could not be found",
+  no_brief: "the seat did not answer the handoff request",
+  not_shell_launch: "the seat was not started by `clankie` from the pane's shell",
+  invalid_target: "the launch could not be expressed in the pane",
+  in_progress: "another relaunch was running",
+  launch_failed: "the old session could not be signalled",
+};
 const LAUNCH_COMMAND = /^(claude|codex)(\d*)$/u;
 
 const LaunchSchema = z
@@ -217,6 +235,72 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
     const temporary = `${deps.journalPath}.${String(process.pid)}.tmp`;
     writeFileSync(temporary, `${JSON.stringify(journal)}\n`, { mode: 0o600 });
     renameSync(temporary, deps.journalPath);
+  }
+  // Refused waits live beside the journal, so an older runtime's strict journal read never meets them.
+  const waitsPath = `${deps.journalPath}.restart-waits.json`;
+  /** A stored wait also keeps a notice it began sending, so a retry sends those exact words. */
+  const StoredWaitSchema = LeadRestartStatusSchema.shape.waiting
+    .unwrap()
+    .extend({ pendingNotice: z.string().min(1).optional() });
+  type StoredWait = z.infer<typeof StoredWaitSchema>;
+  function readWaits(): Record<string, StoredWait> {
+    try {
+      return z.record(z.string(), StoredWaitSchema).parse(JSON.parse(readFileSync(waitsPath, "utf8")));
+    } catch {
+      // Observation only: a missing or unreadable record starts a new wait rather than stopping restarts.
+      return {};
+    }
+  }
+  function writeWaits(waits: Record<string, StoredWait>): void {
+    mkdirSync(dirname(waitsPath), { recursive: true, mode: 0o700 });
+    const temporary = `${waitsPath}.${String(process.pid)}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(waits)}\n`, { mode: 0o600 });
+    renameSync(temporary, waitsPath);
+  }
+  /**
+   * A due fresh restart was refused (VUH-2821): extend its wait and, once the
+   * wait is old enough, tell the owner once which refusal holds it. The notice's
+   * words are stored before it is sent, so a save that fails after sending is
+   * retried with the same words, which the conversation records only once; a
+   * notice that was never stored was never sent, and the next refusal sends it.
+   */
+  function restartRefused(conversationId: string, reason: string, detail?: string): void {
+    const waits = readWaits();
+    const at = new Date(now()).toISOString();
+    const previous = waits[conversationId];
+    const wait: StoredWait = {
+      since: previous?.since ?? at,
+      lastAt: at,
+      lastReason: reason,
+      ...(detail === undefined ? {} : { lastDetail: detail.slice(0, 512) }),
+      counts: { ...previous?.counts, [reason]: (previous?.counts[reason] ?? 0) + 1 },
+      ...(previous?.noticedAt === undefined ? {} : { noticedAt: previous.noticedAt }),
+      ...(previous?.pendingNotice === undefined ? {} : { pendingNotice: previous.pendingNotice }),
+    };
+    const waited = now() - Date.parse(wait.since);
+    if (
+      wait.noticedAt === undefined &&
+      wait.pendingNotice === undefined &&
+      waited >= (deps.restartNoticeAfterMs ?? RESTART_NOTICE_AFTER_MS)
+    ) {
+      const counts = Object.entries(wait.counts)
+        .sort(([, a], [, b]) => b - a)
+        .map(([name, count]) => `${name} ×${String(count)}`)
+        .join(", ");
+      wait.pendingNotice = `Clankie's seat has been due a fresh restart (ADR 0271) since ${wait.since}, ${String(Math.floor(waited / 60_000))} minutes, and every attempt was refused. The latest: ${reason} (${RESTART_REFUSALS[reason] ?? "see the relaunch receipt"}). All refusals: ${counts}. \`clankie fleet status\` shows the wait; \`clankie fleet set --lead-restarts off\` stops it.`;
+    }
+    writeWaits({ ...waits, [conversationId]: wait });
+    if (wait.pendingNotice === undefined) return;
+    deps.notice(conversationId, wait.pendingNotice);
+    const { pendingNotice: _sent, ...noticed } = wait;
+    writeWaits({ ...waits, [conversationId]: { ...noticed, noticedAt: at } });
+  }
+  /** The seat relaunched, or is no longer due: its wait ends. */
+  function restartSettled(conversationId: string): void {
+    const waits = readWaits();
+    if (waits[conversationId] === undefined) return;
+    const { [conversationId]: _ended, ...rest } = waits;
+    writeWaits(rest);
   }
   function drop(receiptId: string): void {
     const journal = read();
@@ -386,6 +470,28 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
 
   return {
     leadSeatLaunch,
+    restartRefused,
+    restartSettled,
+    /** The restart's budget, latest check and refused wait, for `clankie fleet status`. */
+    restartStatus(input: {
+      readonly conversationId: string;
+      readonly setting: "on" | "off";
+      readonly budget: { readonly contextTokens: number; readonly ageMs: number };
+      readonly check?: LeadRestartStatus["check"];
+    }): LeadRestartStatus {
+      const stored = readWaits()[input.conversationId];
+      const waiting: LeadRestartWait | undefined =
+        stored === undefined ? undefined : (({ pendingNotice: _pending, ...wait }) => wait)(stored);
+      return {
+        schemaVersion: 1,
+        conversationId: input.conversationId,
+        setting: input.setting,
+        budget: { contextTokens: input.budget.contextTokens, ageHours: input.budget.ageMs / 3_600_000 },
+        noticeAfterMinutes: (deps.restartNoticeAfterMs ?? RESTART_NOTICE_AFTER_MS) / 60_000,
+        ...(input.check === undefined ? {} : { check: input.check }),
+        ...(waiting === undefined ? {} : { waiting }),
+      };
+    },
     /** The relaunch's own checks, with no effect: undefined when it would go ahead now. */
     async preflight(input: RelaunchLeadSeatInput): Promise<RelaunchLeadSeatResult | undefined> {
       const seat = await deps.seat(input.conversationId);

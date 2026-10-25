@@ -5418,6 +5418,27 @@ paths:
         "503":
           description: Authentication or fleet metrics unavailable
 
+  /v1/fleet/lead-restart:
+    get:
+      tags: [Operator]
+      operationId: getLeadRestartStatus
+      summary: Read the default lead seat's fresh-restart budget, last check and refused wait
+      description: |
+        Operator-only. The ADR 0271 budget (context tokens and session age), the
+        latest check since service start (context, session start, whether a restart
+        is due), and a due restart's refused wait: when it began, the latest refusal
+        and a count per refusal reason, and when the owner was told. The wait lasts
+        across service restarts until the seat relaunches or is no longer due.
+        Contract: LeadRestartStatusSchema in packages/protocol/src/fleet-settings.ts.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Current no-store lead restart status
+        "401":
+          description: Operator authentication required
+        "503":
+          description: Authentication or the lead restart status unavailable
+
   /v1/fleet/seats/{paneId}/messages/health:
     post:
       tags: [Operator]

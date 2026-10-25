@@ -274,3 +274,43 @@ export const FLEET_HIRE_DEFAULTS_WORDING = {
   model: { label: "Model", noPreferenceDetail: "The coding agent picks its own model." },
   effort: { label: "Thinking effort", noPreferenceDetail: "Clankie sets it for each job." },
 } as const;
+
+/** The default lead seat's fresh restart (ADR 0271): its budget, last check and any refused wait (VUH-2821). */
+export const FLEET_LEAD_RESTART_PATH = "/v1/fleet/lead-restart";
+export const LeadRestartStatusSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    conversationId: z.string().min(1).max(256),
+    setting: z.enum(["on", "off"]),
+    /** The restart is due at either bound. */
+    budget: z
+      .object({ contextTokens: z.number().int().positive(), ageHours: z.number().positive() })
+      .strict(),
+    /** A due restart refused this long tells the owner once. */
+    noticeAfterMinutes: z.number().int().positive(),
+    /** The latest check since the service started; absent before the first. */
+    check: z
+      .object({
+        at: z.string().datetime(),
+        contextTokens: z.number().int().nonnegative().optional(),
+        sessionStartedAt: z.string().datetime().optional(),
+        due: z.boolean(),
+      })
+      .strict()
+      .optional(),
+    /** A due restart refused since `since`, kept across service restarts until it relaunches or is no longer due. */
+    waiting: z
+      .object({
+        since: z.string().datetime(),
+        lastAt: z.string().datetime(),
+        lastReason: z.string().min(1).max(64),
+        lastDetail: z.string().max(512).optional(),
+        counts: z.record(z.string().min(1).max(64), z.number().int().positive()),
+        noticedAt: z.string().datetime().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type LeadRestartStatus = z.infer<typeof LeadRestartStatusSchema>;
+export type LeadRestartWait = NonNullable<LeadRestartStatus["waiting"]>;
