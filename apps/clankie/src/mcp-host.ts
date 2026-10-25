@@ -80,6 +80,7 @@ import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import {
   refuseBuiltInTrackerFeatures,
+  trackerArgumentReferences,
   TRACKER_LEAD,
   TRACKER_OWNER,
   TRACKER_TOOLS,
@@ -110,6 +111,35 @@ const REQUEST_TIMEOUT_MS = 60_000;
 /** Publication attribution is optional; it cannot exhaust a connected-account call's budget. */
 const ATTRIBUTION_TIMEOUT_MS = 2_000;
 const isReadTool = (name: string) => /^(?:get|list|search|check|fetch|read)_/u.test(name);
+/** Host arguments on every tracker tool; the host consumes them before any backend sees the call. */
+const trackerHostProperties = (name: string): Record<string, unknown> => ({
+  repo: {
+    type: "string",
+    description:
+      "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
+  },
+  ...(isReadTool(name)
+    ? {
+        linearHistory: {
+          type: "boolean",
+          description:
+            "Read connected Linear itself as history, even for an item of a project that cut over to the built-in tracker. The result is marked as Linear history; current state lives in the built-in tracker.",
+        },
+      }
+    : {}),
+});
+const LINEAR_HISTORY_NOTE =
+  "Linear history: this was read from connected Linear. Projects cut over to the built-in tracker stopped updating there; their current state is in the built-in tracker (call without linearHistory).";
+/** Marks a read of connected Linear that touched a cut-over project's frozen copy (VUH-2829). */
+const markLinearHistory = (content: string) => {
+  let result: unknown = content;
+  try {
+    result = JSON.parse(content);
+  } catch {
+    // Text results stay text inside the marked envelope.
+  }
+  return JSON.stringify({ linearHistory: LINEAR_HISTORY_NOTE, result });
+};
 /** Per invocation, including the SDK's later credential/header awaits; never connection-global. */
 const dispatchFence = new AsyncLocalStorage<(() => void) | undefined>();
 /** Refusal before a wire effect does not mean the shared provider connection failed. */
@@ -360,6 +390,15 @@ export interface McpHostOptions {
     principalId: string,
     fence?: TrackerRouteFence,
   ) => Promise<string | undefined>;
+  /**
+   * The cut-over project whose built-in tracker holds a record these references name
+   * (VUH-2829), whoever calls: its repo routes the call there, so it never reaches the
+   * frozen Linear copy. Undefined when they name none. Throws to refuse.
+   */
+  readonly trackerRepoForItem?: (
+    references: readonly string[],
+    fence?: TrackerRouteFence,
+  ) => Promise<{ repo: string; project: string } | undefined>;
   /** Host-only authority: caller roles and inherited worker attribution grant no closure. */
   readonly prepareTrackerLeadClosure?: (
     source: ConversationAuthority,
@@ -505,11 +544,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         ...tool.inputSchema,
         properties: {
           ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
-          repo: {
-            type: "string",
-            description:
-              "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
-          },
+          ...trackerHostProperties(tool.name),
         },
       },
     })),
@@ -879,11 +914,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                     ...(tool.inputSchema as Record<string, unknown>),
                     properties: {
                       ...(tool.inputSchema as { properties?: Record<string, unknown> }).properties,
-                      repo: {
-                        type: "string",
-                        description:
-                          "Optional registered repository or absolute path (operator tools only); follows its saved tracker convention.",
-                      },
+                      ...trackerHostProperties(tool.name),
                     },
                   }
                 : (tool.inputSchema as Record<string, unknown>)
@@ -973,6 +1004,11 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     // (projects and their bindings) under the settings fence above.
     const routeChecks: (() => void)[] = [];
     const routeFence: TrackerRouteFence = (check) => void routeChecks.push(check);
+    if (
+      call &&
+      (await options.trackerRepoForItem?.(trackerArgumentReferences(call.args), routeFence)) !== undefined
+    )
+      throw new Error("The original call now names a cut-over project's item");
     if ((await options.trackerRepoForWorker?.(principalId, routeFence)) !== undefined)
       throw new Error("The worker's tracker route changed");
     if (call && (await options.trackerRepoForCall?.(call.tool, call.args, routeFence)) !== undefined)
@@ -1131,6 +1167,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           detail: "Clankie's Minecraft body is reachable only through the Minecraft service tools.",
         };
       input = { ...input, arguments: structuredClone(input.arguments) };
+      // A host argument (VUH-2829): no backend or provider sees it.
+      const linearHistory = input.server === "linear" && input.arguments.linearHistory === true;
+      if (input.server === "linear") delete input.arguments.linearHistory;
       const timeoutMs =
         input.timeoutMs === undefined
           ? REQUEST_TIMEOUT_MS
@@ -1277,9 +1316,65 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         }
         let trackerRepo = input.arguments.repo;
         let inferredRepo = false;
+        // Reading the frozen Linear copy is explicit, and its result says so (VUH-2829).
+        let markHistory = linearHistory;
+        if (linearHistory && (graphqlCall || !isReadTool(input.tool) || trackerRepo !== undefined))
+          return {
+            outcome: "refused",
+            reason: "invalid_arguments",
+            possiblyDispatched: false,
+            detail: "linearHistory marks a read of connected Linear; writes and repo calls cannot use it.",
+          };
+        if (linearHistory && isLocalTracker(server))
+          return {
+            outcome: "refused",
+            reason: "server_unavailable",
+            possiblyDispatched: false,
+            detail:
+              "Linear is not connected, so there is no Linear history to read. Call without linearHistory.",
+          };
+        // A call naming a cut-over project's item reaches that project's built-in tracker,
+        // whoever calls; what cannot be routed there is refused (VUH-2829, ADR 0226).
+        let cutover: { repo: string; project: string } | undefined;
+        if (server.id === "linear" && !linearHistory && options.trackerRepoForItem) {
+          try {
+            cutover = await options.trackerRepoForItem(
+              graphqlPlan ? graphqlPlan.references : trackerArgumentReferences(input.arguments),
+            );
+          } catch (error) {
+            return {
+              outcome: "refused",
+              reason: "lane_denied",
+              possiblyDispatched: false,
+              detail: error instanceof Error ? error.message.slice(0, 500) : "Tracker routing failed",
+            };
+          }
+        }
+        const cutoverPointer =
+          cutover &&
+          `This names an item of ${cutover.project}, which tracks its work in Clankie's built-in tracker; Linear holds only a frozen copy from before the cutover.`;
+        // The built-in tracker answers operator tools only; a room's read stays a marked Linear read.
+        if (
+          cutover &&
+          trackerNames.has(input.tool) &&
+          (input.lane === "operator" || !isReadTool(input.tool))
+        ) {
+          if (trackerRepo === undefined) {
+            trackerRepo = cutover.repo;
+            inferredRepo = true;
+          }
+        } else if (cutover && (graphqlPlan ? graphqlPlan.mutation : !isReadTool(input.tool))) {
+          return {
+            outcome: "refused",
+            reason: "lane_denied",
+            possiblyDispatched: false,
+            detail: `${cutoverPointer} Write it there with the linear_* tracker tools (they route to it) or clankie work --project.`,
+          };
+        } else if (cutover && !isLocalTracker(server)) markHistory = true;
         // A hired worker's project decides its tracker; an explicit repo still wins (VUH-2014).
         if (
           server.id === "linear" &&
+          !linearHistory &&
           input.delegation !== undefined &&
           trackerRepo === undefined &&
           (trackerNames.has(input.tool) || graphqlCall) &&
@@ -1332,7 +1427,10 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           return {
             outcome: "refused",
             reason: "lane_denied",
-            detail: "Repository tracker access requires operator tools and a registered repository.",
+            detail:
+              cutover && trackerRepo === cutover.repo
+                ? `${cutoverPointer} Reach it from operator tools.`
+                : "Repository tracker access requires operator tools and a registered repository.",
           };
         }
         // Connected Linear MCP has no receipts or preconditions; never forward or drop them silently.
@@ -1774,10 +1872,11 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             // can still await without retaining an obsolete transport.
             if (selected.retired) void closeRetired(selected);
           }
-          const content =
+          const compacted =
             input.resultMode !== "data" && server.id === "linear" && !result.isError
               ? compactLinearWrite(input.tool, result.content)
               : result.content;
+          const content = markHistory ? markLinearHistory(compacted) : compacted;
           const settled = {
             content: input.resultMode === "data" ? content : content.slice(0, MAX_RESULT_CHARACTERS),
             isError: result.isError,

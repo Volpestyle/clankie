@@ -191,6 +191,50 @@ export function refuseBuiltInTrackerFeatures(name: string, args: Record<string, 
     );
 }
 
+const REFERENCE_ARGUMENTS = [
+  "id",
+  "issueId",
+  "parentId",
+  "parent",
+  "projectId",
+  "statusUpdateId",
+  "query",
+  "project",
+  "team",
+  "teamId",
+  "state",
+  "assignee",
+  "lead",
+  "leadTeam",
+  "duplicateOf",
+] as const;
+const REFERENCE_LIST_ARGUMENTS = [
+  "blocks",
+  "blockedBy",
+  "relatedTo",
+  "removeBlocks",
+  "removeBlockedBy",
+  "removeRelatedTo",
+  "setTeams",
+  "addTeams",
+  "removeTeams",
+  "labels",
+  "addLabels",
+  "removeLabels",
+] as const;
+
+/** The record references a tracker call names: ids, keys and names, never free text. */
+export function trackerArgumentReferences(args: Record<string, unknown>): string[] {
+  const references: string[] = [];
+  for (const key of REFERENCE_ARGUMENTS) if (typeof args[key] === "string") references.push(args[key]);
+  for (const key of REFERENCE_LIST_ARGUMENTS) {
+    const values = args[key];
+    if (Array.isArray(values))
+      for (const value of values) if (typeof value === "string") references.push(value);
+  }
+  return references;
+}
+
 const string = { type: "string" };
 const boolean = { type: "boolean" };
 const nullableString = { type: ["string", "null"] };

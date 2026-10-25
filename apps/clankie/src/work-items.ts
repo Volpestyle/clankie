@@ -50,6 +50,7 @@ import {
   INBOX_TOOLS,
   type InboxPendingFence,
   refuseBuiltInTrackerFeatures,
+  trackerArgumentReferences,
   TRACKER_OWNER,
   TrackerReadRejected,
   type TrackerActor,
@@ -489,6 +490,47 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       }));
+  // Which built-in tracker project each record reference belongs to, rebuilt when the store changes.
+  let recordProjects: { version: string; index: Map<string, string> } | undefined;
+  const builtInRecordProjects = async () => {
+    const path = join(
+      options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"),
+      "tracker.json",
+    );
+    // Taken before the read, so a racing write leaves a stale version and the next call rereads.
+    const version = fileVersion(path);
+    if (recordProjects?.version === version) return recordProjects.index;
+    const index = new Map<string, string>();
+    let store: Record<string, unknown> = {};
+    try {
+      store = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        throw new WorkRequestError(
+          "backend_unavailable",
+          "The built-in tracker cannot be read, so this tracker call has nowhere safe to go.",
+        );
+    }
+    const records = (key: string) =>
+      (Array.isArray(store[key]) ? store[key] : []) as Record<string, unknown>[];
+    const add = (value: unknown, projectId: unknown) => {
+      if (typeof value === "string" && typeof projectId === "string")
+        index.set(value.toLowerCase(), projectId);
+    };
+    for (const project of records("projects"))
+      for (const value of [project.id, project.name, project.slugId]) add(value, project.id);
+    const issueProjects = new Map<unknown, unknown>();
+    for (const issue of records("issues")) {
+      issueProjects.set(issue.id, issue.projectId);
+      const previous = Array.isArray(issue.previousIdentifiers) ? issue.previousIdentifiers : [];
+      for (const value of [issue.id, issue.identifier, ...previous]) add(value, issue.projectId);
+    }
+    for (const key of ["comments", "statusUpdates", "documents", "milestones"])
+      for (const record of records(key))
+        add(record.id, record.projectId ?? issueProjects.get(record.issueId));
+    recordProjects = { version, index };
+    return index;
+  };
   /** The tracker project the owner bound this workspace's settings project to, if any. */
   const builtInBinding = async (path: string): Promise<TrackerDeps["builtIn"]> => {
     const machine = options.localMachineId ?? "local";
@@ -612,6 +654,51 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
+  /**
+   * The cut-over project whose built-in tracker holds what a tracker call names (VUH-2829):
+   * an imported `TEAM-n`, a `LOCAL-TEAM-n`, a record UUID, or the project's own id or name.
+   * A cut-over project is bound to a built-in tracker project and its saved convention is
+   * not `linear` (an unreadable one counts, so nothing falls back to Linear). Undefined
+   * when the references name none; refuses when they name two. With `fence`, the
+   * conventions it read are fenced; the default store is not, as in resolveTrackerRepo.
+   */
+  const cutoverRepoForReferences = async (
+    references: readonly string[],
+    fence?: TrackerRouteFence,
+  ): Promise<{ repo: string; project: string; trackerProjectId: string } | undefined> => {
+    if (references.length === 0) return undefined;
+    const machine = options.localMachineId ?? "local";
+    const cutover = new Map<string, { repo: string; project: string; trackerProjectId: string }>();
+    for (const project of (await options.projects?.())?.projects ?? []) {
+      if (project.trackerProjectId === undefined) continue;
+      const workspace = project.workspaces.find((entry) => entry.id === project.trackerRef?.workspaceId);
+      let backend: string | undefined;
+      if (workspace?.machineId === machine) {
+        fenceRouteFile(fence, join(workspace.path, CONVENTION_FILE));
+        // allow-swallowed-rejection -- an unreadable convention counts as cut over, never as Linear.
+        backend = (await readConvention(workspace.path).catch(() => undefined))?.backend;
+      }
+      if (backend !== "linear")
+        cutover.set(project.trackerProjectId, {
+          repo: projectWorkRepoId(project.id),
+          project: project.name,
+          trackerProjectId: project.trackerProjectId,
+        });
+    }
+    if (cutover.size === 0) return undefined;
+    const index = await builtInRecordProjects();
+    const matched = new Set<string>();
+    for (const reference of references) {
+      const projectId = index.get(reference.toLowerCase());
+      if (projectId !== undefined && cutover.has(projectId)) matched.add(projectId);
+    }
+    if (matched.size > 1)
+      throw new WorkRequestError(
+        "invalid",
+        "This call names items of more than one cut-over project. Make one call per project.",
+      );
+    return matched.size === 1 ? cutover.get([...matched][0]!) : undefined;
+  };
   const authorizeWrite = async (authority: WorkWriteAuthority) => {
     if (!authority.current() || !(await authority.authorize()) || !authority.current())
       throw new Error("Owner authority expired or was revoked. Read the work again.");
@@ -705,6 +792,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       intent: import("@clankie/protocol").WorkHandoffIntent,
     ) => Promise<{ assertCurrent(): void; guard(): Promise<void>; ownerName: string | undefined }>,
   ): Promise<WorkItemWriteReceipt> => {
+    // A cut-over project's item named from a Linear repo is written in its built-in tracker, as
+    // `work update` is; the receipt binds to that project's repo (VUH-2829). An unknown or
+    // unreadable repo keeps its own write path and its own refusal.
+    const backend = /^project-[a-f0-9]{48}$/u.test(request.repoId)
+      ? // allow-swallowed-rejection -- the write path below refuses an unreadable project itself.
+        (await projectReader?.prepare(request.repoId).catch(() => undefined))?.convention.backend
+      : await locate(request.repoId, false).then(
+          (entry) => readConvention(entry.path).then((convention) => convention?.backend),
+          // allow-swallowed-rejection -- the write path below refuses an unknown repo itself.
+          () => undefined,
+        );
+    const cutover = backend === "linear" ? await cutoverRepoForReferences([request.itemId]) : undefined;
+    if (cutover) request = { ...request, repoId: cutover.repo };
     const key = JSON.stringify([request.repoId, request.itemId]);
     const operation = async (): Promise<WorkItemWriteReceipt> => {
       let begun = false;
@@ -1059,40 +1159,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         typeof value === "string" &&
         (/^(?:P-)?LOCAL(?:-[A-Z0-9]+)*-\d+$/iu.test(value) ||
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value));
-      const references = new Set<string>();
-      for (const key of [
-        "id",
-        "issueId",
-        "parentId",
-        "projectId",
-        "statusUpdateId",
-        "query",
-        "project",
-        "team",
-        "teamId",
-        "state",
-        "assignee",
-        "lead",
-        "leadTeam",
-        "duplicateOf",
-      ])
-        if (isReference(args[key])) references.add(args[key].toLowerCase());
-      for (const key of [
-        "blocks",
-        "blockedBy",
-        "relatedTo",
-        "removeBlocks",
-        "removeBlockedBy",
-        "removeRelatedTo",
-        "setTeams",
-        "addTeams",
-        "removeTeams",
-        "labels",
-        "addLabels",
-        "removeLabels",
-      ])
-        if (Array.isArray(args[key]))
-          for (const value of args[key]) if (isReference(value)) references.add(value.toLowerCase());
+      const references = new Set(
+        trackerArgumentReferences(args)
+          .filter(isReference)
+          .map((value) => value.toLowerCase()),
+      );
       fenceRouteFile(fence, registryPath);
       const fencedWorkspace = options.workspace?.();
       fence?.(() => {
@@ -1240,6 +1311,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       });
       return read.convention.backend === "linear" ? undefined : repo;
     },
+    cutoverRepoForReferences,
     /** Host-private retirement route: current saved scope, with delegated write fences. */
     async prepareSeatIssueTracker(
       projectId: string,
@@ -1623,16 +1695,21 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           throw new WorkRequestError("result_too_large", "There are too many work trackers to list at once.");
         return { repos };
       }
-      if (
-        (request.action === "show" ||
-          request.action === "activity" ||
-          request.action === "update" ||
-          request.action === "attach") &&
-        request.project !== undefined
-      ) {
+      const itemRequest =
+        request.action === "show" ||
+        request.action === "activity" ||
+        request.action === "update" ||
+        request.action === "attach";
+      // A cut-over project's item is read and moved in its built-in tracker, whatever repo the
+      // caller runs from: a Linear repo would otherwise reach the frozen copy (VUH-2829).
+      const itemProject = !itemRequest
+        ? undefined
+        : (request.project ??
+          (local ? (await cutoverRepoForReferences([request.id]))?.trackerProjectId : undefined));
+      if (itemRequest && itemProject !== undefined) {
         // An explicit project wins over whatever repo, or repo reference, the caller names.
         if (!local) throw new WorkRequestError("invalid", "Devices read work items through their repo");
-        const { repo, backend } = await builtInProjectItem(request.project, request.id);
+        const { repo, backend } = await builtInProjectItem(itemProject, request.id);
         try {
           switch (request.action) {
             case "show": {

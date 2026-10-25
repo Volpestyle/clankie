@@ -25,7 +25,9 @@ per-project cycles with automatic rollover, and a fifth
 [amendment](#amendment-evidence-keys-are-the-trackers-own-identifiers-2026-10-09-vuh-1991-vuh-1997)
 (VUH-1991, VUH-1997) keys evidence by the tracker's own identifiers. The
 [cutover amendment](#proposed-amendment-cutover-and-switch-back-2026-10-09-vuh-1987)
-(VUH-1987) moves one World project from Linear onto the built-in tracker and back.
+(VUH-1987) moves one World project from Linear onto the built-in tracker and back;
+its VUH-2829 [item routing](#proposed-amendment-cutover-and-switch-back-2026-10-09-vuh-1987)
+sends any caller's call for a cut-over project's item to the built-in tracker.
 
 ## Context
 
@@ -792,6 +794,66 @@ argument. Only a confirmed hire routes. A hire that is not yet confirmed, a
 legacy hire whose process was never proved, or a finished (`gone`) hire keeps
 the old routing. A worker in that state passes `repo` for a cut-over project.
 
+**Routing by the item's project (VUH-2829).** VUH-2014 routes by the caller's
+hire, but a cut-over project's work is often done from another project's repo.
+Clankie Work is worked from the `clankie` and `clankie-app` checkouts, whose
+convention is `linear`, and the lead has no hire at all. Their calls for Clankie
+Work items still reached the frozen Linear copy: after the 2026-10-10 cutover,
+eight Clankie Work issues diverged between Linear and the built-in tracker.
+
+**Decision: route by the item's project.** We did not choose refusing and
+pointing to the built-in. A tracker call that names a cut-over project's
+record goes to that project's built-in tracker, whoever calls: a worker hired
+into any project, the lead's operator tools, an unhired operator call, or the
+Linear backend behind `clankie work --repo` on a Linear repo. A cut-over
+project is a registered project bound to a built-in tracker project
+(`trackerProjectId`) whose saved convention is not `linear`. An unreadable
+convention counts as cut over, so nothing falls back to Linear. A call names a
+record by an imported `TEAM-n`, a `LOCAL-TEAM-n`, a record UUID (issue,
+comment, status update, document, milestone), or the project's own UUID, name
+or slug, in any reference argument (`id`, `issueId`, `parentId`, `project`,
+relation lists and the rest; free text never counts). The route reaches the
+project's repo as an explicit `repo` does. Writes record the host-stamped actor
+and stay scoped to the project.
+
+Why route rather than refuse:
+
+- The intent is unambiguous: the item has one home, and the built-in tracker
+  holds it under the same key and UUID.
+- A refusal asks every caller to retry with `repo`. That manual rule was
+  already documented, and nobody followed it.
+- Routing grants nothing new. Any operator-lane caller could already pass the
+  project's `repo`, and the same project scope applies.
+
+Precedence: an explicit `repo` wins, then the item's project, then the hire's
+project (VUH-2014), then the old default. A call naming records of two cut-over
+projects is refused.
+
+What cannot be routed is refused with a pointer to the built-in tracker. It
+never reaches Linear:
+
+- `linear_graphql` mutations whose document or variables carry such a
+  reference;
+- Linear-only writes, such as `create_worker_comment` or a connected Linear
+  MCP tool outside the tracker vocabulary;
+- routed calls from a non-operator lane.
+
+`clankie work show|activity|update|close|attach ID` takes the VUH-2805
+`--project` path for a cut-over item, whatever `--repo` it runs from, and
+`clankie work write` from a Linear repo binds its receipt to the item's project
+repo. Both matter because the Linear backend mixes item calls with team calls
+(statuses, users) that only Linear answers.
+
+**History reads stay possible and marked.** A read tool with `linearHistory:
+true` reaches connected Linear without any routing. Its result is wrapped as
+`{ "linearHistory": "Linear history: …", "result": … }`. A write, a
+`repo` call or `linear_graphql` with `linearHistory` is refused, and so is a
+history read when Linear is not connected. Unrouted Linear reads that name a
+cut-over record, such as `linear_graphql` queries and connected Linear MCP read
+tools outside the vocabulary, return the same marked envelope. The 2026-10-10
+drift check and the mirror read Linear through their own GraphQL session, so
+this routing does not change them.
+
 **Interfaces and proof.** Before the live run, the device protocol's
 `WorkBackendKind` gains `builtin`, so app builds must include it before they read
 a `builtin` repo. `apps/clankie/test/linear-cutover.integration.test.ts` covers
@@ -811,6 +873,13 @@ these cases over the HTTP route:
   `linear` project, bound or unbound, reaches the Linear path (the local fallback
   in tests); a worker whose project has no saved convention is refused; and an
   explicit `repo` still wins.
+- VUH-2829, with Linear connected through a recording MCP boundary: a hire in a
+  `linear` project and the lead comment on and move an imported Clankie Work
+  item by key and UUID, and a `LOCAL-VUH-n` one; the lead's `clankie work
+update` from a Linear repo moves it as well. Every write lands in the
+  built-in store under its actor. `linear_graphql` mutations naming it, inline
+  or in variables, are refused before any request. `linearHistory` reads reach
+  Linear and come back marked. The provider sees no write at all.
 
 ## Amendment: owner tracker settings (2026-10-20, VUH-2532)
 

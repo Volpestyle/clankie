@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { z } from "zod";
 import { FileCredentialStore } from "@clankie/credential-broker";
+import { serve } from "@hono/node-server";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ProjectsSettingsSchema } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import {
@@ -43,7 +48,10 @@ afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
 });
 
-async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearImportSnapshot = (s) => s) {
+async function cutoverFixture(
+  linear: (source: LinearImportSnapshot) => LinearImportSnapshot = (s) => s,
+  connected: { linearUrl?: string } = {},
+) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "linear-cutover-")));
   const workspace = join(root, "clankie-work");
   await mkdir(workspace);
@@ -166,6 +174,7 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     },
   });
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const graphqlRequests: string[] = [];
   let workItems!: ReturnType<typeof createWorkItemsService>;
   // Runs once after the host's pre-lock READ fence, just before the backend takes its lock.
   let beforeLock: (() => Promise<void>) | undefined;
@@ -186,7 +195,7 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
         id: "linear",
         credential: "linear",
         transport: "http",
-        url: "http://127.0.0.1:1/mcp",
+        url: connected.linearUrl ?? "http://127.0.0.1:1/mcp",
         args: [],
         lane: "everywhere",
         initialTools: [],
@@ -204,12 +213,23 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
         (projectId, projectFence) => workItems.trackerRepoForProject(projectId, projectFence),
         fence,
       ),
+    trackerRepoForItem: (references, fence) => workItems.cutoverRepoForReferences(references, fence),
+    // Linear's GraphQL API is never reached from this fixture.
+    linearFetch: async (input) => {
+      graphqlRequests.push(String(input));
+      throw new Error("No Linear API in this fixture");
+    },
     logger: { info() {}, warn() {} },
   });
   workItems = createWorkItemsService({
     stateDirectory: join(root, "work"),
     globalTrackerDirectory: trackerDirectory,
     projects: async () => (await settings.load()).projects,
+    // Wired as the service wires it: owner writes to a project repo read fenced settings.
+    projectsFence: async () => {
+      const snapshot = await settings.loadFenced();
+      return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
+    },
     localMachineId: "local",
     mcpHost: host,
     builtInTracker: (assertIssueWrite) =>
@@ -344,8 +364,9 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     projects: JSON.stringify((await settings.load()).projects),
   });
   /** `clankie work` as the lead seat runs it: the CLI over HTTP with the operator credential. */
-  const work = (...args: string[]) =>
-    runWorkCommand([...args, "--repo", workspace], {
+  const work = (...args: string[]) => workIn(workspace, ...args);
+  const workIn = (repo: string, ...args: string[]) =>
+    runWorkCommand([...args, "--repo", repo], {
       env: { CLANKIE_OPERATOR_TOKEN: "owner", CLANKIE_CONTROL_PLANE_URL: "http://clankie.test" },
       fetchImpl: (input, init) => Promise.resolve(app.app.request(String(input), init)),
     }) as Promise<{ ok: boolean; body: Record<string, any> }>;
@@ -353,8 +374,11 @@ async function cutoverFixture(linear: (source: LinearImportSnapshot) => LinearIm
     root,
     workspace,
     host,
+    credentials,
+    graphqlRequests,
     evidence,
     work,
+    workIn,
     source,
     projectId,
     trackerDirectory,
@@ -817,6 +841,251 @@ it("routes a hired worker's tracker calls without repo by its project's saved co
   );
   expect(explicit, JSON.stringify(explicit)).toMatchObject({ outcome: "ok" });
   expect((await store()).issues.some((entry: { title: string }) => entry.title === "Explicit repo")).toBe(
+    false,
+  );
+});
+
+/** Connected Linear's MCP boundary, standing in for mcp.linear.app: it records every call and keeps nothing. */
+async function linearProvider() {
+  const calls: { name: string; args: Record<string, unknown> }[] = [];
+  const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>();
+  const server = serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      if (request.headers.get("authorization") !== "Bearer fixture-linear-secret")
+        return new Response(null, { status: 401 });
+      const id = request.headers.get("mcp-session-id");
+      if (id) return sessions.get(id)?.handleRequest(request) ?? new Response(null, { status: 404 });
+      const mcp = new Server(
+        { name: "linear-cutover-fixture", version: "1" },
+        { capabilities: { tools: {} } },
+      );
+      mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
+        tools: ["get_issue", "list_issues", "save_issue", "save_comment", "list_comments"].map((name) => ({
+          name,
+          inputSchema: { type: "object" },
+        })),
+      }));
+      mcp.setRequestHandler(CallToolRequestSchema, async (call) => {
+        calls.push({ name: call.params.name, args: call.params.arguments ?? {} });
+        const key = call.params.arguments?.id ?? call.params.arguments?.issueId;
+        return {
+          content: [{ type: "text", text: JSON.stringify({ identifier: key, title: "Frozen Linear copy" }) }],
+        };
+      });
+      const transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: randomUUID,
+        enableJsonResponse: true,
+      });
+      await mcp.connect(transport as unknown as Transport);
+      const response = await transport.handleRequest(request);
+      if (transport.sessionId) sessions.set(transport.sessionId, transport);
+      return response;
+    },
+  });
+  await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing Linear provider fixture address");
+  return {
+    url: `http://127.0.0.1:${address.port}/mcp`,
+    calls,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+      }),
+  };
+}
+
+it("routes a cut-over project's items to its built-in tracker for a hire in a Linear project and for the lead, and never writes to Linear (VUH-2829)", async () => {
+  const provider = await linearProvider();
+  cleanups.push(provider.close);
+  const f = await cutoverFixture(undefined, { linearUrl: provider.url });
+  const cut = await f.post("/v1/tracker/cutover/linear", {
+    worldProject: "clankie-work",
+    scratch: "work",
+    linearProjectId: f.projectId,
+  });
+  expect(cut.status, JSON.stringify(cut.body)).toBe(200);
+  // Linear is connected, as on the live service: calls that are not routed reach the provider.
+  await f.credentials.set("linear", {
+    type: "api",
+    key: "fixture-linear-secret",
+    account: {
+      provider: "linear",
+      actor: "app",
+      connectionId: randomUUID(),
+      userId: randomUUID(),
+      workspaceId: randomUUID(),
+      name: "Fixture app",
+      workspaceName: "Cutover fixture",
+      verifiedAt: new Date().toISOString(),
+    },
+  });
+  expect(await f.host.trackerStatus!()).toMatchObject({ backend: "linear" });
+  // Like the clankie repo's workers: hired into a project whose convention is `linear`.
+  await f.hire("linear-work", "w1:p2", f.linearWorkspace);
+  const store = async () => JSON.parse(await readFile(join(f.trackerDirectory, "tracker.json"), "utf8"));
+  const item = f.source.issues.find((entry) => entry.identifier === "VUH-1905")!;
+  const lead = (tool: string, args: Record<string, unknown>) =>
+    f.host.call({ lane: "operator", server: "linear", tool, arguments: args });
+  // The built-in status, not the imported Linear `state` it keeps as history.
+  const status = (current: Record<string, any>) => {
+    const issue = current.issues.find((entry: { id: string }) => entry.id === item.id);
+    return current.issueStatuses.find((entry: { id: string }) => entry.id === issue.statusId).name;
+  };
+  expect(status(await store())).toBe("In Progress");
+
+  // The hire comments on and moves the imported item by its key and by its UUID, without repo.
+  for (const [name, args] of [
+    ["linear_save_comment", { issueId: "VUH-1905", body: "Hire comment by key" }],
+    ["linear_save_comment", { issueId: item.id, body: "Hire comment by UUID" }],
+    ["linear_save_issue", { id: "VUH-1905", state: "Todo" }],
+  ] as const) {
+    const result = await f.workerCall(name, args, "w1:p2");
+    expect(result, `${name} ${JSON.stringify(result)}`).toMatchObject({ outcome: "ok" });
+  }
+  let after = await store();
+  expect(status(after)).toBe("Todo");
+  for (const body of ["Hire comment by key", "Hire comment by UUID"])
+    expect(
+      after.comments.find((entry: { body: string }) => entry.body === body),
+      body,
+    ).toMatchObject({
+      issueId: item.id,
+      createdByActor: { type: "agent-worker", id: "fleet:default:pane:w1:p2" },
+    });
+
+  // The lead's operator tools, with no hire and no repo, land there too, as Clankie for the owner.
+  expect(await lead("save_comment", { issueId: "VUH-1905", body: "Lead comment by key" })).toMatchObject({
+    outcome: "ok",
+  });
+  const leadMove = await lead("save_issue", { id: "VUH-1905", state: "Backlog" });
+  expect(leadMove, JSON.stringify(leadMove)).toMatchObject({ outcome: "ok", isError: false });
+  // So does an item made after the cutover, named by its project and then by its LOCAL key.
+  const made = await lead("save_issue", {
+    team: "VUH",
+    project: "Clankie Work",
+    title: "Made after cutover",
+  });
+  expect(made, JSON.stringify(made)).toMatchObject({ outcome: "ok" });
+  const local = (await store()).issues.find(
+    (entry: { title: string }) => entry.title === "Made after cutover",
+  );
+  expect(local).toMatchObject({
+    identifier: expect.stringMatching(/^LOCAL-VUH-\d+$/u),
+    projectId: f.projectId,
+  });
+  expect(
+    await f.workerCall(
+      "linear_save_comment",
+      { issueId: local.identifier, body: "Hire on a LOCAL key" },
+      "w1:p2",
+    ),
+  ).toMatchObject({ outcome: "ok" });
+  after = await store();
+  expect(status(after)).toBe("Backlog");
+  expect(
+    after.comments.find((entry: { body: string }) => entry.body === "Lead comment by key"),
+  ).toMatchObject({
+    issueId: item.id,
+    createdByActor: { type: "agent-worker", id: "clankie", onBehalfOf: [{ type: "human", id: "owner" }] },
+  });
+  expect(
+    after.comments.find((entry: { body: string }) => entry.body === "Hire on a LOCAL key"),
+  ).toMatchObject({ issueId: local.id });
+
+  // So does the lead's `clankie work` run from a repo whose convention is `linear`: its Linear
+  // backend's call reaches the host without repo and is routed the same way.
+  const cli = await f.workIn(f.linearWorkspace, "update", "VUH-1905", "--status", "in_progress");
+  expect(cli.ok, JSON.stringify(cli.body)).toBe(true);
+  expect(status(await store())).toBe("In Progress");
+  // And its owner writes (`work write`): a blocker lands on the built-in item.
+  const blocker = (await store()).issues.find(
+    (entry: { identifier: string; projectId: string }) =>
+      entry.projectId === f.projectId &&
+      /^VUH-\d+$/u.test(entry.identifier) &&
+      entry.identifier !== "VUH-1905",
+  );
+  const wrote = await f.workIn(f.linearWorkspace, "write", "VUH-1905", "--add-blocker", blocker.identifier);
+  expect(wrote.ok, JSON.stringify(wrote.body)).toBe(true);
+  expect(wrote.body).toMatchObject({
+    outcome: "applied",
+    item: {
+      id: "VUH-1905",
+      dependsOn: expect.arrayContaining([blocker.identifier]),
+      location: expect.stringMatching(/^clankie-work:\/\/local\//u),
+    },
+  });
+
+  // A GraphQL mutation naming the item, inline or in variables, is refused with a pointer.
+  for (const args of [
+    { query: 'mutation { commentCreate(input: { issueId: "VUH-1905", body: "x" }) { success } }' },
+    {
+      query: "mutation Move($id: String!) { issueUpdate(id: $id, input: { priority: 1 }) { success } }",
+      variables: { id: item.id },
+    },
+  ])
+    expect(await lead("graphql", args)).toMatchObject({
+      outcome: "refused",
+      possiblyDispatched: false,
+      detail: expect.stringContaining("Clankie Work, which tracks its work in Clankie's built-in tracker"),
+    });
+  expect(f.graphqlRequests).toEqual([]);
+
+  // Linear history stays readable when asked for explicitly, and the result says so.
+  const history = await lead("get_issue", { id: "VUH-1905", linearHistory: true });
+  expect(history, JSON.stringify(history)).toMatchObject({ outcome: "ok" });
+  expect(JSON.parse((history as { content: string }).content)).toEqual({
+    linearHistory: expect.stringMatching(/^Linear history:/u),
+    result: { identifier: "VUH-1905", title: "Frozen Linear copy" },
+  });
+  const hireHistory = await f.workerCall(
+    "linear_get_issue",
+    { id: "VUH-1905", linearHistory: true },
+    "w1:p2",
+  );
+  expect(hireHistory, JSON.stringify(hireHistory)).toMatchObject({ outcome: "ok" });
+  expect(JSON.parse(hireHistory.content!)).toMatchObject({ linearHistory: expect.any(String) });
+  expect(
+    await lead("save_comment", { issueId: "VUH-1905", body: "History write", linearHistory: true }),
+  ).toMatchObject({ outcome: "refused", reason: "invalid_arguments", possiblyDispatched: false });
+  // Without the marker, a read of the item is the built-in's current state.
+  const current = await f.workerCall("linear_get_issue", { id: "VUH-1905" }, "w1:p2");
+  expect(JSON.parse(current.content!)).toMatchObject({ identifier: "VUH-1905", status: "In Progress" });
+
+  // A Discord room reaches no built-in tracker: its read is marked Linear history, its write refused.
+  const room = (tool: string, args: Record<string, unknown>) =>
+    f.host.call({ lane: "discord_presence", server: "linear", tool, arguments: args });
+  const roomRead = await room("get_issue", { id: "VUH-1905" });
+  expect(JSON.parse((roomRead as { content: string }).content)).toMatchObject({
+    linearHistory: expect.any(String),
+  });
+  expect(await room("save_comment", { issueId: "VUH-1905", body: "From a room" })).toMatchObject({
+    outcome: "refused",
+    reason: "lane_denied",
+    detail: expect.stringContaining("Reach it from operator tools"),
+  });
+
+  // An item that never cut over still reaches Linear from the same hire.
+  expect(await f.workerCall("linear_get_issue", { id: "VUH-2829" }, "w1:p2")).toMatchObject({
+    outcome: "ok",
+  });
+
+  // Linear is unchanged: the provider saw no write, and the item only in the two marked reads.
+  expect(provider.calls.filter((call) => !/^(?:get|list)_/u.test(call.name))).toEqual([]);
+  // (`clankie work` also lists Linear's projects to resolve --repo; that read names no item.)
+  const naming = (call: { args: Record<string, unknown> }, key: string) =>
+    JSON.stringify(call.args).includes(key);
+  expect(provider.calls.filter((call) => naming(call, "VUH-") || naming(call, item.id))).toEqual([
+    { name: "get_issue", args: { id: "VUH-1905" } },
+    { name: "get_issue", args: { id: "VUH-1905" } },
+    { name: "get_issue", args: { id: "VUH-1905" } },
+    { name: "get_issue", args: { id: "VUH-2829" } },
+  ]);
+  expect(provider.calls.map((call) => call.name)).not.toContain("save_issue");
+  expect((await store()).comments.some((entry: { body: string }) => entry.body === "From a room")).toBe(
     false,
   );
 });

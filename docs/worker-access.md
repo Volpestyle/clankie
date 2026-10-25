@@ -408,7 +408,15 @@ Call the discovered name through `clankie_call({name, arguments})`:
 { "name": "linear_get_issue", "arguments": { "id": "VUH-1558", "includeRelations": true } }
 ```
 
-A `linear_*` tracker call without `repo` follows the caller's hire
+A `linear_*` tracker call that names an item of a cut-over project (its imported
+`TEAM-n`, `LOCAL-TEAM-n` or UUID, or the project itself) goes to that project's
+built-in tracker, whatever the caller's hire, and never to the frozen Linear copy
+(VUH-2829). Writes Clankie cannot route there, such as a `linear_graphql`
+mutation or `create_worker_comment` naming the item, are refused with a pointer.
+To read the Linear copy as history, pass `linearHistory: true` on a read; the
+result comes back marked as Linear history.
+
+Otherwise a `linear_*` tracker call without `repo` follows the caller's hire
 (VUH-2014). A worker hired for a registered project uses that project's saved
 convention. On a `builtin` project (one cut over from Linear), or any other
 non-Linear convention, the call goes to the project's own tracker, so the

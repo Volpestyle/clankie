@@ -714,6 +714,8 @@ const mcpHost = createMcpHost({
       (projectId, projectFence) => workItems.trackerRepoForProject(projectId, projectFence),
       fence,
     ),
+  // Any caller's call naming a cut-over project's item goes to its built-in tracker (VUH-2829).
+  trackerRepoForItem: (references, fence) => workItems.cutoverRepoForReferences(references, fence),
   // A fleet worker is named by the seat it was hired into, as the host recorded it.
   trackerWorkerName: (principalId) => {
     const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);

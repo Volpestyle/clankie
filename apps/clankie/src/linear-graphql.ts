@@ -8,6 +8,7 @@ import {
 import {
   Kind,
   parse,
+  visit,
   type DocumentNode,
   type FragmentDefinitionNode,
   type OperationDefinitionNode,
@@ -69,6 +70,8 @@ export interface LinearGraphqlPlan {
   readonly mutation: boolean;
   /** Destructive root fields and the exact ids they act on; empty for ordinary operations. */
   readonly destructive: readonly { readonly field: string; readonly targets: readonly string[] }[];
+  /** Every string the document or its variables carry, so a host can see which records it names. */
+  readonly references: readonly string[];
 }
 
 /** Classifies the one operation that will run. Unparseable or ambiguous input never reaches Linear. */
@@ -178,12 +181,21 @@ export function planLinearGraphql(args: Record<string, unknown>): LinearGraphqlP
   } else if (confirmed.size > 0) {
     throw new LinearGraphqlRefusal("confirm is only for destructive mutations; remove it");
   }
+  const references: string[] = [];
+  visit(document, { StringValue: (node) => void references.push(node.value) });
+  const collect = (value: unknown): void => {
+    if (typeof value === "string") references.push(value);
+    else if (Array.isArray(value)) value.forEach(collect);
+    else if (value !== null && typeof value === "object") Object.values(value).forEach(collect);
+  };
+  collect(variables);
   return {
     query,
     variables,
     ...(operationName === undefined ? {} : { operationName }),
     mutation,
     destructive,
+    references,
   };
 }
 

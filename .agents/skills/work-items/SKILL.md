@@ -44,8 +44,10 @@ workers use the same `linear_*` tracker tools on every backend, discovered throu
 convention. `clankie doctor` reports the active backend and why. Use the full
 identifier everywhere: a built-in `LOCAL-…` key never becomes another tracker's key.
 For an item `clankie work ready --project P` lists, pass that same `--project P`
-to `show`, `activity`, `update`, `close` or `attach`; without it they use the repo
-you run from, which may be Linear.
+to `show`, `activity`, `update`, `close` or `attach`. Without it they use the repo
+you run from, which may be Linear. An item of a project cut over to the built-in
+tracker always goes there, from any repo or tool. Linear holds only its frozen
+copy; read that copy only with `linearHistory: true`.
 Issue summaries have no separate 20,000-character limit: `work create --summary`
 matches canonical `save_issue` descriptions, and `work show`/API reads return
 the full summary. Provider and transport request limits still apply.

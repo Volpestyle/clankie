@@ -2765,6 +2765,29 @@ Linear or durable local storage. `clankie doctor` reports the active backend and
 selection reason. An explicit `repo` tool argument selects the repo's recorded
 GitHub or Markdown adapter.
 
+#### Items of a cut-over project
+
+A project cut over to the built-in tracker keeps only a frozen copy in Linear.
+A call that names one of its items goes to the built-in tracker, from any repo
+and any caller ([VUH-2829](adr/0226-one-tracker-tool-surface.md#proposed-amendment-cutover-and-switch-back-2026-10-09-vuh-1987)).
+An item is named by its imported `VUH-n`, its `LOCAL-VUH-n`, its UUID, or the
+project's UUID or name:
+
+- `clankie work show|activity|update|close|attach ID` behaves as if
+  `--project` named the item's project, even with `--repo` on a Linear repo,
+  and `clankie work write ID` writes it there, with its receipt bound to that
+  project's repo;
+- a `linear_*` tracker tool call without `repo` goes to that project's repo;
+- a `linear_graphql` mutation, or another Linear-only write, that names the
+  item is refused with a pointer to the built-in tracker.
+
+To read the Linear copy for history, add `"linearHistory": true` to a read
+tool's arguments. The call reaches connected Linear without routing and returns
+`{ "linearHistory": "Linear history: …", "result": … }`. A write or a `repo`
+call with `linearHistory` is refused, and so is a history read while Linear is
+not connected. Linear reads that cannot be routed, such as `linear_graphql`
+queries naming the item, come back in the same envelope.
+
 #### Built-in item identifiers after cutover
 
 The built-in tracker deliberately keeps its own namespace. A default new store

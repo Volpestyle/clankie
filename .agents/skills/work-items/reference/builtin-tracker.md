@@ -223,12 +223,17 @@ Cutting a World project over is the owner's decision. Run
 binding and convention changes, and the switch-back command. Without `--dry-run`
 it applies the plan, and it refuses on drift or a non-empty live store. Afterwards
 that project's convention is `backend: builtin`: its work is in the built-in
-tracker, not Linear. A worker or lead hired for that project reaches it with
-`linear_*` calls without `repo`. Writes outside the project are
-refused, and so is `linear_graphql`. Anyone else passes the project's `repo`, or
-uses `clankie work --repo`. Clankie's own unhired operator calls without `repo`
-still reach connected Linear. A hire whose project has no saved convention is
-refused rather than guessed; an explicit `repo` always wins.
+tracker, not Linear. Any `linear_*` call that names one of its items (`VUH-n`,
+`LOCAL-VUH-n`, a UUID, or the project) reaches the built-in tracker, from any
+hire, the lead or `clankie work` in any repo, with no `repo` needed. Linear keeps
+only a frozen copy and is never written: a `linear_graphql` mutation or another
+Linear-only write naming the item is refused with a pointer. A worker or lead
+hired for that project also reaches it without `repo` for calls that name no
+item. Writes outside the project are refused, and so is `linear_graphql`. A hire
+whose project has no saved convention is refused rather than guessed. An explicit
+`repo` always wins. To read the frozen Linear copy for history, pass
+`linearHistory: true` on a read. The result is marked `linearHistory`; never
+treat it as current state.
 `... --switch-back [--dry-run]` restores Linear as the project's tracker and
 reports the pilot writes Linear never saw. Those writes, including every
 `LOCAL-TEAM-n` item, then exist only in the kept pilot file, never in Linear.
