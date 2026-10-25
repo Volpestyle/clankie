@@ -555,10 +555,14 @@ export class ConversationStore {
         if (unrecognized !== undefined) {
           this.unrecognizedInboundStorage.add(meta.conversationId);
           console.warn(`Retaining conversation ${entry.name}: ${unrecognized}`);
+          // A side fork is never resumed; leave every byte for the reader that wrote it.
+          if (side) continue;
         }
         if (meta.inboundReportStore !== undefined) {
           const directory = join(root, entry.name);
-          const reports = new InboundReportStore(directory);
+          const reports = new InboundReportStore(directory, {
+            collect: !this.unrecognizedInboundStorage.has(meta.conversationId),
+          });
           const stored = reports.load(meta.inboundReportStore);
           for (const [id, receipt] of Object.entries(meta.inboundAcceptances ?? {})) {
             if (stored[id] !== undefined && !isDeepStrictEqual(stored[id], receipt))
@@ -4020,7 +4024,9 @@ export class ConversationStore {
     if (sharded) {
       let reports = this.inboundReportStores.get(directory);
       if (reports === undefined) {
-        reports = new InboundReportStore(directory);
+        reports = new InboundReportStore(directory, {
+          collect: !this.unrecognizedInboundStorage.has(meta.conversationId),
+        });
         if (meta.inboundReportStore !== undefined) reports.load(meta.inboundReportStore);
         this.inboundReportStores.set(directory, reports);
       }

@@ -43,11 +43,14 @@ export class InboundReportStorageError extends Error {}
  */
 export class InboundReportStore {
   private readonly directory: string;
+  /** False never unlinks a shard: unrecognized storage may still reference it (VUH-2831). */
+  private readonly collect: boolean;
   private buckets = new Map<string, Bucket>();
   private sweep = true;
 
-  public constructor(conversationDirectory: string) {
+  public constructor(conversationDirectory: string, options: { readonly collect?: boolean } = {}) {
     this.directory = join(conversationDirectory, "inbound-reports");
+    this.collect = options.collect ?? true;
   }
 
   public load(reference: InboundReportReference | undefined): Entries {
@@ -136,8 +139,9 @@ export class InboundReportStore {
         const retained = new Set(Object.values(shards));
         // A failed prepare can leave orphan immutable files. Sweep once after
         // a durable manifest commit; later commits unlink only superseded shards.
-        const candidates =
-          this.sweep && existsSync(this.directory)
+        const candidates = !this.collect
+          ? []
+          : this.sweep && existsSync(this.directory)
             ? readdirSync(this.directory).filter((file) => filename.test(file))
             : [...old.values()].map((bucket) => bucket.file);
         this.sweep = false;

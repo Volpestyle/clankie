@@ -21,7 +21,7 @@ function open(directory: string, sharded = true) {
 }
 
 /** A real admission's committed files, renamed into a side fork of a fresh default. */
-async function sideFork(options: { sharded?: boolean; read?: boolean } = {}) {
+async function sideFork(options: { sharded?: boolean; read?: boolean; side?: boolean } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "side-report-retention-")));
   roots.push(root);
   const directory = join(root, "conversations");
@@ -40,6 +40,11 @@ async function sideFork(options: { sharded?: boolean; read?: boolean } = {}) {
     expect(producer.acknowledgeInboundReports("global-default", [deliveryId])).toBe(true);
   }
   await producer.close();
+  if (options.side === false) {
+    const side = join(directory, "global-default");
+    const path = join(side, "meta.json");
+    return { directory, side, path, deliveryId, meta: () => JSON.parse(fs.readFileSync(path, "utf8")) };
+  }
   const side = join(directory, "side-conversation");
   fs.renameSync(join(directory, "global-default"), side);
   const path = join(side, "meta.json");
@@ -67,19 +72,43 @@ function snapshot(directory: string): Record<string, string> {
   );
 }
 
-/** Startup succeeds, keeps every byte of the side fork and says why. */
+/** Startup and a reopen succeed, keep every byte of the side fork and say why. */
 async function expectRetained(fork: Awaited<ReturnType<typeof sideFork>>, reason: string | RegExp) {
   const before = snapshot(fork.side);
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const store = open(fork.directory);
-  try {
+  for (let boot = 0; boot < 2; boot += 1) {
+    warn.mockClear();
+    const store = open(fork.directory);
+    try {
+      expect(snapshot(fork.side)).toEqual(before);
+      expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).toMatch(reason);
+      expect(store.inboundReports("side-conversation")).toEqual([]);
+    } finally {
+      await store.close();
+    }
     expect(snapshot(fork.side)).toEqual(before);
-    expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).toMatch(reason);
-    expect(store.inboundReports("side-conversation")).toEqual([]);
-  } finally {
-    await store.close();
   }
-  expect(snapshot(fork.side)).toEqual(before);
+}
+
+/**
+ * Stands in for a later reader's ledger beside recognized receipts: another
+ * real unread admission's shards, referenced from a field or a file this
+ * reader does not know.
+ */
+async function futureLedger(fork: Awaited<ReturnType<typeof sideFork>>, kind: "field" | "file") {
+  const future = await sideFork();
+  const manifest = future.meta().inboundReportStore;
+  fs.mkdirSync(join(fork.side, "inbound-reports"), { recursive: true });
+  const shards = (Object.values(manifest.shards) as string[]).map((file) => {
+    const target = join(fork.side, "inbound-reports", file);
+    fs.copyFileSync(join(future.side, "inbound-reports", file), target);
+    return target;
+  });
+  if (kind === "field")
+    fs.writeFileSync(fork.path, JSON.stringify({ ...fork.meta(), inboundReportLedger: manifest }));
+  else fs.writeFileSync(join(fork.side, "inbound-reports", "manifest.json"), JSON.stringify(manifest));
+  const bytes = () => shards.map((file) => fs.readFileSync(file, "base64"));
+  return { manifest, bytes, before: bytes() };
 }
 
 it("keeps a side fork's unread sharded reports through startup", async () => {
@@ -161,4 +190,63 @@ it("still retires a recognized side fork with nothing unread", async () => {
       await store.close();
     }
   }
+});
+
+it.each([
+  [false, "field"],
+  [true, "field"],
+  [false, "file"],
+  [true, "file"],
+] as const)(
+  "keeps every byte of a side fork mixing recognized receipts (sharded %s) with an unknown %s ledger",
+  async (sharded, kind) => {
+    const fork = await sideFork({ sharded, read: true });
+    await futureLedger(fork, kind);
+    await expectRetained(fork, /unrecognized report (field|storage)/u);
+  },
+);
+
+it.each([
+  [false, "field"],
+  [true, "field"],
+  [false, "file"],
+  [true, "file"],
+] as const)(
+  "never collects an unknown ledger's shards from a live inbox (sharded %s, unknown %s)",
+  async (sharded, kind) => {
+    const inbox = await sideFork({ sharded, read: true, side: false });
+    const ledger = await futureLedger(inbox, kind);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let boot = 0; boot < 2; boot += 1) {
+      const store = open(inbox.directory);
+      try {
+        expect(store.inboundReports("global-default", { includeRead: true })).toHaveLength(boot + 1);
+        // A new admission commits a manifest, which would sweep unreferenced shards.
+        const deliveryId = randomUUID();
+        store.submitInbound("later report", {
+          deliveryId,
+          binding: "a".repeat(64),
+          paneId: "fixture-pane",
+          text: "later report",
+          fingerprint: deliveryFingerprint("later report"),
+          recipient: { kind: "conversation", owner: { conversationId: "global-default" } },
+        });
+      } finally {
+        await store.close();
+      }
+      expect(ledger.bytes()).toEqual(ledger.before);
+      if (kind === "field") expect(inbox.meta().inboundReportLedger).toEqual(ledger.manifest);
+      else
+        expect(
+          JSON.parse(fs.readFileSync(join(inbox.side, "inbound-reports", "manifest.json"), "utf8")),
+        ).toEqual(ledger.manifest);
+    }
+  },
+);
+
+it("still refuses to boot past an unreadable inbox that is not a side fork", async () => {
+  const inbox = await sideFork({ side: false });
+  const file = String(Object.values(inbox.meta().inboundReportStore.shards)[0]);
+  fs.writeFileSync(join(inbox.side, "inbound-reports", file), "corrupt");
+  expect(() => open(inbox.directory)).toThrow("Retained inbound reports are unreadable");
 });

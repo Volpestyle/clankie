@@ -52,8 +52,11 @@ layout stays intact for automatic rollback. Only manifest-referenced shards are 
 are not report acceptance. Report storage stays inside `inbound*` metadata fields
 and `inbound-reports/`: a manifest, shard, field or file the reader cannot read
 never proves nothing is unread, so startup and retention keep that conversation's
-directory and log `Retaining conversation ID: why` (VUH-2831). An unreadable side
-fork is skipped, not loaded; any other unreadable inbox still stops boot. Read reports older than 24 hours are compacted;
+directory and log `Retaining conversation ID: why` (VUH-2831). A side fork with
+unreadable or unrecognized storage is skipped, not loaded, so nothing rewrites it.
+Any other unreadable inbox still stops boot; one with unrecognized storage loads
+but never unlinks a shard, so superseded shards accumulate there until the
+foreign storage is gone. Read reports older than 24 hours are compacted;
 unread, delivered and uncertain reports are retained. The files are independent
 of event trimming and pane lifetime. Join `runId` to the
 accepted/completed/failed `events.jsonl` turns.
