@@ -12,7 +12,7 @@ const Intent = z.object({
   id: z.uuid(),
   ref: z.string().min(1).max(256),
   initiator: z.unknown().transform(parseUpdateInitiator),
-  /** Consecutive failed attempts, durable so a restart loop cannot retry forever. */
+  /** Accumulated failed attempts, durable so a restart loop cannot retry forever. */
   failures: z.number().int().min(0).default(0),
 });
 
@@ -122,7 +122,7 @@ export function integrationSafeUpdates(options: {
       // Refuse an unresolvable ref now; a durable intent must not retry one forever.
       await options.updater.preview?.(ref).catch((error: unknown) => {
         const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0];
-        throw Error(`Update ref "${ref}" does not resolve to a commit: ${reason}`);
+        throw Error(`Update ref "${ref}" could not be resolved now: ${reason}`);
       });
       const intent = {
         id: randomUUID(),

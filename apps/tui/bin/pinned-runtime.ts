@@ -61,19 +61,25 @@ export async function updateCommit(
   if (!ref || ref.length > 256 || ref.startsWith("-") || ref.includes("\0") || /\s/u.test(ref))
     throw Error("Invalid runtime ref");
   let resolvedRef = ref;
-  if (/^[a-f0-9]{4,64}$/u.test(ref)) {
-    // A hex ref is a commit, never `refs/heads/<hex>`. A local commit resolves as is; otherwise fetch
-    // main so a newly landed object is present. Git refuses an unknown or ambiguous abbreviation.
-    const commit = () =>
+  if (/^[a-f0-9]{7,64}$/u.test(ref)) {
+    // A hex ref of Git's default abbreviation length or more is a commit, never `refs/heads/<hex>`
+    // (name such a branch `refs/heads/NAME`). An abbreviation is resolved after fetching main so a
+    // newly landed object can make it ambiguous instead of silently matching an older commit; an
+    // unreachable origin falls back to local objects. A full SHA resolves locally, else after the fetch.
+    // `async` wrappers also turn a synchronous runner's throw into a rejection.
+    const commit = async () =>
       run("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], checkout);
-    resolvedRef = await Promise.resolve(commit()).catch(async () => {
-      await run(
-        "git",
-        ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"],
-        checkout,
-      );
-      return commit();
-    });
+    const fetchMain = async () =>
+      run("git", ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"], checkout);
+    if (ref.length < 40) {
+      await fetchMain().catch(() => undefined);
+      resolvedRef = await commit();
+    } else {
+      resolvedRef = await commit().catch(async () => {
+        await fetchMain();
+        return commit();
+      });
+    }
   } else if (ref !== "HEAD" && !ref.startsWith("refs/tags/")) {
     const branch = ref.replace(/^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/u, "");
     await run("git", ["check-ref-format", `refs/heads/${branch}`], checkout);

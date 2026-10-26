@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -69,23 +69,76 @@ it("resolves a local-only commit by SHA without reaching origin", async () => {
     expect(await updateCommit(f.checkout, ref, f.base, run)).toMatchObject({ newCommit: local });
 });
 
-it("refuses unknown and ambiguous abbreviations", async () => {
+it("refuses an unknown abbreviation", async () => {
   const f = fixture();
   await expect(updateCommit(f.checkout, "deadbeef0", f.base, run)).rejects.toThrow();
-  // fast-import writes many commits in one process; find two sharing a four-digit prefix.
+});
+
+it("refuses a 7-digit prefix shared by a local old commit and a fetched-only new commit", async () => {
+  const f = fixture();
+  // 60k unrelated root commits in one fast-import; 28-bit prefixes collide a handful of times.
+  const marks = join(f.root, "marks");
   const stream = Array.from(
-    { length: 2_000 },
+    { length: 60_000 },
     (_, i) =>
-      `commit refs/heads/ambiguous\ncommitter t <t@t> ${1_700_000_000 + i} +0000\ndata 1\n${i % 10}\n\n`,
+      `reset refs/tmp/pool\ncommit refs/tmp/pool\nmark :${i + 1}\ncommitter t <t@t> ${1_700_000_000 + i} +0000\ndata 1\nx\n\n`,
   ).join("");
-  execFileSync("git", ["fast-import", "--quiet", "--force"], { cwd: f.author, input: stream });
-  git(f.author, "push", "origin", "refs/heads/ambiguous:refs/heads/main", "--force");
-  const shas = git(f.author, "rev-list", "ambiguous").split("\n");
-  const counts = new Map<string, number>();
-  for (const sha of shas) counts.set(sha.slice(0, 4), (counts.get(sha.slice(0, 4)) ?? 0) + 1);
-  const ambiguous = [...counts].find(([, n]) => n > 1)?.[0];
-  expect(ambiguous).toBeDefined();
-  await expect(updateCommit(f.checkout, ambiguous!, f.base, run)).rejects.toThrow();
+  execFileSync("git", ["fast-import", "--quiet", `--export-marks=${marks}`], {
+    cwd: f.author,
+    input: stream,
+    maxBuffer: 1 << 28,
+  });
+  const byPrefix = new Map<string, string>();
+  let pair: [string, string] | undefined;
+  for (const line of readFileSync(marks, "utf8").trim().split("\n")) {
+    const sha = line.split(" ")[1]!;
+    const earlier = byPrefix.get(sha.slice(0, 7));
+    if (earlier) {
+      pair = [earlier, sha];
+      break;
+    }
+    byPrefix.set(sha.slice(0, 7), sha);
+  }
+  expect(pair).toBeDefined();
+  const [old, landed] = pair!;
+  // The checkout already holds the old commit; origin main then moves to the colliding one.
+  git(f.author, "push", "origin", `${old}:refs/heads/old`);
+  git(f.checkout, "fetch", "origin", "refs/heads/old:refs/heads/old");
+  git(f.author, "push", "origin", "--delete", "old");
+  git(f.author, "push", "origin", "--force", `${landed}:refs/heads/main`);
+  const prefix = old.slice(0, 7);
+  expect(git(f.checkout, "rev-parse", `${prefix}^{commit}`)).toBe(old); // resolves locally on its own
+  await expect(updateCommit(f.checkout, prefix, f.base, run)).rejects.toThrow(/ambiguous|short object/i);
+  // The full SHA stays exact.
+  expect(await updateCommit(f.checkout, landed, f.base, run)).toMatchObject({ newCommit: landed });
+}, 120_000);
+
+it("keeps hex-named branches reachable as refs/heads/NAME and origin/NAME, not as bare names", async () => {
+  const f = fixture();
+  git(f.author, "commit", "--allow-empty", "-m", "hex branch");
+  git(f.author, "push", "origin", "HEAD:refs/heads/abcdef1234");
+  const tip = git(f.author, "rev-parse", "HEAD");
+  for (const ref of ["refs/heads/abcdef1234", "origin/abcdef1234"])
+    expect(await updateCommit(f.checkout, ref, f.base, run)).toMatchObject({
+      newCommit: tip,
+      resolvedRef: "refs/remotes/origin/abcdef1234",
+    });
+  // A bare hex name is a commit lookup, and no object has that name.
+  await expect(updateCommit(f.checkout, "abcdef1234", f.base, run)).rejects.toThrow();
+});
+
+it("falls back to local objects for an abbreviation when origin is unreachable", async () => {
+  const f = fixture();
+  renameSync(f.origin, `${f.origin}.gone`);
+  expect(await updateCommit(f.checkout, f.base.slice(0, 7), f.base, run)).toMatchObject({
+    newCommit: f.base,
+  });
+});
+
+it("accepts a synchronous runner that throws before the fetch", async () => {
+  const f = fixture();
+  const sync = (_command: string, args: readonly string[], cwd: string) => git(cwd, ...args);
+  expect(await updateCommit(f.checkout, f.next, f.base, sync)).toMatchObject({ newCommit: f.next });
 });
 
 function waiting(f: ReturnType<typeof fixture>, options: { gaveUp: string[]; errors: unknown[] }) {
@@ -128,7 +181,7 @@ it("refuses an unresolvable ref at request time without a durable waiting intent
     minutes: 60,
     integrationBatchId: batch,
   });
-  await expect(w.wrapped.request("2f1add276", w.authority)).rejects.toThrow(/does not resolve to a commit/);
+  await expect(w.wrapped.request("2f1add276", w.authority)).rejects.toThrow(/could not be resolved now/);
   expect(w.wrapped.status().pending).toBeUndefined();
   expect(existsSync(join(f.root, "updates", "integration-wait.json"))).toBe(false);
   // A resolvable short SHA waits normally.

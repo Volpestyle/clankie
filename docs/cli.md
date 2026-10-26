@@ -533,13 +533,17 @@ canary, locks and reconciliation applies to both. A source checkout follows `mai
 
 `clankie update` fetches `origin/main` and stages its exact commit. Named branches
 (including `origin/BRANCH` and `refs/heads/BRANCH`) fetch that branch from origin;
-failed fetches refuse the update without using a cached or local tip. Use a full
-commit SHA (full or abbreviated), `HEAD`, or `refs/tags/TAG` for an explicit local
-target. A SHA is always a commit, never a branch: a local commit resolves as is, a
-missing one is looked up after fetching `origin/main`, and an unknown or ambiguous
-SHA is refused when requested. A deploy waiting for integration batches validates its
-ref up front and gives up after five failed attempts, dropping the wait (so the
-integrate queue resumes) and alerting the lead. The result
+failed fetches refuse the update without using a cached or local tip. Use a
+commit SHA (full, or abbreviated to at least 7 hex digits), `HEAD`, or `refs/tags/TAG`
+for an explicit local target. A hex-looking ref is always a commit, never a branch;
+name a branch like `cafe1234` as `refs/heads/cafe1234`. An abbreviation is checked
+after fetching `origin/main` (local objects only if origin is unreachable), so one
+that is unknown or ambiguous with a newly landed commit is refused. A deploy waiting
+for integration batches previews its ref up front (a fetch of up to 60 seconds while
+the registry lock is held) and refuses it when it cannot be resolved right then,
+including when origin is unreachable. A queued wait that then fails five times, about
+75 seconds of continuous failure, is dropped so the integrate queue resumes, and the
+lead is alerted once; request the update again afterwards. The result
 records `resolvedRef` and `newCommit`, with `older-than-current-pin` or
 `diverged-from-current-pin` warnings when applicable. It installs dependencies
 in an independent detached worktree and schedules a fixed helper in a separate
