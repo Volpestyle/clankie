@@ -98,21 +98,37 @@ signed-in profile with no URL limits. Any room member could have Clankie read
 accounts, and paste the result into the room.
 
 The host now derives the boundary from the host-stamped `shell` authority it
-already receives. A call without it gets a separate logged-out CDP context
-created with `proxyServer` set to an in-process public-web proxy and
-`proxyBypassList: "<-loopback>"`, so Chrome's implicit loopback bypass doesn't
-apply. The proxy resolves each request's host, refuses the name if any answer is
-loopback, RFC1918, link-local, CGNAT/tailnet, multicast or another special-use
-address, refuses `localhost` and `.local` names, and connects to the address it
-checked, which closes DNS rebinding. Because every request in the context goes
-through it, the check covers redirects, frames, popups, `fetch` and
-`browser_use_evaluate` without per-navigation interception. Chrome already
-refuses page-initiated navigation to `file:` and `chrome:`. The host refuses
+already receives. Calls without it browse in a second, headless Chrome that the
+host launches lazily with a throwaway profile (deleted on close) and the mock
+keychain, so these turns never share a process, profile or secret store with
+the owner's Chrome. Each such conversation also gets its own disposable context
+there. That Chrome is launched with `--proxy-server` set to an in-process
+public-web proxy, `--proxy-bypass-list=<-loopback>` (so Chrome's implicit
+loopback bypass doesn't apply), and
+`--webrtc-ip-handling-policy=disable_non_proxied_udp`. The proxy resolves each
+request's host, refuses the name if any answer is loopback, RFC1918,
+link-local, CGNAT/tailnet, multicast or another special-use address, refuses
+`localhost` and `.local` names, and connects to the address it checked, which
+closes DNS rebinding. HTTP, WebSocket and HTTPS requests all go through it, so
+the check covers redirects, frames, popups, `fetch` and `browser_use_evaluate`
+without per-navigation interception. The WebRTC policy keeps ICE/STUN off
+direct UDP: peer connections may use only proxied TCP, which the same check
+covers. WebTransport (QUIC) sends nothing under the proxy configuration. Chrome
+already refuses page-initiated navigation to `file:` and `chrome:`.
+
+The WebRTC policy is a whole-browser switch with no per-context or CDP control,
+and without a proxy it disables WebRTC entirely. Setting it on the owner's
+Chrome would have broken machine turns. That is why these turns get a
+separate process rather than only a context in the owner's Chrome. The first
+version of this amendment's fix used a per-context proxy, and review (Sage)
+showed WebRTC sending STUN datagrams to loopback around it. The host refuses
 non-http(s) URLs in tool arguments, refuses `isolated: false` and headed-mode
 changes in these turns, and returns any tab that leaves the public web to
 `about:blank` before a tool reads it. A conversation that switches between
 machine and non-machine turns gets a fresh workspace on each switch.
 
-Machine-authorized turns keep the shared profile and unrestricted navigation.
-Proof: `apps/clankie/test/browser-public-web.integration.test.ts` drives a real
-Chrome against local fixture pages.
+Machine-authorized turns keep the shared profile, unrestricted navigation and
+WebRTC. Proof: `apps/clankie/test/browser-public-web.integration.test.ts` drives
+real Chrome against local HTTP and UDP fixtures. The private fixtures record no
+request or datagram from a restricted turn, and the machine control reaches
+both.

@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createSocket, type Socket } from "node:dgram";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -20,6 +21,8 @@ let privateServer: Server;
 let publicPort: number;
 let privatePort: number;
 const privateHits: string[] = [];
+let privateUdp: Socket;
+const privateDatagrams: number[] = [];
 
 async function listen(server: Server): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -47,6 +50,9 @@ beforeAll(async () => {
     response.end(`<p>${SECRET}</p>`);
   });
   privatePort = await listen(privateServer);
+  privateUdp = createSocket("udp4");
+  privateUdp.on("message", (message) => privateDatagrams.push(message.length));
+  await new Promise<void>((resolve) => privateUdp.bind(0, "127.0.0.1", resolve));
   publicServer = createServer((request, response) => {
     const path = request.url ?? "/";
     if (path === "/redirect") {
@@ -86,6 +92,7 @@ afterAll(async () => {
   await host?.close();
   await new Promise((resolve) => publicServer?.close(resolve));
   await new Promise((resolve) => privateServer?.close(resolve));
+  privateUdp?.close();
   await rm(stateRoot, { recursive: true, force: true });
 }, 60_000);
 
@@ -162,6 +169,45 @@ describe("browser in a turn without machine access", () => {
       reason: "approval_required",
     });
   }, 90_000);
+
+  it("keeps WebRTC from sending to private addresses", async () => {
+    // A STUN server, a remote host candidate and a WebTransport (QUIC) session on the
+    // private UDP fixture: each makes Chrome send datagrams there outside any HTTP proxy.
+    const probe = `(async () => {
+      const port = ${privateUdp.address().port};
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:" + port }] });
+      pc.createDataChannel("probe");
+      await pc.setLocalDescription(await pc.createOffer());
+      const peer = new RTCPeerConnection();
+      await peer.setRemoteDescription(pc.localDescription);
+      const answer = await peer.createAnswer();
+      peer.close();
+      await pc.setRemoteDescription({
+        type: "answer",
+        sdp: answer.sdp.replace("a=ice-ufrag", "a=candidate:1 1 udp 2122260223 127.0.0.1 " + port + " typ host\\r\\na=ice-ufrag"),
+      });
+      try {
+        const transport = new WebTransport("https://127.0.0.1:" + port + "/");
+        transport.ready.catch(() => {});
+        transport.closed.catch(() => {});
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      pc.close();
+      return "probed";
+    })()`;
+    for (const authority of [social, owner]) {
+      const before = privateDatagrams.length;
+      await call("browser_use_read", { url: publicUrl("/") }, authority);
+      expect(await call("browser_use_evaluate", { expression: probe }, authority)).toMatchObject({
+        outcome: "ok",
+        isError: false,
+        content: "probed",
+      });
+      const sent = privateDatagrams.length - before;
+      if (authority === social) expect(sent, "restricted WebRTC datagrams").toBe(0);
+      else expect(sent, "machine control reaches the UDP fixture").toBeGreaterThan(0);
+    }
+  }, 60_000);
 
   it("classifies loopback, private, link-local and tailnet addresses as private by default", async () => {
     const plain = await createBrowserHost({ stateRoot, attachmentRoot: stateRoot, logger });

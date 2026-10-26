@@ -1,10 +1,14 @@
 /**
- * The public web a turn without machine access may browse (VUH-2590). Chrome sends
- * every request of such a turn's browser context through this proxy, so the
- * address check covers navigations, redirects, frames, popups and page scripts.
+ * The public web a turn without machine access may browse (VUH-2590). Such turns use
+ * their own throwaway Chrome, never the owner's profile. It sends every request
+ * through this proxy and keeps WebRTC off direct UDP, so the address check covers
+ * navigations, redirects, frames, popups, page scripts and peer connections.
  * The proxy connects to the address it checked, so DNS rebinding cannot swap it.
  */
+import { spawn } from "node:child_process";
 import { lookup as dnsLookup } from "node:dns/promises";
+import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { createServer, request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { BlockList, connect, isIP, type AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
@@ -249,4 +253,102 @@ export async function startPublicWebProxy(
         for (const socket of tunnels) socket.destroy();
       }),
   };
+}
+
+export interface PublicWebChrome {
+  /** The browser-level CDP endpoint. */
+  readonly endpoint: string;
+  close(): Promise<void>;
+}
+
+async function chromeExecutable(configured: string | undefined): Promise<string> {
+  const candidates = configured
+    ? [configured]
+    : process.platform === "darwin"
+      ? [
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+      : process.platform === "win32"
+        ? [join(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google/Chrome/Application/chrome.exe")]
+        : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
+  for (const candidate of candidates)
+    if (
+      await access(candidate).then(
+        () => true,
+        () => false,
+      )
+    )
+      return candidate;
+  throw new Error("Chrome not found. Install Chrome or set CLANKIE_BROWSER_EXECUTABLE.");
+}
+
+/**
+ * Launch the headless Chrome for turns without machine access, with a fresh profile
+ * that is deleted on close. WebRTC's IP-handling policy is a whole-browser switch,
+ * which is why this is a separate process from the owner's Chrome.
+ */
+export async function launchPublicWebChrome(options: {
+  root: string;
+  proxy: PublicWebProxy;
+  executablePath?: string | undefined;
+}): Promise<PublicWebChrome> {
+  const executable = await chromeExecutable(options.executablePath);
+  await mkdir(options.root, { recursive: true, mode: 0o700 });
+  const profile = await mkdtemp(join(options.root, "public-"));
+  const child = spawn(
+    executable,
+    [
+      `--user-data-dir=${profile}`,
+      "--remote-debugging-port=0",
+      "--remote-debugging-address=127.0.0.1",
+      "--headless=new",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-background-networking",
+      "--window-size=1440,900",
+      `--proxy-server=${options.proxy.url}`,
+      // Chrome bypasses proxies for loopback unless told not to.
+      "--proxy-bypass-list=<-loopback>",
+      // WebRTC uses only proxied TCP, so ICE/STUN reaches no address the proxy refused.
+      "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+      // A throwaway profile needs no secret store; never touch the owner's keychain.
+      ...(process.platform === "darwin" ? ["--use-mock-keychain"] : []),
+      ...(process.platform === "linux" ? ["--password-store=basic"] : []),
+      "about:blank",
+    ],
+    { stdio: "ignore" },
+  );
+  let launchError: Error | undefined;
+  child.on("error", (error) => {
+    launchError = error;
+  });
+  let closing: Promise<void> | undefined;
+  const close = () =>
+    (closing ??= (async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+        child.kill("SIGTERM");
+        const timer = setTimeout(() => child.kill("SIGKILL"), 2000);
+        await exited;
+        clearTimeout(timer);
+      }
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    })());
+  try {
+    for (const deadline = Date.now() + 15_000; Date.now() < deadline;) {
+      if (launchError) throw launchError;
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error("Chrome exited before exposing CDP.");
+      const published = await readFile(join(profile, "DevToolsActivePort"), "utf8").catch(() => "");
+      const [port, path] = published.trim().split("\n");
+      if (port && /^\d+$/u.test(port) && path?.startsWith("/devtools/browser/"))
+        return { endpoint: `ws://127.0.0.1:${port}${path}`, close };
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("Chrome did not expose CDP within 15000 ms.");
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }

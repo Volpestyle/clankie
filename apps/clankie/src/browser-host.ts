@@ -1,6 +1,6 @@
 /** Clankie's private browser, driven directly through Browser Use Pi's public SDK. */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   Browser,
@@ -23,9 +23,11 @@ import {
 } from "@clankie/protocol";
 import { startBrowserRecording } from "./browser-recording.ts";
 import {
+  launchPublicWebChrome,
   nonPublicUrl,
   refusePublicWebUrl,
   startPublicWebProxy,
+  type PublicWebChrome,
   type PublicWebOptions,
   type PublicWebProxy,
 } from "./browser-public-web.ts";
@@ -140,7 +142,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       targets: Set<string>;
       contextId?: string | undefined;
       isolated: boolean;
-      /** A turn without machine access: logged out and confined to the public web. */
+      /** A turn without machine access: the public-web Chrome, never the owner's profile. */
       restricted: boolean;
       idle?: NodeJS.Timeout;
     }
@@ -151,6 +153,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   let headed = false;
   let closing = false;
   let publicWeb: PublicWebProxy | undefined;
+  let publicChrome: (PublicWebChrome & { connection: CDP }) | undefined;
+  let publicProfilesSwept = false;
   let lifecycle = Promise.resolve();
   const locked = <T>(action: () => Promise<T>): Promise<T> => {
     const next = lifecycle.then(action);
@@ -186,10 +190,17 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     endpoint = undefined;
     headed = false;
   }
-  async function recoverChrome() {
+  async function stopPublicChrome() {
+    const current = publicChrome;
+    publicChrome = undefined;
+    current?.connection.close();
+    await current?.close();
+  }
+  async function recoverChrome(restricted = false) {
     // Stop the sole owner before retiring workers whose targets died with Chrome.
-    await stopChrome();
+    await (restricted ? stopPublicChrome() : stopChrome());
     for (const lane of lanes.values()) {
+      if (lane.restricted !== restricted) continue;
       await lane.workspace
         ?.close()
         .catch((error) =>
@@ -240,21 +251,53 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       throw error;
     }
   }
+  async function ensurePublicChrome() {
+    if (publicChrome) {
+      try {
+        await publicChrome.connection.send("Browser.getVersion");
+        return;
+      } catch {
+        await recoverChrome(true);
+      }
+    }
+    publicWeb ??= await startPublicWebProxy({ ...options.publicWeb, logger: options.logger });
+    // This host is the only owner of these throwaway profiles; a crash in an earlier run may leave some.
+    if (!publicProfilesSwept) {
+      await rm(join(root, "public"), { recursive: true, force: true });
+      publicProfilesSwept = true;
+    }
+    const launched = await launchPublicWebChrome({
+      root: join(root, "public"),
+      proxy: publicWeb,
+      executablePath: env.CLANKIE_BROWSER_EXECUTABLE,
+    });
+    try {
+      publicChrome = { ...launched, connection: await CDP.connect(launched.endpoint, 15_000) };
+    } catch (error) {
+      await launched.close();
+      throw error;
+    }
+  }
   async function retire(_id: string, lane: NonNullable<ReturnType<typeof lanes.get>>) {
     clearTimeout(lane.idle);
+    const chrome = () => (lane.restricted ? publicChrome?.connection : connection);
     try {
       await lane.workspace?.close();
     } catch (error) {
-      const healthy = await connection?.send("Browser.getVersion").then(
-        () => true,
-        () => false,
-      );
+      const healthy = await chrome()
+        ?.send("Browser.getVersion")
+        .then(
+          () => true,
+          () => false,
+        );
       if (healthy) throw error;
-      await recoverChrome();
+      await recoverChrome(lane.restricted);
     }
     lane.workspace = undefined;
-    if (connection) {
-      const live = await connection.send("Target.getTargets").catch(() => undefined);
+    const cdp = chrome();
+    if (cdp) {
+      // allow-swallowed-rejection -- an unreachable Chrome has no live targets left to close.
+      const live = await cdp.send("Target.getTargets").catch(() => undefined);
       if (live) {
         for (let previous = -1; previous !== lane.targets.size;) {
           previous = lane.targets.size;
@@ -262,14 +305,14 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
             if (target.openerId && lane.targets.has(target.openerId)) lane.targets.add(target.targetId);
         }
         if (lane.contextId) {
-          const contexts = await connection.send("Target.getBrowserContexts");
+          const contexts = await cdp.send("Target.getBrowserContexts");
           if (contexts.browserContextIds.includes(lane.contextId))
-            await connection.send("Target.disposeBrowserContext", { browserContextId: lane.contextId });
+            await cdp.send("Target.disposeBrowserContext", { browserContextId: lane.contextId });
         } else
           for (const targetId of lane.targets) {
             if (!live.targetInfos.some((target) => target.targetId === targetId)) continue;
-            await connection.send("Target.closeTarget", { targetId }).catch(async (error) => {
-              const remaining = await connection!.send("Target.getTargets");
+            await cdp.send("Target.closeTarget", { targetId }).catch(async (error) => {
+              const remaining = await cdp!.send("Target.getTargets");
               if (remaining.targetInfos.some((target) => target.targetId === targetId)) throw error;
             });
           }
@@ -277,7 +320,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     }
     lane.targets.clear();
     lane.contextId = undefined;
-    if (![...lanes.values()].some((other) => other.workspace)) await stopChrome();
+    const browsing = [...lanes.values()].filter((other) => other.workspace);
+    if (!browsing.some((other) => !other.restricted)) await stopChrome();
+    if (!browsing.some((other) => other.restricted)) await stopPublicChrome();
   }
   function armLaneIdle(
     id: string,
@@ -406,7 +451,11 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
             }
             const nextHeaded = args.headed ?? headed;
             if (args.headed !== undefined && args.headed !== headed) {
-              if ([...lanes.entries()].some(([otherId, other]) => otherId !== id && other.workspace))
+              if (
+                [...lanes.entries()].some(
+                  ([otherId, other]) => otherId !== id && other.workspace && !other.restricted,
+                )
+              )
                 throw new Error("Chrome mode change unavailable while other conversations are browsing");
               await retire(id, current);
               lanes.set(id, current);
@@ -418,35 +467,28 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
               current.isolated = args.isolated;
             }
             headed = nextHeaded;
-            await ensureChrome();
+            await (current.restricted ? ensurePublicChrome() : ensureChrome());
             await authority?.guard?.();
             if (!current.workspace) {
-              if (current.restricted) {
-                publicWeb ??= await startPublicWebProxy({ ...options.publicWeb, logger: options.logger });
-                // Chrome bypasses proxies for loopback unless told not to; this context must not.
+              const cdp = current.restricted ? publicChrome!.connection : connection!;
+              const cdpUrl = current.restricted ? publicChrome!.endpoint : endpoint!;
+              // Each restricted conversation also gets its own disposable context in that Chrome.
+              if (current.isolated || current.restricted)
                 current.contextId = (
-                  await connection!.send("Target.createBrowserContext", {
-                    disposeOnDetach: true,
-                    proxyServer: publicWeb.url,
-                    proxyBypassList: "<-loopback>",
-                  })
+                  await cdp.send("Target.createBrowserContext", { disposeOnDetach: true })
                 ).browserContextId;
-              } else if (current.isolated)
-                current.contextId = (
-                  await connection!.send("Target.createBrowserContext", { disposeOnDetach: true })
-                ).browserContextId;
-              const { targetId } = await connection!.send("Target.createTarget", {
+              const { targetId } = await cdp.send("Target.createTarget", {
                 url: "about:blank",
                 ...(current.contextId ? { browserContextId: current.contextId } : {}),
               });
               current.targets.add(targetId);
               current.workspace = await createBrowserWorkspace(
                 options,
-                Browser.chrome({ cdpUrl: endpoint!, targetId }),
+                Browser.chrome({ cdpUrl, targetId }),
                 createHash("sha256").update(id).digest("hex"),
                 current.targets,
                 current.contextId,
-                current.restricted,
+                current.restricted ? cdpUrl : undefined,
               );
             }
           });
@@ -479,6 +521,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
           for (const [id, lane] of lanes) await retire(id, lane);
         } finally {
           await stopChrome();
+          await stopPublicChrome();
         }
       });
       await discovery.close();
@@ -493,8 +536,10 @@ async function createBrowserWorkspace(
   key: string,
   targets: Set<string>,
   contextId?: string,
-  restricted = false,
+  /** The public-web Chrome's endpoint; set only for turns without machine access. */
+  publicEndpoint?: string,
 ): Promise<BrowserHost> {
+  const restricted = publicEndpoint !== undefined;
   const env = options.environment ?? process.env;
   const root = join(options.stateRoot, "browser");
   const profileDir = join(root, "profile");
@@ -576,12 +621,15 @@ async function createBrowserWorkspace(
     });
     try {
       const initial = await session.execute("await page.info()");
-      const [port, path] = (await readFile(join(profileDir, "DevToolsActivePort"), "utf8"))
-        .trim()
-        .split("\n");
-      if (!port || !/^\d+$/u.test(port) || !path?.startsWith("/devtools/browser/") || !initial.targetId)
+      const [port, path] = publicEndpoint
+        ? []
+        : (await readFile(join(profileDir, "DevToolsActivePort"), "utf8")).trim().split("\n");
+      if (
+        !initial.targetId ||
+        (!publicEndpoint && (!port || !/^\d+$/u.test(port) || !path?.startsWith("/devtools/browser/")))
+      )
         throw new Error("Owned Chrome did not publish its browser endpoint");
-      connection = await CDP.connect(`ws://127.0.0.1:${port}${path}`, 15_000);
+      connection = await CDP.connect(publicEndpoint ?? `ws://127.0.0.1:${port}${path}`, 15_000);
       await select(initial.targetId);
       try {
         recordingRequested = (await options.recordSessions?.()) ?? false;
@@ -592,7 +640,11 @@ async function createBrowserWorkspace(
         );
       }
       options.logger.info(
-        { event: "browser.host.ready", provider: "browser-use-pi", profileDir },
+        {
+          event: "browser.host.ready",
+          provider: "browser-use-pi",
+          profileDir: publicEndpoint ? "public" : profileDir,
+        },
         "browser ready",
       );
     } catch (error) {
