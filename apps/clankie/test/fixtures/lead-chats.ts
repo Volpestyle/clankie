@@ -39,6 +39,8 @@ export async function leadChatFixture(
     localUnavailable?: () => boolean;
     nativeStatus?: () => string;
     nativeSourceProof?: boolean;
+    /** Runs before the complete local Herdr inventory answers; it may hold or fail that answer. */
+    inventory?: () => Promise<void>;
     leadRestartCheckMs?: number;
     defaultLead?: boolean;
     beforeOpen?: (sessionId: string) => Promise<void>;
@@ -130,7 +132,14 @@ export async function leadChatFixture(
   const adoption = vi.spyOn(HerdrWatchStore.prototype, "adoptSeat");
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const runner: HerdrWatchRunner = {
-    ...(options.slowFleetMs === undefined && !options.nativeSourceProof ? {} : { list: async () => [head] }),
+    ...(options.slowFleetMs === undefined && !options.nativeSourceProof
+      ? {}
+      : {
+          list: async () => {
+            await options.inventory?.();
+            return [head];
+          },
+        }),
     get: async () => {
       if (options.paneReadFails?.()) throw new Error("Herdr pane read unavailable");
       return head;

@@ -81,6 +81,69 @@ it.each([
   else expect((await f.captain.leadRestartStatus!()).waiting).toBeUndefined();
 });
 
+// VUH-2870: a read while a round still proves its source keeps the latest
+// completed check; only a refusal that round establishes replaces it.
+it("keeps the latest check while a round is pending and clears it on that round's refusal", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime("2026-10-26T12:00:00Z");
+  // Once held, the next source proof waits for its local inventory until the test answers.
+  let held: { entered: () => void; answer: Promise<void> } | undefined;
+  let answer = () => {};
+  let unanswered: Error | undefined;
+  const f = await leadChatFixture(false, cleanup, {
+    nativeSourceProof: true,
+    defaultLead: true,
+    leadRestartCheckMs: 25,
+    inventory: async () => {
+      if (held !== undefined) {
+        held.entered();
+        await held.answer;
+      }
+      if (unanswered !== undefined) throw unanswered;
+    },
+    beforeOpen: async (sessionId) => {
+      const path = join(process.env.CLAUDE_CONFIG_DIR!, "projects", "-scratch", `${sessionId}.jsonl`);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(
+        path,
+        [
+          { type: "user", timestamp: new Date(Date.now() - 3_600_000).toISOString() },
+          { type: "assistant", message: { usage: { input_tokens: 100_000 } } },
+        ]
+          .map((line) => JSON.stringify(line))
+          .join("\n") + "\n",
+      );
+    },
+  });
+  cleanup.push(async () => answer());
+  const status = statusReader(f.captain);
+  await expect.poll(status).toMatchObject({ check: { contextTokens: 100_000, due: false } });
+  await new Promise<void>((entered) => {
+    const answered = new Promise<void>((resolve) => {
+      answer = () => resolve();
+    });
+    held = { entered: () => entered(), answer: answered };
+  });
+  const pending = await status();
+  expect(pending.check).toMatchObject({ contextTokens: 100_000, due: false });
+  expect(pending.unknownCheck).toBeUndefined();
+  expect(parseProtocolResponse(PreviousLeadRestartStatusSchema, pending).check).toMatchObject({
+    contextTokens: 100_000,
+    due: false,
+  });
+
+  unanswered = new Error("Herdr socket closed");
+  held = undefined;
+  answer();
+  await expect.poll(status).toMatchObject({
+    waiting: { lastReason: "source_unproven", lastDetail: expect.stringContaining("Herdr socket closed") },
+  });
+  const refused = await status();
+  expect(refused.check).toBeUndefined();
+  expect(refused.unknownCheck).toMatchObject({ at: expect.stringMatching(/^2026-10-26T12:00:0/u) });
+  expect(parseProtocolResponse(PreviousLeadRestartStatusSchema, refused).check).toBeUndefined();
+});
+
 // Production rounds, source proof, transcript discovery, persisted wait and
 // authenticated status route. The named machine times out; uniqueness stays strict.
 it.each(["source_unproven", "ambiguous", "missing", "empty"])(

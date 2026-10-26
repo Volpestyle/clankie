@@ -5591,8 +5591,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (leadRestartAskedAt !== undefined && Date.now() - leadRestartAskedAt < LEAD_RESTART_RETRY_MS) return;
     // v1 readers require check.due. Omit that legacy optional check when the
     // budget is unknown, keeping the refusal readable through additive decoding.
-    leadRestartCheck = undefined;
-    leadRestartUnknownCheck = { at: new Date().toISOString() };
+    // Only a refusal this round establishes replaces the latest check: a read
+    // while the round is still running sees the previous result (VUH-2870).
+    const attemptedAt = new Date().toISOString();
+    const unknown = (observed: NonNullable<LeadRestartStatus["unknownCheck"]> = { at: attemptedAt }) => {
+      leadRestartCheck = undefined;
+      leadRestartUnknownCheck = observed;
+    };
     let sourceDetail = "No native Claude session could be proven for the default lead.";
     let source: HerdrAgentSnapshot | undefined;
     try {
@@ -5602,17 +5607,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     } catch (error) {
       sourceDetail = String(error);
     }
-    if (source?.agent !== "claude" || source.session === undefined)
+    if (source?.agent !== "claude" || source.session === undefined) {
+      unknown();
       return leadSeats.restartRefused(conversationId, "source_unproven", sourceDetail);
+    }
     let usage: Awaited<ReturnType<typeof readClaudeSessionUsage>>;
     let usageDetail: string;
     try {
       const lookup = await inspectHerdrSeatTranscriptPathAsync(source.agent, source.session);
       usageDetail = `${source.session.value}: candidates ${JSON.stringify(lookup.candidates)}${lookup.candidates.length ? "" : `; searched ${JSON.stringify(lookup.searched)}`}`;
-      if (lookup.path === undefined)
+      if (lookup.path === undefined) {
+        unknown();
         return leadSeats.restartRefused(conversationId, "usage_unreadable", usageDetail);
+      }
       usage = await readClaudeSessionUsage(lookup.path);
     } catch (error) {
+      unknown();
       return leadSeats.restartRefused(conversationId, "usage_unreadable", String(error));
     }
     const large = (usage.contextTokens ?? 0) >= LEAD_RESTART_CONTEXT_TOKENS;
@@ -5622,9 +5632,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
       ...(usage.startedAt === undefined ? {} : { sessionStartedAt: new Date(usage.startedAt).toISOString() }),
     };
-    leadRestartUnknownCheck = observed;
-    if (!large && !old && (usage.contextTokens === undefined || usage.startedAt === undefined))
+    if (!large && !old && (usage.contextTokens === undefined || usage.startedAt === undefined)) {
+      unknown(observed);
       return leadSeats.restartRefused(conversationId, "usage_unreadable", usageDetail);
+    }
     leadRestartUnknownCheck = undefined;
     leadRestartCheck = { ...observed, due: large || old };
     if (!large && !old) return leadSeats.restartSettled(conversationId);
