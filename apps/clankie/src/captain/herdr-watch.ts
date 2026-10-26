@@ -6120,15 +6120,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const waiting = new AbortController();
     const abort = () => waiting.abort();
     signal.addEventListener("abort", abort, { once: true });
+    let retryDelayMs = 0;
     await Promise.race([
       delay(RETRY_ADMISSION_MS),
       this.runner.waitForChange(pane.paneId, "working", waiting.signal),
     ])
-      .catch(() => undefined)
+      .catch((error) => {
+        if (!signal.aborted) {
+          console.warn("Herdr working watch observation failed", record.id, String(error));
+          retryDelayMs = RETRY_ADMISSION_MS;
+        }
+      })
       .finally(() => {
         waiting.abort();
         signal.removeEventListener("abort", abort);
-        if (!signal.aborted) this.retry(record, 0);
+        if (!signal.aborted) this.retry(record, retryDelayMs);
       });
   }
 
