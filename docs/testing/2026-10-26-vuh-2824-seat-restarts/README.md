@@ -71,9 +71,24 @@ Remote and prepared command-pane fresh restarts remain unsupported; loss of
 original native control after service replacement refuses. Unknown facts and
 uncertain originals never authorize fallback dispatch.
 
-VUH-2825 must land first; the final VUH-2824 rebase, exact Elin review and normal
-root gate/revalidation follow its landed SHA. The final issue report records
-those outcomes separately from these focused checks. Mika owns the activity
+After VUH-2825 landed and the later main window opened, the final rebase onto
+`ffd2bafc4` preserved Elin's exact `c8e8fcaa` source approval. The single root gate
+at `a54ef0e37` passed static checks and all typechecks, then failed at
+`lead-native-hire.test.ts`: the adapter's unconditional 500K keys violated an
+explicit controller-owned launcher's exact configuration guard. It stopped with
+3,718 tests passed, 46 skipped and one failure; no push occurred.
+
+R4 confines the automatic 500K Codex backstop to the default local launcher.
+Explicit and per-view remote server launchers preserve their configured
+arguments, including the existing strict isolation guard. The production native
+hire fixture and adapter tests reproduce the failure before the fix (7 failed /
+26 passed) and pass after it (33/33); lint and formatting also pass. No evaluator
+or real harness ran. `landing-repair-proof.json` retains the failed root report
+and log with the focused red/green evidence. This changes the exact patch and
+requires Iona's new review and a valid root gate before any push.
+
+The final issue report records review, gate and remote readback outcomes
+separately from these focused checks. Mika owns the activity
 producer; his tree was not edited. GLOBAL retains the main-window push decision,
 runtime rollout and closure.
 

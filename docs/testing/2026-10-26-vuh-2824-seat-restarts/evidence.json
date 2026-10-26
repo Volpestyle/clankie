@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "landing-repair-proof.json",
+      "size": 930840,
+      "sha256": "b2c81d0356f93e1436589f5d8266a0ae250da96c97bee46187b72f7c2668be2a",
+      "url": "clankie://evidence/sha256/b2c81d0356f93e1436589f5d8266a0ae250da96c97bee46187b72f7c2668be2a"
+    },
+    {
       "path": "repair-source-proof.json",
       "size": 239233,
       "sha256": "697d6c61b3367a5e942c72331221a21f07ee2f1092ca4406ce335fcf1e902594",

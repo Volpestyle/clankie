@@ -4598,12 +4598,15 @@ controller refuse visibly; remote restart control remains unavailable. These
 are engineering limitations, not a request to type into or replace the pane.
 Claude hires set `autoCompactWindow: 500000` and launch with
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=500000` so saved model-specific windows cannot
-override the backstop; Codex hires pass native
+override the backstop; default local Codex launches pass native
 `model_auto_compact_token_limit=500000` and
 `model_auto_compact_token_limit_scope="total"`. Codex's smaller native model
 window can clamp that backstop. The installed Codex 0.163.0 binary exposes both
 keys, and [its tagged native configuration](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/config_toml.rs)
-declares their token threshold and scope. These launch settings do not alter lead restart ownership.
+declares their token threshold and scope. Explicit controller-owned server
+launchers retain their configured arguments; per-view remote launchers also keep
+their own configuration because their native versions have not been verified.
+These launch settings do not alter lead restart ownership.
 
 `--lead-restarts on` (the default) lets the service restart the default lead
 seat fresh in its own pane when it is idle, the owner has written nothing for 15

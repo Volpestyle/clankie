@@ -157,8 +157,6 @@ describe("Codex harness seat adapter", () => {
       "mcp_servers.worker.required=false",
       'mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
       'mcp_servers.worker.default_tools_approval_mode="approve"',
-      "model_auto_compact_token_limit=500000",
-      'model_auto_compact_token_limit_scope="total"',
     ]);
     if (started.outcome === "started") await started.control.close();
     const ordinary = createCodexSeatAdapter({
@@ -173,6 +171,29 @@ describe("Codex harness seat adapter", () => {
       'model_auto_compact_token_limit_scope="total"',
     ]);
     if (local.outcome === "started") await local.control.close();
+  });
+
+  it("preserves an explicit server launcher's configured compaction arguments", async () => {
+    const f = fixture();
+    const configured = [
+      "mcp_servers.linear.enabled=false",
+      "model_auto_compact_token_limit=250000",
+      'model_auto_compact_token_limit_scope="total"',
+    ];
+    const server = async () => {
+      throw new Error("fixture server boundary");
+    };
+    const adapter = createCodexSeatAdapter({
+      start: f.start,
+      herdr: f.herdr,
+      trackerOverrides: async () => [...configured],
+      server,
+    });
+    const started = await adapter.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
+    expect(started.outcome).toBe("started");
+    expect(f.start.mock.calls[0]![0].config).toEqual(configured);
+    expect(f.start.mock.calls[0]![0].server).toBe(server);
+    if (started.outcome === "started") await started.control.close();
   });
 
   it("forwards the local service's discovery state into Codex's worker MCP environment", async () => {

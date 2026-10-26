@@ -377,13 +377,17 @@ export function createCodexSeatAdapter(
                 detail: `Codex startup is pending in pane ${view.paneId}. The server and native TUI remain alive; ${launch.resumeSessionId ? "the saved thread may still be restoring. Inspect native progress and any owner trust prompt there" : "review any hook or folder trust prompt there"}. The original brief will continue automatically when ready; do not retry the hire.`,
               });
             },
-            // Native Codex 0.163 supports this token limit; keep its model window
-            // and trust policy unchanged. Smaller windows retain their native cap.
-            config: [
-              ...trackerOverrides,
-              "model_auto_compact_token_limit=500000",
-              'model_auto_compact_token_limit_scope="total"',
-            ],
+            // The default local Codex 0.163 supports this backstop without changing
+            // its model window or trust policy. Caller-owned launchers keep their
+            // own native configuration, including remote version compatibility.
+            config:
+              options.server === undefined && options.serverForView === undefined
+                ? [
+                    ...trackerOverrides,
+                    "model_auto_compact_token_limit=500000",
+                    'model_auto_compact_token_limit_scope="total"',
+                  ]
+                : trackerOverrides,
             ...(launch.resumeSessionId ? { resumeThreadId: launch.resumeSessionId } : {}),
             ...(launch.model ? { model: launch.model } : {}),
             ...(launch.effort ? { effort: launch.effort } : {}),
