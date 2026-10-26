@@ -68,6 +68,8 @@ const open = (headed?: boolean) => ({
   tool: "browser_use_open",
   arguments: headed === undefined ? {} : { headed },
 });
+// These cases cover the machine-authorized browser; browser-public-web.integration covers the rest.
+const machine = { shell: true };
 const code = () => ({
   schemaVersion: 1 as const,
   tool: "browser_use_javascript",
@@ -103,7 +105,11 @@ describe("browser host", () => {
   it("keeps browser-only evaluation out of the Node REPL", async () => {
     const current = await build();
     const expression = "document.title";
-    await current.call({ schemaVersion: 1, tool: "browser_use_evaluate", arguments: { expression } });
+    await current.call(
+      { schemaVersion: 1, tool: "browser_use_evaluate", arguments: { expression } },
+      undefined,
+      machine,
+    );
     expect(page.evaluate).toHaveBeenCalledWith(expression);
     expect(execute).toHaveBeenCalledTimes(1); // Host-authored initialization only.
   });
@@ -111,11 +117,15 @@ describe("browser host", () => {
     const current = await build();
     page.evaluate.mockResolvedValueOnce("useful text ".repeat(6000));
     expect(
-      await current.call({
-        schemaVersion: 1,
-        tool: "browser_use_read",
-        arguments: { url: "https://example.com" },
-      }),
+      await current.call(
+        {
+          schemaVersion: 1,
+          tool: "browser_use_read",
+          arguments: { url: "https://example.com" },
+        },
+        undefined,
+        machine,
+      ),
     ).toMatchObject({ content: "useful text ".repeat(6000) });
     await current.call(code(), undefined, { shell: true });
     expect(BrowserUse.create).toHaveBeenCalledTimes(2);
@@ -132,7 +142,11 @@ describe("browser host", () => {
   });
   it("saves screenshots as hash-bound artifacts", async () => {
     const current = await build();
-    const result = await current.call({ schemaVersion: 1, tool: "browser_use_screenshot", arguments: {} });
+    const result = await current.call(
+      { schemaVersion: 1, tool: "browser_use_screenshot", arguments: {} },
+      undefined,
+      machine,
+    );
     const digest = createHash("sha256").update(jpeg).digest("hex");
     expect(result).toMatchObject({
       outcome: "ok",
@@ -142,24 +156,24 @@ describe("browser host", () => {
   });
   it("resets the session on headed changes and returns to headless after idle", async () => {
     const current = await build(20);
-    await current.call(open());
-    await current.call(open(true));
+    await current.call(open(), undefined, machine);
+    await current.call(open(true), undefined, machine);
     expect(close).toHaveBeenCalledTimes(2);
     expect(BrowserUse.create).toHaveBeenCalledWith(
       expect.objectContaining({ browser: expect.objectContaining({ headless: false }) }),
     );
     await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(4));
-    await current.call(open());
+    await current.call(open(), undefined, machine);
     expect(BrowserUse.create).toHaveBeenCalledWith(
       expect.objectContaining({ browser: expect.objectContaining({ headless: true }) }),
     );
   });
   it("drains accepted calls before shutdown and rejects later calls", async () => {
     const current = await build();
-    const first = current.call(open());
+    const first = current.call(open(), undefined, machine);
     const second = current.call(code(), undefined, { shell: true });
     const stopped = current.close();
-    expect(await current.call(open())).toMatchObject({ outcome: "refused" });
+    expect(await current.call(open(), undefined, machine)).toMatchObject({ outcome: "refused" });
     expect(await first).toMatchObject({ outcome: "ok" });
     expect(await second).toMatchObject({ outcome: "ok" });
     await stopped;
@@ -167,7 +181,7 @@ describe("browser host", () => {
   });
   it("reports worker loss without replaying the uncertain cell", async () => {
     const current = await build();
-    await current.call(open());
+    await current.call(open(), undefined, machine);
     execute.mockRejectedValueOnce(
       new CellError("worker timed out; bindings reset", { text: "before timeout", images: [] }, true),
     );
@@ -182,7 +196,7 @@ describe("browser host", () => {
   it("reports missing Chrome as unavailable without crashing service creation", async () => {
     vi.mocked(BrowserUse.create).mockRejectedValueOnce(new Error("Chrome not found"));
     const current = await build();
-    expect(await current.call(open())).toMatchObject({
+    expect(await current.call(open(), undefined, machine)).toMatchObject({
       outcome: "refused",
       reason: "browser_unavailable",
       detail: "Chrome not found",
@@ -191,7 +205,7 @@ describe("browser host", () => {
 
   it("observes the selected tab even when the cell fails after changing it", async () => {
     const current = await build();
-    await current.call(open());
+    await current.call(open(), undefined, machine);
     execute.mockRejectedValueOnce(
       new CellError("after tab switch", { text: "", images: [], targetId: "tab-2" }, false),
     );
@@ -215,7 +229,7 @@ describe("browser host", () => {
       logger,
       recordSessions: async () => true,
     });
-    await host.call({ ...open(), arguments: { url: "https://example.com" } });
+    await host.call({ ...open(), arguments: { url: "https://example.com" } }, undefined, machine);
     await host.close();
     expect(stopped).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(2);
@@ -229,7 +243,7 @@ describe("browser host", () => {
       logger,
       recordSessions: async () => true,
     });
-    expect(await host.call(open())).toMatchObject({ outcome: "ok" });
+    expect(await host.call(open(), undefined, machine)).toMatchObject({ outcome: "ok" });
     await host.close();
     expect(close).toHaveBeenCalledTimes(2);
     expect(logger.warn).toHaveBeenCalledWith(
@@ -240,8 +254,8 @@ describe("browser host", () => {
 
   it("keeps idle cleanup armed after an aborted call", async () => {
     const current = await build(20);
-    await current.call(open());
-    await current.call(open(), AbortSignal.abort());
+    await current.call(open(), undefined, machine);
+    await current.call(open(), AbortSignal.abort(), machine);
     await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
   });
   it("refuses old tools and unknown arguments before starting a browser", async () => {
@@ -258,7 +272,7 @@ describe("browser host", () => {
 
 it("rechecks conversation authority inside the browser queue before any queued effect", async () => {
   const current = await build();
-  await current.call(open());
+  await current.call(open(), undefined, machine);
   let release!: () => void;
   let started!: () => void;
   const begun = new Promise<void>((resolve) => {
@@ -279,6 +293,7 @@ it("rechecks conversation authority inside the browser queue before any queued e
     { schemaVersion: 1, tool: "browser_use_click", arguments: { x: 10, y: 10 } },
     undefined,
     {
+      ...machine,
       guard: async () => {
         if (!permitted) throw new Error("stale conversation authority");
       },
@@ -302,6 +317,7 @@ it("rechecks conversation authority after asynchronous browser setup before page
     { schemaVersion: 1, tool: "browser_use_click", arguments: { x: 10, y: 10 } },
     undefined,
     {
+      ...machine,
       guard: async () => {
         if (!allowed) throw new Error("authority changed during browser setup");
       },

@@ -3868,7 +3868,9 @@ estimate from registry prices, not an invoice. Terminal receipts name
 
 Each conversation browses concurrently in its own tabs and workspace. Calls
 serialize within that conversation. The shared profile retains Clankie's logins;
-`isolated: true` opens a logged-out context. Close/60-second idle cleanup affects
+`isolated: true` opens a logged-out context. A call without machine authority
+(a captain bearer, or a social or voice turn) always browses logged out and only
+on public http(s) addresses; anything else returns `doctrine_denied`. Close/60-second idle cleanup affects
 only that conversation, with no browser body lease or recovery hold. One service
 owner launches and recovers Chrome; a headed mode change is unavailable while
 other conversations browse.

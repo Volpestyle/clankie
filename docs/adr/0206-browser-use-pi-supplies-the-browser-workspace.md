@@ -89,3 +89,30 @@ and no caller can steal a lock or manufacture machine authority.
 
 The earlier whole-browser serialization and burst/lease descriptions above are
 historical and superseded by this amendment.
+
+## Amendment: turns without machine access browse the public web logged out (2026-10-25, VUH-2590)
+
+Every lane registered the browser, and social and voice turns shared the
+signed-in profile with no URL limits. Any room member could have Clankie read
+`file://` paths, loopback services or LAN devices, or act in his logged-in
+accounts, and paste the result into the room.
+
+The host now derives the boundary from the host-stamped `shell` authority it
+already receives. A call without it gets a separate logged-out CDP context
+created with `proxyServer` set to an in-process public-web proxy and
+`proxyBypassList: "<-loopback>"`, so Chrome's implicit loopback bypass doesn't
+apply. The proxy resolves each request's host, refuses the name if any answer is
+loopback, RFC1918, link-local, CGNAT/tailnet, multicast or another special-use
+address, refuses `localhost` and `.local` names, and connects to the address it
+checked, which closes DNS rebinding. Because every request in the context goes
+through it, the check covers redirects, frames, popups, `fetch` and
+`browser_use_evaluate` without per-navigation interception. Chrome already
+refuses page-initiated navigation to `file:` and `chrome:`. The host refuses
+non-http(s) URLs in tool arguments, refuses `isolated: false` and headed-mode
+changes in these turns, and returns any tab that leaves the public web to
+`about:blank` before a tool reads it. A conversation that switches between
+machine and non-machine turns gets a fresh workspace on each switch.
+
+Machine-authorized turns keep the shared profile and unrestricted navigation.
+Proof: `apps/clankie/test/browser-public-web.integration.test.ts` drives a real
+Chrome against local fixture pages.

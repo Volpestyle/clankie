@@ -22,6 +22,13 @@ import {
   type CallBrowserToolResult,
 } from "@clankie/protocol";
 import { startBrowserRecording } from "./browser-recording.ts";
+import {
+  nonPublicUrl,
+  refusePublicWebUrl,
+  startPublicWebProxy,
+  type PublicWebOptions,
+  type PublicWebProxy,
+} from "./browser-public-web.ts";
 
 export function browserEnabled(value: string | undefined): boolean {
   return !["0", "false", "no", "off"].includes(value?.trim().toLowerCase() ?? "");
@@ -40,7 +47,7 @@ const tools = {
       isolated: z.boolean().optional(),
     }),
     description:
-      "Open Clankie's private browser and optionally navigate. headed:true opens his own login/takeover window; changing mode resets JavaScript bindings. Logins persist. isolated:true uses a logged-out context. Idle cleanup closes only this conversation after 60 seconds. Mode changes are unavailable while other conversations browse.",
+      "Open Clankie's private browser and optionally navigate. headed:true opens his own login/takeover window; changing mode resets JavaScript bindings. Logins persist. isolated:true uses a logged-out context. A turn without machine access always browses logged out, only public http(s) addresses, with no mode changes. Idle cleanup closes only this conversation after 60 seconds. Mode changes are unavailable while other conversations browse.",
   },
   browser_use_javascript: {
     schema: z.strictObject({ code: string, timeoutMs: z.number().int().min(1).max(120_000).optional() }),
@@ -108,6 +115,8 @@ export interface BrowserHostOptions {
   blockedTools?: readonly string[];
   recordSessions?: () => Promise<boolean>;
   idleMs?: number;
+  /** Test seams for the public-web boundary of turns without machine access. */
+  publicWeb?: PublicWebOptions;
 }
 export interface BrowserHost {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
@@ -131,6 +140,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       targets: Set<string>;
       contextId?: string | undefined;
       isolated: boolean;
+      /** A turn without machine access: logged out and confined to the public web. */
+      restricted: boolean;
       idle?: NodeJS.Timeout;
     }
   >();
@@ -139,6 +150,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   let endpoint: string | undefined;
   let headed = false;
   let closing = false;
+  let publicWeb: PublicWebProxy | undefined;
   let lifecycle = Promise.resolve();
   const locked = <T>(action: () => Promise<T>): Promise<T> => {
     const next = lifecycle.then(action);
@@ -300,6 +312,22 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     "catalog",
     new Set(),
   );
+  async function publicWebRefusal(
+    tool: string,
+    args: Record<string, unknown>,
+    currentHeaded: boolean,
+  ): Promise<string | undefined> {
+    if (tool !== "browser_use_open" && tool !== "browser_use_read") return undefined;
+    const { url: target, headed: nextHeaded, isolated } = tools.browser_use_open.schema.parse(args);
+    if (isolated === false) return "A turn without machine access cannot use the signed-in profile.";
+    if (nextHeaded !== undefined && nextHeaded !== currentHeaded)
+      return "A turn without machine access cannot change the browser's mode.";
+    if (target === undefined) return undefined;
+    const refusal = await refusePublicWebUrl(target, options.publicWeb);
+    return refusal === undefined
+      ? undefined
+      : `A turn without machine access browses only public http(s) addresses: ${refusal}.`;
+  }
   return {
     catalog: (signal) =>
       closing
@@ -314,9 +342,11 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
           detail: "browser_host_closed",
         });
       const id = authority?.conversationId ?? "operator";
+      // Machine authority is host-stamped; anything less browses logged out on the public web.
+      const restricted = authority?.shell !== true;
       let lane = lanes.get(id);
       if (!lane) {
-        lane = { tail: Promise.resolve(), targets: new Set(), isolated: false };
+        lane = { tail: Promise.resolve(), targets: new Set(), isolated: false, restricted };
         lanes.set(id, lane);
       }
       const current = lane;
@@ -348,6 +378,11 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
             isError: true,
             artifacts: [],
           };
+        if (restricted) {
+          const refusal = await publicWebRefusal(request.tool, parsed.data, headed);
+          if (refusal !== undefined)
+            return { outcome: "refused", tool: request.tool, reason: "doctrine_denied", detail: refusal };
+        }
         if (request.tool === "browser_use_close") {
           await locked(() => retire(id, current));
           return {
@@ -364,6 +399,11 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
             lanes.set(id, current);
             const args =
               request.tool === "browser_use_open" ? tools.browser_use_open.schema.parse(parsed.data) : {};
+            if (restricted !== current.restricted) {
+              await retire(id, current);
+              lanes.set(id, current);
+              current.restricted = restricted;
+            }
             const nextHeaded = args.headed ?? headed;
             if (args.headed !== undefined && args.headed !== headed) {
               if ([...lanes.entries()].some(([otherId, other]) => otherId !== id && other.workspace))
@@ -372,7 +412,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
               lanes.set(id, current);
               headed = args.headed;
             }
-            if (args.isolated !== undefined && args.isolated !== current.isolated) {
+            if (!restricted && args.isolated !== undefined && args.isolated !== current.isolated) {
               await retire(id, current);
               lanes.set(id, current);
               current.isolated = args.isolated;
@@ -381,7 +421,17 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
             await ensureChrome();
             await authority?.guard?.();
             if (!current.workspace) {
-              if (current.isolated)
+              if (current.restricted) {
+                publicWeb ??= await startPublicWebProxy({ ...options.publicWeb, logger: options.logger });
+                // Chrome bypasses proxies for loopback unless told not to; this context must not.
+                current.contextId = (
+                  await connection!.send("Target.createBrowserContext", {
+                    disposeOnDetach: true,
+                    proxyServer: publicWeb.url,
+                    proxyBypassList: "<-loopback>",
+                  })
+                ).browserContextId;
+              } else if (current.isolated)
                 current.contextId = (
                   await connection!.send("Target.createBrowserContext", { disposeOnDetach: true })
                 ).browserContextId;
@@ -396,6 +446,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
                 createHash("sha256").update(id).digest("hex"),
                 current.targets,
                 current.contextId,
+                current.restricted,
               );
             }
           });
@@ -431,6 +482,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         }
       });
       await discovery.close();
+      await publicWeb?.close();
     },
   };
 }
@@ -441,6 +493,7 @@ async function createBrowserWorkspace(
   key: string,
   targets: Set<string>,
   contextId?: string,
+  restricted = false,
 ): Promise<BrowserHost> {
   const env = options.environment ?? process.env;
   const root = join(options.stateRoot, "browser");
@@ -547,6 +600,22 @@ async function createBrowserWorkspace(
       throw error;
     }
   }
+  /** Return a restricted tab that left the public web to about:blank before anything reads it. */
+  async function confine() {
+    if (!restricted || !page || !connection) return;
+    // A refused navigation briefly leaves the target without a URL while Chrome swaps in its error page.
+    let current = "";
+    for (const deadline = Date.now() + 3000; ; await new Promise((resolve) => setTimeout(resolve, 50))) {
+      current = (await connection.send("Target.getTargetInfo", { targetId: page.targetId })).targetInfo.url;
+      if (current !== "" || Date.now() > deadline) break;
+    }
+    if (current === "about:blank" || current.startsWith("chrome-error://chromewebdata/")) return;
+    if (nonPublicUrl(current, options.publicWeb) === undefined) return;
+    await page.cdp("Page.navigate", { url: "about:blank" });
+    throw new Error(
+      `Refused ${current.slice(0, 200)}: a turn without machine access browses only public http(s) addresses. The tab is back on about:blank.`,
+    );
+  }
   async function ownedTabs() {
     const listed = await new Tabs(connection!, () => {}).list();
     for (let previous = -1; previous !== targets.size;) {
@@ -615,6 +684,9 @@ async function createBrowserWorkspace(
       if (!page || !session || !connection) throw new Error("Browser session unavailable");
       let value: unknown;
       await authority?.guard?.();
+      // Check what is already on the tab before reading it; a navigating call checks its destination below.
+      const navigates = (name === "browser_use_open" || name === "browser_use_read") && "url" in parsed.data;
+      if (!navigates && name !== "browser_use_tabs" && name !== "browser_use_select_tab") await confine();
       switch (name) {
         case "browser_use_javascript": {
           const args = tools.browser_use_javascript.schema.parse(parsed.data);
@@ -652,6 +724,7 @@ async function createBrowserWorkspace(
         case "browser_use_read": {
           const args = tools.browser_use_open.schema.parse(parsed.data);
           if (args.url) await page.goto(args.url);
+          await confine();
           value =
             name === "browser_use_read" ? await page.evaluate("document.body.innerText") : await page.info();
           break;
@@ -709,6 +782,7 @@ async function createBrowserWorkspace(
           value = await page.info();
           break;
       }
+      await confine();
       if (value !== undefined) result.text = typeof value === "string" ? value : JSON.stringify(value);
     } catch (error) {
       isError = true;

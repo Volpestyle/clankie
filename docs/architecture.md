@@ -767,7 +767,13 @@ call-time revocation checks still apply.
   Each conversation has independent tabs, a JavaScript worker/workspace and a call
   queue. Calls serialize within that conversation; rooms browse concurrently in
   the shared signed-in profile. `browser_use_open` with `isolated: true` creates
-  a logged-out CDP context. Browser use does not acquire an exclusive body lease.
+  a logged-out CDP context. A turn without machine access always gets its own
+  logged-out context whose every request goes through the host's public-web
+  proxy ([`browser-public-web.ts`](../apps/clankie/src/browser-public-web.ts)).
+  The proxy resolves each host, refuses loopback, private, link-local, tailnet
+  and `.local` addresses, and connects only to the address it checked. The host
+  refuses non-http(s) URLs and mode changes in those turns (VUH-2590).
+  Browser use does not acquire an exclusive body lease.
   Model-facing JSON previews retain up to 50 KiB or 2,000 serialized lines,
   followed by a truncation notice when needed. A large page string keeps a
   UTF-8-safe prefix instead of being dropped as an oversized line; full results
