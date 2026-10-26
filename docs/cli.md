@@ -2487,7 +2487,8 @@ reads and writes; the vendor account windows retain their own meaning.
 For reproducible comparisons, use `--since ISO --until ISO` instead of `--days`.
 The start is inclusive, the end exclusive; `--until` defaults to now. Days and
 intervals are positive and at most 366 days. Ordinary account reads never scan
-transcripts. Explicit fleet reads stream the local native files and share the
+transcripts. Explicit fleet reads stream all discovered local native files so
+older retained identities cannot change with the requested window, and share the
 same query for one minute; `--refresh` rereads both meters and the ledger.
 
 The fleet ledger also reports `above400KContextTokens` per seat/day for ADR 0293’s fixed worker comparison; divide its worker sum by worker `contextTokens` to measure the parent’s under-10% goal.
@@ -2499,7 +2500,8 @@ cumulative snapshot identity as the fallback for older rollouts. A retained copy
 of a native message contributes once. Canonical native calls are selected before interval filtering: latest usage
 timestamp wins; equal-time fragments use the largest valid context reading, then
 a stable seat identity. Codex retained snapshots are reconciled with their
-explicit native response IDs when unambiguous. Adjacent reads therefore use the
+explicit native response IDs with valid retained usage when unambiguous. Invalid
+usage cannot register an alias or discard a valid anonymous snapshot. Adjacent reads therefore use the
 same canonical timestamp and UTC day as a combined read. A compaction counts only in the requested interval.
 
 Roles come from native census and retained hire/lead-relaunch records. Historical

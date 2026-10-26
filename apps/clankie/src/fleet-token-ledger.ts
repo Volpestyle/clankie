@@ -299,7 +299,9 @@ export async function readFleetTokenLedger(
         warnings.push(`Unreadable native transcript metadata: ${basename(path)}`);
         return undefined;
       });
-      if (!meta?.isFile() || meta.mtimeMs < Date.parse(since)) continue;
+      // Identity evidence is query-independent: an old retained file can make
+      // a newer anonymous snapshot ambiguous, even outside the requested window.
+      if (!meta?.isFile()) continue;
       const inode = `${meta.dev}:${meta.ino}`;
       if (visitedFiles.has(inode)) continue;
       visitedFiles.add(inode);
@@ -401,7 +403,7 @@ export async function readFleetTokenLedger(
             const response = str(payload.response_id) ?? lastResponseId;
             const snapshot = signature === undefined ? undefined : `${sessionId}:snapshot:${signature}`;
             messageId = response ? `${sessionId}:response:${response}` : snapshot;
-            if (snapshot && response) {
+            if (snapshot && response && context !== undefined && Number.isSafeInteger(context)) {
               const key = `codex:${snapshot}`;
               const responses = snapshotResponses.get(key) ?? new Set<string>();
               responses.add(`codex:${sessionId}:response:${response}`);
@@ -473,7 +475,9 @@ export async function readFleetTokenLedger(
   for (const [snapshot, responses] of snapshotResponses) {
     const call = calls.get(snapshot);
     if (!call) continue;
-    if (responses.size === 1) recordCall(responses.values().next().value!, call);
+    const retained = [...responses].filter((response) => calls.has(response));
+    if (retained.length === 0) continue;
+    if (retained.length === 1) recordCall(retained[0]!, call);
     else warnings.push("Ambiguous Codex snapshot identity; explicit native response IDs retained");
     calls.delete(snapshot);
   }

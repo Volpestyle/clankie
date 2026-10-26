@@ -1,8 +1,8 @@
 # VUH-2826 native fleet token ledger
 
-![Original week reproduced from native archives](clankie://evidence/sha256/a132dbd61ab5bb57295371872edd94c951ea513d17372c353cdb71c98e3d4362)
+![Original week reproduced from native archives](clankie://evidence/sha256/7d5658b95f5ff25e4683c9bf0c69b30891315215bd888286cbfae7168d7b832f)
 
-[Raw source CLI JSON](clankie://evidence/sha256/4e2076bd5c20f240ca9e44a10ff4c25e99406281ac6aa66c958e7a468b28bd2d) · [CLI table](clankie://evidence/sha256/e1c7d77b0ef335a41890703edcf673e611f364f93303b401d215d44eab4ddd82)
+[Raw source CLI JSON](clankie://evidence/sha256/ebc3b923042813fa0613a424855444c45b53c6a01d68627aa4fd591bae649a5a) · [CLI table](clankie://evidence/sha256/79e07b4d572d0a36d7235512e10eea22464a4e8a0b346f5710b43362ad27730d)
 
 Source candidate proof, 2026-10-26. The source CLI called a real authenticated,
 isolated localhost HTTP usage route, which streamed this machine’s native Claude
@@ -39,10 +39,10 @@ response IDs only when unambiguous. The corrected source report replaces the
 previous scan-order-sensitive capture; the original fixed window is unchanged.
 
 The source CLI reports 65,387 Claude/Codex calls and 20,171,053,930 context tokens
-from 404 files. Lead role attribution comes from the existing native relaunch
+from 1,984 files (10,762,413,314 bytes in this capture). Lead role attribution comes from the existing native relaunch
 journal, not a hardcoded session ID. Its 16 compactions are inside this interval;
 the old audit’s 38 were lifetime compactions. Its foreground sleep count is 63.
-Warnings retain nine malformed/incomplete native lines, four ambiguous Codex
+Warnings retain nine malformed/incomplete native lines, eight ambiguous Codex
 snapshot identities (explicit native response IDs retained), and unknown
 historical roles, which use a disclosed worker budget. Sleep detection counts recorded
 literal executable shell/tool calls, excluding explicit background calls and
@@ -76,11 +76,19 @@ comes from the tracker and delivery records, not token totals.
   meters, cache refresh, 400K strict boundary, unauthorized and malformed queries.
 - Hosted/gateway classifiers accept bounded fleet reads and reject POST,
   duplicate/unknown query keys and invalid windows.
-- Focused ledger/account/transport checks: 28 tests passed in four files.
+- Focused ledger/account/transport checks: 30 tests passed in four files.
+- Old-mtime native alias evidence and invalid/missing/negative explicit usage:
+  both regressions fail on r2 and pass with query-independent discovery and valid
+  alias targets; valid zero-input usage remains supported.
 - Reversed profile/file order and adjacent UTC windows for Claude, Codex response
   IDs, snapshot-only retained copies, mixed aliases and ambiguous native snapshots.
 - Prior candidate `49e2de97` received CHANGES for scan-order and interval dedup;
-  this replacement corrects both. New exact-patch review/root gate are required.
+  r2 corrected those but received further CHANGES for query-dependent old-mtime
+  evidence and invalid aliases. This replacement corrects both new cases.
+  Discovery scans all retained native files, independent of the requested window;
+  each stream remains bounded to its observed file size and never writes native
+  files. Invalid usage cannot register an alias or erase a valid snapshot.
+  New exact-patch review/root gate are required.
 - The prior root gate failed an unchanged 30s 165-report retirement case, also
   reproduced on immutable `ab2200fe9`; no assertion/deadline change or waiver.
 

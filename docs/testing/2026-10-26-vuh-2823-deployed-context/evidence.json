@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "codex-control.json",
+      "size": 173304,
+      "sha256": "5e55c16afa1426921a5915b894089c6c2b049732f8319e38f82513f36197b446",
+      "url": "clankie://evidence/sha256/5e55c16afa1426921a5915b894089c6c2b049732f8319e38f82513f36197b446"
+    },
+    {
       "path": "efficiency.json",
       "size": 67478,
       "sha256": "fd4b9a8bfd9671ea810833f90a9c56e827c187c59c4128e8efcbd31964a8e0cb",

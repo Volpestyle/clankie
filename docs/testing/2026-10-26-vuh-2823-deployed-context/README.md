@@ -58,3 +58,23 @@ boundary integration proof, not a forced live compact in this capture.
 The image summarizes actual CLI observations and these limits. Raw CLI/status
 captures and native usage components are retained through the evidence store.
 Lead owns acceptance/closure; VUH-2823 is not closed by this worker report.
+
+## Later natural Codex flagged control
+
+A mandatory pre-commit `clankie fleet status` read at `2026-10-26T17:15:43.426Z`
+now reports Pike’s unchanged native session `01a1789b-03c1-7671-8235-b016eb4fd2bb`
+at **343,865** tokens with `context 343865 tokens (300K budget)`. Its exact native
+`token_count` at `17:10:22.899Z` matches (input 343,865; cached input 343,296 is
+already included). Dex’s Claude row is **438,150**, flagged, and Theo’s Codex row
+is **238,054**, unflagged. No activity was requested to grow these contexts.
+
+A read-only `clankie update status` reports actual running revision
+`1fa743e349327245abfbcfffca5b80c32f9805be`, healthy, rollout `9c193501`, canary
+passed at `17:09:16.085Z`, 31 samples and hold released. Fresh service health is
+healthy. This is a later observation following the lead-owned rollout; this
+worker made no deployment request. [Raw public rows, exact native components,
+running revision/canary and health](clankie://evidence/sha256/5e55c16afa1426921a5915b894089c6c2b049732f8319e38f82513f36197b446).
+
+The earlier “no flagged Codex row” limit applies to the first snapshot and is
+resolved by this later natural control. A known unflagged Claude token row is
+still absent from these public captures and remains an acceptance gap.

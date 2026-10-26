@@ -8,6 +8,24 @@
       "url": "clankie://evidence/sha256/a132dbd61ab5bb57295371872edd94c951ea513d17372c353cdb71c98e3d4362"
     },
     {
+      "path": "r3-baseline.png",
+      "size": 173302,
+      "sha256": "7d5658b95f5ff25e4683c9bf0c69b30891315215bd888286cbfae7168d7b832f",
+      "url": "clankie://evidence/sha256/7d5658b95f5ff25e4683c9bf0c69b30891315215bd888286cbfae7168d7b832f"
+    },
+    {
+      "path": "r3-usage.json",
+      "size": 375064,
+      "sha256": "ebc3b923042813fa0613a424855444c45b53c6a01d68627aa4fd591bae649a5a",
+      "url": "clankie://evidence/sha256/ebc3b923042813fa0613a424855444c45b53c6a01d68627aa4fd591bae649a5a"
+    },
+    {
+      "path": "r3-usage.txt",
+      "size": 49580,
+      "sha256": "79e07b4d572d0a36d7235512e10eea22464a4e8a0b346f5710b43362ad27730d",
+      "url": "clankie://evidence/sha256/79e07b4d572d0a36d7235512e10eea22464a4e8a0b346f5710b43362ad27730d"
+    },
+    {
       "path": "usage.json",
       "size": 374733,
       "sha256": "4e2076bd5c20f240ca9e44a10ff4c25e99406281ac6aa66c958e7a468b28bd2d",

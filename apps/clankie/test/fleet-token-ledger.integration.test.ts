@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, copyFile, rm, appendFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, copyFile, rm, appendFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -464,3 +464,86 @@ for (const kind of [
     }
   });
 }
+
+async function aliasFixture() {
+  const root = await mkdtemp(join(tmpdir(), "fleet-ledger-alias-"));
+  roots.push(root);
+  const home = join(root, "codex");
+  const directory = join(home, "sessions", "native");
+  await mkdir(directory, { recursive: true });
+  const header = { type: "session_meta", timestamp: at, payload: { id: codex, source: "cli" } };
+  const record = (timestamp: string, input: number | undefined, response?: string) => ({
+    type: "event_msg",
+    timestamp,
+    payload: {
+      type: "token_count",
+      ...(response ? { response_id: response } : {}),
+      info: {
+        last_token_usage: input === undefined ? {} : { input_tokens: input },
+        total_token_usage: { input_tokens: 600_000, output_tokens: 20 },
+      },
+    },
+  });
+  return {
+    directory,
+    header,
+    record,
+    options: {
+      profiles: [{ harness: "codex" as const, home }],
+      stateDir: root,
+      census: async () => ({ seats: [] }),
+      now: () => now,
+    },
+  };
+}
+
+it("uses old native alias evidence for identical standalone and combined UTC buckets", async () => {
+  const f = await aliasFixture();
+  const old = join(f.directory, "old.jsonl");
+  await writeFile(old, jsonl([f.header, f.record(at, 100_000, "r1")]));
+  await utimes(old, new Date(at), new Date(at));
+  await writeFile(
+    join(f.directory, "new.jsonl"),
+    jsonl([f.header, f.record(next, 100_000, "r2"), f.record(next, 550_000)]),
+  );
+  const whole = await readFleetTokenLedger(
+    { since: "2026-10-24T00:00:00Z", until: "2026-10-26T00:00:00Z" },
+    f.options,
+  );
+  const left = await readFleetTokenLedger(
+    { since: "2026-10-24T00:00:00Z", until: "2026-10-25T00:00:00Z" },
+    f.options,
+  );
+  const right = await readFleetTokenLedger(
+    { since: "2026-10-25T00:00:00Z", until: "2026-10-26T00:00:00Z" },
+    f.options,
+  );
+  expect(whole.totals).toMatchObject({ modelCalls: 2, contextTokens: 200_000 });
+  expect(right.seats[0]!.days).toEqual(whole.seats[0]!.days.filter((day) => day.day === "2026-10-25"));
+  expect(left.totals.contextTokens + right.totals.contextTokens).toBe(whole.totals.contextTokens);
+  expect(left.totals.modelCalls + right.totals.modelCalls).toBe(whole.totals.modelCalls);
+  expect(right.totals.aboveBudgetTokenShare).toBe(0);
+  expect(right.sources.filesRead).toBe(whole.sources.filesRead);
+});
+
+it("retains valid anonymous snapshot usage when explicit native aliases have invalid usage", async () => {
+  const f = await aliasFixture();
+  const file = join(f.directory, "rollout.jsonl");
+  for (const inputs of [
+    [undefined, -1],
+    [100_000, -1],
+    [0, undefined],
+  ]) {
+    await writeFile(
+      file,
+      jsonl([
+        f.header,
+        ...inputs.map((input, index) => f.record(at, input, `response-${index}`)),
+        f.record(next, 550_000),
+      ]),
+    );
+    const report = await readFleetTokenLedger({ days: 7 }, f.options);
+    expect(report.totals).toMatchObject({ modelCalls: 1, contextTokens: 550_000, aboveBudgetTokenShare: 1 });
+    expect(report.warnings.some((warning) => warning.includes("Ambiguous Codex"))).toBe(false);
+  }
+});
