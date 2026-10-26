@@ -28,8 +28,11 @@ The service performs the handshake:
    the destination.
 3. The destination must be a channel where Clankie's own bot posted the launch:
    a successful `activity_start` presence write records it, and `activity_stop`
-   forgets it and stops its shares. A participant in an instance someone else
-   started gets nothing.
+   forgets it and stops its shares. Each launch is its own incarnation: an
+   admission rechecks it after every lookup, opening and grant, and stop waits
+   for an in-flight opening before ending the channel's shares, so nothing
+   begun before a stop (or a stop and relaunch) reaches media after it. A
+   participant in an instance someone else started gets nothing.
 4. It grants the channel's play share, opening one on first admission while play
    is running, and returns `{session,grant,expiresAt,mediaPath,accessToken}`.
 

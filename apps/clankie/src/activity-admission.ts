@@ -167,43 +167,75 @@ type DestinationSharing = Pick<ActivitySharing, "grantForDestination" | "request
  * after play starts, and a later play session gets a fresh share.
  */
 export function createActivityLaunches(sharing: DestinationSharing) {
-  const launched = new Set<string>();
-  const opening = new Map<string, Promise<unknown>>();
+  // One object per launch. Stop or relaunch replaces it, so an admission that
+  // began under an older launch can tell, after any await, that it lost its
+  // authority (VUH-2833 review).
+  const launched = new Map<string, object>();
+  const opening = new Map<string, { launch: object; done: Promise<unknown> }>();
   const key = (guildId: string, channelId: string) => `${guildId}:${channelId}`;
   const allow = async () => true;
+  const stopDestination = async (guildId: string, channelId: string) => {
+    const listed = (await sharing.request({ action: "list" }, allow)) as {
+      sessions: ActivityShareSession[];
+    };
+    for (const session of listed.sessions)
+      if (session.scope.guildId === guildId && session.scope.channelId === channelId)
+        await sharing
+          .request({ action: "stop", shareId: session.shareId, generation: session.generation }, allow)
+          // allow-swallowed-rejection -- the launch is already forgotten, so no new viewer is admitted, and a share that cannot be stopped still ends at its own expiry
+          .catch(() => undefined);
+  };
   return {
     launched(guildId: string, channelId: string) {
-      launched.add(key(guildId, channelId));
+      launched.set(key(guildId, channelId), {});
     },
     async stopped(guildId: string, channelId: string) {
-      launched.delete(key(guildId, channelId));
-      const listed = (await sharing.request({ action: "list" }, allow)) as {
-        sessions: ActivityShareSession[];
-      };
-      for (const session of listed.sessions)
-        if (session.scope.guildId === guildId && session.scope.channelId === channelId)
-          await sharing
-            .request({ action: "stop", shareId: session.shareId, generation: session.generation }, allow)
-            // allow-swallowed-rejection -- the launch is already forgotten, so no new viewer is admitted, and a share that cannot be stopped still ends at its own expiry
-            .catch(() => undefined);
+      const destination = key(guildId, channelId);
+      launched.delete(destination);
+      // A share an in-flight admission is still opening must exist before the
+      // listing below, or it would outlive this stop.
+      // allow-swallowed-rejection -- the admission that started this opening reports its failure; stop only needs it settled
+      await opening.get(destination)?.done.catch(() => undefined);
+      await stopDestination(guildId, channelId);
     },
     async grant(guildId: string, channelId: string) {
       const destination = key(guildId, channelId);
-      if (!launched.has(destination)) throw new Error("activity_destination_refused");
+      const launch = launched.get(destination);
+      const current = () => launch !== undefined && launched.get(destination) === launch;
+      const refused = () => new Error("activity_destination_refused");
+      if (!current()) throw refused();
+      let granted: Awaited<ReturnType<DestinationSharing["grantForDestination"]>> | undefined;
       try {
-        return await sharing.grantForDestination(guildId, channelId);
+        granted = await sharing.grantForDestination(guildId, channelId);
       } catch (error) {
         if (!(error instanceof Error) || error.message !== "activity_share_gone") throw error;
       }
+      if (!current()) throw refused();
+      if (granted !== undefined) return granted;
       let open = opening.get(destination);
-      if (open === undefined) {
-        open = sharing
-          .request({ action: "start", sourceId: "play", guildId, channelId }, allow)
-          .finally(() => opening.delete(destination));
-        opening.set(destination, open);
+      if (open === undefined || open.launch !== launch) {
+        const done = sharing.request({ action: "start", sourceId: "play", guildId, channelId }, allow);
+        const entry = { launch: launch!, done };
+        opening.set(destination, entry);
+        void done.then(
+          () => {
+            if (opening.get(destination) === entry) opening.delete(destination);
+          },
+          () => {
+            if (opening.get(destination) === entry) opening.delete(destination);
+          },
+        );
+        open = entry;
       }
-      await open;
-      return sharing.grantForDestination(guildId, channelId);
+      await open.done;
+      if (!current()) {
+        // Stopped while this share opened: end it rather than leave it running.
+        await stopDestination(guildId, channelId);
+        throw refused();
+      }
+      granted = await sharing.grantForDestination(guildId, channelId);
+      if (!current()) throw refused();
+      return granted;
     },
   };
 }

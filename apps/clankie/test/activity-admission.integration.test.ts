@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { DiscordPresenceSession } from "@clankie/discord-presence-core";
 import { ActivityShareFrameSchema } from "@clankie/interactive-environment";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -133,7 +134,32 @@ async function stack(options: { clientSecret?: string | undefined } = {}) {
   const producerPort = await producer.listen(0);
   cleanup.push(() => producer.close());
   const play = new ActivityPlaySource();
+  // Holds the next matching producer-control response until released, so a
+  // test can stop the launch while an admission waits on a real lookup.
+  const gates: {
+    match: (method: string, path: string) => boolean;
+    hold: Promise<void>;
+    reached: () => void;
+  }[] = [];
+  const hold = (method: string, path: string) => {
+    let release!: () => void, reached!: () => void;
+    const held = new Promise<void>((done) => (release = done));
+    const arrived = new Promise<void>((done) => (reached = done));
+    gates.push({ match: (m, p) => m === method && p === path, hold: held, reached });
+    return { release, arrived };
+  };
   const sharing = new ActivitySharing({
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      const path = new URL(String(input)).pathname;
+      const gate = gates.findIndex((candidate) => candidate.match(init?.method ?? "GET", path));
+      if (gate >= 0) {
+        const [held] = gates.splice(gate, 1);
+        held!.reached();
+        await held!.hold;
+      }
+      return response;
+    },
     files: new DeliveredFileStore(join(root, "artifacts")),
     token: async () => PRODUCER_BEARER,
     url: `http://127.0.0.1:${producerPort}`,
@@ -155,6 +181,17 @@ async function stack(options: { clientSecret?: string | undefined } = {}) {
     activityLaunches: launches,
     eventLogPath: join(root, "events.jsonl"),
     authenticateOperator: async () => undefined,
+    authenticateCaptain: async (request) =>
+      request.headers.get("authorization") === "Bearer bridge"
+        ? { captainId: "body", steerSourceLane: "discord_text" }
+        : undefined,
+    // The bot's REST effect itself is out of scope; the route's bookkeeping is the subject.
+    discordPresenceRuntime: {
+      execute: async (write, _session, guard) => {
+        await guard?.();
+        return { id: write.idempotencyKey, action: write.action, transportKind: "bot", channelId: CHANNEL };
+      },
+    },
   });
   const http = serve({ fetch: (req) => service.app.fetch(req), hostname: "127.0.0.1", port: 0 });
   await new Promise<void>((done) => http.once("listening", done));
@@ -184,7 +221,7 @@ async function stack(options: { clientSecret?: string | undefined } = {}) {
     });
     return { status: response.status, body: (await response.json()) as Record<string, any> };
   };
-  return { discord, play, launches, shares, serviceUrl, viewerUrl, viewerPort, admit };
+  return { discord, play, launches, shares, service, hold, serviceUrl, viewerUrl, viewerPort, admit };
 }
 
 it("admits a verified participant of Clankie's own launch to live play media, through the tunnel", async () => {
@@ -283,4 +320,109 @@ it("fails closed with a clear reason when the client secret is not stored", asyn
   });
   expect(s.discord.seen).toEqual([]);
   expect(s.shares.stats()).toHaveLength(0);
+});
+
+it("an admission waiting on its lookup when the launch stops gets nothing", async () => {
+  const s = await stack();
+  s.play.createSink("FireRed");
+  s.launches.launched(GUILD, CHANNEL);
+  const lookup = s.hold("GET", "/shares");
+  const pending = s.admit("member-code", "i-here");
+  await lookup.arrived;
+  await s.launches.stopped(GUILD, CHANNEL);
+  lookup.release();
+  expect((await pending).status).toBe(403);
+  expect(s.shares.stats()).toHaveLength(0);
+});
+
+it("a stop during an in-flight share opening waits for it and ends it", async () => {
+  const s = await stack();
+  s.play.createSink("FireRed");
+  s.launches.launched(GUILD, CHANNEL);
+  const opening = s.hold("POST", "/shares");
+  const pending = s.admit("member-code", "i-here");
+  await opening.arrived;
+  const stopping = s.launches.stopped(GUILD, CHANNEL);
+  opening.release();
+  await stopping;
+  expect((await pending).status).toBe(403);
+  expect(s.shares.stats()).toHaveLength(0);
+});
+
+it("a relaunch does not revive an admission begun under the stopped launch", async () => {
+  const s = await stack();
+  s.play.createSink("FireRed");
+  s.launches.launched(GUILD, CHANNEL);
+  const lookup = s.hold("GET", "/shares");
+  const stale = s.admit("member-code", "i-here");
+  await lookup.arrived;
+  await s.launches.stopped(GUILD, CHANNEL);
+  s.launches.launched(GUILD, CHANNEL);
+  lookup.release();
+  expect((await stale).status).toBe(403);
+  const fresh = await s.admit("member-code", "i-here");
+  expect(fresh.status).toBe(200);
+  expect(s.shares.stats()).toHaveLength(1);
+});
+
+// Adapted from the reviewer's probe: the launch registry follows the real presence route.
+it("the authenticated presence route records the bot's launch and stop", async () => {
+  const s = await stack();
+  s.play.createSink("FireRed");
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    s.service.app.request(path, {
+      method: "POST",
+      headers: { authorization: "Bearer bridge", "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  const session = new DiscordPresenceSession({
+    sessionId: "fixture-session",
+    characterId: "clankie",
+    credentialRef: "discord_bot",
+    transportKind: "bot",
+    emit: async (event) => {
+      const response = await post("/v1/discord/presence-session-events", event);
+      expect(response.status).toBe(200);
+      return (await response.json()).session;
+    },
+  });
+  await session.start();
+  await session.gatewayReady();
+  await session.voiceStateChanged(GUILD, true, { channelId: CHANNEL, occupants: [] });
+  const send = (kind: "activity_start" | "activity_stop") =>
+    post(
+      "/v1/discord/presence-actions",
+      {
+        schemaVersion: 1,
+        idempotencyKey: `fixture:${kind}`,
+        action: `discord.presence.${kind}`,
+        identity: {
+          presenceSessionId: `discord:${GUILD}:${CHANNEL}`,
+          correlationId: `fixture:${kind}`,
+          profileHash: "unversioned",
+          characterId: "clankie",
+          credentialRef: "discord_bot",
+          transportKind: "bot",
+        },
+        payload: {
+          kind,
+          guildId: GUILD,
+          channelId: CHANNEL,
+          ...(kind === "activity_start" ? { surface: "gba_emulator" } : {}),
+        },
+      },
+      {
+        "x-clankie-discord-presence-session": session.record.sessionId,
+        "x-clankie-discord-presence-phase": session.record.phase,
+        "x-clankie-discord-presence-revision": String(session.record.revision),
+      },
+    );
+  expect((await s.admit("member-code", "i-here")).status).toBe(403);
+  const started = await send("activity_start");
+  expect(started.status, await started.text()).toBe(200);
+  expect((await s.admit("member-code", "i-here")).status).toBe(200);
+  const stopped = await send("activity_stop");
+  expect(stopped.status, await stopped.text()).toBe(200);
+  expect(s.shares.stats()).toHaveLength(0);
+  expect((await s.admit("member-code", "i-here")).status).toBe(403);
 });
