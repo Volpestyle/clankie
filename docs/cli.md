@@ -4486,16 +4486,19 @@ conversation gets one notice naming the reason; the wait ends when the seat
 relaunches or is no longer due (VUH-2821). A source that cannot be proven records
 `source_unproven`, including the inventory that did not answer; a missing,
 ambiguous or unreadable transcript records `usage_unreadable` with its candidate
-paths or read error. In those cases `check.due` is absent and the CLI says
-`budget unknown`; the refusal remains visible and gets the same two-hour notice.
+paths or read error. In those cases the optional legacy `check` is absent and
+`unknownCheck` records the attempt's time and any partial usage. Existing v1
+readers retain the refusal; the updated CLI says `budget unknown`. It gets the
+same two-hour notice.
 
 Claude Code accepts trust at the home directory for that session only. An
 unattended relaunch into home therefore refuses `trust_required` before ending
 the lead, even with a saved trust flag. The check uses the conversation's
 resolved launch directory, which can override the pane's cwd. The notice names
-the owner action: choose a trusted project with `clankie workdir set PATH`,
-restart captain, then open the conversation with the selected Claude account
-and accept folder trust there once. An unprovable launch directory also refuses.
+the owner action: first accept folder trust for a non-home project using the
+selected Claude account, then select it with `clankie workdir set PATH` and
+restart captain. Trust the project before changing the workdir, so the next
+unattended launch can use its persisted decision. An unprovable launch directory also refuses.
 
 `--auto-tidy 1h` (the default; also `30m`, `4h`, `1d`) lets the service tidy
 finished hires on its own (VUH-2392). Every five minutes it closes a local hire's

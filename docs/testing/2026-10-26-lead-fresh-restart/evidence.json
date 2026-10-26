@@ -3,9 +3,9 @@
   "objects": [
     {
       "path": "proof-bundle.json",
-      "size": 28901,
-      "sha256": "f6904a264e8f971bc2b35433ec6f7bbcc2f5765d00a86d07140cb2867fe38acb",
-      "url": "clankie://evidence/sha256/f6904a264e8f971bc2b35433ec6f7bbcc2f5765d00a86d07140cb2867fe38acb"
+      "size": 36335,
+      "sha256": "63348ad0ae07c8e27161ed79223890efd8c5f82f481dc169f105fea7b269aa82",
+      "url": "clankie://evidence/sha256/63348ad0ae07c8e27161ed79223890efd8c5f82f481dc169f105fea7b269aa82"
     }
   ]
 }

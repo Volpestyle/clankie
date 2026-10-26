@@ -153,7 +153,9 @@ export function formatLeadRestartLines(status: FleetCommandResult["leadRestart"]
   if (!status) return [];
   if ("unavailable" in status) return [`lead restart: unavailable (${status.unavailable})`];
   const budget = `${String(status.budget.contextTokens / 1000)}K tokens or ${String(status.budget.ageHours)}h`;
-  const check = status.check;
+  const check =
+    status.check ??
+    (status.unknownCheck === undefined ? undefined : { ...status.unknownCheck, due: undefined });
   const seen =
     check === undefined
       ? "not checked since the service started"

@@ -5425,8 +5425,9 @@ paths:
       summary: Read the default lead seat's fresh-restart budget, last check and refused wait
       description: |
         Operator-only. The ADR 0271 budget (context tokens and session age), the
-        latest check since service start (context, session start, whether a restart
-        is due; due is absent if source or usage is unknown), and the refused wait: when it began, the latest refusal
+        latest known check since service start (context, session start, whether a restart
+        is due), optional unknownCheck metadata if source or usage is unknown
+        (the legacy optional check is then absent), and the refused wait: when it began, the latest refusal
         and a count per refusal reason, and when the owner was told. The wait lasts
         across service restarts until the seat relaunches or is no longer due.
         Contract: LeadRestartStatusSchema in packages/protocol/src/fleet-settings.ts.

@@ -451,7 +451,7 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         return {
           outcome: "refused",
           reason: "trust_required",
-          detail: `Claude's launch directory ${directory ?? "(unknown)"} ${paths[0] === paths[1] && paths[0] !== undefined ? "is home; trust there is session-only" : "could not be verified outside home"}. Owner action: use \`clankie workdir set PATH\` for a trusted project, restart captain, then open this conversation with the selected Claude account and accept folder trust there once. The current session was left running.`,
+          detail: `Claude's launch directory ${directory ?? "(unknown)"} ${paths[0] === paths[1] && paths[0] !== undefined ? "is home; trust there is session-only" : "could not be verified outside home"}. Owner action: first accept folder trust for a non-home project using the selected Claude account. Then select that project with \`clankie workdir set PATH\` and restart captain. The current session was left running.`,
         };
     }
     if (input.guards.requireIdle && !deps.idle(input.conversationId))
@@ -622,6 +622,7 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
       readonly setting: "on" | "off";
       readonly budget: { readonly contextTokens: number; readonly ageMs: number };
       readonly check?: LeadRestartStatus["check"];
+      readonly unknownCheck?: LeadRestartStatus["unknownCheck"];
     }): LeadRestartStatus {
       const stored = readWaits()[input.conversationId];
       const waiting: LeadRestartWait | undefined =
@@ -633,6 +634,7 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         budget: { contextTokens: input.budget.contextTokens, ageHours: input.budget.ageMs / 3_600_000 },
         noticeAfterMinutes: (deps.restartNoticeAfterMs ?? RESTART_NOTICE_AFTER_MS) / 60_000,
         ...(input.check === undefined ? {} : { check: input.check }),
+        ...(input.unknownCheck === undefined ? {} : { unknownCheck: input.unknownCheck }),
         ...(waiting === undefined ? {} : { waiting }),
       };
     },

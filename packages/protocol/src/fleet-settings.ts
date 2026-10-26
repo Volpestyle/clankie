@@ -295,8 +295,17 @@ export const LeadRestartStatusSchema = z
         at: z.string().datetime(),
         contextTokens: z.number().int().nonnegative().optional(),
         sessionStartedAt: z.string().datetime().optional(),
-        /** Absent when the source or usage cannot establish whether the budget is exceeded. */
-        due: z.boolean().optional(),
+        due: z.boolean(),
+      })
+      .strict()
+      .optional(),
+    /** Latest attempted check when the source/usage cannot establish the budget.
+     * Keep the optional v1 `check` absent so older additive readers retain the wait. */
+    unknownCheck: z
+      .object({
+        at: z.string().datetime(),
+        contextTokens: z.number().int().nonnegative().optional(),
+        sessionStartedAt: z.string().datetime().optional(),
       })
       .strict()
       .optional(),

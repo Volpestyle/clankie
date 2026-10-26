@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, expect, it, vi } from "vitest";
-import { FLEET_LEAD_RESTART_PATH } from "@clankie/protocol";
+import { FLEET_LEAD_RESTART_PATH, parseProtocolResponse } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { registerLeadRestartRoutes } from "../src/app/lead-restart-routes.ts";
 import { createBearerAuthenticator } from "../src/app/http-auth.ts";
@@ -12,6 +12,22 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { fleetStatus, formatLeadRestartLines } from "../../tui/src/command/fleet.ts";
 import { fleetSettingsClient } from "../../tui/test/fixtures/fleet-settings-client.ts";
 import { leadChatFixture } from "./fixtures/lead-chats.ts";
+import { PreviousLeadRestartStatusSchema } from "./fixtures/lead-restart-status-v1.ts";
+
+function statusReader(captain: Parameters<typeof registerLeadRestartRoutes>[1]["captain"]) {
+  const app = new Hono();
+  registerLeadRestartRoutes(app, {
+    captain,
+    authenticateOperator: createBearerAuthenticator("scratch-owner", { operatorId: "owner" }),
+  });
+  return async () => {
+    const response = await app.request(FLEET_LEAD_RESTART_PATH, {
+      headers: { authorization: "Bearer scratch-owner" },
+    });
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+}
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -48,6 +64,15 @@ it.each([
   await expect
     .poll(() => f.captain.leadRestartStatus!())
     .toMatchObject({ check: { contextTokens: tokens, due } });
+  const response = await statusReader(f.captain)();
+  const previousRead = parseProtocolResponse(PreviousLeadRestartStatusSchema, response);
+  expect(previousRead.check).toMatchObject({ contextTokens: tokens, due });
+  expect(response.unknownCheck).toBeUndefined();
+  if (process.env.RESTART_COMPAT_OUTPUT)
+    await appendFile(
+      process.env.RESTART_COMPAT_OUTPUT,
+      JSON.stringify({ scenario: "known", response, previousRead }) + "\n",
+    );
   // No launcher in this census fixture: due checks refuse before asking for a brief.
   if (due)
     await expect
@@ -80,25 +105,22 @@ it.each(["source_unproven", "ambiguous", "missing", "empty"])(
         }
       },
     });
-    const app = new Hono();
-    registerLeadRestartRoutes(app, {
-      captain: f.captain,
-      authenticateOperator: createBearerAuthenticator("scratch-owner", { operatorId: "owner" }),
-    });
-    const status = async () => {
-      const response = await app.request(FLEET_LEAD_RESTART_PATH, {
-        headers: { authorization: "Bearer scratch-owner" },
-      });
-      expect(response.status).toBe(200);
-      return response.json();
-    };
+    const status = statusReader(f.captain);
     await expect.poll(status).toMatchObject({
       budget: { contextTokens: 250_000, ageHours: 12 },
-      check: { at: expect.stringMatching(/^2026-10-26T12:00:0/u) },
+      unknownCheck: { at: expect.stringMatching(/^2026-10-26T12:00:0/u) },
       waiting: { lastReason: reason },
     });
     const first = await status();
-    expect(first.check.due).toBeUndefined();
+    expect(first.check).toBeUndefined();
+    const previousRead = parseProtocolResponse(PreviousLeadRestartStatusSchema, first);
+    expect(previousRead.check).toBeUndefined();
+    expect(previousRead.waiting?.lastReason).toBe(reason);
+    if (process.env.RESTART_COMPAT_OUTPUT)
+      await appendFile(
+        process.env.RESTART_COMPAT_OUTPUT,
+        JSON.stringify({ scenario, response: first, previousRead }) + "\n",
+      );
     expect(formatLeadRestartLines(first)[0]).toContain("budget unknown");
     if (reason === "source_unproven") expect(first.waiting.lastDetail).toContain("inventory pc");
     else {

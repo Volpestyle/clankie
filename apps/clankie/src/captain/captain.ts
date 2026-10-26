@@ -5517,6 +5517,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let leadRestartAskedAt: number | undefined;
   /** The latest restart check, for `clankie fleet status` (VUH-2821). */
   let leadRestartCheck: LeadRestartStatus["check"];
+  let leadRestartUnknownCheck: LeadRestartStatus["unknownCheck"];
   const stopLeadRestarts = startFleetRounds(async () => {
     const conversationId = conversations.defaultGlobalConversationId();
     if (shutdown.signal.aborted) return;
@@ -5526,7 +5527,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (!conversations.hasNativeSeat(conversationId) && headSeat === undefined)
       return leadSeats.restartSettled(conversationId);
     if (leadRestartAskedAt !== undefined && Date.now() - leadRestartAskedAt < LEAD_RESTART_RETRY_MS) return;
-    leadRestartCheck = { at: new Date().toISOString() };
+    // v1 readers require check.due. Omit that legacy optional check when the
+    // budget is unknown, keeping the refusal readable through additive decoding.
+    leadRestartCheck = undefined;
+    leadRestartUnknownCheck = { at: new Date().toISOString() };
     let sourceDetail = "No native Claude session could be proven for the default lead.";
     let source: HerdrAgentSnapshot | undefined;
     try {
@@ -5551,16 +5555,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     const large = (usage.contextTokens ?? 0) >= LEAD_RESTART_CONTEXT_TOKENS;
     const old = usage.startedAt !== undefined && Date.now() - usage.startedAt >= LEAD_RESTART_AGE_MS;
-    leadRestartCheck = {
+    const observed = {
       at: new Date().toISOString(),
       ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
       ...(usage.startedAt === undefined ? {} : { sessionStartedAt: new Date(usage.startedAt).toISOString() }),
-      ...(large || old || (usage.contextTokens !== undefined && usage.startedAt !== undefined)
-        ? { due: large || old }
-        : {}),
     };
-    if (!large && !old && leadRestartCheck.due === undefined)
+    leadRestartUnknownCheck = observed;
+    if (!large && !old && (usage.contextTokens === undefined || usage.startedAt === undefined))
       return leadSeats.restartRefused(conversationId, "usage_unreadable", usageDetail);
+    leadRestartUnknownCheck = undefined;
+    leadRestartCheck = { ...observed, due: large || old };
     if (!large && !old) return leadSeats.restartSettled(conversationId);
     const launch = await leadSeats.leadSeatLaunch(conversationId);
     if (launch === undefined) return leadSeats.restartRefused(conversationId, "no_launch");
@@ -7588,6 +7592,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         setting: (await settings()).fleet.leadRestarts ?? "on",
         budget: { contextTokens: LEAD_RESTART_CONTEXT_TOKENS, ageMs: LEAD_RESTART_AGE_MS },
         ...(leadRestartCheck === undefined ? {} : { check: leadRestartCheck }),
+        ...(leadRestartUnknownCheck === undefined ? {} : { unknownCheck: leadRestartUnknownCheck }),
       });
     },
     async fleetEfficiency(conversationId, review) {
