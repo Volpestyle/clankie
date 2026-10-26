@@ -97,6 +97,41 @@ export interface GuidedReviewRecord extends Entity {
   })[];
 }
 
+/** Explicit retirement preserves bindings and identity while reclaiming active payload bytes. */
+export type GuidedReviewTombstone = Pick<
+  GuidedReviewRecord,
+  | "id"
+  | "schemaVersion"
+  | "storeId"
+  | "issueId"
+  | "projectId"
+  | "runId"
+  | "identity"
+  | "snapshotSha256"
+  | "createdAt"
+  | "updatedAt"
+  | "createdByActor"
+  | "updatedByActor"
+> & { retiredAt: string; retiredByActor: TrackerActor; retirementEventId: string };
+
+type StoredGuidedReview = GuidedReviewRecord | GuidedReviewTombstone;
+function retiredGuidedReview(review: StoredGuidedReview): review is GuidedReviewTombstone {
+  return "retiredAt" in review;
+}
+export interface GuidedReviewMutationReceipt {
+  schemaVersion: 1;
+  reviewId: string;
+  storeId: string;
+  issueId: string;
+  projectId: string | null;
+  identity: GuidedReviewIdentity;
+  snapshotSha256: string;
+  operation: "save" | "reply" | "resolve" | "retire";
+  eventId: string | null;
+  updatedAt: string;
+  actor: TrackerActor;
+}
+
 /** One idempotency key's settled outcome, committed in the same replacement as its effect. */
 interface WriteReceipt {
   actorKey: string;
@@ -359,7 +394,7 @@ interface Store {
   /** Runs of issue work (VUH-1918). */
   runs?: Run[];
   bundles?: EvidenceBundle[];
-  guidedReviews?: GuidedReviewRecord[];
+  guidedReviews?: StoredGuidedReview[];
   /** Links to ADR 0245 records; no question, answer or parallel ask lifecycle here. */
   ownerAsks?: { eventId: string; issueId: string; runId?: string; requestId: string }[];
 }
@@ -697,7 +732,7 @@ function parseStore(content: string): Store {
   if (store.guidedReviews !== undefined) {
     if (
       !Array.isArray(store.guidedReviews) ||
-      store.guidedReviews.length > 1000 ||
+      store.guidedReviews.filter((review) => !retiredGuidedReview(review)).length > 1000 ||
       new Set(store.guidedReviews.map((review) => review.id)).size !== store.guidedReviews.length
     )
       throw new Error("Invalid guided review collection");
@@ -1599,14 +1634,16 @@ export const GUIDED_REVIEW_LIMITS = Object.freeze({
 /** Shared capacity is reserved for immutable captures; discussion has its own per-review budget. */
 function assertGuidedReviewBudget(store: Store, review: GuidedReviewRecord, tool: string): void {
   if (tool === "save_guided_review") {
-    const snapshots = (store.guidedReviews ?? []).map((entry) => ({
-      ...entry,
-      updatedAt: entry.createdAt,
-      updatedByActor: entry.createdByActor,
-      findings: entry.findings.map(
-        ({ resolved: _resolved, replies: _replies, history: _history, ...finding }) => finding,
-      ),
-    }));
+    const snapshots = (store.guidedReviews ?? [])
+      .filter((entry): entry is GuidedReviewRecord => !retiredGuidedReview(entry))
+      .map((entry) => ({
+        ...entry,
+        updatedAt: entry.createdAt,
+        updatedByActor: entry.createdByActor,
+        findings: entry.findings.map(
+          ({ resolved: _resolved, replies: _replies, history: _history, ...finding }) => finding,
+        ),
+      }));
     if (Buffer.byteLength(JSON.stringify(snapshots)) > GUIDED_REVIEW_LIMITS.totalBytes)
       throw new TrackerWriteRefused(
         "guided_review_budget",
@@ -1625,13 +1662,32 @@ function assertGuidedReviewBudget(store: Store, review: GuidedReviewRecord, tool
     );
 }
 
-/** Event references keep every receipt constant-size as discussion grows. */
-function guidedReviewReceiptResult(review: GuidedReviewRecord) {
-  const latest = review.findings
-    .flatMap((finding) => finding.history)
-    .sort((a, b) => a.at.localeCompare(b.at))
-    .at(-1);
-  return { guidedReviewSnapshot: review.id, eventId: latest?.id ?? null, updatedAt: review.updatedAt };
+/** The public compact result is immutable and independently replayable after retirement. */
+function guidedReviewMutationReceipt(
+  review: StoredGuidedReview,
+  name: string,
+  actor: TrackerActor,
+): GuidedReviewMutationReceipt {
+  const event = retiredGuidedReview(review)
+    ? undefined
+    : review.findings
+        .flatMap((finding) => finding.history)
+        .sort((a, b) => a.at.localeCompare(b.at))
+        .at(-1);
+  return {
+    schemaVersion: 1,
+    reviewId: review.id,
+    storeId: review.storeId,
+    issueId: review.issueId,
+    projectId: review.projectId,
+    identity: structuredClone(review.identity),
+    snapshotSha256: review.snapshotSha256,
+    operation:
+      name === "save_guided_review" ? "save" : retiredGuidedReview(review) ? "retire" : event!.action,
+    eventId: retiredGuidedReview(review) ? review.retirementEventId : (event?.id ?? null),
+    updatedAt: review.updatedAt,
+    actor: structuredClone(actor),
+  };
 }
 
 function replayGuidedReviewReceipt(store: Store, value: unknown): unknown {
@@ -1643,7 +1699,8 @@ function replayGuidedReviewReceipt(store: Store, value: unknown): unknown {
     updatedAt?: string;
   };
   const review = (store.guidedReviews ?? []).find((entry) => entry.id === receipt.guidedReviewSnapshot);
-  if (!review) throw new Error("Guided review receipt snapshot is unavailable");
+  if (!review || retiredGuidedReview(review))
+    throw new Error("Guided review receipt snapshot is unavailable");
   validateStoredGuidedReview(store, review);
   // Read the original compact receipts written before event references were introduced.
   if (receipt.result) {
@@ -1674,7 +1731,8 @@ function replayGuidedReviewReceipt(store: Store, value: unknown): unknown {
   return restored;
 }
 
-function guidedReviewSummary(review: GuidedReviewRecord): Record<string, unknown> {
+function guidedReviewSummary(review: StoredGuidedReview): Record<string, unknown> {
+  if (retiredGuidedReview(review)) return { ...review };
   return {
     id: review.id,
     schemaVersion: review.schemaVersion,
@@ -1698,7 +1756,7 @@ function guidedReviewSummary(review: GuidedReviewRecord): Record<string, unknown
   };
 }
 
-function validateGuidedReviewMetadata(store: Store, review: GuidedReviewRecord): void {
+function validateGuidedReviewMetadata(store: Store, review: StoredGuidedReview): void {
   const issue = store.issues.find((entry) => entry.id === review.issueId);
   if (
     review.schemaVersion !== 1 ||
@@ -1712,6 +1770,27 @@ function validateGuidedReviewMetadata(store: Store, review: GuidedReviewRecord):
       !(store.runs ?? []).some((run) => run.id === review.runId && run.issueId === issue.id))
   )
     throw new Error("Invalid guided review binding");
+  if (retiredGuidedReview(review)) {
+    if (
+      !Number.isFinite(Date.parse(review.retiredAt)) ||
+      review.retiredAt !== review.updatedAt ||
+      typeof review.retirementEventId !== "string" ||
+      !review.retiredByActor ||
+      !/^[a-f0-9]{64}$/u.test(review.snapshotSha256) ||
+      (review.identity?.kind !== "patch" && review.identity?.kind !== "git")
+    )
+      throw new Error("Invalid retired guided review metadata");
+    if (
+      review.identity.kind === "patch"
+        ? !/^[a-f0-9]{64}$/u.test(review.identity.sha256)
+        : typeof review.identity.gitDirectory !== "string" ||
+          review.identity.gitDirectory.length > 4096 ||
+          !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(review.identity.baseCommit) ||
+          !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(review.identity.headCommit)
+    )
+      throw new Error("Invalid retired guided review identity");
+    return;
+  }
   if (
     !review.inspection ||
     typeof review.inspection !== "object" ||
@@ -2784,14 +2863,16 @@ async function dispatch(
     case "save_guided_review": {
       const issue = findIssue(store, args.issueId as string);
       options.assertIssueWrite?.(issueView(store, issue));
-      if ((store.guidedReviews?.length ?? 0) >= 1000) throw new Error("Guided review limit reached");
+      if ((store.guidedReviews ?? []).filter((review) => !retiredGuidedReview(review)).length >= 1000)
+        throw new Error("Guided review limit reached");
       if (
-        (store.guidedReviews ?? []).filter((review) => review.issueId === issue.id).length >=
-        GUIDED_REVIEW_LIMITS.perIssue
+        (store.guidedReviews ?? []).filter(
+          (review) => review.issueId === issue.id && !retiredGuidedReview(review),
+        ).length >= GUIDED_REVIEW_LIMITS.perIssue
       )
         throw new TrackerWriteRefused(
           "guided_review_limit",
-          "This issue has reached its saved guided review limit",
+          "This issue has reached its active review limit; an owner or lead can explicitly retire an older review",
         );
       const runId = args.runId as string | undefined;
       if (runId !== undefined) {
@@ -2834,7 +2915,7 @@ async function dispatch(
     }
     case "get_guided_review": {
       const review = guidedReviewForIssue(store, args, options);
-      validateStoredGuidedReview(store, review);
+      if (!retiredGuidedReview(review)) validateStoredGuidedReview(store, review);
       return review;
     }
     case "list_guided_reviews": {
@@ -2852,6 +2933,11 @@ async function dispatch(
     }
     case "post_guided_finding": {
       const review = guidedReviewForIssue(store, args, options);
+      if (retiredGuidedReview(review))
+        throw new TrackerWriteRefused(
+          "guided_review_retired",
+          "This review is retired; save a new source revision on the same issue",
+        );
       validateStoredGuidedReview(store, review);
       if (canonical(review.identity) !== canonical(args.expectedSource))
         throw new TrackerWriteRefused("source_mismatch", "Guided finding source does not match this review");
@@ -2870,6 +2956,57 @@ async function dispatch(
       finding.history.push(event);
       review.updatedAt = now;
       return review;
+    }
+    case "post_retire_guided_review": {
+      const review = guidedReviewForIssue(store, args, options);
+      // The ordinary operator route's Clankie label is not native lead proof.
+      // Existing owner activity is the only destructive authority proven here.
+      if (!isOwnerActivity(context.actor))
+        throw new TrackerWriteRefused(
+          "guided_review_retire_authority",
+          "Retirement requires authenticated owner activity; an actor label or issue-write authority is insufficient",
+        );
+      if (retiredGuidedReview(review))
+        throw new TrackerWriteRefused("guided_review_retired", "This review is already retired");
+      validateStoredGuidedReview(store, review);
+      if (canonical(review.identity) !== canonical(args.expectedSource))
+        throw new TrackerWriteRefused("source_mismatch", "Retirement source does not match this review");
+      assertUnchangedSince(review, args);
+      // Legacy historical full results require payload retention. Do not silently rewrite them.
+      if (
+        (store.receipts ?? []).some((receipt) => {
+          if (
+            receipt.state !== "applied" ||
+            !["save_guided_review", "post_guided_finding"].includes(receipt.tool)
+          )
+            return false;
+          const result = receipt.result as Record<string, unknown> | undefined;
+          return result?.guidedReviewSnapshot === review.id || result?.id === review.id;
+        })
+      )
+        throw new TrackerWriteRefused(
+          "guided_review_legacy_receipts",
+          "Legacy full-response receipts require payload retention; retirement needs an explicit compatibility decision",
+        );
+      const tombstone: GuidedReviewTombstone = {
+        id: review.id,
+        schemaVersion: 1,
+        storeId: review.storeId,
+        issueId: review.issueId,
+        projectId: review.projectId,
+        ...(review.runId === undefined ? {} : { runId: review.runId }),
+        identity: review.identity,
+        snapshotSha256: review.snapshotSha256,
+        createdAt: review.createdAt,
+        ...(review.createdByActor === undefined ? {} : { createdByActor: review.createdByActor }),
+        updatedAt: now,
+        updatedByActor: context.actor,
+        retiredAt: now,
+        retiredByActor: context.actor,
+        retirementEventId: randomUUID(),
+      };
+      store.guidedReviews![store.guidedReviews!.indexOf(review)] = tombstone;
+      return tombstone;
     }
     case "save_issue_view": {
       const project = issueViewProject(store, args);
@@ -3999,6 +4136,11 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       }
     }
     const settled = structuredClone(result);
+    const publicResult = ["save_guided_review", "post_guided_finding", "post_retire_guided_review"].includes(
+      name,
+    )
+      ? guidedReviewMutationReceipt(settled as StoredGuidedReview, name, actor)
+      : settled;
     appendAudit(store, {
       at: now,
       tool: name,
@@ -4016,10 +4158,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         fingerprint,
         state: "applied",
         at: now,
-        result:
-          name === "save_guided_review" || name === "post_guided_finding"
-            ? guidedReviewReceiptResult(settled as GuidedReviewRecord)
-            : settled,
+        result: publicResult,
       });
     appendSync(before, store, actor, name, now, key);
     await persist(path, store, assertHeld, {
@@ -4032,7 +4171,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     });
     for (const listener of syncListeners.get(path) ?? []) listener();
     publish(store.events?.slice(firstEvent - 1) ?? []);
-    return settled;
+    return publicResult;
   };
   const loadExisting = async (mutable: boolean, captureRead: boolean) => {
     let origin: Pick<LockedReadIdentity, "canonicalDirectory" | "directory"> | undefined;
@@ -5321,7 +5460,11 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             );
           options.assertIssueWrite?.(issueView(store, issue));
           guidedSourceFence?.();
-          if (name === "get_guided_review" || name === "post_guided_finding")
+          if (
+            name === "get_guided_review" ||
+            name === "post_guided_finding" ||
+            name === "post_retire_guided_review"
+          )
             guidedReviewForIssue(store, args, options);
         }
         const rolloverDue = cyclesDue(store, clock);

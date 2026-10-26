@@ -252,7 +252,7 @@ Git identity uses returned `gitDirectory` and full commit IDs; patch identity
 uses the parsed byte SHA-256, never its claimed object IDs. Save re-inspects and
 refuses changed/incomplete sources. Use `review show ID --issue ITEM` and
 `review list --issue ITEM --limit N --cursor CURSOR` for summaries; `show` returns
-the full persisted inspection. The host denies source reads by default: use only
+the full active inspection or a retired identity tombstone. The host denies source reads by default: use only
 canonical paths in the issue project's bound local workspace repository or an
 existing approved genuine linked worktree. Arbitrary host paths, symlink aliases
 and remote-machine paths refuse; source paths never bypass tool/project ceilings.
@@ -261,29 +261,48 @@ Refusals include `source_authority_required`, `guided_review_source_refused` and
 under-lock identity/binding checks and a source publication fence.
 
 Native tools are `linear_save_guided_review`, `linear_get_guided_review`,
-`linear_list_guided_reviews` and `linear_post_guided_finding`. These require an
+`linear_list_guided_reviews`, `linear_post_guided_finding` and
+`linear_post_retire_guided_review`. These require an
 explicit authenticated actor; external actors and other tracker backends refuse.
 For edits, read first and send `findingId`, saved identity as `expectedSource`,
 current review `updatedAt` as `ifUpdatedAt`, a new idempotency key, and
 `edit:{action:"reply",body}` or `edit:{action:"resolve",resolved:true}`.
 `resolved:false` reopens. CLI: `review edit ID --issue ITEM --json JSON`.
 Existing tracker audit/receipts retain actor attribution; anchors and source
-stay immutable and reads survive source removal. Each issue is capped at three
-reviews; immutable snapshots share an 8 MiB store budget checked on saves.
-Discussion and edit receipts do not consume shared snapshot capacity. Each
-review has an independent 256 KiB serialized discussion budget; a typed
-`guided_review_discussion_budget` refusal affects only that review. Other
-reviews remain editable even when snapshot capacity is full. Constant-size
-receipts reference review/event/timestamp and rebuild the exact historical
-response from ordered history on replay. Snapshots are retained without
-overwrite/retirement in this slice. At three
-source revisions (`guided_review_limit`), preserve those reviews and use a linked
-successor issue for later revisions; do not rebind a review or edit tracker files.
-At a discussion limit, use another review slot or successor issue. A full shared
-snapshot pool refuses new saves (`guided_review_budget`) but preserves edits to
-existing reviews within their own budgets. Capacity/retirement changes require
-separate tracked work. Ordinary loads check shallow metadata; selected full
-reads/writes check snapshot integrity. Finding resolution is not owner
+stay immutable and active reads survive source removal. Each issue is capped at
+three active reviews; active immutable snapshots share an 8 MiB store budget.
+Discussion and mutation receipts are excluded. Each review independently allows
+256 KiB serialized discussion; `guided_review_discussion_budget` affects only
+that review. Other reviews stay editable even when snapshot capacity is full.
+
+This unlanded contract returns compact save/edit/retire results with
+`schemaVersion:1,reviewId,storeId,issueId,projectId,identity,snapshotSha256,operation,eventId,updatedAt,actor`.
+Operations are `save`, `reply`, `resolve`, `retire`; event ID is string or null.
+Retries and `get_write_receipt` replay the exact compact result after retirement,
+never recreate payload. Full historical payload replay is no longer promised for
+new writes: reread current active content with `review show`. Legacy full-result
+and snapshot-pointer receipts remain readable unchanged but block retirement
+with `guided_review_legacy_receipts`; do not silently migrate them.
+
+Use `clankie work owner post_retire_guided_review --repo /repo --json JSON`
+through authenticated `/v1/tracker/owner/call`, with `issueId`, `id`, saved
+identity as `expectedSource`, current `updatedAt` as `ifUpdatedAt`, and a fresh
+`idempotencyKey`. Retirement requires a proven owner principal. Generic
+`review retire ID --issue ITEM --json JSON` refuses
+`guided_review_retire_authority` without one; the normal Clankie-for-owner actor
+stamp is insufficient. Current routes fail closed to owner-only retirement.
+Native lead support requires a proven host capability and is not implemented
+here; client actor labels, role claims and `--actor` do not grant authority.
+Owner activity does not verify acceptance. Normal issue/project scope and revision/source identity
+checks apply; no host source read. Explicit irreversible retirement releases
+active slot and byte capacity in the same issue/store, retaining identity,
+actor audit and compact receipts. Get/list return a tombstone with stable source
+identity and `retiredAt`/`retiredBy`, without payload. Edits refuse
+`guided_review_retired`. At `guided_review_limit` or `guided_review_budget`, an
+authenticated owner can explicitly retire an eligible review before a new save. No
+automatic eviction, successor issue workaround, parallel store or source rebinding.
+Ordinary loads check shallow metadata; selected active full reads/writes check
+snapshot integrity. Finding resolution is not owner
 verification or an upstream verdict. No Work UI/device sync is provided; publish
 artifact bytes through the existing evidence store. Payloads and limits:
 `docs/guided-reviews.md`.

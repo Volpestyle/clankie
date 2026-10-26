@@ -3190,7 +3190,7 @@ hunks), non-UTF-8, truncated, contradictory or unsupported patches answer
 `{ "outcome": "refused", "code" }` and exit 1. Contract: [guided
 reviews](guided-reviews.md#reading-a-supplied-patch).
 
-### `work review save|show|list|edit` (built-in tracker)
+### `work review save|show|list|edit|retire` (built-in tracker)
 
 Persist an inspected local Git change or supplied patch with an ordered
 walkthrough, anchored severity findings, replies and resolution history:
@@ -3200,6 +3200,7 @@ clankie work review save --json "$(cat review.json)"
 clankie work review show REVIEW_ID --issue ITEM
 clankie work review list --issue ITEM --limit 20 [--cursor CURSOR]
 clankie work review edit REVIEW_ID --issue ITEM --json "$(cat edit.json)"
+clankie work owner post_retire_guided_review --repo /repo --json "$(cat retire.json)"
 ```
 
 Save JSON requires `issueId`, `source`, `expectedSource`, `walkthrough`,
@@ -3223,17 +3224,38 @@ review `updatedAt` as `ifUpdatedAt`, a fresh `idempotencyKey`, and
 `edit: {action:"reply",body}` or `edit: {action:"resolve",resolved:true}`.
 Set `resolved:false` to reopen. Sources and anchors cannot be edited.
 
-At most three reviews are retained per issue. Immutable snapshots share an
-8 MiB store budget checked on saves; discussion and edit receipts are excluded.
-Each review independently allows 256 KiB of serialized discussion. A
-`guided_review_discussion_budget` refusal affects only that review, leaving
-other reviews editable even when the shared snapshot pool is full. Constant-size
-review/event/timestamp receipts reconstruct exact historical responses on replay.
-At the three-review cap, track further source revisions on a linked successor
-issue; this slice has no snapshot overwrite/retirement operation.
-`list` returns summaries without inspections or bodies;
-`show` returns the full review. Ordinary loads check shallow metadata; full
-snapshot integrity checks apply to selected full reads and writes.
+At most three active reviews are retained per issue. Active immutable snapshots
+share an 8 MiB store budget; discussion and mutation receipts are excluded.
+Each review independently allows 256 KiB of serialized discussion.
+`guided_review_discussion_budget` affects only that review; other reviews remain
+editable even when snapshot capacity is full.
+
+This unlanded contract returns compact save/edit/retire results:
+`{schemaVersion:1,reviewId,storeId,issueId,projectId,identity,snapshotSha256,operation,eventId,updatedAt,actor}`.
+`operation` is `save`, `reply`, `resolve` or `retire`; `eventId` is a string or
+null. Retries and `get_write_receipt` replay that exact compact result, even
+after retirement. Full historical payload replay is no longer promised for new
+writes. `show` reads the current full active review; `list` returns summaries.
+Retired get/list results are identity tombstones with `retiredAt`/`retiredBy`
+and no payload. Legacy full-result/pointer receipts keep their original replay
+semantics and block retirement with `guided_review_legacy_receipts`.
+
+Owner-call retire JSON requires `issueId`, `id`, saved identity as
+`expectedSource`, current `updatedAt` as `ifUpdatedAt`, and a fresh
+`idempotencyKey`. The existing `work owner` command uses authenticated
+`/v1/tracker/owner/call`. Only a proven owner principal may retire under normal
+issue/project scope. The generic `review retire ID --issue ITEM --json JSON`
+route refuses `guided_review_retire_authority` without that principal; its normal
+Clankie-for-owner actor stamp does not prove owner authority. Current routes fail
+closed to owner-only retirement. Native lead support needs a proven host
+capability and is not implemented here; client actor labels, role claims and
+`--actor` do not grant authority. Owner activity does not verify acceptance. Retirement checks revision and source
+identity without host source reads. It irreversibly releases active review and
+byte capacity in the same issue/store, preserving identity, compact receipts and
+audit. Retired edits refuse `guided_review_retired`; replay never restores a
+payload. At `guided_review_limit` or `guided_review_budget`, choose an eligible
+review to retire explicitly. There is no automatic eviction, successor issue
+workaround, parallel store or source rebinding.
 
 These service calls require explicit authenticated actors and an existing
 built-in issue. They use tracker receipts/audit, never verify acceptance or

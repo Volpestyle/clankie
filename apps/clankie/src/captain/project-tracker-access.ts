@@ -7,6 +7,7 @@ const TOOLS = new Set([
   "get_guided_review",
   "list_guided_reviews",
   "post_guided_finding",
+  "post_retire_guided_review",
   "save_issue_view",
   "get_issue_view",
   "list_issue_views",
@@ -74,6 +75,7 @@ export async function authorizeProjectTrackerCall(
     case "get_guided_review":
     case "list_guided_reviews":
     case "post_guided_finding":
+    case "post_retire_guided_review":
       await issueRef(args.issueId);
       break;
     case "save_issue_view":

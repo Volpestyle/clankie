@@ -97,6 +97,7 @@ export const GUIDED_REVIEW_TOOLS: ReadonlySet<string> = new Set([
   "get_guided_review",
   "list_guided_reviews",
   "post_guided_finding",
+  "post_retire_guided_review",
 ]);
 
 /** Mailbox capability is supplied by the authenticated HTTP route, never MCP arguments. */
@@ -398,25 +399,25 @@ function tool(
 export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   tool(
     "save_guided_review",
-    "Built-in only. Save an immutable local two-ref or supplied-patch review after re-inspecting its exact expected source identity. Ordered walkthrough and severity findings use inspected hunk lines. No upstream verdict or owner verification.",
+    "Built-in only. Save an immutable local two-ref or supplied-patch review after re-inspecting its exact expected source identity. Ordered walkthrough and severity findings use inspected hunk lines. Returns a compact mutation receipt; get_guided_review reads the full active review. No upstream verdict or owner verification.",
     { ...guidedReviewCreateProperties, idempotencyKey },
     ["issueId", "source", "expectedSource", "walkthrough", "findings", "idempotencyKey"],
   ),
   tool(
     "get_guided_review",
-    "Built-in only. Re-read a saved local review and its durable finding replies/resolutions in its exact issue.",
+    "Built-in only. Read the current full active review and discussion, or retired identity tombstone, in its exact issue.",
     { issueId: string, id: string },
     ["issueId", "id"],
   ),
   tool(
     "list_guided_reviews",
-    "Built-in only. List saved local reviews for one issue; follow cursor.",
+    "Built-in only. List active review summaries and retired identity tombstones for one issue; follow cursor.",
     { issueId: string, ...pagination },
     ["issueId"],
   ),
   tool(
     "post_guided_finding",
-    "Built-in only. Reply to or resolve/reopen a saved finding. Requires unchanged review revision and exact immutable source identity; never approves work or writes to a host.",
+    "Built-in only. Reply to or resolve/reopen a saved finding. Requires unchanged review revision and exact immutable source identity; returns a compact mutation receipt. Never approves work or writes to a host.",
     {
       issueId: string,
       id: string,
@@ -426,6 +427,12 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       ...writeControls,
     },
     ["issueId", "id", "findingId", "expectedSource", "edit", "ifUpdatedAt", "idempotencyKey"],
+  ),
+  tool(
+    "post_retire_guided_review",
+    "Built-in only. Authenticated owner principal retires a saved review in its current issue, reclaiming its payload while retaining identity and compact receipts. Requires exact source identity and unchanged revision; no source read. Generic actor labels do not prove authority; legacy full-result receipts refuse retirement.",
+    { issueId: string, id: string, expectedSource: guidedReviewIdentitySchema, ...writeControls },
+    ["issueId", "id", "expectedSource", "ifUpdatedAt", "idempotencyKey"],
   ),
   {
     name: "inbox_pending_questions",

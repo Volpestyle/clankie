@@ -42,6 +42,14 @@ export function compactLinearWrite(tool: string, content: string): string {
   }
   if (typeof record !== "object" || record === null || Array.isArray(record)) return content;
   const source = record as Record<string, unknown>;
+  // Guided mutations already return immutable compact results. Preserve their
+  // exact identity/event/actor contract across native and HTTP transports.
+  if (
+    ["save_guided_review", "post_guided_finding", "post_retire_guided_review"].includes(tool) &&
+    source.schemaVersion === 1 &&
+    typeof source.reviewId === "string"
+  )
+    return content;
   const receipt: Record<string, unknown> = {};
   for (const key of ISSUE_FIELDS)
     if (source[key] !== undefined && source[key] !== null) receipt[key] = source[key];

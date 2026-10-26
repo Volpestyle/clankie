@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { createLocalTracker, GUIDED_REVIEW_LIMITS, type GuidedReviewRecord } from "../src/tracker-local.ts";
+import {
+  createLocalTracker,
+  GUIDED_REVIEW_LIMITS,
+  type GuidedReviewRecord,
+  type GuidedReviewMutationReceipt,
+} from "../src/tracker-local.ts";
 import { readReviewPatch, REVIEW_PATCH_LIMITS } from "../src/review-patch.ts";
 import type { TrackerActor } from "../src/tracker-tools.ts";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
@@ -67,8 +72,14 @@ async function fixture(bytes: number) {
     ],
     idempotencyKey: `bounds-save-${++sequence}`,
   });
-  const save = (issueId: string) =>
-    tracker.call("save_guided_review", input(issueId), { actor }) as Promise<GuidedReviewRecord>;
+  const get = (issueId: string, id: string) =>
+    tracker.call("get_guided_review", { issueId, id }, { actor }) as Promise<GuidedReviewRecord>;
+  const save = async (issueId: string) => {
+    const receipt = (await tracker.call("save_guided_review", input(issueId), {
+      actor,
+    })) as GuidedReviewMutationReceipt;
+    return get(issueId, receipt.reviewId);
+  };
   return { root, directory, tracker, issue, save, input, patchBytes, authorizeGuidedReviewSource };
 }
 
@@ -96,15 +107,21 @@ it("caps reviews per issue and returns small summaries without inspection or dis
   }
 });
 
-it("keeps edit receipts constant-size and replays exact historical discussion after reopen", async () => {
+it("keeps edit receipts constant-size and replays exact compact historical results after reopen", async () => {
   const f = await fixture(1024);
   try {
     const issue = await f.issue("Long discussion");
     const saveInput = f.input(issue.id);
     saveInput.findings.push({ ...saveInput.findings[0]!, body: "Second finding" });
-    const initial = (await f.tracker.call("save_guided_review", saveInput, { actor })) as GuidedReviewRecord;
-    let latest = initial;
-    let historical!: GuidedReviewRecord;
+    const initial = (await f.tracker.call("save_guided_review", saveInput, {
+      actor,
+    })) as GuidedReviewMutationReceipt;
+    let latest = (await f.tracker.call(
+      "get_guided_review",
+      { issueId: issue.id, id: initial.reviewId },
+      { actor },
+    )) as GuidedReviewRecord;
+    let historical!: GuidedReviewMutationReceipt;
     let historicalInput!: Record<string, unknown>;
     const otherActor: TrackerActor = { type: "human", id: "reply-author", onBehalfOf: [] };
     for (let index = 0; index < 200; index++) {
@@ -120,11 +137,16 @@ it("keeps edit receipts constant-size and replays exact historical discussion af
             ? { action: "resolve", resolved: index % 14 === 0 }
             : { action: "reply", body: "r".repeat(200) },
       };
-      latest = (await f.tracker.call("post_guided_finding", input, {
+      const mutation = (await f.tracker.call("post_guided_finding", input, {
         actor: otherActor,
-      })) as GuidedReviewRecord;
+      })) as GuidedReviewMutationReceipt;
+      latest = (await f.tracker.call(
+        "get_guided_review",
+        { issueId: issue.id, id: mutation.reviewId },
+        { actor },
+      )) as GuidedReviewRecord;
       if (index === 5) {
-        historical = latest;
+        historical = mutation;
         historicalInput = input;
       }
     }
@@ -136,10 +158,22 @@ it("keeps edit receipts constant-size and replays exact historical discussion af
     expect(receipts).toHaveLength(200);
     expect(
       Buffer.byteLength(JSON.stringify(receipts.map((entry: { result: unknown }) => entry.result))),
-    ).toBeLessThan(40 * 1024);
+    ).toBeLessThan(160 * 1024);
     for (const receipt of receipts) {
-      expect(Object.keys(receipt.result).sort()).toEqual(["eventId", "guidedReviewSnapshot", "updatedAt"]);
-      expect(Buffer.byteLength(JSON.stringify(receipt.result))).toBeLessThan(200);
+      expect(Object.keys(receipt.result).sort()).toEqual([
+        "actor",
+        "eventId",
+        "identity",
+        "issueId",
+        "operation",
+        "projectId",
+        "reviewId",
+        "schemaVersion",
+        "snapshotSha256",
+        "storeId",
+        "updatedAt",
+      ]);
+      expect(Buffer.byteLength(JSON.stringify(receipt.result))).toBeLessThan(800);
     }
     const reopened = createLocalTracker({
       directory: f.directory,
@@ -189,8 +223,8 @@ it("isolates shared snapshot exhaustion and per-review discussion exhaustion fro
       }
     }
     expect(exhausted).toBe(true);
-    const reply = (review: GuidedReviewRecord, key: string, body: string) =>
-      f.tracker.call(
+    const reply = async (review: GuidedReviewRecord, key: string, body: string) => {
+      await f.tracker.call(
         "post_guided_finding",
         {
           issueId: review.issueId,
@@ -202,7 +236,13 @@ it("isolates shared snapshot exhaustion and per-review discussion exhaustion fro
           edit: { action: "reply", body },
         },
         { actor },
+      );
+      return f.tracker.call(
+        "get_guided_review",
+        { issueId: review.issueId, id: review.id },
+        { actor },
       ) as Promise<GuidedReviewRecord>;
+    };
     // Filling the immutable snapshot pool cannot disable discussions already saved.
     second = await reply(second, "other-after-global-cap", "still writable");
     let discussionFull = false;
@@ -237,6 +277,22 @@ it("isolates shared snapshot exhaustion and per-review discussion exhaustion fro
     expect(Buffer.byteLength(JSON.stringify(discussion))).toBeLessThanOrEqual(
       GUIDED_REVIEW_LIMITS.discussionBytes,
     );
+    await f.tracker.call(
+      "post_retire_guided_review",
+      {
+        issueId: first.issueId,
+        id: first.id,
+        expectedSource: first.identity,
+        ifUpdatedAt: first.updatedAt,
+        idempotencyKey: "reclaim-full-review",
+      },
+      { actor },
+    );
+    const replacement = await f.save(firstIssue.id);
+    expect(replacement.id).not.toBe(first.id);
+    expect(replacement.findings[0]!.replies).toEqual([]);
+    const replied = await reply(replacement, "replacement-has-discussion-room", "r".repeat(16000));
+    expect(replied.findings[0]!.replies).toHaveLength(1);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -283,6 +339,49 @@ it("checks snapshot integrity on selected get/edit without hashing unrelated ret
         { actor },
       ),
     ).rejects.toThrow("snapshot integrity");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+it("refuses retirement while legacy receipts require retaining the original payload", async () => {
+  const f = await fixture(1024);
+  try {
+    const issue = await f.issue("Legacy receipts");
+    const review = await f.save(issue.id);
+    const path = join(f.directory, "tracker.json");
+    const store = JSON.parse(await readFile(path, "utf8"));
+    const saveReceipt = store.receipts.find((entry: { tool: string }) => entry.tool === "save_guided_review");
+    for (const result of [
+      review,
+      { guidedReviewSnapshot: review.id, eventId: null, updatedAt: review.updatedAt },
+    ]) {
+      saveReceipt.result = result;
+      await writeFile(path, JSON.stringify(store));
+      const before = await readFile(path, "utf8");
+      const reopened = createLocalTracker({
+        directory: f.directory,
+        authorizeGuidedReviewSource: f.authorizeGuidedReviewSource,
+      });
+      await expect(
+        reopened.call(
+          "post_retire_guided_review",
+          {
+            issueId: issue.id,
+            id: review.id,
+            expectedSource: review.identity,
+            ifUpdatedAt: review.updatedAt,
+            idempotencyKey: "legacy-retirement",
+          },
+          { actor },
+        ),
+      ).rejects.toMatchObject({ reason: "guided_review_legacy_receipts" });
+      const after = JSON.parse(await readFile(path, "utf8"));
+      const previous = JSON.parse(before);
+      expect(after.guidedReviews).toEqual(previous.guidedReviews);
+      expect(after.issues).toEqual(previous.issues);
+      expect(after.runs).toEqual(previous.runs);
+    }
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

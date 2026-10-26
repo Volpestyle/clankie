@@ -38,7 +38,7 @@ const WORK_USAGE = [
   "  | lease ITEM [--minutes N] [--release]",
   "  | review-diff BASE HEAD   (read-only local Git change between two commits of --repo; no service)",
   "  | review-patch FILE   (read-only local Git patch file; no Git, repository or service)",
-  "  | review save --json REVIEW | review show|list [ID] --issue ITEM | review edit ID --issue ITEM --json EDIT   (durable local guided reviews)",
+  "  | review save --json REVIEW | review show|list [ID] --issue ITEM | review edit|retire ID --issue ITEM --json JSON   (durable local guided reviews)",
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | call TOOL [--json ARGS]   (Clankie's call to the built-in tracker, for the owner)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker; agents never use it)",
@@ -361,14 +361,18 @@ function trackerRequest(
         path: "/v1/tracker/call",
         body: { repo, name, arguments: toolArgs },
       });
-      if (action === "save" || action === "edit") {
+      if (action === "save" || action === "edit" || action === "retire") {
         const value: unknown = JSON.parse(one(parsed, "--json") ?? "null");
         if (!value || typeof value !== "object" || Array.isArray(value))
           throw new Error("--json requires a review object");
         if (action === "save" && id === undefined && one(parsed, "--issue") === undefined)
           return call("save_guided_review", value as Record<string, unknown>);
-        if (action === "edit" && id !== undefined && one(parsed, "--issue"))
-          return call("post_guided_finding", { ...value, id, issueId: one(parsed, "--issue") });
+        if ((action === "edit" || action === "retire") && id !== undefined && one(parsed, "--issue"))
+          return call(action === "edit" ? "post_guided_finding" : "post_retire_guided_review", {
+            ...value,
+            id,
+            issueId: one(parsed, "--issue"),
+          });
       }
       if (
         (action === "show" || action === "list") &&

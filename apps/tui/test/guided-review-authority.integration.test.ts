@@ -220,7 +220,7 @@ it("fences real review sources and concurrent authority changes through producti
           timeout: 60000,
         },
       );
-      expect(JSON.parse(output.stdout).result.id).toEqual(expect.any(String));
+      expect(JSON.parse(output.stdout).result.reviewId).toEqual(expect.any(String));
     }
     const denied = async (args: unknown, reason: string) => {
       const before = await domains();

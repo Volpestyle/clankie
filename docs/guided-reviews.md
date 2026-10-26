@@ -253,38 +253,73 @@ restart. Reads do not re-open the source. Supplied patch object IDs remain
 unverified claims. Source identity, walkthrough, finding bodies and anchors are
 immutable after creation; discussion state can change.
 
-Each issue may retain at most three guided reviews. Across the tracker store,
-immutable snapshots share an 8 MiB budget, checked on saves. Discussion and
-edit receipts do not consume that shared capacity. Each review independently
+Each issue may retain at most three active guided reviews. Active immutable
+snapshots share an 8 MiB tracker-store budget, checked on saves. Discussion and
+mutation receipts do not consume that shared capacity. Each review independently
 allows 256 KiB of serialized discussion (reply projections and event history).
-`guided_review_discussion_budget` refuses a further edit to that review without
-changing its last accepted state; other reviews remain writable, including when
-the shared snapshot pool is full. Existing finding reply/history count limits
-also apply.
+`guided_review_discussion_budget` refuses a further edit without changing the
+last accepted state; other reviews remain writable even when the shared snapshot
+pool is full. Finding reply/history count limits also apply.
 
-This slice retains snapshots permanently and provides no retirement or overwrite
-operation. At the three-review cap, `guided_review_limit` refuses a fourth source
-revision; keep the existing reviews and track subsequent revisions on a linked
-successor issue. An existing review cannot be rebound to a newer source. If a
-review's discussion reaches its own limit, use another review slot or a successor
-issue for further discussion. A full shared snapshot pool refuses new snapshots
-with `guided_review_budget`, while saved reviews and their independent discussion
-capacity remain available. Increasing capacity or adding retirement is separate
-tracked work, never an instruction to edit tracker storage manually.
+This unlanded contract changes successful save/edit responses to compact mutation
+receipts rather than full historical review payloads. Save, reply, resolve and
+retire return exactly these fields:
 
-Successful receipts store only the review ID, terminal event ID and resulting
-timestamp. Replay reconstructs the exact historical replies, resolutions and
-actor stamps from the immutable snapshot and ordered history through that event.
-It does not copy the growing discussion into every receipt. The existing
-actor-scoped request fingerprint still refuses a changed request under an old
-key, including the save preflight replay path.
+```ts
+{
+  schemaVersion: 1,
+  reviewId, storeId, issueId, projectId, identity, snapshotSha256,
+  operation: "save" | "reply" | "resolve" | "retire",
+  eventId: string | null,
+  updatedAt,
+  actor
+}
+```
 
-`list_guided_reviews` returns bounded summaries: identity and bindings, counts,
-and finding IDs/severity/resolution/reply counts. It omits inspections and bodies;
-`get_guided_review` returns the full saved review. Ordinary store loads validate
-shallow review metadata. Full snapshot integrity checks run only on creation and
-selected full reads/edits (including receipt reconstruction), so reading an
-unrelated issue does not hash every retained inspection.
+Actor-scoped idempotency keys and fingerprints preserve the exact compact result
+on retry and through `get_write_receipt`, including after retirement. A changed
+request under an old key refuses. Full historical payload replay is no longer
+promised for new writes: use `get_guided_review` / `review show` for the current
+active review. Precompact full-result and snapshot-pointer receipts remain
+readable with their existing result semantics; retirement refuses those reviews
+with `guided_review_legacy_receipts`, without silently converting receipts or
+migrating storage.
+
+`list_guided_reviews` returns bounded active summaries without inspection or
+bodies. `get_guided_review` returns the full active review. Retired get/list
+results return an identity tombstone with stable review/source bindings and
+`retiredAt`/`retiredBy`, without inspection, walkthrough, findings or discussion.
+Ordinary loads validate shallow metadata; full snapshot checks apply to selected
+active reads and edits.
+
+## Retiring a saved review
+
+A proven authenticated owner principal may explicitly retire a review in its
+current issue. Read first, then supply saved `identity` as `expectedSource`, current
+`updatedAt` as `ifUpdatedAt`, and a fresh `idempotencyKey`:
+
+```bash
+clankie work owner post_retire_guided_review --repo /repo --json "$(cat retire.json)"
+```
+
+Owner-call JSON contains `issueId`, `id`, `expectedSource`, `ifUpdatedAt` and
+`idempotencyKey`. This uses the authenticated `/v1/tracker/owner/call` route.
+`work review retire ID --issue ITEM --json JSON` remains a generic route and
+refuses with `guided_review_retire_authority` without a proven owner principal.
+The normal tracker call's Clankie-for-owner actor stamp does not establish that
+principal. Current routes fail closed to owner-only retirement; native lead
+support needs a proven host capability and is not implemented here. Client actor
+labels, role claims and `--actor` cannot grant retirement authority. Owner
+activity records the action; it does not verify delivery or acceptance.
+Normal issue/project scope, revision and source-identity checks apply; retirement
+never reopens the source or reads the host filesystem. It releases the review's
+active slot and snapshot/discussion capacity in the same store and issue while
+retaining stable identity, actor audit and compact successful receipts. Retired
+reviews reject edits with `guided_review_retired`; replay never recreates a
+payload. Retirement is irreversible. There is no automatic eviction, successor
+issue workaround, parallel store or source rebinding. At `guided_review_limit`
+or `guided_review_budget`, an authenticated owner can choose an eligible active review to
+retire explicitly before saving a replacement.
 
 ## Replying and resolving
 
@@ -314,7 +349,7 @@ upstream approval.
 
 The native tracker tool names are `linear_save_guided_review`,
 `linear_get_guided_review`, `linear_list_guided_reviews` and
-`linear_post_guided_finding`; their underlying tracker names omit `linear_`.
+`linear_post_guided_finding` and `linear_post_retire_guided_review`; their underlying tracker names omit `linear_`.
 All require `issueId`; reads and edits by review ID also require `id`. The list
 returns `guidedReviews` and the normal tracker pagination metadata. Writes use
 the existing atomic tracker store, actor-scoped idempotency receipts and audit

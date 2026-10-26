@@ -167,9 +167,16 @@ it("attributes guided review edits to the authenticated worker and preserves own
       idempotencyKey: "worker-review",
     };
     const receipt = await call("linear_save_guided_review", input);
+    expect(receipt).toMatchObject({
+      reviewId: expect.any(String),
+      actor: run.actor,
+      identity: expectedSource,
+      operation: "save",
+    });
+    expect(await call("linear_save_guided_review", input)).toEqual(receipt);
     const saved = (await call("linear_get_guided_review", {
       issueId: issue.id,
-      id: receipt.id,
+      id: receipt.reviewId,
     })) as GuidedReviewRecord;
     expect(saved.runId).toBe(run.id);
     expect(saved.createdByActor).toEqual(run.actor);

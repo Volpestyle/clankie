@@ -9,7 +9,10 @@ import { expect, it } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createLocalTracker, readReviewDiff, readReviewPatch, trackerToolsFor } from "@clankie/work-items";
 import { createClankieApp } from "../../clankie/src/app.ts";
-import type { GuidedReviewRecord } from "../../../packages/work-items/src/tracker-local.ts";
+import type {
+  GuidedReviewMutationReceipt,
+  GuidedReviewRecord,
+} from "../../../packages/work-items/src/tracker-local.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { createGuidedReviewSourceAuthorizer } from "../../clankie/src/guided-review-source.ts";
 import { createWorkItemsService } from "../../clankie/src/work-items.ts";
@@ -153,13 +156,13 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
       await new Promise<void>((done, reject) => server!.close((error) => (error ? reject(error) : done())));
       server = undefined;
     };
-    const cli = async (...args: string[]) => {
+    const cli = async <T = GuidedReviewRecord>(...args: string[]): Promise<T> => {
       const output = await execute(process.execPath, [CLI, "work", ...args, "--repo", repo], {
         cwd: repo,
         env: { ...env, CLANKIE_OPERATOR_TOKEN: "fixture-owner", CLANKIE_CONTROL_PLANE_URL: host },
         timeout: 60_000,
       });
-      return (JSON.parse(output.stdout) as { result: GuidedReviewRecord }).result;
+      return (JSON.parse(output.stdout) as { result: T }).result;
     };
     const call = (name: string, args: Record<string, unknown>, authenticated = true) =>
       fetch(`${host}/v1/tracker/call`, {
@@ -196,37 +199,64 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
       ],
       idempotencyKey: "git-review",
     };
-    const saved = await cli("review", "save", "--json", JSON.stringify(save));
-    expect(saved.id).toEqual(expect.any(String));
+    const savedMutation = await cli<GuidedReviewMutationReceipt>(
+      "review",
+      "save",
+      "--json",
+      JSON.stringify(save),
+    );
+    expect(savedMutation).toMatchObject({
+      schemaVersion: 1,
+      reviewId: expect.any(String),
+      operation: "save",
+      eventId: null,
+      identity: expectedSource,
+      actor: { type: "agent-worker", id: "clankie" },
+    });
+    expect(savedMutation).not.toHaveProperty("inspection");
+    expect(savedMutation).not.toHaveProperty("findings");
+    const saved = await cli("review", "show", savedMutation.reviewId, "--issue", issue.id);
+    expect(saved.id).toBe(savedMutation.reviewId);
     expect(saved.createdByActor).toMatchObject({ type: "agent-worker", id: "clankie" });
     expect(saved.walkthrough).toEqual(save.walkthrough);
     expect(saved.findings.map(({ body, severity, anchor }) => ({ body, severity, anchor }))).toEqual(
       save.findings,
     );
-    expect(await cli("review", "save", "--json", JSON.stringify(save))).toEqual(saved);
+    expect(await cli("review", "save", "--json", JSON.stringify(save))).toEqual(savedMutation);
     expect(await cli("review", "show", saved.id, "--issue", issue.id)).toEqual(saved);
     expect(JSON.stringify(await cli("review", "list", "--issue", issue.id))).toContain(saved.id);
     let current = saved;
+    let firstEdit: { input: Record<string, unknown>; receipt: GuidedReviewMutationReceipt } | undefined;
     for (const [index, edit] of [
       { action: "reply", body: "Confirmed context" },
       { action: "resolve", resolved: true },
       { action: "resolve", resolved: false },
     ].entries()) {
-      current = await cli(
+      const editInput = {
+        findingId: saved.findings[0]!.id,
+        expectedSource,
+        edit,
+        ifUpdatedAt: current.updatedAt,
+        idempotencyKey: `finding-edit-${index}`,
+      };
+      const editReceipt = await cli<GuidedReviewMutationReceipt>(
         "review",
         "edit",
         saved.id,
         "--issue",
         issue.id,
         "--json",
-        JSON.stringify({
-          findingId: saved.findings[0]!.id,
-          expectedSource,
-          edit,
-          ifUpdatedAt: current.updatedAt,
-          idempotencyKey: `finding-edit-${index}`,
-        }),
+        JSON.stringify(editInput),
       );
+      expect(editReceipt).toMatchObject({
+        reviewId: saved.id,
+        operation: edit.action,
+        eventId: expect.any(String),
+      });
+      expect(editReceipt).not.toHaveProperty("findings");
+      if (index === 0) firstEdit = { input: editInput, receipt: editReceipt };
+      current = await cli("review", "show", editReceipt.reviewId, "--issue", issue.id);
+      expect(current.updatedAt).toBe(editReceipt.updatedAt);
     }
     expect(JSON.stringify(current)).toContain("Confirmed context");
     expect(current.findings[0]!.resolved).toBe(false);
@@ -236,11 +266,17 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
       "resolve",
     ]);
     expect(current.findings[0]!.replies.map((reply) => reply.body)).toEqual(["Confirmed context"]);
-    // Compact receipts must reconstruct historical responses, not return current discussion state.
-    expect(await cli("review", "save", "--json", JSON.stringify(save))).toEqual(saved);
+    expect(firstEdit).toBeDefined();
+    expect(
+      await cli("review", "edit", saved.id, "--issue", issue.id, "--json", JSON.stringify(firstEdit!.input)),
+    ).toEqual(firstEdit!.receipt);
+    const editLookup = await call("get_write_receipt", { idempotencyKey: "finding-edit-0" });
+    expect((await editLookup.json()).result.result).toEqual(firstEdit!.receipt);
+    // A keyed replay returns the original immutable mutation receipt after later edits.
+    expect(await cli("review", "save", "--json", JSON.stringify(save))).toEqual(savedMutation);
     const savedReceipt = await call("get_write_receipt", { idempotencyKey: "git-review" });
-    expect((await savedReceipt.json()).result.result).toEqual(saved);
-    const patchSaved = await cli(
+    expect((await savedReceipt.json()).result.result).toEqual(savedMutation);
+    const patchMutation = await cli<GuidedReviewMutationReceipt>(
       "review",
       "save",
       "--json",
@@ -251,6 +287,7 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
         idempotencyKey: "patch-review",
       }),
     );
+    const patchSaved = await cli("review", "show", patchMutation.reviewId, "--issue", issue.id);
     await rm(patchPath);
     expect(
       await cli(
@@ -264,7 +301,7 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
           idempotencyKey: "patch-review",
         }),
       ),
-    ).toEqual(patchSaved);
+    ).toEqual(patchMutation);
     await stop();
     host = await start();
     expect(await cli("review", "show", saved.id, "--issue", issue.id)).toEqual(current);
