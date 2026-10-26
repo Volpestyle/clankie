@@ -443,3 +443,97 @@ it("migrates an owned private legacy registry once and refuses unsafe registry p
   await chmod(join(root, "harness-account-identities"), 0o755);
   expect(() => harnessAccountIdentityPath(root!)).toThrow(/owned and private/u);
 });
+
+/** VUH-2871: a stopped runtime's in-flight account read must not recreate its removed state directory. */
+it("fails an account read aborted during the native probe or after it, without persisting the registry", async () => {
+  root = await mkdtemp(join(tmpdir(), "clankie-identity-abort-"));
+  vi.stubEnv("HOME", join(root, "home"));
+  await mkdir(join(root, "home"));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  await settings.update((current) => ({
+    ...current,
+    execution: {
+      connections: [
+        {
+          id: "box",
+          kind: "herdr",
+          session: "default",
+          ssh: { host: "box.invalid", shell: "posix" },
+          enabled: true,
+          capabilities: ["code"],
+        },
+      ],
+    },
+  }));
+  const fleet = { id: "box", session: "default", ssh: { host: "box.invalid", shell: "posix" as const } };
+  const probe = JSON.stringify({
+    schemaVersion: 1,
+    accounts: [
+      { harness: "claude", label: "default", home: "/h", signedIn: true, identity: "a@example.com" },
+    ],
+  });
+  const gate = () => {
+    let release!: () => void;
+    const open = new Promise<void>((resolve) => (release = resolve));
+    return { open, release };
+  };
+  const reader = (
+    stateDir: string,
+    signal: AbortSignal | undefined,
+    hooks: { shell?: () => Promise<string>; piStatus?: () => Promise<never> },
+  ) =>
+    createWorkerAccountsReader({
+      identityPath: harnessAccountIdentityPath(stateDir),
+      settings: () => settings.load(),
+      fleet: async () => fleet,
+      shell: () => hooks.shell ?? (async () => probe),
+      ...(hooks.piStatus ? { piStatus: hooks.piStatus } : {}),
+      ...(signal ? { signal } : {}),
+    });
+
+  // Control: without an abort the probe's observation is persisted, so the checks below can fail.
+  const control = join(root, "control");
+  await reader(control, undefined, {})("box", ["claude"]);
+  expect((await stat(join(control, "harness-account-identities", "registry.json"))).isFile()).toBe(true);
+
+  // Abort while the remote probe is in flight; the state directory is removed before it answers.
+  const probing = join(root, "probing");
+  const probeGate = gate();
+  const stopProbe = new AbortController();
+  const aborted = reader(probing, stopProbe.signal, {
+    shell: async () => {
+      await probeGate.open;
+      return probe;
+    },
+  })("box", ["claude"]);
+  const probeOutcome = aborted.then(
+    () => "resolved",
+    (error: unknown) => String(error),
+  );
+  stopProbe.abort(new Error("runtime closed"));
+  await rm(probing, { recursive: true, force: true });
+  probeGate.release();
+  expect(await probeOutcome).toContain("runtime closed");
+  await expect(stat(probing)).rejects.toMatchObject({ code: "ENOENT" });
+
+  // Abort after the probe was observed and saved, before the reader delivers notices.
+  const delivering = join(root, "delivering");
+  const stopDeliver = new AbortController();
+  const late = reader(delivering, stopDeliver.signal, {
+    piStatus: async () => {
+      stopDeliver.abort(new Error("runtime closed"));
+      await rm(delivering, { recursive: true, force: true });
+      return {
+        harness: "pi",
+        label: "pi",
+        home: "pi",
+        signedIn: false,
+        usable: false,
+        headroom: null,
+        reason: "fixture",
+      } as never;
+    },
+  })(undefined, ["pi"]);
+  await expect(late).rejects.toThrow("runtime closed");
+  await expect(stat(delivering)).rejects.toMatchObject({ code: "ENOENT" });
+});
