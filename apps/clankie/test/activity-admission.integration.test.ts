@@ -124,7 +124,7 @@ async function discordFixture() {
   return { url: await listen(server), seen };
 }
 
-async function stack(options: { clientSecret?: string | undefined } = {}) {
+async function stack(options: { clientSecret?: string | undefined; lockTimeoutMs?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "clankie-activity-admission-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const discord = await discordFixture();
@@ -170,7 +170,10 @@ async function stack(options: { clientSecret?: string | undefined } = {}) {
     sources: { resolve: async (sourceId) => play.resolve(sourceId) },
   });
   cleanup.push(() => sharing.close());
-  const launches = createActivityLaunches(sharing);
+  const launches = createActivityLaunches(
+    sharing,
+    options.lockTimeoutMs === undefined ? {} : { lockTimeoutMs: options.lockTimeoutMs },
+  );
   const admission = createSelfHostedActivityAdmission({
     applicationId: APP,
     clientSecret: async () => ("clientSecret" in options ? options.clientSecret : "fixture-secret"),
@@ -488,3 +491,34 @@ it.each([
     expect(closed).toBeUndefined();
   },
 );
+
+it("a hung producer call fails admissions closed until it settles, then the channel recovers", async () => {
+  const s = await stack({ lockTimeoutMs: 200 });
+  const playSink = s.play.createSink("FireRed");
+  s.launches.launched(GUILD, CHANNEL);
+  const lookup = s.hold("GET", "/shares");
+  const hung = s.admit("member-code", "i-here");
+  await lookup.arrived;
+  expect((await hung).status).toBe(403);
+  // Nothing interleaves with the hung call; a waiting viewer is refused, not stranded.
+  expect((await s.admit("member-code", "i-here")).status).toBe(403);
+  expect(s.shares.stats()).toHaveLength(0);
+  // Producer requests carry their own timeout; when the call settles, the
+  // abandoned admission takes nothing and the channel serves again.
+  lookup.release();
+  const next = await s.admit("member-code", "i-here");
+  expect(next.status).toBe(200);
+  expect(s.shares.stats()).toHaveLength(1);
+  const socket = new WebSocket(`ws://127.0.0.1:${s.viewerPort}${next.body.mediaPath}`, { headers: TUNNEL });
+  cleanup.push(() => socket.terminate());
+  const messages: Record<string, any>[] = [];
+  socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+  await new Promise<void>((done, reject) => {
+    socket.once("open", done);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({ kind: "admit", grant: next.body.grant }));
+  await vi.waitFor(() => expect(messages[0]?.kind).toBe("session"));
+  playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+  await vi.waitFor(() => expect(messages.some((message) => message.kind === "frame")).toBe(true));
+});

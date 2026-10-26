@@ -173,7 +173,10 @@ type DestinationSharing = Pick<ActivitySharing, "grantForDestination" | "request
  * after every await and refuses, ending only what it took, once that launch is
  * retired (VUH-2833 review).
  */
-export function createActivityLaunches(sharing: DestinationSharing) {
+export function createActivityLaunches(
+  sharing: DestinationSharing,
+  { lockTimeoutMs = 10_000 }: { lockTimeoutMs?: number } = {},
+) {
   interface Launch {
     shares: Set<string>;
   }
@@ -182,10 +185,19 @@ export function createActivityLaunches(sharing: DestinationSharing) {
   const queues = new Map<string, Promise<unknown>>();
   const key = (guildId: string, channelId: string) => `${guildId}:${channelId}`;
   const allow = async () => true;
-  const exclusive = <T>(destination: string, work: () => Promise<T>): Promise<T> => {
+  // A slow producer call must not leave callers waiting forever. Each caller
+  // stops waiting after the timeout and is refused (fail closed), and its work
+  // is marked abandoned so it takes nothing when it resumes. The channel itself
+  // stays held until that work settles: releasing it early would let a stale
+  // producer response race the next admission. Every producer request carries
+  // its own timeout, so the hold is bounded.
+  const exclusive = <T>(destination: string, work: (abandoned: () => boolean) => Promise<T>): Promise<T> => {
     const previous = queues.get(destination) ?? Promise.resolve();
-    // allow-swallowed-rejection -- the earlier operation's own caller receives its failure; this one only waits its turn
-    const run = previous.catch(() => undefined).then(work);
+    let abandoned = false;
+    const run = previous
+      // allow-swallowed-rejection -- the earlier operation's own caller receives its failure; this one only waits its turn
+      .catch(() => undefined)
+      .then(() => work(() => abandoned));
     const settled = run.then(
       () => undefined,
       () => undefined,
@@ -194,7 +206,14 @@ export function createActivityLaunches(sharing: DestinationSharing) {
     void settled.then(() => {
       if (queues.get(destination) === settled) queues.delete(destination);
     });
-    return run;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        abandoned = true;
+        reject(new Error("activity_admission_timeout"));
+      }, lockTimeoutMs);
+    });
+    return Promise.race([run, timedOut]).finally(() => clearTimeout(timer));
   };
   const owned = (destination: string, shareId: string) =>
     launched.get(destination)?.shares.has(shareId) === true ||
@@ -228,6 +247,7 @@ export function createActivityLaunches(sharing: DestinationSharing) {
     async stopped(guildId: string, channelId: string) {
       const destination = key(guildId, channelId);
       retire(destination);
+      // Cleanup always finishes, even after its caller stopped waiting.
       await exclusive(destination, async () => {
         for (const launch of retired.get(destination) ?? []) {
           await stopShares(launch.shares);
@@ -239,8 +259,8 @@ export function createActivityLaunches(sharing: DestinationSharing) {
       const destination = key(guildId, channelId);
       const launch = launched.get(destination);
       if (launch === undefined) return Promise.reject(new Error("activity_destination_refused"));
-      return exclusive(destination, async () => {
-        const current = () => launched.get(destination) === launch;
+      return exclusive(destination, async (abandoned) => {
+        const current = () => !abandoned() && launched.get(destination) === launch;
         // What this admission took: ended again if its launch retires meanwhile.
         const taken = new Set<string>();
         const refuse = async (): Promise<never> => {
