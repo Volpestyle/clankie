@@ -28,6 +28,8 @@ export interface SeatIssueSettlement {
   /** The status actually set, which differs from intended while a status is missing. */
   readonly status?: string;
   readonly detail?: string;
+  /** A failed close or exit settlement is retried in later roster rounds until then. */
+  readonly retryUntil?: string;
 }
 const unavailableWarnings = new RepeatedWarnings();
 
@@ -123,6 +125,7 @@ const FALLBACK: Record<"Verifying" | "Paused", { name: string; type: string }> =
 };
 const CLOSED_TYPES = new Set(["completed", "canceled", "duplicate"]);
 const DAY_MS = 24 * 60 * 60 * 1000;
+const RETIREMENT_RETRY_MS = 6 * 60 * 60 * 1000;
 const StateSchema = z
   .object({
     lastCheckAt: z.string().datetime().optional(),
@@ -166,6 +169,47 @@ export function liveSeatIssue(seat: OperatorFleetSeat): LiveSeatIssue {
 }
 
 type Tracker = Pick<McpHost, "call">;
+
+interface Retirement {
+  readonly issue: string;
+  readonly canonicalId: string;
+  readonly attribution: SeatIssueAttribution;
+  readonly seat: string;
+  readonly why: string;
+  readonly outcome?: SeatIssueOutcome | undefined;
+  readonly evidence?: string | undefined;
+  readonly unlanded?: boolean | undefined;
+  /** Refs this close parked clean unlanded commits on (VUH-2802). */
+  readonly parked?: readonly string[] | undefined;
+}
+interface RetirementPlan {
+  readonly scope: string;
+  readonly identity: string;
+  /** Unset when retirement only comments, preserving built-in delivery. */
+  readonly status?: string;
+  readonly comment: string;
+  readonly pause: boolean;
+  readonly result: SeatIssueSettlement;
+  statusSet?: boolean;
+  commentAttempted?: boolean;
+  commented?: boolean;
+}
+interface PendingRetirement {
+  readonly retirement: Retirement;
+  attempts: number;
+  retryAt: number;
+  until: number;
+  plan?: RetirementPlan;
+  running?: boolean;
+}
+
+// Done needs evidence; a stated Done without it is proof pending.
+const retirementIntent = (input: Retirement): SeatIssueStatus =>
+  input.outcome === "done" && input.evidence
+    ? "Done"
+    : input.outcome === "done" || input.outcome === "verifying"
+      ? "Verifying"
+      : "Paused";
 type Row = Record<string, unknown>;
 const text = (value: unknown) => (typeof value === "string" ? value : undefined);
 const oneLine = (value: string) => value.replace(/\s+/gu, " ").trim().slice(0, 400);
@@ -176,6 +220,9 @@ export class SeatIssueKeeper {
   private readonly unavailable = new Map<string, { attempts: number; retryAt: number }>();
   // Unresolved observations are possible owners, never evidence of absence.
   private readonly unknownOwners = new Map<string, LiveSeatIssue>();
+  // In memory only: attribution cannot outlive the process, and the daily check
+  // still reports an issue whose retirement was lost to a restart.
+  private readonly pending = new Map<string, PendingRetirement>();
   private readonly seats = new Map<
     string,
     {
@@ -316,7 +363,7 @@ export class SeatIssueKeeper {
       if (now - seat.goneSince < this.exitGraceMs) continue;
       this.seats.delete(seatId);
       results.push(
-        await this.settle({
+        await this.retire(seatId, {
           issue: seat.issue,
           canonicalId: seat.canonicalId,
           attribution: seat.attribution,
@@ -325,6 +372,7 @@ export class SeatIssueKeeper {
         }),
       );
     }
+    results.push(...(await this.retryRetirements(present)));
     for (const seat of present.values())
       if (Object.hasOwn(this.state.paused, scopedKey(seat.scope, seat.canonicalId)))
         results.push(await this.resume(seat));
@@ -353,7 +401,7 @@ export class SeatIssueKeeper {
       }
     }
     if (seat === undefined) return { outcome: "skipped", detail: "The seat had no tracked issue." };
-    return this.settle({
+    return this.retire(input.seatId, {
       issue: seat.issue,
       canonicalId: seat.canonicalId,
       attribution: seat.attribution,
@@ -430,110 +478,191 @@ export class SeatIssueKeeper {
     ].join("\n");
   }
 
-  private async settle(input: {
-    issue: string;
-    canonicalId: string;
+  /**
+   * Settle now, or keep a failed settlement for retry in later roster rounds
+   * with its original outcome and evidence. The pane is never closed again.
+   */
+  private async retire(seatId: string, retirement: Retirement): Promise<SeatIssueSettlement> {
+    const pending: PendingRetirement = { retirement, attempts: 0, retryAt: 0, until: 0 };
+    const result = await this.settle(pending, "interactive");
+    if (result.outcome !== "failed") return result;
+    pending.until = this.now() + RETIREMENT_RETRY_MS;
+    this.pending.set(seatId, pending);
+    return this.deferred(pending, result);
+  }
 
-    attribution: SeatIssueAttribution;
-    seat: string;
-    why: string;
-    outcome?: SeatIssueOutcome | undefined;
-    evidence?: string | undefined;
-    unlanded?: boolean | undefined;
-    /** Refs this close parked clean unlanded commits on (VUH-2802). */
-    parked?: readonly string[] | undefined;
-  }): Promise<SeatIssueSettlement> {
-    let successor: { seatId: string; title: string } | undefined;
-    // Done needs evidence; a stated Done without it is proof pending.
-    let intended: SeatIssueStatus =
-      input.outcome === "done" && input.evidence
-        ? "Done"
-        : input.outcome === "done" || input.outcome === "verifying"
-          ? "Verifying"
-          : "Paused";
+  private async retryRetirements(
+    present: ReadonlyMap<string, { canonicalId: string }>,
+  ): Promise<SeatIssueSettlement[]> {
+    const results: SeatIssueSettlement[] = [];
+    for (const [seatId, pending] of this.pending) {
+      // A seat that returned with confirmed attribution owns its issue again.
+      if (present.get(seatId)?.canonicalId === pending.retirement.canonicalId && pending.plan === undefined) {
+        this.pending.delete(seatId);
+        continue;
+      }
+      if (pending.running || this.now() < pending.retryAt) continue;
+      pending.running = true;
+      try {
+        const result = await this.settle(pending, "background");
+        if (result.outcome !== "failed") {
+          this.pending.delete(seatId);
+          results.push(result);
+        } else if (this.now() >= pending.until) {
+          this.pending.delete(seatId);
+          results.push({
+            ...result,
+            detail: `${result.detail ?? ""} Issue settlement retries ended; settle it by hand.`.trim(),
+          });
+        } else results.push(this.deferred(pending, result));
+      } finally {
+        pending.running = false;
+      }
+    }
+    return results;
+  }
+
+  private deferred(pending: PendingRetirement, result: SeatIssueSettlement): SeatIssueSettlement {
+    pending.attempts = Math.min(pending.attempts + 1, 5);
+    pending.retryAt = this.now() + Math.min(30_000 * 2 ** (pending.attempts - 1), 300_000);
+    return { ...result, retryUntil: new Date(pending.until).toISOString() };
+  }
+
+  private async settle(
+    pending: PendingRetirement,
+    priority: LinearRequestPriority,
+  ): Promise<SeatIssueSettlement> {
+    const input = pending.retirement;
+    let intended = pending.plan?.result.intended ?? retirementIntent(input);
     try {
       const scope = await input.attribution.resolve();
+      const call = async (tool: string, args: Row) => (await scope.call(tool, args, priority)) as Row;
       const targetId = input.canonicalId;
-      const identity = scopedKey(scope, targetId);
-      successor = this.liveOwners.get(identity)?.[0];
-      if (!successor)
-        for (const seat of this.unknownOwners.values()) {
-          // Observation backoff is not retirement authority. Recheck each
-          // possible successor now; if still unknown, defer without effects.
-          const attribution =
-            seat.attribution ??
-            (this.requireAttribution ? undefined : { resolve: async () => this.legacyScope });
-          if (!attribution) throw new Error("Live successor tracker attribution is unavailable");
-          const candidate = await attribution.resolve();
-          if (candidate.identity !== scope.identity) continue;
-          const keys = [...seat.keys, ...(seat.ownedKeys ?? [])]
-            .map(issueKey)
-            .filter((key) => key !== undefined);
-          if (!keys.length) throw new Error("Live successor assignment is unavailable");
-          for (const key of keys) {
-            if ((await this.canonicalId(candidate, key)) === targetId) {
-              successor = { seatId: seat.seatId, title: seat.title };
+      let plan = pending.plan;
+      let current: string | undefined;
+      if (plan !== undefined) {
+        // A started settlement only finishes; a retry never decides it again.
+        if (plan.scope !== scope.identity) throw new Error("Retirement tracker scope changed");
+      } else {
+        const identity = scopedKey(scope, targetId);
+        let successor = this.liveOwners.get(identity)?.[0];
+        if (!successor)
+          for (const seat of this.unknownOwners.values()) {
+            const keys = [...seat.keys, ...(seat.ownedKeys ?? [])]
+              .map(issueKey)
+              .filter((key) => key !== undefined);
+            if (!keys.length) throw new Error("Live successor assignment is unavailable");
+            // Canonical identity in this verified scope can prove the seat names
+            // other work. In any other scope it could not own this target either.
+            let names: boolean | undefined = false;
+            for (const key of keys) {
+              try {
+                if ((await this.canonicalId(scope, key)) !== targetId) continue;
+                names = true;
+              } catch {
+                names = undefined;
+              }
               break;
             }
+            if (names === false) continue;
+            // Observation backoff is not retirement authority. Recheck each
+            // possible successor now; if still unknown, defer without effects.
+            const attribution =
+              seat.attribution ??
+              (this.requireAttribution ? undefined : { resolve: async () => this.legacyScope });
+            if (!attribution) throw new Error("Live successor tracker attribution is unavailable");
+            const candidate = await attribution.resolve();
+            if (candidate.identity !== scope.identity) continue;
+            for (const key of keys) {
+              if ((await this.canonicalId(candidate, key)) === targetId) {
+                successor = { seatId: seat.seatId, title: seat.title };
+                break;
+              }
+            }
+            if (successor) break;
           }
-          if (successor) break;
+        if (successor) intended = "In Progress";
+        const issue = await call("get_issue", { id: targetId });
+        const canonicalId = text(issue.id);
+        if (!canonicalId || canonicalId !== targetId)
+          throw new Error("Tracker returned a different canonical issue identity");
+        current = text(issue.status) ?? text(issue.state);
+        const retirement = [
+          `${successor ? `Handed from ${input.seat} to ${successor.title}` : `${input.seat} left`}: ${oneLine(input.why)}.`,
+          input.evidence ? ` Evidence: ${oneLine(input.evidence)}.` : "",
+          input.unlanded ? " Unlanded work was left behind." : "",
+          input.parked?.length ? ` Unlanded commits parked on ${input.parked.join(", ")}.` : "",
+        ].join("");
+        const stage = text(issue.stage);
+        if (scope.backend === "builtin" && ["landed", "delivered", "owner-verified"].includes(stage ?? "")) {
+          if (!current) throw new Error("Tracker returned no current delivery status");
+          // Retirement describes activity, not permission to rewind or verify delivery.
+          plan = {
+            scope: scope.identity,
+            identity,
+            comment: `${retirement} Retirement activity: ${intended}. Delivery preserved: ${stage}. Status: ${current}.`,
+            pause: false,
+            result: {
+              outcome: "updated",
+              issue: input.issue,
+              intended,
+              status: current,
+              detail: `Delivery preserved: ${stage}; retirement activity recorded in comment.`,
+            },
+          };
+        } else {
+          if (CLOSED_TYPES.has(text(issue.statusType) ?? ""))
+            return { outcome: "skipped", issue: input.issue, intended, detail: `Already ${current}.` };
+          const team = text(issue.teamId) ?? text(issue.team);
+          const statuses = await call("list_issue_statuses", { team });
+          const rows = (Array.isArray(statuses) ? statuses : (statuses.statuses ?? [])) as Row[];
+          const named = (name: string) =>
+            rows.find((row) => text(row.name)?.toLowerCase() === name.toLowerCase());
+          const fallback = intended === "Verifying" || intended === "Paused" ? FALLBACK[intended] : undefined;
+          const target =
+            named(intended) ??
+            (fallback && (named(fallback.name) ?? rows.find((row) => row.type === fallback.type))) ??
+            (intended === "Done" ? rows.find((row) => row.type === "completed") : undefined);
+          const status = text(target?.name);
+          if (status === undefined) throw new Error(`No ${intended} status`);
+          const missing = status.toLowerCase() !== intended.toLowerCase();
+          plan = {
+            scope: scope.identity,
+            identity,
+            status,
+            comment: `${retirement} Status: ${status}${missing ? ` (intended ${intended}; that status does not exist yet)` : ""}.`,
+            pause: intended === "Paused",
+            result: { outcome: "updated", issue: input.issue, intended, status },
+          };
         }
-      if (successor) intended = "In Progress";
-      const call = async (tool: string, args: Row) => (await scope.call(tool, args, "interactive")) as Row;
-      const issue = await call("get_issue", { id: targetId });
-      const canonicalId = text(issue.id);
-      if (!canonicalId || canonicalId !== targetId)
-        throw new Error("Tracker returned a different canonical issue identity");
-      const current = text(issue.status) ?? text(issue.state);
-      const retirement = [
-        `${successor ? `Handed from ${input.seat} to ${successor.title}` : `${input.seat} left`}: ${oneLine(input.why)}.`,
-        input.evidence ? ` Evidence: ${oneLine(input.evidence)}.` : "",
-        input.unlanded ? " Unlanded work was left behind." : "",
-        input.parked?.length ? ` Unlanded commits parked on ${input.parked.join(", ")}.` : "",
-      ].join("");
-      const stage = text(issue.stage);
-      if (scope.backend === "builtin" && ["landed", "delivered", "owner-verified"].includes(stage ?? "")) {
-        if (!current) throw new Error("Tracker returned no current delivery status");
-        // Retirement describes activity, not permission to rewind or verify delivery.
-        await call("save_comment", {
-          issueId: canonicalId,
-          body: `${retirement} Retirement activity: ${intended}. Delivery preserved: ${stage}. Status: ${current}.`,
-        });
-        delete this.state.paused[identity];
-        this.save();
-        return {
-          outcome: "updated",
-          issue: input.issue,
-          intended,
-          status: current,
-          detail: `Delivery preserved: ${stage}; retirement activity recorded in comment.`,
-        };
       }
-      if (CLOSED_TYPES.has(text(issue.statusType) ?? ""))
-        return { outcome: "skipped", issue: input.issue, intended, detail: `Already ${current}.` };
-      const team = text(issue.teamId) ?? text(issue.team);
-      const statuses = await call("list_issue_statuses", { team });
-      const rows = (Array.isArray(statuses) ? statuses : (statuses.statuses ?? [])) as Row[];
-      const named = (name: string) =>
-        rows.find((row) => text(row.name)?.toLowerCase() === name.toLowerCase());
-      const fallback = intended === "Verifying" || intended === "Paused" ? FALLBACK[intended] : undefined;
-      const target =
-        named(intended) ??
-        (fallback && (named(fallback.name) ?? rows.find((row) => row.type === fallback.type))) ??
-        (intended === "Done" ? rows.find((row) => row.type === "completed") : undefined);
-      const status = text(target?.name);
-      if (status === undefined) throw new Error(`No ${intended} status`);
-      if (status !== current) await call("save_issue", { id: canonicalId, state: status });
-      const missing = status.toLowerCase() !== intended.toLowerCase();
-      const body = [
-        retirement,
-        ` Status: ${status}${missing ? ` (intended ${intended}; that status does not exist yet)` : ""}.`,
-      ].join("");
-      await call("save_comment", { issueId: canonicalId, body });
-      if (intended === "Paused") this.state.paused[identity] = new Date(this.now()).toISOString();
-      else delete this.state.paused[identity];
+      // Frozen before the first external effect so a retry applies each effect once.
+      pending.plan = plan;
+      if (plan.status !== undefined && !plan.statusSet) {
+        if (current === undefined) {
+          const issue = await call("get_issue", { id: targetId });
+          if (text(issue.id) !== targetId)
+            throw new Error("Tracker returned a different canonical issue identity");
+          current = text(issue.status) ?? text(issue.state);
+          // Settled by someone else between attempts.
+          if (current !== plan.status && CLOSED_TYPES.has(text(issue.statusType) ?? ""))
+            return { outcome: "skipped", issue: input.issue, intended, detail: `Already ${current}.` };
+        }
+        if (plan.status !== current) await call("save_issue", { id: targetId, state: plan.status });
+        plan.statusSet = true;
+      }
+      if (!plan.commented) {
+        // An uncertain earlier post may have applied; read before posting again.
+        if (!plan.commentAttempted || !(await this.hasComment(scope, targetId, plan.comment, priority))) {
+          plan.commentAttempted = true;
+          await call("save_comment", { issueId: targetId, body: plan.comment });
+        }
+        plan.commented = true;
+      }
+      if (plan.pause) this.state.paused[plan.identity] = new Date(this.now()).toISOString();
+      else delete this.state.paused[plan.identity];
       this.save();
-      return { outcome: "updated", issue: input.issue, intended, status };
+      return plan.result;
     } catch (error) {
       return {
         outcome: "failed",
@@ -542,6 +671,32 @@ export class SeatIssueKeeper {
         detail: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  private async hasComment(
+    scope: SeatIssueTrackerScope,
+    issueId: string,
+    body: string,
+    priority: LinearRequestPriority,
+  ): Promise<boolean> {
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      const result = (await scope.call(
+        "list_comments",
+        { issueId, limit: 100, ...(cursor === undefined ? {} : { cursor }) },
+        priority,
+      )) as Row;
+      const rows = Array.isArray(result)
+        ? result
+        : Array.isArray(result.comments)
+          ? result.comments
+          : undefined;
+      if (rows === undefined) throw new Error("Tracker comments are unreadable");
+      if ((rows as Row[]).some((row) => text(row.body)?.trim() === body.trim())) return true;
+      cursor = !Array.isArray(result) && result.hasNextPage === true ? text(result.cursor) : undefined;
+      if (cursor === undefined) return false;
+    }
+    throw new Error("Tracker comments exceed the retirement lookup bound");
   }
 
   private async resume(

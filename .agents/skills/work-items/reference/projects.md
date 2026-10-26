@@ -92,7 +92,17 @@ saved file is still revalidated before issue effects. Failed roster lookups
 back off from 30 seconds to five minutes for the same occupant and assignment.
 Unreadable live assignments defer the daily orphan check. Retirement rechecks
 possible successors fresh even during observation backoff; if ownership is still
-unknown it defers the tracker effect. No cached scope grants write authority.
+unknown it defers the tracker effect. An unattributed seat blocks only when one
+of its keys names the retiring item in that item's own scope, or cannot be
+resolved there. No cached scope grants write authority.
+
+A deferred or failed close or exit settlement carries `retryUntil`. Later roster
+rounds retry it, keeping the original outcome and evidence. The backoff runs from
+30 seconds to five minutes for six hours, and the pane is not closed again. Once
+a status change or comment has been attempted, a retry only finishes that same
+plan: it reads the issue and its comments back first, so each effect lands once.
+Don't settle a retrying issue by hand. When retries end, the result says so; a
+service restart also drops them, and the daily check then lists the issue.
 
 Built-in retirement cannot set Done or impersonate owner verification, and it
 cannot move delivery backwards. Existing evidence, independent-check and owner
