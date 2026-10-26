@@ -112,15 +112,18 @@ hosted scope. Config/admission failure never opens legacy media.
 
 ## Local dev viewer
 
-The anonymous legacy `/frames` and `/.proxy/frames` stream is a development
-aid. It opens only with `CLANKIE_ACTIVITY_LOCAL_VIEWER=1` (`viewerMode:
-{mode:"local"}`), and then only to a direct loopback request: a loopback peer,
+The anonymous legacy `/frames` and `/.proxy/frames` stream serves the owner's
+own watch link. It opens only with `CLANKIE_ACTIVITY_LOCAL_VIEWER=1` (`viewerMode:
+{mode:"local"}`), which the launcher sets for the service it starts (set `0` to
+opt out), and then only to a direct loopback request: a loopback peer,
 a loopback `Host`, a loopback or absent `Origin`, and no proxy headers
-(`cf-connecting-ip`, `cf-ray`, `x-forwarded-*`, `forwarded`, `x-real-ip`,
+(any `x-forwarded-*` or `cf-*` header, `forwarded`, `via`, `x-real-ip`,
 `true-client-ip`). cloudflared connects from loopback but adds those headers,
-so a tunnelled viewer gets `{mode:"shares"}` and needs a grant. Without the
-flag, the `http://127.0.0.1:4320` watch link and `pnpm viewer-probe` are
-refused too. Pending share admissions are capped at 64 in total and four per
+so a tunnelled viewer gets `{mode:"shares"}` and needs a grant. A bare
+`pnpm start` without the flag refuses the `http://127.0.0.1:4320` watch link
+and `pnpm viewer-probe` too. The self-hosted `/activity` voice-channel launch
+arrives through the tunnel, so it shows "Access unavailable" until a
+self-hosted official admission adapter exists. Pending share admissions are capped at 64 in total and four per
 client, keyed by `cf-connecting-ip` behind the tunnel.
 
 The private HTTP viewer projection releases its bounded registry slot on

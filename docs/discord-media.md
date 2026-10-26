@@ -129,9 +129,10 @@ Developer Portal Activity URL Mapping and Entry Point must target that HTTPS
 origin, while `~/.cloudflared/config.yml` maps only the viewer hostname to
 `http://127.0.0.1:4320`. Never expose port 4322. Public viewers need a share
 grant or official admission: the server refuses an unauthenticated media socket.
-The legacy anonymous `/frames` stream opens only in the explicit loopback dev
-mode (`CLANKIE_ACTIVITY_LOCAL_VIEWER=1`), and then only to direct loopback
-requests; tunnelled, proxied or cross-origin requests still need a grant
+The legacy anonymous `/frames` stream opens only in the loopback local viewer
+mode (`CLANKIE_ACTIVITY_LOCAL_VIEWER=1`, which the launcher sets so the owner's
+`/activity` watch link works), and then only to direct loopback requests;
+tunnelled, proxied or cross-origin requests still need a grant
 ([VUH-2594](https://linear.app/vuhlp/issue/VUH-2594)).
 
 Use `clankie restart activity`, `clankie restart tunnel`, and `clankie health`

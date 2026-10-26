@@ -466,6 +466,15 @@ const ACTIVITY: ManagedService = {
   label: "Activity surface",
   ...workspaceStart("@clankie/discord-activity", "apps/discord-activity"),
   restartWhenUnhealthy: true,
+  /**
+   * The owner's own watch link (`/activity` → `http://127.0.0.1:4320`) needs the
+   * anonymous local stream. The server opens it only to direct loopback
+   * requests; tunnelled viewers still need a share grant (VUH-2594). `0` opts out.
+   */
+  serviceEnv: ({ env }) => ({
+    ...env,
+    CLANKIE_ACTIVITY_LOCAL_VIEWER: env.CLANKIE_ACTIVITY_LOCAL_VIEWER?.trim() || "1",
+  }),
   conflictingPids: ({ env, matchingPids, listPortOwners }) => [
     ...(listPortOwners(Number(env.CLANKIE_ACTIVITY_PORT ?? "4320")) ?? matchingPids),
     ...(listPortOwners(Number(env.CLANKIE_ACTIVITY_PRODUCER_PORT ?? "4322")) ?? matchingPids),

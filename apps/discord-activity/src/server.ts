@@ -216,24 +216,24 @@ function effectiveViewerMode(
 }
 
 /**
- * Headers a reverse proxy or tunnel adds. cloudflared connects from loopback,
- * so the peer address alone cannot tell a tunnelled viewer from a local one.
+ * Evidence that a reverse proxy or tunnel forwarded the request. cloudflared
+ * connects from loopback, so the peer address alone cannot tell a tunnelled
+ * viewer from a local one. Whole header families count, not just their
+ * well-known members: a proxy may rewrite Host and still say it forwarded.
  */
-const FORWARDING_HEADERS = [
-  "forwarded",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-forwarded-proto",
-  "x-real-ip",
-  "true-client-ip",
-  "cf-connecting-ip",
-  "cf-ray",
-  "cf-visitor",
-];
+const FORWARDING_HEADERS = new Set(["forwarded", "via", "x-real-ip", "true-client-ip"]);
+const FORWARDING_HEADER_PREFIXES = ["x-forwarded-", "cf-"];
+
+function isForwarded(request: IncomingMessage): boolean {
+  return Object.keys(request.headers).some(
+    (name) =>
+      FORWARDING_HEADERS.has(name) || FORWARDING_HEADER_PREFIXES.some((prefix) => name.startsWith(prefix)),
+  );
+}
 
 function isDirectLoopbackRequest(request: IncomingMessage): boolean {
   if (!isLoopbackAddress(request.socket.remoteAddress)) return false;
-  if (FORWARDING_HEADERS.some((name) => request.headers[name] !== undefined)) return false;
+  if (isForwarded(request)) return false;
   if (!isLoopbackHostname(hostnameOf(`http://${request.headers.host ?? ""}`))) return false;
   // A browser page on another site may open a loopback WebSocket; its Origin says so.
   const origin = request.headers.origin;

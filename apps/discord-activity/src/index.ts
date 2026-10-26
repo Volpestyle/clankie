@@ -21,8 +21,8 @@ if (
   const hub = new RenderedSurfaceHub();
   const shares = new ActivityShareRegistry();
   const stateRoot = process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie");
-  // The unauthenticated legacy stream is a development aid, opened only on
-  // request and then only to direct loopback viewers (VUH-2594).
+  // The unauthenticated legacy stream opens only on request (the launcher asks
+  // for the owner's watch link) and then only to direct loopback viewers (VUH-2594).
   const localViewer = process.env.CLANKIE_ACTIVITY_LOCAL_VIEWER?.trim() === "1";
   const activity = createDiscordActivityServer({
     hub,

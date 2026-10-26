@@ -1,3 +1,4 @@
+import { get } from "node:http";
 import { WebSocket } from "ws";
 import { expect, it, vi } from "vitest";
 import { RenderedSurfaceHub } from "../src/frame-hub.ts";
@@ -30,8 +31,15 @@ function upgrade(port: number, path: string, headers: Record<string, string> = {
   return { socket, outcome };
 }
 
-const config = async (port: number, headers: Record<string, string> = {}) =>
-  (await fetch(`http://127.0.0.1:${port}/.proxy/activity/config`, { headers })).json();
+// node:http, not fetch: fetch replaces a caller's Host header with its own.
+const config = (port: number, headers: Record<string, string> = {}) =>
+  new Promise<unknown>((done, reject) => {
+    get(`http://127.0.0.1:${port}/.proxy/activity/config`, { headers }, async (response) => {
+      let body = "";
+      for await (const chunk of response) body += String(chunk);
+      done(JSON.parse(body));
+    }).once("error", reject);
+  });
 
 it("refuses an unauthenticated legacy upgrade by default, on both paths, local or tunnelled", async () => {
   const { hub, activity, port } = await serve({ shares: new ActivityShareRegistry() });
@@ -90,13 +98,22 @@ it("the explicit loopback dev mode opens legacy media only to direct loopback re
       TUNNEL,
       { "cf-connecting-ip": "203.0.113.7" },
       { "x-forwarded-for": "203.0.113.7" },
+      { "x-forwarded-port": "443" },
+      { "x-forwarded-server": "proxy.example" },
+      { "x-forwarded-prefix": "/public" },
+      { "cf-ipcountry": "US" },
+      { forwarded: "for=203.0.113.7" },
+      { via: "1.1 proxy.example" },
       { host: "activity.clankie.bot" },
       { origin: "https://attacker.example" },
       { origin: "null" },
-    ]) {
-      const { socket, outcome } = upgrade(port, "/.proxy/frames", headers);
-      sockets.push(socket);
-      expect(await outcome, JSON.stringify(headers)).toBe("refused");
+    ] as Record<string, string>[]) {
+      expect(await config(port, headers), JSON.stringify(headers)).toEqual({ mode: "shares" });
+      for (const path of ["/frames", "/.proxy/frames"]) {
+        const { socket, outcome } = upgrade(port, path, headers);
+        sockets.push(socket);
+        expect(await outcome, `${path} ${JSON.stringify(headers)}`).toBe("refused");
+      }
     }
     expect(hub.viewerCount).toBe(2);
   } finally {
