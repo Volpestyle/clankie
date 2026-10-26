@@ -245,10 +245,9 @@ export class HarnessSignIns {
       if (!command) return { ok: false, error: "not_installed" };
       const env = this.useHome({ ...this.options.env }, harness, found.home);
       await this.capture(harness === "claude" ? [command, "auth", "logout"] : [command, "logout"], [], env);
-      // Never delete a home whose credential the logout did not clear. An
-      // `ANTHROPIC_API_KEY` on the body is not this home's to clear.
-      const after = await this.signedIn(harness, env);
-      if (after.signedIn && after.method !== "api_key") return { ok: false, error: "unavailable" };
+      // Deleting or reporting success needs the harness's own conclusive
+      // signed-out answer; a failed, empty or unreadable status keeps the home.
+      if (!(await this.signedOut(harness, command, env))) return { ok: false, error: "unavailable" };
       const deleted = existsSync(join(found.home, MANAGED_MARKER));
       if (deleted) rmSync(found.home, { recursive: true, force: true });
       return { ok: true, harness, profile: found.label, deleted };
@@ -365,6 +364,28 @@ export class HarnessSignIns {
       signedIn: result.code === 0,
       ...(result.code === 0 && method ? { method } : {}),
     };
+  }
+
+  /**
+   * Only the harness's explicit signed-out answer counts: Claude's status JSON
+   * with `loggedIn: false`, or Codex's failing `Not logged in`. Claude is asked
+   * without an `ANTHROPIC_API_KEY`, which is not this home's to clear.
+   */
+  private async signedOut(harness: LoginHarness, command: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+    if (harness === "codex") {
+      const result = await this.capture([command, "login", "status"], [], env);
+      return result !== undefined && result.code !== 0 && /^Not logged in\b/mu.test(result.stdout);
+    }
+    const result = await this.capture([command, "auth", "status", "--json"], ["ANTHROPIC_API_KEY"], env);
+    if (result === undefined) return false;
+    try {
+      return (
+        (JSON.parse(result.stdout.slice(result.stdout.indexOf("{"))) as { loggedIn?: unknown }).loggedIn ===
+        false
+      );
+    } catch {
+      return false;
+    }
   }
 
   /** Clankie's own `claude` PATH shim is not Claude Code: look past it. */
@@ -583,15 +604,16 @@ export class HarnessSignIns {
       );
       if (account === undefined) return {};
       const others = (account.homes ?? []).filter((home) => home.home !== target.home);
+      // The owner signed this profile in on purpose: hires naming it reach the
+      // account verified there now, whatever it held or lacked before.
+      if (account.accountKey !== undefined) {
+        const labels = (account.homes ?? [])
+          .filter((home) => home.home === target.home)
+          .map((home) => home.label);
+        this.options.rebind?.(harness, [...new Set([target.label, ...labels])], account.accountKey);
+      }
       if (target.created) return others[0] === undefined ? {} : { duplicateOf: others[0].label };
       if (target.before !== undefined && account.identity !== target.before) {
-        // Hires naming this profile must reach the account signed in now, not the old one.
-        if (account.accountKey !== undefined) {
-          const labels = (account.homes ?? [])
-            .filter((home) => home.home === target.home)
-            .map((home) => home.label);
-          this.options.rebind?.(harness, [...new Set([target.label, ...labels])], account.accountKey);
-        }
         return {
           identityChanged: {
             before: target.before,

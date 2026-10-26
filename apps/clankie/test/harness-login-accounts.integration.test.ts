@@ -299,4 +299,75 @@ describe.skipIf(!harnessesInstalled)("several accounts per harness, signed in fr
     });
     expect(await hire()).toBe("bob@example.com");
   }, 120_000);
+
+  it("binds a signed-out profile's labels to the account a re-sign puts there", async () => {
+    const f = await fixture(true);
+    const work = await readyProfile(f.home, "work", "alice@example.com");
+    const hire = async () => {
+      const choice = chooseWorkerAccount("mac", "claude", await f.read(), "work");
+      return "account" in choice ? choice.account.identity : choice.refused;
+    };
+    expect(await hire()).toBe("alice@example.com");
+    // Signed out, the label still names Alice: no hire lands on whoever signs in next by itself.
+    expect(
+      (await f.call(HARNESS_LOGIN_REMOVE_PATH, { harness: "claude", profile: "work" })).body,
+    ).toMatchObject({
+      ok: true,
+      deleted: false,
+    });
+    expect(existsSync(join(work, "fixture-identity.json"))).toBe(false);
+    expect(await hire()).toMatch(/cannot take this hire|No verified home/u);
+    // The owner signs Bob in there on purpose, so hires naming it reach Bob.
+    const done = await signInWith(f, { harness: "claude", profile: "work" }, "bob@example.com");
+    expect(done).toMatchObject({ state: "complete", profile: "work" });
+    expect(done.identityChanged).toBeUndefined();
+    expect(await hire()).toBe("bob@example.com");
+  }, 120_000);
+
+  it("deletes a profile only after its harness says plainly that it is signed out", async () => {
+    const f = await fixture(true);
+    const team = await readyProfile(f.home, "team", "carol@example.com");
+    await writeFile(join(team, ".clankie-profile"), "{}\n");
+    await writeFile(join(team, "fixture-logout-fails"), "1");
+    const remove = () => f.call(HARNESS_LOGIN_REMOVE_PATH, { harness: "claude", profile: "team" });
+    // Logout failed and status still shows the sign-in.
+    expect(await remove()).toEqual({ status: 503, body: { ok: false, error: "unavailable" } });
+    // Logout failed and status cannot be read: unknown is never signed out.
+    for (const status of ["malformed", "empty", "fail"]) {
+      await writeFile(join(team, "fixture-status"), status);
+      expect(await remove()).toEqual({ status: 503, body: { ok: false, error: "unavailable" } });
+      expect(existsSync(join(team, "fixture-identity.json"))).toBe(true);
+    }
+    // Once its harness answers signed out, Clankie's own profile goes.
+    await rm(join(team, "fixture-status"));
+    await rm(join(team, "fixture-logout-fails"));
+    expect((await remove()).body).toEqual({ ok: true, harness: "claude", profile: "team", deleted: true });
+    expect(existsSync(team)).toBe(false);
+  }, 120_000);
 });
+
+/** A Claude profile a hire can use: signed in, first-run setup done, worker plugin installed. */
+async function readyProfile(home: string, label: string, email: string): Promise<string> {
+  const dir = join(home, `.claude-${label}`);
+  await mkdir(join(dir, "plugins"), { recursive: true });
+  await writeFile(join(dir, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
+  await writeFile(
+    join(dir, "plugins", "installed_plugins.json"),
+    JSON.stringify({ plugins: { "clankie-worker@clankie": [] } }),
+  );
+  await writeFile(join(dir, "fixture-identity.json"), JSON.stringify({ email }));
+  return dir;
+}
+
+/** A replayed Claude sign-in where the browser approves `email`. */
+async function signInWith(
+  f: Awaited<ReturnType<typeof fixture>>,
+  body: Record<string, unknown>,
+  email: string,
+) {
+  const started = await f.call(HARNESS_LOGIN_START_PATH, body);
+  const sessionId = String(started.body.sessionId);
+  await f.until(sessionId, (state) => state.state === "needs_code");
+  await f.call(HARNESS_LOGIN_CODE_PATH, { sessionId, code: `approve:${email}` });
+  return f.until(sessionId, (state) => !["pending", "needs_code", "verifying"].includes(String(state.state)));
+}

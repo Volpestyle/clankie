@@ -3,7 +3,9 @@
 // and `auth logout` per config directory, captured 2026-10-25, with the
 // account the owner approves in the browser standing in as the pasted code
 // `approve:<email>`. It reports a version below `/usage` support, so the
-// account probe reads no usage.
+// account probe reads no usage. Faults a test plants in the config directory:
+// `fixture-logout-fails` makes logout fail and keep the sign-in, and
+// `fixture-status` (`malformed`, `empty` or `fail`) makes status inconclusive.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const dir = process.env.CLAUDE_CONFIG_DIR ?? join(process.env.HOME, ".claude");
@@ -13,7 +15,12 @@ if (command === "--version") {
   process.stdout.write("2.1.200 (Claude Code)\n");
   process.exit(0);
 }
+const fault = (name) => existsSync(join(dir, name)) && readFileSync(join(dir, name), "utf8").trim();
 if (command === "auth" && sub === "status") {
+  const status = fault("fixture-status");
+  if (status === "malformed") process.stdout.write("Checking sign-in…\n");
+  if (status === "empty") process.stdout.write("{}");
+  if (status) process.exit(status === "empty" ? 0 : 1);
   if (!existsSync(signedIn)) {
     process.stdout.write(JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, null, 2));
     process.exit(1);
@@ -37,6 +44,10 @@ if (command === "auth" && sub === "status") {
   process.exit(0);
 }
 if (command === "auth" && sub === "logout") {
+  if (fault("fixture-logout-fails") !== false) {
+    process.stderr.write("Failed to log out: keychain unavailable\n");
+    process.exit(1);
+  }
   rmSync(signedIn, { force: true });
   process.stdout.write("Successfully logged out from your Anthropic account.\n");
   process.exit(0);
