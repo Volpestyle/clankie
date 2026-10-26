@@ -248,3 +248,27 @@ it("bounds a hung exchange to ten seconds and retains its identity for reconcili
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("requires fresh admission after reconciling an earlier process's uncertain exchange", async () => {
+  const root = await mkdtemp(join(tmpdir(), "evidence-restart-uncertain-"));
+  try {
+    const f = await fleetFixture(root);
+    f.mode("uncertain");
+    await expect(f.provider.credentials(f.destination, "read")()).rejects.toThrow(
+      "evidence_session_unavailable",
+    );
+    f.advance(1001);
+    f.mode("deny");
+    const restarted = new BrokerEvidenceCredentials(f.providerOptions);
+    await expect(restarted.credentials(f.destination, "read")()).rejects.toThrow(
+      "evidence_session_unavailable",
+    );
+    expect(f.requests.length).toBe(3);
+    expect(f.requests[0]!.nonce === f.requests[1]!.nonce).toBe(true);
+    expect(f.requests[1]!.reconcile).toBe(true);
+    expect(f.requests[2]!.nonce === f.requests[1]!.nonce).toBe(false);
+    expect(f.requests[2]!.reconcile).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

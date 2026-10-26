@@ -17,6 +17,7 @@ export const EvidenceCredentialSchema = z
     pending: z
       .object({
         nonce: EvidenceLeaseSchema.shape.nonce,
+        instanceId: z.string().uuid(),
         startedAtMs: z.number().int().positive(),
         attemptAtMs: z.number().int().positive(),
         inFlight: z.boolean(),

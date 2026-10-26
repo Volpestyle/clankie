@@ -26,6 +26,17 @@ passed 19/19. Broker and service source typechecks passed; the original whole
 service typecheck also passed its 15 test partitions before the final new test
 roots. Focused final compiler evidence is retained with the bundle.
 
+A final audit found and fixed one additional restart edge: reconciliation of a
+previous process's uncertain exchange cannot count as fresh admission. The
+broker now retains a provider-instance witness with its pending request. A new
+instance first settles the old identity, then requires a new live exchange
+before using credentials. A regression simulates a cached valid old reply plus
+current fleet denial and confirms refusal. The two changed provider/MinIO files
+were re-proved 23/23 with no skips and focused compilation passed;
+`restart-proof.zip` retains those original outputs and a new cleanup record.
+Device/settings/support inputs are unchanged; their 14 passing baseline cases
+above remain applicable.
+
 Refusals cover missing/disabled admission, wrong tenant/installation/body or
 sealing key/nonce/audience/destination/bucket/region/prefix/purpose, unknown
 signer, invalid signature, replay, expiry, malformed/future/overlong replies,

@@ -61,6 +61,7 @@ type BrokerEvidenceCredentialsOptions = {
 };
 
 export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
+  private readonly instanceId = randomUUID();
   private readonly validated = new Map<string, string>();
   private readonly options: BrokerEvidenceCredentialsOptions;
   constructor(options: BrokerEvidenceCredentialsOptions) {
@@ -126,6 +127,7 @@ export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
           ? { ...current.pending, attemptAtMs: now, inFlight: true, reconcile: true }
           : {
               nonce: randomBytes(16).toString("base64url"),
+              instanceId: this.instanceId,
               startedAtMs: now,
               attemptAtMs: now,
               inFlight: true,
@@ -178,6 +180,7 @@ export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
         clearTimeout(timer);
       }
       let published: EvidenceCredential["lease"];
+      let reconciledPreviousProcess = false;
       await o.store.update(id, async (current) => {
         if (
           current.type !== "evidence-storage" ||
@@ -189,7 +192,9 @@ export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
           return current;
         const { pending: _pending, lease: previous, ...base } = current;
         if (lease) {
-          published = lease;
+          if (claimed.instanceId !== this.instanceId && this.validated.get(id) !== epoch)
+            reconciledPreviousProcess = true;
+          else published = lease;
           return { ...base, lease, retryAtMs: 0 };
         }
         if (transient) {
@@ -211,6 +216,9 @@ export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
         this.validated.delete(id);
         return { ...base, epoch: randomUUID(), enabled: false };
       });
+      // Reconciliation settles an earlier process's request; it cannot stand in
+      // for this process's mandatory fresh fleet check after restart.
+      if (reconciledPreviousProcess) continue;
       if (!published) throw 0;
       this.validated.set(id, epoch);
       return { ...published.session, expiration: new Date(published.expiresAtMs) };
