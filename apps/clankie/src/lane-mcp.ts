@@ -46,7 +46,9 @@ export interface LaneMcpEndpoint {
   close(): Promise<void>;
 }
 
-function instructionsFor(lane: CaptainSessionLaneV2): string {
+function instructionsFor(lane: CaptainSessionLaneV2, unboundOperator: boolean): string {
+  if (unboundOperator)
+    return "This operator-bearer session has no conversation. Stateless tools are available; conversation-scoped lead tools require a verified launcher binding. It never inherits global-default.";
   return [
     `These are Clankie's own tools, in his ${lane} lane. He is a persistent agent with a`,
     "life outside this connection — memory, rooms, a browser, connected services — and calling",
@@ -114,7 +116,10 @@ export function createLaneMcpEndpoint({
   };
 
   const open = async (lane: CaptainSessionLaneV2, conversationId?: string): Promise<LaneMcpSession> => {
-    const bank = await captain.laneToolBank(lane, conversationId);
+    const unboundOperator = lane === "operator" && conversationId === undefined;
+    const bank = unboundOperator
+      ? await captain.laneToolBank(lane, undefined, undefined, { conversation: "none" })
+      : await captain.laneToolBank(lane, conversationId);
     const byName = new Map<string, LaneTool>(bank.tools.map((tool) => [tool.name, tool]));
     // Unlisted tools stay reachable through the bank's own search and call pair.
     const unlisted =
@@ -123,7 +128,7 @@ export function createLaneMcpEndpoint({
         : [];
     const server = new Server(
       { name: "clankie", version: CLANKIE_VERSION },
-      { capabilities: { tools: {} }, instructions: instructionsFor(lane) },
+      { capabilities: { tools: {} }, instructions: instructionsFor(lane, unboundOperator) },
     );
     server.setRequestHandler(ListToolsRequestSchema, () => {
       const result = {
@@ -148,6 +153,26 @@ export function createLaneMcpEndpoint({
       return result;
     });
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      // Receipt operations and protected native dispatches name an original
+      // conversation. Never let their optional IDs select the lead by default.
+      if (
+        unboundOperator &&
+        (request.params.name === RECONCILE_SEAT_CALL ||
+          SeatCallToolSchema.safeParse(request.params.name).success)
+      )
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                error: "conversation_binding_required",
+                recovery:
+                  "Use a verified launcher-bound conversation for lead tools. Stateless tools remain available on the operator bearer.",
+              }),
+            },
+          ],
+          isError: true,
+        };
       if (request.params.name === RECONCILE_SEAT_CALL && lane === "operator") {
         const args = request.params.arguments ?? {};
         if (args.settle !== undefined) {

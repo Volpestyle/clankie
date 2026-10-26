@@ -4,7 +4,11 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
-import type { HttpBindings } from "@hono/node-server";
+import type { Server as HttpServer } from "node:http";
+import { serve, type HttpBindings } from "@hono/node-server";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import {
@@ -831,6 +835,79 @@ it.each([false, true])(
     await settle(f.service, second!);
   },
 );
+
+it("an unbound HTTP MCP session has no lead conversation while the bound seat retains its report", async () => {
+  const f = await fixture({ parent: false });
+  const attached = await poll(f.service, "global-default");
+  const receipt = await delivery(f.service);
+  expect(await report(f.service, "Private retained lead report", receipt)).toMatchObject({ received: true });
+  const [event] = await attached.events();
+  expect(event!.content).toContain("Private retained lead report");
+  const offeredAt = accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.offeredAt;
+  const server = serve({ hostname: "127.0.0.1", port: 0, fetch: f.service.app.app.fetch }) as HttpServer;
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Owned HTTP listener unavailable");
+  const host = `http://127.0.0.1:${address.port}`;
+  const client = new Client({ name: "unbound-operator-proof", version: "1" });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${host}/v1/mcp`), {
+        requestInit: { headers: { authorization: "Bearer operator" } },
+      }) as Transport,
+    );
+    expect(client.getInstructions()).toContain("has no conversation");
+    // Connected discovery is stateless; it must not grant a conversation merely
+    // because its bearer also permits the operator lane.
+    expect(
+      (await client.callTool({ name: "mcp_tool_search", arguments: { query: "fixture" } })).isError,
+    ).not.toBe(true);
+    for (const [name, args] of [
+      ["message_seat", { seat: "term_aaa", message: "Must not reach the worker" }],
+      ["worker_reports", {}],
+      ["acknowledge_worker_reports", { deliveryIds: [receipt.id] }],
+      ["reconcile_seat_call", { deliveryId: receipt.id }],
+    ] as const) {
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError).toBe(true);
+      const block = result.content as Array<{ type: string; text?: string }>;
+      expect(JSON.parse(block[0]!.text!)).toMatchObject({ error: "conversation_binding_required" });
+      expect(JSON.stringify(result)).not.toContain("Private retained lead report");
+    }
+    expect(accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.offeredAt).toBe(
+      offeredAt,
+    );
+    expect(
+      accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.readAt,
+    ).toBeUndefined();
+    const eventId = receipt.id;
+    for (const [method, path, body] of [
+      ["GET", "/v1/seat/events?conversationId=global-default&wait=0", undefined],
+      ["POST", `/v1/seat/events/${eventId}/ack?conversationId=global-default`, undefined],
+      [
+        "POST",
+        `/v1/seat/events/${eventId}/reply?conversationId=global-default`,
+        { schemaVersion: 1, text: "Must not reply" },
+      ],
+    ] as const) {
+      const response = await fetch(`${host}${path}`, {
+        method,
+        headers: { authorization: "Bearer operator", "content-type": "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: "seat_process_unproven" });
+    }
+    expect(accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.state).not.toBe(
+      "read",
+    );
+    await settle(f.service, event!);
+  } finally {
+    await client.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
 
 it("a managed clankie head excluded from fleet seats receives its native child's report in the attached global conversation", async () => {
   const f = await fixture();

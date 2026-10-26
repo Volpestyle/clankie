@@ -3716,8 +3716,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     lane: CaptainSessionLaneV2,
     conversationId?: string,
     delegation?: ConversationAuthority,
+    host?: { conversation: "none" },
   ) {
-    if (delegation) {
+    // A bare MCP bearer has owner tools but no source conversation to impersonate.
+    const conversationBound = host?.conversation !== "none";
+    if (conversationBound && delegation) {
       if (lane !== "operator" || delegation.owner.conversationId !== conversationId)
         throw new Error("remote_lead_conversation_mismatch");
       await assertConversationAuthority(delegation);
@@ -3730,7 +3733,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // one already say so.
     const capture: TurnContext = {};
     let toolLane = lane;
-    if (lane === "operator") {
+    if (conversationBound && lane === "operator") {
       const binding = seatContext(conversationId);
       if (binding === undefined) throw new Error("Unknown captain conversation");
       if (binding.machineId !== undefined && delegation === undefined)
@@ -3773,7 +3776,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         capture.targetId = targetId;
       }
     }
-    if (lane === "operator" && capture.targetId !== undefined) {
+    if (conversationBound && lane === "operator" && capture.targetId !== undefined) {
       const sourceConversationId = seatContext(conversationId)!.conversationId;
       capture.requestQuestion = (draft) =>
         conversations.requestSurfaceQuestion(sourceConversationId, draft, {
@@ -3812,7 +3815,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       hireSeat,
       messageSeat,
       workerReportActions,
-      delegation
+      conversationBound && delegation
         ? {
             server: "linear",
             allows: (tool) => tool.server === "linear" && projectTrackerTool(tool.name),
@@ -3846,7 +3849,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : undefined,
     );
     const ownerTools =
-      lane === "operator" && toolLane === "operator" && capture.targetId !== undefined
+      conversationBound && lane === "operator" && toolLane === "operator" && capture.targetId !== undefined
         ? [
             roomForkTool((input) =>
               forkIntoRoom({
@@ -3857,7 +3860,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ),
           ]
         : [];
-    return lane === "operator" && conversationId !== undefined
+    return conversationBound && lane === "operator" && conversationId !== undefined
       ? { ...bank, tools: [...bank.tools, ...nativeRoomHandoffs.tools(conversationId), ...ownerTools] }
       : { ...bank, tools: [...bank.tools, ...ownerTools] };
   }

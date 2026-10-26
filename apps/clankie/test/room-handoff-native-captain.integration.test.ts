@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -183,7 +184,9 @@ it.each(["claude", "codex"] as const)(
         personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
       },
     );
+    const seatBinding = operatorSeatBindingFixture();
     const service = await createClankieApp({
+      operatorSeatBindings: seatBinding.registry,
       captain,
       settings,
       authenticateOperator: async (incoming) =>
@@ -196,6 +199,7 @@ it.each(["claude", "codex"] as const)(
     let run: ReturnType<typeof captain.submitDiscordTurn> | undefined;
     let secondRun: ReturnType<typeof captain.submitDiscordTurn> | undefined;
     try {
+      await seatBinding.register(service.app, parentConversationId, headers);
       const synced = await service.app.request(`/v1/seat/transcript?conversationId=${parentConversationId}`, {
         method: "POST",
         headers,
@@ -334,11 +338,19 @@ it.each(["claude", "codex"] as const)(
 
       let rpcId = 1;
       const rpc = async (body: unknown, sessionId?: string) =>
-        service.app.request(`/v1/mcp?conversationId=${parentConversationId}`, {
-          method: "POST",
-          headers: { ...headers, ...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }) },
-          body: JSON.stringify(body),
-        });
+        service.app.request(
+          `/v1/mcp?conversationId=${parentConversationId}`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              ...seatBinding.headers(parentConversationId),
+              ...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }),
+            },
+            body: JSON.stringify(body),
+          },
+          seatBinding.env(parentConversationId),
+        );
       const initialized = await rpc({
         jsonrpc: "2.0",
         id: rpcId++,

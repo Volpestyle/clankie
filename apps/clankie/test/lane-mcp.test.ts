@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { CaptainSessionLaneV2Schema } from "@clankie/protocol";
 import { assertMcpToolsList } from "../src/mcp-tool-schema.ts";
 import { listedOnLane } from "../src/captain/mcp-tool-surface.ts";
@@ -99,6 +100,11 @@ async function mcpApp() {
   });
 }
 
+const boundOperatorApps = new WeakMap<
+  Awaited<ReturnType<typeof mcpApp>>,
+  { binding: ReturnType<typeof operatorSeatBindingFixture>; conversationId: string }
+>();
+
 type Rpc = { readonly result?: Record<string, unknown>; readonly error?: { readonly message: string } };
 
 async function call(
@@ -107,15 +113,21 @@ async function call(
   body: unknown,
   sessionId?: string,
 ): Promise<Response> {
-  return await app.app.request("/v1/mcp", {
-    method: "POST",
-    headers: {
-      ...MCP_HEADERS,
-      authorization: `Bearer ${bearer}`,
-      ...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }),
+  const bound = bearer === "operator" ? boundOperatorApps.get(app) : undefined;
+  return await app.app.request(
+    bound ? `/v1/mcp?conversationId=${bound.conversationId}` : "/v1/mcp",
+    {
+      method: "POST",
+      headers: {
+        ...MCP_HEADERS,
+        authorization: `Bearer ${bearer}`,
+        ...(bound ? bound.binding.headers(bound.conversationId) : {}),
+        ...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }),
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    bound?.binding.env(bound.conversationId),
+  );
 }
 
 /** Initialize a session the way a harness does, and hand back its session id. */
@@ -623,12 +635,16 @@ it("initializes an operator MCP session with native and connected tools", async 
       settings,
     },
   );
+  const binding = operatorSeatBindingFixture();
   const app = await createClankieApp({
-    operatorSeatBindings: permissiveSeatBindings(),
+    operatorSeatBindings: binding.registry,
     captain,
     authenticateOperator: async () => ({ operatorId: "operator-james" }),
   });
   try {
+    const conversationId = captain.seatContext()!.conversationId;
+    await binding.register(app.app, conversationId, { authorization: "Bearer operator" });
+    boundOperatorApps.set(app, { binding, conversationId });
     const sessionId = await connect(app, "operator");
     const names = await toolNames(app, "operator", sessionId);
     expect(names.some((name) => name.startsWith("swarm_"))).toBe(false);
@@ -729,30 +745,40 @@ it("serves every real Captain schema with MCP's object root without losing union
       settings: new SettingsStore(join(root, "settings.json")),
     },
   );
+  const binding = operatorSeatBindingFixture();
+  const conversationId = captain.seatContext()!.conversationId;
   const app = await createClankieApp({
-    operatorSeatBindings: permissiveSeatBindings(),
+    operatorSeatBindings: binding.registry,
     captain,
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer fixture"
         ? { operatorId: "schema-fixture" }
         : undefined,
   });
-  const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: 0 });
+  await binding.register(app.app, conversationId, { authorization: "Bearer fixture" });
+  const server = serve({
+    fetch: (request, env) => app.app.fetch(request, binding.httpEnv(request, env) ?? env),
+    hostname: "127.0.0.1",
+    port: 0,
+  });
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("No loopback address");
   const client = new Client({ name: "official-sdk-schema-regression", version: "1" });
   try {
     await client.connect(
-      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/v1/mcp`), {
-        requestInit: { headers: { authorization: "Bearer fixture" } },
-      }) as unknown as Transport,
+      new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/v1/mcp?conversationId=${conversationId}`),
+        {
+          requestInit: {
+            headers: { authorization: "Bearer fixture", ...binding.headers(conversationId) },
+          },
+        },
+      ) as unknown as Transport,
     );
     // The SDK itself rejects a missing root type before returning tools/list.
     const listed = (await client.listTools()).tools;
-    // The HTTP route resolves its default conversation explicitly; include that same
-    // conversation-bound room handoff bank when comparing native schemas.
-    const conversationId = captain.seatContext()?.conversationId;
+    // Compare the explicitly registered lead's conversation-bound room handoff bank.
     expect(conversationId).toBeDefined();
     const bank = await captain.laneToolBank("operator", conversationId);
     const originals = new Map(bank.tools.map((tool) => [tool.name, tool.inputSchema]));

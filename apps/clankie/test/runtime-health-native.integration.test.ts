@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
@@ -139,13 +140,16 @@ it.skipIf(process.platform !== "darwin")(
     let burn: ReturnType<typeof setInterval> | undefined;
     const burners: Worker[] = [];
     let observer: RuntimeHealthObserver;
+    const seatBinding = operatorSeatBindingFixture();
     const body = await createClankieApp({
+      operatorSeatBindings: seatBinding.registry,
       captain,
       settings,
       authenticateOperator: createBearerAuthenticator("native-test", { operatorId: "owned-health-test" }),
       localFleet: link,
       runtimeHealth: () => observer.snapshot(),
     });
+    await seatBinding.register(body.app, "global-default", { authorization: "Bearer native-test" });
     const privateFetch = link.fetch((request) => body.app.fetch(request));
     const server = serve({
       hostname: "127.0.0.1",
@@ -153,7 +157,7 @@ it.skipIf(process.platform !== "darwin")(
       fetch: async (request, env) => {
         if (new URL(request.url).pathname.startsWith("/v1/fleet/")) return privateFetch(request, env);
         if (hot && new URL(request.url).pathname === "/health") await new Promise((r) => setTimeout(r, 1100));
-        return body.app.fetch(request);
+        return body.app.fetch(request, seatBinding.httpEnv(request, env) ?? env);
       },
     });
     if (!server.listening) await once(server, "listening");
@@ -189,14 +193,15 @@ it.skipIf(process.platform !== "darwin")(
     execFileSync('herdr',['pane','report-agent',pane,'--source','native-health-fixture','--agent','claude','--state','idle','--agent-session-id',${JSON.stringify(sessionId)}]);
     execFileSync('herdr',['pane','report-agent-session',pane,'--source','herdr:claude','--agent','claude','--agent-session-id',${JSON.stringify(sessionId)}]);
     execFileSync('herdr',['agent','rename',pane,'clankie']);
-    const headers={authorization:'Bearer native-test','content-type':'application/json','x-clankie-pane':pane};
+    const headers={authorization:'Bearer native-test','content-type':'application/json','x-clankie-pane':pane,...${JSON.stringify(seatBinding.headers("global-default"))}};
     async function post(path,value){const r=await fetch(host+path,{method:'POST',headers,body:JSON.stringify(value)});const body=await r.json();if(!r.ok)throw Error(path+':'+JSON.stringify(body));return body}
     await post('/v1/seat/transcript',{sessionId:${JSON.stringify(sessionId)},entries:[],activity:'waiting'});
     const r=await fetch(host+'/v1/fleet/seats/'+encodeURIComponent(pane)+'/tool-catalog',{method:'POST',headers,body:JSON.stringify({schemaVersion:1,harness:'claude',sessionId:${JSON.stringify(sessionId)},bridge:'operator',conversationId:'global-default',tools:[],checkedAt:new Date().toISOString()})});
     const catalog={status:r.status,body:await r.json()};
     await writeFile(${JSON.stringify(ready)},JSON.stringify(catalog));
-    for(;;){const r=await fetch(host+${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'?wait=1000',{headers});if(!r.ok)throw Error('poll '+r.status);const page=await r.json();for(const e of page.events){if(e.source==='service'&&e.content.startsWith('Runtime health alarm:')){while(!(await readFile(${JSON.stringify(acknowledgeAlarm)},'utf8').catch(()=>'')))await new Promise(r=>setTimeout(r,20))}const ack=await post(${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'/'+e.id+'/ack',{});await appendFile(${JSON.stringify(notices)},JSON.stringify({event:e,ack})+'\\n')}}
+    for(;;){const r=await fetch(host+${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'?conversationId=global-default&wait=1000',{headers});if(!r.ok)throw Error('poll '+r.status);const page=await r.json();for(const e of page.events){if(e.source==='service'&&e.content.startsWith('Runtime health alarm:')){while(!(await readFile(${JSON.stringify(acknowledgeAlarm)},'utf8').catch(()=>'')))await new Promise(r=>setTimeout(r,20))}const ack=await post(${JSON.stringify(OPERATOR_SEAT_EVENTS_PATH)}+'/'+e.id+'/ack?conversationId=global-default',{});await appendFile(${JSON.stringify(notices)},JSON.stringify({event:e,ack})+'\\n')}}
   `,
+      { mode: 0o600 },
     );
     const until = async (test: () => Promise<boolean>, timeoutMs = 12000) => {
       const deadline = Date.now() + timeoutMs;

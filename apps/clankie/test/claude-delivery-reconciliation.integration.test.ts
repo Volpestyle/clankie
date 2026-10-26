@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -297,7 +298,9 @@ it("reconciles both native and MCP dispatch IDs through the operator HTTP route 
           : undefined;
       },
     });
+  const seatBinding = operatorSeatBindingFixture();
   const app = await createClankieApp({
+    operatorSeatBindings: seatBinding.registry,
     seatCallReceiptPath: join(f.root, "mcp-receipts.json"),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer proof-owner" ? { operatorId: "owner" } : undefined,
@@ -329,9 +332,23 @@ it("reconciles both native and MCP dispatch IDs through the operator HTTP route 
         watches().reconcileSeatDelivery(id, conversationId ?? "global-default"),
     }),
   });
+  // These existing dispatches and receipts belong to global-default.
+  await seatBinding.register(app.app, "global-default", { authorization: "Bearer proof-owner" });
+  const boundRequest = (init: RequestInit) =>
+    app.app.request(
+      "/v1/mcp?conversationId=global-default",
+      {
+        ...init,
+        headers: {
+          ...Object.fromEntries(new Headers(init.headers)),
+          ...seatBinding.headers("global-default"),
+        },
+      },
+      seatBinding.env("global-default"),
+    );
   let session: string | undefined;
   const rpc = async (body: unknown) =>
-    app.app.request("/v1/mcp", {
+    boundRequest({
       method: "POST",
       headers: {
         authorization: "Bearer proof-owner",

@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { createHmac, randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { Server } from "node:http";
@@ -35,8 +36,15 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-async function listen(app: Awaited<ReturnType<typeof createClankieApp>>) {
-  const server = serve({ hostname: "127.0.0.1", port: 0, fetch: app.app.fetch }) as Server;
+async function listen(
+  app: Awaited<ReturnType<typeof createClankieApp>>,
+  binding?: ReturnType<typeof operatorSeatBindingFixture>,
+) {
+  const server = serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request, env) => app.app.fetch(request, binding?.httpEnv(request, env) ?? env),
+  }) as Server;
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("No owned HTTP address");
@@ -274,7 +282,9 @@ async function fixture(
           sessionKey: store.nativeSeatSessionKey(id),
         }) && outbox(id).confirmReceived(original),
     );
+  const seatBinding = operatorSeatBindingFixture();
   const service = await createClankieApp({
+    operatorSeatBindings: seatBinding.registry,
     settings,
     captain: createStubCaptain({
       receiveLinearActivity: (event, following, target) =>
@@ -330,7 +340,9 @@ async function fixture(
       projectContext: (activity) => attribution.projectContext(activity, host),
     },
   });
-  const url = await listen(service);
+  for (const id of [leadId, "global-default"])
+    await seatBinding.register(service.app, id, { authorization: `Bearer ${token}` });
+  const url = await listen(service, seatBinding);
   const clients = new Map<string, Client>();
   const confirm = async (id: string, wakeId: string) => {
     let client = clients.get(id);
@@ -338,7 +350,7 @@ async function fixture(
       client = new Client({ name: "owned-target-seat", version: "1.0.0" });
       await client.connect(
         new StreamableHTTPClientTransport(new URL(`${url}/v1/mcp?conversationId=${id}`), {
-          requestInit: { headers: { authorization: `Bearer ${token}` } },
+          requestInit: { headers: { authorization: `Bearer ${token}`, ...seatBinding.headers(id) } },
         }) as Transport,
       );
       clients.set(id, client);
@@ -358,10 +370,17 @@ async function fixture(
     fetch(`${url}/v1/linear/routes`, { method: "PUT", headers, body: JSON.stringify({ projectChats }) });
   const poll = async (id = "global-default", wait = 0) =>
     OperatorSeatEventsPageSchema.parse(
-      await (await fetch(`${url}/v1/seat/events?conversationId=${id}&wait=${wait}`, { headers })).json(),
+      await (
+        await fetch(`${url}/v1/seat/events?conversationId=${id}&wait=${wait}`, {
+          headers: { ...headers, ...seatBinding.headers(id) },
+        })
+      ).json(),
     ).events;
   const ack = (id: string, eventId: string) =>
-    fetch(`${url}/v1/seat/events/${eventId}/ack?conversationId=${id}`, { method: "POST", headers });
+    fetch(`${url}/v1/seat/events/${eventId}/ack?conversationId=${id}`, {
+      method: "POST",
+      headers: { ...headers, ...seatBinding.headers(id) },
+    });
   const event = (data: Record<string, unknown> = {}, envelope: Record<string, unknown> = {}) => {
     const commentId = randomUUID();
     const createdAt = new Date().toISOString();

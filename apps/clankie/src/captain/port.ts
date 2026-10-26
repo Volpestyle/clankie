@@ -540,12 +540,14 @@ export interface CaptainPort {
   /**
    * That lane's authority plan as callable tools, for a seat in another harness
    * (VUH-1085). Each call opens its own turn context, so one seat's attachments
-   * and room never leak into another's.
+   * and room never leak into another's. The host may explicitly request no
+   * conversation binding for a neutral bearer tool bank.
    */
   laneToolBank(
     lane: CaptainSessionLaneV2,
     conversationId?: string,
     delegation?: import("./conversation-owner.ts").ConversationAuthority,
+    host?: { conversation: "none" },
   ): Promise<LaneToolBank>;
   /** Read-only exact native delivery reconciliation; operator conversation only. */
   reconcileSeatDelivery?(id: string, conversationId?: string): Promise<FleetSeatDelivery | undefined>;

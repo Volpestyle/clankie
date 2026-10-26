@@ -148,6 +148,11 @@ retries are not retained as diagnostics. A successful registration/admission
 clears the recorded refusal for that conversation. The bridge retries only
 missing or stale registration within its bounded startup window; wrong ancestry,
 nonce, conflict or an existing claimant remain final.
+Bearer-only HTTP MCP clients, including the normal `clankie linear` CLI, retain
+stateless tools. Omitting the conversation creates no conversation context;
+lead tools return `conversation_binding_required`, never a `global-default`
+fallback. A named conversation and every event poll/ack/reply still need the
+verified launch. Do not copy a conversation or nonce to repair a stateless CLI.
 Missing helper, unprovable socket, wrong ancestry, wrong claim and another live
 claimant are distinct refusals. Prime's missing verified kernel PID remains open.
 Joined/delegated seats retain their separate authenticated route; relay/app

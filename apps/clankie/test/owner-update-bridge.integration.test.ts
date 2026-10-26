@@ -11,23 +11,36 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
-import { createStubCaptain } from "../src/captain/port.ts";
 import { OperatorSeatBindings } from "../src/operator-seat-bindings.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
-import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 
-// Publication retry semantics below are post-admission coverage. A direct or
-// legacy bearer client is deliberately excluded from the operator seat surface.
-it("refuses legacy owner-update MCP before publication without a native seat binding", async () => {
+it("refuses unbound owner-update publication while keeping neutral MCP available", async () => {
+  const root = await mkdtemp(join(tmpdir(), "owner-mail-neutral-"));
+  const captain = createCaptain(
+    {
+      herdrAvailable: () => false,
+      browser: { catalog: async () => ({ schemaVersion: 1, available: false, tools: [] }) },
+      mcp: { catalog: async () => [] },
+      embodiment: {},
+      memory: { recallMemoryCard: async () => "", searchMemory: async () => "" },
+    } as unknown as CaptainDeps,
+    {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+      settings: new SettingsStore(join(root, "settings.json")),
+    },
+  );
   const service = await createClankieApp({
-    captain: createStubCaptain({}),
+    captain,
     operatorSeatBindings: new OperatorSeatBindings({
       socket: async () => undefined,
       processes: async () => undefined,
@@ -35,25 +48,45 @@ it("refuses legacy owner-update MCP before publication without a native seat bin
     }),
     authenticateOperator: async () => ({ operatorId: "mail-owner" }),
   });
+  const server = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port: 0 });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No loopback listener");
+  const client = new Client({ name: "neutral-mail-client", version: "1" });
   try {
-    for (const query of ["", "?conversationId=global-default"]) {
-      const response = await service.app.request(`/v1/mcp${query}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: "Bearer mail-fixture" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "tools/call",
-          params: { name: "mail_owner_update", arguments: { title: "Excluded", body: "No native seat" } },
-        }),
-      });
-      expect(response.status).toBe(403);
-      expect(await response.json()).toMatchObject({
-        error: query ? "seat_binding_required" : "seat_binding_conversation_required",
-      });
-    }
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/v1/mcp`), {
+        requestInit: { headers: { authorization: "Bearer mail-fixture" } },
+      }) as unknown as Transport,
+    );
+    const result = await client.callTool({
+      name: "mail_owner_update",
+      arguments: { title: "Excluded", body: "No native seat" },
+    });
+    expect(result.isError).toBe(true);
+    expect(decodeMcpResult(result)).toMatchObject({ error: "conversation_binding_required" });
+    const mailbox = await service.app.request("/operator/v1/dispatch", {
+      method: "POST",
+      headers: { authorization: "Bearer mail-fixture", "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: 1, op: "owner_update_list", state: "all" }),
+    });
+    expect(mailbox.status).toBe(200);
+    const updates = OperatorConversationServiceResultSchema.parse(await mailbox.json());
+    expect(updates).toMatchObject({ op: "owner_update_list", result: { updates: [] } });
+    const response = await service.app.request("/v1/mcp?conversationId=global-default", {
+      method: "POST",
+      headers: { authorization: "Bearer mail-fixture", "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: "seat_binding_required" });
   } finally {
+    await client.close();
     service.close();
+    if ("closeAllConnections" in server) server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await captain.close();
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -78,6 +111,7 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
     },
     memory: { recallMemoryCard: async () => "", searchMemory: async () => "" },
   } as unknown as CaptainDeps;
+  const seatBinding = operatorSeatBindingFixture();
   const openService = async () => {
     const captain = createCaptain(deps, {
       repoRoot: root,
@@ -86,13 +120,14 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
       settings: new SettingsStore(join(root, "settings.json")),
     });
     const app = await createClankieApp({
-      operatorSeatBindings: permissiveSeatBindings(),
+      operatorSeatBindings: seatBinding.registry,
       captain,
       authenticateOperator: async (request) =>
         request.headers.get("authorization") === "Bearer mail-fixture"
           ? { operatorId: "mail-owner" }
           : undefined,
     });
+    await seatBinding.register(app.app, "global-default", { authorization: "Bearer mail-fixture" });
     return { captain, app };
   };
   let service = await openService();
@@ -101,7 +136,7 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: async (request) => {
+    fetch: async (request, env) => {
       const body =
         request.method === "POST"
           ? await request
@@ -109,7 +144,7 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
               .json()
               .catch(() => undefined)
           : undefined;
-      let response = await service.app.app.fetch(request);
+      let response = await service.app.app.fetch(request, seatBinding.httpEnv(request, env) ?? env);
       if (loseNextResult && response.status === 200 && body?.params?.name === "mail_owner_update") {
         loseNextResult = false;
         response = new Response("Publication reply lost", { status: 502 });
@@ -129,6 +164,15 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
   const host = `http://127.0.0.1:${address.port}`;
   const bridges: { client: Client; transport: StdioClientTransport }[] = [];
   let legacy: Client | undefined;
+  const bindingPath = join(root, "bridge-binding.json");
+  await writeFile(
+    bindingPath,
+    JSON.stringify({
+      conversationId: "global-default",
+      bridgeClaim: Object.values(seatBinding.headers("global-default"))[0],
+    }),
+    { mode: 0o600 },
+  );
   const openBridge = async () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
@@ -138,6 +182,9 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
         join(import.meta.dirname, "fixtures/mcp-stdio-bridge.ts"),
         host,
         "mail-fixture",
+        "tools",
+        "",
+        bindingPath,
       ],
       cwd: join(import.meta.dirname, ".."),
       stderr: "pipe",
@@ -226,8 +273,10 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
     // fresh host identity, rather than the old constant authored-tool ID.
     legacy = new Client({ name: "legacy-mail-client", version: "1" });
     await legacy.connect(
-      new StreamableHTTPClientTransport(new URL(`${host}/v1/mcp`), {
-        requestInit: { headers: { authorization: "Bearer mail-fixture" } },
+      new StreamableHTTPClientTransport(new URL(`${host}/v1/mcp?conversationId=global-default`), {
+        requestInit: {
+          headers: { authorization: "Bearer mail-fixture", ...seatBinding.headers("global-default") },
+        },
       }) as unknown as Transport,
     );
     const legacyFirst = update(await mail(legacy));

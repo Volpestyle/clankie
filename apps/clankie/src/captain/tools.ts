@@ -10,6 +10,7 @@ import type { QuestionDraft } from "./conversation-questions.ts";
 import type { OwnerUpdate, OwnerUpdateDraft, ConversationQuestionResult } from "@clankie/protocol";
 import {
   captureConversationAuthority,
+  ConversationRequiredError,
   assertConversationAuthority,
   type ConversationAuthority,
 } from "./conversation-owner.ts";
@@ -1656,7 +1657,8 @@ function herdrWatchTools(
 
 function autonomyTools(autonomy: AutonomyStore, turn: TurnContext): ToolDefinition[] {
   const conversationId = (): string => {
-    if (turn.targetId === undefined) throw new Error("Operator conversation attribution is unavailable");
+    if (turn.targetId === undefined)
+      throw new ConversationRequiredError("Operator conversation attribution is unavailable");
     return turn.targetId;
   };
   return [

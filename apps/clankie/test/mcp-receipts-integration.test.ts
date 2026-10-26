@@ -1,6 +1,6 @@
 import { decodeMcpResult } from "@clankie/protocol/mcp-result";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, appendFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, appendFile, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server as HttpServer } from "node:http";
@@ -12,7 +12,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain, type LaneTool } from "../src/captain/port.ts";
-import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 
 function gate<T = void>() {
   let release!: (value: T | PromiseLike<T>) => void;
@@ -83,9 +83,10 @@ async function fixture(unreadableReceiptPath = false) {
       call: async () => ({ content: [{ type: "text", text: "VUH-1638 fixture issue" }] }),
     },
   ];
-  const boot = () =>
-    createClankieApp({
-      operatorSeatBindings: permissiveSeatBindings(),
+  const seatBinding = operatorSeatBindingFixture();
+  const boot = async () => {
+    const app = await createClankieApp({
+      operatorSeatBindings: seatBinding.registry,
       captain: createStubCaptain({
         laneToolBank: async (lane) => {
           banks++;
@@ -103,14 +104,23 @@ async function fixture(unreadableReceiptPath = false) {
           : undefined,
       seatCallReceiptPath: join(root, "seat-call-receipts.json"),
     });
+    for (const id of ["global-default", "another-conversation"])
+      await seatBinding.register(app.app, id, { authorization: `Bearer ${bearer}` });
+    return app;
+  };
   let service = await boot();
   const http = serve({
-    fetch: (request) => service.app.fetch(request),
+    fetch: (request, env) => service.app.fetch(request, seatBinding.httpEnv(request, env) ?? env),
     hostname: "127.0.0.1",
     port: 0,
   }) as HttpServer;
   http.on("request", (request, response) => {
-    if (!dropArmed || request.method !== "POST" || request.url !== "/v1/mcp") return;
+    if (
+      !dropArmed ||
+      request.method !== "POST" ||
+      new URL(request.url ?? "/", "http://fixture").pathname !== "/v1/mcp"
+    )
+      return;
     dropArmed = false;
     dropSibling.release(() => response.destroy());
   });
@@ -121,9 +131,27 @@ async function fixture(unreadableReceiptPath = false) {
   const address = http.address();
   if (address === null || typeof address === "string") throw new Error("Fixture has no loopback port");
   const host = `http://127.0.0.1:${address.port}`;
+  const bindingPath = join(root, "bridge-binding.json");
+  await writeFile(
+    bindingPath,
+    JSON.stringify({
+      conversationId: "global-default",
+      bridgeClaim: Object.values(seatBinding.headers("global-default"))[0],
+    }),
+    { mode: 0o600 },
+  );
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["--import", "tsx", join(import.meta.dirname, "fixtures/mcp-stdio-bridge.ts"), host, bearer],
+    args: [
+      "--import",
+      "tsx",
+      join(import.meta.dirname, "fixtures/mcp-stdio-bridge.ts"),
+      host,
+      bearer,
+      "tools",
+      "",
+      bindingPath,
+    ],
     cwd: join(import.meta.dirname, ".."),
     env: { PATH: process.env.PATH ?? "", HOME: root },
     stderr: "pipe",
@@ -152,6 +180,7 @@ async function fixture(unreadableReceiptPath = false) {
     client,
     host,
     bearer,
+    bindingHeaders: (id: string) => seatBinding.headers(id),
     armSiblingDrop: () => {
       dropArmed = true;
     },
@@ -319,11 +348,17 @@ it("an older SDK client reuses the exact protected ID after restart without disp
   const connect = async (conversationId?: string, discord = false) => {
     const client = new Client({ name: "older-direct-sdk-seat", version: "1" });
     clients.push(client);
+    if (!discord) conversationId ??= "global-default";
     const url = new URL("/v1/mcp", f.host);
     if (conversationId !== undefined) url.searchParams.set("conversationId", conversationId);
     await client.connect(
       new StreamableHTTPClientTransport(url, {
-        requestInit: { headers: { authorization: `Bearer ${f.bearer}${discord ? ":discord" : ""}` } },
+        requestInit: {
+          headers: {
+            authorization: `Bearer ${f.bearer}${discord ? ":discord" : ""}`,
+            ...(!discord ? f.bindingHeaders(conversationId!) : {}),
+          },
+        },
       }) as unknown as Transport,
     );
     return client;

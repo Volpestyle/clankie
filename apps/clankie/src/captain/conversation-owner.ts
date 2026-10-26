@@ -80,10 +80,18 @@ export interface ConversationAuthority {
   readonly authorize: () => Promise<boolean>;
 }
 
+/** Missing conversation binding, distinct from an expired or denied authority. */
+export class ConversationRequiredError extends Error {
+  constructor(message = "Turn conversation attribution is unavailable") {
+    super(message);
+    this.name = "ConversationRequiredError";
+  }
+}
+
 export function captureConversationAuthority(
   source: ConversationAuthority | undefined,
 ): ConversationAuthority {
-  if (source === undefined) throw new Error("Turn conversation attribution is unavailable");
+  if (source === undefined) throw new ConversationRequiredError();
   const owner = ConversationOwnerSchema.parse(source.owner);
   if (owner.discord !== undefined) Object.freeze(owner.discord);
   return Object.freeze({

@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -343,7 +344,9 @@ it("over the lead's MCP tools: message_seat is refused, reconcile_seat_call sett
   const f = fixture(),
     native = f.create();
   let nextText = "handoff: start the release";
+  const seatBinding = operatorSeatBindingFixture();
   const app = await createClankieApp({
+    operatorSeatBindings: seatBinding.registry,
     seatCallReceiptPath: join(f.root, "mcp-receipts.json"),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer proof-owner" ? { operatorId: "owner" } : undefined,
@@ -371,10 +374,24 @@ it("over the lead's MCP tools: message_seat is refused, reconcile_seat_call sett
       settleSeatDelivery: (id) => native.settleDelivery(id),
     }),
   });
+  // These existing dispatches and receipts belong to global-default.
+  await seatBinding.register(app.app, "global-default", { authorization: "Bearer proof-owner" });
+  const boundRequest = (init: RequestInit) =>
+    app.app.request(
+      "/v1/mcp?conversationId=global-default",
+      {
+        ...init,
+        headers: {
+          ...Object.fromEntries(new Headers(init.headers)),
+          ...seatBinding.headers("global-default"),
+        },
+      },
+      seatBinding.env("global-default"),
+    );
   let session: string | undefined;
   let rpcId = 0;
   const rpc = async (method: string, params?: unknown) => {
-    const response = await app.app.request("/v1/mcp", {
+    const response = await boundRequest({
       method: "POST",
       headers: {
         authorization: "Bearer proof-owner",
@@ -402,7 +419,7 @@ it("over the lead's MCP tools: message_seat is refused, reconcile_seat_call sett
       capabilities: {},
       clientInfo: { name: "lead", version: "1" },
     });
-    await app.app.request("/v1/mcp", {
+    await boundRequest({
       method: "POST",
       headers: {
         authorization: "Bearer proof-owner",

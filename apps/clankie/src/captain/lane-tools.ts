@@ -25,7 +25,11 @@ import type { HerdrWatchPort } from "./herdr-watch.ts";
 import type { LaneLog } from "./lane-log.ts";
 import type { HireSeat, LaneTool, LaneToolBank, LaneToolResult, MessageSeat } from "./port.ts";
 import { captainTools, callConversationBrowser, toolJson, type TurnContext } from "./tools.ts";
-import { assertConversationAuthority, type ConversationAuthority } from "./conversation-owner.ts";
+import {
+  assertConversationAuthority,
+  ConversationRequiredError,
+  type ConversationAuthority,
+} from "./conversation-owner.ts";
 
 type McpToolDescriptor = Awaited<ReturnType<CaptainDeps["mcp"]["catalog"]>>[number];
 type BrowserToolDescriptor = Awaited<ReturnType<CaptainDeps["browser"]["catalog"]>>["tools"][number];
@@ -316,6 +320,20 @@ function authoredLaneTool(tool: ToolDefinition, turn: TurnContext): LaneTool {
         )(context?.callId ?? randomUUID(), args);
         return withMedia(toolContent(result.content), turn.media === before ? undefined : turn.media);
       } catch (error) {
+        if (error instanceof ConversationRequiredError)
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  error: "conversation_binding_required",
+                  detail: error.message,
+                  recovery: "Bind this MCP session to an existing conversation, then retry this tool.",
+                }),
+              },
+            ],
+            isError: true,
+          };
         return { content: [{ type: "text", text: errorText(error) }], isError: true };
       }
     },

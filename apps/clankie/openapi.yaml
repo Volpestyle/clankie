@@ -5402,7 +5402,7 @@ paths:
         schema: { type: string }
       - in: query
         name: conversationId
-        description: Explicit registered operator conversation; required for operator-lane callers on every request. Other lanes omit it.
+        description: Explicit registered operator conversation. Omit for a stateless operator session with no conversation; naming one requires native launch admission on every request. Other lanes omit it.
         schema: { type: string, minLength: 1, maxLength: 256 }
     post:
       tags: [Captain]
@@ -5418,16 +5418,20 @@ paths:
         returns its id in `mcp-session-id`; every later request must carry that
         header and resolve to the same lane and conversation. `DELETE` ends the session.
         `clankie mcp` is the stdio bridge to this route (ADR 0152).
-        Operator-lane requests additionally require the local native binding
-        registered by the launcher, an explicit conversationId, and the bridge's
-        x-clankie-bridge-claim. Bearer-only clients cannot use this route.
+        An operator request without conversationId opens a stateless session:
+        connected-service tools remain available on the bearer, with no default
+        conversation. Conversation-scoped lead tools refuse with a typed
+        conversation_binding_required tool result and perform no lead operation.
+        An operator request naming a conversation requires the local native
+        binding registered by its launcher and the bridge's x-clankie-bridge-claim.
+        Seat event polling, acknowledgment and reply always require that binding.
         Joined seats use their authenticated delegated /v1/fleet/lead/mcp route;
         the device relay does not expose operator MCP or local seat bindings.
       security:
         [{ operatorBearer: [] }, { captainBearer: [] }, { discordTextBearer: [] }, { discordVoiceBearer: [] }]
       responses:
         "200":
-          description: JSON-RPC response for this request
+          description: JSON-RPC response; an unbound conversation-scoped tool returns isError with conversation_binding_required
         "400":
           description: No session id on a non-initialize request
         "403":

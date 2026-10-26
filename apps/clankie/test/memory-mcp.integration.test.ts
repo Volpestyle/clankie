@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { CaptainEpisodeSchema } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { serve } from "@hono/node-server";
@@ -86,7 +87,9 @@ it("migrates legacy notes and exercises memory through the real MCP endpoint wit
       settings: new SettingsStore(join(root, "settings.json")),
     },
   );
+  const seatBinding = operatorSeatBindingFixture();
   const app = await createClankieApp({
+    operatorSeatBindings: seatBinding.registry,
     captain,
     memory,
     authenticateOperator: async (request) =>
@@ -96,20 +99,33 @@ it("migrates legacy notes and exercises memory through the real MCP endpoint wit
         ? { captainId: "fixture-body", steerSourceLane: "discord_text" }
         : undefined,
   });
-  const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: 0 });
+  const server = serve({
+    fetch: (request, env) => app.app.fetch(request, seatBinding.httpEnv(request, env) ?? env),
+    hostname: "127.0.0.1",
+    port: 0,
+  });
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("No loopback address");
   const baseUrl = `http://127.0.0.1:${address.port}/v1/mcp`;
   const clients: Client[] = [];
   async function connect(bearer: string, conversationId?: string): Promise<Client> {
+    if (bearer === "console") {
+      conversationId ??= "global-default";
+      await seatBinding.register(app.app, conversationId, { authorization: "Bearer console" });
+    }
     const client = new Client({ name: "memory-integration", version: "1" });
     clients.push(client);
     const url = new URL(baseUrl);
     if (conversationId !== undefined) url.searchParams.set("conversationId", conversationId);
     await client.connect(
       new StreamableHTTPClientTransport(url, {
-        requestInit: { headers: { authorization: `Bearer ${bearer}` } },
+        requestInit: {
+          headers: {
+            authorization: `Bearer ${bearer}`,
+            ...(bearer === "console" ? seatBinding.headers(conversationId!) : {}),
+          },
+        },
       }) as unknown as Transport,
     );
     return client;

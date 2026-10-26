@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
@@ -6,22 +7,29 @@ import {
   type LaneUpstreamTransportEvent,
 } from "../../../tui/src/command/mcp.ts";
 
-const [host, bearer, channel, diagnostics] = process.argv.slice(2);
+const [host, bearer, channel, diagnostics, bindingPath] = process.argv.slice(2);
 if (!host || !bearer) throw new Error("MCP integration fixture requires a host and bearer");
-process.exitCode = await runMcpCommand(["--lane", "operator"], {
-  transport: new StdioServerTransport() as unknown as Transport,
-  readParentArgv: async () =>
-    channel === "channel" ? "claude --dangerously-load-development-channels server:clankie" : undefined,
-  connectUpstream: async () =>
-    connectLaneUpstream({
-      host,
-      bearer,
-      ...(diagnostics === "diagnostics"
-        ? {
-            onTransportEvent: (event: LaneUpstreamTransportEvent) => {
-              process.stderr.write(`${JSON.stringify(event)}\n`);
-            },
-          }
-        : {}),
-    }),
-});
+const binding = bindingPath
+  ? (JSON.parse(readFileSync(bindingPath, "utf8")) as { conversationId: string; bridgeClaim: string })
+  : undefined;
+process.exitCode = await runMcpCommand(
+  ["--lane", "operator", ...(binding ? ["--conversation", binding.conversationId] : [])],
+  {
+    transport: new StdioServerTransport() as unknown as Transport,
+    readParentArgv: async () =>
+      channel === "channel" ? "claude --dangerously-load-development-channels server:clankie" : undefined,
+    connectUpstream: async () =>
+      connectLaneUpstream({
+        host,
+        bearer,
+        ...binding,
+        ...(diagnostics === "diagnostics"
+          ? {
+              onTransportEvent: (event: LaneUpstreamTransportEvent) => {
+                process.stderr.write(`${JSON.stringify(event)}\n`);
+              },
+            }
+          : {}),
+      }),
+  },
+);

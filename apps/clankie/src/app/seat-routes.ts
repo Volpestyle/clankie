@@ -806,6 +806,11 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
   ctx.app.all("/v1/mcp", async (context) => {
     const auth = await ctx.authenticateLane(context);
     if ("denial" in auth) return auth.denial;
+    // A bearer grants the operator's stateless tools, not a conversation. In
+    // particular, the CLI must never resolve an omitted ID to global-default.
+    // Naming a conversation still requires the launcher's native binding below.
+    if (auth.lane === "operator" && context.req.query("conversationId") === undefined)
+      return laneMcp.handle(context.req.raw, auth.lane);
     const unbound = await refuseUnboundOperator(context, auth.lane);
     if (unbound !== undefined) return unbound;
     const binding = seatBinding(context, auth.lane);

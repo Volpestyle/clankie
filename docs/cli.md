@@ -7393,9 +7393,14 @@ Definitions are copied into a file readable only by the owner; `--dry-run` shows
 its path without printing server credentials. The generated bridge requires the
 launcher's `CLANKIE_CONVERSATION_ID`; reusing the file with that binding absent
 fails before connecting. Its tools use `mcp__clankie__*`; the plugin still supplies
-identity, hooks, room-agent permissions and skills. Operator MCP and event
-poll/read/ack/reply require an explicit conversation and a kernel-verified
-launcher binding; an unbound bridge never inherits `global-default`. The launcher
+identity, hooks, room-agent permissions and skills. Conversation-scoped operator
+MCP and event poll/read/ack/reply require an explicit conversation and a
+kernel-verified launcher binding; an unbound bridge never inherits `global-default`.
+An operator-bearer HTTP MCP session that omits the conversation has no conversation
+at all: stateless tools remain available, including the ordinary `clankie linear`
+read/graphql/post/catalog paths, while lead tools refuse with
+`conversation_binding_required`. Naming a conversation still requires native
+launch admission; a bearer cannot select it by text alone. The launcher
 registers its direct harness child plus a nonce hash at
 `PUT /v1/captain/seat-bindings`. Only the intended bridge receives the nonce
 through private MCP configuration (Codex/OpenCode use a 0600 nonce file), not

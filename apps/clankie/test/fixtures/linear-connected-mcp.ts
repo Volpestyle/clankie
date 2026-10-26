@@ -1,5 +1,6 @@
+import { operatorSeatBindingFixture } from "./operator-seat-binding-fixture.ts";
 import { createHmac, randomUUID } from "node:crypto";
-import { mkdtemp, appendFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, appendFile, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server as HttpServer, ServerResponse } from "node:http";
@@ -38,7 +39,10 @@ export function heldProviderRead() {
   return { admitted: gate(), response: gate() };
 }
 
-async function listen(service: Awaited<ReturnType<typeof createClankieApp>>) {
+async function listen(
+  service: Awaited<ReturnType<typeof createClankieApp>>,
+  binding?: ReturnType<typeof operatorSeatBindingFixture>,
+) {
   const notificationStream = gate();
   const retryStream = gate();
   let stream: ServerResponse | undefined;
@@ -47,11 +51,12 @@ async function listen(service: Awaited<ReturnType<typeof createClankieApp>>) {
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (request) => service.app.fetch(request),
+    fetch: (request, env) => service.app.fetch(request, binding?.httpEnv(request, env) ?? env),
   }) as HttpServer;
   server.on("request", (request, response) => {
     wireRequests.push({ method: request.method ?? "", path: request.url ?? "" });
-    if (request.method !== "GET" || request.url !== "/v1/mcp") return;
+    if (request.method !== "GET" || new URL(request.url ?? "/", "http://fixture").pathname !== "/v1/mcp")
+      return;
     stream = response;
     if (dropped) retryStream.release();
     else notificationStream.release();
@@ -285,7 +290,9 @@ export async function createConnectedLinearFixture(
   });
   const outbox = new SeatOutbox({ uncertaintyPath: join(root, "outbox.json") });
   const pollStarted = gate();
+  const seatBinding = operatorSeatBindingFixture();
   const service = await createClankieApp({
+    operatorSeatBindings: seatBinding.registry,
     settings,
     linearWebhook: {
       secret: async () => webhookSecret,
@@ -325,7 +332,12 @@ export async function createConnectedLinearFixture(
         ? { operatorId: "fixture-operator" }
         : undefined,
   });
-  const endpoint = await listen(service);
+  // Provider remains stateless; this consumer carries its explicit conversation.
+  await seatBinding.register(service.app, conversationId, { authorization: `Bearer ${operatorToken}` });
+  const bindingPath = join(root, "bridge-binding.json");
+  const claim = Object.values(seatBinding.headers(conversationId))[0];
+  await writeFile(bindingPath, JSON.stringify({ conversationId, bridgeClaim: claim }), { mode: 0o600 });
+  const endpoint = await listen(service, seatBinding);
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [
@@ -336,6 +348,7 @@ export async function createConnectedLinearFixture(
       operatorToken,
       options.channel ? "channel" : "tools",
       "diagnostics",
+      bindingPath,
     ],
     cwd: join(import.meta.dirname, "../.."),
     env: { PATH: process.env.PATH ?? "", HOME: root },

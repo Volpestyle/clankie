@@ -7,6 +7,7 @@ import { z } from "zod";
 import { ProjectProposalDraftSchema, type ProjectProposalDraft } from "@clankie/protocol/projects";
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { ConversationRequiredError } from "./conversation-owner.ts";
 import { QuestionDraftSchema, type QuestionDraft } from "./conversation-questions.ts";
 import { toolJson, type TurnContext } from "./tools.ts";
 
@@ -21,7 +22,8 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
         withoutPatterns(z.toJSONSchema(OwnerUpdateDraftSchema, { io: "input" })),
       ),
       execute: async (id, input) => {
-        if (!turn.mailOwnerUpdate) throw new Error("Owner updates require a current source conversation");
+        if (!turn.mailOwnerUpdate)
+          throw new ConversationRequiredError("Owner updates require a current source conversation");
         return toolJson(await turn.mailOwnerUpdate(OwnerUpdateDraftSchema.parse(input), id));
       },
     }),
@@ -33,7 +35,9 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       parameters: Type.Object({}, { additionalProperties: false }),
       execute: async () => {
         if (!turn.proposeProjectDefaults)
-          throw new Error("Project proposals require a current owner workspace conversation");
+          throw new ConversationRequiredError(
+            "Project proposals require a current owner workspace conversation",
+          );
         return toolJson(await turn.proposeProjectDefaults());
       },
     }),
@@ -47,10 +51,10 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       ),
       execute: async (_id, input) => {
         const draft = QuestionDraftSchema.parse(input);
+        const request = turn.requestQuestion;
+        if (!request) throw new ConversationRequiredError("Questions require a current source conversation");
         if (draft.workerQuestion && turn.shell !== true)
           throw new Error("Worker question escalation requires an admitted machine turn");
-        const request = turn.requestQuestion;
-        if (!request) throw new Error("Questions require a current source conversation");
         return toolJson(await request(draft));
       },
     }),
@@ -66,7 +70,7 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       ),
       execute: async (_id, input) => {
         if (!turn.cancelQuestion)
-          throw new Error("Question cancellation requires a current lead conversation");
+          throw new ConversationRequiredError("Question cancellation requires a current lead conversation");
         return toolJson(
           await turn.cancelQuestion(
             ConversationQuestionTargetSchema.omit({ conversationId: true }).parse(input),
@@ -84,7 +88,9 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       ),
       execute: async (_id, input) => {
         if (!turn.proposeProjectCreate)
-          throw new Error("Project proposals require a current owner workspace conversation");
+          throw new ConversationRequiredError(
+            "Project proposals require a current owner workspace conversation",
+          );
         return toolJson(await turn.proposeProjectCreate(ProjectProposalDraftSchema.parse(input)));
       },
     }),

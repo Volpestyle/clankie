@@ -194,7 +194,8 @@ messaged as the lead. Now:
   re-registers every few seconds and attempts withdrawal on exit. An HTTP or
   transport failure to withdraw emits a warning without masking the harness exit;
   process lifetime checks still refuse a dead launcher.
-- **The service admits only that bridge.** `/v1/mcp`, `GET /v1/seat/events`,
+- **Conversation authority belongs only to that bridge.** `/v1/mcp` with an
+  explicit conversation, `GET /v1/seat/events`,
   and the events `ack` and `reply` routes admit an operator-lane request only
   when the socket's owner is the harness's **direct child** (or, for a launcher
   that spawned a shell first, the one registered extra hop), presenting the nonce
@@ -203,6 +204,12 @@ messaged as the lead. Now:
   A stray nested under the genuine harness or its shell, a wrong conversation, a
   reused pid (births differ), a dead launcher, a second live claimant and a
   caller with no provable socket are all refused with a typed `seat_*` error.
+- **Stateless bearer tools keep working.** HTTP `/v1/mcp` with no conversation
+  creates no conversation context, so ordinary `clankie linear` read/graphql/
+  post/catalog calls retain their bearer access. Lead tools return a typed
+  `conversation_binding_required` refusal; they cannot inherit `global-default`,
+  offer or acknowledge reports, message seats, or reconcile a lead's receipts.
+  Naming a conversation still requires the native launch proof above.
 - **The bridge refuses early.** Without a selected conversation it exits with a
   diagnostic before reading the credential or contacting the service.
 - **Where the nonce travels.** Claude: only in the per-launch 0600

@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import { OPERATOR_SEAT_EVENTS_PATH, type OperatorSeatEvent } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
@@ -13,8 +14,34 @@ const event: OperatorSeatEvent = {
   createdAt: "2026-09-01T20:00:00.000Z",
 };
 
+async function boundApp(
+  options: Parameters<typeof createClankieApp>[0],
+  id = "global-default",
+  auth = "Bearer operator",
+) {
+  const binding = operatorSeatBindingFixture();
+  const service = await createClankieApp({ ...options, operatorSeatBindings: binding.registry });
+  await binding.register(service.app, id, { authorization: auth });
+  const original = service.app.request.bind(service.app);
+  service.app.request = ((input: string | Request, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    const url = typeof input === "string" ? input : input.url;
+    const selected = new URL(url, "http://fixture").searchParams.get("conversationId") ?? id;
+    for (const [key, value] of Object.entries(binding.headers(selected))) headers.set(key, value);
+    const explicit = url.includes("conversationId=")
+      ? url
+      : `${url}${url.includes("?") ? "&" : "?"}conversationId=${id}`;
+    return original(explicit, { ...init, headers }, binding.env(id));
+  }) as typeof service.app.request;
+  return {
+    ...service,
+    registerBinding: (conversationId: string) =>
+      binding.register({ request: original }, conversationId, { authorization: auth }),
+  };
+}
+
 async function app(polled: number[] = [], replies: [string, string][] = []) {
-  return createClankieApp({
+  return boundApp({
     captain: createStubCaptain({
       pollSeatEvents: async (waitMs) => {
         polled.push(waitMs);
@@ -92,20 +119,23 @@ describe("seat outbox routes", () => {
 
 it("resolves project context and keeps event polls/replies on that binding", async () => {
   const bindings: Array<string | undefined> = [];
-  const clankie = await createClankieApp({
-    captain: createStubCaptain({
-      seatContext: (id) => (id === "project-a" ? { conversationId: id, cwd: "/projects/a" } : undefined),
-      pollSeatEvents: async (_wait, _signal, id) => {
-        bindings.push(id);
-        return [];
-      },
-      replySeatEvent: async (_event, _text, id) => {
-        bindings.push(id);
-        return true;
-      },
-    }),
-    authenticateOperator: () => Promise.resolve({ operatorId: "test" }),
-  });
+  const clankie = await boundApp(
+    {
+      captain: createStubCaptain({
+        seatContext: (id) => (id === "project-a" ? { conversationId: id, cwd: "/projects/a" } : undefined),
+        pollSeatEvents: async (_wait, _signal, id) => {
+          bindings.push(id);
+          return [];
+        },
+        replySeatEvent: async (_event, _text, id) => {
+          bindings.push(id);
+          return true;
+        },
+      }),
+      authenticateOperator: () => Promise.resolve({ operatorId: "test" }),
+    },
+    "project-a",
+  );
   try {
     const context = await clankie.app.request("/v1/captain/seat-context?conversationId=project-a");
     expect(await context.json()).toEqual({
@@ -114,6 +144,8 @@ it("resolves project context and keeps event polls/replies on that binding", asy
       occupied: false,
     });
     expect((await clankie.app.request("/v1/captain/seat-context?conversationId=missing")).status).toBe(404);
+    // Admission succeeds so the assertion reaches the unknown-conversation lookup.
+    await clankie.registerBinding("missing");
     expect((await clankie.app.request("/v1/mcp?conversationId=missing", { method: "POST" })).status).toBe(
       404,
     );
@@ -139,21 +171,24 @@ it.each(["cbe70835-228a-4b68-bdae-1b55e984c9a0", "ses_opencodeNative123"])(
   "accepts only bounded display transcripts for operator conversations (%s)",
   async (sessionId) => {
     const seen: string[] = [];
-    const clankie = await createClankieApp({
-      captain: createStubCaptain({
-        seatContext: (id) => (id === "project-a" ? { conversationId: id, cwd: "/project" } : undefined),
-        syncSeatTranscript: (id) => {
-          seen.push(id);
-          return seen.length === 1;
-        },
-      }),
-      authenticateOperator: async (request) =>
-        request.headers.get("authorization") === "Bearer operator" ? { operatorId: "fixture" } : undefined,
-      authenticateCaptain: async (request) =>
-        request.headers.get("authorization") === "Bearer social"
-          ? { captainId: "fixture", steerSourceLane: "discord_text" }
-          : undefined,
-    });
+    const clankie = await boundApp(
+      {
+        captain: createStubCaptain({
+          seatContext: (id) => (id === "project-a" ? { conversationId: id, cwd: "/project" } : undefined),
+          syncSeatTranscript: (id) => {
+            seen.push(id);
+            return seen.length === 1;
+          },
+        }),
+        authenticateOperator: async (request) =>
+          request.headers.get("authorization") === "Bearer operator" ? { operatorId: "fixture" } : undefined,
+        authenticateCaptain: async (request) =>
+          request.headers.get("authorization") === "Bearer social"
+            ? { captainId: "fixture", steerSourceLane: "discord_text" }
+            : undefined,
+      },
+      "project-a",
+    );
     const body = {
       sessionId,
       entries: [{ type: "message", id: "native-entry", role: "agent", text: "hello" }],
@@ -216,7 +251,7 @@ it("requires operator authority and a workspace create request for a fresh seat 
 
 it("acknowledges an exact head event only through its operator binding", async () => {
   const calls: string[] = [];
-  const clankie = await createClankieApp({
+  const clankie = await boundApp({
     captain: createStubCaptain({
       acknowledgeSeatEvent: async (id) => {
         calls.push(id);

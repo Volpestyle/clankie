@@ -2,7 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { serve } from "@hono/node-server";
+import { spawn } from "node:child_process";
+import { serve, type HttpBindings } from "@hono/node-server";
+import { OPERATOR_SEAT_BRIDGE_CLAIM_HEADER } from "@clankie/protocol";
 import { FileCredentialStore, LINEAR_API_PROVIDER_ID } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it, vi } from "vitest";
@@ -17,6 +19,7 @@ import type { LaneLog } from "../src/captain/lane-log.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import {
   API_ACCESS,
   API_REFRESH,
@@ -37,7 +40,9 @@ afterEach(async () => {
 
 // Proves CLI -> lane MCP HTTP -> real bank/host -> schema-validating local
 // Linear HTTP. No model, live account, or publication is involved.
-it("reaches deferred Linear reads through the CLI without widening room or credential authority", async () => {
+it("reaches deferred Linear reads through the CLI without widening room or credential authority", async ({
+  signal,
+}) => {
   const directory = await mkdtemp(join(tmpdir(), "linear-cli-lane-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   vi.stubEnv("HOME", directory);
@@ -107,7 +112,9 @@ it("reaches deferred Linear reads through the CLI without widening room or crede
     current: () => true,
     authorize: async () => true,
   };
+  const seatBinding = operatorSeatBindingFixture();
   const service = await createClankieApp({
+    operatorSeatBindings: seatBinding.registry,
     captain: createStubCaptain({
       laneToolBank: (lane, conversationId) =>
         buildLaneToolBank(
@@ -138,7 +145,11 @@ it("reaches deferred Linear reads through the CLI without widening room or crede
         : undefined,
   });
   cleanups.push(() => service.close());
-  const server = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port: 0 });
+  const server = serve({
+    fetch: (request, env) => service.app.fetch(request, seatBinding.httpEnv(request, env as HttpBindings)),
+    hostname: "127.0.0.1",
+    port: 0,
+  });
   cleanups.push(
     () =>
       new Promise<void>((resolve, reject) => {
@@ -229,10 +240,56 @@ it("reaches deferred Linear reads through the CLI without widening room or crede
     expect(JSON.parse(updateRequest!.body).variables.filter.project).toEqual({ id: { eq: PROJECT_ID } });
     expect(provider.validationErrors).toEqual([]);
 
+    // Exercise the launcher binary's ordinary bearer-only CLI path, without
+    // injecting callTool, a conversation, a bridge claim, or a model harness.
+    const cli = spawn(
+      process.execPath,
+      [
+        "--import",
+        import.meta.resolve("tsx"),
+        join(import.meta.dirname, "../../tui/bin/clankie.ts"),
+        "linear",
+        "read",
+        "get_status_updates",
+        "--json-stdin",
+      ],
+      {
+        cwd: join(import.meta.dirname, "../../.."),
+        env: {
+          ...doctorOptions.env,
+          PATH: process.env.PATH ?? "",
+          NODE_ENV: "test",
+          VITEST: "true",
+          CLANKIE_SETTINGS_FILE: join(directory, "settings.json"),
+          CLANKIE_CREDENTIALS_FILE: join(directory, "credentials.json"),
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+        signal,
+      },
+    );
+    let cliOutput = "";
+    let cliError = "";
+    cli.stdout.on("data", (chunk) => {
+      cliOutput += chunk.toString();
+    });
+    cli.stderr.on("data", (chunk) => {
+      cliError += chunk.toString();
+    });
+    const completed = new Promise<number | null>((resolve, reject) => {
+      cli.once("error", reject);
+      cli.once("close", resolve);
+    });
+    cli.stdin.end(JSON.stringify({ type: "project", project: PROJECT_ID }));
+    expect(await completed, cliError).toBe(0);
+    expect(JSON.parse(cliOutput).ok).toBe(true);
+    expect(cliOutput).toContain(UPDATE_ID);
+
+    await seatBinding.register(service.app, "fixture-project", { authorization: "Bearer fixture-owner" });
     const projectLead = await connectLaneUpstream({
       host,
       bearer: "fixture-owner",
       conversationId: "fixture-project",
+      bridgeClaim: seatBinding.headers("fixture-project")[OPERATOR_SEAT_BRIDGE_CLAIM_HEADER],
     });
     upstreams.push(projectLead);
     const scopedUpdates = await command(
