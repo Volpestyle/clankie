@@ -684,6 +684,7 @@ export function remoteCodexQueue(
     } finally {
       // Cleanup cannot change a delivery verdict. A failed cleanup is left for
       // the existing age-based prune, never a reason to replay the message.
+      // allow-swallowed-rejection -- Cleanup failure cannot replace the original delivery verdict; age pruning remains available.
       if (staged && !retainStaged) await staged.remove().catch(() => undefined);
     }
   };

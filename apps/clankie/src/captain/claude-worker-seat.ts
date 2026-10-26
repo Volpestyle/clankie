@@ -973,6 +973,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
         state: "queued",
       };
     } finally {
+      // allow-swallowed-rejection -- Cleanup preserves the refusal; abandoned files remain eligible for the seven-day prune.
       if (prepared && !keepPrepared) await prepared.remove().catch(() => undefined);
     }
   }

@@ -46,6 +46,7 @@ export async function stageWindowsMessage(
     return { path, sha256, remove };
   } catch (error) {
     // Staging cannot dispatch a message, so even a lost reply permits cleanup.
+    // allow-swallowed-rejection -- Preserve the staging failure and definite not-sent result; age pruning covers cleanup failure.
     await remove().catch(() => undefined);
     throw error;
   }

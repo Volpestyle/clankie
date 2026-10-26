@@ -3122,6 +3122,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             }
           }
           if (staged) {
+            // allow-swallowed-rejection -- A failed recipient read refuses dispatch and removes this preparation.
             const observed = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
             if (
               !observed ||
@@ -3156,6 +3157,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           if (result.outcome === "undelivered" || result.outcome === "offline") dispatched = false;
           return result;
         } finally {
+          // allow-swallowed-rejection -- Cleanup cannot change the send verdict; stale files remain eligible for the seven-day prune.
           if (staged && !dispatched) await staged.remove().catch(() => undefined);
         }
       }
