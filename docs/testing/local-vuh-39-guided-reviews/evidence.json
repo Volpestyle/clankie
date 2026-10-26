@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "capacity-addendum-82a1dc8d4.tar",
+      "size": 30720,
+      "sha256": "60130a9cd772c84ba7defe2b0b41ef15a480e76273944eaf25a47f735c385093",
+      "url": "clankie://evidence/sha256/60130a9cd772c84ba7defe2b0b41ef15a480e76273944eaf25a47f735c385093"
+    },
+    {
       "path": "cli-journey.json",
       "size": 154212,
       "sha256": "0bc0f16c21d029d0599ae7c2dbdd830066d24dcb2e420ed4b710b315b09002af",

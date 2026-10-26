@@ -2,6 +2,18 @@
 
 ## Final lifecycle repair proof
 
+A capacity-only follow-up at `82a1dc8d4076554ab549aa763e2f68bdc4857854`
+addresses Aster's two narrow CHANGES on `b7f59af69`: the three capacity refusals
+and guided tool descriptions now give authenticated owner-only recovery through
+`clankie work owner post_retire_guided_review`, with the legacy-ineligible caveat.
+Docs and tests pin the existing resolve/reopen freeze at discussion saturation
+and recovery through eligible owner retirement plus a new revision on the same
+issue. Its two affected files pass seven tests; package typecheck and formatting
+pass. The addendum references the published proof below and retains its valid
+receipt/native/authority/81-test evidence without rerunning that history.
+The [published capacity addendum](clankie://evidence/sha256/60130a9cd772c84ba7defe2b0b41ef15a480e76273944eaf25a47f735c385093)
+contains the exact `b7f59af69..82a1dc8d4` repair delta and affected-check logs.
+
 The [published final proof](clankie://evidence/sha256/6f3a6a47cf50bc854b01e5a6586eaa570b199435327be8f6e472df40204cec85)
 binds committed source `e7bddb5528c3abb2eb6f2bdb1ccd73bd6d5ac7e9` over main
 `ffd2bafc471d3168da92a7ccff4d4b6610af1f4f`, excluding only testing docs.
