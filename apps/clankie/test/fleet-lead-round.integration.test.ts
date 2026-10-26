@@ -99,8 +99,8 @@ async function fixture(
           payload: {
             type: "token_count",
             info: {
-              model_context_window: 100000,
-              last_token_usage: { input_tokens: healthy ? 40000 : 80000 },
+              model_context_window: 1_000_000,
+              last_token_usage: { input_tokens: healthy ? 299_999 : 300_000 },
             },
           },
         },
@@ -809,7 +809,7 @@ it("a real watch wake includes every owned seat and never another lead's or unow
   expect(event?.content).toContain('"seatId":"term_2"');
   expect(event?.content).not.toContain('"seatId":"term_3"');
   expect(event?.content).not.toContain('"seatId":"term_4"');
-  expect(event?.content).toContain("context 80%");
+  expect(event?.content).toContain("context 300000 tokens (300K budget)");
   expect(event?.content).toContain("no progress in 2h");
   expect(event?.content).toContain("overlap");
   await f.finish(event!.id);
@@ -875,8 +875,8 @@ it("periodic rounds independently wake both leading conversations with only thei
     f.captain.pollSeatEvents(3000, undefined, "global-default"),
     f.captain.pollSeatEvents(3000, undefined, f.other),
   ]);
-  expect(next[0]?.content).toContain("context 80%");
-  expect(nextOther[0]?.content).toContain("context 80%");
+  expect(next[0]?.content).toContain("context 300000 tokens (300K budget)");
+  expect(nextOther[0]?.content).toContain("context 300000 tokens (300K budget)");
   for (const conversationId of ["global-default", f.other])
     expect(
       journal.read(conversationId).filter((event) => event.type === "turn" && event.phase === "accepted"),
@@ -889,6 +889,7 @@ it("skips unchanged unflagged rounds despite fresh observation clocks, then wake
   const f = await fixture(200, undefined, false, true);
   const before = await f.captain.fleetEfficiency!("global-default");
   expect(before.seats.every((seat) => seat.efficiency?.flags.length === 0)).toBe(true);
+  expect(before.seats.every((seat) => seat.efficiency?.contextTokens === 299_999)).toBe(true);
   const [first, other] = await Promise.all([
     f.captain.pollSeatEvents(3000, undefined, "global-default"),
     f.captain.pollSeatEvents(3000, undefined, f.other),
@@ -1108,7 +1109,13 @@ it("an admitted lead can record a scope finding, and another lead cannot change 
     seats: [
       {
         seatId: "term_1",
-        efficiency: { flags: expect.arrayContaining(["off-scope", "context 80%", "no progress in 2h"]) },
+        efficiency: {
+          flags: expect.arrayContaining([
+            "off-scope",
+            "context 300000 tokens (300K budget)",
+            "no progress in 2h",
+          ]),
+        },
       },
       { seatId: "term_2" },
     ],
