@@ -5996,9 +5996,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
         signal.addEventListener("abort", abort, { once: true });
         try {
           const round = this.awaitRound?.(owner.conversationId, waiting.signal).then(() => "round");
+          // Recheck native events too: an error may arrive while Herdr still
+          // calls the pane working. Joining the same round retains its deadline.
           const change =
-            round && workingObservation && observedPane && this.runner.waitForChange
-              ? this.runner.waitForChange(observedPane.paneId, "working", waiting.signal).then(() => "change")
+            round && workingObservation
+              ? Promise.race([
+                  delay(RETRY_ADMISSION_MS).then(() => "change"),
+                  ...(observedPane && this.runner.waitForChange
+                    ? [
+                        this.runner
+                          .waitForChange(observedPane.paneId, "working", waiting.signal)
+                          .then(() => "change"),
+                      ]
+                    : []),
+                ])
               : undefined;
           if ((await (change && round ? Promise.race([round, change]) : round)) === "change") {
             this.retry(record, 0);
