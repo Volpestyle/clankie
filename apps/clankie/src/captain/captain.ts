@@ -6433,6 +6433,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             await guard();
             const heard = await normalizeDiscordTurn(request, deps, {
               ...(admitted.sender === undefined ? {} : { sender: admitted.sender }),
+              systemTools: admitted.plan.systemTools,
               carriesHistory: false,
             });
             const normalized: NormalizedDiscordTurn = {
@@ -6495,6 +6496,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             if (run === undefined || authority?.sourceCurrent?.() === false) return undefined;
             const heard = await normalizeDiscordTurn(request, deps, {
               ...(grant.sender === undefined ? {} : { sender: grant.sender }),
+              systemTools: grant.plan.systemTools,
               carriesHistory: true,
             });
             if (!run.session.isStreaming || authority?.sourceCurrent?.() === false) return undefined;
@@ -6691,6 +6693,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 }
                 const heard = await normalizeDiscordTurn(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
+                  systemTools: plan.systemTools,
                   // A warm loop already holds the room; a cold one reads the bounded backlog once.
                   carriesHistory: loopKey !== undefined && sessions.has(loopKey),
                   ...(loopKey !== undefined

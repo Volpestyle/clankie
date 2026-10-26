@@ -51,7 +51,11 @@ trigger (`discord.wakeTrigger`: `mention`, `name` or `any`; VUH-1765; `addressed
 is the earlier spelling of `mention`, still accepted). Any
 event except voice may carry `context`: at most 20 buffered channel messages
 before it, oldest first, which the body passes to the captain as the turn's
-context messages. Context is never a trigger. Default remote text still
+context messages. Context is never a trigger. The model sees each context
+message as one JSON record with its connection-read author id, so no body can
+pass as another speaker's line. A turn that holds machine tools acts only on the
+trigger, never on an earlier context message
+([ADR 0251](adr/0251-discord-owners-and-room-skills.md), VUH-2591). Default remote text still
 requires explicit addressing; channels opt in to buffering separately
 (`discord.ambientChannelIds`).
 

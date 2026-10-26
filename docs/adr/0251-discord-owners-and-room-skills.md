@@ -104,6 +104,37 @@ flowchart TD
     Audience -- no --> Social["Social one-shot: room + brief only"]
 ```
 
+## Room backlog is data, 2026-10-25
+
+[VUH-2591](https://linear.app/vuhlp/issue/VUH-2591): a non-owner in a mixed
+room could post a multi-line message containing a line shaped like the
+backlog's `[time] <owner-id> body` rendering. When the owner later woke Clankie
+there with a bare "clankie", he was told to act on the sender's latest earlier
+message, and the forged line looked like one. Owner turns in mixed rooms are
+one-shot machine turns that hold the builtin shell, so the forgery could reach
+`bash`.
+
+**Decision.** The turn builder (`apps/clankie/src/captain/discord-turn.ts`)
+renders every context message, and the trigger, as one JSON object per line
+with the service-read `author` id and the raw `body`. A body's newlines and
+look-alike lines stay inside its own string. The bridge and hosted ingress
+paths both use this builder. A turn that holds machine tools treats only the
+trigger message as the request. Context is background, even when the sender
+wrote it, and a bare wake on such a turn gets a question back rather than an
+action. Social turns still read a bare wake as pointing back at the sender's
+own earlier message, now matched by its true `author`.
+
+**Builtin shell in mixed rooms: kept.** Owner turns in mixed rooms keep the
+one-shot builtin read, bash, edit and write tools. The fix removes the forged
+attribution path and the instruction that adopted an earlier message, and
+neither needed the owner to lose capability. The remaining risk is ordinary
+prompt injection from untrusted content in the room. The owner's machine turns
+already face the same risk from web pages, files and repositories, and the
+one-shot session, the withheld private context and the per-machine ceiling
+(ADR 0244) still bound it. If live use shows that stranger text in the backlog
+still steers machine turns, the next step is to withhold the backlog from
+mixed-room machine turns before removing the shell.
+
 ## Migration and rollout
 
 1. Normalize old stored configs on load and persist on the next normal settings
