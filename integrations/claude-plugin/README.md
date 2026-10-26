@@ -191,7 +191,9 @@ messaged as the lead. Now:
   must also prove the named harness is a direct child of that socket owner,
   with matching live births. An unrelated bearer holder cannot nominate the
   genuine harness, including after service restart before heartbeat. It
-  re-registers every few seconds and withdraws on exit.
+  re-registers every few seconds and attempts withdrawal on exit. An HTTP or
+  transport failure to withdraw emits a warning without masking the harness exit;
+  process lifetime checks still refuse a dead launcher.
 - **The service admits only that bridge.** `/v1/mcp`, `GET /v1/seat/events`,
   and the events `ack` and `reply` routes admit an operator-lane request only
   when the socket's owner is the harness's **direct child** (or, for a launcher

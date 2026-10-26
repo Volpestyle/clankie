@@ -132,6 +132,55 @@ describe("private bridge nonce file", () => {
 });
 
 describe("a launcher registering its harness", () => {
+  it("retains the registration refusal status when its response body is malformed", async () => {
+    server.removeAllListeners("request");
+    server.on("request", (_request, response) => {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end("not JSON");
+    });
+    const warnings: string[] = [];
+    const binding = registerSeatBinding(
+      { conversationId: "workspace-7", harnessPid: 4242, nonce: "launch-nonce" },
+      { env: scratchEnv(), host, warn: (message) => warnings.push(message) },
+    );
+    await binding.ready;
+    expect(warnings).toEqual(["seat binding refused (503); its bridge stays locked out until it registers"]);
+    await binding.stop();
+  });
+
+  it.each(["HTTP refusal", "transport disconnect"])(
+    "warns safely without rejecting cleanup after a withdrawal %s",
+    async (failure) => {
+      server.removeAllListeners("request");
+      server.on("request", (request, response) => {
+        if (request.method === "DELETE") {
+          if (failure === "transport disconnect") {
+            request.socket.destroy();
+            return;
+          }
+          response.writeHead(503);
+          response.end("launch-nonce scratch-bearer");
+          return;
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end('{"ok":true}');
+      });
+      const warnings: string[] = [];
+      const binding = registerSeatBinding(
+        { conversationId: "workspace-7", harnessPid: 4242, nonce: "launch-nonce" },
+        { env: scratchEnv(), host, warn: (message) => warnings.push(message) },
+      );
+      await binding.ready;
+      expect(warnings).toEqual([]);
+      await expect(binding.stop()).resolves.toBeUndefined();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("seat binding withdrawal");
+      expect(warnings[0]).toContain(failure === "HTTP refusal" ? "503" : "unavailable");
+      expect(warnings[0]).toContain("native process");
+      expect(warnings.join("\n")).not.toMatch(/launch-nonce|scratch-bearer/u);
+    },
+  );
+
   it("sends the harness pid and only a hash of the nonce, heartbeats, and withdraws on stop", async () => {
     const binding = registerSeatBinding(
       { conversationId: "workspace-7", harnessPid: 4242, nonce: "launch-nonce", depth: 2 },

@@ -91,6 +91,7 @@ export function registerSeatBinding(
       }
       if (!warned && !stopped) {
         warned = true;
+        // allow-swallowed-rejection -- malformed refusal JSON still reports its HTTP status below
         const detail: unknown = await response?.json().catch(() => undefined);
         const body = typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {};
         const code =
@@ -125,7 +126,16 @@ export function registerSeatBinding(
       stopped = true;
       clearInterval(timer);
       await ready;
-      await request("DELETE").catch(() => undefined);
+      try {
+        const response = await request("DELETE");
+        if (!response?.ok)
+          warn(
+            `seat binding withdrawal refused (${response?.status ?? "no credential"}); registration may remain until its native process expires`,
+          );
+      } catch {
+        // Keep harness exit cleanup intact; never print request errors that may contain credentials.
+        warn("seat binding withdrawal unavailable; registration may remain until its native process expires");
+      }
     },
   };
 }

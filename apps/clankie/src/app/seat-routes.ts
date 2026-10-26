@@ -162,9 +162,7 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const auth = await ctx.authenticateLane(context);
     if ("denial" in auth) return auth.denial;
     if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
-    const parsed = OperatorSeatBindingRequestSchema.safeParse(
-      await context.req.json().catch(() => undefined),
-    );
+    const parsed = OperatorSeatBindingRequestSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_seat_binding" }, 400);
     const socket = (context.env as HttpBindings | undefined)?.incoming?.socket;
     if (socket === undefined)

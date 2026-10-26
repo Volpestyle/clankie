@@ -154,6 +154,21 @@ describe("operator seat routes", () => {
     expect(hits).toEqual([]);
   });
 
+  it("refuses malformed registration JSON without creating a binding", async () => {
+    const response = await fetch(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/captain/seat-bindings`,
+      {
+        method: "PUT",
+        headers: { authorization: `Bearer ${BEARER}`, "content-type": "application/json" },
+        body: "{",
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_seat_binding" });
+    expect((await call(40, "GET", "/v1/captain/seat-bindings")).body.bindings).toEqual([]);
+    expect(hits).toEqual([]);
+  });
+
   it("serve the registered bridge and the registered launcher", async () => {
     expect((await register()).status).toBe(200);
     expect((await poll(30)).status).toBe(200);
