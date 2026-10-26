@@ -95,6 +95,14 @@ Report missing isolation honestly and keep owner-verified acceptance open.
    printed `clankie://evidence/sha256/...` links. A tracker upload may display a
    screenshot, but the evidence-store copy is the record. Listing, key inference
    and backfill: `docs/cli.md` under `evidence push|fetch`.
+   Local storage remains the default. Self-hosted S3 keeps its SDK credential
+   chain. Managed evidence has only a default-off scoped broker/provider seam;
+   its private injected issuer is unmounted, with no production transport or
+   activation. Missing managed admission refuses; never repair it with owner
+   AWS credentials, settings secrets or another destination. Historical reads
+   retain their recorded destination and need its own read authority. Offline
+   MinIO proof is not hosted STS/IAM/revocation proof; cloud work, startup and
+   owner activation need separate authorization (ADR 0297).
 5. **One owner per item.** Set `--owner` when you take an item; do not edit an
    item another agent owns without telling them.
 6. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,

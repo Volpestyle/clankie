@@ -214,3 +214,11 @@ export {
   type GoogleMetadata,
   type GoogleCredential,
 } from "./google-oauth.ts";
+
+export {
+  EvidenceCredentialSchema,
+  evidenceCredentialId,
+  sameEvidenceBinding,
+  decodeEvidenceLease,
+  type EvidenceCredential,
+} from "./evidence-credential.ts";

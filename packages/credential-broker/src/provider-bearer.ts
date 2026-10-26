@@ -82,7 +82,7 @@ export async function resolveProviderBearer(
 
 /** Extracts a bearer from an already selected snapshot; performs no storage reads or refresh. */
 export function providerCredentialBearer(stored: ProviderCredential | undefined): string | undefined {
-  if (stored === undefined) return undefined;
+  if (stored === undefined || stored.type === "evidence-storage") return undefined;
   if (stored.type === "api") return stored.key.trim().length > 0 ? stored.key : undefined;
   if (stored.type === "wellknown") return stored.token.trim().length > 0 ? stored.token : undefined;
   if (stored.access.trim().length === 0) return undefined;

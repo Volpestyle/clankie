@@ -1,0 +1,66 @@
+# VUH-1913 offline renewable evidence credentials
+
+James accepted ADR 0297 for the offline slice only at 22:55Z on 2026-10-26.
+This candidate implements the public typed provider/broker decoder and both
+adapter paths. The private counterpart adds an unmounted issuer with injected
+session issuance and an offline policy contract. Defaults issue nothing.
+No cloud account, real bucket, IAM, real credentials, deployment, production
+bootstrap or activation was used or added.
+
+The governed offline run exercises the source `clankie` executable in a child
+process for push/fetch, real evidence
+HTTP routes, production operator authentication, isolated FileCredentialStore,
+SQLite, fleet-signed encrypted responses from the actual private handler, and an
+owned loopback MinIO. Full 20,400-byte readback matches SHA-256
+`9b0a60692042eb75c25648157c0646eb78ec1114ff506a6f0cb1e65b50640dc0`;
+the CLI receipt is applied. Ten concurrent reads spend one renewal; subsequent
+SDK calls use replacement credentials without restart. Signed GETs respect both
+the 900-second cap and a 90-second session bound. Current storage can become
+local while historical reads retain the recorded S3 namespace and read purpose;
+historical managed writes refuse. Expiry/outage returns a bounded HTTP refusal.
+
+The public focused run passed 36/36 across five files, with no skips: provider
+negatives/reconciliation, the manual CLI/MinIO proof, evidence device authority,
+evidence settings and existing support authority. Private issuer/policy checks
+passed 19/19. Broker and service source typechecks passed; the original whole
+service typecheck also passed its 15 test partitions before the final new test
+roots. Focused final compiler evidence is retained with the bundle.
+
+Refusals cover missing/disabled admission, wrong tenant/installation/body or
+sealing key/nonce/audience/destination/bucket/region/prefix/purpose, unknown
+signer, invalid signature, replay, expiry, malformed/future/overlong replies,
+stale revision, explicit denial, revocation during held renewal, and restart
+while revoked/offline. Unknown evidence objects refuse before issuer access.
+Captured settings, receipts, status and fixture logs contain no disposable secret
+markers or signed URLs. The unchanged explicit self-hosted binding still works.
+
+MinIO binary SHA-256:
+`2f907af97c8353ba35c206245243760c3b330479554ddf8310de259eab25ef31`
+(`RELEASE.2025-09-07T16-13-09Z`). It was copied from the previous local proof,
+never pointed at previous data or credentials. MinIO exited 0, its port closed,
+and all fixture data/credentials were removed; issuer and evidence servers
+stopped. The test keeps all children within its `clankie heavy` lifetime.
+
+Raw logs, proof JSON, MinIO output and checksums are in the adjacent evidence
+bundle. Original failed attempts are retained: the SDK's second credential cache
+initially hid half-life renewal, and compiler checks caught consumers assuming
+all broker entries were model credentials. Both were fixed and re-proved.
+A separate baseline storage run passed 26 with one pre-existing external-MinIO
+case skipped; that is not counted in the 36/36 manual run above.
+
+Private whole-app checking initially encountered the worktree's stale sibling
+paths/missing dependencies. The focused private handler/policy check uses isolated
+scratch dependencies and this public protocol source. Private PR CI and both
+root landing gates remain pending the requested review and landing window.
+
+## Limits and remaining gates
+
+This proves local protocol and provider behavior, not real STS renewal, IAM
+isolation, AWS S3 HEAD 403/404 behavior, cloud revocation, full service startup or
+hosted activation. The private issuer is unmounted and has no production
+transport/STS adapter. Real cloud proof and activation require separate explicit
+owner authorization. New direct requests can start until session/URL expiry;
+already-started transfers can continue afterward. VUH-1913 remains open.
+
+Public review, private PR/CI, and an owner-granted landing window are required
+before root gates or any push. The private PR must stop before merge.

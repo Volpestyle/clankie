@@ -3436,12 +3436,33 @@ bearer. The relay validates the canonical update and snapshot schemas. Saving
 changes only `configured`; `active` and `restartRequired` report the captured
 backend until a separately authorized restart.
 
-The S3 foundation uses the standard AWS SDK credential provider chain; never
-put credentials in settings. Broker-backed renewable tenant credentials and
-owner-approved bucket/IAM/lifecycle/backup configuration still belong to hosted
-plumbing. Records and upload receipts remain in the existing SQLite store.
-Switching blob backends does not migrate existing blobs; migration and the
-required real-hosted push/fetch proof remain open.
+Self-hosted S3 uses the standard AWS SDK credential provider chain; credentials
+are never settings. Managed evidence has an optional default-off runtime-provider
+hook: active and historical adapters require an exact scoped broker grant and
+refuse without it. It does not expose a credential-entry command or enable a
+tenant. The private issuer is injectable and unmounted; production transport,
+STS, startup and activation are not provided by the offline slice. Existing
+settings, TUI and device authority are unchanged. Records and receipts remain
+in SQLite, and switching backends does not migrate blobs.
+
+Managed sessions renew on demand at half-life and are capped at 900 seconds and
+host identity expiry. Restart requires fresh admission. Invalid or denied replies
+invalidate the cache; transient failure may retain a previously admitted session
+only with more than 60 seconds left. Signed GETs are capped at session expiry
+and 15 minutes. Revocation does not end an already-started direct-S3 transfer.
+Hosted proof, bucket/IAM/lifecycle/backups, startup and owner activation remain
+gated separately; see [ADR 0297](adr/0297-hosted-evidence-uses-renewable-tenant-credentials.md).
+
+The manual `evidence-credentials-s3.integration.test.ts` offline check starts an
+owned MinIO child inside its governed test lifetime, with scratch HOME/XDG and
+disposable credentials, and stops/removes it in teardown. Set
+`EVIDENCE_OFFLINE_MINIO_BINARY` to the locally verified binary and
+`EVIDENCE_OFFLINE_ISSUER_FIXTURE` to the private checkout's
+`apps/fleet/test/fixtures/evidence-issuer.ts`, then name that test through
+`clankie heavy -- pnpm exec vitest run`. It exercises the public CLI and HTTP
+routes, production operator auth, isolated file broker, SQLite and private
+injected issuer. Without both paths it is skipped. This proves offline
+protocol/provider behavior, not AWS STS, IAM, cloud revocation or full startup.
 
 The manual `apps/clankie/test/evidence-s3.integration.test.ts` check uses the
 production SDK against a real, already-running loopback MinIO server. Start

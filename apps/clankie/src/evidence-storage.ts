@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { closeSync, linkSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { chmod, open, rm } from "node:fs/promises";
 import { join } from "node:path";
+import type { EvidenceCredentialProvider } from "./evidence-credentials.ts";
 import { S3EvidenceBlobs } from "./evidence-s3.ts";
 import {
   EvidenceRefusal,
@@ -23,6 +24,43 @@ export type EvidenceLegacyItem =
 export interface EvidenceResolverOptions {
   /** Trusted SDK binding for a disposable S3-compatible fixture; never stored or accepted over HTTP. */
   readonly s3Client?: S3Client;
+  readonly evidenceCredentials?: EvidenceCredentialProvider;
+  readonly managedEvidence?: boolean;
+}
+
+/** One factory binds both active writes and historical reads. Managed mode never reaches ambient credentials. */
+export function evidenceS3Client(
+  destination: Extract<EvidenceDestination, { backend: "s3" }>,
+  purpose: "read" | "write",
+  options: EvidenceResolverOptions = {},
+): S3Client {
+  const fixture = options.s3Client?.config;
+  const scoped = options.evidenceCredentials?.credentials(destination, purpose);
+  const credentials =
+    scoped || options.managedEvidence
+      ? Object.assign(
+          scoped ??
+            (async () => {
+              throw new EvidenceRefusal(503, "evidence_session_unavailable");
+            }),
+          { memoized: true },
+        )
+      : fixture?.credentials;
+  const client = new S3Client({
+    region: destination.region,
+    ...(credentials ? { credentials } : {}),
+    ...(fixture
+      ? {
+          forcePathStyle: fixture.forcePathStyle,
+          useFipsEndpoint: fixture.useFipsEndpoint,
+          useDualstackEndpoint: fixture.useDualstackEndpoint,
+          ...(fixture.endpoint ? { endpoint: fixture.endpoint } : {}),
+        }
+      : {}),
+  });
+  // `memoized` tells the SDK that the broker owns caching and refresh. Its
+  // default five-minute cache would otherwise hide half-life and revocation.
+  return client;
 }
 
 export function parseEvidenceDestination(value: unknown): EvidenceDestination {
@@ -110,20 +148,7 @@ class RecordedS3Blobs implements EvidenceBlobStore {
   }
 
   private binding() {
-    const fixture = this.options.s3Client?.config;
-    // Copy only the trusted SDK transport/credential binding, never its HTTP handler.
-    const client = new S3Client({
-      region: this.destination.region,
-      ...(fixture
-        ? {
-            credentials: fixture.credentials,
-            forcePathStyle: fixture.forcePathStyle,
-            useFipsEndpoint: fixture.useFipsEndpoint,
-            useDualstackEndpoint: fixture.useDualstackEndpoint,
-            ...(fixture.endpoint ? { endpoint: fixture.endpoint } : {}),
-          }
-        : {}),
-    });
+    const client = evidenceS3Client(this.destination, "read", this.options);
     return { blobs: new S3EvidenceBlobs(this.destination, client), release: () => client.destroy() };
   }
 
@@ -139,7 +164,9 @@ class RecordedS3Blobs implements EvidenceBlobStore {
   has(sha256: string) {
     return this.run((blobs) => blobs.has(sha256));
   }
-  write(sha256: string, size: number, body: AsyncIterable<Uint8Array>) {
+  async write(sha256: string, size: number, body: AsyncIterable<Uint8Array>) {
+    if (this.options.managedEvidence || this.options.evidenceCredentials)
+      throw new EvidenceRefusal(503, "evidence_destination_read_only");
     return this.run((blobs) => blobs.write(sha256, size, body));
   }
   signedFetch(sha256: string, expiresInSeconds: number) {

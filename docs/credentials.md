@@ -20,18 +20,39 @@ This reference owns credential identities and trust boundaries. The
 [broker implementation](../packages/credential-broker/README.md) owns storage
 and locking; [worker access](worker-access.md) owns restricted delegation.
 
-The partial S3 evidence adapter foundation uses the standard AWS SDK credential
-provider chain, including its renewable temporary-credential providers.
-`clankie evidence storage` configures only non-secret destination identifiers
-through the owner HTTP API. It reports configured and active separately; saving
-never applies or restarts the captured adapter. Local remains the default.
-Full startup-selection and hosted credential proof remain VUH-1913 gaps. The schema contains only backend, bucket, region and object
-prefix; no access key, session token or secret is a setting. This adapter does
-not yet route hosted tenant credentials through Clankie's broker. Hosted credential
-issuance, refresh and tenant isolation must be completed in the private hosted
-plumbing before that acceptance criterion is met. Do not copy an owner's AWS
-tokens into the service, shell presets, logs or evidence. Local evidence proof
-does not authorize a real AWS destination or replace hosted roundtrip evidence.
+Self-hosted S3 evidence uses the standard AWS SDK credential provider chain,
+including renewable temporary credentials. Local remains the default.
+`clankie evidence storage` saves only backend, bucket, region and prefix; it
+reports configured versus active and never restarts or activates the adapter.
+
+The default-off managed evidence seam uses a dedicated `evidence-storage`
+broker entry, not model OAuth. A trusted runtime provider must admit an exact
+installation, destination, purpose and grant revision. Both active writes and
+recorded historical reads consult it; missing admission or a failed managed
+exchange refuses without the ambient provider chain. The generic auth list
+omits these entries, and their dedicated summary contains only type and enabled
+state, with no access-key prefix. Secrets never belong in settings, receipts,
+logs, argv, worker auth or evidence.
+
+Renewal starts on demand at half-life, with a ten-second deadline, coalesced
+broker claims and bounded retry backoff. An uncertain exchange retains its
+original nonce for transport reconciliation. Only a previously admitted process
+may use its existing session during a transient outage, and only with more than
+60 seconds left. Invalid or denied replies withdraw local authority immediately;
+revocation/replacement fences prevent late publication. Restart requires fresh
+fleet admission before any persisted session is used. Signed GET expiry is
+bounded by the session and 15 minutes.
+
+This is an offline implementation seam, not an available hosted storage service.
+The private injected issuer is unmounted; no production issuer transport, STS
+adapter, bootstrap, bucket, IAM, rollout or activation is installed. Its local
+signed fixture and owned MinIO proof exercise protocol/provider behavior, not
+real STS renewal, IAM isolation, S3 HEAD 403/404 behavior or cloud revocation.
+Hosted proof and production startup/activation remain separately owner-gated
+([ADR 0297](adr/0297-hosted-evidence-uses-renewable-tenant-credentials.md)).
+Issued S3 sessions and URLs can admit new requests until absolute expiry, up to
+15 minutes after revocation; a direct transfer started before expiry can
+continue afterward. No hard transfer cutoff is promised.
 
 Phase A captures only a private non-secret destination alongside each pending
 upload and record; no bearer, SDK credential, endpoint or signed URL is persisted

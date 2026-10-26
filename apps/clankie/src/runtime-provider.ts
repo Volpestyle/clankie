@@ -6,6 +6,7 @@ import { publicGatewayTargetFor, type PublicGatewayRoute } from "@clankie/protoc
 import type { CredentialStore as ModelCredentialStore } from "@earendil-works/pi-ai";
 import type { ConversationTurnContext } from "./captain/conversations.ts";
 import type { PiSeatModel } from "./captain/herdr-watch.ts";
+import type { EvidenceCredentialProvider } from "./evidence-credentials.ts";
 import type { HostedBodyClient } from "./hosted-body.ts";
 import type { ComposerTranscriptionCloud } from "./composer-transcription.ts";
 import providerApi from "./runtime-provider-api.json" with { type: "json" };
@@ -20,6 +21,8 @@ type RuntimeAuthorization = (request: Request) => Promise<true | "authentication
 
 /** Optional host policy. An ordinary installation supplies none of these hooks. */
 export interface RuntimeProvider {
+  /** Optional default-off evidence admission. Managed S3 refuses when absent. */
+  evidence?: EvidenceCredentialProvider;
   quota?: {
     routes(authorize: RuntimeAuthorization): Hono;
     hireCapacity?: () => Promise<{ live: number; limit: number } | undefined>;
@@ -93,9 +96,10 @@ export async function loadRuntimeProvider(context: RuntimeProviderContext): Prom
   const provider: unknown = await module.createRuntimeProvider(context);
   if (
     !record(provider) ||
-    Object.keys(provider).some((key) => !["quota", "heartbeat", "model"].includes(key))
+    Object.keys(provider).some((key) => !["quota", "heartbeat", "model", "evidence"].includes(key))
   )
     throw new Error("runtime_provider_invalid");
+  methods(provider.evidence, ["credentials"]);
   methods(provider.quota, ["routes"], ["hireCapacity"]);
   methods(provider.heartbeat, [
     "begin",

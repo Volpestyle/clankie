@@ -14,8 +14,8 @@ import { EvidenceRefusal } from "./evidence-store.ts";
 
 /**
  * S3-compatible blobs behind the service's existing upload/receipt API.
- * The default SDK provider chain refreshes its renewable AWS credentials;
- * broker-backed tenant credential delivery remains separate hosted plumbing.
+ * Self-hosted adapters retain the SDK chain. Trusted managed composition supplies
+ * a broker-owned renewable provider through the shared active/historical factory.
  * No credentials or signed URLs appear in status or settings.
  */
 export class S3EvidenceBlobs implements EvidenceBlobStore {

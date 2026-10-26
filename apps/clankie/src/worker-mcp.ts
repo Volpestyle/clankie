@@ -759,7 +759,8 @@ export class WorkerMcp {
       // Persist rotated refresh tokens even if the subsequent identity read fails.
       await resolveProviderBearer(provider, this.options.credentials);
       const result = await update.call(this.options.credentials, provider, async (current) => {
-        if (current.type === "wellknown") throw new Error("Unsupported Linear credential type");
+        if (current.type === "wellknown" || current.type === "evidence-storage")
+          throw new Error("Unsupported Linear credential type");
         const account =
           current.type === "api"
             ? await verifyLinearApiAccount(current.key)

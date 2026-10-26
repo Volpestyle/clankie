@@ -9,6 +9,16 @@ The operator-facing [credential guide](../../docs/credentials.md) owns token
 names, bot-versus-user setup, rotation, and the distinction between Discord
 account credentials and local Clankie bearers.
 
+## Managed evidence (offline slice)
+
+`evidence-storage` is a dedicated internal typed credential, keyed by installation,
+destination and read/write purpose. Both backends validate it, lock mutations and
+publish their existing revision witnesses. Generic `list()` omits it; the dedicated
+summary returns only type/enabled, and model/bearer adapters cannot export it.
+The body owns nonce-bound encrypted reply decoding, half-life renewal and durable
+admission/tombstone fences. No production issuer is installed; see
+[ADR 0297](../../docs/adr/0297-hosted-evidence-uses-renewable-tenant-credentials.md).
+
 ## Clankie account refresh
 
 The public gateway account provider coalesces concurrent token reads. Before

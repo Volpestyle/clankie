@@ -175,7 +175,9 @@ export class LinearRequestBudget {
                   ? credential.access
                   : credential.type === "api"
                     ? credential.key
-                    : credential.token,
+                    : credential.type === "wellknown"
+                      ? credential.token
+                      : undefined,
               ],
         ),
       )

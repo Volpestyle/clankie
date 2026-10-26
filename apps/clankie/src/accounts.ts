@@ -256,7 +256,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
 
   const linearConnection = async (apps: OauthApps): Promise<AccountConnection> => {
     const credential = (await store.get(LINEAR_API_PROVIDER_ID)) ?? (await store.get(LINEAR_PROVIDER_ID));
-    if (credential === undefined || credential.type === "wellknown")
+    if (credential === undefined || credential.type === "wellknown" || credential.type === "evidence-storage")
       return {
         provider: "linear",
         status:

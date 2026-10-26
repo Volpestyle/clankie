@@ -119,7 +119,7 @@ export class BrokerCredentialStore {
 }
 
 function toPiCredential(credential: ProviderCredential | undefined): Credential | undefined {
-  if (credential === undefined) return undefined;
+  if (credential === undefined || credential.type === "evidence-storage") return undefined;
   if (credential.type === "api") return { type: "api_key", key: credential.key };
   if (credential.type === "oauth") {
     return {

@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { z } from "zod";
 import lockfile from "proper-lockfile";
+import { EvidenceCredentialSchema } from "./evidence-credential.ts";
 
 export const ProviderAccountSchema = z
   .object({
@@ -31,6 +32,7 @@ export type ProviderAccount = z.infer<typeof ProviderAccountSchema>;
  * - `wellknown`: a key/token pair for providers that authenticate with both.
  */
 export const ProviderCredentialSchema = z.discriminatedUnion("type", [
+  EvidenceCredentialSchema,
   z.object({
     type: z.literal("api"),
     key: z.string().min(1),
@@ -68,6 +70,7 @@ export type RedactedCredential = (
   | { type: "api"; key: string }
   | { type: "oauth"; accountId?: string; expires: number }
   | { type: "wellknown" }
+  | { type: "evidence-storage"; enabled: boolean }
 ) & { account?: ProviderAccount };
 
 /** Reduces a credential to a display-safe summary. Never returns raw secrets. */
@@ -75,6 +78,8 @@ export function redactCredential(credential: ProviderCredential): RedactedCreden
   const account =
     "account" in credential && credential.account !== undefined ? { account: credential.account } : {};
   switch (credential.type) {
+    case "evidence-storage":
+      return { type: "evidence-storage", enabled: credential.enabled };
     case "api":
       return { type: "api", key: `${credential.key.slice(0, 4)}…`, ...account };
     case "oauth":
@@ -296,7 +301,7 @@ export class FileCredentialStore implements CredentialStore {
     const { credentials } = await this.load();
     return Object.fromEntries(
       Object.entries(credentials)
-        .filter(([id]) => id !== "google-oauth-app")
+        .filter(([id, credential]) => id !== "google-oauth-app" && credential.type !== "evidence-storage")
         .map(([id, credential]) => [id, redactCredential(credential)]),
     );
   }
@@ -661,7 +666,8 @@ export class KeychainCredentialStore implements CredentialStore {
         if (id === "google-oauth-app") continue;
         try {
           const credential = await this.getDirect(id);
-          if (credential !== undefined) redacted[id] = redactCredential(credential);
+          if (credential !== undefined && credential.type !== "evidence-storage")
+            redacted[id] = redactCredential(credential);
         } catch (error) {
           if (this.state.failure) throw error;
           // A missing or malformed entry must not break listing the rest.

@@ -56,6 +56,7 @@
     "./owner-settings": "./src/owner-settings.ts",
     "./linear-settings": "./src/linear-settings.ts",
     "./evidence": "./src/evidence.ts",
+    "./evidence-credentials": "./src/evidence-credentials.ts",
     "./huddles": "./src/huddles.ts",
     "./routines": "./src/routines.ts",
     "./fleet-roster": "./src/fleet-roster.ts",

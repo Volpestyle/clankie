@@ -1,7 +1,7 @@
 # ADR 0297: Hosted evidence uses renewable tenant credentials
 
-Status: Proposed (2026-10-26, VUH-1913). Awaiting James's decision. This draft
-authorizes no implementation, credentials, infrastructure, deployment or activation.
+Status: Accepted (offline slice only), 2026-10-26, James; hosted proof and activation not authorized
+
 Extends [ADR 0258](0258-evidence-lives-in-the-evidence-store.md), subject to the
 managed credits-only amendments in
 [ADR 0239](0239-worker-harnesses-sign-in-with-their-own-logins.md) and
@@ -32,7 +32,7 @@ a lead relaunch. The VUH-2860 commits `881942e8a`, `546215cf4` and `251de1c79`
 fix successor binding and receipt-bound brief delivery on this proposal's base.
 That historical refusal does not justify an account, trust or credential workaround.
 
-## Proposed decision
+## Decision
 
 Use a dedicated, renewable evidence credential provider in the trusted body
 service. The private fleet authenticates the current installation and issues
@@ -277,9 +277,9 @@ It preserves existing evidence semantics and isolates issuance from model and
 account login policy. Production storage cost, retention and recovery remain
 private operational decisions, not implied by merging this draft.
 
-## Evidence and decision needed
+## Evidence and decision record
 
-Code and docs inspection only, based on public `251de1c79` and local ops
+Proposal evidence: code and docs inspection only, based on public `251de1c79` and local ops
 `40164d7f8`. The eight storage commits named in VUH-1913 (`bbb34c4b0`,
 `ba47c2d19`, `c80aea6b5`, `98708ece8`, `18ab2bda3`, `13ed02b8f`, `7ec10fb0f`,
 `ffe0d0d5d`) are present. The relay consumer is `e4fb1cd94`; app consumer/focus
@@ -293,10 +293,7 @@ is not rerun or promoted to hosted acceptance here. Relevant implementation:
 VUH-1913 lives in the built-in tracker at
 `clankie-work://local/issue/bcd5580c-6a77-4287-b357-dc0377a12407`.
 
-**James's one decision:** approve or reject the default-off S3 design above
-(tenant-only buckets and 900-second renewable leases), accepting that revocation
-can leave **up to 15 minutes to start new requests, with already-started direct-S3
-transfers able to continue after expiry**, so the offline vertical slice can be
-scoped. Approval does not authorize cloud work or production activation. If that
-exposure is unacceptable or a hard transfer cutoff is required, reject this
-design and revisit a proxy.
+James accepted the offline slice at 22:55Z on 2026-10-26. This authorizes only
+that slice and its offline acceptance above. Hosted proof, production startup,
+cloud resources, real credentials, deployment and owner activation remain
+separately owner-gated. Passing the local slice does not finish VUH-1913.
