@@ -245,17 +245,39 @@ it.each(["resource_held", "resource_queued", "resource_native_unknown"])(
   },
 );
 
-it.each(["file", "tracker", "symlink"])(
-  "preserves handoff uncertainty when %s proof is missing",
+it.each(["file", "tracker", "tracker_read", "symlink"])(
+  "immediately notices replied handoff uncertainty once when %s proof is missing",
   async (gap) => {
     const f = await fixture();
     if (gap === "file") f.missingFile();
     else if (gap === "tracker") f.missingWork();
-    else f.symlinkFile();
+    else if (gap === "symlink") f.symlinkFile();
+    else {
+      const request = f.candidate.requestHandoff;
+      f.candidate.requestHandoff = async (...args) => {
+        const reply = await request(...args);
+        await rm(join(f.root, "work-item.json"));
+        return reply;
+      };
+    }
     await f.policy.tick();
+    const failed = (await f.policy.status()).seats[0]!;
+    expect(failed.handoff).toMatchObject({
+      state: "uncertain",
+      failureNoticedAt: "2026-10-26T12:00:00.000Z",
+    });
+    expect(failed.receiptId).toBe("original-handoff");
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0]).toContain("handoff recovery proof is unconfirmed");
+    expect(f.notices[0]).toContain("original-handoff");
+    const resumed = createHiredSeatRestarts(f.deps);
+    await resumed.tick();
+    f.advance(2 * 3_600_000);
     await createHiredSeatRestarts(f.deps).tick();
     expect(f.requests()).toBe(1);
     expect(f.restarts()).toBe(0);
+    expect(f.notices).toHaveLength(1);
+    expect((await resumed.status()).seats[0]!.receiptId).toBe("original-handoff");
   },
 );
 

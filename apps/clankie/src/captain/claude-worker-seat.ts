@@ -1067,23 +1067,29 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
   const firstTurnMs = deps.timing?.firstTurnMs ?? FIRST_TURN_MS;
   const stops: StopReceipts = new Map();
   const channels = new Set<string>();
+  const admittedRestarts = new WeakSet<SeatLaunch>();
   return {
     harness: "claude",
     async admitRestart(launch) {
+      admittedRestarts.delete(launch);
       if (launch.harness !== "claude") throw new Error("Claude restart requires a Claude hire");
       const consent = await deps.consent(launch.env);
       if (!consent.approved) throw new Error(`consent_required: ${consent.detail}`);
+      admittedRestarts.add(launch);
     },
     async start(launch, view): Promise<SeatStartResult> {
+      const restartAdmitted = admittedRestarts.delete(launch);
       if (launch.harness !== "claude" || view.start === undefined)
         return {
           outcome: "failed",
           reason: "harness_unavailable",
           detail: "This pane cannot start interactive Claude",
         };
-      const consent = await deps.consent(launch.env);
-      if (!consent.approved)
-        return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
+      if (!restartAdmitted) {
+        const consent = await deps.consent(launch.env);
+        if (!consent.approved)
+          return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
+      }
       const nativePrompt = launch.resumeSessionId === undefined && launch.brief.length > 0;
       await view.guard?.();
       let startAttempted = false;

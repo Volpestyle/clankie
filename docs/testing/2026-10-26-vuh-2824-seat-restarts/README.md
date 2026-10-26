@@ -39,6 +39,31 @@ Source typecheck and the unchanged swallowed-rejection check also passed.
 Commands, complete retained outputs, source digests and prior failures are in the
 new `repair-source-proof.json` evidence object.
 
+The next exact review, candidate `4926d140`, also returned CHANGES. Its five
+required corrections are retained with red/green evidence in the new
+`review-repair-proof.json` object. A real orphan holding a lease now refuses at
+PID 1; exact journal births are checked again after ancestry. Claude consumes
+one successful consent admission only for its exact successor launch object.
+Fresh-restart usage admission applies even when the original hire resumed a
+saved session, and remains pinned to the original account. Failed recovery-file
+or tracker reads after a good reply were reproduced leaving `requested`; they
+now become uncertain and immediately notify once, retaining the original receipt
+without resending or signalling. Both strict OpenAPI fleet schemas now include
+`seatRestarts` and the nearby existing gate fields. Release notes explicitly say
+the setting defaults to on for existing installations. Earlier passing checks
+and evidence remain historical source proof, not review approval.
+
+R3 governed regressions passed **160 tests across six files**: native engine 43,
+Claude adapter 63, policy 17, resource guard 4, and settings/CLI 33. Red runs
+reproduced the orphan/PID-reuse gaps, the consent reread, the resumed-hire usage
+bypass and four post-reply proof-read failures before their fixes. Public docs
+rendering and an explicit parse of both strict OpenAPI fleet schemas passed.
+Service source and all 15 test typecheck partitions, the resource package
+typecheck, and the unchanged swallowed-rejection checker also passed.
+The retained logs are under `.local/vuh2824-r3/` in the owned tree and in the
+`review-repair-proof.json` evidence object. The unchanged Codex adapter suite's
+prior result remains valid; no installed harness restart is claimed.
+
 The 500K native backstops remain covered by adapter assertions. The original
 source audit verified installed Codex 0.163.0 keys against its version-tagged
 configuration and Claude 2.1.310 support. Native compaction was not forced.

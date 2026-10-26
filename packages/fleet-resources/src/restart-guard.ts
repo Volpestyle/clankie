@@ -30,18 +30,19 @@ export async function proveRestartResources(
     if (before.length !== 3) return { clear: false, reason: "resource_inventory_incomplete" };
     // A transient unrelated process must not invalidate exact journal births.
     // Omitted or uncertain requested PIDs remain unknown, never proved exited.
-    const processes = observe
-      ? await observe()
-      : [
-          ...(
-            await observeProcesses([
-              ...owner.processes.map(({ pid }) => pid),
-              ...before.flatMap((state) =>
-                [...state.leases, ...state.queue].flatMap(entryProofs).map(({ pid }) => pid),
-              ),
-            ])
-          ).values(),
-        ].flatMap((row) => (row.status === "live" ? [row.identity] : []));
+    const relevantPids = [
+      ...owner.processes.map(({ pid }) => pid),
+      ...before.flatMap((state) =>
+        [...state.leases, ...state.queue].flatMap(entryProofs).map(({ pid }) => pid),
+      ),
+    ];
+    const readBirths =
+      observe ??
+      (async () =>
+        [...(await observeProcesses(relevantPids)).values()].flatMap((row) =>
+          row.status === "live" ? [row.identity] : [],
+        ));
+    const processes = await readBirths();
     const byPid = new Map(processes.map((process) => [process.pid, process]));
     const matches = (actual: ProcessIdentity | undefined, proof: ProcessProof) =>
       actual !== undefined &&
@@ -87,7 +88,9 @@ export async function proveRestartResources(
         if (seen.has(current.pid)) return undefined;
         seen.add(current.pid);
         if (unrelatedBoundaries.has(current.pid)) return false;
-        if (current.ppid <= 1) return false;
+        // Reparenting erases ancestry. PID 1 cannot prove that a live holder
+        // never belonged to this seat; only a known unrelated branch can.
+        if (current.ppid <= 1) return undefined;
         current = ancestry.get(current.ppid);
       }
       return undefined;
@@ -114,6 +117,27 @@ export async function proveRestartResources(
         }
       }
     }
+    // Bracket the topology census with exact births: a reused PID or changed
+    // parent must not make unrelated topology stand in for a journaled holder.
+    const afterBirths = new Map((await readBirths()).map((process) => [process.pid, process]));
+    const stable = (proof: ProcessProof) => {
+      const prior = byPid.get(proof.pid),
+        current = afterBirths.get(proof.pid);
+      return (
+        matches(current, proof) &&
+        prior !== undefined &&
+        current !== undefined &&
+        prior.startTime === current.startTime &&
+        prior.uid === current.uid &&
+        prior.ppid === current.ppid
+      );
+    };
+    if (owner.processes.some((proof) => !stable(proof)))
+      return { clear: false, reason: "resource_owner_birth_unknown" };
+    for (const state of before)
+      for (const entry of [...state.leases, ...state.queue])
+        if (entryProofs(entry).some((proof) => !stable(proof)))
+          return { clear: false, reason: "resource_attribution_unknown", detail: entry.id };
     // Register/cancel/settle during the native census invalidates this negative proof.
     if (JSON.stringify(before) !== JSON.stringify(await read()))
       return { clear: false, reason: "resource_inventory_changed" };

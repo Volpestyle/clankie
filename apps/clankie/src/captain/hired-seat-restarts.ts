@@ -114,7 +114,11 @@ export function createHiredSeatRestarts(deps: {
       counts: { ...previous?.counts, [reason]: (previous?.counts[reason] ?? 0) + 1 },
       ...(previous?.noticedAt ? { noticedAt: previous.noticedAt } : {}),
     };
-    if (!row.waiting.noticedAt && now() - Date.parse(row.waiting.since) >= NOTICE_MS) {
+    if (
+      !row.waiting.noticedAt &&
+      !row.handoff?.failureNoticedAt &&
+      now() - Date.parse(row.waiting.since) >= NOTICE_MS
+    ) {
       // Claim before publishing; an interrupted notice is never duplicated.
       row.waiting.noticedAt = at;
       save();
@@ -141,14 +145,21 @@ export function createHiredSeatRestarts(deps: {
     // Last policy await before the original controller rechecks its native identity and signals.
     await deps.resources(candidate);
   }
-  function uncertainRestart(row: StatusSeat, candidate: RestartCandidate, reason: string) {
+  function uncertainRestart(
+    row: StatusSeat,
+    candidate: RestartCandidate,
+    reason: string,
+    phase: "restart" | "handoff" = "restart",
+  ) {
     row.handoff!.state = "uncertain";
     if (row.handoff!.failureNoticedAt) return;
     row.handoff!.failureNoticedAt = new Date(now()).toISOString();
     save(); // Claim the immediate notice before publishing; never replay an uncertain effect.
     deps.notice(
       candidate.owner,
-      `Hired seat ${candidate.agent.terminalId} fresh restart is unconfirmed: ${reason}. Its original receipt ${row.receiptId ?? row.handoff!.id} and recovery inputs are preserved; check the original controller before taking further action.`,
+      phase === "handoff"
+        ? `Hired seat ${candidate.agent.terminalId} handoff recovery proof is unconfirmed: ${reason}. Its session and original receipt ${row.receiptId ?? row.handoff!.id} are preserved; no native restart was attempted. Check the saved handoff and work item before taking further action.`
+        : `Hired seat ${candidate.agent.terminalId} fresh restart is unconfirmed: ${reason}. Its original receipt ${row.receiptId ?? row.handoff!.id} and recovery inputs are preserved; check the original controller before taking further action.`,
     );
   }
   async function restartKept(candidate: RestartCandidate, row: StatusSeat) {
@@ -295,29 +306,36 @@ export function createHiredSeatRestarts(deps: {
             row.handoff.state = "uncertain";
             throw new RestartRefusal("handoff_unconfirmed", result.detail ?? result.reason ?? result.outcome);
           }
-          const handoff = await readHandoff(candidate.workingDirectory, path, id);
-          const item = await deps.workItem(candidate, id, at);
-          // Keep all three recovery inputs before the native effect boundary.
-          const keptPath = `${deps.path}.${id}.handoff.json`;
-          const fd = openSync(keptPath, "wx", 0o600);
           try {
-            writeFileSync(
-              fd,
-              JSON.stringify({
-                originalBrief: candidate.originalBrief,
-                handoff,
-                reply: result.text,
-                workItem: item,
-                path,
-                id,
-              }),
-            );
-            fsyncSync(fd);
-          } finally {
-            closeSync(fd);
+            const handoff = await readHandoff(candidate.workingDirectory, path, id);
+            const item = await deps.workItem(candidate, id, at);
+            // Keep all three recovery inputs before the native effect boundary.
+            const keptPath = `${deps.path}.${id}.handoff.json`;
+            const fd = openSync(keptPath, "wx", 0o600);
+            try {
+              writeFileSync(
+                fd,
+                JSON.stringify({
+                  originalBrief: candidate.originalBrief,
+                  handoff,
+                  reply: result.text,
+                  workItem: item,
+                  path,
+                  id,
+                }),
+              );
+              fsyncSync(fd);
+            } finally {
+              closeSync(fd);
+            }
+            row.handoff.state = "kept";
+            save();
+          } catch (error) {
+            // The reply is final even when its durable recovery proof cannot be
+            // verified. Preserve the original receipt and never request it again.
+            uncertainRestart(row, candidate, String(error), "handoff");
+            throw error;
           }
-          row.handoff.state = "kept";
-          save();
           await restartKept(candidate, row);
         } catch (error) {
           refused(

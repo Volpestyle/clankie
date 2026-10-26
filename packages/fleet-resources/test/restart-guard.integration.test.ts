@@ -197,6 +197,70 @@ it("checks held and queued work in every private lane using native child ancestr
   }
 }, 60_000);
 
+it("refuses attribution for a real orphan holder after its parent exits", async () => {
+  const f = await fixture();
+  let orphan: Awaited<ReturnType<typeof processIdentity>>;
+  try {
+    const parent = spawn(
+      process.execPath,
+      [
+        "-e",
+        `
+      const child = require('node:child_process').spawn(process.execPath,
+        ['-e', 'setTimeout(()=>process.exit(0),20000); setInterval(()=>{},1000)'],
+        {stdio:'ignore', detached:true});
+      console.log(child.pid);
+      child.unref();
+    `,
+      ],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const parentExited = once(parent, "exit");
+    const [line] = await once(parent.stdout!, "data");
+    const pid = Number(String(line).trim());
+    await parentExited;
+    await expect
+      .poll(async () => {
+        orphan = await processIdentity(pid);
+        return orphan?.ppid;
+      })
+      .toBe(1);
+    if (!orphan) throw new Error("Native orphan birth unavailable");
+    const lease: HeavyLease = {
+      id: randomUUID(),
+      token: randomUUID(),
+      kind: "heavy",
+      state: "running",
+      executable: process.execPath,
+      createdAtMs: Date.now(),
+      lastUsedAtMs: Date.now(),
+      claimOwner: orphan,
+    };
+    await f.stores[0]!.transaction((state) => {
+      state.leases.push(lease);
+    });
+    expect(await f.governor.restartGuard!(f.owner)).toMatchObject({
+      clear: false,
+      reason: "resource_attribution_unknown",
+      detail: lease.id,
+    });
+  } finally {
+    try {
+      if (orphan) {
+        const current = await processIdentity(orphan.pid);
+        if (current?.startTime === orphan.startTime) {
+          process.kill(orphan.pid, "SIGTERM");
+          await expect
+            .poll(async () => (await processIdentity(current.pid))?.startTime)
+            .not.toBe(current.startTime);
+        }
+      }
+    } finally {
+      await f.close();
+    }
+  }
+}, 30_000);
+
 it("proves sibling holders unrelated with an unobservable ancestor above their shared parent, without granting ancestry birth authority", async () => {
   const f = await fixture();
   try {
@@ -226,6 +290,27 @@ it("proves sibling holders unrelated with an unobservable ancestor above their s
         (await ancestry()).map((row) => (row.pid === f.commonAncestor.pid ? { ...row, uid: 0 } : row)),
       ),
     ).toEqual({ clear: true });
+    for (const [pid, reason] of [
+      [f.native.pid, "resource_owner_birth_unknown"],
+      [f.unrelated.pid, "resource_attribution_unknown"],
+    ] as const) {
+      let reads = 0;
+      expect(
+        await proveRestartResources(
+          f.owner,
+          f.read,
+          async () => {
+            reads++;
+            return (await births()).map((row) =>
+              row.pid === pid && reads > 1
+                ? { ...row, startTime: "reused-pid", legacyStartTime: "reused-legacy-pid" }
+                : row,
+            );
+          },
+          ancestry,
+        ),
+      ).toMatchObject({ clear: false, reason });
+    }
     expect(
       await proveRestartResources(f.owner, f.read, async () => [f.native, f.descendant], ancestry),
     ).toMatchObject({ clear: false, reason: "resource_attribution_unknown", detail: ticket.id });

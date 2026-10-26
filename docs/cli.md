@@ -4574,14 +4574,20 @@ for 15 minutes in both the pane and its leading conversation. A fresh private
 registry/ancestry read refuses held or queued resources in all three lanes,
 including native children and simulator reservations in every phase. Unrelated
 work with proven different ancestry does not block it; unknown attribution does.
+An orphan at PID 1 is unknown, and exact journal births are checked again after
+the all-UID ancestry census.
 The worker saves `.local/HANDOFF-<name>.md` and a confirmed comment on its existing
 work item before the service keeps all recovery inputs and starts a fresh session
 from the original launch. All launch admissions complete before exit, including
 current maximum trust, signed-in account identity/key/canonical home, project/tools,
-usage without a previous one-shot override, and resource pressure. After signal,
+usage without a previous one-shot override (also for originally resumed hires),
+and resource pressure. After signal,
 only authority revocation or shutdown withholds the successor. A post-signal
 failure immediately produces an uncertainty notice and preserves the original
-receipt without replay. Ordinary refusals lasting two hours produce one notice.
+receipt without replay. A good handoff reply whose recovery file or saved work
+item cannot be verified likewise produces one immediate uncertainty notice and
+never resends the request or attempts native exit. Ordinary refusals lasting two
+hours produce one notice.
 A definitely superseded kept handoff moves to `handoffHistory`; the next eligible
 sweep requests one new nonce while retaining its old recovery inputs and receipt.
 An uncertain original receipt is retained and never repeated automatically.

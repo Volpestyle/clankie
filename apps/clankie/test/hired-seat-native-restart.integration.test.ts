@@ -526,6 +526,7 @@ it.each([
   "signed-out",
   "unknown",
   "usage",
+  "resumed-usage",
   "benign-after-exit",
   "revoked-after-exit",
   "trust-revoked-after-exit",
@@ -562,7 +563,9 @@ it.each([
     },
   };
   const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "fixture", name: "Fixture" }] });
+  const resuming = change === "resumed-usage";
   let projectChecks = 0;
+  let usageReads = 0;
   let maximumTrust = change === "trust-revoked-after-exit";
   let ownerValid = true;
   const accountHome = join(f.root, "account-profile");
@@ -579,26 +582,70 @@ it.each([
     signedIn: true,
     usable: true,
     plan: "pro",
-    headroom: 0.8,
+    headroom: resuming ? 0.05 : 0.8,
     usage: {
       source: "codex-rate-limits",
       observedAt: new Date().toISOString(),
-      windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+      windows: [{ id: "week", label: "Week", usedPercent: resuming ? 95 : 20 }],
     },
   };
   const accountReport = async () => ({
     machine: "local",
     shell: "posix" as const,
     observedAt: new Date().toISOString(),
-    accounts: [account],
+    accounts: [
+      account,
+      ...(resuming
+        ? [
+            {
+              ...account,
+              label: "replacement",
+              accountKey: "replacement-account",
+              identity: "replacement@example.test",
+              headroom: 0.8,
+              usage: {
+                source: "codex-rate-limits" as const,
+                observedAt: new Date().toISOString(),
+                windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+              },
+            },
+          ]
+        : []),
+    ],
   });
-  const store = new HerdrWatchStore(join(f.root, "watcher.json"), {
+  let saved: import("../src/agent-sessions.ts").SavedAgentSession | undefined;
+  const watchPath = join(f.root, "watcher.json");
+  if (resuming) {
+    const sessionId = nativeSessionId(f.currentAgent())!;
+    mkdirSync(join(accountHome, "sessions"));
+    const path = join(accountHome, "sessions", `${sessionId}.jsonl`);
+    writeFileSync(path, readFileSync(f.currentAgent().session!.value));
+    saved = {
+      ref: `local:${sessionId}`,
+      host: "local",
+      sessionId,
+      workingDirectory: f.root,
+      file: { harness: "codex", path, size: 1, mtimeMs: Date.now() },
+    };
+    const owners = new HireOwners(`${watchPath}.owners.json`);
+    owners.bind(
+      "historical-pane",
+      { conversationId: "original-lead" },
+      "historical-seat",
+      undefined,
+      occupantIdForHerdrSession(f.currentAgent().session!),
+      JSON.stringify(["local", "codex", sessionId]),
+      "fixture",
+    );
+  }
+  const store = new HerdrWatchStore(watchPath, {
     runner,
     seatAdapters: [adapter],
     validateOwner: async (owner) => ownerValid && owner.conversationId === "original-lead",
     requireWorkerAccess: async () => {},
     maximumTrustMode: async () => maximumTrust,
     workerAccounts: accountReport,
+    codexAccounts: async () => [{ label: "fixture", home: accountHome }],
     nativeLaunchPolicy: { admit: async () => {} },
     projectHirePolicy: {
       settings: async () => settings,
@@ -611,13 +658,21 @@ it.each([
         return "fixture";
       },
     },
-    workerAccountsReport: accountReport,
+    workerAccountsReport: async () => {
+      usageReads++;
+      if (resuming) {
+        expect(f.nativePid()).toBe(f.originalProof.processes[0]!.pid);
+        expect(f.closes()).toBe(0);
+      }
+      return accountReport();
+    },
   });
   cleanup.push(async () => store.close());
   const hired = await store.spawnSeat(
     {
       schemaVersion: 1,
       harness: "codex",
+      ...(saved ? { resume: saved.ref } : {}),
       title: "Fixture",
       projectId: "fixture",
       workingDirectory: f.root,
@@ -628,15 +683,18 @@ it.each([
     },
     "fixture",
     "Work on VUH-2824 only",
-    undefined,
+    saved,
     {
       owner: { conversationId: "original-lead" },
-      ...(change === "usage" ? { ownerHire: { surface: "desktop" as const, overrideUsage: true } } : {}),
+      ...(["usage", "resumed-usage"].includes(change)
+        ? { ownerHire: { surface: "desktop" as const, overrideUsage: true } }
+        : {}),
       current: () => sourceCurrent,
       authorize: async () => sourceCurrent,
     },
   );
   expect(hired.outcome, JSON.stringify(hired)).toBe("spawned");
+  if (resuming) expect(usageReads).toBe(0);
   sourceCurrent = false;
   const candidate = (await store.freshRestartCandidates())[0]!;
   expect((await candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000))).outcome).toBe(
@@ -678,7 +736,12 @@ it.each([
     f.afterExit(() => {
       maximumTrust = false;
     });
+  const readsBeforeRestart = usageReads;
   const result = await candidate.restart(f.reply(), async () => {});
+  if (resuming) {
+    expect(result.reason).toContain("plan is near its limit (5% remaining; 10% reserved for running work)");
+    expect(usageReads).toBeGreaterThan(readsBeforeRestart);
+  }
   if (["revoked-after-exit", "trust-revoked-after-exit"].includes(change)) {
     expect(result.outcome, JSON.stringify(result)).toBe("uncertain");
     expect(f.nativePid()).toBeUndefined();

@@ -4294,10 +4294,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           "Choose effort for this job and give effortReason: why it is the smallest effort that meets acceptance. Fleet-wide effort is retired.",
       };
     let admittedAccount: string | undefined;
-    const recheckPlan = async (allowUsageOverride = true): Promise<void> => {
+    const recheckPlan = async (allowUsageOverride = true, restarting = false): Promise<void> => {
       if (
-        resume !== undefined ||
-        !this.workHires.has(input) ||
+        (!restarting && (resume !== undefined || !this.workHires.has(input))) ||
         (input.harness !== "claude" && input.harness !== "codex")
       )
         return;
@@ -4322,7 +4321,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
         Date.now(),
         allowUsageOverride && authority?.ownerHire?.overrideUsage === true,
       );
-      const selection = hireAdmissionChoice(eligible, input.harness, admittedAccount ?? input.account);
+      // Fresh replacement is new work even when the original hire resumed history.
+      // Its existing account is fixed; spare capacity elsewhere never selects a replacement identity.
+      const pinnedAccount = restarting
+        ? (identityAccount?.accountKey ??
+          identityAccount?.label ??
+          account?.label ??
+          admittedAccount ??
+          input.account)
+        : (admittedAccount ?? input.account);
+      if (restarting && pinnedAccount === undefined)
+        throw new Error("Original account identity unavailable for restart plan admission");
+      const selection = hireAdmissionChoice(eligible, input.harness, pinnedAccount);
       // Pin the verified eligible identity; later identity/grant checks still apply.
       admittedAccount = selection.account.accountKey ?? selection.account.label;
       chosen.account = admittedAccount;
@@ -5018,7 +5028,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               });
               // Ordinary production hires have no NativeLaunchPolicy. Repeat their
               // actual usage/project/tool/resource admission without a one-shot override.
-              await recheckPlan(false);
+              await recheckPlan(false, true);
               await this.admitProjectLaunch(input, false, restartAuthority);
               await checkExpectedTools();
               if (this.fleetResources)

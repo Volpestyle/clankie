@@ -1021,7 +1021,9 @@ delivery and report routing.
 Hired-seat context restarts are separate from lead-seat ownership (ADR 0293).
 The service's [policy](../apps/clankie/src/captain/hired-seat-restarts.ts) reads
 native context and owner input, verifies a durable file/brief/work-item handoff,
-and consults a fresh private resource/ancestry proof. The
+and consults a fresh private resource/ancestry proof. Exact journal births
+bracket the all-UID ancestry census; an orphan reparented to PID 1 is unknown,
+not proof of an unrelated holder. The
 [original native controller](../apps/clankie/src/captain/hired-seat-restart.ts)
 completes resource, project/tool, account/usage and trust admission before exit,
 then rechecks idle input, draft, process birth and shell identity. It journals the
@@ -1029,7 +1031,9 @@ effect and starts a fresh session in that same pane with the original launch;
 successor guards check revocation and shutdown. Unknown control, state or receipts
 refuse and remain visible through fleet status. An uncertain effect is never
 dispatched again and immediately notifies its owner; a definitely superseded
-handoff is retained in history before requesting one fresh nonce. The
+handoff is retained in history before requesting one fresh nonce. A completed
+reply whose recovery file or tracker proof cannot be retained becomes uncertain
+and immediately notifies its owner without resending or attempting native exit. The
 [CLI reference](cli.md)
 describes current supported controls and engineering limitations.
 

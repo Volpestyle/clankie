@@ -165,7 +165,7 @@ export function formatHiredRestartLines(status: FleetCommandResult["seatRestarts
   if (!status) return [];
   if ("unavailable" in status) return [`hired seat restarts: unavailable (${status.unavailable})`];
   return [
-    `hired seat restarts: ${status.setting} · budget 450K tokens`,
+    `hired seat restarts: ${status.setting} · budget ${status.budgetTokens / 1000}K tokens`,
     ...status.seats.map(
       (seat) =>
         `  ${seat.paneId}: ${seat.check?.contextTokens === undefined ? "context unknown" : `${seat.check.contextTokens} tokens`}${seat.waiting ? `; refused ${seat.waiting.reason} since ${seat.waiting.since} (${JSON.stringify(seat.waiting.counts)})${seat.waiting.detail ? `: ${seat.waiting.detail}` : ""}` : ""}${seat.receiptId ? `; receipt ${seat.receiptId}` : ""}${seat.handoff ? `; handoff ${seat.handoff.id} ${seat.handoff.state}` : ""}`,

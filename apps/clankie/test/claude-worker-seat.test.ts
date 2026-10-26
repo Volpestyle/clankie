@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StopNativeTaskResultSchema } from "@clankie/protocol";
-import type { SeatView } from "@clankie/agent-hosts";
+import type { SeatLaunch, SeatView } from "@clankie/agent-hosts";
 import {
   SeatHookLog,
   channelBody,
@@ -251,6 +251,65 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
     unbind: () => (bound = false),
   };
 }
+
+it("consumes restart consent once for the exact admitted launch across the native start boundary", async () => {
+  const f = await fixture();
+  let approved = true;
+  const consent = vi.fn<ClaudeWorkerSeatDeps["consent"]>(async () =>
+    approved ? { approved: true } : { approved: false, detail: "changed after admission", fix: "approve it" },
+  );
+  const adapter = createClaudeWorkerSeatAdapter({ ...f.deps, consent });
+  const launch: SeatLaunch = { harness: "claude", cwd: f.root, brief: "" };
+  await adapter.admitRestart!(launch);
+  approved = false;
+
+  // A copied launch cannot spend the original's admission.
+  expect(await adapter.start({ ...launch }, f.view)).toMatchObject({
+    outcome: "blocked",
+    reason: "consent_required",
+  });
+  expect(f.start).not.toHaveBeenCalled();
+  const checksBeforeAdmittedStart = consent.mock.calls.length;
+  const guard = vi.fn(async () => {});
+  expect(await adapter.start(launch, { ...f.view, guard })).toMatchObject({ outcome: "started" });
+  expect(f.start).toHaveBeenCalledOnce();
+  expect(guard).toHaveBeenCalled();
+  expect(consent).toHaveBeenCalledTimes(checksBeforeAdmittedStart);
+
+  // Successful startup consumes the token; neither this object nor another launch can reuse it.
+  expect(await adapter.start(launch, f.view)).toMatchObject({
+    outcome: "blocked",
+    reason: "consent_required",
+  });
+  expect(await adapter.start({ harness: "claude", cwd: f.root, brief: "other" }, f.view)).toMatchObject({
+    outcome: "blocked",
+    reason: "consent_required",
+  });
+  expect(consent).toHaveBeenCalledTimes(checksBeforeAdmittedStart + 2);
+  expect(f.start).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])(
+  "refused Claude admission leaves no restart token (previously admitted: %s)",
+  async (previouslyAdmitted) => {
+    const f = await fixture();
+    let approved = previouslyAdmitted;
+    const consent = vi.fn<ClaudeWorkerSeatDeps["consent"]>(async () =>
+      approved ? { approved: true } : { approved: false, detail: "owner consent absent", fix: "approve it" },
+    );
+    const adapter = createClaudeWorkerSeatAdapter({ ...f.deps, consent });
+    const launch: SeatLaunch = { harness: "claude", cwd: f.root, brief: "" };
+    if (previouslyAdmitted) await adapter.admitRestart!(launch);
+    approved = false;
+    await expect(adapter.admitRestart!(launch)).rejects.toThrow("consent_required");
+    expect(await adapter.start(launch, f.view)).toMatchObject({
+      outcome: "blocked",
+      reason: "consent_required",
+    });
+    expect(consent).toHaveBeenCalledTimes(previouslyAdmitted ? 3 : 2);
+    expect(f.start).not.toHaveBeenCalled();
+  },
+);
 
 it("a resumed hire starts the interactive TUI, briefs it over the channel, and waits for the transcript receipt", async () => {
   const { adapter, view, start, deliver } = await fixture();
