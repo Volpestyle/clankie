@@ -57,8 +57,9 @@ Every refusal is definite: nothing was ended and nothing was launched. After the
 signal, the result is either relaunched or an uncertain receipt that is
 reconciled by reading the pane and conversation, never by trying again. A new
 session that binds after the relaunch stopped waiting settles its receipt then
-and receives the kept brief at its first bound poll. A brief whose delivery does
-not confirm is never resent. A receipt from before briefs were kept settles
+and receives the kept brief at its first bound poll. The brief is pinned to that
+session; no later session takes it, and a brief whose delivery does not confirm
+is never resent. A receipt from before briefs were kept settles
 with a notice that its brief was unavailable.
 
 The fleet setting `leadRestarts` (`on` by default) turns this off. It is set

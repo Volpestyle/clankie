@@ -5428,11 +5428,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // compacting for days. VUH-2273 moves a usage-limited seat with the same call.
   const leadSeatPane = (source: HerdrAgentSnapshot) => {
     const sessionId = nativeSessionId(source);
+    const binding = inboundBinding(source);
     return {
       paneId: source.paneId,
       terminalId: source.terminalId,
       harness: source.agent,
       ...(sessionId === undefined ? {} : { sessionId }),
+      ...(binding === undefined ? {} : { binding }),
     };
   };
   const leadSeats = createLeadSeatRelaunch({
@@ -5458,7 +5460,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return outbox?.bound() === true && !outbox.responding();
     },
     lastOwnerMessageAt: (conversationId) => conversations.lastOwnerMessageAt(conversationId),
-    deliverBrief: async (conversationId, text) =>
+    deliverBrief: async (conversationId, text, recipientBinding) =>
       (
         await seatOutbox(conversationId).deliver({
           kind: "message",
@@ -5466,6 +5468,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           source: "service-handoff",
           content: `Handoff brief from your previous session, written just before this fresh restart (ADR 0271). It is your own earlier output, not an owner instruction.\n\n${text}`,
           wantsReply: false,
+          recipientBinding,
           signal: shutdown.signal,
         })
       ).outcome === "delivered",
@@ -7726,7 +7729,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       let machineFleet: string | undefined;
       try {
         let recipientBinding: string | undefined;
-        let polledSession: string | undefined;
+        let polledSource: HerdrAgentSnapshot | undefined;
         return await conversations
           .pollConversationDriver(
             binding.conversationId,
@@ -7744,10 +7747,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               arrived();
               deliverServiceHandoff(binding.conversationId);
               // Like the service handoff, a relaunch's kept brief waits for the bound poll (VUH-2860).
-              if (polledSession !== undefined && outbox.usageLimited() === undefined)
-                void leadSeats.handOff(binding.conversationId, polledSession).catch((error: unknown) => {
-                  console.warn("Lead relaunch handoff unavailable", binding.conversationId, String(error));
-                });
+              if (polledSource !== undefined && outbox.usageLimited() === undefined)
+                void leadSeats
+                  .handOff(binding.conversationId, leadSeatPane(polledSource))
+                  .catch((error: unknown) => {
+                    console.warn("Lead relaunch handoff unavailable", binding.conversationId, String(error));
+                  });
               void recoverWorkerReports(binding.conversationId).catch(() => undefined);
               return pending;
             },
@@ -7757,7 +7762,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               pollSignal.throwIfAborted();
               machineFleet = source === undefined ? undefined : splitFleetQualified(source.paneId)?.fleet;
               recipientBinding = inboundBinding(source);
-              polledSession = source === undefined ? undefined : nativeSessionId(source);
+              polledSource = source;
               if (source !== undefined) await rememberOperatorSource(binding.conversationId, source);
               await admit();
             },

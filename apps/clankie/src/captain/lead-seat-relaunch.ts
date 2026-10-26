@@ -84,6 +84,8 @@ export interface LeadSeatPane {
   readonly terminalId: string;
   readonly harness: string;
   readonly sessionId?: string;
+  /** The session's native delivery binding: a delivery pinned to it reaches no other session. */
+  readonly binding?: string;
 }
 
 export interface LeadSeatRelaunchDeps {
@@ -98,8 +100,11 @@ export interface LeadSeatRelaunchDeps {
   /** The seat is bound, not in a turn, and the conversation has nothing running. */
   readonly idle: (conversationId: string) => boolean;
   readonly lastOwnerMessageAt: (conversationId: string) => number | undefined;
-  /** Hand one message to the conversation's newly bound seat; true once it took it. */
-  readonly deliverBrief: (conversationId: string, text: string) => Promise<boolean>;
+  /**
+   * Hand one message to the conversation's newly bound seat, pinned to its
+   * native binding; true once that exact session took it.
+   */
+  readonly deliverBrief: (conversationId: string, text: string, binding: string) => Promise<boolean>;
   readonly notice: (conversationId: string, text: string) => void;
   readonly signal?: (pid: number, signal: NodeJS.Signals) => void;
   readonly now?: () => number;
@@ -355,18 +360,28 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
    * Hand a settled relaunch's kept brief to the session its receipt names, once,
    * and tell the conversation. The claim is written before delivery, so the
    * waiting relaunch and the new session's poll never both send it, and a
-   * delivery that does not confirm is never resent.
+   * delivery that does not confirm is never resent. The delivery is pinned to
+   * that session's binding: a later session in the pane can neither take nor
+   * acknowledge it, and it settles undelivered instead.
    */
-  async function handOffReceipt(receiptId: string, sessionId: string): Promise<void> {
+  async function handOffReceipt(receiptId: string, seat: LeadSeatPane): Promise<void> {
+    const { sessionId, binding } = seat;
     const receipt = read().receipts.find((entry) => entry.receiptId === receiptId);
-    if (receipt?.stage !== "relaunched" || receipt.sessionId !== sessionId) return;
+    if (
+      receipt?.stage !== "relaunched" ||
+      sessionId === undefined ||
+      binding === undefined ||
+      receipt.sessionId !== sessionId ||
+      receipt.seatId !== seat.terminalId
+    )
+      return;
     const handoff = readHandoffs()[receiptId];
     if (handoff?.state !== "pending") return;
     const brief = handoff.brief;
     keepHandoff(receiptId, { state: brief === undefined ? "none" : "attempting" });
     let outcome: "delivered" | "undelivered" | undefined;
     if (brief !== undefined) {
-      outcome = (await deps.deliverBrief(receipt.conversationId, brief).catch(() => false))
+      outcome = (await deps.deliverBrief(receipt.conversationId, brief, binding).catch(() => false))
         ? "delivered"
         : "undelivered";
       keepHandoff(receiptId, { state: outcome });
@@ -514,7 +529,7 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         if (read().receipts.find((entry) => entry.receiptId === receiptId)?.stage !== "relaunched")
           save({ ...receipt, stage: "relaunched", sessionId: next.sessionId, seatId: next.terminalId });
         // allow-swallowed-rejection -- the relaunch happened either way; an unclaimed brief stays pending for the next bound poll, a claimed one is never resent.
-        await handOffReceipt(receiptId, next.sessionId).catch(() => undefined);
+        await handOffReceipt(receiptId, next).catch(() => undefined);
         return {
           outcome: "relaunched",
           receiptId,
@@ -667,9 +682,9 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
       return result;
     },
     /** At a seat's poll: hand it the brief its conversation's latest relaunch still owes it. */
-    async handOff(conversationId: string, sessionId: string): Promise<void> {
+    async handOff(conversationId: string, seat: LeadSeatPane): Promise<void> {
       const receipt = read().receipts.findLast((entry) => entry.conversationId === conversationId);
-      if (receipt?.stage === "relaunched") await handOffReceipt(receipt.receiptId, sessionId);
+      if (receipt?.stage === "relaunched") await handOffReceipt(receipt.receiptId, seat);
     },
   };
 }

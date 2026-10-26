@@ -12,6 +12,7 @@ import {
 } from "../src/captain/lead-seat-relaunch.ts";
 import { ConversationStore } from "../src/captain/conversations/store.ts";
 import { paneInputLine } from "../src/captain/pane-draft.ts";
+import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { capabilities, leadChatFixture } from "./fixtures/lead-chats.ts";
 
 // ADR 0271 (VUH-2274): the lead seat restarts fresh in its own pane. The old
@@ -61,7 +62,13 @@ async function fixture(
   let session = "old-session";
   const relaunch = createLeadSeatRelaunch({
     journalPath: join(root, "lead-seat-relaunches.json"),
-    seat: async () => ({ paneId: "w1:p1", terminalId: "term_lead", harness: "claude", sessionId: session }),
+    seat: async () => ({
+      paneId: "w1:p1",
+      terminalId: "term_lead",
+      harness: "claude",
+      sessionId: session,
+      binding: `binding:${session}`,
+    }),
     paneShell: async () => ({
       shellPid: 4242,
       foreground: alive
@@ -82,7 +89,9 @@ async function fixture(
     },
     idle: () => true,
     lastOwnerMessageAt: () => options.ownerAt,
-    deliverBrief: async (_id, text) => {
+    deliverBrief: async (_id, text, binding) => {
+      // Pinned to the new session, never the one it replaced.
+      expect(binding).toBe("binding:new-session");
       briefs.push(text);
       return true;
     },
@@ -497,6 +506,84 @@ it("hands a relaunch's kept brief to its new session when it binds after the rel
   await poll();
   expect(briefs()).toHaveLength(1);
 });
+
+// The new session's first poll can be taken by other work, leaving its brief
+// queued. If another relaunch replaces it before its next poll, the brief stays
+// its own: the replacement can neither take nor acknowledge it.
+it.each([false, true])(
+  "keeps a queued brief for the session its receipt names (replaced before taking it: %s)",
+  async (replaced) => {
+    const { poll, receipt, handoffs, notices, work, ...f } = await relaunchedLead();
+    const global = f.leads[0]!;
+    await poll();
+    const ended = f.head.session!.value;
+    const [first, second] = [randomUUID(), randomUUID()];
+    const relaunched = (receiptId: string, previousSessionId: string) => ({
+      receiptId,
+      conversationId: work,
+      paneId: "w4:p2",
+      reason: "fresh_restart",
+      from: { harness: "claude" },
+      to: { harness: "claude" },
+      previousSessionId,
+      startedAt: "2026-10-26T04:34:28.525Z",
+      stage: "launching",
+    });
+    const journal = join(f.root, "lead-seat-relaunches.json");
+    const receiptId = randomUUID();
+    const brief = "This brief belongs to the first new session only.";
+    await writeFile(
+      journal,
+      JSON.stringify({ schemaVersion: 1, receipts: [relaunched(receiptId, ended)], launches: {} }),
+    );
+    await writeFile(`${journal}.handoffs.json`, JSON.stringify({ [receiptId]: { state: "pending", brief } }));
+    f.occupy({ sessionId: first });
+
+    // Another lead's message is queued before the new session's first poll.
+    const lead = "Deploy at 18:00?";
+    const deliver = SeatOutbox.prototype.deliver;
+    let queued!: () => void;
+    const waiting = new Promise<void>((resolve) => (queued = resolve));
+    vi.spyOn(SeatOutbox.prototype, "deliver").mockImplementation(function (this: SeatOutbox, input) {
+      const result = deliver.call(this, input);
+      if (input.content.includes(lead)) queued();
+      return result;
+    });
+    const sending = f.messageSeat(global, "term_work", lead);
+    await waiting;
+    const contents = (events: readonly { id: string; content?: string }[]) =>
+      events.map((event) => event.content ?? "");
+    const taken = await poll();
+    expect(contents(taken).some((content) => content.includes(lead))).toBe(true);
+    expect(contents(taken).some((content) => content.includes(brief))).toBe(false);
+    for (const event of taken) await f.captain.acknowledgeSeatEvent(event.id, work);
+    await sending;
+    expect(await receipt()).toMatchObject({ receiptId, stage: "relaunched", sessionId: first });
+    expect(await handoffs()).toEqual({ [receiptId]: { state: "attempting" } });
+
+    if (replaced) {
+      const journaled = JSON.parse(await readFile(journal, "utf8")) as { receipts: unknown[] };
+      journaled.receipts.push(relaunched(randomUUID(), first));
+      await writeFile(journal, JSON.stringify(journaled));
+      f.occupy({ sessionId: second });
+    }
+    const next = await poll();
+    for (const event of next) await f.captain.acknowledgeSeatEvent(event.id, work);
+    expect(contents(next).some((content) => content.includes(brief))).toBe(!replaced);
+    await expect
+      .poll(async () => ((await handoffs()) as Record<string, unknown>)[receiptId])
+      .toEqual({ state: replaced ? "undelivered" : "delivered" });
+    expect(await notices()).toContainEqual(
+      expect.stringContaining(
+        `session ${ended} → ${first} on claude. The previous session stays resumable. ${
+          replaced
+            ? "The handoff brief did not reach it; it starts from the shared log."
+            : "The handoff brief was delivered to it."
+        }`,
+      ),
+    );
+  },
+);
 
 it("reads a Claude session's start and latest main-thread context, unknown after a compaction", async () => {
   const root = await mkdtemp(join(tmpdir(), "lead-seat-usage-"));
