@@ -2964,8 +2964,10 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   names a repository path still registers it; paired devices name returned IDs.
   A linked Git worktree (a hire's, or Claude Code's `.claude/worktrees/agent-…`)
   registers under its own path, so file-backed work stays where its agent
-  commits. It is named after its main checkout, and while that checkout is
-  registered the list offers the checkout alone.
+  commits, and is named after its main checkout, never its folder. When that
+  checkout is registered and both read the same Linear or GitHub tracker, the
+  list offers the checkout alone; otherwise the worktree stays listed as
+  "<checkout> (worktree)" so its own items remain discoverable.
 - `clankie work list [--status todo,in_progress] [--owner NAME] [--label L]`,
   `work show ID`. `--label` keeps items carrying that label, matched
   case-insensitively; it is how a role station reads its backlog

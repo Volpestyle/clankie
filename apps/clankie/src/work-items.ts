@@ -463,17 +463,41 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     return main;
   };
 
-  /** The repos to offer: a worktree of a listed checkout is that checkout, and any other worktree is named after it. */
+  /**
+   * The repos to offer, named for people. A worktree whose checkout is listed
+   * and reads the same remote tracker (Linear or GitHub, bound alike) is that
+   * checkout, so it is not offered twice. A worktree with
+   * its own file-backed work stays offered, so its items stay discoverable, as
+   * "<checkout> (worktree)" rather than by its folder (VUH-2848).
+   */
   const listed = async () => {
     const repos = await known();
-    const paths = new Set(repos.map((repo) => repo.path));
+    const byPath = new Map(repos.map((repo) => [repo.path, repo]));
     const shown: typeof repos = [];
     for (const repo of repos) {
       const main = await mainCheckout(repo.path);
-      if (main !== undefined && paths.has(main)) continue;
-      shown.push(main === undefined ? repo : { ...repo, name: basename(main) });
+      if (main === undefined) {
+        shown.push(repo);
+        continue;
+      }
+      const checkout = byPath.get(main);
+      if (checkout !== undefined && (await sameRemoteTracker(repo.path, checkout.path))) continue;
+      shown.push({ ...repo, name: checkout === undefined ? basename(main) : `${basename(main)} (worktree)` });
     }
     return shown;
+  };
+  /** Both read one remote tracker binding; file-backed work lives in each worktree and is never the same. */
+  const sameRemoteTracker = async (left: string, right: string) => {
+    const [a, b] = await Promise.all(
+      // allow-swallowed-rejection -- an unreadable convention can't prove a shared tracker, so the worktree stays listed.
+      [left, right].map((path) => readConvention(path).catch(() => undefined)),
+    );
+    if (a === undefined || b === undefined || a.backend !== b.backend) return false;
+    // A built-in binding lives in host settings, not here, so it is never proven shared.
+    if (a.backend !== "linear" && a.backend !== "github") return false;
+    const binding = (convention: typeof a) =>
+      JSON.stringify((convention as unknown as Record<string, unknown>)[convention.backend] ?? null);
+    return binding(a) === binding(b);
   };
 
   /** Registers a local path the operator or an agent named, so the app can read it later. */

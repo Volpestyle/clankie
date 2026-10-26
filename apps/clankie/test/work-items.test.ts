@@ -51,29 +51,69 @@ describe("the work-items service", () => {
     });
   });
 
-  it("lists a repo's linked worktrees as that repo, never by their folder names (VUH-2848)", async () => {
-    // A real checkout and a worktree where Claude Code keeps a subagent's: `.claude/worktrees/agent-…`.
+  // A real checkout, and a worktree where Claude Code keeps a subagent's: `.claude/worktrees/agent-…`.
+  async function checkoutWithWorktree(committed: Record<string, string> = {}) {
     const repo = await mkdtemp(join(tmpdir(), "work-checkout-"));
     const git = (...args: string[]) =>
       defaultRun("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], repo);
     await git("init", "-q", "-b", "main");
-    await writeFile(join(repo, "README.md"), "x\n");
-    await git("add", "README.md");
+    for (const [path, text] of Object.entries({ "README.md": "x\n", ...committed })) {
+      await mkdir(join(repo, path, ".."), { recursive: true });
+      await writeFile(join(repo, path), text);
+    }
+    await git("add", "-A");
     await git("commit", "-q", "-m", "init");
     const worktree = join(repo, ".claude", "worktrees", "agent-a1d73e1df10623670");
     await git("worktree", "add", "-q", "--detach", worktree);
-    const stateDirectory = await mkdtemp(join(tmpdir(), "work-state-"));
-    const service = createWorkItemsService({ stateDirectory, run: defaultRun, clock });
-    const names = async () => {
+    const service = createWorkItemsService({
+      stateDirectory: await mkdtemp(join(tmpdir(), "work-state-")),
+      run: defaultRun,
+      clock,
+    });
+    const repos = async () => {
       const result = await service.handle({ action: "repos" }, true);
-      return "repos" in result ? result.repos.map((entry) => [entry.name, entry.root]) : [];
+      return "repos" in result ? result.repos : [];
     };
-    // An agent in the worktree names its path first: it is named after its checkout.
+    return { repo, worktree, service, repos };
+  }
+
+  it("names a worktree after its checkout and keeps its own file-backed work discoverable (VUH-2848)", async () => {
+    const { repo, worktree, service, repos } = await checkoutWithWorktree();
+    // An agent in the worktree names its path first: no folder name, the checkout's.
     await service.handle({ action: "create", repo: worktree, title: "From the worktree" }, true);
-    expect(await names()).toEqual([[basename(repo), worktree]]);
-    // Once the checkout itself is known, the list offers it alone.
+    expect((await repos()).map((entry) => [entry.name, entry.root])).toEqual([[basename(repo), worktree]]);
+    // Once the checkout is known too, both stay offered: their file-backed work differs.
     await service.handle({ action: "list", repo }, true);
-    expect(await names()).toEqual([[basename(repo), repo]]);
+    const offered = await repos();
+    expect(offered.map((entry) => [entry.name, entry.root])).toEqual([
+      [`${basename(repo)} (worktree)`, worktree],
+      [basename(repo), repo],
+    ]);
+    // A device enumerating what it is offered still finds the worktree's item.
+    const titles = [];
+    for (const entry of offered) {
+      const listed = await service.handle({ action: "list", repo: entry.id }, false);
+      if ("items" in listed) titles.push(...listed.items.map((item) => item.title));
+    }
+    expect(titles).toEqual(["From the worktree"]);
+  });
+
+  it("offers a checkout once when its worktree reads the same Linear project (VUH-2848)", async () => {
+    const tracking = {
+      schemaVersion: 1,
+      backend: "linear",
+      linear: { team: "VUH", project: "clankie" },
+      decidedBy: "owner",
+      decidedAt: "2026-09-26T00:00:00.000Z",
+    };
+    const { repo, worktree, service, repos } = await checkoutWithWorktree({
+      ".clankie/tracking.json": JSON.stringify(tracking),
+    });
+    // Naming a path registers it; this fixture has no Linear connection to read items with.
+    await service.handle({ action: "list", repo: worktree }, true).catch(() => undefined);
+    expect((await repos()).map((entry) => [entry.name, entry.root])).toEqual([[basename(repo), worktree]]);
+    await service.handle({ action: "list", repo }, true).catch(() => undefined);
+    expect((await repos()).map((entry) => [entry.name, entry.root])).toEqual([[basename(repo), repo]]);
   });
 
   it("never lets a device name a path or write", async () => {
