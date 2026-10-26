@@ -95,7 +95,7 @@ export interface FleetCommandResult {
   /** Status only: the lead seat's fresh-restart check and any refused wait (VUH-2821). */
   readonly leadRestart?: LeadRestartStatus | { readonly unavailable: string };
   readonly seatContext?:
-    | { seats: OperatorFleetSeat[]; readWarnings?: OperatorFleetReadWarnings }
+    | { seats: readonly OperatorFleetSeat[]; readWarnings?: OperatorFleetReadWarnings }
     | { unavailable: string };
 }
 
