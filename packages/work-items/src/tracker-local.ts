@@ -3,6 +3,7 @@ import {
   validateGuidedReviewContent,
   type CreateGuidedReviewInput,
   type GuidedReviewIdentity,
+  type GuidedReviewMutationReceipt,
   type GuidedReviewSource,
   type GuidedReviewCapture,
   type GuidedReviewFindingInput,
@@ -118,19 +119,7 @@ type StoredGuidedReview = GuidedReviewRecord | GuidedReviewTombstone;
 function retiredGuidedReview(review: StoredGuidedReview): review is GuidedReviewTombstone {
   return "retiredAt" in review;
 }
-export interface GuidedReviewMutationReceipt {
-  schemaVersion: 1;
-  reviewId: string;
-  storeId: string;
-  issueId: string;
-  projectId: string | null;
-  identity: GuidedReviewIdentity;
-  snapshotSha256: string;
-  operation: "save" | "reply" | "resolve" | "retire";
-  eventId: string | null;
-  updatedAt: string;
-  actor: TrackerActor;
-}
+export type { GuidedReviewMutationReceipt } from "./guided-review.ts";
 
 /** One idempotency key's settled outcome, committed in the same replacement as its effect. */
 interface WriteReceipt {

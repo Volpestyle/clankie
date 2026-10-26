@@ -1,3 +1,4 @@
+import type { TrackerActor } from "./tracker-tools.ts";
 import { readReviewDiff, type ReviewDiff } from "./review-git.ts";
 import { readReviewPatch, type ReviewPatch } from "./review-patch.ts";
 
@@ -5,6 +6,98 @@ import { readReviewPatch, type ReviewPatch } from "./review-patch.ts";
 export type GuidedReviewIdentity =
   | { kind: "git"; gitDirectory: string; baseCommit: string; headCommit: string }
   | { kind: "patch"; sha256: string };
+/** Stable successful mutation result; payload reads use get_guided_review. */
+export interface GuidedReviewMutationReceipt {
+  schemaVersion: 1;
+  reviewId: string;
+  storeId: string;
+  issueId: string;
+  projectId: string | null;
+  identity: GuidedReviewIdentity;
+  snapshotSha256: string;
+  operation: "save" | "reply" | "resolve" | "retire";
+  eventId: string | null;
+  updatedAt: string;
+  actor: TrackerActor;
+}
+
+/** Recognize only the domain receipt, never a refusal or a partial lookalike. */
+export function isGuidedReviewMutationReceipt(value: unknown): value is GuidedReviewMutationReceipt {
+  const record = (entry: unknown): entry is Record<string, unknown> =>
+    entry !== null && typeof entry === "object" && !Array.isArray(entry);
+  const keys = (
+    entry: Record<string, unknown>,
+    required: readonly string[],
+    optional: readonly string[] = [],
+  ) =>
+    required.every((key) => Object.hasOwn(entry, key)) &&
+    Object.keys(entry).every((key) => required.includes(key) || optional.includes(key));
+  const text = (entry: unknown): entry is string => typeof entry === "string" && entry.trim().length > 0;
+  const hash = (entry: unknown) => typeof entry === "string" && /^[a-f0-9]{64}$/.test(entry);
+  const actorRef = (entry: unknown, full = false): boolean =>
+    record(entry) &&
+    keys(entry, full ? ["type", "id", "onBehalfOf"] : ["type", "id"], full ? ["name", "model"] : ["name"]) &&
+    ["human", "agent-worker", "app", "external"].includes(entry.type as string) &&
+    text(entry.id) &&
+    (entry.name === undefined || typeof entry.name === "string") &&
+    (!full || entry.model === undefined || typeof entry.model === "string");
+  if (
+    !record(value) ||
+    !keys(value, [
+      "schemaVersion",
+      "reviewId",
+      "storeId",
+      "issueId",
+      "projectId",
+      "identity",
+      "snapshotSha256",
+      "operation",
+      "eventId",
+      "updatedAt",
+      "actor",
+    ])
+  )
+    return false;
+  if (
+    value.schemaVersion !== 1 ||
+    !text(value.reviewId) ||
+    !text(value.storeId) ||
+    !text(value.issueId) ||
+    !(value.projectId === null || text(value.projectId)) ||
+    !hash(value.snapshotSha256) ||
+    !["save", "reply", "resolve", "retire"].includes(value.operation as string) ||
+    (value.operation === "save" ? value.eventId !== null : !text(value.eventId)) ||
+    typeof value.updatedAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.updatedAt) ||
+    !Number.isFinite(Date.parse(value.updatedAt)) ||
+    new Date(value.updatedAt).toISOString() !== value.updatedAt
+  )
+    return false;
+  const identity = value.identity;
+  if (!record(identity)) return false;
+  if (identity.kind === "patch") {
+    if (!keys(identity, ["kind", "sha256"]) || !hash(identity.sha256)) return false;
+  } else if (identity.kind === "git") {
+    const commit = (entry: unknown) =>
+      typeof entry === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(entry);
+    if (
+      !keys(identity, ["kind", "gitDirectory", "baseCommit", "headCommit"]) ||
+      typeof identity.gitDirectory !== "string" ||
+      identity.gitDirectory.length < 1 ||
+      identity.gitDirectory.length > 4096 ||
+      !commit(identity.baseCommit) ||
+      !commit(identity.headCommit)
+    )
+      return false;
+  } else return false;
+  return (
+    actorRef(value.actor, true) &&
+    record(value.actor) &&
+    Array.isArray(value.actor.onBehalfOf) &&
+    value.actor.onBehalfOf.every((entry) => actorRef(entry))
+  );
+}
+
 export type GuidedReviewSource =
   | { kind: "git"; repository: string; base: string; head: string }
   | { kind: "patch"; path: string };

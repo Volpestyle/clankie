@@ -1,3 +1,5 @@
+import { isGuidedReviewMutationReceipt } from "@clankie/work-items";
+
 /**
  * A Linear write answers with the whole saved record: the description the
  * caller just sent, every comment body, and signed attachment URLs that expire
@@ -45,9 +47,10 @@ export function compactLinearWrite(tool: string, content: string): string {
   // Guided mutations already return immutable compact results. Preserve their
   // exact identity/event/actor contract across native and HTTP transports.
   if (
-    ["save_guided_review", "post_guided_finding", "post_retire_guided_review"].includes(tool) &&
-    source.schemaVersion === 1 &&
-    typeof source.reviewId === "string"
+    isGuidedReviewMutationReceipt(record) &&
+    ((tool === "save_guided_review" && record.operation === "save") ||
+      (tool === "post_guided_finding" && ["reply", "resolve"].includes(record.operation)) ||
+      (tool === "post_retire_guided_review" && record.operation === "retire"))
   )
     return content;
   const receipt: Record<string, unknown> = {};

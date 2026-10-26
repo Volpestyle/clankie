@@ -7,7 +7,12 @@ import { FileCredentialStore } from "@clankie/credential-broker";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createGuidedReviewSourceAuthorizer } from "../src/guided-review-source.ts";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker, readReviewPatch, TRACKER_OWNER } from "@clankie/work-items";
+import {
+  createLocalTracker,
+  readReviewPatch,
+  TRACKER_OWNER,
+  type GuidedReviewMutationReceipt,
+} from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
@@ -166,7 +171,7 @@ it("attributes guided review edits to the authenticated worker and preserves own
       ],
       idempotencyKey: "worker-review",
     };
-    const receipt = await call("linear_save_guided_review", input);
+    const receipt = (await call("linear_save_guided_review", input)) as GuidedReviewMutationReceipt;
     expect(receipt).toMatchObject({
       reviewId: expect.any(String),
       actor: run.actor,
@@ -174,18 +179,34 @@ it("attributes guided review edits to the authenticated worker and preserves own
       operation: "save",
     });
     expect(await call("linear_save_guided_review", input)).toEqual(receipt);
+    const savedWrite = await call("linear_get_write_receipt", { idempotencyKey: input.idempotencyKey });
+    expect(savedWrite).toMatchObject({ state: "applied", tool: "save_guided_review" });
+    expect(savedWrite.result).toEqual(receipt);
     const saved = (await call("linear_get_guided_review", {
       issueId: issue.id,
       id: receipt.reviewId,
     })) as GuidedReviewRecord;
     expect(saved.runId).toBe(run.id);
     expect(saved.createdByActor).toEqual(run.actor);
+    expect(receipt).toEqual({
+      schemaVersion: 1,
+      reviewId: saved.id,
+      storeId: saved.storeId,
+      issueId: issue.id,
+      projectId: project.id,
+      identity: expectedSource,
+      snapshotSha256: saved.snapshotSha256,
+      operation: "save",
+      eventId: null,
+      updatedAt: saved.updatedAt,
+      actor: run.actor,
+    });
     let current = saved;
     for (const [index, edit] of [
       { action: "reply", body: "Worker explanation" },
       { action: "resolve", resolved: true },
     ].entries()) {
-      await call("linear_post_guided_finding", {
+      const editReceipt = await call("linear_post_guided_finding", {
         issueId: issue.id,
         id: saved.id,
         findingId: saved.findings[0]!.id,
@@ -194,10 +215,26 @@ it("attributes guided review edits to the authenticated worker and preserves own
         ifUpdatedAt: current.updatedAt,
         idempotencyKey: `worker-edit-${index}`,
       });
+      const editWrite = await call("linear_get_write_receipt", { idempotencyKey: `worker-edit-${index}` });
+      expect(editWrite).toMatchObject({ state: "applied", tool: "post_guided_finding" });
+      expect(editWrite.result).toEqual(editReceipt);
       current = (await call("linear_get_guided_review", {
         issueId: issue.id,
         id: saved.id,
       })) as GuidedReviewRecord;
+      expect(editReceipt).toEqual({
+        schemaVersion: 1,
+        reviewId: saved.id,
+        storeId: saved.storeId,
+        issueId: issue.id,
+        projectId: project.id,
+        identity: expectedSource,
+        snapshotSha256: saved.snapshotSha256,
+        operation: edit.action,
+        eventId: current.findings[0]!.history.at(-1)!.id,
+        updatedAt: current.updatedAt,
+        actor: run.actor,
+      });
     }
     expect(current.findings[0]!.resolved).toBe(true);
     expect(current.findings[0]!.history).toHaveLength(2);
