@@ -3,21 +3,21 @@
   "objects": [
     {
       "path": "baseline.png",
-      "size": 171281,
-      "sha256": "2c0b29366c5338f29134557a923d4fce107fc7d9cd569a3f10b77d01120db4bc",
-      "url": "clankie://evidence/sha256/2c0b29366c5338f29134557a923d4fce107fc7d9cd569a3f10b77d01120db4bc"
+      "size": 170379,
+      "sha256": "a132dbd61ab5bb57295371872edd94c951ea513d17372c353cdb71c98e3d4362",
+      "url": "clankie://evidence/sha256/a132dbd61ab5bb57295371872edd94c951ea513d17372c353cdb71c98e3d4362"
     },
     {
       "path": "usage.json",
-      "size": 374387,
-      "sha256": "9234bfaa75f062e4a217e10d302e37ddfb55c51bad393ec9f4731bafb5990ce5",
-      "url": "clankie://evidence/sha256/9234bfaa75f062e4a217e10d302e37ddfb55c51bad393ec9f4731bafb5990ce5"
+      "size": 374733,
+      "sha256": "4e2076bd5c20f240ca9e44a10ff4c25e99406281ac6aa66c958e7a468b28bd2d",
+      "url": "clankie://evidence/sha256/4e2076bd5c20f240ca9e44a10ff4c25e99406281ac6aa66c958e7a468b28bd2d"
     },
     {
       "path": "usage.txt",
-      "size": 48759,
-      "sha256": "714266824d5ede565e5d095e1170e2e3e8f9850ec84baf1283c396ac2e954269",
-      "url": "clankie://evidence/sha256/714266824d5ede565e5d095e1170e2e3e8f9850ec84baf1283c396ac2e954269"
+      "size": 49175,
+      "sha256": "e1c7d77b0ef335a41890703edcf673e611f364f93303b401d215d44eab4ddd82",
+      "url": "clankie://evidence/sha256/e1c7d77b0ef335a41890703edcf673e611f364f93303b401d215d44eab4ddd82"
     }
   ]
 }

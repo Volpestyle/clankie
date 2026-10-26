@@ -347,3 +347,120 @@ it("serves the native ledger beside account meters through the authenticated HTT
   );
   expect(invalid.status).toBe(400);
 });
+
+for (const kind of [
+  "claude",
+  "codex-response",
+  "codex-snapshot",
+  "codex-mixed",
+  "codex-ambiguous",
+] as const) {
+  it(`canonicalizes ${kind} retained calls before UTC intervals, regardless of profile/file order`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "fleet-ledger-canonical-"));
+    roots.push(root);
+    const harness = kind === "claude" ? "claude" : "codex";
+    const sessionId = harness === "claude" ? lead : codex;
+    const homes = [join(root, "profile-a"), join(root, "profile-b")];
+    const profiles = homes.map((home) => ({ harness, home }) as const);
+    const directories = homes.map((home) =>
+      join(home, harness === "claude" ? "projects" : "sessions", "native"),
+    );
+    await Promise.all(directories.map((directory) => mkdir(directory, { recursive: true })));
+    const fragments = [
+      { timestamp: at, input: 100_000 },
+      { timestamp: next, input: 500_000 },
+      { timestamp: next, input: 550_000 },
+      { timestamp: next, input: 450_000 },
+    ];
+    const records = (fragment: (typeof fragments)[number], index: number) => {
+      if (harness === "claude")
+        return [
+          {
+            type: "assistant",
+            sessionId,
+            timestamp: fragment.timestamp,
+            message: { id: "one-native-streamed-call", usage: { input_tokens: fragment.input } },
+          },
+        ];
+      const response =
+        kind === "codex-response" ||
+        (kind === "codex-mixed" && index === 1) ||
+        (kind === "codex-ambiguous" && (index === 1 || index === 3));
+      return [
+        { type: "session_meta", timestamp: at, payload: { id: sessionId, source: "cli" } },
+        ...(response
+          ? [
+              {
+                type: "token_usage_record",
+                timestamp: fragment.timestamp,
+                payload: {
+                  thread_id: sessionId,
+                  response_id:
+                    kind === "codex-ambiguous" ? `native-response-${index}` : "one-native-response",
+                },
+              },
+            ]
+          : []),
+        {
+          type: "event_msg",
+          timestamp: fragment.timestamp,
+          payload: {
+            type: "token_count",
+            info: {
+              last_token_usage: { input_tokens: fragment.input },
+              // A retained snapshot can omit its response ID and reorder JSON keys.
+              total_token_usage:
+                index % 2
+                  ? { output_tokens: 20, input_tokens: 600_000 }
+                  : { input_tokens: 600_000, output_tokens: 20 },
+            },
+          },
+        },
+      ];
+    };
+    const options = { profiles, stateDir: root, census: async () => ({ seats: [] }), now: () => now };
+    let expected: unknown;
+    for (const reverseFiles of [false, true]) {
+      const indices = reverseFiles ? [3, 2, 1, 0] : [0, 1, 2, 3];
+      for (const [position, index] of indices.entries())
+        await writeFile(
+          join(directories[Math.floor(position / 2)]!, `${position % 2}.jsonl`),
+          jsonl(records(fragments[index]!, index)),
+        );
+      for (const reverseProfiles of [false, true]) {
+        const source = { ...options, profiles: reverseProfiles ? [...profiles].reverse() : profiles };
+        const whole = await readFleetTokenLedger(
+          { since: "2026-10-24T00:00:00Z", until: "2026-10-26T00:00:00Z" },
+          source,
+        );
+        const left = await readFleetTokenLedger(
+          { since: "2026-10-24T00:00:00Z", until: "2026-10-25T00:00:00Z" },
+          source,
+        );
+        const right = await readFleetTokenLedger(
+          { since: "2026-10-25T00:00:00Z", until: "2026-10-26T00:00:00Z" },
+          source,
+        );
+        expect(whole.totals).toMatchObject({
+          modelCalls: kind === "codex-ambiguous" ? 2 : 1,
+          contextTokens: kind === "codex-ambiguous" ? 950_000 : 550_000,
+          medianContextTokens: kind === "codex-ambiguous" ? 475_000 : 550_000,
+          aboveBudgetTokenShare: 1,
+        });
+        expect(whole.seats[0]!.days.map((day) => [day.day, day.contextTokens])).toEqual([
+          ["2026-10-25", kind === "codex-ambiguous" ? 950_000 : 550_000],
+        ]);
+        if (kind === "codex-ambiguous")
+          expect(whole.warnings).toContain(
+            "Ambiguous Codex snapshot identity; explicit native response IDs retained",
+          );
+        expect(left.totals.modelCalls).toBe(0);
+        expect(left.totals.contextTokens + right.totals.contextTokens).toBe(whole.totals.contextTokens);
+        expect(left.totals.modelCalls + right.totals.modelCalls).toBe(whole.totals.modelCalls);
+        expect(right.seats[0]!.days).toEqual(whole.seats[0]!.days);
+        expected ??= whole.seats;
+        expect(whole.seats).toEqual(expected);
+      }
+    }
+  });
+}

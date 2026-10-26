@@ -2496,8 +2496,11 @@ Claude calls are deduped by native message ID, including separate subagent
 transcripts. Codex context comes from `token_count.last_token_usage.input_tokens`,
 which already includes cached input; response IDs dedupe its snapshots, with
 cumulative snapshot identity as the fallback for older rollouts. A retained copy
-of a native message contributes once. UTC days use the latest usage record for
-each native call. A compaction counts only in the requested interval.
+of a native message contributes once. Canonical native calls are selected before interval filtering: latest usage
+timestamp wins; equal-time fragments use the largest valid context reading, then
+a stable seat identity. Codex retained snapshots are reconciled with their
+explicit native response IDs when unambiguous. Adjacent reads therefore use the
+same canonical timestamp and UTC day as a combined read. A compaction counts only in the requested interval.
 
 Roles come from native census and retained hire/lead-relaunch records. Historical
 sessions without attribution are labeled `unknown` and use the worker review

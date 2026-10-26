@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "efficiency.json",
+      "size": 67478,
+      "sha256": "fd4b9a8bfd9671ea810833f90a9c56e827c187c59c4128e8efcbd31964a8e0cb",
+      "url": "clankie://evidence/sha256/fd4b9a8bfd9671ea810833f90a9c56e827c187c59c4128e8efcbd31964a8e0cb"
+    },
+    {
+      "path": "fleet-status.json",
+      "size": 84426,
+      "sha256": "b88f5b2400c49fe1756422d6117d81a928a39dbdd202c042633307bca05e3135",
+      "url": "clankie://evidence/sha256/b88f5b2400c49fe1756422d6117d81a928a39dbdd202c042633307bca05e3135"
+    },
+    {
+      "path": "live-context.png",
+      "size": 198658,
+      "sha256": "bc23b0501e8fb483d828a92b69938c43087a3fc0ccc8607d43a1bb09b0ecee79",
+      "url": "clankie://evidence/sha256/bc23b0501e8fb483d828a92b69938c43087a3fc0ccc8607d43a1bb09b0ecee79"
+    },
+    {
+      "path": "verification.json",
+      "size": 114029,
+      "sha256": "534e179a68ffb5830fb858854a1402418064568f065713de6e749613f39ae9d7",
+      "url": "clankie://evidence/sha256/534e179a68ffb5830fb858854a1402418064568f065713de6e749613f39ae9d7"
+    }
+  ]
+}

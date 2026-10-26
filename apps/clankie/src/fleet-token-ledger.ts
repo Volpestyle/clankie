@@ -262,6 +262,20 @@ export async function readFleetTokenLedger(
   const attributed = await bindings(options, warnings);
   const seats = new Map<string, Omit<Seat, "days" | "totals">>();
   const calls = new Map<string, Call>();
+  const snapshotResponses = new Map<string, Set<string>>();
+  // Latest valid native usage wins. Equal-time streaming fragments retain the
+  // largest context; a stable seat key resolves otherwise identical retained copies.
+  const recordCall = (id: string, call: Call) => {
+    const previous = calls.get(id);
+    if (
+      !previous ||
+      call.at > previous.at ||
+      (call.at === previous.at &&
+        (call.context > previous.context ||
+          (call.context === previous.context && call.seatKey < previous.seatKey)))
+    )
+      calls.set(id, call);
+  };
   const events = new Map<string, Event>();
   const visitedRoots = new Set<string>();
   const visitedFiles = new Set<string>();
@@ -301,7 +315,6 @@ export async function readFleetTokenLedger(
       let sessionId = "";
       let subagentId: string | undefined;
       let lastResponseId: string | undefined;
-      let snapshotIdentity: { signature: string; id: string } | undefined;
       let malformed = 0;
       const localEvents: [string, Event][] = [];
       const stream = handle.createReadStream({
@@ -359,7 +372,7 @@ export async function readFleetTokenLedger(
             typeof entry.timestamp === "string" && Number.isFinite(Date.parse(entry.timestamp))
               ? new Date(entry.timestamp).toISOString()
               : undefined;
-          if (!at || at < since || at >= until) continue;
+          if (!at) continue;
           let messageId: string | undefined;
           let context: number | undefined;
           if (profile.harness === "claude" && entry.type === "assistant") {
@@ -381,23 +394,26 @@ export async function readFleetTokenLedger(
             const info = obj(payload.info);
             context = count(obj(info.last_token_usage).input_tokens);
             // Older rollouts have no response record; repeated cumulative snapshots are the same native response.
-            const signature = Object.keys(obj(info.total_token_usage)).length
-              ? JSON.stringify(info.total_token_usage)
+            const total = obj(info.total_token_usage);
+            const signature = Object.keys(total).length
+              ? JSON.stringify(Object.entries(total).sort(([a], [b]) => a.localeCompare(b)))
               : undefined;
-            messageId =
-              str(payload.response_id) ??
-              lastResponseId ??
-              (signature === undefined
-                ? undefined
-                : snapshotIdentity?.signature === signature
-                  ? snapshotIdentity.id
-                  : `snapshot:${sessionId}:${signature}`);
-            if (signature !== undefined && messageId !== undefined)
-              snapshotIdentity = { signature, id: messageId };
+            const response = str(payload.response_id) ?? lastResponseId;
+            const snapshot = signature === undefined ? undefined : `${sessionId}:snapshot:${signature}`;
+            messageId = response ? `${sessionId}:response:${response}` : snapshot;
+            if (snapshot && response) {
+              const key = `codex:${snapshot}`;
+              const responses = snapshotResponses.get(key) ?? new Set<string>();
+              responses.add(`codex:${sessionId}:response:${response}`);
+              snapshotResponses.set(key, responses);
+            }
             lastResponseId = undefined;
           }
           if (messageId && context !== undefined && Number.isSafeInteger(context))
-            calls.set(`${profile.harness}:${messageId}`, { seatKey, at, context });
+            recordCall(`${profile.harness}:${messageId}`, { seatKey, at, context });
+          // Events belong to their own native timestamps; calls are windowed only
+          // after all retained fragments and response/snapshot aliases are canonical.
+          if (at < since || at >= until) continue;
           const compact =
             profile.harness === "claude"
               ? entry.type === "system" && entry.subtype === "compact_boundary"
@@ -452,6 +468,15 @@ export async function readFleetTokenLedger(
       }
     }
   }
+  // A retained older rollout may lack response_id for a snapshot that a newer
+  // copy identifies. Merge it before interval assignment, independent of scan order.
+  for (const [snapshot, responses] of snapshotResponses) {
+    const call = calls.get(snapshot);
+    if (!call) continue;
+    if (responses.size === 1) recordCall(responses.values().next().value!, call);
+    else warnings.push("Ambiguous Codex snapshot identity; explicit native response IDs retained");
+    calls.delete(snapshot);
+  }
   type Bucket = { contexts: number[]; above: number; compactions: number; foregroundSleepCalls: number };
   const buckets = new Map<string, Map<string, Bucket>>();
   const bucket = (key: string, day: string): Bucket => {
@@ -468,6 +493,7 @@ export async function readFleetTokenLedger(
     return value;
   };
   for (const call of calls.values()) {
+    if (call.at < since || call.at >= until) continue;
     const value = bucket(call.seatKey, call.at.slice(0, 10));
     value.contexts.push(call.context);
     if (call.context > seats.get(call.seatKey)!.budgetTokens) value.above += call.context;
