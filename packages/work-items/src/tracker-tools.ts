@@ -417,7 +417,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   ),
   tool(
     "post_guided_finding",
-    "Built-in only. Reply to or resolve/reopen a saved finding. Requires unchanged review revision and exact immutable source identity; returns a compact mutation receipt. Never approves work or writes to a host.",
+    "Built-in only. Reply to or resolve/reopen a saved finding. Requires unchanged review revision and exact immutable source identity; returns a compact mutation receipt. Never approves work or writes to a host. All edits share the discussion byte budget, so saturation can refuse resolve/reopen too. Recovery requires an authenticated owner to retire an eligible review with clankie work owner post_retire_guided_review, then save a new revision on the same issue; legacy full/pointer receipts block retirement.",
     {
       issueId: string,
       id: string,
@@ -430,7 +430,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   ),
   tool(
     "post_retire_guided_review",
-    "Built-in only. Authenticated owner principal retires a saved review in its current issue, reclaiming its payload while retaining identity and compact receipts. Requires exact source identity and unchanged revision; no source read. Generic actor labels do not prove authority; legacy full-result receipts refuse retirement.",
+    "Built-in only. An authenticated owner retires an eligible saved review with clankie work owner post_retire_guided_review, reclaiming its payload while retaining identity and compact receipts; then save a new revision on the same issue. Requires exact source identity and unchanged revision; no source read. Generic actor labels and issue-write authority do not prove owner authority. Legacy full/pointer receipts make a review ineligible for retirement.",
     { issueId: string, id: string, expectedSource: guidedReviewIdentitySchema, ...writeControls },
     ["issueId", "id", "expectedSource", "ifUpdatedAt", "idempotencyKey"],
   ),

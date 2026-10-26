@@ -221,6 +221,7 @@ it("retires guided revisions through production HTTP and ordinary CLI without lo
         expect(refusal.detail).toContain("clankie work owner post_retire_guided_review");
         expect(refusal.detail).toMatch(/same issue/i);
         expect(refusal.detail).not.toContain("or lead");
+        expect(refusal.detail).toMatch(/legacy full\/pointer receipts/i);
       }
       expect(await domains()).toEqual(before);
     };

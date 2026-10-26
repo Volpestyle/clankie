@@ -22,6 +22,7 @@ function expectCapacityRefusal(error: unknown, reason: string) {
   expect(message).toContain("clankie work owner post_retire_guided_review");
   expect(message).toMatch(/same issue/i);
   expect(message).not.toContain("or lead");
+  expect(message).toMatch(/legacy full\/pointer receipts/i);
 }
 
 async function fixture(bytes: number) {
