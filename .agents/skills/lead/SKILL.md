@@ -113,6 +113,9 @@ one harvest owner, who follows it to its destination. Wait for the completion
 event rather than polling or adding a second watcher; when a report is overdue,
 read the pane state and `clankie status`. Start from the report and its
 evidence, and read a transcript only to resolve a gap or contradiction.
+An unverified watch observation while a pane is still `working` joins your next
+report round once and stays armed. Re-arming it does not produce another notice
+until its state changes; it is not a completion or a reason to poll.
 
 On completion, inspect, decide and act. A branch is not landed, and landing is
 not delivery: check the integrated consumer as soon as the parts can join.

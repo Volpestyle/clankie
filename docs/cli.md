@@ -913,6 +913,11 @@ wake the lead again. Without `messageId`, watch status remains a pane-level cue.
 An unavailable exact native controller reports unconfirmed correlation rather
 than substituting another turn or terminal input. Remote queue transports that
 provide only legacy boolean receipts still lack message-scoped correlation.
+A watch that observes unverified completion while the pane is still `working`
+joins the next lead report round. It stays armed and does not repeat that
+working notice, including after service restart or re-arming the same watch.
+A changed state can report again; failures, blocked turns, questions and gone
+panes keep their immediate delivery. Clean completions keep joining the round.
 
 Codex completion watches poll retained turn IDs/statuses without loading items.
 They refresh full history on a change or after 30 seconds unchanged, to recover

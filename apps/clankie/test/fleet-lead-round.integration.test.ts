@@ -7,7 +7,7 @@ import { localFleetProof } from "../src/local-fleet-proof.ts";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -182,46 +182,54 @@ async function fixture(
     } else if (args[0] === "agent" && args[1] === "list") result = { agents: rows };
     else if (args[0] === "pane" && args[1] === "list") result = { panes: rows };
     else if (args[0] === "workspace" && args[1] === "list") result = { workspaces: [] };
+    else if (args[0] === "pane" && args[1] === "process-info")
+      result = { process_info: { foreground_processes: [] } };
     else throw new Error(`Unexpected native transport request: ${args.join(" ")}`);
     return JSON.stringify({ result });
   };
+  // Every Herdr transport in this fixture has an empty workspace census.
+  // No process, workspace or pane is restored from the owner installation.
+  expect(JSON.parse(await execute(["workspace", "list"])).result.workspaces).toEqual([]);
   const fleetResources = await resourceFixture?.(root);
-  const captain = createCaptain(
-    {
-      herdrAvailable: () => true,
-      memory: {},
-      embodiment: {},
-      browser: { catalog: async () => ({ available: false, tools: [] }) },
-      mcp: { catalog: async () => [], call: async () => ({ outcome: "ok", content: "", isError: false }) },
-      ...(deployHolds === undefined ? {} : { deployHolds }),
-      ...(remote?.fleets === undefined ? {} : { fleets: remote.fleets }),
-    } as unknown as CaptainDeps,
-    {
-      repoRoot: root,
-      stateDir: root,
-      workingDirectory: root,
-      settings: new SettingsStore(join(root, "settings.json")),
-      nativeHerdrRunner: createHerdrWatchRunner(() => true, execute, undefined, {
-        localCodexRecovery: false,
-      }),
-      nativeCensusRunner: async (_cmd, args) => ({ stdout: await execute(args), stderr: "" }),
-      nativeSummariesPath: join(root, "summaries.json"),
-      seatAdapters: [],
-      discordEnvironment: {},
-      fleetRoundIntervalMs: roundMs,
-      ...(fleetResources ? { fleetResources } : {}),
-      // These cases park a seat with one short poll and expect it gone within
-      // the original 2s; the 30s head hold has its own coverage (VUH-2045).
-      headBoundGraceMs: 2_000,
-      workerReportBridgeStatus: (_fleet, pane) => reportHealth?.get(pane),
-      ...(remote?.fleetEfficiencyDeadlineMs === undefined
-        ? {}
-        : { fleetEfficiencyDeadlineMs: remote.fleetEfficiencyDeadlineMs }),
-      ...(remote?.fleetProbeMinMs === undefined ? {} : { fleetProbeMinMs: remote.fleetProbeMinMs }),
-      ...(remote?.reportRoundMs === undefined ? {} : { reportRoundMs: remote.reportRoundMs }),
-    },
-  );
-  fixtures.push({ root, captain });
+  const makeCaptain = () =>
+    createCaptain(
+      {
+        herdrAvailable: () => true,
+        memory: {},
+        embodiment: {},
+        browser: { catalog: async () => ({ available: false, tools: [] }) },
+        mcp: { catalog: async () => [], call: async () => ({ outcome: "ok", content: "", isError: false }) },
+        ...(deployHolds === undefined ? {} : { deployHolds }),
+        ...(remote?.fleets === undefined ? {} : { fleets: remote.fleets }),
+      } as unknown as CaptainDeps,
+      {
+        repoRoot: root,
+        stateDir: root,
+        workingDirectory: root,
+        settings: new SettingsStore(join(root, "settings.json")),
+        nativeHerdrRunner: createHerdrWatchRunner(() => true, execute, undefined, {
+          localCodexRecovery: false,
+        }),
+        nativeCensusRunner: async (_cmd, args) => ({ stdout: await execute(args), stderr: "" }),
+        nativeSummariesPath: join(root, "summaries.json"),
+        seatAdapters: [],
+        discordEnvironment: {},
+        fleetRoundIntervalMs: roundMs,
+        ...(fleetResources ? { fleetResources } : {}),
+        // These cases park a seat with one short poll and expect it gone within
+        // the original 2s; the 30s head hold has its own coverage (VUH-2045).
+        headBoundGraceMs: 2_000,
+        workerReportBridgeStatus: (_fleet, pane) => reportHealth?.get(pane),
+        ...(remote?.fleetEfficiencyDeadlineMs === undefined
+          ? {}
+          : { fleetEfficiencyDeadlineMs: remote.fleetEfficiencyDeadlineMs }),
+        ...(remote?.fleetProbeMinMs === undefined ? {} : { fleetProbeMinMs: remote.fleetProbeMinMs }),
+        ...(remote?.reportRoundMs === undefined ? {} : { reportRoundMs: remote.reportRoundMs }),
+      },
+    );
+  let captain = makeCaptain();
+  const entry = { root, captain };
+  fixtures.push(entry);
   // Park both native outboxes before a scheduled wake; zero-wait reads do not bind them.
   if (bind) {
     // A seeded unresolved original produces its one VUH-1779 alert, nothing else.
@@ -240,7 +248,15 @@ async function fixture(
   ]);
   return {
     root,
-    captain,
+    get captain() {
+      return captain;
+    },
+    restart: async () => {
+      await captain.close();
+      captain = makeCaptain();
+      entry.captain = captain;
+      expect(await captain.pollSeatEvents(1, undefined, "global-default")).toEqual([]);
+    },
     rows,
     nativeRequests,
     other: second.conversation.conversationId,
@@ -273,9 +289,9 @@ async function fixture(
         }),
       ).toBe(true);
     },
-    settle: (index: number) => {
+    settle: (index: number, status = "done") => {
       const row = rows[index]!;
-      row.agent_status = "done";
+      row.agent_status = status;
       for (const complete of [...(waits.get(row.pane_id) ?? []), ...(waits.get(row.terminal_id) ?? [])])
         complete();
     },
@@ -846,6 +862,84 @@ it("holds a clean completion watch for an idle lead's round, then wakes it once"
   expect(performance.now() - settledAt).toBeGreaterThanOrEqual(1_400);
   await f.finish(event!.id);
   expect(await f.captain.pollSeatEvents(500, undefined, "global-default")).toEqual([]);
+});
+
+// VUH-2822: use the public tool, production native runner, watcher, report
+// round, captain wake and seat outbox. Only the native transport is synthetic;
+// scripts/testing/vitest-setup.ts gives this fork private HOME/XDG stores.
+it("rounds an uncorrelated working watch once, retains it across rearming, and escalates a changed state", async () => {
+  expect(process.env.HOME).toContain("/cv-");
+  expect(process.env.XDG_CONFIG_HOME).toBe(join(process.env.HOME!, ".config"));
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    { reportRoundMs: 1_500 },
+  );
+  const bank = await f.captain.laneToolBank("operator", "global-default");
+  const watch = bank.tools.find((tool) => tool.name === "herdr_watch")!;
+  const input = {
+    agent: f.rows[0]!.pane_id,
+    reason: "VUH-2822 working observation",
+    messageId: "uncorrelated-input",
+  };
+  await watch.call(input);
+  expect(await f.captain.pollSeatEvents(600, undefined, "global-default")).toEqual([]);
+  const [event] = await f.captain.pollSeatEvents(3000, undefined, "global-default");
+  expect(event?.content).toContain("agent status working");
+  expect(event?.content).toContain("message_correlation_unavailable");
+  await f.finish(event!.id);
+  await watch.call(input);
+  await f.restart();
+  const restoredBank = await f.captain.laneToolBank("operator", "global-default");
+  await restoredBank.tools.find((tool) => tool.name === "herdr_watch")!.call(input);
+  // Cross the production 5-second retry and another report deadline.
+  expect(await f.captain.pollSeatEvents(7_000, undefined, "global-default")).toEqual([]);
+  const persisted = JSON.parse(await readFile(join(f.root, "herdr-watches.json"), "utf8"));
+  expect(persisted.watches).toHaveLength(1);
+  expect(persisted.watches[0]).toMatchObject({ workingNoticeDelivered: true, noticeSequence: 1 });
+  expect(persisted.harvestedTurns ?? []).toEqual([]);
+  f.settle(0, "blocked");
+  const [blocked] = await f.captain.pollSeatEvents(2_000, undefined, "global-default");
+  expect(blocked?.content).toContain("agent status blocked");
+  await f.finish(blocked!.id);
+  expect(await f.captain.pollSeatEvents(500, undefined, "global-default")).toEqual([]);
+}, 25_000);
+
+it("an escalation overtakes a working watch still held for its round", async () => {
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    { reportRoundMs: 10_000 },
+  );
+  const bank = await f.captain.laneToolBank("operator", "global-default");
+  const watch = bank.tools.find((tool) => tool.name === "herdr_watch")!;
+  await watch.call({
+    agent: f.rows[0]!.pane_id,
+    reason: "Do not delay blockers",
+    messageId: "pending-input",
+  });
+  expect(await f.captain.pollSeatEvents(300, undefined, "global-default")).toEqual([]);
+  f.settle(0, "blocked");
+  const [event] = await f.captain.pollSeatEvents(2_000, undefined, "global-default");
+  expect(event?.content).toContain("agent status blocked");
+  expect(event?.content).not.toContain("agent status working");
+  await f.finish(event!.id);
 });
 
 it("periodic rounds independently wake both leading conversations with only their seats", async () => {

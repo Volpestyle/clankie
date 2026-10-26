@@ -1614,11 +1614,11 @@ function herdrWatchTools(
       name: "herdr_watch",
       label: "Watch Herdr agent",
       description:
-        "Arm a persisted one-shot watcher on a Herdr agent pane. Supply messageId from message_seat for exact completion, including a turn that finished before admission. When the agent settles, " +
+        "Arm a persisted watcher on a Herdr agent pane. Supply messageId from message_seat for exact completion, including a turn that finished before admission. When the agent settles, " +
         "this same conversation wakes so you can inspect and harvest it; in Discord, your reply to that wake " +
         "posts in this channel, answering the message you are on now. Use this after agreeing to " +
         "harvest or after dispatching work; do not poll with schedule_wake or block the current turn with " +
-        "`herdr agent wait`. A settled status is only a cue to inspect, not proof the work is correct. " +
+        "`herdr agent wait`. A settled status is only a cue to inspect, not proof the work is correct. Unverified working observations join the next report round once; the watch stays armed without repeating until state changes. " +
         "If the pane switches to another native session or its agent exits first, the watch ends without a wake; inspect the seat and arm it again if you still need its next completion.",
       parameters: Type.Object({
         messageId: Type.Optional(
