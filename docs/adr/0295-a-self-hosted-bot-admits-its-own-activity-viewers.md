@@ -82,7 +82,8 @@ again at every Discord effect the runtime commits (the invite post, each
 stale-invite delete and the message post) and before it registers. If it was
 revoked meanwhile, whatever already landed is taken back: its invite is
 revoked, which kills the link in any message it posted, unless a newer launch
-holds the channel. A stop waits a bounded ten seconds for such accepted
+holds the channel. That check repeats before every invite the cleanup deletes,
+so cleanup that is still listing invites never reaches a replacement's. A stop waits a bounded ten seconds for such accepted
 launches to finish that cleanup; until they have, its receipt is `uncertain`,
 not `confirmed`.
 

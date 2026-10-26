@@ -675,7 +675,9 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
       // stop can wait for it and its cleanup (VUH-2835).
       const launches = ctx.dependencies.activityLaunches;
       const roomLaunch = write.payload.kind === "activity_start" ? write.payload : undefined;
-      const launchInFlight = roomLaunch ? launches?.beginLaunch(write.idempotencyKey) : undefined;
+      const launchInFlight = roomLaunch
+        ? launches?.beginLaunch(write.idempotencyKey, roomLaunch.guildId, roomLaunch.channelId)
+        : undefined;
       const launchRevoked = () =>
         roomLaunch !== undefined && launches !== undefined && !launches.allowsLaunch(write.idempotencyKey);
       // Checked at every Discord effect the runtime commits (it guards the
@@ -688,7 +690,9 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
       // holds or is opening the channel. It is never registered.
       const compensate = async () => {
         if (roomLaunch === undefined || launches === undefined) return;
-        if (launches.hasNewerLaunch(roomLaunch.guildId, roomLaunch.channelId)) return;
+        const replaced = () =>
+          launches.hasNewerLaunch(roomLaunch.guildId, roomLaunch.channelId, write.idempotencyKey);
+        if (replaced()) return;
         await discordPresenceRuntime
           .execute(
             DiscordPresenceWriteSchema.parse({
@@ -702,6 +706,11 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
               },
             }),
             session,
+            // The runtime checks this before each invite it deletes: once a
+            // newer launch holds the channel, its invite is no longer ours to take.
+            async () => {
+              if (replaced()) throw new Error("discord_presence_activity_launch_replaced");
+            },
           )
           .catch((error: unknown) =>
             logger.warn(

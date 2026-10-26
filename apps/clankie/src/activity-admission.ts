@@ -189,6 +189,8 @@ export function createActivityLaunches(
   // Accepted room launch writes still running in the presence route, and the
   // revoked call ids a stop must wait for, per destination.
   const inFlight = new Map<string, Promise<void>>();
+  // Every activity_start the route is running, per destination, room or not.
+  const startsInFlight = new Map<string, Set<string>>();
   const revokedAt = new Map<string, Set<string>>();
   const launchCall = (idempotencyKey: string) => /^captain:(.+):watch_start$/u.exec(idempotencyKey)?.[1];
   // One queue for every destination: they share one producer client whose
@@ -276,14 +278,19 @@ export function createActivityLaunches(
       return callId === undefined || !revoked.has(callId);
     },
     /** The presence route marks an accepted room launch write until its handling ends. */
-    beginLaunch(idempotencyKey: string): (() => void) | undefined {
+    beginLaunch(idempotencyKey: string, guildId: string, channelId: string): () => void {
+      const destination = key(guildId, channelId);
+      const starts = startsInFlight.get(destination) ?? new Set<string>();
+      starts.add(idempotencyKey);
+      startsInFlight.set(destination, starts);
       const callId = launchCall(idempotencyKey);
-      if (callId === undefined) return undefined;
-      let done!: () => void;
-      inFlight.set(callId, new Promise<void>((resolve) => (done = resolve)));
+      let done: (() => void) | undefined;
+      if (callId !== undefined) inFlight.set(callId, new Promise<void>((resolve) => (done = resolve)));
       return () => {
-        inFlight.delete(callId);
-        done();
+        starts.delete(idempotencyKey);
+        if (starts.size === 0) startsInFlight.delete(destination);
+        if (callId !== undefined) inFlight.delete(callId);
+        done?.();
       };
     },
     /**
@@ -304,10 +311,20 @@ export function createActivityLaunches(
       clearTimeout(timer);
       return settled;
     },
-    /** A current launch, or a room launch reserved since the last stop, holds this channel. */
-    hasNewerLaunch(guildId: string, channelId: string) {
+    /**
+     * A current launch, a room launch reserved since the last stop, or another
+     * unrevoked start already running holds this channel. `except` is the
+     * asking launch's own write.
+     */
+    hasNewerLaunch(guildId: string, channelId: string, except: string) {
       const destination = key(guildId, channelId);
-      return launched.has(destination) || (reserved.get(destination)?.size ?? 0) > 0;
+      return (
+        launched.has(destination) ||
+        (reserved.get(destination)?.size ?? 0) > 0 ||
+        [...(startsInFlight.get(destination) ?? [])].some(
+          (other) => other !== except && !revoked.has(launchCall(other) ?? ""),
+        )
+      );
     },
     launched(guildId: string, channelId: string) {
       const destination = key(guildId, channelId);

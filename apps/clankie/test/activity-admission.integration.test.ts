@@ -627,19 +627,20 @@ function discordRest() {
   const calls: string[] = [];
   let next = 0;
   // Holds the next matching REST call, after Discord has done it, until released.
-  const holds: { match: RegExp; reached: () => void; hold: Promise<void> }[] = [];
+  const holds: { match: RegExp; skip: number; reached: () => void; hold: Promise<void> }[] = [];
   const held = async (call: string) => {
-    const index = holds.findIndex((candidate) => candidate.match.test(call));
+    const index = holds.findIndex((candidate) => candidate.match.test(call) && candidate.skip-- <= 0);
     if (index < 0) return;
     const [gate] = holds.splice(index, 1);
     gate!.reached();
     await gate!.hold;
   };
-  const hold = (match: RegExp) => {
+  /** Holds the matching call after `skip` earlier matches have passed. */
+  const hold = (match: RegExp, skip = 0) => {
     let release!: () => void, reached!: () => void;
     const gate = new Promise<void>((done) => (release = done));
     const arrived = new Promise<void>((done) => (reached = done));
-    holds.push({ match, reached, hold: gate });
+    holds.push({ match, skip, reached, hold: gate });
     return { release, arrived };
   };
   const rest = {
@@ -1069,6 +1070,60 @@ it.each([
     const admitted = await s.admit("member-code", "i-here");
     expect(admitted.status).toBe(200);
     expect(admitted.body.session.shareId).toBe(fresh.session.shareId);
+  },
+  30_000,
+);
+
+// Adapted from the reviewer's probe: a revoked launch's cleanup is still
+// listing invites when a fresh launch publishes; the fresh invite survives.
+it.each([{ replaced: true }, { replaced: false }] as const)(
+  "a stale launch's cleanup never revokes a fresh launch's invite (fresh launch during cleanup: $replaced)",
+  async ({ replaced }) => {
+    const discord = discordRest();
+    const s = await stack({
+      presenceRuntime: new DiscordBotPresenceRuntime({
+        botToken: "fixture-bot",
+        rest: discord.rest as never,
+        activityApplicationIds: { gba_emulator: APP },
+      }),
+    });
+    const playSink = s.play.createSink("FireRed");
+    const body = await roomBody(s);
+    // The old launch reaches Discord only after the stop gave up waiting.
+    const late = discord.hold(/^before POST \/channels\/\d+\/invites$/u);
+    body.setMode("background");
+    const old = await roomTool(s, body).invoke({ action: "start", sourceId: "play" });
+    await late.arrived;
+    body.setMode("act");
+    expect(
+      await roomTool(s, body).invoke({ action: "stop", shareId: old.session.shareId, generation: 1 }),
+    ).toMatchObject({ receipt: { outcome: "uncertain" } });
+    // Its cleanup listing (after its own stale-invite listing) is held next.
+    const cleanupListing = discord.hold(/^GET \/channels\/\d+\/invites$/u, 1);
+    late.release();
+    let fresh: Record<string, any> | undefined;
+    if (replaced) {
+      await cleanupListing.arrived;
+      fresh = await roomTool(s, body).invoke({ action: "start", sourceId: "play" });
+      expect(fresh.receipt).toMatchObject({ outcome: "confirmed" });
+      cleanupListing.release();
+    } else {
+      cleanupListing.release();
+    }
+    expect(await body.backgroundStatus()).toBe(409);
+    if (!replaced) {
+      expect(discord.invites.size).toBe(0);
+      fresh = await roomTool(s, body).invoke({ action: "start", sourceId: "play" });
+      expect(fresh.receipt).toMatchObject({ outcome: "confirmed" });
+    }
+    // Only the fresh launch's invite is left, and it admits to the fresh share.
+    expect(discord.invites.size).toBe(1);
+    const admitted = await s.admit("member-code", "i-here");
+    expect(admitted.status).toBe(200);
+    expect(admitted.body.session.shareId).toBe(fresh!.session.shareId);
+    const view = await watch(s, admitted);
+    playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+    await vi.waitFor(() => expect(view.messages.some((message) => message.kind === "frame")).toBe(true));
   },
   30_000,
 );
