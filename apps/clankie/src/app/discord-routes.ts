@@ -671,12 +671,52 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
           return context.json({ error: "discord_reply_reconciliation_failed" }, 503);
         }
       }
+      // An accepted room launch stays in flight until this handling ends, so a
+      // stop can wait for it and its cleanup (VUH-2835).
+      const launches = ctx.dependencies.activityLaunches;
+      const roomLaunch = write.payload.kind === "activity_start" ? write.payload : undefined;
+      const launchInFlight = roomLaunch ? launches?.beginLaunch(write.idempotencyKey) : undefined;
+      const launchRevoked = () =>
+        roomLaunch !== undefined && launches !== undefined && !launches.allowsLaunch(write.idempotencyKey);
+      // Checked at every Discord effect the runtime commits (it guards the
+      // invite post, each stale-invite delete and the message post).
+      const launchGuard = async () => {
+        if (launchRevoked()) throw new Error("discord_presence_activity_launch_revoked");
+      };
+      // A revoked launch whose effect already landed takes back its invite,
+      // which also kills the link in any posted message, unless a newer launch
+      // holds or is opening the channel. It is never registered.
+      const compensate = async () => {
+        if (roomLaunch === undefined || launches === undefined) return;
+        if (launches.hasNewerLaunch(roomLaunch.guildId, roomLaunch.channelId)) return;
+        await discordPresenceRuntime
+          .execute(
+            DiscordPresenceWriteSchema.parse({
+              ...write,
+              idempotencyKey: `${write.idempotencyKey}:revoked`,
+              action: "discord.presence.activity_stop",
+              payload: {
+                kind: "activity_stop",
+                guildId: roomLaunch.guildId,
+                channelId: roomLaunch.channelId,
+              },
+            }),
+            session,
+          )
+          .catch((error: unknown) =>
+            logger.warn(
+              { errorName: error instanceof Error ? error.name.slice(0, 64) : "Error" },
+              "Revoked activity launch could not take back its invite",
+            ),
+          );
+      };
       try {
         let result: DiscordPresenceWriteResult;
         if (ctx.dependencies.bodyLeases === undefined || write.payload.kind === "typing_start") {
-          result = await discordPresenceRuntime.execute(write, session, () =>
-            ctx.discordTurnReceipts.enforceGuard(write.idempotencyKey),
-          );
+          result = await discordPresenceRuntime.execute(write, session, async () => {
+            await ctx.discordTurnReceipts.enforceGuard(write.idempotencyKey);
+            await launchGuard();
+          });
         } else {
           const sourceId =
             write.sourceDeliveryId ??
@@ -819,6 +859,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
                 async () => {
                   await guard();
                   await ctx.discordTurnReceipts.enforceGuard(write.idempotencyKey);
+                  await launchGuard();
                   if (
                     publish?.stayId !== undefined &&
                     ctx.dependencies.bodyVoiceStays?.publishing(conversationId)?.stayId !== publish.stayId
@@ -842,8 +883,13 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
           result,
           expiresAtMs: ctx.clock().getTime() + DELIVERY_RETENTION_MS,
         });
-        if (write.payload.kind === "activity_start")
-          ctx.dependencies.activityLaunches?.launched(write.payload.guildId, write.payload.channelId);
+        if (roomLaunch !== undefined && launches !== undefined) {
+          if (launchRevoked()) {
+            await compensate();
+            return context.json({ error: "activity_launch_revoked" }, 409);
+          }
+          launches.launched(roomLaunch.guildId, roomLaunch.channelId);
+        }
         if (write.payload.kind === "activity_stop")
           await ctx.dependencies.activityLaunches
             ?.stopped(write.payload.guildId, write.payload.channelId)
@@ -863,6 +909,11 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
         );
         return context.json(result);
       } catch (error) {
+        // A guard stopped a revoked launch partway: undo what already landed.
+        if (launchRevoked()) {
+          await compensate();
+          return context.json({ error: "activity_launch_revoked" }, 409);
+        }
         const code =
           error instanceof Error && error.message.startsWith("discord_presence_")
             ? error.message
@@ -878,6 +929,8 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
           "Discord presence action failed",
         );
         return context.json({ error: code }, 502);
+      } finally {
+        launchInFlight?.();
       }
     });
   });

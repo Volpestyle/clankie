@@ -51,6 +51,7 @@ export interface CaptainDeps {
   readonly activitySelfHostedLaunch?: {
     reserveLaunch(callId: string, guildId: string, channelId: string): void;
     revokeLaunches(guildId: string, channelId: string): void;
+    settleRevoked(guildId: string, channelId: string, timeoutMs: number): Promise<boolean>;
   };
   /** Non-secret wake settings, shared by the CLI, API and Clankie's own tool. */
   readonly linearWake?: {

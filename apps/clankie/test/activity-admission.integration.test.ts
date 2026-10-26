@@ -626,20 +626,41 @@ function discordRest() {
   const invites = new Map<string, { channelId: string }>();
   const calls: string[] = [];
   let next = 0;
+  // Holds the next matching REST call, after Discord has done it, until released.
+  const holds: { match: RegExp; reached: () => void; hold: Promise<void> }[] = [];
+  const held = async (call: string) => {
+    const index = holds.findIndex((candidate) => candidate.match.test(call));
+    if (index < 0) return;
+    const [gate] = holds.splice(index, 1);
+    gate!.reached();
+    await gate!.hold;
+  };
+  const hold = (match: RegExp) => {
+    let release!: () => void, reached!: () => void;
+    const gate = new Promise<void>((done) => (release = done));
+    const arrived = new Promise<void>((done) => (reached = done));
+    holds.push({ match, reached, hold: gate });
+    return { release, arrived };
+  };
   const rest = {
     async post(route: string, options: { body: Record<string, unknown> }) {
       calls.push(`POST ${route}`);
+      // "before": the request reaches Discord only when released.
+      await held(`before POST ${route}`);
       const invite = /^\/channels\/(\d+)\/invites$/u.exec(route);
       if (invite !== null) {
         expect(options.body).toMatchObject({ target_type: 2, target_application_id: APP });
         const code = `launch${++next}`;
         invites.set(code, { channelId: invite[1]! });
+        await held(`POST ${route}`);
         return { code };
       }
+      await held(`POST ${route}`);
       return { id: `message-${++next}` };
     },
     async get(route: string) {
       calls.push(`GET ${route}`);
+      await held(`GET ${route}`);
       const channel = /^\/channels\/(\d+)\/invites$/u.exec(route)?.[1];
       return [...invites]
         .filter(([, invite]) => invite.channelId === channel)
@@ -652,7 +673,7 @@ function discordRest() {
     async put() {},
     async patch() {},
   };
-  return { rest, invites, calls };
+  return { rest, invites, calls, hold };
 }
 
 // The room's own Discord body, as the bridge's /captain-action would be: it
@@ -675,9 +696,10 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
   await session.start();
   await session.gatewayReady();
   await session.voiceStateChanged(GUILD, true, { channelId: CHANNEL, occupants: [] });
-  let mode: "act" | "refuse" | "lose" | "late" = "act";
+  let mode: "act" | "refuse" | "lose" | "late" | "background" = "act";
   // "late": the caller's timeout fires first; the body's write lands when released.
   let lateWrite: (() => Promise<number>) | undefined;
+  let inBackground: Promise<number> | undefined;
   let held: { reached: () => void; hold: Promise<void> } | undefined;
   const actions = {
     async execute(input: { action: string; callId: string }) {
@@ -719,6 +741,11 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
             "x-clankie-discord-presence-revision": String(session.record.revision),
           },
         );
+      // "background": the caller's timeout fires while the write is already in the route.
+      if (mode === "background" && kind === "activity_start") {
+        inBackground = Promise.resolve(write()).then((response) => response.status);
+        return { ok: false, message: DISCORD_BODY_UNREACHABLE_MESSAGE };
+      }
       if (mode === "late" && kind === "activity_start") {
         lateWrite = async () => (await write()).status;
         return { ok: false, message: DISCORD_BODY_UNREACHABLE_MESSAGE };
@@ -735,6 +762,8 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
     setMode: (next: typeof mode) => (mode = next),
     /** Lets a "late" body's held presence write land now; its HTTP status. */
     releaseLate: () => lateWrite!(),
+    /** The status a "background" write finally got from the route. */
+    backgroundStatus: () => inBackground!,
     /** Delays the body's next watch_start until released. */
     holdNextStart() {
       let release!: () => void, reached!: () => void;
@@ -962,3 +991,84 @@ it("a body write that outlives its launch's timeout cannot land after a confirme
   expect(admitted.status).toBe(200);
   expect(admitted.body.session.shareId).toBe(fresh.session.shareId);
 });
+
+// Every await in a room launch's Discord effect (VUH-2835 review): a stop that
+// lands while the accepted launch is held there wins, and the late effect is
+// taken back. A fresh launch afterwards still works.
+it.each([
+  { point: "invite post", hop: /^POST \/channels\/\d+\/invites$/u, release: "during the stop" },
+  { point: "stale-invite listing", hop: /^GET \/channels\/\d+\/invites$/u, release: "during the stop" },
+  { point: "message post", hop: /^POST \/channels\/\d+\/messages$/u, release: "during the stop" },
+  {
+    point: "invite post",
+    hop: /^POST \/channels\/\d+\/invites$/u,
+    release: "after the stop gave up waiting",
+  },
+  // Discord itself acts late: the invite or message exists only after the stop.
+  {
+    point: "late-arriving invite post",
+    hop: /^before POST \/channels\/\d+\/invites$/u,
+    release: "during the stop",
+  },
+  {
+    point: "late-arriving invite post",
+    hop: /^before POST \/channels\/\d+\/invites$/u,
+    release: "after the stop gave up waiting",
+  },
+  {
+    point: "late-arriving message post",
+    hop: /^before POST \/channels\/\d+\/messages$/u,
+    release: "after the stop gave up waiting",
+  },
+] as const)(
+  "a stop while an accepted launch is held at its $point leaves no invite or admission ($release)",
+  async ({ point, hop, release }) => {
+    const discord = discordRest();
+    const s = await stack({
+      presenceRuntime: new DiscordBotPresenceRuntime({
+        botToken: "fixture-bot",
+        rest: discord.rest as never,
+        activityApplicationIds: { gba_emulator: APP },
+      }),
+    });
+    const playSink = s.play.createSink("FireRed");
+    const body = await roomBody(s);
+    const effect = discord.hold(hop);
+    body.setMode("background");
+    const started = await roomTool(s, body).invoke({ action: "start", sourceId: "play" });
+    expect(started.receipt).toMatchObject({ outcome: "uncertain" });
+    await effect.arrived;
+    body.setMode("act");
+    const stopping = roomTool(s, body).invoke({
+      action: "stop",
+      shareId: started.session.shareId,
+      generation: 1,
+    });
+    if (release === "during the stop") {
+      await new Promise((done) => setTimeout(done, 200));
+      effect.release();
+      // The stop waited for the held effect and its cleanup, so it can confirm.
+      expect(await stopping).toMatchObject({ stopped: true, receipt: { outcome: "confirmed" } });
+    } else {
+      // The effect outlasts the stop's bounded wait: not a confirmed stop.
+      expect(await stopping).toMatchObject({ stopped: true, receipt: { outcome: "uncertain" } });
+      effect.release();
+    }
+    expect(await body.backgroundStatus()).toBe(409);
+    expect(discord.invites.size).toBe(0);
+    // Held before its message, a revoked launch never posts one.
+    const launchMessages = discord.calls.filter((call) => /^POST \/channels\/\d+\/messages$/u.test(call));
+    expect(launchMessages).toHaveLength(point.includes("message") ? 1 : 0);
+    expect(s.shares.stats()).toHaveLength(0);
+    expect((await s.admit("member-code", "i-here")).status).toBe(403);
+    playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+    expect(s.shares.stats()).toHaveLength(0);
+    const fresh = await roomTool(s, body).invoke({ action: "start", sourceId: "play" });
+    expect(fresh.receipt).toMatchObject({ outcome: "confirmed" });
+    expect(discord.invites.size).toBe(1);
+    const admitted = await s.admit("member-code", "i-here");
+    expect(admitted.status).toBe(200);
+    expect(admitted.body.session.shareId).toBe(fresh.session.shareId);
+  },
+  30_000,
+);

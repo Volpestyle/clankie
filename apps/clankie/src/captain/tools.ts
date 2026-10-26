@@ -1892,6 +1892,9 @@ function discordServerTools(
   ];
 }
 
+/** How long a room stop waits for an older launch already inside its Discord effect. */
+const ROOM_STOP_SETTLE_MS = 10_000;
+
 /**
  * A self-hosted bot's room launch (VUH-2835): the turn's own Discord body
  * posts the invite with the existing `watch_start`, and the presence write it
@@ -1924,6 +1927,7 @@ export function activityRoomLauncher(
         .find((room) => room.guildId === server)?.channelId,
     reserve: (callId, server, voice) => fence.reserveLaunch(callId, server, voice),
     revoke: (server, voice) => fence.revokeLaunches(server, voice),
+    settle: (server, voice) => fence.settleRevoked(server, voice, ROOM_STOP_SETTLE_MS),
     watch: async (action, callId) => {
       const result = await actions.execute({ action, callId, actorId, guildId, channelId, messageId });
       if (result.ok) return "confirmed";

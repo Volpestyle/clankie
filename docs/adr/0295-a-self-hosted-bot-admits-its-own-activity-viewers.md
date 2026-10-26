@@ -77,7 +77,14 @@ stop waits for a pending launch, so no older launch republishes after it. A
 caller's timeout does not prove the body stopped, so each room launch reserves
 its call id before the body call, a stop revokes the channel's reservations,
 and the presence route refuses a revoked launch's `activity_start` before it
-posts an invite or registers.
+posts an invite or registers. A launch the route already accepted is checked
+again at every Discord effect the runtime commits (the invite post, each
+stale-invite delete and the message post) and before it registers. If it was
+revoked meanwhile, whatever already landed is taken back: its invite is
+revoked, which kills the link in any message it posted, unless a newer launch
+holds the channel. A stop waits a bounded ten seconds for such accepted
+launches to finish that cleanup; until they have, its receipt is `uncertain`,
+not `confirmed`.
 
 A `#share` fragment still opens a delegated grant on a self-hosted viewer
 outside Discord. Hosted config never sets `delegated`, so hosted viewers keep

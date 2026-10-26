@@ -186,6 +186,11 @@ export function createActivityLaunches(
   // are unique per tool call, so the revoked set only grows by stopped launches.
   const reserved = new Map<string, Set<string>>();
   const revoked = new Set<string>();
+  // Accepted room launch writes still running in the presence route, and the
+  // revoked call ids a stop must wait for, per destination.
+  const inFlight = new Map<string, Promise<void>>();
+  const revokedAt = new Map<string, Set<string>>();
+  const launchCall = (idempotencyKey: string) => /^captain:(.+):watch_start$/u.exec(idempotencyKey)?.[1];
   // One queue for every destination: they share one producer client whose
   // status listing reconciles all of its shares, so admissions and cleanup in
   // different channels must not interleave either. They are rare and
@@ -257,13 +262,52 @@ export function createActivityLaunches(
      */
     revokeLaunches(guildId: string, channelId: string) {
       const destination = key(guildId, channelId);
-      for (const callId of reserved.get(destination) ?? []) revoked.add(callId);
+      const stopped = revokedAt.get(destination) ?? new Set<string>();
+      for (const callId of reserved.get(destination) ?? []) {
+        revoked.add(callId);
+        stopped.add(callId);
+      }
+      revokedAt.set(destination, stopped);
       reserved.delete(destination);
     },
     /** False for the presence write of a revoked room launch: it must not post or register. */
     allowsLaunch(idempotencyKey: string) {
-      const callId = /^captain:(.+):watch_start$/u.exec(idempotencyKey)?.[1];
+      const callId = launchCall(idempotencyKey);
       return callId === undefined || !revoked.has(callId);
+    },
+    /** The presence route marks an accepted room launch write until its handling ends. */
+    beginLaunch(idempotencyKey: string): (() => void) | undefined {
+      const callId = launchCall(idempotencyKey);
+      if (callId === undefined) return undefined;
+      let done!: () => void;
+      inFlight.set(callId, new Promise<void>((resolve) => (done = resolve)));
+      return () => {
+        inFlight.delete(callId);
+        done();
+      };
+    },
+    /**
+     * Waits, at most `timeoutMs`, for revoked launches in this channel that the
+     * route already accepted, including their cleanup. False while any still runs.
+     */
+    async settleRevoked(guildId: string, channelId: string, timeoutMs: number): Promise<boolean> {
+      const pending = [...(revokedAt.get(key(guildId, channelId)) ?? [])].flatMap((callId) => {
+        const running = inFlight.get(callId);
+        return running === undefined ? [] : [running];
+      });
+      if (pending.length === 0) return true;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settled = await Promise.race([
+        Promise.all(pending).then(() => true),
+        new Promise<boolean>((done) => (timer = setTimeout(() => done(false), timeoutMs))),
+      ]);
+      clearTimeout(timer);
+      return settled;
+    },
+    /** A current launch, or a room launch reserved since the last stop, holds this channel. */
+    hasNewerLaunch(guildId: string, channelId: string) {
+      const destination = key(guildId, channelId);
+      return launched.has(destination) || (reserved.get(destination)?.size ?? 0) > 0;
     },
     launched(guildId: string, channelId: string) {
       const destination = key(guildId, channelId);

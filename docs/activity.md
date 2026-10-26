@@ -42,7 +42,10 @@ nothing is resent). `stop` ends the share and revokes the invite through
 waits for a pending launch and no older launch can republish after it. A stop
 also revokes every room launch reserved in that channel, so a body call that
 outlived the tool's timeout is refused when its presence write finally arrives:
-it posts no invite and registers no launch. Local
+it posts no invite and registers no launch. A launch already inside its
+Discord effect is checked again at each invite, delete and message step and
+takes back anything that landed; a stop confirms only once that has finished,
+and otherwise reports `uncertain`. Local
 owner API/CLI requests can still create and switch delegated shares without an
 adapter.
 

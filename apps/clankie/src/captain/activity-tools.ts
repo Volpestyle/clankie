@@ -19,6 +19,8 @@ export interface ActivityRoomLauncher {
   reserve(callId: string, guildId: string, channelId: string): void;
   /** Revokes every reserved launch in this channel, even one whose body call is still running. */
   revoke(guildId: string, channelId: string): void;
+  /** Waits, bounded, for revoked launches the body already started; false while any still runs. */
+  settle(guildId: string, channelId: string): Promise<boolean>;
 }
 
 const ActivityShareParameters = Type.Object({
@@ -145,13 +147,18 @@ export function activityTools(
             throw new Error("activity_destination_refused");
           const stopping = listed.sessions.find((session) => session.shareId === shareId);
           // Revoke first: a launch still in its body call must not land after this stop.
-          if (roomLaunch !== undefined && action === "stop" && stopping !== undefined)
+          let settled = true;
+          if (roomLaunch !== undefined && action === "stop" && stopping !== undefined) {
             roomLaunch.revoke(stopping.scope.guildId, stopping.scope.channelId);
+            // A revoked launch already inside its Discord effect cleans up after
+            // itself; a stop only confirms once that has happened.
+            settled = await roomLaunch.settle(stopping.scope.guildId, stopping.scope.channelId);
+          }
           result = await sharing.request(parsed, authorize);
           if (roomLaunch !== undefined && action === "stop")
             result = {
               ...(result as object),
-              receipt: await launchReceipt(roomLaunch, "watch_stop", callId, listed, shareId!),
+              receipt: await launchReceipt(roomLaunch, "watch_stop", callId, listed, shareId!, settled),
             };
         }
       } else {
@@ -209,7 +216,14 @@ async function launchReceipt(
   callId: string,
   listed: { sessions: LaunchedSession[] },
   shareId: string,
+  settled: boolean,
 ) {
   const session = listed.sessions.find((candidate) => candidate.shareId === shareId);
-  return { outcome: await launcher.watch(action, callId), receiptId: randomUUID(), session };
+  const outcome = await launcher.watch(action, callId);
+  // An older accepted launch may still be running: not a confirmed stop yet.
+  return {
+    outcome: outcome === "confirmed" && !settled ? "uncertain" : outcome,
+    receiptId: randomUUID(),
+    session,
+  };
 }
