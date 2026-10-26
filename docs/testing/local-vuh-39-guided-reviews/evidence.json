@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/0bc0f16c21d029d0599ae7c2dbdd830066d24dcb2e420ed4b710b315b09002af"
     },
     {
+      "path": "receipt-final-proof.tar",
+      "size": 204800,
+      "sha256": "6f3a6a47cf50bc854b01e5a6586eaa570b199435327be8f6e472df40204cec85",
+      "url": "clankie://evidence/sha256/6f3a6a47cf50bc854b01e5a6586eaa570b199435327be8f6e472df40204cec85"
+    },
+    {
       "path": "repair-proof.tar",
       "size": 133120,
       "sha256": "82417daed3db75a89152db890df403b1d076dc1821d6b2786f1fc4dd57168fd4",
