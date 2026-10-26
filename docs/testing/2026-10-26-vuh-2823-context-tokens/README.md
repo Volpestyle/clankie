@@ -4,12 +4,12 @@ Source reader/store proof on 2026-10-26, candidate based on `251de1c79`.
 This is measured against live local Herdr sessions and their native transcript
 files, without changing or resuming any session. It is not deployed-service proof.
 
-| Native seat | Session | Harness | Context tokens | 300K flag |
-| --- | --- | --- | ---: | --- |
-| Operator head (separate proof): `term_65d97f756b3881` | `c302c14b-2de0-48f5-b757-6535b8e75da9` | claude | 436,562 | yes |
-| Claude worker (Dex): `term_65ea04595a718173` | `a383aa17-4977-4763-a3e6-6093b6a43127` | claude | 153,723 | no |
-| Codex reviewer: `term_65e92aca921b0156` | `01a16d3a-98c4-75a1-9283-9cfbe61469ea` | codex | 372,715 | yes |
-| Codex worker (this seat): `term_65ebf2183cb00191` | `01a1789c-1918-7412-949e-86a42e0aec98` | codex | 140,255 | no |
+| Native seat                                           | Session                                | Harness | Context tokens | 300K flag |
+| ----------------------------------------------------- | -------------------------------------- | ------- | -------------: | --------- |
+| Operator head (separate proof): `term_65d97f756b3881` | `c302c14b-2de0-48f5-b757-6535b8e75da9` | claude  |        436,562 | yes       |
+| Claude worker (Dex): `term_65ea04595a718173`          | `a383aa17-4977-4763-a3e6-6093b6a43127` | claude  |        153,723 | no        |
+| Codex reviewer: `term_65e92aca921b0156`               | `01a16d3a-98c4-75a1-9283-9cfbe61469ea` | codex   |        372,715 | yes       |
+| Codex worker (this seat): `term_65ebf2183cb00191`     | `01a1789c-1918-7412-949e-86a42e0aec98` | codex   |        140,255 | no        |
 
 The source `readFleet` census supplies native terminal/session identity; titles
 are not used to infer roles. The operator head (`c302c14b`) is deliberately
