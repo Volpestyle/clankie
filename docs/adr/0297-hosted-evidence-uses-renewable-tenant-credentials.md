@@ -148,11 +148,16 @@ Disabling the feature, revoking the evidence grant, replacing the installation
 or disabling its tenant prevents further issuance. The body clears its cache
 when it observes revocation, refuses new evidence operations and cancels its
 owned streams where possible. A grant revision is enforced by our issuer and
-service, not by S3 against an already-issued session. A stolen session can remain
-usable until its absolute expiry: **up to 15 minutes after revocation**. Already
-issued signed GETs share that upper bound, and bytes already downloaded cannot
-be recalled. Emergency provider-side denial and recovery are separate private
-operator procedures; this proposal promises no immediate remote invalidation.
+service, not by S3 against an already-issued session. A stolen session or an
+issued signed GET can admit new requests until absolute expiry: **up to 15
+minutes after revocation**. This bounds request admission, not transfer duration.
+S3 checks signed-URL expiry when the HTTP request starts: a download begun just
+before expiry can continue afterward; a new request or reconnect after expiry
+fails. See [S3's expiration contract](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html#PresignedUrl-Expiration).
+Body-side cancellation cannot terminate a leaked URL's direct-S3 transfer, and
+bytes already downloaded cannot be recalled. This design promises neither a hard
+transfer cutoff at 900 seconds nor immediate remote invalidation. Emergency
+provider-side denial and recovery remain separate private operator procedures.
 
 ### Defaults and activation
 
@@ -189,8 +194,8 @@ gateway, malicious repository/model output and replayed or delayed replies.
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Cross-tenant/confused-deputy request                       | Verified installation maps to server-owned bucket, prefix and policy; exact response binding and SDK destination checks. Same-SHA blobs in different tenants confer no access. IAM is the final object boundary.                                                                                                                                                                           |
 | Gateway reads or substitutes a session                     | Body-key proof on the request plus encrypted, fleet-signed, nonce-bound response; reject audience, binding, time, revision or signature mismatch. Gateway can still deny delivery.                                                                                                                                                                                                         |
-| Prompt injection or hostile tenant code steals credentials | Never deliver credentials to workers or tools. The current single-uid body is not a secret boundary against arbitrary same-user execution. A tenant may compromise its own session; its blast radius must remain its tenant bucket and 900-second lease.                                                                                                                                   |
-| Refresh races revocation, restart or replacement           | Broker lock, durable revision/tombstone, fresh fleet check after restart and no publication after withdrawal. Existing S3 sessions retain the bounded expiry window above.                                                                                                                                                                                                                 |
+| Prompt injection or hostile tenant code steals credentials | Never deliver credentials to workers or tools. The current single-uid body is not a secret boundary against arbitrary same-user execution. A tenant may compromise its own session; its resource scope must remain its tenant bucket; request admission ends at session expiry, while an already-started transfer may continue.                                                            |
+| Refresh races revocation, restart or replacement           | Broker lock, durable revision/tombstone, fresh fleet check after restart and no publication after withdrawal. Existing S3 sessions retain the request-admission window above; ongoing direct transfers can outlast it.                                                                                                                                                                     |
 | Overwrite, deletion or spend abuse                         | Conditional creation enforced in private policy; no delete/config authority, bounded existing upload contract, per-tenant issuance limits and private monitoring. Direct PUT with a stolen session bypasses service upload limits and can incur storage/egress costs. Session expiry alone is not a spend cap; require an explicit operational budget and containment plan before rollout. |
 | Issuer, service uid or platform compromise                 | Trusted components can access that tenant's session; a compromised issuer or infrastructure administrator can cross tenants. This is not end-to-end encryption against the platform.                                                                                                                                                                                                       |
 
@@ -243,8 +248,12 @@ Acceptance for that slice:
 Then stop for a separate, explicitly authorized hosted proof and production
 startup/activation plan in `clankie-ops`. That plan must name real identity and
 destination verification, two-tenant IAM negatives (including key enumeration),
-real session expiry/renewal, conditional-write enforcement, the revocation bound,
-quotas, retained-data/backups and restore acceptance, full startup and owner
+real session expiry/renewal, conditional-write enforcement, and distinct
+revocation/expiry cases: new or reconnected requests after expiry must refuse,
+while a direct signed GET begun just before expiry may continue transferring
+afterward. Record both admission time and last-byte time; do not report request
+expiry as a proven transfer cutoff. It must also cover quotas,
+retained-data/backups and restore acceptance, full startup and owner
 activation, and a rollback preserving old records. The historical proof bucket
 is not implicitly reused. Passing the local slice does not finish VUH-1913.
 
@@ -256,8 +265,9 @@ is not implicitly reused. Passing the local slice does not finish VUH-1913.
   lifetime and rotation burden. Rejected.
 - Proxy every object through the fleet: could centralize revocation and avoid
   handing storage sessions to bodies, but introduces a new bulk data service
-  and changes the landed direct-S3 path. Reconsider if a 15-minute exposure
-  window is unacceptable.
+  and changes the landed direct-S3 path. Reconsider if a 15-minute new-request
+  window or continued transfers after expiry is unacceptable; a hard transfer
+  cutoff needs its own enforced data path and proof.
 - Use one shared bucket immediately: cheaper to operate, but requires solving
   metadata enumeration and missing HEAD without broadening tenant authority.
   Deferred rather than weakening the current adapter's access-error handling.
@@ -284,7 +294,9 @@ VUH-1913 lives in the built-in tracker at
 `clankie-work://local/issue/bcd5580c-6a77-4287-b357-dc0377a12407`.
 
 **James's one decision:** approve or reject the default-off S3 design above
-(tenant-only buckets, 900-second renewable leases and up to 15 minutes of
-residual access after revocation), so the offline vertical slice can be scoped.
-Approval does not authorize cloud work or production activation. If the
-revocation window is unacceptable, reject this design and revisit a proxy.
+(tenant-only buckets and 900-second renewable leases), accepting that revocation
+can leave **up to 15 minutes to start new requests, with already-started direct-S3
+transfers able to continue after expiry**, so the offline vertical slice can be
+scoped. Approval does not authorize cloud work or production activation. If that
+exposure is unacceptable or a hard transfer cutoff is required, reject this
+design and revisit a proxy.
