@@ -12,6 +12,12 @@ import { MAXIMUM_TRUST_CODEX_CONFIG } from "@clankie/protocol/owner-settings";
 import { readSeatMaximumTrust, type SeatCommandOptions, type SeatPlan } from "./seat.ts";
 import { resolveSeatContext } from "./seat-context.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
+import {
+  bindLaunchedHarness,
+  mintBridgeNonce,
+  writeBridgeNonceFile,
+  type SeatBinding,
+} from "./seat-binding.ts";
 import { startCodexAppServerSeat } from "../../../clankie/src/captain/codex-app-server.ts";
 import { codexTrackerOverrides } from "../../../clankie/src/captain/tracker-isolation.ts";
 import { fleetSeatToolCatalogPath } from "@clankie/protocol/tool-catalog";
@@ -206,6 +212,8 @@ export async function runCodexSeat(
   writeFileSync(bindingPath, JSON.stringify(binding), { mode: 0o600 });
   const seatEnv = { ...env };
   for (const key of Object.keys(seatEnv)) if (/^(?:SWARM_|CLANKIE_SWARM_)/u.test(key)) delete seatEnv[key];
+  delete seatEnv.CLANKIE_BRIDGE_NONCE;
+  delete seatEnv.CLANKIE_BRIDGE_NONCE_FILE;
   delete seatEnv.CLANKIE_SEAT_SESSION_ID;
   delete seatEnv.CLANKIE_CONVERSATION_ID;
   seatEnv.CLANKIE_CODEX_SEAT_BINDING = bindingPath;
@@ -214,6 +222,15 @@ export async function runCodexSeat(
   if (plan.conversationId) seatEnv.CLANKIE_CONVERSATION_ID = plan.conversationId;
   let child: ChildProcess | undefined;
   let running: Promise<number> | undefined;
+  // The app-server runs Codex's tools and MCP servers, so it is the harness the
+  // service admits the bridge under (VUH-2816). Only MCP receives its nonce file.
+  const bridgeNonce = mintBridgeNonce();
+  const nonceFile = writeBridgeNonceFile(directory, bridgeNonce);
+  const bridgeConfig = [
+    `plugins.${JSON.stringify(PLUGIN)}.mcp_servers.lead.enabled=false`,
+    `mcp_servers.clankie={command="clankie",args=["mcp","--lane","operator"],env={CLANKIE_BRIDGE_NONCE_FILE=${JSON.stringify(nonceFile)}},env_vars=["CLANKIE_CONVERSATION_ID","CLANKIE_CONTROL_PLANE_URL","CLANKIE_CAPTAIN_URL","CLANKIE_STATE_HOME","CLANKIE_OPERATOR_TOKEN","CLANKIE_CAPTAIN_TOKEN","XDG_STATE_HOME"]}`,
+  ];
+  let seatBinding: SeatBinding | undefined;
   const launch =
     options.spawnImpl ??
     ((command, args, cwd, childEnv) =>
@@ -254,7 +271,16 @@ export async function runCodexSeat(
       env: Object.fromEntries(
         Object.entries(seatEnv).filter((entry): entry is [string, string] => entry[1] !== undefined),
       ),
-      config: plan.args.filter((_value, index) => index % 2 === 1),
+      onServerStarted: (pid) => {
+        seatBinding = bindLaunchedHarness(options, {
+          command,
+          conversationId: plan.conversationId,
+          harnessPid: pid,
+          nonce: bridgeNonce,
+          stderr,
+        });
+      },
+      config: [...plan.args.filter((_value, index) => index % 2 === 1), ...bridgeConfig],
       catalogBridge: "operator",
       ...(env.HERDR_PANE_ID?.trim()
         ? {
@@ -362,6 +388,7 @@ export async function runCodexSeat(
     try {
       await delivery;
       await upstream?.close();
+      await seatBinding?.stop();
     } finally {
       await seat.close();
       rmSync(directory, { recursive: true, force: true });

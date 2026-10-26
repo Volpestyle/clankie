@@ -115,6 +115,18 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     ...fleetLinks,
     ...workerTools,
     ...workerReports,
+    ...(report.operatorSeatBindings === undefined
+      ? []
+      : "available" in report.operatorSeatBindings
+        ? [
+            `  ${mark(report.operatorSeatBindings.available)} Native seat bindings · ${report.operatorSeatBindings.available ? "helper available (not a live harness probe)" : clean(report.operatorSeatBindings.error ?? "unavailable")}${report.operatorSeatBindings.recovery ? ` · ${clean(report.operatorSeatBindings.recovery)}` : ""}`,
+            ...(report.operatorSeatBindings.lastRefusal
+              ? [
+                  `  ! Last native seat refusal · ${clean(report.operatorSeatBindings.lastRefusal.error)} · ${clean(report.operatorSeatBindings.lastRefusal.recovery)}`,
+                ]
+              : []),
+          ]
+        : [`  ○ Native seat bindings · unavailable · ${clean(report.operatorSeatBindings.detail)}`]),
     ...(report.seatBridges === undefined
       ? []
       : "bridges" in report.seatBridges

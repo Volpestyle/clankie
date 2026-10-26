@@ -192,6 +192,21 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
         fetchImpl: wire.fetchFor(token),
       });
       try {
+        // Joined seats retain their delegated MCP route. Their authenticated
+        // tunnel never becomes a local socket proof for the operator registry.
+        for (const [method, path] of [
+          ["POST", "/v1/mcp"],
+          ["DELETE", "/v1/captain/seat-bindings"],
+        ] as const) {
+          const localOnly = await wire.rpc({
+            method,
+            path,
+            headers: { authorization: `Bearer ${token}` },
+            body: "{}",
+          });
+          expect(localOnly.status).toBe(403);
+          expect(await localOnly.json()).toMatchObject({ error: "joined_seat_route_refused" });
+        }
         const tools = await upstream.listTools();
         expect(tools.map((tool) => tool.name)).toContain("message_seat");
         expect(tools.map((tool) => tool.name)).not.toContain("shell");

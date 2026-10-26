@@ -13,6 +13,7 @@ import { z } from "zod";
 import { registerSeatRoutes } from "../src/app/seat-routes.ts";
 import type { ClankieAppDependencies } from "../src/app/types.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
 
 const ChannelSchema = z.object({
   method: z.literal("notifications/claude/channel"),
@@ -57,6 +58,7 @@ async function fixture(fault: "outage" | "lost-response" | "refused" | "none") {
     // Owned service adapter: all delivery and persistence run in SeatOutbox;
     // this fixture has no model, fleet, or external tool bank.
     dependencies: {
+      operatorSeatBindings: permissiveSeatBindings(),
       captain: {
         seatContext: (id?: string) =>
           id === "global-default" ? { conversationId: id, cwd: root } : undefined,

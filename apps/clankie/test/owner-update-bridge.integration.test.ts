@@ -17,8 +17,45 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
+import { OperatorSeatBindings } from "../src/operator-seat-bindings.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
+
+// Publication retry semantics below are post-admission coverage. A direct or
+// legacy bearer client is deliberately excluded from the operator seat surface.
+it("refuses legacy owner-update MCP before publication without a native seat binding", async () => {
+  const service = await createClankieApp({
+    captain: createStubCaptain({}),
+    operatorSeatBindings: new OperatorSeatBindings({
+      socket: async () => undefined,
+      processes: async () => undefined,
+      birth: async () => undefined,
+    }),
+    authenticateOperator: async () => ({ operatorId: "mail-owner" }),
+  });
+  try {
+    for (const query of ["", "?conversationId=global-default"]) {
+      const response = await service.app.request(`/v1/mcp${query}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer mail-fixture" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "mail_owner_update", arguments: { title: "Excluded", body: "No native seat" } },
+        }),
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: query ? "seat_binding_required" : "seat_binding_conversation_required",
+      });
+    }
+  } finally {
+    service.close();
+  }
+});
 
 it("keeps distinct mail calls unique through real stdio bridge and service restarts, preserving exact retries", async () => {
   const root = await mkdtemp(join(tmpdir(), "owner-mail-bridge-"));
@@ -49,6 +86,7 @@ it("keeps distinct mail calls unique through real stdio bridge and service resta
       settings: new SettingsStore(join(root, "settings.json")),
     });
     const app = await createClankieApp({
+      operatorSeatBindings: permissiveSeatBindings(),
       captain,
       authenticateOperator: async (request) =>
         request.headers.get("authorization") === "Bearer mail-fixture"

@@ -25,6 +25,7 @@ import { createStubCaptain, type LaneTool } from "../src/captain/port.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { TurnSettledLog } from "../src/captain/turn-metrics.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
 
 // Real device authentication, owner route, conversation driver/admission, seat
 // mailbox and transcript projection. No model/session replacement or live probes.
@@ -35,7 +36,7 @@ afterEach(async () => {
 const ID = "global-default";
 const DEVICE = "owner-phone";
 const BINDING = "native-seat-fixture";
-async function fixture(tools: readonly LaneTool[] = []) {
+async function fixture(tools: readonly LaneTool[] = [], admittedBridge = true) {
   const root = mkdtempSync(join(tmpdir(), "owner-app-seat-turn-"));
   const now = Date.now();
   const key = randomBytes(32);
@@ -114,6 +115,7 @@ async function fixture(tools: readonly LaneTool[] = []) {
     beforePoll?: () => Promise<void>;
   } = {};
   const service = await createClankieApp({
+    ...(admittedBridge ? { operatorSeatBindings: permissiveSeatBindings() } : {}),
     settings,
     captain: createStubCaptain({
       laneToolBank: async (lane) => ({ lane, tools }),
@@ -203,6 +205,27 @@ async function fixture(tools: readonly LaneTool[] = []) {
   };
   return { service, conversations, outbox, hooks, dispatch, send, poll, journal, revoke };
 }
+
+// Owner app dispatch is a separate authenticated owner surface. It does not
+// inherit the right to execute operator MCP as the native head.
+it("owner app sends remain supported while bearer-only MCP is refused", async () => {
+  const f = await fixture([], false);
+  const poll = f.poll();
+  const response = await f.send("ios-owner");
+  expect(response.status).toBe(200);
+  const accepted = (await response.json()) as { result: { runId: string } };
+  const event = OperatorSeatEventSchema.parse((await poll)[0]);
+  expect(event.kind).toBe("turn");
+  const mcp = await f.service.app.request(`/v1/mcp?conversationId=${ID}`, {
+    method: "POST",
+    headers: { authorization: "Bearer fixture-owner", "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  });
+  expect(mcp.status).toBe(403);
+  expect(await mcp.json()).toMatchObject({ error: "seat_binding_required" });
+  expect(f.outbox.acknowledge(event.id, BINDING)).toBe(true);
+  expect(await f.conversations.awaitRunResult(accepted.result.runId)).toBe(true);
+});
 
 it("one owner turn dispatches one tracker write while native admission overlaps service routing", async () => {
   const directory = mkdtempSync(join(tmpdir(), "owner-turn-tracker-"));

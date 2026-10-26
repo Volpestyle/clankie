@@ -391,6 +391,12 @@ export {
 export {
   OPERATOR_HEAD_AGENT_NAME,
   OPERATOR_SEAT_EVENTS_PATH,
+  OPERATOR_SEAT_BINDINGS_PATH,
+  OPERATOR_SEAT_BRIDGE_CLAIM_HEADER,
+  OperatorSeatBindingRequestSchema,
+  type OperatorSeatBindingRequest,
+  OperatorSeatBindingStatusSchema,
+  type OperatorSeatBindingStatus,
   OPERATOR_SEAT_EVENT_WAIT_MS_MAX,
   OperatorSeatEventKindSchema,
   LEGACY_OPERATOR_SEAT_EVENT_KINDS,

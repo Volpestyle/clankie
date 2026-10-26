@@ -7393,9 +7393,20 @@ Definitions are copied into a file readable only by the owner; `--dry-run` shows
 its path without printing server credentials. The generated bridge requires the
 launcher's `CLANKIE_CONVERSATION_ID`; reusing the file with that binding absent
 fails before connecting. Its tools use `mcp__clankie__*`; the plugin still supplies
-identity, hooks, room-agent permissions and skills. Direct unbound operator
-bridges outside this launch retain the known [VUH-2816](https://linear.app/vuhlp/issue/VUH-2816)
-gap. No owner MCP files are written.
+identity, hooks, room-agent permissions and skills. Operator MCP and event
+poll/read/ack/reply require an explicit conversation and a kernel-verified
+launcher binding; an unbound bridge never inherits `global-default`. The launcher
+registers its direct harness child plus a nonce hash at
+`PUT /v1/captain/seat-bindings`. Only the intended bridge receives the nonce
+through private MCP configuration (Codex/OpenCode use a 0600 nonce file), not
+the inherited harness environment or argv. `clankie doctor` reads helper
+availability and the last typed refusal/recovery from
+`GET /v1/captain/seat-bindings`; this read does not prove a live model harness.
+Prime lacks a verified kernel PID/launch edge and remains refused. Real harness
+wrapper compatibility remains unproven; process chains, precise refusals,
+joined/relay exclusions and consumed-report recovery are in the
+[seat binding reference](../integrations/claude-plugin/README.md#binding-and-the-known-unbound-bridge-gap).
+No owner MCP files are written.
 
 Every fresh Claude launch starts a new Claude Code session under a recorded id.
 Without a selection it takes the shared global chat (`global-default`) while no

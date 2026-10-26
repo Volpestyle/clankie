@@ -169,13 +169,115 @@ before it can serve tools.
 
 The new file is a convenient bare-server artifact in a private 0700 launch
 directory, mode 0600. It contains no operator bearer by default, but a same-user
-process could deliberately supply a conversation and invoke it. This is not a
-verified-seat authority boundary. A manually started, unbound operator bridge
-outside this generated launch still has the existing
-[VUH-2816](https://linear.app/vuhlp/issue/VUH-2816) defect: it can default to the
-owner's lead conversation. This patch does not fix that wider defect or claim
-that all unbound bridges fail closed. The operator plugin stays session-only;
-plain `claude` without it keeps its own identity and configuration.
+process could deliberately supply a conversation and invoke it. The bridge's
+binding check below uses kernel process facts and a bridge-only nonce. It is a
+guard against strays, not an authority boundary against a hostile same-user
+process that holds the operator bearer and can launch its own child.
+
+An operator bridge acts as the lead only for the process its launcher
+registered ([VUH-2816](https://linear.app/vuhlp/issue/VUH-2816)). The service
+used to answer a request with no conversation from the owner's `global-default`
+lead chat, and the bearer plus a free-text `conversationId` named no caller, so
+a stray with the clankie server in its MCP config (or a `clankie mcp` started in a
+seat's shell, inheriting its environment and ancestry) polled, acknowledged and
+messaged as the lead. Now:
+
+- **The launcher registers.** After spawning the harness, `clankie claude` (and
+  the codex, opencode and grok launchers) `PUT /v1/captain/seat-bindings` with
+  the conversation, the harness pid and a hash of a per-launch nonce. The
+  service takes the launcher's identity from the kernel's owner of the request's
+  TCP socket (the same native helper the local-fleet proof uses), never from the
+  body, and records pid plus kernel birth time. The existing native pair census
+  must also prove the named harness is a direct child of that socket owner,
+  with matching live births. An unrelated bearer holder cannot nominate the
+  genuine harness, including after service restart before heartbeat. It
+  re-registers every few seconds and withdraws on exit.
+- **The service admits only that bridge.** `/v1/mcp`, `GET /v1/seat/events`,
+  and the events `ack` and `reply` routes admit an operator-lane request only
+  when the socket's owner is the harness's **direct child** (or, for a launcher
+  that spawned a shell first, the one registered extra hop), presenting the nonce
+  in `x-clankie-bridge-claim`, or is the registered launcher itself for its
+  pumps. The conversation must be named: there is no `global-default` fallback.
+  A stray nested under the genuine harness or its shell, a wrong conversation, a
+  reused pid (births differ), a dead launcher, a second live claimant and a
+  caller with no provable socket are all refused with a typed `seat_*` error.
+- **The bridge refuses early.** Without a selected conversation it exits with a
+  diagnostic before reading the credential or contacting the service.
+- **Where the nonce travels.** Claude: only in the per-launch 0600
+  `seat-mcp.json` MCP entry. Grok: only the ACP `mcpServers` environment.
+  Codex and OpenCode: a private 0600 nonce file; only their MCP server config
+  receives `CLANKIE_BRIDGE_NONCE_FILE`. Codex disables the plugin's `lead`
+  transport and supplies a native `mcp_servers.clankie` entry; OpenCode's
+  plugin preserves that explicit server environment. The harness environment
+  and argv contain no nonce bytes, and inherited claim variables are cleared.
+  `--dry-run` creates no nonce and prints none. The file reader refuses symlinks,
+  public permissions, wrong owner, wrong size and malformed claims.
+
+Expected process chains (source candidate; native model harness launches remain unproven):
+
+| Launcher  | Registered child and expected bridge chain                                    | Remaining gap                                                                                                                                                                                                                                                                                                                                  |
+| --------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude`  | launcher → Claude → MCP bridge; depth 1                                       | A node/npm wrapper that adds another process needs native confirmation.                                                                                                                                                                                                                                                                        |
+| `claudeN` | launcher → interactive shell → Claude → MCP bridge; shell registered, depth 2 | Shell alias/function and node wrappers can add hops. A depth-2 claim permits this exact distance; it does not prove which wrapper binary ran.                                                                                                                                                                                                  |
+| Codex     | launcher → app-server → MCP bridge; app-server PID from `onServerStarted`     | An npm shim spawning the native binary can add a hop; no real app-server launch was authorized.                                                                                                                                                                                                                                                |
+| OpenCode  | launcher → OpenCode → MCP bridge                                              | Plugin-host/wrapper parentage and native config consumption need real harness confirmation.                                                                                                                                                                                                                                                    |
+| Grok      | launcher → ACP agent → MCP bridge                                             | ACP child PID is registered; native wrapper ancestry needs confirmation.                                                                                                                                                                                                                                                                       |
+| Prime     | daemon → Python kernel → MCP bridge                                           | **OPEN:** no launcher-visible kernel PID, so local operator bridge is refused. Needed native interface: return the kernel PID for this exact launch, with its kernel lifetime and launcher/daemon launch correlation; the service must independently observe that lifetime and verified launch edge. A bare self-asserted PID is insufficient. |
+
+Limits and caller routes:
+
+- An operator-bearer holder can launch its own child and race to register an empty
+  conversation. The direct-child check prevents unrelated-PID squatting, not this
+  same-user impersonation or a hostile user reading private nonce files. Do not
+  call a self-asserted launch authenticated. Existing `seat-context` selects or
+  creates conversations but issues no launch ticket. Fleet/remote launch intent
+  belongs to admitted native hires/delegations, not free local operator launches;
+  this repair reuses their native census rather than inventing blanket authority.
+- The registry is in service memory. After restart, old bridges refuse until
+  the genuine launcher's heartbeat succeeds. A different live controller yields
+  `seat_binding_conflict`; do not terminate another seat to clear it.
+- Joined/remote leads use their existing machine token and `seat.authorize`
+  delegated `/v1/fleet/lead/*` route, outside this local kernel registry. Their
+  local `/v1/mcp` and binding routes refuse. Device relay allowlists owner
+  dispatch/tail routes and excludes local MCP/binding registration. Owner-app
+  turns still use owner dispatch. Legacy bearer-only owner-update MCP is refused;
+  a registered seat uses the normal bound MCP path. Permissive retry fixtures
+  prove only behavior after admission, never real consumers or launches.
+- `POST /v1/seat/transcript` and prompt/memory reads remain bearer-only.
+- Fixtures prove real native Node launcher/harness/bridge process chains and
+  HTTP/socket admission, not real Claude, Codex, OpenCode, Grok or Prime launches.
+  Full original real-operator acceptance remains open pending those checks.
+
+`clankie doctor` reads `GET /v1/captain/seat-bindings`: helper availability,
+registered conversations and the last refusal/recovery; no claim or hash is
+returned. A last refusal is historical, not a live harness probe. Startup and
+registration errors preserve the precise reason: `seat_binding_helper_missing`
+(prepare/repair the native helper), `seat_process_unproven` (use a direct IPv4
+loopback socket and inspect the helper), `seat_harness_not_child` or
+`seat_bridge_not_registered` (wrong launch chain), `seat_bridge_claim_invalid`
+(recreate the private MCP config), and `seat_bridge_claimed` (another bridge
+holds the launch). Relaunch only the seat you own; do not copy claims or restart
+the real service as a diagnostic workaround.
+
+#### Reports a stray session consumed
+
+A stray that acknowledged a report marks it read in the lead conversation's
+inbox, so the real lead's `worker_reports` no longer lists it. Read reports are
+pruned from the conversation file a day after they are read
+(`READ_REPORT_RETENTION_MS`), and an exact-ID status then reads as unknown, so
+the retained record may or may not still exist. Recovery reads existing evidence
+and creates no new delivery:
+
+1. Read the stray session's own transcript (its Claude profile's project log);
+   it holds the report text it received and anything it sent.
+2. Read the retained store record for the exact delivery ID, if the day has not
+   passed or the file was not yet rewritten, and the exact-ID status.
+3. Read what the worker itself wrote on the tracker issue it reported on.
+
+Never replay, resend, re-acknowledge or edit a retained or uncertain report: a
+duplicate delivery or a second acknowledgment is a new effect. If the stray also
+messaged a worker as the lead, tell that worker (through the real lead) which
+instructions were not the lead's.
 
 `--conversation ID` resolves an existing global/workspace or Discord room conversation through
 `GET /v1/captain/seat-context`, starts Claude in its service-owned workspace and
@@ -361,6 +463,7 @@ bank, not the harness.
 | He answers as Claude Code                  | The seat was not launched by `clankie claude`, which enables the plugin for its session    |
 | Every Claude Code session answers as him   | The plugin is enabled at user scope; `claude plugin disable clankie@clankie`               |
 | `/mcp` shows `lead` failed                 | The service is down or the operator credential is missing: `clankie status`                |
+| `lead` refused: no verified seat binding   | The bridge was not launched by `clankie claude`; launch the seat that way (VUH-2816)       |
 | No persona or memory card at session start | `clankie` is not on the hook's `PATH`; `pnpm cli:install` symlinks it into `~/.local/bin`  |
 | Wakes never arrive                         | The seat was loaded with `--plugin-dir`; install from the marketplace for the channel flag |
 | `claude plugin validate --strict` warns    | The skills are symlinks by design; sessions follow them, validation does not               |

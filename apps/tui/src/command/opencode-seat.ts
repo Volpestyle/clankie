@@ -3,7 +3,7 @@ import { openCodeDeliveryStage } from "@clankie/protocol";
 import { execFile as execCallback, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -14,6 +14,12 @@ import { clankieStateHome } from "../state-home.ts";
 import { commandHost, outputJson } from "./io.ts";
 import { fetchLaneText } from "./prompt.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
+import {
+  bindLaunchedHarness,
+  mintBridgeNonce,
+  writeBridgeNonceFile,
+  type SeatBinding,
+} from "./seat-binding.ts";
 import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
 import { resolveSeatContext } from "./seat-context.ts";
 import { releaseAtLeast } from "../../../clankie/src/captain/native-release.ts";
@@ -157,6 +163,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
     plugin?: unknown[];
     skills?: { paths?: string[] };
     autoupdate?: boolean;
+    mcp?: Record<string, unknown>;
   };
   config.autoupdate = false;
   if (plan.newConversation !== undefined) {
@@ -412,6 +419,8 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
   if (!address || typeof address === "string") throw new Error("Bridge failed to bind");
   const childEnv = { ...env };
   for (const key of Object.keys(childEnv)) if (/^(?:SWARM_|CLANKIE_SWARM_)/u.test(key)) delete childEnv[key];
+  delete childEnv.CLANKIE_BRIDGE_NONCE;
+  delete childEnv.CLANKIE_BRIDGE_NONCE_FILE;
   delete childEnv.CLANKIE_OPERATOR_TOKEN;
   delete childEnv.CLANKIE_CODEX_SEAT_BINDING;
   delete childEnv.CLANKIE_SEAT_SESSION_ID;
@@ -419,6 +428,17 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
   if (plan.conversationId) childEnv.CLANKIE_CONVERSATION_ID = plan.conversationId;
   childEnv.CLANKIE_CONTROL_PLANE_URL = host;
   childEnv.CLANKIE_SEAT_HARNESS = "opencode";
+  // The service admits OpenCode's bridge only as the direct child of the process registered here (VUH-2816).
+  const bridgeNonce = mintBridgeNonce();
+  const nonceFile = writeBridgeNonceFile(directory, bridgeNonce);
+  config.mcp ??= {};
+  config.mcp.clankie = {
+    type: "local",
+    command: ["clankie", "mcp", "--lane", "operator"],
+    environment: { CLANKIE_BRIDGE_NONCE_FILE: nonceFile },
+    enabled: true,
+  };
+  let binding: SeatBinding | undefined;
   childEnv.CLANKIE_OPENCODE_BRIDGE = `http://127.0.0.1:${address.port}`;
   childEnv.CLANKIE_OPENCODE_BRIDGE_TOKEN = token;
   if (plan.resumed) childEnv.CLANKIE_OPENCODE_SESSION = plan.sessionId;
@@ -434,13 +454,22 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
   try {
     const launch =
       options.spawnImpl ??
-      ((command, args, cwd, env) =>
+      ((command, args, cwd, env, onSpawn) =>
         new Promise<number>((resolve, reject) => {
           const child = spawn(command, [...args], { cwd, env, stdio: "inherit" });
           child.once("error", reject);
           child.once("exit", (code) => resolve(code ?? 1));
+          if (child.pid !== undefined) onSpawn?.(child.pid);
         }));
-    return await launch(plan.command, plan.args, plan.cwd, childEnv);
+    return await launch(plan.command, plan.args, plan.cwd, childEnv, (pid) => {
+      binding = bindLaunchedHarness(options, {
+        command: "opencode",
+        conversationId: plan.conversationId,
+        harnessPid: pid,
+        nonce: bridgeNonce,
+        stderr,
+      });
+    });
   } finally {
     stop.abort();
     ready = false;
@@ -451,6 +480,8 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
     await starting?.catch(() => undefined);
     await delivery;
     await upstream?.close();
+    await binding?.stop();
+    rmSync(nonceFile, { force: true });
     stderr.write(
       `clankie opencode closed: ${failure}. Receipts and ${warnings.size} warning(s): ${directory}\n`,
     );

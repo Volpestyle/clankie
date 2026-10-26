@@ -1,4 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { statSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
@@ -163,6 +165,8 @@ test("launcher bridge authenticates and binds one session without copying operat
     CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
     CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
     OPENCODE_CONFIG: ownerConfig,
+    CLANKIE_BRIDGE_NONCE: "contaminated-parent-nonce",
+    CLANKIE_BRIDGE_NONCE_FILE: "/contaminated-parent-file",
   };
   const output: string[] = [];
   try {
@@ -183,6 +187,20 @@ test("launcher bridge authenticates and binds one session without copying operat
         },
         spawnImpl: async (_command, _args, _cwd, childEnv) => {
           expect(childEnv?.CLANKIE_OPERATOR_TOKEN).toBeUndefined();
+          const inherited = JSON.parse(
+            execFileSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(process.env))"], {
+              env: childEnv,
+              encoding: "utf8",
+            }),
+          );
+          expect(inherited.CLANKIE_BRIDGE_NONCE).toBeUndefined();
+          expect(inherited.CLANKIE_BRIDGE_NONCE_FILE).toBeUndefined();
+          const config = JSON.parse(childEnv!.OPENCODE_CONFIG_CONTENT!);
+          const noncePath = config.mcp.clankie.environment.CLANKIE_BRIDGE_NONCE_FILE;
+          expect(statSync(noncePath).mode & 0o777).toBe(0o600);
+          const nonce = readFileSync(noncePath, "utf8");
+          expect(nonce).toMatch(/^[a-f0-9]{64}$/u);
+          expect(JSON.stringify(childEnv)).not.toContain(nonce);
           expect(childEnv?.OPENCODE_CONFIG).toBe(ownerConfig);
           const url = childEnv!.CLANKIE_OPENCODE_BRIDGE!;
           const post = (path: string, body: object, token = childEnv!.CLANKIE_OPENCODE_BRIDGE_TOKEN) =>
@@ -250,7 +268,10 @@ test("plugin keeps unrelated MCP and native permissions while isolating Linear i
       mcp: {
         linear: { type: "remote", url: "https://mcp.linear.app/mcp" },
         design: { type: "local", command: ["design-mcp"] },
-        clankie: { enabled: false },
+        clankie: {
+          enabled: false,
+          environment: { CLANKIE_BRIDGE_NONCE_FILE: "/private/launch/bridge-nonce" },
+        },
       },
     };
     await hooks!.config(config);
@@ -258,6 +279,7 @@ test("plugin keeps unrelated MCP and native permissions while isolating Linear i
     expect(config.mcp.linear).toEqual({ enabled: false });
     expect(config.mcp.design).toEqual({ type: "local", command: ["design-mcp"] });
     expect(config.mcp.clankie).toEqual({
+      environment: { CLANKIE_BRIDGE_NONCE_FILE: "/private/launch/bridge-nonce" },
       type: "local",
       command: ["clankie", "mcp", "--lane", "operator"],
       enabled: true,

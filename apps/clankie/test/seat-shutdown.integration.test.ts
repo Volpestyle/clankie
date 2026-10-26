@@ -14,6 +14,7 @@ import { registerSeatRoutes } from "../src/app/seat-routes.ts";
 import type { ClankieAppDependencies } from "../src/app/types.ts";
 import { SeatLinkInterruptedError, SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { drainHttpServer } from "../src/http-drain.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
 
 const ChannelSchema = z.object({
   method: z.literal("notifications/claude/channel"),
@@ -49,6 +50,7 @@ function service(root: string, bearer: string, binding: string, port: number) {
         ? { lane: "operator" }
         : { denial: context.json({ error: "unauthorized" }, 401) },
     dependencies: {
+      operatorSeatBindings: permissiveSeatBindings(),
       captain: {
         seatContext: (id?: string) =>
           id === "global-default" ? { conversationId: id, cwd: root } : undefined,

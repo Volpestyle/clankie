@@ -171,7 +171,9 @@ export default async function ClankieSeat({ client }) {
           config.mcp[name] = { enabled: false };
       }
       config.mcp ??= {};
+      const nonceFile = config.mcp.clankie?.environment?.CLANKIE_BRIDGE_NONCE_FILE;
       config.mcp.clankie = {
+        ...(typeof nonceFile === "string" ? { environment: { CLANKIE_BRIDGE_NONCE_FILE: nonceFile } } : {}),
         type: "local",
         command: ["clankie", "mcp", "--lane", "operator"],
         enabled: true,

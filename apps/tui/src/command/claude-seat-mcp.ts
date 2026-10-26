@@ -51,6 +51,7 @@ export function writeClaudeSeatMcpConfig(
   cwd: string,
   env: NodeJS.ProcessEnv,
   optIns: readonly string[],
+  bridgeNonce?: string,
 ): string {
   const declared = servers(readJson(join(pluginRoot, ".mcp.json")).mcpServers);
   if (!Object.hasOwn(declared, "lead"))
@@ -68,7 +69,20 @@ export function writeClaudeSeatMcpConfig(
     if (name === "lead") {
       const args = selected[key]!.args;
       if (!Array.isArray(args)) throw new Error("The Clankie lead bridge must declare its arguments");
-      selected[key] = { ...selected[key], args: [...args, "--conversation", "${CLANKIE_CONVERSATION_ID:-}"] };
+      selected[key] = {
+        ...selected[key],
+        args: [...args, "--conversation", "${CLANKIE_CONVERSATION_ID:-}"],
+        // The launch nonce rides this per-launch 0600 file only. It is not in Claude's
+        // environment, so a shell Claude runs does not inherit it (VUH-2816).
+        ...(bridgeNonce === undefined
+          ? {}
+          : {
+              env: {
+                ...(selected[key] as { env?: Record<string, string> }).env,
+                CLANKIE_BRIDGE_NONCE: bridgeNonce,
+              },
+            }),
+      };
     }
   }
   if (optIns.length > 0) {

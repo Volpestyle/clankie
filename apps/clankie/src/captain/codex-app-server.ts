@@ -491,7 +491,12 @@ export const localCodexServer: CodexServerLauncher = async (input) => {
     input.inheritEnvironment === false
       ? {}
       : Object.fromEntries(
-          Object.entries(process.env).filter(([key]) => !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key)),
+          Object.entries(process.env).filter(
+            ([key]) =>
+              !/^(?:HERDR_|SWARM_|CLANKIE_SWARM_)/u.test(key) &&
+              key !== "CLANKIE_BRIDGE_NONCE" &&
+              key !== "CLANKIE_BRIDGE_NONCE_FILE",
+          ),
         );
   // `clankie restart` signals the service's whole process group. The native
   // TUI stays in Herdr, so its app-server must also outlive a service restart.

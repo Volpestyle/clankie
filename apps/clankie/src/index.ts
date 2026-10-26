@@ -178,7 +178,13 @@ import { LOCAL_FLEET_KEEP_ALIVE_MS, LocalFleetLink } from "./local-fleet-link.ts
 import { NativeFixtureAdmissions } from "./native-fixture-admissions.ts";
 import { createFixtureOriginalVerifier } from "./fixture-original-verifier.ts";
 import { createFixtureBootstrap } from "./fixture-admission-bootstrap.ts";
-import { fleetProcessHelper } from "./local-fleet-process.ts";
+import {
+  fleetProcessHelper,
+  observeNativeBirth,
+  observeSocketProcess,
+  observeNativeProcesses,
+} from "./local-fleet-process.ts";
+import { OperatorSeatBindings } from "./operator-seat-bindings.ts";
 import { createProjectProcessObserver, HarnessBinaryObservations } from "./project-process-proof.ts";
 import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createPrimeNativeHost } from "./captain/prime-native-host.ts";
@@ -1928,6 +1934,14 @@ if (nativeFixtureAdmissions.unavailable)
     { event: "fixture_admission.unavailable", reason: nativeFixtureAdmissions.unavailable },
     "Native fixture admission refuses on this host; the service continues",
   );
+// Kernel proof of who is on the other end of an operator-lane socket (VUH-2816).
+const operatorSeatBindings = new OperatorSeatBindings({
+  socket: (socket) => observeSocketProcess(socket, fleetProcessHelper(repoRoot)),
+  birth: (pid) => observeNativeBirth(pid, undefined, fleetProcessHelper(repoRoot)),
+  processes: (controller, harness) =>
+    observeNativeProcesses(controller, harness, fleetProcessHelper(repoRoot)),
+  available: () => existsSync(fleetProcessHelper(repoRoot)) && ["darwin", "linux"].includes(process.platform),
+});
 const localFleet = new LocalFleetLink({
   fixtureAdmission: (request, proof, socket, current) =>
     nativeFixtureAdmissions.handleOriginal(request, proof, socket, current),
@@ -2433,6 +2447,7 @@ const clankie = await createClankieApp({
     });
   },
   localFleet,
+  operatorSeatBindings,
   runtimeProvider,
   ...(runtimeProvider.quota?.composer === undefined
     ? {}

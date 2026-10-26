@@ -31,6 +31,7 @@ import { planExplicitResume } from "./seat-resume.ts";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
 import { operatorHarness } from "./harness-command.ts";
 import { writeClaudeSeatMcpConfig } from "./claude-seat-mcp.ts";
+import { bindLaunchedHarness, mintBridgeNonce, type SeatBinding } from "./seat-binding.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -86,6 +87,8 @@ export interface SeatPlan {
   /** Whether wakes and escalations can reach this session as channel events. */
   readonly channel: boolean;
   readonly sessionId: string;
+  /** The per-launch secret in the bridge's own MCP config; never printed (VUH-2816). */
+  readonly bridgeNonce?: string;
   readonly resumed: boolean;
   /** An exact session resumed by ID; it becomes this command's recorded seat. */
   readonly explicitResume?: import("./seat-resume.ts").ExplicitResume;
@@ -152,6 +155,8 @@ export interface SeatCommandOptions {
     args: readonly string[],
     cwd: string,
     env?: NodeJS.ProcessEnv,
+    /** Called with the harness child's pid as soon as it exists, so the launcher can register it. */
+    onSpawn?: (pid: number) => void,
   ) => Promise<number>;
   readonly sleepImpl?: (ms: number) => Promise<void>;
   /** Test seam: the socket of the session the service leads; undefined when it cannot be read. */
@@ -312,6 +317,7 @@ export function defaultSpawn(
   args: readonly string[],
   cwd: string,
   env?: NodeJS.ProcessEnv,
+  onSpawn?: (pid: number) => void,
 ): Promise<number> {
   const launch = claudeLaunch(command, args, env ?? process.env);
   return new Promise((resolve, reject) => {
@@ -322,6 +328,7 @@ export function defaultSpawn(
     });
     child.once("error", reject);
     child.once("exit", (code, signal) => resolve(code ?? (signal === null ? 1 : 128)));
+    if (child.pid !== undefined) onSpawn?.(child.pid);
   });
 }
 
@@ -467,7 +474,8 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   const trust: { enabled: boolean; unreadable?: string } = options.joinedSeat
     ? await options.joinedSeat.maximumTrust()
     : await readSeatMaximumTrust(options);
-  const mcpConfig = writeClaudeSeatMcpConfig(plugin.path, cwd, env, flags.mcpServers ?? []);
+  const bridgeNonce = flags.dryRun ? undefined : mintBridgeNonce();
+  const mcpConfig = writeClaudeSeatMcpConfig(plugin.path, cwd, env, flags.mcpServers ?? [], bridgeNonce);
   const args = [
     "--strict-mcp-config",
     "--mcp-config",
@@ -502,6 +510,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     plugin,
     channel,
     sessionId,
+    ...(bridgeNonce === undefined ? {} : { bridgeNonce }),
     resumed: previous !== undefined,
     ...(explicit === undefined ? {} : { explicitResume: explicit }),
     ...(conversationId === undefined ? {} : { conversationId }),
@@ -581,7 +590,8 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   }
   let plan = await planSeat(flags, options);
   if (flags.dryRun) {
-    outputJson(stdout, { ok: true, ...plan });
+    const { bridgeNonce: _secret, ...printable } = plan;
+    outputJson(stdout, { ok: true, ...printable });
     return 0;
   }
   if (plan.newConversation !== undefined) {
@@ -612,6 +622,8 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   // The service owns the lead actor. A portal never inherits a worker's Swarm
   // session from the terminal it happened to launch in.
   const seatEnv = { ...env };
+  delete seatEnv.CLANKIE_BRIDGE_NONCE;
+  delete seatEnv.CLANKIE_BRIDGE_NONCE_FILE;
   for (const key of Object.keys(seatEnv)) if (key.startsWith("SWARM_")) delete seatEnv[key];
   delete seatEnv.CLANKIE_CONVERSATION_ID;
   delete seatEnv.CLANKIE_CODEX_SEAT_BINDING;
@@ -622,12 +634,24 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
     stderr.write(
       `clankie ${plan.command}: maximum trust mode is unreadable (${plan.maximumTrustModeUnreadable}); launching in auto mode.\n`,
     );
-  const running = (options.spawnImpl ?? defaultSpawn)(plan.command, plan.args, plan.cwd, seatEnv);
+  // The service admits this seat's bridge only for the harness process registered here (VUH-2816).
+  let binding: SeatBinding | undefined;
+  const running = (options.spawnImpl ?? defaultSpawn)(plan.command, plan.args, plan.cwd, seatEnv, (pid) => {
+    binding = bindLaunchedHarness(options, {
+      command: plan.command,
+      conversationId: plan.conversationId,
+      harnessPid: pid,
+      nonce: plan.bridgeNonce,
+      // `claudeN` runs through the owner's shell, which then runs the harness.
+      ...(/^claude\d+$/u.test(plan.command) ? { depth: 2 as const } : {}),
+      stderr,
+    });
+  });
   const claim =
     plan.herdrPaneId === undefined
       ? Promise.resolve()
       : claimHerdrSeat(plan.herdrPaneId, execFile, sleep, stderr, plan.command).catch(() => undefined);
-  const exitCode = await running;
+  const exitCode = await running.finally(() => binding?.stop());
   await claim;
   if (plan.herdrPaneId !== undefined) {
     await execFile("herdr", ["agent", "rename", plan.herdrPaneId, "--clear"]).catch(() => undefined);

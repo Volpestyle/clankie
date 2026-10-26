@@ -12,6 +12,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain, type LaneTool } from "../src/captain/port.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
 
 function gate<T = void>() {
   let release!: (value: T | PromiseLike<T>) => void;
@@ -84,6 +85,7 @@ async function fixture(unreadableReceiptPath = false) {
   ];
   const boot = () =>
     createClankieApp({
+      operatorSeatBindings: permissiveSeatBindings(),
       captain: createStubCaptain({
         laneToolBank: async (lane) => {
           banks++;

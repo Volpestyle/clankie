@@ -194,6 +194,9 @@ export interface InstallDoctorReport {
   readonly ownerHerdrSessions?: readonly string[];
   readonly herdrPlugin: HerdrPluginReport;
   readonly remoteHarnesses?: readonly unknown[];
+  readonly operatorSeatBindings?:
+    | import("@clankie/protocol").OperatorSeatBindingStatus
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly autonomy?: { readonly level: AutonomyLevelReading; readonly drift?: AutonomyDrift };
   readonly workingPreferences?: import("./command/working-preferences.ts").WorkingPreferencesReport;
   readonly toolCatalogHealth?:

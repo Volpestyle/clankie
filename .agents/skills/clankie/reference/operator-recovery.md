@@ -133,3 +133,20 @@ after service restart. Re-adoption never restores cached launch authority.
 If that listener is gone, re-adoption cannot recreate it: ask the owner to
 end the stale TUI, then resume the exact saved session with `hire_agent`'s
 `resume` reference and a new dedicated backend. Do not restart or replace the existing pane as a probe.
+
+## Operator bridge binding refusals
+
+An unbound `clankie mcp --lane operator` cannot inherit `global-default`, read,
+poll or acknowledge reports, or message seats. Start it through the normal
+`clankie claude|codex|opencode|grok` launcher. The service verifies the socket
+owner, launcher→harness child edge, process lifetimes, selected conversation
+and bridge-only nonce. Do not copy the nonce into harness env/argv or rebind a
+foreign PID. `clankie doctor` exposes native helper availability and the last
+precise refusal/recovery; a historical refusal is not a live harness probe.
+Missing helper, unprovable socket, wrong ancestry, wrong claim and another live
+claimant are distinct refusals. Prime's missing verified kernel PID remains open.
+Joined/delegated seats retain their separate authenticated route; relay/app
+owner dispatch is separate from local MCP. The
+[seat binding reference](../../../../integrations/claude-plugin/README.md#binding-and-the-known-unbound-bridge-gap)
+records process-chain limits and recovery of reports already consumed by a stray.
+Never replay an acknowledged report or uncertain delivery to compensate.

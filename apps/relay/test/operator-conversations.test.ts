@@ -1760,6 +1760,23 @@ it("withholds room output after await if the original observe grant is revoked",
   expect(response.status).toBe(403);
 });
 
+it("does not project local native seat binding or operator MCP through the device relay", async () => {
+  const dispatch = vi.fn();
+  const relay = await startRelay({ dispatch });
+  for (const [method, path] of [
+    ["POST", "/v1/mcp"],
+    ["PUT", "/v1/captain/seat-bindings"],
+    ["DELETE", "/v1/captain/seat-bindings"],
+  ] as const) {
+    const response = await fetch(new URL(path, relay.url), {
+      method,
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(response.status).toBe(404);
+  }
+  expect(dispatch).not.toHaveBeenCalled();
+});
+
 describe("public gateway reach", () => {
   // A route missing from the gateway works on the same Mac and fails on every
   // remote device with only a generic "couldn't load".

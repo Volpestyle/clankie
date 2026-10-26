@@ -5027,6 +5027,107 @@ paths:
         "401":
           description: Operator authentication required
 
+  /v1/captain/seat-bindings:
+    get:
+      tags: [Captain, Operator]
+      operationId: getOperatorSeatBindingStatus
+      summary: Inspect native seat binding availability and the last refusal
+      description: Read-only operator-lane diagnostics; contains no process IDs or launch secrets.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      responses:
+        "200":
+          description: Binding diagnostics; unavailable helpers are represented in the body
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available, bindings]
+                properties:
+                  available: { type: boolean }
+                  error: { type: string }
+                  recovery: { type: string }
+                  lastRefusal:
+                    type: object
+                    required: [error, recovery]
+                    properties:
+                      error: { type: string }
+                      recovery: { type: string }
+                      conversationId: { type: string }
+                  bindings:
+                    type: array
+                    items:
+                      type: object
+                      required: [conversationId]
+                      properties:
+                        conversationId: { type: string }
+        "401":
+          description: Authentication required
+        "403":
+          description: lane_forbidden
+        "503":
+          description: Authentication unavailable
+    put:
+      tags: [Captain, Operator]
+      operationId: registerOperatorSeatBinding
+      summary: Bind a launcher's native harness to an operator conversation
+      description: >-
+        Local process proof is required in addition to operator authentication.
+        The request socket identifies the controller. The harness's bridge must
+        present x-clankie-bridge-claim on subsequent MCP and seat mailbox requests.
+        Remote relay and bearer-only clients cannot establish this local binding.
+        Registry refusals include an error code and human-readable recovery text.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [conversationId, harnessPid, nonceHash]
+              properties:
+                conversationId: { type: string, minLength: 1, maxLength: 256 }
+                harnessPid: { type: integer, minimum: 1 }
+                nonceHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+                depth: { type: integer, enum: [1, 2] }
+      responses:
+        "200":
+          description: Registered; JSON object with ok true
+        "400":
+          description: invalid_seat_binding or seat_binding_invalid
+        "401":
+          description: Authentication required
+        "403":
+          description: lane_forbidden, seat_process_unproven, seat_harness_not_child or seat_binding_helper_missing
+        "409":
+          description: seat_binding_conflict; a different live controller owns the conversation
+        "413":
+          description: Request body exceeds 4 KiB
+        "503":
+          description: seat_binding_unavailable
+    delete:
+      tags: [Captain, Operator]
+      operationId: deregisterOperatorSeatBinding
+      summary: Release the requesting launcher's operator seat binding
+      description: Only the registered controller process may remove its binding.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      parameters:
+        - in: query
+          name: conversationId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Removed or already absent; JSON object with ok true
+        "401":
+          description: Authentication required
+        "403":
+          description: lane_forbidden, seat_binding_conversation_required or seat_process_unproven
+        "409":
+          description: seat_binding_conflict; caller is not the registered controller
+        "503":
+          description: seat_binding_unavailable
+
   /v1/captain/seat-context:
     post:
       tags: [Captain, Operator]
@@ -5295,9 +5396,13 @@ paths:
 
   /v1/mcp:
     parameters:
+      - in: header
+        name: x-clankie-bridge-claim
+        description: Private launch nonce for the registered operator bridge; the launcher controller uses its socket identity instead.
+        schema: { type: string }
       - in: query
         name: conversationId
-        description: Operator conversation binding; every request in a session retains it. Omitted selects the global head.
+        description: Explicit registered operator conversation; required for operator-lane callers on every request. Other lanes omit it.
         schema: { type: string, minLength: 1, maxLength: 256 }
     post:
       tags: [Captain]
@@ -5313,6 +5418,11 @@ paths:
         returns its id in `mcp-session-id`; every later request must carry that
         header and resolve to the same lane and conversation. `DELETE` ends the session.
         `clankie mcp` is the stdio bridge to this route (ADR 0152).
+        Operator-lane requests additionally require the local native binding
+        registered by the launcher, an explicit conversationId, and the bridge's
+        x-clankie-bridge-claim. Bearer-only clients cannot use this route.
+        Joined seats use their authenticated delegated /v1/fleet/lead/mcp route;
+        the device relay does not expose operator MCP or local seat bindings.
       security:
         [{ operatorBearer: [] }, { captainBearer: [] }, { discordTextBearer: [] }, { discordVoiceBearer: [] }]
       responses:
@@ -5321,7 +5431,9 @@ paths:
         "400":
           description: No session id on a non-initialize request
         "403":
-          description: The session belongs to another lane or conversation
+          description: Native seat binding refused, or session belongs to another lane or conversation
+        "409":
+          description: seat_bridge_claimed; another live bridge holds the binding
         "404":
           description: Unknown or expired session
     get:
@@ -5337,7 +5449,9 @@ paths:
         "400":
           description: No session id
         "403":
-          description: The session belongs to another lane or conversation
+          description: Native seat binding refused, or session belongs to another lane or conversation
+        "409":
+          description: seat_bridge_claimed; another live bridge holds the binding
         "404":
           description: Unknown or expired session
     delete:
@@ -5350,7 +5464,9 @@ paths:
         "200":
           description: Session closed
         "403":
-          description: The session belongs to another lane or conversation
+          description: Native seat binding refused, or session belongs to another lane or conversation
+        "409":
+          description: seat_bridge_claimed; another live bridge holds the binding
         "404":
           description: Unknown or expired session
 
@@ -5361,8 +5477,8 @@ paths:
       summary: Long-poll the seat's outbox
       description: |
         Wakes, herdr completion watches, and room escalations queued for a
-        bound head (ADR 0152). Polling is what binds the seat: `clankie mcp`
-        asks again the moment a poll returns and pushes each event into the
+        bound head (ADR 0152). The launcher registers the native seat binding
+        before polling; `clankie mcp` asks again when a poll returns and pushes each event into the
         session as a channel notification. Operator bearer only; a Discord
         bridge bearer is 403. `wait` is capped at 30000 ms.
         The loaded bridge advertises capabilities through x-clankie-seat-capabilities.
@@ -5388,7 +5504,7 @@ paths:
           example: '{"schemaVersion":1,"eventKinds":["wake","watch","escalation","message","turn"],"ownerOrigin":true}'
         - in: query
           name: conversationId
-          description: Existing operator global/workspace conversation; omitted selects the global head.
+          description: Explicit registered operator global/workspace conversation; required for operator-lane callers.
           schema: { type: string, minLength: 1, maxLength: 256 }
         - in: query
           name: wait
@@ -5423,7 +5539,7 @@ paths:
       parameters:
         - in: query
           name: conversationId
-          description: Existing operator global/workspace conversation; omitted selects the global head.
+          description: Explicit registered operator global/workspace conversation; required for operator-lane callers.
           schema: { type: string, minLength: 1, maxLength: 256 }
         - in: path
           name: id

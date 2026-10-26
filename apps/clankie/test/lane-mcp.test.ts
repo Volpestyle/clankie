@@ -37,6 +37,7 @@ import type { HerdrWatchPort } from "../src/captain/herdr-watch.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
 import { createStubCaptain, type LaneTool, type LaneToolBank } from "../src/captain/port.ts";
 import { fleetEfficiencyTools, type FleetEfficiencyReview } from "../src/captain/fleet-efficiency-tools.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
 
 /**
  * His tools over MCP (VUH-1085). What this guards is the lane boundary: the
@@ -81,6 +82,7 @@ function bankFor(lane: CaptainSessionLaneV2): LaneToolBank {
 
 async function mcpApp() {
   return await createClankieApp({
+    operatorSeatBindings: permissiveSeatBindings(),
     captain: createStubCaptain({ laneToolBank: (lane) => Promise.resolve(bankFor(lane)) }),
     authenticateCaptain: (request) =>
       Promise.resolve(
@@ -162,6 +164,7 @@ describe("lane MCP endpoint", () => {
     );
     if (!definition) throw new Error("Missing fleet efficiency tool");
     const app = await createClankieApp({
+      operatorSeatBindings: permissiveSeatBindings(),
       captain: createStubCaptain({
         laneToolBank: async (lane) => ({
           lane,
@@ -621,6 +624,7 @@ it("initializes an operator MCP session with native and connected tools", async 
     },
   );
   const app = await createClankieApp({
+    operatorSeatBindings: permissiveSeatBindings(),
     captain,
     authenticateOperator: async () => ({ operatorId: "operator-james" }),
   });
@@ -726,6 +730,7 @@ it("serves every real Captain schema with MCP's object root without losing union
     },
   );
   const app = await createClankieApp({
+    operatorSeatBindings: permissiveSeatBindings(),
     captain,
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer fixture"
@@ -935,6 +940,7 @@ it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP call
   ]);
   expect(call).not.toHaveBeenCalled();
   const app = await createClankieApp({
+    operatorSeatBindings: permissiveSeatBindings(),
     captain: createStubCaptain({ laneToolBank: async () => bank }),
     authenticateOperator: async () => ({ operatorId: "operator" }),
   });
@@ -1077,6 +1083,7 @@ it("serves realtime voice its own recall_episodes, get_self_state and remember_e
     },
   );
   const app = await createClankieApp({
+    operatorSeatBindings: permissiveSeatBindings(),
     captain,
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer voice"
@@ -1250,6 +1257,7 @@ it("serves an operator API and its first tool bank while a real remote MCP catal
   let piSession: AgentSession | undefined;
   const warm = mcp.warm();
   const app = await createClankieApp({
+    operatorSeatBindings: permissiveSeatBindings(),
     captain,
     authenticateOperator: async () => ({ operatorId: "operator-james" }),
   });

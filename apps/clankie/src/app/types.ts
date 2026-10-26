@@ -262,6 +262,8 @@ export interface ClankieAppDependencies {
     authenticate(token: string): string | undefined;
     identity?(request: Request): import("../local-fleet-link.ts").LocalFleetIdentity | undefined;
   };
+  /** Which process may act as the lead's operator-lane bridge or controller for a conversation (VUH-2816). Absent, the operator lane refuses every bridge. */
+  operatorSeatBindings?: import("../operator-seat-bindings.ts").OperatorSeatBindings;
   localFleet?: {
     identity(request: Request): import("../local-fleet-link.ts").LocalFleetIdentity | undefined;
   };

@@ -25,6 +25,34 @@ export const OPERATOR_HEAD_AGENT_NAME = "clankie";
 export const OPERATOR_SEAT_EVENTS_PATH = "/v1/seat/events";
 export const OPERATOR_SEAT_EVENT_WAIT_MS_MAX = 30_000;
 /**
+ * A seat launcher registers the harness process it spawned for a conversation
+ * here (VUH-2816). The operator lane then admits only that harness's bridge,
+ * carrying the launch nonce in `OPERATOR_SEAT_BRIDGE_CLAIM_HEADER`, or the
+ * launcher itself; the bearer and a `conversationId` query alone do not.
+ */
+export const OPERATOR_SEAT_BINDINGS_PATH = "/v1/captain/seat-bindings";
+export const OPERATOR_SEAT_BRIDGE_CLAIM_HEADER = "x-clankie-bridge-claim";
+export const OperatorSeatBindingRequestSchema = z
+  .object({
+    conversationId: OperatorConversationIdSchema,
+    harnessPid: z.number().int().positive(),
+    nonceHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    depth: z.union([z.literal(1), z.literal(2)]).optional(),
+  })
+  .strict();
+export type OperatorSeatBindingRequest = z.infer<typeof OperatorSeatBindingRequestSchema>;
+/** Read-only native binding diagnosis. Never contains a claim, hash, bearer or process argv. */
+export const OperatorSeatBindingStatusSchema = z.object({
+  available: z.boolean(),
+  error: z.string().optional(),
+  recovery: z.string().optional(),
+  lastRefusal: z
+    .object({ error: z.string(), recovery: z.string(), conversationId: z.string().optional() })
+    .optional(),
+  bindings: z.array(z.object({ conversationId: z.string() })),
+});
+export type OperatorSeatBindingStatus = z.infer<typeof OperatorSeatBindingStatusSchema>;
+/**
  * `turn` carries a host-authenticated ordinary owner send.
  * `message` carries a fleet seat's DM or room turn, or an authenticated worker
  * report to its leading conversation. Its content grants no new authority.

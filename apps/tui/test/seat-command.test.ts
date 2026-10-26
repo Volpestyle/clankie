@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -199,6 +200,8 @@ describe("clankie claude (the operator seat)", () => {
       SWARM_COORDINATOR_ENDPOINT: "/tmp/other-coordinator.sock",
       CLANKIE_SEAT_HARNESS: "codex",
       CLANKIE_CODEX_SEAT_BINDING: "/another/seat.json",
+      CLANKIE_BRIDGE_NONCE: "contaminated-parent-nonce",
+      CLANKIE_BRIDGE_NONCE_FILE: "/contaminated-parent-file",
     });
     const calls: string[][] = [];
     const spawned: { args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv | undefined }[] = [];
@@ -211,6 +214,19 @@ describe("clankie claude (the operator seat)", () => {
       fleetSocketPath: async () => "/tmp/fleet.sock",
       spawnImpl: async (_command, args, cwd, childEnv) => {
         spawned.push({ args, cwd, env: childEnv });
+        const inherited = JSON.parse(
+          execFileSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(process.env))"], {
+            env: childEnv,
+            encoding: "utf8",
+          }),
+        );
+        expect(inherited.CLANKIE_BRIDGE_NONCE).toBeUndefined();
+        expect(inherited.CLANKIE_BRIDGE_NONCE_FILE).toBeUndefined();
+        const configPath = args[args.indexOf("--mcp-config") + 1]!;
+        const config = JSON.parse(await readFile(configPath, "utf8"));
+        const nonce = config.mcpServers.clankie.env.CLANKIE_BRIDGE_NONCE;
+        expect(nonce).toMatch(/^[a-f0-9]{64}$/u);
+        expect(JSON.stringify({ childEnv, args })).not.toContain(nonce);
         return 0;
       },
       sleepImpl: async () => undefined,

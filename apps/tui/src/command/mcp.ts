@@ -1,7 +1,7 @@
 import { readableMcpResult } from "@clankie/protocol/mcp-result";
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, constants, closeSync, fstatSync, openSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   checkFleetMembership,
@@ -35,7 +35,7 @@ import {
  *
  * stdout is the wire. Nothing here may print to it except JSON-RPC.
  */
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -60,6 +60,7 @@ import {
   CLAUDE_WORKER_PLUGIN_ID,
   FLEET_SEAT_MCP_SERVER,
   OPERATOR_CONVERSATION_TEXT_MAX,
+  OPERATOR_SEAT_BRIDGE_CLAIM_HEADER,
   OPERATOR_SEAT_EVENTS_PATH,
   OperatorSeatEventsPageSchema,
   OperatorSeatEventKindSchema,
@@ -79,6 +80,26 @@ import { commandHost } from "./io.ts";
 import { runWorkerMcp } from "./worker-mcp.ts";
 import { callEvidenceTool, EVIDENCE_TOOLS, isEvidenceTool, type EvidenceOptions } from "./evidence.ts";
 import { clankieStateHome } from "../state-home.ts";
+
+/**
+ * A fast refusal with a clear diagnostic for an operator bridge that names no
+ * conversation. The service answers a request with none from the owner's
+ * `global-default` lead chat, which let a stray `claude` with the clankie
+ * server poll, acknowledge and message as the lead (VUH-2816). This is not the
+ * authority: the service admits only the process its launcher registered for
+ * that conversation (`OperatorSeatBindings`), and refuses every other caller
+ * even when this check would pass. Returns the refusal, or undefined.
+ */
+export function operatorBindingRefusal(input: {
+  readonly conversationId: string | undefined;
+}): string | undefined {
+  if (input.conversationId?.trim()) return undefined;
+  return (
+    "clankie mcp --lane operator has no seat binding (no conversation selected); it will not default to the " +
+    "global lead conversation, so it neither polls nor reads or acknowledges worker reports, and cannot " +
+    "message seats. Launch the seat with `clankie claude` (or codex, opencode, grok) to bind it."
+  );
+}
 
 // Capture when this module loads; a runtime update on disk cannot replace an
 // already running bridge. The journal identifies the code that actually ran.
@@ -109,6 +130,37 @@ const SEAT_RECONCILE_TIMEOUT_MS = 10_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
 const OUTBOX_RETRY_MS = 5_000;
+/** How long a freshly started bridge waits for its launcher's registration (VUH-2816). */
+/** Only the MCP server receives this path; ordinary harness exec children receive no claim. */
+function bridgeLaunchClaim(env: NodeJS.ProcessEnv): string | undefined {
+  const path = env.CLANKIE_BRIDGE_NONCE_FILE;
+  if (path === undefined) return env.CLANKIE_BRIDGE_NONCE;
+  let fd: number | undefined;
+  try {
+    if (!isAbsolute(path)) throw new Error("relative path");
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(fd);
+    if (
+      !stat.isFile() ||
+      stat.size !== 64 ||
+      (stat.mode & 0o077) !== 0 ||
+      (process.getuid !== undefined && stat.uid !== process.getuid())
+    )
+      throw new Error("unsafe file");
+    const nonce = readFileSync(fd, "utf8");
+    if (!/^[a-f0-9]{64}$/u.test(nonce)) throw new Error("invalid claim");
+    return nonce;
+  } catch {
+    throw new Error(
+      "seat_bridge_claim_invalid: private bridge nonce file is missing, unsafe or invalid. Relaunch the seat to recreate its MCP configuration; do not copy a nonce into the harness environment.",
+    );
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+const BINDING_WAIT_MS = 500;
+const BINDING_WAIT_ATTEMPTS = 40;
 const SEAT_CLIENT = { name: "clankie-seat", version: "0.2.0" } as const;
 export const CHANNEL_NOTIFICATION_METHOD = "notifications/claude/channel";
 const REPLY_TOOL_NAME = "reply";
@@ -661,11 +713,17 @@ export async function connectLaneUpstream(input: {
   readonly host: string;
   readonly bearer: string;
   readonly conversationId?: string;
+  /** The nonce the launcher put in this bridge's own launch config. */
+  readonly bridgeClaim?: string;
   readonly fetchImpl?: typeof fetch;
   readonly onTransportEvent?: (event: LaneUpstreamTransportEvent) => void;
 }): Promise<LaneToolUpstream> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const headers = { authorization: `Bearer ${input.bearer}` };
+  // The launch nonce proves this bridge is the process its launcher registered (VUH-2816).
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${input.bearer}`,
+    ...(input.bridgeClaim === undefined ? {} : { [OPERATOR_SEAT_BRIDGE_CLAIM_HEADER]: input.bridgeClaim }),
+  };
   const urlFor = (path: string) => {
     const url = new URL(path, input.host);
     if (input.conversationId !== undefined) url.searchParams.set("conversationId", input.conversationId);
@@ -1400,6 +1458,8 @@ export async function runMcpCommand(
           "use clankie_tools/clankie_call from the worker plugin, or tell Clankie with message_clankie.",
       );
     }
+    const unbound = operatorBindingRefusal({ conversationId: input.conversationId });
+    if (unbound !== undefined) throw new Error(unbound);
     const credential = await resolveOperatorCredential({
       env,
       ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
@@ -1407,14 +1467,31 @@ export async function runMcpCommand(
     if (credential === undefined) {
       throw new Error("No operator credential is available; start the clankie service once first.");
     }
-    return connectLaneUpstream({
-      host: commandHost({ ...options, env }),
-      bearer: credential.token,
-      // A joined seat's requests ride its join channel, never a direct fetch (VUH-2607).
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-      onTransportEvent: lifecycle,
-      ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
-    });
+    const bridgeClaim = bridgeLaunchClaim(env);
+    // The launcher registers its harness right after spawning it, which can land a
+    // moment after the harness starts this bridge. Wait out only that window; any
+    // other refusal (not the registered process, wrong claim) stays final.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await connectLaneUpstream({
+          host: commandHost({ ...options, env }),
+          bearer: credential.token,
+          // A joined seat's requests ride its join channel, never a direct fetch (VUH-2607).
+          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+          onTransportEvent: lifecycle,
+          ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
+          ...(bridgeClaim === undefined ? {} : { bridgeClaim }),
+        });
+      } catch (error) {
+        if (attempt >= BINDING_WAIT_ATTEMPTS || !String(error).includes("seat_binding_required")) {
+          throw new Error(
+            `Operator bridge refused: ${error instanceof Error ? error.message : String(error)}. Run \`clankie doctor\` for the precise native binding refusal and recovery.`,
+            { cause: error },
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, options.pollRetryMs ?? BINDING_WAIT_MS));
+      }
+    }
   }
 }
 

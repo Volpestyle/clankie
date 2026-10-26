@@ -8,6 +8,7 @@ import {
   parseProtocolResponse,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { OPERATOR_SEAT_BINDINGS_PATH, OperatorSeatBindingStatusSchema } from "@clankie/protocol";
 import { MachineAccessRefusalSchema } from "@clankie/protocol";
 import { JoinedShellAuditSchema } from "@clankie/protocol/machine-join";
 import { runMachinesCommand } from "./machines.ts";
@@ -97,6 +98,13 @@ function brokenVoiceCall(voice: InstallDoctorReport["discordVoice"]): string | u
 function doctorSummary(report: InstallDoctorReport): string {
   if (report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready")
     return report.credentialStoreHealth.message ?? "Keychain unavailable";
+  const nativeBinding = report.operatorSeatBindings;
+  if (nativeBinding && "available" in nativeBinding) {
+    if (!nativeBinding.available)
+      return `${nativeBinding.error ?? "seat_binding_unavailable"}: ${nativeBinding.recovery ?? "Repair the native helper and relaunch the seat."}`;
+    if (nativeBinding.lastRefusal)
+      return `${nativeBinding.lastRefusal.error}: ${nativeBinding.lastRefusal.recovery} (last observed refusal; not a probe of the current seat)`;
+  }
   const refusal =
     report.machineAccessRefusals && "refusals" in report.machineAccessRefusals
       ? report.machineAccessRefusals.refusals[0]
@@ -455,6 +463,7 @@ export async function doctorCommand(
       ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),
     }),
     remoteHarnesses,
+    operatorSeatBindings: await inspectOperatorSeatBindings(options),
     discordRoomDelivery,
     ...(discordVoice === undefined ? {} : { discordVoice }),
     toolCatalogHealth,
@@ -472,6 +481,31 @@ export async function doctorCommand(
     ...(serviceRecovery.length === 0 ? {} : { serviceRecovery }),
     ...(autostart === undefined ? {} : { autostart }),
   };
+}
+
+async function inspectOperatorSeatBindings(
+  options: InspectInstallOptions & { host?: string },
+): Promise<NonNullable<InstallDoctorReport["operatorSeatBindings"]>> {
+  try {
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("No operator credential for native seat diagnosis");
+    const response = await (options.fetchImpl ?? fetch)(
+      new URL(OPERATOR_SEAT_BINDINGS_PATH, commandHost({ ...options, env })),
+      {
+        headers: { authorization: `Bearer ${credential.token}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) throw new Error(`Native seat diagnosis unavailable (${response.status})`);
+    return OperatorSeatBindingStatusSchema.parse(await response.json());
+  } catch (error) {
+    return { status: "unavailable", detail: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 async function inspectResources(

@@ -19,6 +19,7 @@ import { readSeatBridges } from "../../tui/src/command/seat-delivery.ts";
 import { statusCommand } from "../../tui/src/command/status.ts";
 import { formatDoctorSummary } from "../../tui/src/command/doctor.ts";
 import type { InstallDoctorReport } from "../../tui/src/install-doctor.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
 
 const Channel = z.object({
   method: z.literal("notifications/claude/channel"),
@@ -52,6 +53,7 @@ it.each(["legacy", "modern"])(
       },
     );
     const app = await createClankieApp({
+      operatorSeatBindings: permissiveSeatBindings(),
       // This test has no connected provider accounts. Seat driver, receipts,
       // owner admission, notices and diagnostics are the production captain.
       captain: new Proxy(captain, {
@@ -252,6 +254,7 @@ it("shows an owner reconnect notice after a taken turn loses its bridge and reta
     },
   );
   const app = await createClankieApp({
+    operatorSeatBindings: permissiveSeatBindings(),
     captain,
     eventLogPath: join(root, "events.jsonl"),
     authenticateCaptain: async (request) =>

@@ -20,6 +20,9 @@ import {
   FleetSeatMessageStatusSchema,
   FleetSeatMessageSchema,
   WorkerReportBridgeStatusSchema,
+  OPERATOR_SEAT_BINDINGS_PATH,
+  OPERATOR_SEAT_BRIDGE_CLAIM_HEADER,
+  OperatorSeatBindingRequestSchema,
   OPERATOR_SEAT_EVENTS_PATH,
   OPERATOR_SEAT_CAPABILITIES_HEADER,
   OperatorSeatCapabilitiesSchema,
@@ -29,6 +32,7 @@ import {
   type CaptainSessionLaneV2,
   type OperatorSeatEventsPage,
 } from "@clankie/protocol";
+import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -44,6 +48,7 @@ import { peerSeatAuthority as resolvePeerSeatAuthority } from "./peer-seat-autho
 import { RemoteObservationError } from "../remote-fleet-relay.ts";
 import { fleetAdmissionUnavailableResponse } from "../local-fleet-admission.ts";
 import { SeatLinkInterruptedError } from "../captain/seat-outbox.ts";
+import { seatBindingRecovery } from "../operator-seat-bindings.ts";
 import {
   FLEET_REVIEW_CANDIDATES_PATH,
   FLEET_REVIEW_VERDICTS_PATH,
@@ -111,6 +116,103 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const binding = ctx.dependencies.captain.seatContext(raw?.trim());
     return binding ?? { denial: context.json({ error: "unknown_captain_conversation" }, 404) };
   };
+
+  /**
+   * The operator lane acts as the lead only for the process its launcher
+   * registered (VUH-2816). The conversation is read raw: the service-wide
+   * default of `global-default` never stands in for a caller that named none.
+   */
+  const refuseUnboundOperator = async (context: Context, lane: string): Promise<Response | undefined> => {
+    if (lane !== "operator") return undefined;
+    const socket = (context.env as HttpBindings | undefined)?.incoming?.socket;
+    const bindings = ctx.dependencies.operatorSeatBindings;
+    const admitted = await (bindings?.admit(socket, {
+      conversationId: context.req.query("conversationId")?.trim(),
+      claim: context.req.header(OPERATOR_SEAT_BRIDGE_CLAIM_HEADER),
+    }) ?? { ok: false as const, error: "seat_binding_required" as const, status: 403 as const });
+    return admitted.ok
+      ? undefined
+      : context.json(
+          {
+            error: admitted.error,
+            detail: seatBindingRecovery(admitted.error),
+            recovery: seatBindingRecovery(admitted.error),
+          },
+          admitted.status,
+        );
+  };
+
+  // The launcher that spawned a harness registers it. The caller's process, proven
+  // from its socket, becomes the conversation's controller; it names only the harness.
+  ctx.app.get(OPERATOR_SEAT_BINDINGS_PATH, async (context) => {
+    const auth = await ctx.authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const bindings = ctx.dependencies.operatorSeatBindings;
+    return context.json(
+      bindings?.status() ?? {
+        available: false,
+        error: "seat_binding_unavailable",
+        recovery: seatBindingRecovery("seat_binding_unavailable"),
+        bindings: [],
+      },
+    );
+  });
+  ctx.app.put(OPERATOR_SEAT_BINDINGS_PATH, bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
+    const auth = await ctx.authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const parsed = OperatorSeatBindingRequestSchema.safeParse(
+      await context.req.json().catch(() => undefined),
+    );
+    if (!parsed.success) return context.json({ error: "invalid_seat_binding" }, 400);
+    const socket = (context.env as HttpBindings | undefined)?.incoming?.socket;
+    if (socket === undefined)
+      return context.json(
+        { error: "seat_process_unproven", recovery: seatBindingRecovery("seat_process_unproven") },
+        403,
+      );
+    const bindings = ctx.dependencies.operatorSeatBindings;
+    if (bindings === undefined)
+      return context.json(
+        { error: "seat_binding_unavailable", recovery: seatBindingRecovery("seat_binding_unavailable") },
+        503,
+      );
+    const result = await bindings.register(socket, parsed.data);
+    return result.ok
+      ? context.json({ ok: true })
+      : context.json({ error: result.error, recovery: seatBindingRecovery(result.error) }, result.status);
+  });
+  ctx.app.delete(OPERATOR_SEAT_BINDINGS_PATH, async (context) => {
+    const auth = await ctx.authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const conversationId = context.req.query("conversationId")?.trim();
+    const socket = (context.env as HttpBindings | undefined)?.incoming?.socket;
+    if (!conversationId)
+      return context.json(
+        {
+          error: "seat_binding_conversation_required",
+          recovery: seatBindingRecovery("seat_binding_conversation_required"),
+        },
+        403,
+      );
+    if (socket === undefined)
+      return context.json(
+        { error: "seat_process_unproven", recovery: seatBindingRecovery("seat_process_unproven") },
+        403,
+      );
+    const bindings = ctx.dependencies.operatorSeatBindings;
+    if (bindings === undefined)
+      return context.json(
+        { error: "seat_binding_unavailable", recovery: seatBindingRecovery("seat_binding_unavailable") },
+        503,
+      );
+    const result = await bindings.deregister(socket, conversationId);
+    return result.ok
+      ? context.json({ ok: true })
+      : context.json({ error: result.error, recovery: seatBindingRecovery(result.error) }, result.status);
+  });
 
   ctx.app.get("/v1/captain/seat-context", async (context) => {
     const auth = await ctx.authenticateLane(context);
@@ -192,6 +294,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       const auth = await ctx.authenticateLane(context);
       if ("denial" in auth) return auth.denial;
       if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+      const unbound = await refuseUnboundOperator(context, auth.lane);
+      if (unbound !== undefined) return unbound;
       const wait = Number(context.req.query("wait") ?? 0);
       const waitMs = Number.isFinite(wait)
         ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX)
@@ -234,6 +338,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       const auth = await ctx.authenticateLane(context);
       if ("denial" in auth) return auth.denial;
       if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+      const unbound = await refuseUnboundOperator(context, auth.lane);
+      if (unbound !== undefined) return unbound;
       const binding = seatBinding(context, auth.lane);
       if ("denial" in binding) return binding.denial;
       const acknowledged = await ctx.dependencies.captain.acknowledgeSeatEvent(
@@ -250,6 +356,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const auth = await ctx.authenticateLane(context);
     if ("denial" in auth) return auth.denial;
     if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const unbound = await refuseUnboundOperator(context, auth.lane);
+    if (unbound !== undefined) return unbound;
     const parsed = OperatorSeatReplySchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
     const binding = seatBinding(context, auth.lane);
@@ -700,6 +808,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
   ctx.app.all("/v1/mcp", async (context) => {
     const auth = await ctx.authenticateLane(context);
     if ("denial" in auth) return auth.denial;
+    const unbound = await refuseUnboundOperator(context, auth.lane);
+    if (unbound !== undefined) return unbound;
     const binding = seatBinding(context, auth.lane);
     if ("denial" in binding) return binding.denial;
     return laneMcp.handle(context.req.raw, auth.lane, binding.conversationId);

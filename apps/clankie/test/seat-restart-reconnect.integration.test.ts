@@ -18,6 +18,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { drainHttpServer } from "../src/http-drain.ts";
+import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
 
 const ChannelSchema = z.object({
   method: z.literal("notifications/claude/channel"),
@@ -51,6 +52,7 @@ function service(captain: ReturnType<typeof captainAt>, bearer: string, port: nu
         ? { lane: "operator" }
         : { denial: context.json({ error: "unauthorized" }, 401) },
     dependencies: {
+      operatorSeatBindings: permissiveSeatBindings(),
       // The seat's lane tools need connected accounts this test does not hold;
       // everything the outbox, driver fence and restart decide is the real captain.
       captain: new Proxy(captain, {

@@ -23,6 +23,7 @@ import { commandHost, outputJson } from "./io.ts";
 import { fetchLaneText } from "./prompt.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { resolveSeatContext } from "./seat-context.ts";
+import { bindLaunchedHarness, mintBridgeNonce, type SeatBinding } from "./seat-binding.ts";
 import { MAXIMUM_TRUST_HARNESS_ARGS } from "@clankie/protocol/owner-settings";
 import { readSeatMaximumTrust, type SeatCommandOptions, type SeatPlan } from "./seat.ts";
 
@@ -157,10 +158,14 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
     ...(plan.conversationId ? { CLANKIE_CONVERSATION_ID: plan.conversationId } : {}),
   };
   delete childEnv.CLANKIE_SEAT_PARENT_ARGV;
+  delete childEnv.CLANKIE_BRIDGE_NONCE;
+  delete childEnv.CLANKIE_BRIDGE_NONCE_FILE;
   const context = `${prompt}\n\n${memory}\n\nAvailable Clankie skills (read the relevant SKILL.md before using it):\n${plan.skills
     .map((skill) => `${skill.name}: ${join(skill.path, "SKILL.md")}`)
     .join("\n")}`;
   let child: ChildProcess | undefined, native: GrokNativeController | undefined;
+  let binding: SeatBinding | undefined;
+  const bridgeNonce = mintBridgeNonce();
   const stop = new AbortController();
   let upstream: Awaited<ReturnType<typeof connectLaneUpstream>> | undefined;
   let pump: Promise<void> | undefined;
@@ -196,6 +201,14 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
       });
     });
     void exited.catch(() => {});
+    // The service admits Grok's bridge only as this child's direct child carrying the nonce (VUH-2816).
+    binding = bindLaunchedHarness(options, {
+      command: "grok",
+      conversationId: plan.conversationId,
+      harnessPid: child.pid,
+      nonce: bridgeNonce,
+      stderr,
+    });
     await waitForGrokTuiSession({
       home: plan.grokHome,
       pid: child.pid!,
@@ -227,6 +240,7 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
           throw new Error("Original Grok visible session changed");
       },
     });
+    await binding?.ready;
     await native.load({
       systemPrompt: context,
       mcpServers: [
@@ -237,6 +251,7 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
           env: [
             { name: "CLANKIE_CONTROL_PLANE_URL", value: commandHost(options) },
             { name: "CLANKIE_OPERATOR_TOKEN", value: credential.token },
+            { name: "CLANKIE_BRIDGE_NONCE", value: bridgeNonce },
             ...(plan.conversationId ? [{ name: "CLANKIE_CONVERSATION_ID", value: plan.conversationId }] : []),
           ],
         },
@@ -348,6 +363,7 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
     await pump?.catch(() => {});
     await transcriptPump?.catch(() => {});
     await upstream?.close();
+    await binding?.stop();
     if (!active) {
       await native?.stopOwnedLeader().catch(() => {});
       await persist();

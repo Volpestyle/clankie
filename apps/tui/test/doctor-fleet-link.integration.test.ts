@@ -59,6 +59,15 @@ it.each(["healthy", "unavailable"] as const)(
         });
         return;
       }
+      if (path === "/v1/captain/seat-bindings")
+        return json(200, {
+          available: true,
+          bindings: [],
+          lastRefusal: {
+            error: "seat_bridge_claim_invalid",
+            recovery: "Relaunch to recreate the private MCP configuration.",
+          },
+        });
       if (path === "/v1/runtime-connections")
         return json(200, {
           connections: [
@@ -105,7 +114,23 @@ it.each(["healthy", "unavailable"] as const)(
     });
     expect(report.remoteHarnesses).toHaveLength(1);
     expect(formatDoctorReport(report)).toContain("✗ Seat bridge conv-kh2 · disconnected · KH2:");
-    expect(formatDoctorSummary(report)).toContain("Seat bridge disconnected for conv-kh2. KH2:");
+    expect(report.operatorSeatBindings).toMatchObject({
+      available: true,
+      lastRefusal: { error: "seat_bridge_claim_invalid" },
+    });
+    expect(formatDoctorSummary(report)).toContain("seat_bridge_claim_invalid: Relaunch");
+    expect(formatDoctorReport(report)).toContain("Last native seat refusal · seat_bridge_claim_invalid");
+    expect(
+      formatDoctorSummary({
+        ...report,
+        operatorSeatBindings: {
+          available: false,
+          error: "seat_binding_helper_missing",
+          recovery: "Prepare native helper; relaunch.",
+          bindings: [],
+        },
+      }),
+    ).toContain("seat_binding_helper_missing: Prepare native helper");
     expect(report.remoteHarnesses?.[0]).toMatchObject({ machine: "pc", linkState });
     expect(formatDoctorReport(report)).toContain(`✗ Fleet pc · unreachable · ${reason}`);
     const machine = await machineDoctorCommand("pc", { env });
