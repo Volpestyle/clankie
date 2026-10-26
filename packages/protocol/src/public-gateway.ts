@@ -51,8 +51,10 @@ import {
 } from "./model-keys.ts";
 import {
   HARNESS_LOGINS_PATH,
+  HARNESS_LOGIN_ACCOUNTS_PATH,
   HARNESS_LOGIN_CANCEL_PATH,
   HARNESS_LOGIN_CODE_PATH,
+  HARNESS_LOGIN_REMOVE_PATH,
   HARNESS_LOGIN_START_PATH,
   HARNESS_LOGIN_STATUS_PATH,
 } from "./harness-logins.ts";
@@ -158,6 +160,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: HARNESS_LOGIN_STATUS_PATH, target: "control" },
   { method: "POST", path: HARNESS_LOGIN_CODE_PATH, target: "control" },
   { method: "POST", path: HARNESS_LOGIN_CANCEL_PATH, target: "control" },
+  { method: "GET", path: HARNESS_LOGIN_ACCOUNTS_PATH, target: "control" },
+  { method: "POST", path: HARNESS_LOGIN_REMOVE_PATH, target: "control" },
   { method: "POST", path: MODEL_SUBSCRIPTION_START_PATH, target: "control" },
   { method: "POST", path: MODEL_SUBSCRIPTION_STATUS_PATH, target: "control" },
   { method: "POST", path: MODEL_SUBSCRIPTION_CANCEL_PATH, target: "control" },

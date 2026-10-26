@@ -2,15 +2,22 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   HARNESS_LOGINS_PATH,
+  HARNESS_LOGIN_ACCOUNTS_PATH,
   HARNESS_LOGIN_CANCEL_PATH,
   HARNESS_LOGIN_CODE_PATH,
+  HARNESS_LOGIN_REMOVE_PATH,
   HARNESS_LOGIN_START_PATH,
   HARNESS_LOGIN_STATUS_PATH,
+  HarnessAccountLoginResultSchema,
+  HarnessLoginAccountsResponseSchema,
   HarnessLoginCodeSchema,
-  HarnessLoginResultSchema,
+  HarnessLoginRemoveResultSchema,
+  HarnessLoginRemoveSchema,
   HarnessLoginSessionRequestSchema,
   HarnessLoginStartSchema,
   HarnessLoginsResponseSchema,
+  type HarnessAccountLoginResult,
+  type HarnessLoginRemoveResult,
   type HarnessLoginResult,
 } from "@clankie/protocol/harness-logins";
 import type { HarnessSignIns } from "./harness-logins.ts";
@@ -26,10 +33,12 @@ export function createHarnessLoginRoutes(
   // Login links and codes are interaction data: no request or result logging here.
   for (const path of [
     HARNESS_LOGINS_PATH,
+    HARNESS_LOGIN_ACCOUNTS_PATH,
     HARNESS_LOGIN_START_PATH,
     HARNESS_LOGIN_STATUS_PATH,
     HARNESS_LOGIN_CODE_PATH,
     HARNESS_LOGIN_CANCEL_PATH,
+    HARNESS_LOGIN_REMOVE_PATH,
   ]) {
     app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
@@ -50,14 +59,23 @@ export function createHarnessLoginRoutes(
   app.get(HARNESS_LOGINS_PATH, async (context) =>
     context.json(HarnessLoginsResponseSchema.parse(await logins!.list())),
   );
-  const answer = (result: HarnessLoginResult) => {
-    const parsed = HarnessLoginResultSchema.parse(result);
+  app.get(HARNESS_LOGIN_ACCOUNTS_PATH, async (context) =>
+    context.json(HarnessLoginAccountsResponseSchema.parse(await logins!.accounts())),
+  );
+  const answer = (result: HarnessAccountLoginResult | HarnessLoginRemoveResult) => {
+    const parsed =
+      "deleted" in result
+        ? HarnessLoginRemoveResultSchema.parse(result)
+        : HarnessAccountLoginResultSchema.parse(result);
     if (parsed.ok) return { body: parsed, status: 200 as const };
     const status = {
       managed_credits_only: 403,
       busy: 409,
       not_installed: 404,
       session_not_found: 404,
+      profile_not_found: 404,
+      profile_exists: 409,
+      default_profile: 409,
       malformed: 400,
       forbidden: 403,
       unavailable: 503,
@@ -69,16 +87,25 @@ export function createHarnessLoginRoutes(
     HARNESS_LOGIN_STATUS_PATH,
     HARNESS_LOGIN_CODE_PATH,
     HARNESS_LOGIN_CANCEL_PATH,
+    HARNESS_LOGIN_REMOVE_PATH,
   ]) {
     app.post(path, async (context) => {
       const who = await principal(context.req.raw);
       if (who === undefined) return context.json({ ok: false, error: "forbidden" }, 403);
       const body: unknown = await context.req.json().catch(() => undefined);
-      let result: HarnessLoginResult;
+      let result: HarnessLoginResult | HarnessAccountLoginResult | HarnessLoginRemoveResult;
       if (path === HARNESS_LOGIN_START_PATH) {
         const parsed = HarnessLoginStartSchema.safeParse(body);
         if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
-        result = await logins!.start(parsed.data.harness, who);
+        const { harness, profile, add } = parsed.data;
+        result = await logins!.start(harness, who, {
+          ...(profile === undefined ? {} : { profile }),
+          ...(add === undefined ? {} : { add: add.label === undefined ? {} : { label: add.label } }),
+        });
+      } else if (path === HARNESS_LOGIN_REMOVE_PATH) {
+        const parsed = HarnessLoginRemoveSchema.safeParse(body);
+        if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
+        result = await logins!.remove(parsed.data.harness, parsed.data.profile);
       } else if (path === HARNESS_LOGIN_CODE_PATH) {
         const parsed = HarnessLoginCodeSchema.safeParse(body);
         if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);

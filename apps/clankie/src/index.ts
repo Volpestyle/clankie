@@ -235,6 +235,10 @@ import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.
 import { integrationSafeUpdates } from "./integration-update.ts";
 import { ownerCheckoutSyncReport, startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
+import {
+  harnessAccountIdentities,
+  harnessAccountIdentityPath,
+} from "./captain/harness-account-identities.ts";
 import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { EvidenceStore } from "./evidence-store.ts";
@@ -1216,7 +1220,18 @@ function releaseUpdaterOrNone() {
 // A hosted image opts its body into idle official-release installs (ADR 0237).
 // A managed body always takes them; a self-run owner can turn them off.
 // Worker harnesses sign in with their own logins, as this service's user.
-const harnessLogins = new HarnessSignIns({ env: process.env });
+const harnessLogins = new HarnessSignIns({
+  env: process.env,
+  // The same identity-keyed reader hires choose by, for this Mac only.
+  accounts: () => captain.readWorkerAccounts!(undefined, ["claude", "codex"]),
+  rebind: (harness, labels, key) =>
+    harnessAccountIdentities(harnessAccountIdentityPath(join(stateRoot, "captain"))).rebind(
+      "local",
+      harness,
+      labels,
+      key,
+    ),
+});
 const scheduledUpdateEnabled = async () =>
   hostedBody !== undefined || (await settingsStore.load()).host.autoUpdate;
 const scheduledUpdateIdle = bodyIdleCheck({

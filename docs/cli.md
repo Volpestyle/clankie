@@ -9104,7 +9104,7 @@ The owner API exposes `GET /v1/operator/projects` and revision-guarded
 
 ### Signing worker harnesses in
 
-`clankie harness login [status | claude | codex | cancel SESSION_ID]` signs the
+`clankie harness login [status | accounts | claude|codex [--add [LABEL] | --profile LABEL] | remove claude|codex LABEL [--yes] | cancel SESSION_ID]` signs the
 Claude Code or Codex worker harness into the owner's own account with that
 harness's official login on self-hosted bodies ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
 Managed bodies return an empty harness list and refuse login with
@@ -9114,7 +9114,12 @@ On self-hosted bodies, `status` prints JSON for both harnesses (`installed`, `si
 sign-in; `claude` prints the authorization link and prompts for the code the
 page shows (it needs a terminal; a wrong code prompts again). Stdout gets only
 the final JSON, without the link or code; exit 0 means `complete`. Ctrl-C
-cancels on the service. TUI: `/harness-login`. API and states:
+cancels on the service. `accounts` lists every account per harness (email,
+plan, sign-in state, usage). `--add [LABEL]` signs a new account into a fresh
+`~/.claude-LABEL` or `~/.codex-LABEL` profile and never an existing home;
+`--profile LABEL` re-signs that profile. `remove` signs a profile out with the
+harness's own logout and deletes it only if Clankie created it; it asks for
+confirmation unless `--yes`, and refuses the default home. TUI: `/harness-login`. API and states:
 [harness sign-in](harness-logins.md).
 
 ### Linking native fleet harnesses

@@ -186,6 +186,16 @@ export class HarnessAccountIdentities {
       };
     });
   }
+  /**
+   * The owner re-signed a home into another account on purpose: its labels
+   * follow the new identity, so a hire naming them reaches what is signed in
+   * there now. Passive observation never does this; it only records a notice.
+   */
+  rebind(machine: string, harness: string, labels: readonly string[], key: string) {
+    machine = this.machine(machine);
+    for (const label of labels) this.state.aliases[aliasKey(machine, harness, label)] = key;
+    this.save();
+  }
   aliases(machine: string): Record<string, string> {
     machine = this.machine(machine);
     return Object.fromEntries(

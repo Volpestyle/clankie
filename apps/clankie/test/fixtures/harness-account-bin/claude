@@ -1,0 +1,62 @@
+#!/usr/bin/env node
+// Replays Claude Code 2.1.310's `auth status --json`, headless `auth login`
+// and `auth logout` per config directory, captured 2026-10-25, with the
+// account the owner approves in the browser standing in as the pasted code
+// `approve:<email>`. It reports a version below `/usage` support, so the
+// account probe reads no usage.
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const dir = process.env.CLAUDE_CONFIG_DIR ?? join(process.env.HOME, ".claude");
+const signedIn = join(dir, "fixture-identity.json");
+const [command, sub] = process.argv.slice(2);
+if (command === "--version") {
+  process.stdout.write("2.1.200 (Claude Code)\n");
+  process.exit(0);
+}
+if (command === "auth" && sub === "status") {
+  if (!existsSync(signedIn)) {
+    process.stdout.write(JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider: "firstParty" }, null, 2));
+    process.exit(1);
+  }
+  const { email } = JSON.parse(readFileSync(signedIn, "utf8"));
+  process.stdout.write(
+    JSON.stringify(
+      {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        email,
+        accountId: `acct-${email}`,
+        orgId: `org-${email}`,
+        subscriptionType: "max",
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(0);
+}
+if (command === "auth" && sub === "logout") {
+  rmSync(signedIn, { force: true });
+  process.stdout.write("Successfully logged out from your Anthropic account.\n");
+  process.exit(0);
+}
+if (command === "auth" && sub === "login") {
+  process.stdout.write(
+    "Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&state=fixture\nPaste code here if prompted > ",
+  );
+  let input = "";
+  process.stdin.on("data", (chunk) => {
+    input += chunk;
+    if (!input.includes("\n")) return;
+    const code = input.trim();
+    input = "";
+    if (code.startsWith("approve:")) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(signedIn, JSON.stringify({ email: code.slice("approve:".length) }));
+      process.stdout.write("Login successful.\n");
+      process.exit(0);
+    }
+    process.stdout.write("Invalid code. Please make sure the full code was copied.\n");
+  });
+} else process.exit(2);

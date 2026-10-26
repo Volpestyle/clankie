@@ -711,7 +711,7 @@ function buildNetworkRows() {
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
         purpose:
-          "Start a worker harness's own login (Claude subscription or Codex device code) for this device.",
+          "Start a worker harness's own login (Claude subscription or Codex device code) for this device, in the default, a named or a new profile.",
       },
     ],
     [
@@ -733,6 +733,22 @@ function buildNetworkRows() {
       {
         access: "Encrypted initiating device bearer with terminalControl (Take Control)",
         purpose: "Cancel this device's pending worker harness sign-in.",
+      },
+    ],
+    [
+      "GET /v1/harness-logins/accounts",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "List every Claude Code and Codex account on this machine with its email, plan, sign-in state and usage.",
+      },
+    ],
+    [
+      "POST /v1/harness-logins/remove",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Sign one non-default worker harness account out with its own logout, deleting it if Clankie created it.",
       },
     ],
     [

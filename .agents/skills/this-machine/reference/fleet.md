@@ -23,6 +23,11 @@ bundle for one hire.
 Extra Codex accounts are registered homes (`clankie accounts codex add HOME
 --label LABEL`, `list`, `remove LABEL`, `/accounts codex`). The owner signs in and
 trusts hooks in that home; never copy credentials or approve hook trust for them.
+To sign a new account into a fresh `~/.claude-LABEL` or `~/.codex-LABEL` home,
+the owner runs `clankie harness login claude|codex --add [LABEL]` or uses the
+app; `--profile LABEL` re-signs that home and `clankie harness login accounts`
+lists every account. Removing one signs it out with the harness's own logout:
+it is the owner's call, never yours.
 Hires rank accounts from `worker_accounts` `allocation`; missing or stale usage is
 unknown, not an empty plan. `hire_agent` can pin `account: "LABEL"`. `clankie
 accounts hold codex LABEL [--machine ID] [--reason TEXT]` keeps an account out of
