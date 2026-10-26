@@ -6,11 +6,11 @@ The public `clankie integrate status UUID --wait` now waits through active queue
 
 Simulator renewal retains exact native identity/session/process-birth guards. A live exact holder can renew through finite native activity or queued/held heavy work with validated native ancestry. Native prompt time begins idle expiry; explicit touch remains available. Evidence loss expires; unknown/replayed/stale/future/replaced/dead identity cannot become immortal activity. Caps, runaway protection, cleanup and shutdown remain independent.
 
-| Native holder | Turn activity source proof | Queued/held heavy proof |
-| --- | --- | --- |
-| Codex root | Implemented; read-only native RPC/controller fixture | Exact native process ancestry fixture passed |
-| Codex child | Implemented; verified parentThreadId chain to original root | Exact native process ancestry fixture passed |
-| Claude root | **REQUIRED / OPEN: no verified public native root discriminator** | Exact native process ancestry fixture passed |
+| Native holder      | Turn activity source proof                                                   | Queued/held heavy proof                      |
+| ------------------ | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| Codex root         | Implemented; read-only native RPC/controller fixture                         | Exact native process ancestry fixture passed |
+| Codex child        | Implemented; verified parentThreadId chain to original root                  | Exact native process ancestry fixture passed |
+| Claude root        | **REQUIRED / OPEN: no verified public native root discriminator**            | Exact native process ancestry fixture passed |
 | Claude local child | Implemented; original mod timer→helper→authenticated admission→lease fixture | Exact native process ancestry fixture passed |
 
 Heavy proof covers root and child native-holder shapes; it does not separately launch each real harness. Turn proofs exercise source/native wire contracts with fixture native processes. No actual Claude/Codex harness, running service, plugin reload or CoreSimulator was launched. The simulator adapter uses a subprocess surrogate; kernel process identities, TCP ownership admission, HTTP routes and governor are real. Installed-runtime acceptance stays GLOBAL-owned after rollout.
@@ -42,16 +42,16 @@ Reused the original-week audit and already retained VUH-2826 native token-ledger
 
 Corpus interval: `[2026-10-18T01:40:00.000Z, 2026-10-25T01:41:00.000Z)`, UTC boundaries, 1,984 files / 10,762,413,314 bytes, 65,387 calls. Literal executable foreground-sleep detector over available native transcripts: 4,060 calls (lead 63, workers 3,723, subagents 203, unknown role 71). Missing transcripts are not zeroes. Nine malformed/incomplete-line warnings and ambiguous Codex snapshot aliases remain limitations. The original audit's approximately 3,300 Claude loops used a different corpus/detector; it is not directly comparable to this broader retained native ledger.
 
-| UTC day | Known workers | Subagents | Unknown role | Lead |
-| --- | ---: | ---: | ---: | ---: |
-| Oct 18 (partial) | 438 | 170 | 49 | 0 |
-| Oct 19 | 139 | 2 | 16 | 5 |
-| Oct 20 | 1089 | 1 | 2 | 20 |
-| Oct 21 | 460 | 6 | 0 | 9 |
-| Oct 22 | 119 | 0 | 0 | 3 |
-| Oct 23 | 693 | 24 | 0 | 17 |
-| Oct 24 | 782 | 0 | 0 | 7 |
-| Oct 25 (partial) | 3 | no retained row | 4 | 2 |
+| UTC day          | Known workers |       Subagents | Unknown role | Lead |
+| ---------------- | ------------: | --------------: | -----------: | ---: |
+| Oct 18 (partial) |           438 |             170 |           49 |    0 |
+| Oct 19           |           139 |               2 |           16 |    5 |
+| Oct 20           |          1089 |               1 |            2 |   20 |
+| Oct 21           |           460 |               6 |            0 |    9 |
+| Oct 22           |           119 |               0 |            0 |    3 |
+| Oct 23           |           693 |              24 |            0 |   17 |
+| Oct 24           |           782 |               0 |            0 |    7 |
+| Oct 25 (partial) |             3 | no retained row |            4 |    2 |
 
 Six full UTC days (Oct 19–24): known workers 3,282 / 6 = **547/day**; workers plus subagents 3,315 / 6 = **552.5/day**. Unknown roles stay separate. Partial endpoints are excluded from these daily averages.
 
