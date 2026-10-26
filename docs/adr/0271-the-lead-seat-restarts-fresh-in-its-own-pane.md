@@ -44,19 +44,22 @@ service does not ask again for an hour.
 The relaunch reads the pane's own process tree. It requires the `clankie
 <command>` launcher under the pane's shell, and takes the command (`claude`,
 `claude2`, `codex`, …) and the native harness process from it. It records a
-durable receipt, signals the harness process with SIGTERM, waits for the pane
-to return to its shell, and runs the same launcher with `--conversation <id>`
-there. The new session binds to the same conversation and receives the brief as
-its first message. The conversation still names the ended session as its seat,
-so the new one binds through the receipt: a session of the launched harness in
-that same pane terminal, while the receipt is open or names it (VUH-2860). The
-old session stays on disk and resumable. Each restart records a service notice
-in the conversation.
+durable receipt and keeps the brief beside it, signals the harness process with
+SIGTERM, waits for the pane to return to its shell, and runs the same launcher
+with `--conversation <id>` there. The new session binds to the same conversation
+and receives the brief once. The conversation still names the ended session as
+its seat, so the new one binds through the receipt: a session of the launched
+harness in that same pane terminal, while the receipt is open or names it
+(VUH-2860). The old session stays on disk and resumable. Each restart records a
+service notice in the conversation.
 
 Every refusal is definite: nothing was ended and nothing was launched. After the
 signal, the result is either relaunched or an uncertain receipt that is
 reconciled by reading the pane and conversation, never by trying again. A new
-session that binds after the relaunch stopped waiting settles its receipt then.
+session that binds after the relaunch stopped waiting settles its receipt then
+and receives the kept brief at its first bound poll. A brief whose delivery does
+not confirm is never resent. A receipt from before briefs were kept settles
+with a notice that its brief was unavailable.
 
 The fleet setting `leadRestarts` (`on` by default) turns this off. It is set
 through the revision-fenced fleet settings API, `clankie fleet set

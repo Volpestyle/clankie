@@ -302,9 +302,81 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
     const { [conversationId]: _ended, ...rest } = waits;
     writeWaits(rest);
   }
+  // Handoff briefs also live beside the journal (VUH-2860), so a new session that
+  // binds after its relaunch stopped waiting still receives its brief.
+  const handoffsPath = `${deps.journalPath}.handoffs.json`;
+  /**
+   * `pending` keeps a relaunch's brief, if it had one, until one delivery is
+   * claimed as `attempting`. An attempt a later read finds unfinished stays
+   * uncertain and is never resent. `unavailable` marks a receipt written before
+   * briefs were kept: its brief is gone, and nothing claims it was delivered.
+   */
+  const HandoffSchema = z.union([
+    z.object({ state: z.literal("pending"), brief: z.string().min(1).optional() }).strict(),
+    z.object({ state: z.enum(["attempting", "delivered", "undelivered", "none", "unavailable"]) }).strict(),
+  ]);
+  type Handoff = z.infer<typeof HandoffSchema>;
+  function readHandoffs(): Record<string, Handoff> {
+    try {
+      return z.record(z.string(), HandoffSchema).parse(JSON.parse(readFileSync(handoffsPath, "utf8")));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      throw error;
+    }
+  }
+  function keepHandoff(receiptId: string, handoff: Handoff | undefined): void {
+    const { [receiptId]: _previous, ...rest } = readHandoffs();
+    // Like the journal's receipts, only the latest few are kept.
+    const handoffs = Object.fromEntries(
+      Object.entries(handoff === undefined ? rest : { ...rest, [receiptId]: handoff }).slice(-32),
+    );
+    mkdirSync(dirname(handoffsPath), { recursive: true, mode: 0o700 });
+    const temporary = `${handoffsPath}.${String(process.pid)}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(handoffs)}\n`, { mode: 0o600 });
+    renameSync(temporary, handoffsPath);
+  }
+  function restartNotice(
+    receipt: Receipt,
+    sessionId: string,
+    brief: "delivered" | "undelivered" | "unavailable" | undefined,
+  ): string {
+    const { to } = receipt;
+    return `Clankie's seat restarted fresh in its pane (${receipt.reason.replaceAll("_", " ")}): session ${receipt.previousSessionId ?? "unknown"} → ${sessionId} on ${to.harness}${to.account === undefined ? "" : ` (${to.account})`}. The previous session stays resumable.${
+      brief === "delivered"
+        ? " The handoff brief was delivered to it."
+        : brief === "undelivered"
+          ? " The handoff brief did not reach it; it starts from the shared log."
+          : brief === "unavailable"
+            ? " Its handoff brief was not kept by the service that started this relaunch, so none was delivered; it starts from the shared log."
+            : ""
+    }`;
+  }
+  /**
+   * Hand a settled relaunch's kept brief to the session its receipt names, once,
+   * and tell the conversation. The claim is written before delivery, so the
+   * waiting relaunch and the new session's poll never both send it, and a
+   * delivery that does not confirm is never resent.
+   */
+  async function handOffReceipt(receiptId: string, sessionId: string): Promise<void> {
+    const receipt = read().receipts.find((entry) => entry.receiptId === receiptId);
+    if (receipt?.stage !== "relaunched" || receipt.sessionId !== sessionId) return;
+    const handoff = readHandoffs()[receiptId];
+    if (handoff?.state !== "pending") return;
+    const brief = handoff.brief;
+    keepHandoff(receiptId, { state: brief === undefined ? "none" : "attempting" });
+    let outcome: "delivered" | "undelivered" | undefined;
+    if (brief !== undefined) {
+      outcome = (await deps.deliverBrief(receipt.conversationId, brief).catch(() => false))
+        ? "delivered"
+        : "undelivered";
+      keepHandoff(receiptId, { state: outcome });
+    }
+    deps.notice(receipt.conversationId, restartNotice(receipt, sessionId, outcome));
+  }
   function drop(receiptId: string): void {
     const journal = read();
     write({ ...journal, receipts: journal.receipts.filter((entry) => entry.receiptId !== receiptId) });
+    keepHandoff(receiptId, undefined);
   }
   function save(receipt: Receipt): void {
     const journal = read();
@@ -387,6 +459,9 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
       startedAt: new Date(now()).toISOString(),
       stage: "ending",
     };
+    // Kept first: a brief that could not be kept stops the relaunch before any effect.
+    const brief = input.handoffBrief?.trim();
+    keepHandoff(receiptId, brief ? { state: "pending", brief } : { state: "pending" });
     save(receipt);
     // The guards are read again just before the one irreversible step.
     const late = await refuseFor(input, seat);
@@ -435,21 +510,11 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         next.sessionId !== seat.sessionId &&
         deps.idle(input.conversationId)
       ) {
-        save({ ...receipt, stage: "relaunched", sessionId: next.sessionId, seatId: next.terminalId });
-        const brief = input.handoffBrief?.trim();
-        const briefed = brief
-          ? await deps.deliverBrief(input.conversationId, brief).catch(() => false)
-          : false;
-        deps.notice(
-          input.conversationId,
-          `Clankie's seat restarted fresh in its pane (${input.reason.replaceAll("_", " ")}): session ${seat.sessionId ?? "unknown"} → ${next.sessionId} on ${target.harness}${target.account === undefined ? "" : ` (${target.account})`}. The previous session stays resumable.${
-            brief
-              ? briefed
-                ? " The handoff brief was its first message."
-                : " The handoff brief did not reach it; it starts from the shared log."
-              : ""
-          }`,
-        );
+        // The new session's own poll may have settled it first (VUH-2860).
+        if (read().receipts.find((entry) => entry.receiptId === receiptId)?.stage !== "relaunched")
+          save({ ...receipt, stage: "relaunched", sessionId: next.sessionId, seatId: next.terminalId });
+        // allow-swallowed-rejection -- the relaunch happened either way; an unclaimed brief stays pending for the next bound poll, a claimed one is never resent.
+        await handOffReceipt(receiptId, next.sessionId).catch(() => undefined);
         return {
           outcome: "relaunched",
           receiptId,
@@ -466,6 +531,45 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         };
       await sleep(POLL_MS);
     }
+  }
+
+  /** Read-only: what became of a relaunch, never another attempt. */
+  async function reconcile(receiptId: string): Promise<RelaunchLeadSeatResult> {
+    const receipt = read().receipts.find((entry) => entry.receiptId === receiptId);
+    if (receipt === undefined)
+      return { outcome: "uncertain", receiptId, detail: "No relaunch receipt has that ID." };
+    if (receipt.stage === "relaunched" && receipt.sessionId && receipt.seatId)
+      return {
+        outcome: "relaunched",
+        receiptId,
+        seatId: receipt.seatId,
+        sessionId: receipt.sessionId,
+        launch: receipt.to,
+      };
+    // allow-swallowed-rejection -- an unreadable seat proves nothing; the receipt stays uncertain.
+    const seat = await deps.seat(receipt.conversationId).catch(() => undefined);
+    if (
+      seat?.sessionId !== undefined &&
+      seat.sessionId !== receipt.previousSessionId &&
+      seat.paneId === receipt.paneId
+    ) {
+      save({ ...receipt, stage: "relaunched", sessionId: seat.sessionId, seatId: seat.terminalId });
+      return {
+        outcome: "relaunched",
+        receiptId,
+        seatId: seat.terminalId,
+        sessionId: seat.sessionId,
+        launch: receipt.to,
+      };
+    }
+    return {
+      outcome: "uncertain",
+      receiptId,
+      detail:
+        receipt.stage === "ending"
+          ? "The old session was signalled; no new launch is recorded."
+          : "A new session was launched in the pane but has not bound to the conversation.",
+    };
   }
 
   return {
@@ -545,41 +649,27 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         : undefined;
     },
     /** Read-only: what became of a relaunch, never another attempt. */
-    async reconcileLeadSeatRelaunch(receiptId: string): Promise<RelaunchLeadSeatResult> {
+    reconcileLeadSeatRelaunch: reconcile,
+    /**
+     * A new session bound by its relaunch receipt (VUH-2860): settle the receipt
+     * by reconciliation. Its kept brief reaches the session at its next poll
+     * (`handOff`). A receipt from before briefs were kept settles all the same,
+     * and the conversation is told its brief was unavailable.
+     */
+    async bindSuccessor(receiptId: string): Promise<RelaunchLeadSeatResult> {
+      const result = await reconcile(receiptId);
+      if (result.outcome !== "relaunched") return result;
       const receipt = read().receipts.find((entry) => entry.receiptId === receiptId);
-      if (receipt === undefined)
-        return { outcome: "uncertain", receiptId, detail: "No relaunch receipt has that ID." };
-      if (receipt.stage === "relaunched" && receipt.sessionId && receipt.seatId)
-        return {
-          outcome: "relaunched",
-          receiptId,
-          seatId: receipt.seatId,
-          sessionId: receipt.sessionId,
-          launch: receipt.to,
-        };
-      const seat = await deps.seat(receipt.conversationId).catch(() => undefined);
-      if (
-        seat?.sessionId !== undefined &&
-        seat.sessionId !== receipt.previousSessionId &&
-        seat.paneId === receipt.paneId
-      ) {
-        save({ ...receipt, stage: "relaunched", sessionId: seat.sessionId, seatId: seat.terminalId });
-        return {
-          outcome: "relaunched",
-          receiptId,
-          seatId: seat.terminalId,
-          sessionId: seat.sessionId,
-          launch: receipt.to,
-        };
+      if (receipt !== undefined && readHandoffs()[receiptId] === undefined) {
+        keepHandoff(receiptId, { state: "unavailable" });
+        deps.notice(receipt.conversationId, restartNotice(receipt, result.sessionId, "unavailable"));
       }
-      return {
-        outcome: "uncertain",
-        receiptId,
-        detail:
-          receipt.stage === "ending"
-            ? "The old session was signalled; no new launch is recorded."
-            : "A new session was launched in the pane but has not bound to the conversation.",
-      };
+      return result;
+    },
+    /** At a seat's poll: hand it the brief its conversation's latest relaunch still owes it. */
+    async handOff(conversationId: string, sessionId: string): Promise<void> {
+      const receipt = read().receipts.findLast((entry) => entry.conversationId === conversationId);
+      if (receipt?.stage === "relaunched") await handOffReceipt(receipt.receiptId, sessionId);
     },
   };
 }

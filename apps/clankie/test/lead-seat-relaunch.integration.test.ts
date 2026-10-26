@@ -326,17 +326,36 @@ it("leaves an uncertain receipt, and launches nothing, when the old session will
 // VUH-2860: the first live relaunch (receipt 3f20b480) started a new session in
 // the lead's pane, but the conversation's stored source still named the session
 // it ended. The service's own seat lookup refused the new session, so every hire
-// failed and the receipt stayed `launching`. This drives that lookup itself.
-it("attaches a relaunch's new session in the same terminal by its open receipt, and refuses it without one", async () => {
+// failed and the receipt stayed `launching`. These drive that lookup itself.
+async function relaunchedLead() {
   const f = await leadChatFixture(false, cleanup, { nativeSourceProof: true });
   const work = f.leads[1]!;
-  const poll = () => f.captain.pollSeatEvents(50, undefined, work, capabilities);
-  const source = async () =>
-    (
-      JSON.parse(await readFile(join(f.root, "conversations", work, "meta.json"), "utf8")) as {
-        nativeSource?: { terminalId: string; session?: { value: string } };
-      }
-    ).nativeSource;
+  const file = async (path: string) => JSON.parse(await readFile(join(f.root, path), "utf8")) as unknown;
+  return {
+    ...f,
+    work,
+    poll: () => f.captain.pollSeatEvents(50, undefined, work, capabilities),
+    source: async () =>
+      (
+        (await file(join("conversations", work, "meta.json"))) as {
+          nativeSource?: { terminalId: string; session?: { value: string } };
+        }
+      ).nativeSource,
+    receipt: async () =>
+      ((await file("lead-seat-relaunches.json")) as { receipts: unknown[] }).receipts.at(-1),
+    handoffs: () => file("lead-seat-relaunches.json.handoffs.json"),
+    notices: async () =>
+      (await readFile(join(f.root, "conversations", work, "events.jsonl"), "utf8"))
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { type: string; role?: string; text?: string })
+        .filter((event) => event.type === "message" && event.role === "external")
+        .map((event) => event.text!),
+  };
+}
+
+it("attaches a relaunch's new session in the same terminal by its open receipt, and refuses it without one", async () => {
+  const { poll, source, receipt, handoffs, notices, work, ...f } = await relaunchedLead();
   await poll();
   const ended = f.head.session!.value;
   expect(await source()).toMatchObject({ terminalId: "term_work", session: { value: ended } });
@@ -347,11 +366,11 @@ it("attaches a relaunch's new session in the same terminal by its open receipt, 
   await poll();
   expect((await source())?.session?.value).toBe(ended);
 
-  // The receipt a relaunch leaves when its wait for the new session times out, in the live shape.
-  const journal = join(f.root, "lead-seat-relaunches.json");
+  // The receipt the live relaunch left when its wait for the new session timed out.
+  // Its service kept no brief beside it.
   const receiptId = randomUUID();
   await writeFile(
-    journal,
+    join(f.root, "lead-seat-relaunches.json"),
     JSON.stringify({
       schemaVersion: 1,
       receipts: [
@@ -370,8 +389,6 @@ it("attaches a relaunch's new session in the same terminal by its open receipt, 
       launches: {},
     }),
   );
-  const receipt = async () =>
-    (JSON.parse(await readFile(journal, "utf8")) as { receipts: unknown[] }).receipts.at(-1);
 
   // The receipt proves only the stored source's own terminal.
   f.occupy({ sessionId: next, terminalId: "term_other" });
@@ -388,11 +405,97 @@ it("attaches a relaunch's new session in the same terminal by its open receipt, 
     sessionId: next,
     seatId: "term_work",
   });
+  // Hiring recovers, and the conversation is told the brief was never kept, not that it arrived.
+  expect(await handoffs()).toEqual({ [receiptId]: { state: "unavailable" } });
+  expect(await notices()).toEqual([
+    expect.stringContaining(
+      `session ${ended} → ${next} on claude. The previous session stays resumable. Its handoff brief was not kept`,
+    ),
+  ]);
 
   // A settled receipt proves nothing further: a later session there is refused again.
   f.occupy({ sessionId: randomUUID() });
   await poll();
   expect((await source())?.session?.value).toBe(next);
+  expect(await notices()).toHaveLength(1);
+});
+
+it("hands a relaunch's kept brief to its new session when it binds after the relaunch stopped waiting", async () => {
+  const { poll, source, receipt, handoffs, notices, work, ...f } = await relaunchedLead();
+  await poll();
+  const ended = f.head.session!.value;
+  // The relaunch itself: it ends the old session and launches once, but the new
+  // session has not bound when its wait runs out (a logical clock spends it).
+  let alive = true;
+  let clock = Date.parse("2026-10-26T04:34:28.525Z");
+  const launched: (readonly string[])[] = [];
+  const delivered: string[] = [];
+  const relaunch = createLeadSeatRelaunch({
+    journalPath: join(f.root, "lead-seat-relaunches.json"),
+    seat: async () => ({ paneId: "w4:p2", terminalId: "term_work", harness: "claude", sessionId: ended }),
+    paneShell: async () => ({
+      shellPid: 4242,
+      foreground: alive
+        ? [
+            { pid: 4243, name: "node", argv: ["node", "/opt/clankie/bin/clankie", "claude"] },
+            { pid: 4244, name: "2.1.296", argv: ["/opt/bin/claude", "--name", "Clankie"] },
+          ]
+        : [],
+    }),
+    signal: () => {
+      alive = false;
+    },
+    readPane: async () => "",
+    runInPane: async (_pane, argv) => {
+      launched.push(argv);
+    },
+    idle: () => true,
+    lastOwnerMessageAt: () => undefined,
+    deliverBrief: async (_id, text) => {
+      delivered.push(text);
+      return true;
+    },
+    notice: () => {},
+    now: () => clock,
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  });
+  const brief = "In flight: VUH-2860 review. Waiting on James: nothing.";
+  const result = await relaunch.relaunchLeadSeat({
+    conversationId: work,
+    harness: "claude",
+    reason: "fresh_restart",
+    guards: { requireNoDraft: false, quietOwnerMs: 0, requireIdle: false },
+    handoffBrief: brief,
+  });
+  expect(result).toMatchObject({ outcome: "uncertain" });
+  expect(launched).toEqual([["/opt/clankie/bin/clankie", "claude", "--conversation", work]]);
+  expect(delivered).toEqual([]);
+
+  // Later the new session runs in the pane, and its real seat bridge polls and acknowledges.
+  const next = randomUUID();
+  f.occupy({ sessionId: next });
+  const channel = await f.bridge(work);
+  const briefs = () =>
+    channel.mock.calls
+      .map(([event]) => (event as { params: { content: string } }).params.content)
+      .filter((content) => content.includes(brief));
+  await expect.poll(briefs, { timeout: 5_000 }).toHaveLength(1);
+  await expect.poll(handoffs).toEqual({
+    [(result as { receiptId: string }).receiptId]: { state: "delivered" },
+  });
+  expect(await source()).toMatchObject({ session: { value: next } });
+  expect(await receipt()).toMatchObject({ stage: "relaunched", sessionId: next, seatId: "term_work" });
+  expect(await notices()).toEqual([
+    expect.stringContaining(
+      `session ${ended} → ${next} on claude. The previous session stays resumable. The handoff brief was delivered to it.`,
+    ),
+  ]);
+  // Later polls never send it again.
+  await poll();
+  await poll();
+  expect(briefs()).toHaveLength(1);
 });
 
 it("reads a Claude session's start and latest main-thread context, unknown after a compaction", async () => {

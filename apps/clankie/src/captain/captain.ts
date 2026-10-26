@@ -5477,8 +5477,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     leadSeats.successorReceipt(conversationId, leadSeatPane(previous), leadSeatPane(next)) !== undefined;
   /**
    * Persist a conversation's proven native source. A relaunch's successor
-   * replaces the session it ended, and its receipt settles by the relaunch's own
-   * read-only reconciliation; a relaunch still waiting sees it and delivers its brief.
+   * replaces the session it ended and settles its receipt; its kept brief
+   * reaches it once its poll is bound (`leadSeats.handOff`).
    */
   async function rememberOperatorSource(conversationId: string, source: HerdrAgentSnapshot): Promise<void> {
     const previous = conversations.nativeSource(conversationId);
@@ -5488,7 +5488,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : leadSeats.successorReceipt(conversationId, leadSeatPane(previous), leadSeatPane(source));
     conversations.rememberNativeSource(conversationId, source);
     if (receiptId !== undefined)
-      await leadSeats.reconcileLeadSeatRelaunch(receiptId).catch((error: unknown) => {
+      await leadSeats.bindSuccessor(receiptId).catch((error: unknown) => {
         console.warn("Lead relaunch reconciliation unavailable", receiptId, String(error));
       });
   }
@@ -7726,6 +7726,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       let machineFleet: string | undefined;
       try {
         let recipientBinding: string | undefined;
+        let polledSession: string | undefined;
         return await conversations
           .pollConversationDriver(
             binding.conversationId,
@@ -7742,6 +7743,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               );
               arrived();
               deliverServiceHandoff(binding.conversationId);
+              // Like the service handoff, a relaunch's kept brief waits for the bound poll (VUH-2860).
+              if (polledSession !== undefined && outbox.usageLimited() === undefined)
+                void leadSeats.handOff(binding.conversationId, polledSession).catch((error: unknown) => {
+                  console.warn("Lead relaunch handoff unavailable", binding.conversationId, String(error));
+                });
               void recoverWorkerReports(binding.conversationId).catch(() => undefined);
               return pending;
             },
@@ -7751,6 +7757,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               pollSignal.throwIfAborted();
               machineFleet = source === undefined ? undefined : splitFleetQualified(source.paneId)?.fleet;
               recipientBinding = inboundBinding(source);
+              polledSession = source === undefined ? undefined : nativeSessionId(source);
               if (source !== undefined) await rememberOperatorSource(binding.conversationId, source);
               await admit();
             },
