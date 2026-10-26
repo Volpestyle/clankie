@@ -354,7 +354,7 @@ async function fixture(
         admitted.delete(request);
       }
     };
-    const bridgeRequest = (path: string, init: RequestInit = {}, claim: string | null = nonce) =>
+    const bridgeRequest = async (path: string, init: RequestInit = {}, claim: string | null = nonce) =>
       app.app.request(
         path,
         {
@@ -790,7 +790,7 @@ it.each([
   );
   if (status.op !== "seat_bridges") throw new Error("Seat bridge status unavailable");
   expect(status.bridges.find((bridge) => bridge.conversationId === target)?.sourceHash).toBeUndefined();
-  expect(f.service.captain.operatorSeatReady(target)).toBe(false);
+  expect(f.service.captain.operatorSeatReady?.(target)).toBe(false);
 });
 
 it.each([false, true])(
