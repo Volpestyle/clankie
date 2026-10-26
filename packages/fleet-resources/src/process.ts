@@ -291,6 +291,31 @@ export async function observeSimulatorReferents(needles: readonly string[]): Pro
   }
   return { processes, matches };
 }
+export interface ProcessAncestor {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly uid: number;
+}
+/** Fresh all-UID topology only. It cannot prove a birth or authorize any effect. */
+export async function processAncestry(): Promise<ProcessAncestor[]> {
+  const reply = await observe("ancestry", {}, helperTimeoutMs);
+  if (!Array.isArray(reply) || reply.length > 10_000) throw new Error("Fleet process ancestry unavailable");
+  const seen = new Set<number>();
+  for (const row of reply) {
+    if (
+      !record(row) ||
+      !keys(row, ["pid", "ppid", "uid"]) ||
+      !integer(row.pid, 0, 2_147_483_647) ||
+      !integer(row.ppid, 0, 2_147_483_647) ||
+      !integer(row.uid, 0, 4_294_967_295) ||
+      seen.has(row.pid) ||
+      (row.pid !== 0 && row.pid === row.ppid)
+    )
+      throw new Error("Fleet process ancestry invalid");
+    seen.add(row.pid);
+  }
+  return reply as ProcessAncestor[];
+}
 let pendingSnapshot: Promise<ProcessIdentity[]> | undefined;
 let snapshotCache: { at: number; rows: ProcessIdentity[] } | undefined;
 export async function processSnapshot(fresh = false): Promise<ProcessIdentity[]> {

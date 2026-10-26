@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createResourceGovernor } from "../src/governor.ts";
 import type { HeavyLease, ResourceQueueEntry, SimulatorReservation } from "../src/model.ts";
-import { processIdentity, processSnapshot } from "../src/process.ts";
+import { processAncestry, processIdentity } from "../src/process.ts";
 import { proveRestartResources } from "../src/restart-guard.ts";
 import { ResourceStore } from "../src/store.ts";
 import type { SimulatorOwner } from "../src/simulators.ts";
@@ -20,9 +20,16 @@ async function fixture() {
     [
       "-e",
       `
-    const c = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'});
-    console.log(c.pid);
-    process.on('SIGTERM',()=>{c.kill(); process.exit(0)});
+    const {spawn} = require('node:child_process');
+    const c = spawn(process.execPath, ['-e', \`
+      const d = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'});
+      console.log(d.pid);
+      process.on('SIGTERM',()=>{d.kill(); process.exit(0)});
+      setInterval(()=>{},1000);
+    \`], {stdio:['ignore','pipe','inherit']});
+    const u = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'});
+    c.stdout.once('data', line => console.log(JSON.stringify([c.pid, Number(String(line).trim()), u.pid])));
+    process.on('SIGTERM',()=>{c.kill(); u.kill(); process.exit(0)});
     setInterval(()=>{},1000);
   `,
     ],
@@ -40,10 +47,13 @@ async function fixture() {
     },
   );
   const [line] = await once(child.stdout!, "data");
-  const native = await processIdentity(child.pid!);
-  const descendant = await processIdentity(Number(String(line).trim()));
-  const unrelated = await processIdentity();
-  if (!native || !descendant || !unrelated) throw new Error("Native fixture births unavailable");
+  const [ownerPid, descendantPid, unrelatedPid] = JSON.parse(String(line));
+  const native = await processIdentity(ownerPid);
+  const descendant = await processIdentity(descendantPid);
+  const unrelated = await processIdentity(unrelatedPid);
+  const commonAncestor = await processIdentity(child.pid!);
+  if (!native || !descendant || !unrelated || !commonAncestor)
+    throw new Error("Native fixture births unavailable");
   const owner: SimulatorOwner = {
     seatId: "hired-seat",
     pane: "pane",
@@ -59,6 +69,7 @@ async function fixture() {
     native,
     descendant,
     unrelated,
+    commonAncestor,
     stores,
     governor,
     read: () => Promise.all(stores.map((store) => store.read())),
@@ -126,6 +137,20 @@ it("checks held and queued work in every private lane using native child ancestr
       });
       expect(await f.governor.restartGuard!(f.owner)).toEqual({ clear: true });
       await f.reset();
+      for (const linked of [
+        { runner: f.descendant },
+        { descendants: [{ pid: f.descendant.pid, startTime: f.descendant.startTime }] },
+      ]) {
+        await store.transaction((state) => {
+          state.leases.push({ ...lease, claimOwner: f.unrelated, ...linked });
+        });
+        expect(await f.governor.restartGuard!(f.owner)).toMatchObject({
+          clear: false,
+          reason: "resource_held_or_queued",
+          detail: lease.id,
+        });
+        await f.reset();
+      }
     }
     for (const phase of ["reserved", "booting", "cancelling"]) {
       const lease: SimulatorReservation = {
@@ -172,6 +197,73 @@ it("checks held and queued work in every private lane using native child ancestr
   }
 }, 60_000);
 
+it("proves sibling holders unrelated with an unobservable ancestor above their shared parent, without granting ancestry birth authority", async () => {
+  const f = await fixture();
+  try {
+    const ticket: ResourceQueueEntry = {
+      id: randomUUID(),
+      token: randomUUID(),
+      kind: "heavy",
+      queuedAtMs: Date.now(),
+      owner: f.unrelated,
+    };
+    await f.stores[0]!.transaction((state) => {
+      state.queue.push(ticket);
+    });
+    // These private births deliberately omit the parent. The all-user census
+    // supplies that link, but nothing above it, independent of runner parentage.
+    const births = async () => [f.native, f.descendant, f.unrelated];
+    const observedPids = new Set([f.native.pid, f.descendant.pid, f.unrelated.pid, f.commonAncestor.pid]);
+    const ancestry = async () => (await processAncestry()).filter(({ pid }) => observedPids.has(pid));
+    expect(f.native.ppid).toBe(f.commonAncestor.pid);
+    expect(f.unrelated.ppid).toBe(f.commonAncestor.pid);
+    expect((await ancestry()).some(({ pid }) => pid === f.commonAncestor.ppid)).toBe(false);
+    expect(await proveRestartResources(f.owner, f.read, births, ancestry)).toEqual({ clear: true });
+    // Model the root-owned login boundary with the real fixture's parent links;
+    // ancestry may cross UIDs without acquiring birth authority for that parent.
+    expect(
+      await proveRestartResources(f.owner, f.read, births, async () =>
+        (await ancestry()).map((row) => (row.pid === f.commonAncestor.pid ? { ...row, uid: 0 } : row)),
+      ),
+    ).toEqual({ clear: true });
+    expect(
+      await proveRestartResources(f.owner, f.read, async () => [f.native, f.descendant], ancestry),
+    ).toMatchObject({ clear: false, reason: "resource_attribution_unknown", detail: ticket.id });
+    expect(
+      await proveRestartResources(f.owner, f.read, births, async () =>
+        (await ancestry()).filter(({ pid }) => pid !== f.commonAncestor.pid),
+      ),
+    ).toMatchObject({ clear: false, reason: "resource_attribution_unknown", detail: ticket.id });
+    expect(
+      await proveRestartResources(f.owner, f.read, births, async () => {
+        throw new Error("all-user ancestry unavailable");
+      }),
+    ).toMatchObject({ clear: false, reason: "resource_inventory_unknown" });
+    expect(
+      await proveRestartResources(f.owner, f.read, births, async () =>
+        (await ancestry()).map((row) => (row.pid === f.unrelated.pid ? { ...row, ppid: 1 } : row)),
+      ),
+    ).toMatchObject({ clear: false, reason: "resource_attribution_unknown", detail: ticket.id });
+    expect(
+      await proveRestartResources(f.owner, f.read, births, async () =>
+        (await ancestry()).map((row) => (row.pid === f.native.pid ? { ...row, ppid: 1 } : row)),
+      ),
+    ).toMatchObject({ clear: false, reason: "resource_owner_birth_unknown" });
+    for (const [pid, uid, reason] of [
+      [f.unrelated.pid, f.unrelated.uid + 1, "resource_attribution_unknown"],
+      [f.native.pid, f.native.uid + 1, "resource_owner_birth_unknown"],
+    ] as const) {
+      expect(
+        await proveRestartResources(f.owner, f.read, births, async () =>
+          (await ancestry()).map((row) => (row.pid === pid ? { ...row, uid } : row)),
+        ),
+      ).toMatchObject({ clear: false, reason });
+    }
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
 it("refuses unknown births, failed journal/census reads and a journal mutation during the census", async () => {
   const f = await fixture();
   try {
@@ -201,11 +293,12 @@ it("refuses unknown births, failed journal/census reads and a journal mutation d
     ).toMatchObject({ clear: false, reason: "resource_inventory_unknown" });
     expect(
       await proveRestartResources(f.owner, f.read, async () => {
-        const census = await processSnapshot(true);
+        const native = await processIdentity(f.native.pid);
+        if (!native) throw new Error("Native fixture birth unavailable");
         await f.stores[2]!.transaction((state) => {
           state.policy.maxLoadRatio += 0.1;
         });
-        return census;
+        return [native];
       }),
     ).toMatchObject({ clear: false, reason: "resource_inventory_changed" });
     await writeFile(join(f.root, "state.json"), "broken journal");

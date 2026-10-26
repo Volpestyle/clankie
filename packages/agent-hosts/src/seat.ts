@@ -300,6 +300,8 @@ export interface SeatControl {
 export interface HarnessSeatAdapter {
   readonly harness: SeatHarness;
   prepare?(launch: SeatLaunch, signal?: AbortSignal): Promise<PreparedSeatLaunch>;
+  /** Read-only startup admissions before an original process is ended. Native readiness still belongs to start. */
+  admitRestart?(launch: SeatLaunch): Promise<void>;
   start(launch: SeatLaunch, view: SeatView, signal?: AbortSignal): Promise<SeatStartResult>;
   /**
    * Control of a seat this adapter started, possibly before a service restart.

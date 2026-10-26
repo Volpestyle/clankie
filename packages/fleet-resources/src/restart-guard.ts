@@ -1,21 +1,47 @@
 import type { ProcessIdentity, ProcessProof, ResourceState } from "./model.ts";
 import type { SimulatorOwner } from "./simulators.ts";
-import { processSnapshot } from "./process.ts";
+import { observeProcesses, processAncestry } from "./process.ts";
 
 export type RestartResourceGuard = { clear: true } | { clear: false; reason: string; detail?: string };
+
+function entryProofs(
+  entry: ResourceState["leases"][number] | ResourceState["queue"][number],
+): ProcessProof[] {
+  if ("kind" in entry && entry.kind === "simulator" && "ownerProcesses" in entry)
+    return entry.ownerProcesses ?? [];
+  return "claimOwner" in entry
+    ? [entry.claimOwner, ...(entry.runner ? [entry.runner] : []), ...(entry.descendants ?? [])]
+    : "owner" in entry
+      ? [entry.owner]
+      : [];
+}
 
 /** A negative proof needs private births and fresh ancestry, never the public status projection. */
 export async function proveRestartResources(
   owner: SimulatorOwner,
   read: () => Promise<readonly ResourceState[]>,
-  observe: () => Promise<ProcessIdentity[]> = () => processSnapshot(true),
+  observe?: () => Promise<ProcessIdentity[]>,
+  observeAncestry: typeof processAncestry = processAncestry,
 ): Promise<RestartResourceGuard> {
   try {
     if (!owner.processes.length || !owner.binding?.socketPath)
       return { clear: false, reason: "resource_provenance_unknown" };
     const before = await read();
     if (before.length !== 3) return { clear: false, reason: "resource_inventory_incomplete" };
-    const processes = await observe();
+    // A transient unrelated process must not invalidate exact journal births.
+    // Omitted or uncertain requested PIDs remain unknown, never proved exited.
+    const processes = observe
+      ? await observe()
+      : [
+          ...(
+            await observeProcesses([
+              ...owner.processes.map(({ pid }) => pid),
+              ...before.flatMap((state) =>
+                [...state.leases, ...state.queue].flatMap(entryProofs).map(({ pid }) => pid),
+              ),
+            ])
+          ).values(),
+        ].flatMap((row) => (row.status === "live" ? [row.identity] : []));
     const byPid = new Map(processes.map((process) => [process.pid, process]));
     const matches = (actual: ProcessIdentity | undefined, proof: ProcessProof) =>
       actual !== undefined &&
@@ -24,16 +50,45 @@ export async function proveRestartResources(
     if (owner.processes.some((proof) => !matches(byPid.get(proof.pid), proof)))
       return { clear: false, reason: "resource_owner_birth_unknown" };
     const roots = new Set(owner.processes.map((proof) => proof.pid));
+    // Births remain exact, private authority. These all-user parent links
+    // only classify ancestry; they never establish a holder's birth or liveness.
+    const ancestry = new Map((await observeAncestry()).map((row) => [row.pid, row]));
+    if (
+      owner.processes.some(
+        ({ pid }) =>
+          ancestry.get(pid)?.uid !== byPid.get(pid)?.uid || ancestry.get(pid)?.ppid !== byPid.get(pid)?.ppid,
+      )
+    )
+      return { clear: false, reason: "resource_owner_birth_unknown" };
+    const ownerAncestors = owner.processes.map(({ pid }) => {
+      const ancestors = new Set<number>();
+      let current = ancestry.get(pid);
+      while (current && current.ppid > 1 && !ancestors.has(current.ppid)) {
+        ancestors.add(current.ppid);
+        current = ancestry.get(current.ppid);
+      }
+      return ancestors;
+    });
+    // Reaching a strict ancestor of every owned root proves a different branch,
+    // even when a login process above that shared ancestor is unobservable.
+    const unrelatedBoundaries = new Set(
+      [...ownerAncestors[0]!].filter(
+        (pid) => !roots.has(pid) && ownerAncestors.every((ancestors) => ancestors.has(pid)),
+      ),
+    );
     const belongs = (proof: ProcessProof): boolean | undefined => {
-      let current = byPid.get(proof.pid);
-      if (!matches(current, proof)) return undefined;
+      const identity = byPid.get(proof.pid);
+      if (!matches(identity, proof)) return undefined;
+      let current = ancestry.get(proof.pid);
+      if (!current || current.uid !== identity!.uid || current.ppid !== identity!.ppid) return undefined;
       const seen = new Set<number>();
       while (current) {
         if (roots.has(current.pid)) return true;
         if (seen.has(current.pid)) return undefined;
         seen.add(current.pid);
+        if (unrelatedBoundaries.has(current.pid)) return false;
         if (current.ppid <= 1) return false;
-        current = byPid.get(current.ppid);
+        current = ancestry.get(current.ppid);
       }
       return undefined;
     };
@@ -46,37 +101,16 @@ export async function proveRestartResources(
           ("simulator" in entry && entry.simulator?.occupantId === owner.occupantId)
         )
           return { clear: false, reason: "resource_held_or_queued", detail: entry.id };
-        if ("kind" in entry && entry.kind === "simulator" && "ownerProcesses" in entry) {
-          const proof = entry.ownerProcesses;
-          if (!proof?.length)
-            return { clear: false, reason: "resource_attribution_unknown", detail: entry.id };
-          for (const process of proof) {
-            const related = belongs(process);
-            if (related !== false)
-              return {
-                clear: false,
-                reason: related ? "resource_held_or_queued" : "resource_attribution_unknown",
-                detail: entry.id,
-              };
-          }
-        } else {
-          const proofs =
-            "claimOwner" in entry
-              ? [entry.claimOwner, ...(entry.runner ? [entry.runner] : []), ...(entry.descendants ?? [])]
-              : "owner" in entry
-                ? [entry.owner]
-                : [];
-          if (!proofs.length)
-            return { clear: false, reason: "resource_attribution_unknown", detail: entry.id };
-          for (const process of proofs) {
-            const related = belongs(process);
-            if (related !== false)
-              return {
-                clear: false,
-                reason: related ? "resource_held_or_queued" : "resource_attribution_unknown",
-                detail: entry.id,
-              };
-          }
+        const proofs = entryProofs(entry);
+        if (!proofs.length) return { clear: false, reason: "resource_attribution_unknown", detail: entry.id };
+        for (const process of proofs) {
+          const related = belongs(process);
+          if (related !== false)
+            return {
+              clear: false,
+              reason: related ? "resource_held_or_queued" : "resource_attribution_unknown",
+              detail: entry.id,
+            };
         }
       }
     }

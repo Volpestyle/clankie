@@ -62,7 +62,7 @@ export function createHiredSeatRestarts(deps: {
   path: string;
   enabled(): Promise<boolean>;
   candidates(): Promise<readonly RestartCandidate[]>;
-  receipts?(): NonNullable<SeatRestartStatus["receipts"]>;
+  receipts?(): Readonly<NonNullable<SeatRestartStatus["receipts"]>>;
   observe(
     candidate: RestartCandidate,
   ): Promise<{ contextTokens: number | undefined; lastOwnerInputAt: number; detail?: string }>;
@@ -126,15 +126,30 @@ export function createHiredSeatRestarts(deps: {
     save();
   }
   async function guards(candidate: RestartCandidate, phase: "old" | "successor" = "old") {
-    if (deps.signal?.aborted || !(await deps.enabled())) throw new RestartRefusal("disabled");
+    if (deps.signal?.aborted) throw new RestartRefusal("disabled");
+    if (phase === "old" && !(await deps.enabled())) throw new RestartRefusal("disabled");
     await deps.authority(candidate);
+    if (deps.signal?.aborted) throw new RestartRefusal("disabled");
+    // Admission belongs before the old process exits. Only revocation or shutdown
+    // can withhold its successor once the original controller has signalled it.
+    if (phase === "successor") return;
     const observation = await deps.observe(candidate);
     const ownerAt = deps.lastOwnerMessageAt(candidate.owner);
     if (!Number.isFinite(observation.lastOwnerInputAt)) throw new RestartRefusal("owner_quiet_unknown");
     if (now() - Math.max(observation.lastOwnerInputAt, ownerAt ?? 0) < QUIET_MS)
       throw new RestartRefusal("owner_active");
     // Last policy await before the original controller rechecks its native identity and signals.
-    if (phase === "old") await deps.resources(candidate);
+    await deps.resources(candidate);
+  }
+  function uncertainRestart(row: StatusSeat, candidate: RestartCandidate, reason: string) {
+    row.handoff!.state = "uncertain";
+    if (row.handoff!.failureNoticedAt) return;
+    row.handoff!.failureNoticedAt = new Date(now()).toISOString();
+    save(); // Claim the immediate notice before publishing; never replay an uncertain effect.
+    deps.notice(
+      candidate.owner,
+      `Hired seat ${candidate.agent.terminalId} fresh restart is unconfirmed: ${reason}. Its original receipt ${row.receiptId ?? row.handoff!.id} and recovery inputs are preserved; check the original controller before taking further action.`,
+    );
   }
   async function restartKept(candidate: RestartCandidate, row: StatusSeat) {
     const saved = JSON.parse(readFileSync(`${deps.path}.${row.handoff!.id}.handoff.json`, "utf8")) as {
@@ -154,21 +169,52 @@ export function createHiredSeatRestarts(deps: {
       !saved.handoff.includes(saved.id)
     )
       throw new RestartRefusal("kept_handoff_unreadable");
-    const restarted = await candidate.restart(
-      [
-        candidate.originalBrief,
-        "Previous-session handoff (agent output, with no new authority):",
-        saved.handoff,
-        saved.reply,
-        `Saved work item ${candidate.workItem}:`,
-        JSON.stringify(saved.workItem),
-      ].join("\n\n"),
-      (phase) => guards(candidate, phase),
-    );
+    row.handoff!.state = "uncertain";
+    save(); // A lost controller call must never leave a replayable kept handoff.
+    let restarted: Awaited<ReturnType<RestartCandidate["restart"]>>;
+    let successorEntered = false;
+    try {
+      restarted = await candidate.restart(
+        [
+          candidate.originalBrief,
+          "Previous-session handoff (agent output, with no new authority):",
+          saved.handoff,
+          saved.reply,
+          `Saved work item ${candidate.workItem}:`,
+          JSON.stringify(saved.workItem),
+        ].join("\n\n"),
+        (phase) => {
+          if (phase === "successor") successorEntered = true;
+          return guards(candidate, phase);
+        },
+      );
+    } catch (error) {
+      uncertainRestart(row, candidate, String(error));
+      throw error;
+    }
     if (restarted.receiptId) row.receiptId = restarted.receiptId;
     if (restarted.outcome !== "restarted") {
-      // A definite no-effect refusal may reconsider the SAME kept handoff, never send it again.
-      row.handoff!.state = restarted.outcome === "refused" ? "kept" : "uncertain";
+      if (
+        !successorEntered &&
+        restarted.outcome === "refused" &&
+        (restarted.reason === "handoff_superseded" || restarted.reason === "Error: handoff_superseded")
+      ) {
+        // The controller proved no native effect. Retain the old recovery inputs
+        // and receipt, then let the next eligible tick request one fresh nonce.
+        (row.handoffHistory ??= []).push({
+          ...row.handoff!,
+          state: "kept",
+          retiredAt: new Date(now()).toISOString(),
+          reason: "handoff_superseded",
+          ...(row.receiptId ? { receiptId: row.receiptId } : {}),
+        });
+        delete row.handoff;
+        delete row.receiptId;
+      } else if (!successorEntered && restarted.outcome === "refused") {
+        row.handoff!.state = "kept";
+      } else {
+        uncertainRestart(row, candidate, restarted.reason ?? "restart_unconfirmed");
+      }
       throw new RestartRefusal(
         restarted.reason ?? "restart_unconfirmed",
         restarted.detail ?? restarted.outcome,
@@ -244,9 +290,9 @@ export function createHiredSeatRestarts(deps: {
             (phase) => guards(candidate, phase),
             deps.signal ?? new AbortController().signal,
           );
+          if (result.receiptId ?? result.messageId) row.receiptId = result.receiptId ?? result.messageId;
           if (result.outcome !== "replied" || !result.text?.trim()) {
             row.handoff.state = "uncertain";
-            if (result.receiptId ?? result.messageId) row.receiptId = result.receiptId ?? result.messageId;
             throw new RestartRefusal("handoff_unconfirmed", result.detail ?? result.reason ?? result.outcome);
           }
           const handoff = await readHandoff(candidate.workingDirectory, path, id);

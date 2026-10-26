@@ -68,6 +68,10 @@ async function fixture() {
     symlinkFile = false,
     enabled = true;
   let outcome = "restarted";
+  let outcomeReason = "owner_active";
+  let afterSignal: (() => void | Promise<void>) | undefined;
+  const controller = new AbortController();
+  const nonces: string[] = [];
   let recovery = "";
   const candidate: RestartCandidate = {
     agent: {
@@ -88,6 +92,7 @@ async function fixture() {
       await guard();
       requests++;
       const nonce = /handoff ID ([a-f0-9-]{36})/u.exec(message)![1]!;
+      nonces.push(nonce);
       const body = `handoff ID ${nonce}: keep decisions and original receipts`;
       if (!missingFile) {
         if (symlinkFile) {
@@ -105,16 +110,29 @@ async function fixture() {
       await guard();
       restarts++;
       recovery = brief;
+      if (outcome !== "refused") {
+        await afterSignal?.();
+        try {
+          await guard("successor");
+        } catch (error) {
+          return {
+            outcome: "uncertain",
+            receiptId: "original-restart",
+            reason: error instanceof RestartRefusal ? error.reason : String(error),
+          };
+        }
+      }
       return {
         outcome,
         receiptId: "original-restart",
-        ...(outcome === "refused" ? { reason: "owner_active" } : {}),
+        ...(outcome === "refused" ? { reason: outcomeReason } : {}),
       };
     },
   };
   const notices: string[] = [];
   const deps = {
     path: join(root, "policy.json"),
+    signal: controller.signal,
     enabled: async () => enabled,
     candidates: async () => [candidate],
     observe: readHiredRestartObservation,
@@ -123,7 +141,7 @@ async function fixture() {
       if (refusedResource) throw new RestartRefusal(refusedResource);
     },
     authority: async () => {},
-    lastOwnerMessageAt: () => undefined,
+    lastOwnerMessageAt: (): number | undefined => undefined,
     workItem: async (_candidate: RestartCandidate, nonce: string) => {
       const item = JSON.parse(await readFile(join(root, "work-item.json"), "utf8"));
       if (!item.saved || !item.body.includes(nonce)) throw new RestartRefusal("work_item_handoff_not_saved");
@@ -162,8 +180,14 @@ async function fixture() {
     disable: () => {
       enabled = false;
     },
-    outcome: (value: string) => {
+    afterSignal: (callback: () => void | Promise<void>) => {
+      afterSignal = callback;
+    },
+    shutdown: () => controller.abort(),
+    nonces,
+    outcome: (value: string, reason = "owner_active") => {
       outcome = value;
+      outcomeReason = reason;
     },
     advance: (ms: number) => {
       now += ms;
@@ -245,6 +269,89 @@ it("reconsiders only a definite pre-exit refusal with the same kept handoff; unc
   await createHiredSeatRestarts(f.deps).tick();
   expect(f.requests()).toBe(1);
   expect(f.restarts()).toBe(2);
+  expect(f.notices).toHaveLength(1);
+  expect(f.notices[0]).toContain("restart is unconfirmed");
+});
+
+it("retires a definitely superseded kept handoff and requests exactly one fresh nonce after new input becomes quiet", async () => {
+  const f = await fixture();
+  f.outcome("refused");
+  await f.policy.tick();
+  const original = (await f.policy.status()).seats[0]!.handoff!;
+  f.advance(60_000);
+  f.setHumanAt("2026-10-26T12:01:00Z");
+  await f.native();
+  f.advance(15 * 60_000);
+  f.outcome("refused", "Error: handoff_superseded");
+  await createHiredSeatRestarts(f.deps).tick();
+  const retired = (await createHiredSeatRestarts(f.deps).status()).seats[0]!;
+  expect(retired.handoff).toBeUndefined();
+  expect(retired.handoffHistory).toMatchObject([
+    { id: original.id, state: "kept", reason: "handoff_superseded", receiptId: "original-restart" },
+  ]);
+  expect(await readFile(`${f.deps.path}.${original.id}.handoff.json`, "utf8")).toContain(original.id);
+  expect(f.requests()).toBe(1);
+  f.outcome("uncertain");
+  await createHiredSeatRestarts(f.deps).tick();
+  await createHiredSeatRestarts(f.deps).tick();
+  expect(f.requests()).toBe(2);
+  expect(new Set(f.nonces).size).toBe(2);
+  expect(f.restarts()).toBe(3);
+  expect((await createHiredSeatRestarts(f.deps).status()).seats[0]!.handoff!.state).toBe("uncertain");
+});
+
+it("completes successor recovery after the setting, owner activity and resources change following signal", async () => {
+  const f = await fixture();
+  f.afterSignal(async () => {
+    f.disable();
+    f.setHumanAt("2026-10-26T12:00:00Z");
+    await f.native();
+    f.deps.lastOwnerMessageAt = () => Date.parse("2026-10-26T12:00:00Z");
+    f.blockResource("resource_held");
+  });
+  await f.policy.tick();
+  expect(f.restarts()).toBe(1);
+  expect((await f.policy.status()).seats[0]!.handoff!.state).toBe("restarted");
+  expect(f.notices).toHaveLength(1);
+  expect(f.notices[0]).toContain("restarted fresh");
+});
+
+it.each(["authority_revoked", "shutdown"])(
+  "refuses successor recovery on %s and immediately notices uncertainty without replay",
+  async (reason) => {
+    const f = await fixture();
+    f.afterSignal(() => {
+      if (reason === "shutdown") f.shutdown();
+      else
+        f.deps.authority = async () => {
+          throw new RestartRefusal(reason);
+        };
+    });
+    await f.policy.tick();
+    const status = await f.policy.status();
+    expect(status.seats[0]!.handoff!.state).toBe("uncertain");
+    expect(status.seats[0]!.handoff!.failureNoticedAt).toBe("2026-10-26T12:00:00.000Z");
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0]).toContain("original-restart");
+    await createHiredSeatRestarts(f.deps).tick();
+    expect(f.requests()).toBe(1);
+    expect(f.restarts()).toBe(1);
+    expect(f.notices).toHaveLength(1);
+  },
+);
+
+it("persists a non-replayable restart claim when the original controller throws", async () => {
+  const f = await fixture();
+  f.candidate.restart = async () => {
+    throw new Error("controller connection lost");
+  };
+  await f.policy.tick();
+  const resumed = createHiredSeatRestarts(f.deps);
+  await resumed.tick();
+  expect(f.requests()).toBe(1);
+  expect((await resumed.status()).seats[0]!.handoff!.state).toBe("uncertain");
+  expect(f.notices).toHaveLength(1);
+  expect(f.notices[0]).toContain("controller connection lost");
 });
 
 it("requires 450K known tokens and native owner quiet; disabling prevents any request", async () => {

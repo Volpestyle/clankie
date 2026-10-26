@@ -35,7 +35,11 @@ Hired seats have their own default-on `seatRestarts`
 setting. `clankie fleet set --seat-restarts on|off` (also in `/fleet`) controls
 fresh-session restarts at 450K context tokens in each idle hired seat’s own pane,
 with its original brief, work item and a fresh handoff brief, independently
-of the default lead's `leadRestarts` setting.
+of the default lead's `leadRestarts` setting. Launch admission finishes before
+exit; revocation or shutdown can still withhold the successor. An immediate
+uncertainty notice preserves the original receipt: inspect it, never repeat the
+restart. A definitely superseded handoff retires to history before one fresh
+nonce is requested.
 
 ## Each turn
 

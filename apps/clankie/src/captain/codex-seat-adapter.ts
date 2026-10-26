@@ -69,15 +69,23 @@ export function createCodexSeatAdapter(
   } = {},
 ): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
+  // The exact immutable launch carries its read-only admission across the old process exit.
+  const admittedRestarts = new WeakSet<SeatLaunch>();
   const herdr =
     options.herdr ?? (async (args: readonly string[]) => exec("herdr", [...args], { timeout: 10_000 }));
   return {
     harness: "codex",
+    async admitRestart(launch) {
+      if (launch.harness !== "codex") throw new Error("Codex restart requires a Codex hire");
+      await options.fleetGates?.(launch.cwd, launch.env);
+      admittedRestarts.add(launch);
+    },
     async attach(ref) {
       const control = controls.get(ref.sessionId);
       return ref.harness === "codex" && control?.ref.paneId === ref.paneId ? control : undefined;
     },
     async start(launch, view, signal) {
+      const restartAdmitted = admittedRestarts.delete(launch);
       if (launch.harness !== "codex")
         return {
           outcome: "failed",
@@ -306,7 +314,9 @@ export function createCodexSeatAdapter(
             launch.env,
           );
           if (options.fleetGates) {
-            await options.fleetGates(launch.cwd, launch.env);
+            // Restart admission already read the gates before ending the original.
+            // Later guard calls retain authority revocation and shutdown checks.
+            if (!restartAdmitted) await options.fleetGates(launch.cwd, launch.env);
             // Codex has one approval envelope, not semantic categories. Keep
             // native sandbox settings and require its supported approval path,
             // unless the owner's maximum trust mode lifts both (VUH-2048).

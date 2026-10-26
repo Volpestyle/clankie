@@ -105,6 +105,8 @@ export interface OriginalHiredRuntime {
   control: SeatControl;
   proof?: ProjectHireProcessProof | undefined;
   readonly prepared: boolean;
+  /** Complete policy and resource admissions while the original native process still lives. */
+  admitRestart(): Promise<void>;
   /** A successor is bound only under this engine's persisted original receipt. */
   successor(
     previous: HerdrAgentSnapshot,
@@ -222,7 +224,9 @@ export class HiredSeatRestarts {
   ): Promise<void> {
     if (runtime.launch.harness === "claude") {
       const [cwd, home] = await Promise.all([
+        // allow-swallowed-rejection -- an unreadable launch directory refuses trust_required below before any native effect.
         realpath(runtime.launch.cwd).catch(() => undefined),
+        // allow-swallowed-rejection -- an unreadable home refuses trust_required below; unknown trust never permits a restart.
         realpath(runtime.launch.env?.HOME ?? homedir()).catch(() => undefined),
       ]);
       if (!cwd || !home || cwd === home) throw new Error("trust_required");
@@ -256,6 +260,7 @@ export class HiredSeatRestarts {
   async candidates(): Promise<readonly HiredRestartCandidate[]> {
     const candidates: HiredRestartCandidate[] = [];
     for (const runtime of this.originals.values()) {
+      // allow-swallowed-rejection -- a failed observation exposes only an unavailable original candidate, never replacement authority.
       const current = await this.runner.get(runtime.agent.paneId).catch(() => undefined);
       const sourceUnproven = !current || nativeSessionId(current) !== nativeSessionId(runtime.agent);
       // A failed observation retains the original receipt's identity for a refusal,
@@ -282,6 +287,7 @@ export class HiredSeatRestarts {
     }
     for (const original of this.provenance) {
       if (this.originals.has(original.paneId)) continue;
+      // allow-swallowed-rejection -- an unreadable historical pane is omitted; journal data cannot authorize a restart.
       const agent = await this.runner.get(original.paneId).catch(() => undefined);
       if (!agent || agent.terminalId !== original.terminalId || nativeSessionId(agent) !== original.sessionId)
         continue;
@@ -475,17 +481,28 @@ export class HiredSeatRestarts {
       const unchangedHandoff = () => {
         if (this.fingerprint(runtime) !== handoff.transcriptSha256) throw new Error("handoff_superseded");
       };
-      unchangedHandoff();
       if (
         this.receipts.some(
           (item) =>
             item.paneId === receipt.paneId &&
             item.previousSessionId === receipt.previousSessionId &&
-            ["ending", "launching", "restarted", "uncertain"].includes(item.stage),
+            ["handoff_sending", "handoff_sent", "ending", "launching", "restarted", "uncertain"].includes(
+              item.stage,
+            ),
         )
       )
         throw new Error("unresolved_original_receipt");
+      unchangedHandoff();
+      // The same launch object reaches adapter admission and startup; no new selection
+      // or policy decision is made after ending the original native process.
+      const { resumeSessionId: _resume, ...launch } = runtime.launch;
+      const successorLaunch: SeatLaunch = {
+        ...launch,
+        brief: `${runtime.originalBrief}\n\nFresh-session handoff for ${runtime.workItem}:\n${handoffBrief}`,
+      };
       await this.check(runtime, guard);
+      await runtime.adapter.admitRestart?.(successorLaunch);
+      await runtime.admitRestart();
       receipt.handoffBrief = handoffBrief;
       receipt.previousProof = ProjectHireProcessProofSchema.parse(runtime.proof);
       receipt.stage = "ending";
@@ -511,41 +528,34 @@ export class HiredSeatRestarts {
       receipt.stage = "launching";
       this.save(receipt);
       // Original launch is reused verbatim except for the deliberately fresh session and first prompt.
-      const { resumeSessionId: _resume, ...launch } = runtime.launch;
       const restartView = runtime.restartView ?? runtime.view;
-      const start = await runtime.adapter.start(
-        {
-          ...launch,
-          brief: `${runtime.originalBrief}\n\nFresh-session handoff for ${runtime.workItem}:\n${handoffBrief}`,
+      const start = await runtime.adapter.start(successorLaunch, {
+        ...restartView,
+        guard: async () => {
+          await guard("successor");
+          await restartView.guard?.();
         },
-        {
-          ...restartView,
-          guard: async () => {
-            await guard("successor");
-            await restartView.guard?.();
-          },
-          bound: async (ref) => {
-            await guard("successor");
-            const next = await this.runner.get(receipt.paneId);
-            const proof = await this.proof(receipt.paneId);
-            if (
-              ref.paneId !== receipt.paneId ||
-              ref.harness !== runtime.launch.harness ||
-              ref.sessionId === receipt.previousSessionId ||
-              nativeSessionId(next) !== ref.sessionId ||
-              !proof ||
-              proof.nativeSessionPending ||
-              proof.processes.length !== 1 ||
-              !next.session ||
-              proof.nativeOccupantId !== occupantIdForHerdrSession(next.session) ||
-              proof.shell.pid !== runtime.proof!.shell.pid ||
-              proof.shell.startTime !== runtime.proof!.shell.startTime
-            )
-              throw new Error("successor_identity_unconfirmed");
-            await runtime.successor(runtime.agent, next, proof, receipt.id);
-          },
+        bound: async (ref) => {
+          await guard("successor");
+          const next = await this.runner.get(receipt.paneId);
+          const proof = await this.proof(receipt.paneId);
+          if (
+            ref.paneId !== receipt.paneId ||
+            ref.harness !== runtime.launch.harness ||
+            ref.sessionId === receipt.previousSessionId ||
+            nativeSessionId(next) !== ref.sessionId ||
+            !proof ||
+            proof.nativeSessionPending ||
+            proof.processes.length !== 1 ||
+            !next.session ||
+            proof.nativeOccupantId !== occupantIdForHerdrSession(next.session) ||
+            proof.shell.pid !== runtime.proof!.shell.pid ||
+            proof.shell.startTime !== runtime.proof!.shell.startTime
+          )
+            throw new Error("successor_identity_unconfirmed");
+          await runtime.successor(runtime.agent, next, proof, receipt.id);
         },
-      );
+      });
       if (start.outcome !== "started") throw new Error(`successor_start_${start.outcome}`);
       const next = await this.runner.get(receipt.paneId);
       const proof = await this.proof(receipt.paneId);

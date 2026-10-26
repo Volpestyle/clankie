@@ -1,6 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -18,6 +27,8 @@ import { ProjectHires, type ProjectHireProcessProof } from "../src/captain/proje
 import { HireOwners } from "../src/captain/hire-owners.ts";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { nativeProcessStart, observeNativeBirth } from "../src/local-fleet-process.ts";
+import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
+import { createClaudeWorkerSeatAdapter, SeatHookLog } from "../src/captain/claude-worker-seat.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -59,8 +70,12 @@ async function fixture(harness: "claude" | "codex") {
   });
   await once(shell, "message");
   let nativePid: number | undefined;
+  let afterExit = () => {};
   shell.on("message", (message) => {
-    if (typeof message === "object" && message && "exited" in message) nativePid = undefined;
+    if (typeof message === "object" && message && "exited" in message) {
+      nativePid = undefined;
+      afterExit();
+    }
   });
   cleanup.push(async () => {
     if (shell.exitCode === null) {
@@ -232,7 +247,13 @@ async function fixture(harness: "claude" | "codex") {
       return { outcome: "started", control: { ...control, ref } };
     },
   };
-  const engine = new HiredSeatRestarts(join(root, "restarts.json"), runner, proof);
+  let signals = 0;
+  let afterSignal = () => {};
+  const engine = new HiredSeatRestarts(join(root, "restarts.json"), runner, proof, (pid) => {
+    signals++;
+    process.kill(pid, "SIGTERM");
+    afterSignal();
+  });
   const originalProof = (await proof())!;
   const owners = new HireOwners(join(root, "owners.json"));
   const owner = { conversationId: "original-lead" };
@@ -295,6 +316,7 @@ async function fixture(harness: "claude" | "codex") {
     adapter,
     proof: originalProof,
     prepared: false,
+    admitRestart: async () => {},
     successor: async (previous, next, observed, id) => {
       expect(nativeSessionId(previous)).not.toBe(nativeSessionId(next));
       expect(observed.shell).toEqual(originalProof.shell);
@@ -358,6 +380,13 @@ async function fixture(harness: "claude" | "codex") {
     currentAgent: () => agent,
     appendRecord: (record: unknown) => appendFileSync(agent.session!.value, JSON.stringify(record) + "\n"),
     closes: () => closes,
+    signals: () => signals,
+    afterExit: (callback: () => void) => {
+      afterExit = callback;
+    },
+    afterSignal: (callback: () => void) => {
+      afterSignal = callback;
+    },
     reply: () => reply,
     nativePid: () => nativePid,
     sends: () => sends,
@@ -486,7 +515,21 @@ it("rechecks native idle after policy awaits and leaves a late pre-signal refusa
   expect(f.launches).toHaveLength(1);
 });
 
-it("uses fresh persisted-owner authority after the original hiring turn expires", async () => {
+it.each([
+  "unchanged",
+  "maximum-trust",
+  "account-key",
+  "identity",
+  "identity-unknown",
+  "home",
+  "canonical-home",
+  "signed-out",
+  "unknown",
+  "usage",
+  "benign-after-exit",
+  "revoked-after-exit",
+  "trust-revoked-after-exit",
+])("uses fresh persisted-owner authority and checks %s at the native restart boundary", async (change) => {
   const f = await fixture("codex");
   let live = false;
   let initial = true;
@@ -520,19 +563,43 @@ it("uses fresh persisted-owner authority after the original hiring turn expires"
   };
   const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "fixture", name: "Fixture" }] });
   let projectChecks = 0;
+  let maximumTrust = change === "trust-revoked-after-exit";
+  let ownerValid = true;
+  const accountHome = join(f.root, "account-profile");
+  mkdirSync(join(f.root, "account-a"));
+  mkdirSync(join(f.root, "account-b"));
+  symlinkSync(join(f.root, "account-a"), accountHome, "dir");
+  let account: import("../src/captain/harness-accounts.ts").WorkerAccountStatus = {
+    harness: "codex",
+    label: "fixture",
+    accountKey: "fixture-account",
+    identity: "fixture@example.test",
+    aliases: ["fixture-account"],
+    home: accountHome,
+    signedIn: true,
+    usable: true,
+    plan: "pro",
+    headroom: 0.8,
+    usage: {
+      source: "codex-rate-limits",
+      observedAt: new Date().toISOString(),
+      windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+    },
+  };
+  const accountReport = async () => ({
+    machine: "local",
+    shell: "posix" as const,
+    observedAt: new Date().toISOString(),
+    accounts: [account],
+  });
   const store = new HerdrWatchStore(join(f.root, "watcher.json"), {
     runner,
     seatAdapters: [adapter],
-    validateOwner: async (owner) => owner.conversationId === "original-lead",
+    validateOwner: async (owner) => ownerValid && owner.conversationId === "original-lead",
     requireWorkerAccess: async () => {},
-    nativeLaunchPolicy: {
-      prepare: async () => ({
-        account: { label: "fixture", home: f.root },
-        args: [],
-        env: { HOME: join(f.root, "home"), CODEX_HOME: join(f.root, "codex") },
-      }),
-      admit: async () => {},
-    },
+    maximumTrustMode: async () => maximumTrust,
+    workerAccounts: accountReport,
+    nativeLaunchPolicy: { admit: async () => {} },
     projectHirePolicy: {
       settings: async () => settings,
       tools: async () => [],
@@ -544,28 +611,7 @@ it("uses fresh persisted-owner authority after the original hiring turn expires"
         return "fixture";
       },
     },
-    workerAccountsReport: async () => ({
-      machine: "local",
-      shell: "posix",
-      observedAt: new Date().toISOString(),
-      accounts: [
-        {
-          harness: "codex",
-          label: "fixture",
-          aliases: [],
-          home: f.root,
-          signedIn: true,
-          usable: true,
-          plan: "pro",
-          headroom: 0.8,
-          usage: {
-            source: "codex-rate-limits",
-            observedAt: new Date().toISOString(),
-            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
-          },
-        },
-      ],
-    }),
+    workerAccountsReport: accountReport,
   });
   cleanup.push(async () => store.close());
   const hired = await store.spawnSeat(
@@ -585,6 +631,7 @@ it("uses fresh persisted-owner authority after the original hiring turn expires"
     undefined,
     {
       owner: { conversationId: "original-lead" },
+      ...(change === "usage" ? { ownerHire: { surface: "desktop" as const, overrideUsage: true } } : {}),
       current: () => sourceCurrent,
       authorize: async () => sourceCurrent,
     },
@@ -595,7 +642,57 @@ it("uses fresh persisted-owner authority after the original hiring turn expires"
   expect((await candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000))).outcome).toBe(
     "replied",
   );
-  expect((await candidate.restart(f.reply(), async () => {})).outcome).toBe("restarted");
+  const oldPid = f.nativePid();
+  if (change === "maximum-trust") maximumTrust = true;
+  if (change === "account-key") account = { ...account, accountKey: "changed-account" };
+  if (change === "identity") account = { ...account, identity: "other@example.test" };
+  if (change === "identity-unknown") account = { ...account, identity: "" };
+  if (change === "canonical-home") {
+    unlinkSync(accountHome);
+    symlinkSync(join(f.root, "account-b"), accountHome, "dir");
+  }
+  if (change === "home") account = { ...account, home: join(f.root, "other") };
+  if (change === "signed-out") account = { ...account, signedIn: false };
+  if (change === "unknown") account = { ...account, signedIn: null };
+  if (change === "usage")
+    account = {
+      ...account,
+      headroom: 0.05,
+      usable: true,
+      usage: {
+        source: "codex-rate-limits",
+        observedAt: new Date().toISOString(),
+        windows: [{ id: "week", label: "Week", usedPercent: 95 }],
+      },
+    };
+  if (change === "benign-after-exit")
+    f.afterExit(() => {
+      maximumTrust = true;
+      account = { ...account, headroom: 0, usable: false };
+    });
+  if (change === "revoked-after-exit")
+    f.afterExit(() => {
+      ownerValid = false;
+    });
+  if (change === "trust-revoked-after-exit")
+    f.afterExit(() => {
+      maximumTrust = false;
+    });
+  const result = await candidate.restart(f.reply(), async () => {});
+  if (["revoked-after-exit", "trust-revoked-after-exit"].includes(change)) {
+    expect(result.outcome, JSON.stringify(result)).toBe("uncertain");
+    expect(f.nativePid()).toBeUndefined();
+    expect(launches).toHaveLength(1);
+    return;
+  }
+  if (!["unchanged", "benign-after-exit"].includes(change)) {
+    expect(result.outcome, JSON.stringify(result)).toBe("refused");
+    expect(f.nativePid()).toBe(oldPid);
+    expect(f.closes()).toBe(0);
+    expect(launches).toHaveLength(1);
+    return;
+  }
+  expect(result.outcome, JSON.stringify(result)).toBe("restarted");
   expect(projectChecks).toBeGreaterThan(1);
   expect(launches).toHaveLength(2);
   expect(store.nativeOwner(f.currentAgent())).toEqual({ conversationId: "original-lead" });
@@ -648,3 +745,179 @@ it("ignores Codex token-only counters when proving the kept handoff is still lat
   });
   expect((await f.candidate.restart(f.reply(), async () => {})).outcome).toBe("restarted");
 });
+
+it.each(["account", "project", "tools", "resources"])(
+  "keeps the original native process when %s admission refuses at the restart boundary",
+  async (boundary) => {
+    const f = await fixture("codex");
+    await f.candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000));
+    const oldPid = f.nativePid();
+    f.runtime.admitRestart = async () => {
+      expect(f.nativePid()).toBe(oldPid);
+      expect(f.signals()).toBe(0);
+      throw new Error(`${boundary}_refused`);
+    };
+    expect(await f.candidate.restart(f.reply(), async () => {})).toMatchObject({
+      outcome: "refused",
+      reason: `Error: ${boundary}_refused`,
+    });
+    expect(f.signals()).toBe(0);
+    expect(f.nativePid()).toBe(oldPid);
+    expect(f.closes()).toBe(0);
+    expect(f.launches).toHaveLength(0);
+    f.runtime.admitRestart = async () => {};
+    expect((await f.candidate.restart(f.reply(), async () => {})).outcome).toBe("restarted");
+    expect(f.signals()).toBe(1);
+  },
+);
+it("completes admitted replacement despite benign policy changes after signal", async () => {
+  const f = await fixture("codex");
+  await f.candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000));
+  let policyCurrent = true;
+  let admissions = 0;
+  f.runtime.admitRestart = async () => {
+    admissions++;
+    expect(f.signals()).toBe(0);
+    if (!policyCurrent) throw new Error("policy_changed");
+  };
+  f.afterSignal(() => {
+    policyCurrent = false;
+  });
+  const phases: (string | undefined)[] = [];
+  const result = await f.candidate.restart(f.reply(), async (phase) => {
+    phases.push(phase);
+    if (phase !== "successor" && !policyCurrent) throw new Error("policy_changed");
+  });
+  expect(result.outcome).toBe("restarted");
+  expect(admissions).toBe(1);
+  expect(phases.filter((phase) => phase === "successor")).toHaveLength(2);
+  expect(f.successors).toEqual([result.receiptId]);
+});
+it.each(["owner_revoked", "service_shutdown"])(
+  "retains uncertainty and prevents successor launch on %s after signal",
+  async (reason) => {
+    const f = await fixture("codex");
+    await f.candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000));
+    let revoked = false;
+    f.afterSignal(() => {
+      revoked = true;
+    });
+    const result = await f.candidate.restart(f.reply(), async (phase) => {
+      if (phase === "successor" && revoked) throw new Error(reason);
+    });
+    expect(result).toMatchObject({ outcome: "uncertain", reason: `Error: ${reason}` });
+    expect(f.signals()).toBe(1);
+    expect(f.nativePid()).toBeUndefined();
+    expect(f.launches).toHaveLength(0);
+    expect(f.successors).toHaveLength(0);
+    expect((await f.candidate.restart(f.reply(), async () => {})).outcome).toBe("refused");
+    expect(f.signals()).toBe(1);
+  },
+);
+
+it("preserves the unresolved-effect fence when later native input supersedes the handoff", async () => {
+  const f = await fixture("codex");
+  await f.candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000));
+  f.failLaunch();
+  expect((await f.candidate.restart(f.reply(), async () => {})).outcome).toBe("uncertain");
+  f.appendRecord({ type: "event_msg", payload: { type: "user_message", message: "later native input" } });
+  expect(await f.candidate.restart(f.reply(), async () => {})).toMatchObject({
+    outcome: "refused",
+    reason: "Error: unresolved_original_receipt",
+  });
+  expect(f.signals()).toBe(1);
+  expect(f.launches).toHaveLength(0);
+});
+it("runs adapter startup admission before signalling and preserves the original on refusal", async () => {
+  const f = await fixture("codex");
+  await f.candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000));
+  const oldPid = f.nativePid();
+  let admittedLaunch: SeatLaunch | undefined;
+  f.adapter.admitRestart = async (launch) => {
+    expect(f.nativePid()).toBe(oldPid);
+    expect(f.signals()).toBe(0);
+    admittedLaunch = launch;
+    throw new Error("native_startup_admission_refused");
+  };
+  expect(await f.candidate.restart(f.reply(), async () => {})).toMatchObject({
+    outcome: "refused",
+    reason: "Error: native_startup_admission_refused",
+  });
+  expect(f.nativePid()).toBe(oldPid);
+  expect(f.signals()).toBe(0);
+  f.adapter.admitRestart = async (launch) => {
+    admittedLaunch = launch;
+  };
+  expect((await f.candidate.restart(f.reply(), async () => {})).outcome).toBe("restarted");
+  expect(f.launches[0]).toBe(admittedLaunch);
+  expect(admittedLaunch?.resumeSessionId).toBeUndefined();
+});
+
+it.each(["claude", "codex"] as const)(
+  "runs the real %s adapter admission before any original native signal",
+  async (harness) => {
+    const f = await fixture(harness);
+    await f.candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000));
+    const oldPid = f.nativePid();
+    const adapter =
+      harness === "claude"
+        ? createClaudeWorkerSeatAdapter({
+            consent: async () => ({
+              approved: false,
+              detail: "owner consent absent",
+              fix: "approve channel",
+            }),
+            hooks: new SeatHookLog(join(f.root, "hooks.jsonl")),
+            agent: async () => undefined,
+            transcript: async () => undefined,
+            mailbox: { bound: () => false, deliver: async () => false },
+          })
+        : createCodexSeatAdapter({
+            fleetGates: async () => {
+              throw new Error("fleet gates unavailable");
+            },
+          });
+    f.adapter.admitRestart = (launch) => adapter.admitRestart!(launch);
+    const result = await f.candidate.restart(f.reply(), async () => {});
+    expect(result.outcome).toBe("refused");
+    expect(result.reason).toContain(harness === "claude" ? "consent_required" : "fleet gates unavailable");
+    expect(f.nativePid()).toBe(oldPid);
+    expect(f.signals()).toBe(0);
+    expect(f.closes()).toBe(0);
+    expect(f.launches).toHaveLength(0);
+  },
+);
+
+it.each(["handoff_sending", "handoff_sent"] as const)(
+  "refuses a retained old handoff behind a newer unresolved %s receipt",
+  async (stage) => {
+    const f = await fixture("codex");
+    await f.candidate.requestHandoff(f.request, async () => {}, AbortSignal.timeout(2000));
+    f.appendRecord({
+      type: "event_msg",
+      payload: { type: "user_message", message: "newer unresolved send" },
+    });
+    const receipts = [
+      ...f.engine.journal(),
+      {
+        id: randomUUID(),
+        paneId: f.currentAgent().paneId,
+        previousSessionId: nativeSessionId(f.currentAgent()),
+        at: new Date().toISOString(),
+        stage,
+      },
+    ];
+    const path = join(f.root, "restarts.json");
+    writeFileSync(path, JSON.stringify(receipts));
+    const engine = new HiredSeatRestarts(path, f.runner, f.proof);
+    engine.register(f.runtime);
+    const candidate = (await engine.candidates())[0]!;
+    expect(await candidate.restart(f.reply(), async () => {})).toMatchObject({
+      outcome: "refused",
+      reason: "Error: unresolved_original_receipt",
+    });
+    expect(f.nativePid()).toBe(f.originalProof.processes[0]!.pid);
+    expect(f.closes()).toBe(0);
+    expect(f.launches).toHaveLength(0);
+  },
+);

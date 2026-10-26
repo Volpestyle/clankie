@@ -1023,10 +1023,13 @@ The service's [policy](../apps/clankie/src/captain/hired-seat-restarts.ts) reads
 native context and owner input, verifies a durable file/brief/work-item handoff,
 and consults a fresh private resource/ancestry proof. The
 [original native controller](../apps/clankie/src/captain/hired-seat-restart.ts)
-then rechecks idle input, draft, process birth and shell identity, journals the
-effect, and starts a fresh session in that same pane with the original launch.
-Unknown control, state or receipts refuse and remain visible through fleet
-status; an uncertain effect is never dispatched again. The
+completes resource, project/tool, account/usage and trust admission before exit,
+then rechecks idle input, draft, process birth and shell identity. It journals the
+effect and starts a fresh session in that same pane with the original launch;
+successor guards check revocation and shutdown. Unknown control, state or receipts
+refuse and remain visible through fleet status. An uncertain effect is never
+dispatched again and immediately notifies its owner; a definitely superseded
+handoff is retained in history before requesting one fresh nonce. The
 [CLI reference](cli.md)
 describes current supported controls and engineering limitations.
 

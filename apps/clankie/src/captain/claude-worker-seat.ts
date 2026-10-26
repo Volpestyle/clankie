@@ -1069,6 +1069,11 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
   const channels = new Set<string>();
   return {
     harness: "claude",
+    async admitRestart(launch) {
+      if (launch.harness !== "claude") throw new Error("Claude restart requires a Claude hire");
+      const consent = await deps.consent(launch.env);
+      if (!consent.approved) throw new Error(`consent_required: ${consent.detail}`);
+    },
     async start(launch, view): Promise<SeatStartResult> {
       if (launch.harness !== "claude" || view.start === undefined)
         return {

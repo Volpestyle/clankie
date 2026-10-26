@@ -4576,7 +4576,14 @@ including native children and simulator reservations in every phase. Unrelated
 work with proven different ancestry does not block it; unknown attribution does.
 The worker saves `.local/HANDOFF-<name>.md` and a confirmed comment on its existing
 work item before the service keeps all recovery inputs and starts a fresh session
-from the original launch. Refusals lasting two hours produce one service notice.
+from the original launch. All launch admissions complete before exit, including
+current maximum trust, signed-in account identity/key/canonical home, project/tools,
+usage without a previous one-shot override, and resource pressure. After signal,
+only authority revocation or shutdown withholds the successor. A post-signal
+failure immediately produces an uncertainty notice and preserves the original
+receipt without replay. Ordinary refusals lasting two hours produce one notice.
+A definitely superseded kept handoff moves to `handoffHistory`; the next eligible
+sweep requests one new nonce while retaining its old recovery inputs and receipt.
 An uncertain original receipt is retained and never repeated automatically.
 
 Only a surviving original local Claude/Codex shell launch can currently restart.

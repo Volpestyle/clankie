@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "repair-source-proof.json",
+      "size": 239233,
+      "sha256": "697d6c61b3367a5e942c72331221a21f07ee2f1092ca4406ce335fcf1e902594",
+      "url": "clankie://evidence/sha256/697d6c61b3367a5e942c72331221a21f07ee2f1092ca4406ce335fcf1e902594"
+    },
+    {
       "path": "source-proof.json",
       "size": 181742,
       "sha256": "f710f70213e1b769fd521b4abcd83a332c170fdaf537dc22f7616f3c8c015f6a",

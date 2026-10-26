@@ -4294,7 +4294,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           "Choose effort for this job and give effortReason: why it is the smallest effort that meets acceptance. Fleet-wide effort is retired.",
       };
     let admittedAccount: string | undefined;
-    const recheckPlan = async (): Promise<void> => {
+    const recheckPlan = async (allowUsageOverride = true): Promise<void> => {
       if (
         resume !== undefined ||
         !this.workHires.has(input) ||
@@ -4320,20 +4320,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
         policy,
         models,
         Date.now(),
-        authority?.ownerHire?.overrideUsage === true,
+        allowUsageOverride && authority?.ownerHire?.overrideUsage === true,
       );
       const selection = hireAdmissionChoice(eligible, input.harness, admittedAccount ?? input.account);
       // Pin the verified eligible identity; later identity/grant checks still apply.
       admittedAccount = selection.account.accountKey ?? selection.account.label;
       chosen.account = admittedAccount;
-      chosen.reason = `${selection.plan}; ${Math.round(selection.remaining * 100)}% remaining at ${selection.account.usage!.observedAt}; ${selection.reason}${authority?.ownerHire?.overrideUsage ? "; owner explicitly overrode the new-hire usage reserve" : ""}`;
+      chosen.reason = `${selection.plan}; ${Math.round(selection.remaining * 100)}% remaining at ${selection.account.usage!.observedAt}; ${selection.reason}${allowUsageOverride && authority?.ownerHire?.overrideUsage ? "; owner explicitly overrode the new-hire usage reserve" : ""}`;
       const allocation = this.projectAllocations.get(input);
       if (allocation)
         this.projectHires.selection(allocation, {
           at: selection.account.usage!.observedAt,
           plan: selection.plan,
           remaining: selection.remaining,
-          reason: `${selection.reason}${authority?.ownerHire?.overrideUsage ? "; owner explicitly overrode the new-hire usage reserve" : ""}`,
+          reason: `${selection.reason}${allowUsageOverride && authority?.ownerHire?.overrideUsage ? "; owner explicitly overrode the new-hire usage reserve" : ""}`,
           model: models[0] ?? "native default",
           effort: input.effort ?? "native default",
           effortReason: input.effortReason!,
@@ -4855,6 +4855,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
           ...workerMcp,
         };
+        // Pin the canonical profile at original hire time, not at the later restart.
+        // A missing signed-in identity leaves this hire usable but automatic restart refused.
+        const restartAccountHome = identityAccount
+          ? // allow-swallowed-rejection -- a missing canonical home leaves automatic restart unavailable; it cannot authorize an exit.
+            await realpath(identityAccount.home).catch(() => undefined)
+          : undefined;
         const started = nativePrepared
           ? await nativePrepared.start(launchView)
           : await adapter.start(effectiveLaunch, launchView);
@@ -4941,8 +4947,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
               current: () => !this.closed,
               authorize: async () => (await this.validateOwner?.(authority.owner)) === true,
             };
-            const restartGuard = async () => {
+            const restartRevocation = async () => {
               await assertConversationAuthority(restartAuthority);
+              if (effectiveLaunch.maximumTrust === true && (await this.maximumTrustMode?.()) !== true)
+                throw new Error("Original hire maximum trust revoked");
               const currentClaim = restartAgent.session
                 ? this.hireOwners.claim(
                     paneId,
@@ -4953,6 +4961,53 @@ export class HerdrWatchStore implements HerdrWatchPort {
               if (!currentClaim?.hired || !isDeepStrictEqual(currentClaim.owner, authority.owner))
                 throw new Error("Original persisted hire owner changed");
               await this.requireWorkerAccess?.(input.fleet);
+              const context = this.projectContexts.get(input);
+              if (context && this.projectPolicy) {
+                const settings = await this.projectPolicy.settings();
+                const project = await this.projectPolicy.project(input, settings, restartAuthority);
+                if (project !== context.projectId) throw new Error("Original hire project access revoked");
+              }
+              // Losing a previously granted tool is revocation; additional tools do not
+              // change this successor's pinned startup catalog.
+              if (expectedToolNames !== undefined) {
+                const current = new Set(await this.expectedHireTools(input));
+                if (expectedToolNames.some((name) => !current.has(name)))
+                  throw new Error("Original hire tool access revoked");
+              }
+              await assertConversationAuthority(restartAuthority);
+            };
+            const restartFreshness = async () => {
+              if (((await this.maximumTrustMode?.()) === true) !== (effectiveLaunch.maximumTrust === true))
+                throw new Error("Original hire maximum trust changed");
+              if (
+                !identityAccount ||
+                !identityHarness ||
+                !this.workerAccounts ||
+                !restartAccountHome ||
+                identityAccount.signedIn !== true ||
+                !identityAccount.accountKey ||
+                !(identityAccount.identity || identityAccount.identityId || identityAccount.chatgptAccountId)
+              )
+                throw new Error("Original signed-in account identity unavailable for restart");
+              const current = await this.workerAccounts(remote, identityHarness);
+              const signed = current.accounts.find(
+                (entry) =>
+                  entry.harness === identityHarness &&
+                  entry.signedIn === true &&
+                  entry.accountKey === identityAccount.accountKey &&
+                  entry.label === identityAccount.label &&
+                  entry.identity === identityAccount.identity &&
+                  entry.identityId === identityAccount.identityId &&
+                  entry.organizationId === identityAccount.organizationId &&
+                  entry.chatgptAccountId === identityAccount.chatgptAccountId &&
+                  entry.nativeDefault === identityAccount.nativeDefault &&
+                  (entry.homes ?? [{ home: entry.home }]).some(({ home }) => home === identityAccount.home),
+              );
+              if (!signed || (await realpath(identityAccount.home)) !== restartAccountHome)
+                throw new Error("Original signed-in account identity or home changed before restart");
+            };
+            const admitRestart = async () => {
+              await restartRevocation();
               const restartPolicySeat = structuredClone(input);
               if (restartPolicySeat.ownerWork) delete restartPolicySeat.ownerWork.overrideUsage;
               await this.nativeLaunchPolicy?.admit({
@@ -4961,30 +5016,30 @@ export class HerdrWatchStore implements HerdrWatchPort {
                 ...(account === undefined ? {} : { account: { ...account } }),
                 resumed: false,
               });
+              // Ordinary production hires have no NativeLaunchPolicy. Repeat their
+              // actual usage/project/tool/resource admission without a one-shot override.
+              await recheckPlan(false);
               await this.admitProjectLaunch(input, false, restartAuthority);
               await checkExpectedTools();
-              await assertConversationAuthority(restartAuthority);
-            };
-            const beforeRestartMutation = async () => {
-              await restartGuard();
               if (this.fleetResources)
                 this.noteResourceAdmission(input, await this.fleetResources.admitHire(input));
-              await restartGuard();
+              await restartFreshness();
+              await restartRevocation();
             };
             const restartView: SeatView = {
               paneId,
               name: subject,
               ...(expectedToolNames === undefined ? {} : { expectedToolNames }),
-              guard: restartGuard,
+              guard: restartRevocation,
               question: (ref, question) => this.forwardNativeQuestion(ref, question),
               run: async (argv) => {
-                await beforeRestartMutation();
+                await restartRevocation();
                 if (nativePrepared || !runInPane)
                   throw new Error("Prepared native restart has no terminal fallback");
                 await runInPane(paneId, argv);
               },
               start: async (harness, args) => {
-                await beforeRestartMutation();
+                await restartRevocation();
                 if (nativePrepared) throw new Error("Prepared native restart cannot launch another process");
                 await startAgent({ name: subject, kind: harness, paneId, ...(args.length ? { args } : {}) });
               },
@@ -4998,6 +5053,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               launch: structuredClone(effectiveLaunch),
               view: launchView,
               restartView,
+              admitRestart,
               control: started.control,
               proof,
               prepared: nativePrepared !== undefined,

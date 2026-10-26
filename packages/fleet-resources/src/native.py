@@ -161,6 +161,21 @@ def snapshot():
     return [value for value in (identity(pid, census=True) for pid in pids) if value is not None]
 
 
+
+def ancestry():
+    """Fresh all-UID topology only; never birth, absence or signal authority."""
+    rows = subprocess.run(["/bin/ps", "-axo", "pid=,ppid=,uid="], capture_output=True, timeout=2, check=True)
+    if len(rows.stdout) > 1024 * 1024:
+        raise RuntimeError("Process ancestry too large")
+    census = [tuple(int(value) for value in row.split()) for row in rows.stdout.splitlines()]
+    if len(census) > 10000 or any(len(row) != 3 for row in census):
+        raise RuntimeError("Process ancestry unavailable")
+    # Darwin ps prints nobody's uid_t 4294967294 as signed -2. Preserve
+    # its exact unsigned identity; TypeScript still validates the bounded row.
+    return [{"pid": pid, "ppid": ppid, "uid": uid + 2**32 if uid < 0 else uid}
+            for pid, ppid, uid in census]
+
+
 def observe_processes():
     raw = sys.stdin.read(16385)
     if len(raw) > 16384:
@@ -763,6 +778,8 @@ def serve():
                 reply["result"] = group_occupied(pgid)
             elif op == "memory":
                 reply["result"] = darwin_memory()
+            elif op == "ancestry":
+                reply["result"] = ancestry()
             elif op == "snapshot":
                 reply["result"] = snapshot()
             elif op == "available":

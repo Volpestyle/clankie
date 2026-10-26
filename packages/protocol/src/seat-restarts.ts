@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+const SeatRestartHandoffSchema = z.object({
+  id: z.string(),
+  at: z.string().datetime(),
+  state: z.enum(["requested", "kept", "uncertain", "restarted"]),
+  failureNoticedAt: z.string().datetime().optional(),
+});
+
 export const FLEET_SEAT_RESTARTS_PATH = "/v1/fleet/seat-restarts";
 export const SeatRestartStatusSchema = z
   .object({
@@ -37,12 +44,15 @@ export const SeatRestartStatusSchema = z
             noticedAt: z.string().datetime().optional(),
           })
           .optional(),
-        handoff: z
-          .object({
-            id: z.string(),
-            at: z.string().datetime(),
-            state: z.enum(["requested", "kept", "uncertain", "restarted"]),
-          })
+        handoff: SeatRestartHandoffSchema.optional(),
+        handoffHistory: z
+          .array(
+            SeatRestartHandoffSchema.extend({
+              retiredAt: z.string().datetime(),
+              reason: z.literal("handoff_superseded"),
+              receiptId: z.string().optional(),
+            }),
+          )
           .optional(),
         receiptId: z.string().optional(),
       }),
