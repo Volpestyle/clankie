@@ -204,5 +204,121 @@ describe.skipIf(!existsSync(helper) || !["darwin", "linux"].includes(process.pla
         }
       }
     }, 60_000);
+    it("retries a dead previous launcher's stale binding until its genuine replacement registers", async () => {
+      expect(await observeNativeBirth(process.pid)).toBeDefined();
+      const fixtures: Fixture[] = [];
+      const remember = (fixture: Fixture): Fixture => {
+        fixtures.push(fixture);
+        fixture.descendants.forEach(remember);
+        return fixture;
+      };
+      const launch = async () => {
+        const child = spawn(
+          process.execPath,
+          [new URL("./fixtures/operator-seat-binding-native.mjs", import.meta.url).pathname, "launcher"],
+          {
+            stdio: ["ignore", "pipe", "inherit"],
+            env: { ...process.env, NODE_ENV: "test" },
+          },
+        );
+        return remember(
+          await new Promise<Fixture>((resolve, reject) => {
+            let text = "";
+            child.stdout!.on("data", (chunk) => {
+              text += chunk;
+              if (text.includes("\n")) resolve(JSON.parse(text.split("\n")[0]!));
+            });
+            child.once("error", reject);
+            child.once("exit", (code) => {
+              if (!text.includes("\n")) reject(new Error(`fixture exited ${code}`));
+            });
+          }),
+        );
+      };
+      const root = await mkdtemp(join(tmpdir(), "native-stale-"));
+      const nonceFile = join(root, "claim");
+      await writeFile(nonceFile, nonce, { mode: 0o600 });
+      let server: Server | undefined;
+      try {
+        const refusals: string[] = [];
+        const banks: string[] = [];
+        const app = new Hono();
+        app.use("*", async (context, next) => {
+          await next();
+          if (context.res.status === 403) {
+            const body = await context.res.clone().json();
+            refusals.push(body.error);
+          }
+        });
+        registerSeatRoutes({
+          app,
+          authenticateLane: async () => ({ lane: "operator" }),
+          dependencies: {
+            operatorSeatBindings: new OperatorSeatBindings({
+              socket: (socket) => observeSocketProcess(socket, helper),
+              birth: observeNativeBirth,
+              processes: (controller, harness) => observeNativeProcesses(controller, harness),
+            }),
+            captain: {
+              seatContext: (conversationId: string) => ({ conversationId, cwd: root }),
+              laneToolBank: async (_lane: string, conversationId: string) => {
+                banks.push(conversationId);
+                return { lane: "operator", tools: [] };
+              },
+            },
+          } as unknown as ClankieAppDependencies,
+        });
+        server = serve({ hostname: "127.0.0.1", port: 0, fetch: app.fetch }) as Server;
+        await new Promise<void>((resolve) => server!.once("listening", resolve));
+        const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+        const command = async (fixture: Fixture, input: unknown) => {
+          const response = await fetch(`http://127.0.0.1:${fixture.port}`, {
+            method: "POST",
+            body: JSON.stringify(input),
+          });
+          return response.json();
+        };
+        const register = (launcher: Fixture) =>
+          command(launcher, {
+            url: `${origin}/v1/captain/seat-bindings`,
+            method: "PUT",
+            body: {
+              conversationId: "native-seat",
+              harnessPid: launcher.descendants[0]!.pid,
+              nonceHash: seatNonceHash(nonce),
+            },
+          });
+        const oldLauncher = await launch();
+        expect((await register(oldLauncher)).status).toBe(200);
+        process.kill(oldLauncher.pid, "SIGTERM");
+        await expect.poll(() => observeNativeBirth(oldLauncher.pid)).toBeUndefined();
+        const newLauncher = await launch();
+        // Start the real MCP grandchild while the registry still holds the dead launcher.
+        const connected = command(newLauncher.descendants[0]!, { spawnMcp: true, origin, file: nonceFile });
+        await expect
+          .poll(() => refusals.slice(0, 2), { timeout: 10_000 })
+          .toEqual(["seat_binding_stale", "seat_binding_required"]);
+        expect(banks).toEqual([]);
+        expect((await register(newLauncher)).status).toBe(200);
+        expect(await connected).toMatchObject({
+          exit: 0,
+          filePresent: true,
+          rawPresent: false,
+          tools: expect.arrayContaining(["reply"]),
+        });
+        expect(banks).toEqual(["native-seat"]);
+      } finally {
+        for (const fixture of fixtures.reverse()) {
+          try {
+            process.kill(fixture.pid, "SIGTERM");
+          } catch {}
+        }
+        if (server) {
+          server.closeAllConnections();
+          await new Promise((resolve) => server!.close(resolve));
+        }
+        await rm(root, { recursive: true, force: true });
+      }
+    }, 60_000);
   },
 );

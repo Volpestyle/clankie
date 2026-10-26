@@ -250,7 +250,13 @@ Limits and caller routes:
 
 `clankie doctor` reads `GET /v1/captain/seat-bindings`: helper availability,
 registered conversations and the last refusal/recovery; no claim or hash is
-returned. A last refusal is historical, not a live harness probe. Startup and
+returned. A last refusal stays in the report body and never replaces a live
+finding in the doctor headline. The normal `seat_binding_required` startup
+window is not retained; successful registration or admission clears the last
+refusal for that conversation. The bridge retries `seat_binding_required` and
+`seat_binding_stale` within the same bounded startup window: a dead prior
+launch is removed before the new launcher's PUT arrives. Wrong ancestry, nonce,
+conflict and an existing claimant remain final refusals. Startup and
 registration errors preserve the precise reason: `seat_binding_helper_missing`
 (prepare/repair the native helper), `seat_process_unproven` (use a direct IPv4
 loopback socket and inspect the helper), `seat_harness_not_child` or

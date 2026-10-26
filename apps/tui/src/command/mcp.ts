@@ -130,7 +130,6 @@ const SEAT_RECONCILE_TIMEOUT_MS = 10_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
 const OUTBOX_RETRY_MS = 5_000;
-/** How long a freshly started bridge waits for its launcher's registration (VUH-2816). */
 /** Only the MCP server receives this path; ordinary harness exec children receive no claim. */
 function bridgeLaunchClaim(env: NodeJS.ProcessEnv): string | undefined {
   const path = env.CLANKIE_BRIDGE_NONCE_FILE;
@@ -159,6 +158,7 @@ function bridgeLaunchClaim(env: NodeJS.ProcessEnv): string | undefined {
   }
 }
 
+/** Bounded startup window for a launcher registration, including a dead prior binding (VUH-2816). */
 const BINDING_WAIT_MS = 500;
 const BINDING_WAIT_ATTEMPTS = 40;
 const SEAT_CLIENT = { name: "clankie-seat", version: "0.2.0" } as const;
@@ -1469,8 +1469,9 @@ export async function runMcpCommand(
     }
     const bridgeClaim = bridgeLaunchClaim(env);
     // The launcher registers its harness right after spawning it, which can land a
-    // moment after the harness starts this bridge. Wait out only that window; any
-    // other refusal (not the registered process, wrong claim) stays final.
+    // moment after the harness starts this bridge. A dead previous launch may
+    // first return stale and clear its entry. Wait out only those two startup
+    // states; native ancestry, nonce and competing live claimant refusals stay final.
     for (let attempt = 0; ; attempt += 1) {
       try {
         return await connectLaneUpstream({
@@ -1483,7 +1484,10 @@ export async function runMcpCommand(
           ...(bridgeClaim === undefined ? {} : { bridgeClaim }),
         });
       } catch (error) {
-        if (attempt >= BINDING_WAIT_ATTEMPTS || !String(error).includes("seat_binding_required")) {
+        if (
+          attempt >= BINDING_WAIT_ATTEMPTS ||
+          !/"error"\s*:\s*"seat_binding_(?:required|stale)"/u.test(String(error))
+        ) {
           throw new Error(
             `Operator bridge refused: ${error instanceof Error ? error.message : String(error)}. Run \`clankie doctor\` for the precise native binding refusal and recovery.`,
             { cause: error },

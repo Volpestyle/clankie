@@ -5032,7 +5032,7 @@ paths:
       tags: [Captain, Operator]
       operationId: getOperatorSeatBindingStatus
       summary: Inspect native seat binding availability and the last refusal
-      description: Read-only operator-lane diagnostics; contains no process IDs or launch secrets.
+      description: Read-only operator-lane diagnostics; contains no process IDs or launch secrets. Normal missing-registration startup retries are not retained. Successful registration or admission clears the last refusal for that conversation; historical refusals do not replace live doctor findings.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       responses:
         "200":

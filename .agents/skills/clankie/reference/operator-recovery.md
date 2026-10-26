@@ -142,7 +142,12 @@ poll or acknowledge reports, or message seats. Start it through the normal
 owner, launcher→harness child edge, process lifetimes, selected conversation
 and bridge-only nonce. Do not copy the nonce into harness env/argv or rebind a
 foreign PID. `clankie doctor` exposes native helper availability and the last
-precise refusal/recovery; a historical refusal is not a live harness probe.
+precise refusal/recovery; a historical refusal stays in the report body and
+cannot replace a live doctor finding. Normal missing-registration startup
+retries are not retained as diagnostics. A successful registration/admission
+clears the recorded refusal for that conversation. The bridge retries only
+missing or stale registration within its bounded startup window; wrong ancestry,
+nonce, conflict or an existing claimant remain final.
 Missing helper, unprovable socket, wrong ancestry, wrong claim and another live
 claimant are distinct refusals. Prime's missing verified kernel PID remains open.
 Joined/delegated seats retain their separate authenticated route; relay/app

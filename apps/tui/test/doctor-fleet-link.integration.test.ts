@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 it.each(["healthy", "unavailable"] as const)(
-  "shows the service's down fleet link and real reason when the harness probe is %s",
+  "keeps a live bridge headline beside historical refusal and reports the down fleet link when the harness probe is %s",
   async (harnessStatus) => {
     const root = await mkdtemp(join(tmpdir(), "clankie-doctor-fleet-link-"));
     roots.push(root);
@@ -118,7 +118,9 @@ it.each(["healthy", "unavailable"] as const)(
       available: true,
       lastRefusal: { error: "seat_bridge_claim_invalid" },
     });
-    expect(formatDoctorSummary(report)).toContain("seat_bridge_claim_invalid: Relaunch");
+    // Historical binding evidence stays in the body while the live bridge fault
+    // retains the actionable headline. Both are present in this same report.
+    expect(formatDoctorSummary(report)).toContain("Seat bridge disconnected for conv-kh2. KH2:");
     expect(formatDoctorReport(report)).toContain("Last native seat refusal · seat_bridge_claim_invalid");
     expect(
       formatDoctorSummary({

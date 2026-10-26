@@ -102,8 +102,6 @@ function doctorSummary(report: InstallDoctorReport): string {
   if (nativeBinding && "available" in nativeBinding) {
     if (!nativeBinding.available)
       return `${nativeBinding.error ?? "seat_binding_unavailable"}: ${nativeBinding.recovery ?? "Repair the native helper and relaunch the seat."}`;
-    if (nativeBinding.lastRefusal)
-      return `${nativeBinding.lastRefusal.error}: ${nativeBinding.lastRefusal.recovery} (last observed refusal; not a probe of the current seat)`;
   }
   const refusal =
     report.machineAccessRefusals && "refusals" in report.machineAccessRefusals

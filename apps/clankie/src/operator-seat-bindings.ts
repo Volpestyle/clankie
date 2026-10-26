@@ -147,12 +147,19 @@ export class OperatorSeatBindings {
     status: 400 | 403 | 409,
     conversationId?: string,
   ): SeatBindingResult {
-    this.lastRefusal = {
-      error,
-      recovery: seatBindingRecovery(error),
-      ...(conversationId === undefined ? {} : { conversationId }),
-    };
+    // The launcher and bridge race during normal startup/restart. Keep the
+    // refusal on the wire, without turning that retry window into doctor history.
+    if (error !== "seat_binding_required")
+      this.lastRefusal = {
+        error,
+        recovery: seatBindingRecovery(error),
+        ...(conversationId === undefined ? {} : { conversationId }),
+      };
     return { ok: false, error, status };
+  }
+
+  private clearRefusal(conversationId: string): void {
+    if (this.lastRefusal?.conversationId === conversationId) this.lastRefusal = undefined;
   }
 
   private async alive(process: SeatProcess): Promise<boolean> {
@@ -169,13 +176,14 @@ export class OperatorSeatBindings {
       !HASH.test(request.nonceHash) ||
       !Number.isSafeInteger(request.harnessPid)
     )
-      return this.refusal("seat_binding_invalid", 400);
+      return this.refusal("seat_binding_invalid", 400, request.conversationId);
     const snapshot = await this.observers.socket(socket);
     if (snapshot === undefined) return this.refusal("seat_process_unproven", 403, request.conversationId);
     const controller = proc(snapshot.owner.pid, snapshot.owner.birth, snapshot.owner.kernelIdentity);
-    if (request.harnessPid === controller.pid) return this.refusal("seat_binding_invalid", 400);
+    if (request.harnessPid === controller.pid)
+      return this.refusal("seat_binding_invalid", 400, request.conversationId);
     const birth = await this.observers.birth(request.harnessPid);
-    if (birth === undefined) return this.refusal("seat_binding_invalid", 400);
+    if (birth === undefined) return this.refusal("seat_binding_invalid", 400, request.conversationId);
     const harness = fromBirth(request.harnessPid, birth);
     const pair = await this.observers.processes(controller.pid, harness.pid);
     const [observedController, observedHarness] = pair?.processes ?? [];
@@ -199,7 +207,7 @@ export class OperatorSeatBindings {
       !same(existing.controller, controller) &&
       (await this.alive(existing.controller))
     )
-      return this.refusal("seat_binding_conflict", 409);
+      return this.refusal("seat_binding_conflict", 409, request.conversationId);
     const refreshed =
       existing !== undefined &&
       same(existing.controller, controller) &&
@@ -212,6 +220,7 @@ export class OperatorSeatBindings {
       depth: request.depth ?? 1,
       ...(refreshed && existing.claimant !== undefined ? { claimant: existing.claimant } : {}),
     });
+    this.clearRefusal(request.conversationId);
     return { ok: true, role: "registered" };
   }
 
@@ -220,11 +229,11 @@ export class OperatorSeatBindings {
     const entry = this.entries.get(conversationId);
     if (entry === undefined) return { ok: true, role: "registered" };
     const snapshot = await this.observers.socket(socket);
-    if (snapshot === undefined) return this.refusal("seat_process_unproven", 403);
+    if (snapshot === undefined) return this.refusal("seat_process_unproven", 403, conversationId);
     if (
       !same(entry.controller, proc(snapshot.owner.pid, snapshot.owner.birth, snapshot.owner.kernelIdentity))
     )
-      return this.refusal("seat_binding_conflict", 409);
+      return this.refusal("seat_binding_conflict", 409, conversationId);
     this.entries.delete(conversationId);
     return { ok: true, role: "registered" };
   }
@@ -236,29 +245,34 @@ export class OperatorSeatBindings {
   ): Promise<SeatBindingResult> {
     if (this.observers.available?.() === false)
       return this.refusal("seat_binding_helper_missing", 403, input.conversationId);
-    if (!input.conversationId?.trim()) return this.refusal("seat_binding_conversation_required", 403);
+    if (!input.conversationId?.trim())
+      return this.refusal("seat_binding_conversation_required", 403, input.conversationId);
     const entry = this.entries.get(input.conversationId);
-    if (entry === undefined) return this.refusal("seat_binding_required", 403);
-    if (socket === undefined) return this.refusal("seat_process_unproven", 403);
+    if (entry === undefined) return this.refusal("seat_binding_required", 403, input.conversationId);
+    if (socket === undefined) return this.refusal("seat_process_unproven", 403, input.conversationId);
     const snapshot = await this.observers.socket(socket);
-    if (snapshot === undefined) return this.refusal("seat_process_unproven", 403);
+    if (snapshot === undefined) return this.refusal("seat_process_unproven", 403, input.conversationId);
     if (!(await this.alive(entry.controller)) || !(await this.alive(entry.harness))) {
       this.entries.delete(input.conversationId);
-      return this.refusal("seat_binding_stale", 403);
+      return this.refusal("seat_binding_stale", 403, input.conversationId);
     }
     const owner = proc(snapshot.owner.pid, snapshot.owner.birth, snapshot.owner.kernelIdentity);
-    if (same(entry.controller, owner)) return { ok: true, role: "controller" };
+    if (same(entry.controller, owner)) {
+      this.clearRefusal(input.conversationId);
+      return { ok: true, role: "controller" };
+    }
     const parent = snapshot.ancestors[entry.depth];
     if (parent === undefined || !same(entry.harness, proc(parent.pid, parent.birth, parent.kernelIdentity)))
-      return this.refusal("seat_bridge_not_registered", 403);
+      return this.refusal("seat_bridge_not_registered", 403, input.conversationId);
     const claimed = createHash("sha256")
       .update(input.claim ?? "")
       .digest();
     if (!timingSafeEqual(claimed, Buffer.from(entry.nonceHash, "hex")))
-      return this.refusal("seat_bridge_claim_invalid", 403);
+      return this.refusal("seat_bridge_claim_invalid", 403, input.conversationId);
     if (entry.claimant !== undefined && !same(entry.claimant, owner) && (await this.alive(entry.claimant)))
-      return this.refusal("seat_bridge_claimed", 409);
+      return this.refusal("seat_bridge_claimed", 409, input.conversationId);
     entry.claimant = owner;
+    this.clearRefusal(input.conversationId);
     return { ok: true, role: "bridge" };
   }
 }

@@ -124,6 +124,38 @@ describe("operator seat bindings", () => {
     expect(await ask(f, 30, NONCE, "seat-b")).toMatchObject({ ok: false, error: "seat_binding_required" });
   });
 
+  it("does not retain the normal registration startup window as a diagnostic", async () => {
+    const f = world(base());
+    expect(await f.bindings.admit(f.socketFor(30), { conversationId: "seat-a", claim: NONCE })).toMatchObject(
+      { error: "seat_binding_required" },
+    );
+    expect(f.bindings.status().lastRefusal).toBeUndefined();
+  });
+
+  it.each(["register", "admit"] as const)(
+    "clears a refusal only when its conversation succeeds via %s",
+    async (recovery) => {
+      const f = await registered();
+      expect(await ask(f, 30, "wrong")).toMatchObject({ error: "seat_bridge_claim_invalid" });
+      expect(f.bindings.status().lastRefusal).toMatchObject({
+        error: "seat_bridge_claim_invalid",
+        conversationId: "seat-a",
+      });
+      const register = (conversationId: string) =>
+        f.bindings.register(f.socketFor(10), {
+          conversationId,
+          harnessPid: 20,
+          nonceHash: seatNonceHash(NONCE),
+        });
+      await register("seat-b");
+      expect(f.bindings.status().lastRefusal).toMatchObject({ conversationId: "seat-a" });
+      expect(await ask(f, 30, NONCE, "unregistered")).toMatchObject({ error: "seat_binding_required" });
+      expect(f.bindings.status().lastRefusal).toMatchObject({ conversationId: "seat-a" });
+      expect((await (recovery === "register" ? register("seat-a") : ask(f, 30))).ok).toBe(true);
+      expect(f.bindings.status().lastRefusal).toBeUndefined();
+    },
+  );
+
   it("refuses a request with no provable socket", async () => {
     const f = await registered();
     expect(await f.bindings.admit(undefined, { conversationId: "seat-a", claim: NONCE })).toMatchObject({
