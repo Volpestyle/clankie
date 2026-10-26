@@ -101,7 +101,16 @@ describe("Discord context visuals", () => {
       expect(normalized.prompt).toContain("chronological samples from early to late");
       expect(normalized.prompt).toContain("final 2 image parts");
       expect(normalized.prompt).toContain("earlier context message gif-message");
-      expect(normalized.prompt).toContain("[newest context visual]");
+      // The visual's source is marked on its own attributed record.
+      expect(normalized.prompt).toContain(
+        JSON.stringify({
+          id: "gif-message",
+          at: "2026-08-15T22:45:25.729Z",
+          author: "user-1",
+          body: "https://klipy.com/gifs/greetings-PSr",
+          newestContextVisual: true,
+        }),
+      );
     },
   );
 
