@@ -442,7 +442,9 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
       // which will need the owner again, even if its persisted flag says true.
       const directory = seat.workingDirectory;
       const paths = await Promise.all([
+        // allow-swallowed-rejection -- an unreadable launch directory refuses trust_required below, before any signal or launch.
         directory === undefined ? undefined : realpath(directory).catch(() => undefined),
+        // allow-swallowed-rejection -- an unreadable home refuses trust_required below; it never grants unattended trust.
         realpath(homedir()).catch(() => undefined),
       ]);
       if (paths[0] === undefined || paths[1] === undefined || paths[0] === paths[1])
