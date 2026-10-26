@@ -53,8 +53,8 @@ official bot's server-owned launch/audience adapter. Launch/stop receipts remain
 confirmed, refused or uncertain; neither client replays an uncertain effect.
 Hosted customers do not configure bot keys, app registrations or tunnels.
 Local self-hosting retains delegated fragment grants. A self-hosted bot admits
-participants of its own `/activity` launch (see Self-hosted official admission);
-it has no share launch adapter.
+participants of its own `/activity` launch and of room `activity_share` launches
+(see Self-hosted official admission and [Activity sharing](../../docs/activity.md)).
 
 Private control on port 4322 requires the broker-owned producer bearer:
 

@@ -65,10 +65,13 @@ grant until it lapses. Revocation is bounded at about five minutes, against
 hosted's 15-second revalidation. [VUH-2834](https://linear.app/vuhlp/issue/VUH-2834)
 tracks tightening it.
 
-Room share tools still refuse with `activity_official_bot_required` for a
-self-hosted bot: this ADR adds admission for the bot's own `/activity` launch,
-not a launch/stop adapter for `ActivitySharing`
-([VUH-2835](https://linear.app/vuhlp/issue/VUH-2835)).
+Room share tools launch through the same path
+([VUH-2835](https://linear.app/vuhlp/issue/VUH-2835)): with self-hosted
+admission configured, a room turn's `start` or `image` opens the share in the
+voice channel the bot occupies in that server and posts the invite through the
+room body's existing `watch_start` action, whose `activity_start` presence write
+records the launch above. No new launch authority exists; a transport failure
+is reported as uncertain, never resent.
 
 A `#share` fragment still opens a delegated grant on a self-hosted viewer
 outside Discord. Hosted config never sets `delegated`, so hosted viewers keep

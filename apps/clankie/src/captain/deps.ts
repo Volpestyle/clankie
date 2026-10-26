@@ -47,6 +47,8 @@ export interface CaptainDeps {
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
   readonly activitySharing?: import("../activity-sharing.ts").ActivitySharing;
+  /** A self-hosted official bot admits Activity viewers itself, so room turns may launch shares (VUH-2835). */
+  readonly activitySelfHostedLaunch?: true;
   /** Non-secret wake settings, shared by the CLI, API and Clankie's own tool. */
   readonly linearWake?: {
     readonly settings: Pick<import("@clankie/settings").SettingsStore, "load" | "update">;

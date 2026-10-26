@@ -66,6 +66,9 @@ export function createDiscordCaptainActionClient(
   };
 }
 
+/** Transport failure: the body may or may not have acted, so callers treat it as uncertain. */
+export const DISCORD_BODY_UNREACHABLE_MESSAGE = "I can't reach my live Discord body for that action.";
+
 function unavailable(): DiscordCaptainActionResult {
-  return { ok: false, message: "I can't reach my live Discord body for that action." };
+  return { ok: false, message: DISCORD_BODY_UNREACHABLE_MESSAGE };
 }

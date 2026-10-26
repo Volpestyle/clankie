@@ -63,7 +63,8 @@ import { SeatQuestionAnswerSchema } from "./codex-user-input.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
-import { activityTools } from "./activity-tools.ts";
+import { activityTools, type ActivityRoomLauncher } from "./activity-tools.ts";
+import { DISCORD_BODY_UNREACHABLE_MESSAGE } from "../discord-captain-actions.ts";
 import { minecraftTools } from "./minecraft-tools.ts";
 import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
 import { routineTool } from "./routine-tools.ts";
@@ -246,7 +247,7 @@ export function captainTools(
         ]
       : []),
     ...(deps.activitySharing && (lane === "operator" || lane.startsWith("discord_"))
-      ? activityTools(deps.activitySharing, turn)
+      ? activityTools(deps.activitySharing, turn, activityRoomLauncher(deps, turn, lane))
       : []),
     ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake, turn) : []),
     ...(deps.bodyLeases === undefined
@@ -1889,6 +1890,43 @@ function discordServerTools(
           }),
         ]),
   ];
+}
+
+/**
+ * A self-hosted bot's room launch (VUH-2835): the turn's own Discord body
+ * posts the invite with the existing `watch_start`, and the presence write it
+ * makes records the channel for admission. Absent unless self-hosted admission
+ * is configured and the turn is attributed to a server message.
+ */
+export function activityRoomLauncher(
+  deps: CaptainDeps,
+  turn: TurnContext,
+  lane: CaptainSessionLaneV2,
+): ActivityRoomLauncher | undefined {
+  const actions = deps.discordActions;
+  const { actorId, guildId, channelId, messageId } = turn;
+  if (
+    deps.activitySelfHostedLaunch !== true ||
+    actions === undefined ||
+    !lane.startsWith("discord_") ||
+    actorId === undefined ||
+    guildId === undefined ||
+    channelId === undefined ||
+    messageId === undefined
+  )
+    return undefined;
+  return {
+    voiceChannel: async (server) =>
+      (await deps.presence.listSessions())
+        .filter((record) => record.transportKind === "bot")
+        .flatMap((record) => record.voiceRooms ?? [])
+        .find((room) => room.guildId === server)?.channelId,
+    watch: async (action, callId) => {
+      const result = await actions.execute({ action, callId, actorId, guildId, channelId, messageId });
+      if (result.ok) return "confirmed";
+      return result.message === DISCORD_BODY_UNREACHABLE_MESSAGE ? "uncertain" : "refused";
+    },
+  };
 }
 
 function discordActionTools(

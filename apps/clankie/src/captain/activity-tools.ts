@@ -1,11 +1,28 @@
+import { randomUUID } from "node:crypto";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ActivitySharingRequestSchema, type ActivitySharing } from "../activity-sharing.ts";
 import { assertConversationAuthority, captureConversationAuthority } from "./conversation-owner.ts";
 import type { TurnContext } from "./tools.ts";
 
+/**
+ * A self-hosted official bot's launch for a room turn (VUH-2835): the turn's
+ * own Discord body posts or revokes the Activity invite through its existing
+ * `watch_start`/`watch_stop` actions, and its presence write records the launch
+ * for admission (ADR 0295).
+ */
+export interface ActivityRoomLauncher {
+  /** The voice channel Clankie's bot occupies in this server, from presence. */
+  voiceChannel(guildId: string): Promise<string | undefined>;
+  watch(action: "watch_start" | "watch_stop", callId: string): Promise<"confirmed" | "refused" | "uncertain">;
+}
+
 /** Social sharing uses the current room/owner proof and delivered media; it grants no capture. */
-export function activityTools(sharing: ActivitySharing, turn: TurnContext): ToolDefinition[] {
+export function activityTools(
+  sharing: ActivitySharing,
+  turn: TurnContext,
+  launcher?: ActivityRoomLauncher,
+): ToolDefinition[] {
   return [
     defineTool({
       name: "activity_share",
@@ -28,20 +45,32 @@ export function activityTools(sharing: ActivitySharing, turn: TurnContext): Tool
         generation: Type.Optional(Type.Integer({ minimum: 1 })),
         ttlMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 7_200_000 })),
       }),
-      execute: async (_id, input) => {
+      execute: async (callId, input) => {
         let result: unknown;
         try {
           const authority = captureConversationAuthority(turn.conversationAuthority);
           await assertConversationAuthority(authority);
           if (authority.owner.discord?.transportKind === "user_session")
             throw new Error("activity_official_bot_required");
-          const { action, sourceId, artifactId, guildId, channelId, shareId, generation, ttlMs } = input;
+          const { action, sourceId, artifactId, guildId, shareId, generation, ttlMs } = input;
+          let { channelId } = input;
+          // Hosted launch wins; otherwise a self-hosted bot's own room launch.
+          const roomLaunch = authority.owner.discord && !sharing.hasLaunchAdapter ? launcher : undefined;
           if (
             authority.owner.discord &&
             (action === "start" || action === "image" || action === "switch") &&
-            !sharing.hasLaunchAdapter
+            !sharing.hasLaunchAdapter &&
+            roomLaunch === undefined
           )
             throw new Error("activity_official_bot_required");
+          if (roomLaunch !== undefined && (action === "start" || action === "image")) {
+            // The invite goes where the bot is in voice, so the share must too.
+            const voice = await roomLaunch.voiceChannel(authority.owner.discord!.guildId!);
+            if (voice === undefined) throw new Error("activity_voice_channel_required");
+            if (channelId !== undefined && channelId !== voice)
+              throw new Error("activity_destination_refused");
+            channelId = voice;
+          }
           if (
             sourceId?.startsWith("artifact:") &&
             !sourceId.startsWith(`artifact:${authority.owner.conversationId}:`)
@@ -84,7 +113,7 @@ export function activityTools(sharing: ActivitySharing, turn: TurnContext): Tool
           // A social turn can only manipulate shares in its host-bound server.
           if (authority.owner.discord && (action === "switch" || action === "stop" || action === "list")) {
             const listed = (await sharing.request({ action: "list" }, authorize)) as {
-              sessions: { shareId: string; scope: { guildId: string } }[];
+              sessions: LaunchedSession[];
             };
             if (action === "list")
               result = {
@@ -101,8 +130,26 @@ export function activityTools(sharing: ActivitySharing, turn: TurnContext): Tool
               )
                 throw new Error("activity_destination_refused");
               result = await sharing.request(parsed, authorize);
+              if (roomLaunch !== undefined && action === "stop")
+                result = {
+                  ...(result as object),
+                  receipt: await launchReceipt(roomLaunch, "watch_stop", callId, listed, shareId!),
+                };
             }
-          } else result = await sharing.request(parsed, authorize);
+          } else {
+            result = await sharing.request(parsed, authorize);
+            if (roomLaunch !== undefined && (action === "start" || action === "image")) {
+              const session = (result as { session: LaunchedSession }).session;
+              const outcome = await roomLaunch.watch("watch_start", callId);
+              // A refused launch posted nothing: end the share it would have shown.
+              if (outcome === "refused")
+                await sharing.request(
+                  { action: "stop", shareId: session.shareId, generation: session.generation },
+                  authorize,
+                );
+              result = { session, receipt: { outcome, receiptId: randomUUID(), session } };
+            }
+          }
         } catch (error) {
           result = {
             outcome: "refused",
@@ -116,4 +163,21 @@ export function activityTools(sharing: ActivitySharing, turn: TurnContext): Tool
       },
     }),
   ];
+}
+
+interface LaunchedSession {
+  shareId: string;
+  generation: number;
+  scope: { guildId: string };
+}
+
+async function launchReceipt(
+  launcher: ActivityRoomLauncher,
+  action: "watch_stop",
+  callId: string,
+  listed: { sessions: LaunchedSession[] },
+  shareId: string,
+) {
+  const session = listed.sessions.find((candidate) => candidate.shareId === shareId);
+  return { outcome: await launcher.watch(action, callId), receiptId: randomUUID(), session };
 }

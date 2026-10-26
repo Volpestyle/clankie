@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { DiscordPresenceSession } from "@clankie/discord-presence-core";
+import { DiscordBotPresenceRuntime } from "../../discord-bridge/src/bot-presence-runtime.ts";
 import { ActivityShareFrameSchema } from "@clankie/interactive-environment";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -16,7 +17,11 @@ import { createActivityLaunches, createSelfHostedActivityAdmission } from "../sr
 import { ActivityPlaySource } from "../src/activity-play-source.ts";
 import { ActivitySharing } from "../src/activity-sharing.ts";
 import { createClankieApp } from "../src/app.ts";
+import { activityTools } from "../src/captain/activity-tools.ts";
+import type { CaptainDeps } from "../src/captain/deps.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
+import { activityRoomLauncher } from "../src/captain/tools.ts";
+import { DISCORD_BODY_UNREACHABLE_MESSAGE } from "../src/discord-captain-actions.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
 
 const APP = "90001";
@@ -131,7 +136,13 @@ async function discordFixture() {
   return { url: await listen(server), seen };
 }
 
-async function stack(options: { clientSecret?: string | undefined; lockTimeoutMs?: number } = {}) {
+async function stack(
+  options: {
+    clientSecret?: string | undefined;
+    lockTimeoutMs?: number;
+    presenceRuntime?: NonNullable<Parameters<typeof createClankieApp>[0]["discordPresenceRuntime"]>;
+  } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-activity-admission-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const discord = await discordFixture();
@@ -199,8 +210,9 @@ async function stack(options: { clientSecret?: string | undefined; lockTimeoutMs
       request.headers.get("authorization") === "Bearer bridge"
         ? { captainId: "body", steerSourceLane: "discord_text" }
         : undefined,
-    // The bot's REST effect itself is out of scope; the route's bookkeeping is the subject.
-    discordPresenceRuntime: {
+    // The bot's REST effect itself is out of scope unless a test supplies the
+    // real runtime; the route's bookkeeping is the subject.
+    discordPresenceRuntime: options.presenceRuntime ?? {
       execute: async (write, _session, guard) => {
         await guard?.();
         return { id: write.idempotencyKey, action: write.action, transportKind: "bot", channelId: CHANNEL };
@@ -607,4 +619,240 @@ it("a late admission listing never ends a share the owner opened meanwhile", asy
   await new Promise((done) => setTimeout(done, 100));
   expect(s.shares.stats().map((share) => share.shareId)).toContain(owned.session.shareId);
   expect(s.shares.stats()).toHaveLength(2);
+});
+
+/** Discord's channel invite and message REST routes, as the bot runtime calls them. */
+function discordRest() {
+  const invites = new Map<string, { channelId: string }>();
+  const calls: string[] = [];
+  let next = 0;
+  const rest = {
+    async post(route: string, options: { body: Record<string, unknown> }) {
+      calls.push(`POST ${route}`);
+      const invite = /^\/channels\/(\d+)\/invites$/u.exec(route);
+      if (invite !== null) {
+        expect(options.body).toMatchObject({ target_type: 2, target_application_id: APP });
+        const code = `launch${++next}`;
+        invites.set(code, { channelId: invite[1]! });
+        return { code };
+      }
+      return { id: `message-${++next}` };
+    },
+    async get(route: string) {
+      calls.push(`GET ${route}`);
+      const channel = /^\/channels\/(\d+)\/invites$/u.exec(route)?.[1];
+      return [...invites]
+        .filter(([, invite]) => invite.channelId === channel)
+        .map(([code]) => ({ code, target_type: 2, target_application: { id: APP } }));
+    },
+    async delete(route: string) {
+      calls.push(`DELETE ${route}`);
+      invites.delete(route.replace(/^\/invites\//u, ""));
+    },
+    async put() {},
+    async patch() {},
+  };
+  return { rest, invites, calls };
+}
+
+// The room's own Discord body, as the bridge's /captain-action would be: it
+// turns watch_start/watch_stop into the authenticated activity_start/stop
+// presence write for the voice channel it occupies.
+async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    s.service.app.request(path, {
+      method: "POST",
+      headers: { authorization: "Bearer bridge", "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  const session = new DiscordPresenceSession({
+    sessionId: "room-session",
+    characterId: "clankie",
+    credentialRef: "discord_bot",
+    transportKind: "bot",
+    emit: async (event) => (await (await post("/v1/discord/presence-session-events", event)).json()).session,
+  });
+  await session.start();
+  await session.gatewayReady();
+  await session.voiceStateChanged(GUILD, true, { channelId: CHANNEL, occupants: [] });
+  let mode: "act" | "refuse" | "lose" = "act";
+  const actions = {
+    async execute(input: { action: string; callId: string }) {
+      if (mode === "refuse")
+        return { ok: false, message: "I need to be in your admitted voice channel first." };
+      const kind = input.action === "watch_start" ? "activity_start" : "activity_stop";
+      const response = await post(
+        "/v1/discord/presence-actions",
+        {
+          schemaVersion: 1,
+          idempotencyKey: `room:${input.callId}:${kind}`,
+          action: `discord.presence.${kind}`,
+          identity: {
+            presenceSessionId: `discord:${GUILD}:${CHANNEL}`,
+            correlationId: `room:${input.callId}`,
+            profileHash: "unversioned",
+            characterId: "clankie",
+            credentialRef: "discord_bot",
+            transportKind: "bot",
+          },
+          payload: {
+            kind,
+            guildId: GUILD,
+            channelId: CHANNEL,
+            ...(kind === "activity_start" ? { surface: "gba_emulator" } : {}),
+          },
+        },
+        {
+          "x-clankie-discord-presence-session": session.record.sessionId,
+          "x-clankie-discord-presence-phase": session.record.phase,
+          "x-clankie-discord-presence-revision": String(session.record.revision),
+        },
+      );
+      // "lose": the body acted, but its answer never arrived.
+      if (mode === "lose") return { ok: false, message: DISCORD_BODY_UNREACHABLE_MESSAGE };
+      return response.ok ? { ok: true, message: "posted" } : { ok: false, message: "refused" };
+    },
+  };
+  return {
+    session,
+    actions,
+    setMode: (next: typeof mode) => (mode = next),
+  };
+}
+
+function roomTool(
+  s: Awaited<ReturnType<typeof stack>>,
+  body: Awaited<ReturnType<typeof roomBody>>,
+  { selfHosted = true, guildId = GUILD }: { selfHosted?: boolean; guildId?: string } = {},
+) {
+  let current = true;
+  const turn = {
+    actorId: "501",
+    guildId,
+    channelId: "777",
+    messageId: "888",
+    conversationAuthority: {
+      owner: {
+        conversationId: "room-conversation",
+        discord: {
+          baseSessionKey: `discord:${guildId}`,
+          targetId: "777",
+          actorId: "501",
+          guildId,
+          channelId: "777",
+          messageId: "888",
+          transportKind: "bot" as const,
+        },
+      },
+      current: () => current,
+      authorize: async () => current,
+    },
+  };
+  const deps = {
+    ...(selfHosted ? { activitySelfHostedLaunch: true as const } : {}),
+    discordActions: body.actions,
+    presence: { listSessions: async () => [body.session.record] },
+  } as unknown as CaptainDeps;
+  const tool = activityTools(
+    s.sharing,
+    turn as never,
+    activityRoomLauncher(deps, turn as never, "discord_presence"),
+  )[0]!;
+  let calls = 0;
+  return {
+    revoke: () => (current = false),
+    invoke: async (input: Record<string, unknown>) =>
+      (await tool.execute(`call-${++calls}`, input as never, undefined, undefined, undefined as never))
+        .details as Record<string, any>,
+  };
+}
+
+it("a room share start launches through the bot's own body and admits a participant to that exact share", async () => {
+  const discord = discordRest();
+  const s = await stack({
+    presenceRuntime: new DiscordBotPresenceRuntime({
+      botToken: "fixture-bot",
+      rest: discord.rest as never,
+      activityApplicationIds: { gba_emulator: APP },
+    }),
+  });
+  const playSink = s.play.createSink("FireRed");
+  const body = await roomBody(s);
+  const room = roomTool(s, body);
+  const started = await room.invoke({ action: "start", sourceId: "play" });
+  expect(started.receipt).toMatchObject({
+    outcome: "confirmed",
+    session: { shareId: started.session.shareId },
+  });
+  // The share lands where the bot is in voice, and the invite goes there too.
+  expect(started.session.scope).toMatchObject({ guildId: GUILD, channelId: CHANNEL });
+  expect(discord.calls).toContain(`POST /channels/${CHANNEL}/invites`);
+  expect(discord.invites.size).toBe(1);
+  const admitted = await s.admit("member-code", "i-here");
+  expect(admitted.status).toBe(200);
+  expect(admitted.body.session.shareId).toBe(started.session.shareId);
+  expect(s.shares.stats()).toHaveLength(1);
+  const view = await watch(s, admitted);
+  playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+  await vi.waitFor(() => expect(view.messages.some((message) => message.kind === "frame")).toBe(true));
+  // Stop ends the share and revokes the invite; the channel admits no one after.
+  const stopped = await room.invoke({ action: "stop", shareId: started.session.shareId, generation: 1 });
+  expect(stopped).toMatchObject({ stopped: true, receipt: { outcome: "confirmed" } });
+  expect(discord.invites.size).toBe(0);
+  expect(s.shares.stats()).toHaveLength(0);
+  expect((await s.admit("member-code", "i-here")).status).toBe(403);
+});
+
+it("a room launch refuses other servers, other channels, revoked turns and bots without self-hosted admission", async () => {
+  const s = await stack();
+  s.play.createSink("FireRed");
+  const body = await roomBody(s);
+  // A turn from another server cannot reach this server's voice channel.
+  const foreign = roomTool(s, body, { guildId: "999" });
+  expect(await foreign.invoke({ action: "start", sourceId: "play" })).toMatchObject({
+    outcome: "refused",
+    reason: "activity_voice_channel_required",
+  });
+  expect(await foreign.invoke({ action: "start", sourceId: "play", guildId: GUILD })).toMatchObject({
+    outcome: "refused",
+  });
+  const room = roomTool(s, body);
+  expect(await room.invoke({ action: "start", sourceId: "play", channelId: "555" })).toMatchObject({
+    outcome: "refused",
+    reason: "activity_destination_refused",
+  });
+  expect(
+    await roomTool(s, body, { selfHosted: false }).invoke({ action: "start", sourceId: "play" }),
+  ).toEqual({
+    outcome: "refused",
+    reason: "activity_official_bot_required",
+  });
+  const revoked = roomTool(s, body);
+  revoked.revoke();
+  expect(await revoked.invoke({ action: "start", sourceId: "play" })).toMatchObject({ outcome: "refused" });
+  expect(s.shares.stats()).toHaveLength(0);
+  expect((await s.admit("member-code", "i-here")).status).toBe(403);
+});
+
+it("a refused room launch ends its share; an uncertain one keeps it and is never resent", async () => {
+  const s = await stack();
+  s.play.createSink("FireRed");
+  const body = await roomBody(s);
+  const room = roomTool(s, body);
+  body.setMode("refuse");
+  const refused = await room.invoke({ action: "start", sourceId: "play" });
+  expect(refused.receipt).toMatchObject({ outcome: "refused" });
+  expect(s.shares.stats()).toHaveLength(0);
+  expect((await s.admit("member-code", "i-here")).status).toBe(403);
+  body.setMode("lose");
+  const uncertain = await room.invoke({ action: "start", sourceId: "play" });
+  expect(uncertain.receipt).toMatchObject({
+    outcome: "uncertain",
+    session: { shareId: uncertain.session.shareId },
+  });
+  expect(s.shares.stats()).toHaveLength(1);
+  // The body did act, so the launch is recorded and its participant is admitted.
+  const admitted = await s.admit("member-code", "i-here");
+  expect(admitted.status).toBe(200);
+  expect(admitted.body.session.shareId).toBe(uncertain.session.shareId);
 });

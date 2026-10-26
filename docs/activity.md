@@ -30,10 +30,16 @@ authorize a retry: list active metadata and reconcile before deciding another
 action. A local stream without the adapter makes no claim that Discord launched.
 
 Discord room turns refuse `start`, `image` and `switch` with
-`activity_official_bot_required` when no official launch adapter is configured.
-This includes self-hosted official bots: they admit viewers of their own
-`/activity` launch (below) but have no share launch adapter. Local owner API/CLI
-requests can still create and switch delegated shares without one.
+`activity_official_bot_required` when no launch adapter is available. A
+self-hosted official bot with Activity admission configured launches room shares
+itself: `start` and `image` open the share in the voice channel the bot occupies
+in that room's server (another channel is refused), then the room's own Discord
+body posts the invite through its `watch_start` action, whose presence write
+records the launch for admission. Its receipt is `confirmed`, `refused` (the
+share is ended) or `uncertain` (the body may have acted; the share is kept and
+nothing is resent). `stop` ends the share and revokes the invite through
+`watch_stop`. Local owner API/CLI requests can still create and switch
+delegated shares without an adapter.
 
 ## Self-hosted official viewer
 
