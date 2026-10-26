@@ -665,6 +665,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   options.fleetResources?.bindSeats({
     resolve: (seatId) => herdrRunner.resolveTerminal(seatId),
+    activity: async (agent, holderId) => {
+      // Root status is never evidence for a sibling native child.
+      if (agent.agent !== "codex" || !holderId?.startsWith("codex:")) return { status: "unknown" };
+      const native = await herdrWatches.nativeTaskObservation(agent.terminalId, holderId);
+      const binding = JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]);
+      if (native?.binding !== binding) return { status: "unknown" };
+      return {
+        status: native.status,
+        ...(native.status === "working" ? { activityUntilMs: Date.now() + 10_000 } : {}),
+      };
+    },
     proof: (fleet, pane) => options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
     // A seat using a simulator booted outside a lease: its lead hears it on
     // the fleet alert channel, as the seat's own reports do (VUH-1816).

@@ -11,7 +11,7 @@ import {
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 
-const usage = `Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] | push UUID | cancel UUID --actor NAME --reason TEXT | revert PASSED_UUID [--push] | reclaim | holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
+const usage = `Usage: clankie integrate [run] SHA... [--app SHA]... [--push] [--id UUID] [--no-wait] | status [UUID] [--wait] | push UUID | cancel UUID --actor NAME --reason TEXT | revert PASSED_UUID [--push] | reclaim | holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
 Default: land directly on main: commit, git pull --rebase origin main, clankie heavy -- pnpm check:landing, then git push origin main (ADR 0240: docs/adr/0240-changes-land-directly-on-main.md). Integrate is optional for composed batches.
 Cancel withdraws a waiting or isolating request before landing. An in-flight gate finishes, but cannot land a withdrawn input.
 A hold keeps deploys off the running service and lifts on its own when its minutes run out; landing on main never waits for one.`;
@@ -25,7 +25,7 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
       positional.push(part);
       continue;
     }
-    if (["--push", "--no-wait"].includes(part)) {
+    if (["--push", "--no-wait", "--wait"].includes(part)) {
       flags.set(part, ["true"]);
       continue;
     }
@@ -46,7 +46,7 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
   const allowed: Record<string, string[]> = {
     run: ["--app", "--id", "--push", "--no-wait"],
     revert: ["--id", "--push", "--no-wait"],
-    status: [],
+    status: ["--wait"],
     push: [],
     cancel: ["--actor", "--reason"],
     holds: [],
@@ -66,7 +66,8 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
       push: flags.has("--push"),
     };
   } else if (["status", "push", "cancel", "release"].includes(verb)) {
-    if (verb === "status" ? rest.length > 1 : rest.length !== 1) throw Error(usage);
+    if (verb === "status" ? rest.length > 1 || (flags.has("--wait") && rest.length !== 1) : rest.length !== 1)
+      throw Error(usage);
     input = {
       action: verb,
       ...(rest[0] ? { id: rest[0] } : {}),
@@ -92,7 +93,10 @@ function integrationRequest(args: readonly string[]): { request: IntegrationRequ
             ...(one("--seat") ? { seat: one("--seat") } : {}),
           };
   }
-  return { request: IntegrationRequestSchema.parse(input), wait: !flags.has("--no-wait") };
+  return {
+    request: IntegrationRequestSchema.parse(input),
+    wait: verb === "status" ? flags.has("--wait") : !flags.has("--no-wait"),
+  };
 }
 
 export async function runIntegrationCommand(
@@ -118,7 +122,7 @@ export async function runIntegrationCommand(
   let result = await client.integrate(request);
   while (
     wait &&
-    request.action === "run" &&
+    (request.action === "run" || request.action === "status") &&
     result.batch &&
     ["queued", "composing", "installing", "gating", "isolating", "pushing"].includes(result.batch.state)
   ) {

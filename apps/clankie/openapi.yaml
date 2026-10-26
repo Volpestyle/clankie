@@ -5943,6 +5943,13 @@ paths:
         until the hook writes stdout and posts deliveredMessageIds on the same
         session. That acknowledgment confirms bridge delivery, never model consumption.
         Held mail expires within 24 hours; an uncertain take is never replayed.
+        NativeActivity is a separate original-native child-activity report: it
+        requires transport process admission and the exact native producer PID,
+        session, instance timestamp and increasing sequence. It expires after
+        fifteen seconds and never settles a turn, drains mail or grants authority.
+        Its bounded children list carries exact local agent IDs, native state and
+        original state-change time. Claude root turns remain unsupported by this
+        activity projection; a root turn's generated agent ID is not a root proof.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
         - in: path

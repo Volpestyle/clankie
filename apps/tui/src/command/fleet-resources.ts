@@ -157,7 +157,7 @@ export async function runSimulatorCommand(
         }
         if (!idleShown) {
           options.progress?.(
-            `Idle timeout is ${plan.simulatorIdleMs / 1000} seconds; touch the lease while using it, and release when finished.`,
+            `Idle timeout is ${plan.simulatorIdleMs / 1000} seconds from verified prompt idle; exact native activity or queued/held heavy work retains supported holders. If native activity is unavailable, explicit touch still works. Release when finished.`,
           );
           idleShown = true;
         }

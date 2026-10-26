@@ -290,6 +290,15 @@ admitted lease is kept for its next resume rather than forgotten. Only an
 observed different occupant or exited process refuses at once (VUH-2055). Child leases
 retain the root’s process proof and idle timeout, so a parent exit cleans them up.
 
+Idle expiry uses freshly verified exact-holder native activity or a matching
+queued/held heavy request whose recorded process descends from that native owner.
+The task label alone cannot renew time. Native prompt idle starts the timeout;
+repeated idle observations do not extend it. Unknown evidence expires from the
+last proven activity. Explicit touch remains independent, as do reservation and
+runaway cleanup. The manager does not persist activity as authority across its
+restart. Supported native turn coverage and the open Claude root discriminator
+are documented in the [simulator reference](../../.agents/skills/fleet-resources/reference/simulators.md).
+
 Simulator reservations remain durable when request processes die. Only the
 simulator manager can settle native receipts and release them after confirmed
 shutdown of the exact device. It appends each settlement's reason to

@@ -395,6 +395,8 @@ export interface FleetResourceGovernor {
   ): Promise<boolean>;
   /** Atomically claim a ticket only at the front of its device's queue. */
   tryAcquireSimulator(options: SimulatorAcquireOptions): Promise<SimulatorAdmission>;
+  /** Fresh native ancestry and exact task identity, never caller labels alone. */
+  simulatorHolderHasHeavyWork(owner: SimulatorReservation): Promise<boolean>;
   simulatorReservations(): Promise<SimulatorReservation[]>;
   updateSimulator(id: string, token: string, update: SimulatorUpdate): Promise<SimulatorReservation>;
   releaseSimulator(id: string, token: string): Promise<void>;

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "source-captures.tar",
+      "size": 92160,
+      "sha256": "3a32fac6111f9c2d5834115661d4489c70282f483c90a3a03e421b9b1e50d059",
+      "url": "clankie://evidence/sha256/3a32fac6111f9c2d5834115661d4489c70282f483c90a3a03e421b9b1e50d059"
+    }
+  ]
+}

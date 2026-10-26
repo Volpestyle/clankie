@@ -117,6 +117,7 @@ export const FleetSeatHookSchema = z
     schemaVersion: z.literal(1),
     event: z.enum([
       "SessionStart",
+      "NativeActivity",
       "UserPromptSubmit",
       "Stop",
       "StopFailure",
@@ -124,6 +125,26 @@ export const FleetSeatHookSchema = z
       "PermissionRequest",
       "SessionEnd",
     ]),
+    activity: z
+      .object({
+        instanceStartedAt: z.iso.datetime(),
+        sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        checkedAt: z.iso.datetime(),
+        children: z
+          .array(
+            z
+              .object({
+                agentId: z.string().min(1).max(200),
+                state: z.enum(["working", "idle"]),
+                stateSince: z.iso.datetime(),
+              })
+              .strict(),
+          )
+          .max(64),
+        producerPid: z.number().int().min(2).max(2_147_483_647),
+      })
+      .strict()
+      .optional(),
     toolName: z.string().min(1).max(200).optional(),
     permissionTransport: z.literal("channel").optional(),
     toolUseId: z.string().min(1).max(256).optional(),

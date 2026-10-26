@@ -1462,13 +1462,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
   /** Controller observations and actions retain the exact native occupant. */
   public async nativeTaskObservation(
     seatId: string,
+    holderId?: string,
   ): Promise<{ binding: string; status: string; queueSupported: boolean } | undefined> {
     if (this.closed) return undefined;
     const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) return undefined;
     const control = await this.seatControl.attach(agent);
     if (!control) return undefined;
-    const status = await control.status().catch(() => "offline");
+    const status =
+      holderId === undefined
+        ? await control.status().catch(() => "offline")
+        : ((await control.holderStatus?.(holderId).catch(() => "unknown")) ?? "unknown");
     const current = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (
       !current?.session ||

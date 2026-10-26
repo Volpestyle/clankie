@@ -23,6 +23,7 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "clankie-claude-catalog-mod-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const reports: Event[] = [];
+  const activityReports: Event[] = [];
   let reply = {
     status: 200,
     body: { status: "matched" } as Event,
@@ -34,6 +35,12 @@ async function fixture() {
     let body = "";
     request.on("data", (chunk) => (body += String(chunk)));
     request.on("end", () => {
+      if (request.url === "/v1/fleet/seats/w1%3Ap1/hook") {
+        activityReports.push(JSON.parse(body));
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ schemaVersion: 1, recorded: true }));
+        return;
+      }
       expect(request.url).toBe("/v1/fleet/seats/w1%3Ap1/tool-catalog");
       expect(request.headers["x-clankie-pane"]).toBe("w1:p1");
       reports.push(JSON.parse(body));
@@ -166,6 +173,7 @@ async function fixture() {
   return {
     api,
     reports,
+    activityReports,
     emit,
     drain,
     url: `http://127.0.0.1:${address.port}`,
@@ -403,7 +411,9 @@ test("same-session lookup cannot bypass a post-await native session retirement",
   finish();
   await observation;
   expect(f.api.mcp.connect).not.toHaveBeenCalled();
-  expect(f.api.process.run).not.toHaveBeenCalled();
+  expect(f.api.process.run.mock.calls.filter(([args]) => args.at(-1)?.endsWith("/report.mjs"))).toHaveLength(
+    0,
+  );
   expect(f.reports).toHaveLength(0);
 });
 

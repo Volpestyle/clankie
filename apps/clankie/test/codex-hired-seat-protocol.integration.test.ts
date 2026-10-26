@@ -1337,3 +1337,27 @@ it("conversation dispatch retains the host Queue identity through automatic pick
     await f.close();
   }
 }, 20000);
+
+it("reads exact root and descendant resource activity through native RPC without resuming a thread or borrowing sibling status", async () => {
+  const f = await hiredFixture();
+  try {
+    const before = f.native.requests.length;
+    f.native.resourceThread("active-child", f.native.threadId, "active");
+    f.native.resourceThread("idle-sibling", f.native.threadId, "idle");
+    f.native.resourceThread("foreign", null, "active");
+    f.native.resourceThread("cycle-a", "cycle-b", "active");
+    f.native.resourceThread("cycle-b", "cycle-a", "active");
+    const status = async (id: string) =>
+      (await f.store.nativeTaskObservation(f.pane.terminal_id, `codex:${id}`))?.status;
+    expect(await status(f.native.threadId)).toBe("working");
+    expect(await status("active-child")).toBe("working");
+    expect(await status("idle-sibling")).toBe("idle");
+    expect(await status("foreign")).toBe("unknown");
+    expect(await status("cycle-a")).toBe("unknown");
+    f.native.resourceThread("active-child", f.native.threadId, "idle");
+    expect(await status("active-child")).toBe("idle");
+    expect(f.native.requests.slice(before).every((request) => request.method === "thread/read")).toBe(true);
+  } finally {
+    await f.close();
+  }
+});

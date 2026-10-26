@@ -37,6 +37,7 @@ import {
 import {
   processGroupOccupied,
   processIdentity,
+  probeProcess,
   observeProcesses,
   resourceNativeHelperPath,
   resourcePython,
@@ -1363,6 +1364,56 @@ export function createResourceGovernor(
       if (lease) return { admitted: true as const, lease };
       if (!refusal) throw new Error("Simulator admission unavailable");
       return { admitted: false as const, reason: refusal.reason, snapshot: await project(refusal.state) };
+    },
+    async simulatorHolderHasHeavyWork(owner) {
+      if (!owner.holderId || !owner.ownerProcesses?.length) return false;
+      const states = await Promise.all([store.read(), lightStore.read(), serverStore.read()]);
+      const candidates = states
+        .flatMap((state) => [
+          ...state.queue
+            .filter((entry) => entry.kind === "heavy")
+            .map((entry) => ({ ...entry, process: entry.owner })),
+          ...state.leases.flatMap((entry) =>
+            entry.kind === "heavy" ? [{ ...entry, process: entry.claimOwner }] : [],
+          ),
+        ])
+        .filter((entry) => entry.seatId === owner.seatId && entry.holderId === owner.holderId);
+      for (const entry of candidates) {
+        if (
+          "state" in entry &&
+          entry.state === "running" &&
+          (!entry.runner || (await probeProcess(entry.runner)) !== "live")
+        )
+          continue;
+        // Walk only this request's ancestry. A copied holder label, another
+        // session in the pane or a reused PID cannot keep a simulator alive.
+        const chain: ProcessIdentity[] = [];
+        let pid = entry.process.pid;
+        for (let depth = 0; pid > 1 && depth < 64; depth++) {
+          const current = await processIdentity(pid);
+          if (!current || current.uid !== entry.process.uid || chain.some((row) => row.pid === pid)) break;
+          if (depth === 0 && current.startTime !== entry.process.startTime) break;
+          chain.push(current);
+          if (
+            owner.ownerProcesses.some((proof) => proof.pid === pid && proof.startTime === current.startTime)
+          ) {
+            // Recheck every birth and edge after the walk, including the
+            // native holder. Unknown or changing observations grant no time.
+            const fresh = await Promise.all(chain.map((row) => processIdentity(row.pid)));
+            if (
+              fresh.every(
+                (row, index) =>
+                  row?.startTime === chain[index]!.startTime && row?.ppid === chain[index]!.ppid,
+              ) &&
+              (await Promise.all(owner.ownerProcesses.map(probeProcess))).every((state) => state === "live")
+            )
+              return true;
+            break;
+          }
+          pid = current.ppid;
+        }
+      }
+      return false;
     },
     async simulatorReservations() {
       return structuredClone(

@@ -368,7 +368,7 @@ it("unknown native inventory refuses admission and cannot free existing capacity
   expect((await f.commands()).filter((args) => ["shutdown", "delete"].includes(args[0]!))).toHaveLength(0);
 });
 
-it("only simulator heartbeats renew idle use; unrelated working turns do not", async () => {
+it("explicit touch renews idle use; unverified working hints do not", async () => {
   const f = await fixture();
   const acquired = lease(await f.manager.acquire(f.request));
   f.advance(500_000);

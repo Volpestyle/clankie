@@ -90,6 +90,36 @@ between observations. Partial or unavailable samples do not mean zero, and
 samples never grant device authority. Whole-machine admission already includes
 these costs, so do not subtract a device's charge a second time.
 
+## Native activity and idle expiry
+
+The lease remains owned by its exact native occupant/processes and task holder.
+The service re-proves that identity before granting activity time. A live heavy
+request with the same holder keeps it alive while queued or holding a permit
+(full, light or server lane); its recorded request process must descend from the
+lease's exact native process. Matching labels or reused PIDs alone are insufficient.
+
+Codex roots and children use fresh native `thread/read` state, with complete
+parent-thread ancestry back to the seat's root. Claude local children use the
+original-native mod's five-second timer and exact `agent.list()` IDs/states.
+Reports expire after fifteen seconds, keep original state-change timestamps,
+and reject stale/future timestamps, replayed sequences, changed sessions and
+wrong producer processes. Waiting/idle children do not borrow a working sibling's
+activity. Root Claude turn IDs have no verified root discriminator in the inspected
+2.1.310 API, so root turn-only renewal remains unsupported; heavy work still retains
+those leases. Other unsupported/unavailable native activity fails closed.
+
+After verified work ends, the normal idle deadline starts at the prompt's native
+state-change time (or its first verified idle observation). Repeated idle reports
+cannot move that deadline. Lost observation starts expiry from the last proven
+activity; it never freezes a cached working state. Explicit touch still extends
+the normal idle deadline and is the fallback for unsupported native activity.
+Run any necessary fallback outside model turns. Release when finished.
+
+Activity observations are deliberately not durable authority: an observer restart
+must re-prove activity and otherwise falls back to the lease's explicit-use
+clock. Reservation stale caps, runaway checks, explicit ownership checks and exact
+device shutdown/cleanup remain independent of activity.
+
 ## Release and lease end
 
 Release answers within about twenty seconds. `held` with `retryAfterMs` means a

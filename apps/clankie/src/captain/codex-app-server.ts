@@ -414,6 +414,8 @@ export interface CodexAppServerSeat {
   expectTools?(names: readonly string[]): void;
   /** Observe this original thread after its bridge binding is in place. */
   checkTools?(): Promise<void>;
+  /** Native thread ancestry, read without starting/resuming any thread. */
+  holderStatus?(threadId: string): Promise<"working" | "idle" | "blocked" | "unknown">;
   pendingQuestion?(requestId: string | number): SeatQuestion | undefined;
   answerQuestion?(
     answer: SeatQuestionAnswer,
@@ -1299,6 +1301,40 @@ export async function startCodexAppServerSeat(options: {
     };
     return {
       checkTools,
+      async holderStatus(target) {
+        if (closed || stopped || !threadId) return "unknown";
+        const seen = new Set<string>();
+        let current = target,
+          status: "working" | "idle" | "blocked" | "unknown" = "unknown";
+        try {
+          for (let depth = 0; depth < 64; depth++) {
+            if (!current || seen.has(current)) return "unknown";
+            seen.add(current);
+            const thread = record(
+              record(await client!.request("thread/read", { threadId: current, includeTurns: false }, 2_000))
+                .thread,
+            );
+            if (closed || stopped || thread.id !== current) return "unknown";
+            if (current === target) {
+              const native = record(thread.status);
+              status =
+                native.type === "idle"
+                  ? "idle"
+                  : native.type === "active"
+                    ? Array.isArray(native.activeFlags) && native.activeFlags.length > 0
+                      ? "blocked"
+                      : "working"
+                    : "unknown";
+            }
+            if (current === threadId) return status;
+            if (typeof thread.parentThreadId !== "string") return "unknown";
+            current = thread.parentThreadId;
+          }
+        } catch {
+          // A lost native observation never renews a cached working state.
+        }
+        return "unknown";
+      },
       pendingQuestion: (requestId) => client!.pendingQuestion(threadId!, requestId),
       async answerQuestion(answer, guard) {
         const parsed = SeatQuestionAnswerSchema.safeParse(answer);

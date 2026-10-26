@@ -643,6 +643,18 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       ctx.dependencies.localFleet?.identity(context.req.raw) ??
       ctx.dependencies.fleetLinks?.identity?.(context.req.raw);
     const proof = identity && (await identity.validate()) ? await identity.projectProof?.() : undefined;
+    if (parsed.data.event === "NativeActivity") {
+      if (!identity || !proof || !(await identity.validate()))
+        return context.json({ error: "native_session_required" }, 403);
+      const recorded = await ctx.dependencies.fleetResources?.recordNativeActivity(
+        pane.paneId,
+        parsed.data,
+        proof,
+      );
+      return recorded
+        ? context.json({ schemaVersion: 1, recorded: true })
+        : context.json({ error: "native_activity_refused" }, 403);
+    }
     const recorded = await ctx.dependencies.captain.recordSeatHook(
       pane.paneId,
       parsed.data,

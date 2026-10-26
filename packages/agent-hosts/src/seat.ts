@@ -260,6 +260,8 @@ export interface SeatControl {
     },
   ): Promise<SeatDelivery>;
   status(): Promise<SeatStatus>;
+  /** Fresh read-only activity for one exact resource task, including native children. */
+  holderStatus?(holderId: string): Promise<SeatStatus | "unknown">;
   /** Read-only native waiting detail for the roster; does not settle a completion watch. */
   statusReason?(): Promise<string | undefined>;
   /** Read the exact currently pending native question; no transcript inference. */

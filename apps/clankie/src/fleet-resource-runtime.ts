@@ -5,6 +5,7 @@ import {
   longHeldJobMs,
   observeSimulatorReferents,
   unprovenSeatDetail,
+  probeProcess,
   type FleetResourceGovernor,
   type ResourceSnapshot,
   type SimulatorDevice,
@@ -12,12 +13,14 @@ import {
   type SimulatorOwner,
   type SimulatorReferents,
 } from "@clankie/fleet-resources";
+import { isDeepStrictEqual } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { userInfo } from "node:os";
-import { join } from "node:path";
-import type { FleetResourcePolicy, SpawnOperatorSeat } from "@clankie/protocol";
+import { basename, join } from "node:path";
+import type { FleetResourcePolicy, FleetSeatHook, SpawnOperatorSeat } from "@clankie/protocol";
 import type { HerdrAgentSnapshot } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
+import type { ProjectProcessProof } from "./project-process-proof.ts";
 import type { ProjectHireProcessProof } from "./captain/project-hires.ts";
 import { fleetQualified, splitFleetQualified } from "./herdr-fleet.ts";
 import type { FleetProgressObservation } from "./fleet-progress.ts";
@@ -57,6 +60,11 @@ export class SimulatorRequestError extends Error {
 interface SeatResolver {
   resolve(seatId: string): Promise<HerdrAgentSnapshot | undefined>;
   proof(fleet: string, pane: string): Promise<ProjectHireProcessProof | undefined>;
+  /** Fresh native state, with a finite validity bound; pane status alone is not activity. */
+  activity?(
+    agent: HerdrAgentSnapshot,
+    holderId?: string,
+  ): Promise<{ status: string; activityUntilMs?: number }>;
   isLocalFleet(fleet?: string): Promise<boolean>;
   /** Tell the lead of this pane about it (the fleet alert channel); false when undelivered. */
   notify?(pane: string, text: string): Promise<boolean>;
@@ -85,6 +93,8 @@ export interface FleetResourceRuntime {
     input: { seatId: string; fleet?: string; holderId?: string },
     options?: { retryUnproven?: boolean },
   ): Promise<SimulatorOwner>;
+  /** Original-native renewal; a caller cannot supply lease/process ownership. */
+  recordNativeActivity(pane: string, hook: FleetSeatHook, proof: ProjectProcessProof): Promise<boolean>;
   observeSeats(seats: readonly ObservedSeat[]): Promise<void>;
   /** Notice seats whose panes use simulators booted outside leases. */
   noticeExternalSimulators(): Promise<void>;
@@ -237,6 +247,7 @@ export async function createFleetResourceRuntime(input: {
       proof.processes.length === 0
     )
       throw owner("Simulator native process ownership is unavailable.");
+    const activity = await resolver.activity?.(before, request.holderId).catch(() => undefined);
     const after = await resolver.resolve(seatId);
     if (
       !after?.session ||
@@ -256,10 +267,36 @@ export async function createFleetResourceRuntime(input: {
       binding: { ...proof.binding },
       processes: proof.processes.map((process) => ({ ...process })),
     };
-    return { identity, status: after.status };
+    const renewal = nativeActivity.get(
+      JSON.stringify([identity.fleet ?? "default", identity.seatId, identity.holderId]),
+    );
+    const matched = renewal && renewal.until > Date.now() && isDeepStrictEqual(renewal.owner, identity);
+    const activityUntilMs = matched ? renewal.until : activity?.activityUntilMs;
+    return {
+      identity,
+      ...(matched && renewal.state === "idle" ? { idleSinceMs: renewal.stateSince } : {}),
+      status: matched ? renewal.state : (activity?.status ?? "unknown"),
+      ...(activityUntilMs === undefined ? {} : { activityUntilMs }),
+    };
   };
   // Seats seen by the last roster census; attribution maps processes to their panes.
   let seen: readonly ObservedSeat[] = [];
+  const nativeProducers = new Map<
+    string,
+    { owner: SimulatorOwner; instance: number; sequence: number; checkedAt: number }
+  >();
+  const nativeActivity = new Map<
+    string,
+    {
+      owner: SimulatorOwner;
+      instance: number;
+      sequence: number;
+      checkedAt: number;
+      state: "working" | "idle";
+      stateSince: number;
+      until: number;
+    }
+  >();
   const noticeHolders = async () => {
     if (!resolver?.notify || closed) return;
     const alerts = cached?.holderAlerts ?? [];
@@ -416,6 +453,96 @@ export async function createFleetResourceRuntime(input: {
     },
     proveSimulatorSeat: async (request, options) =>
       (await (options?.retryUnproven ? proveFirst(request) : observe(request))).identity,
+    async recordNativeActivity(pane, hook, proof) {
+      const report = hook.activity;
+      if (closed || hook.event !== "NativeActivity" || !report || proof.nativeSessionPending) return false;
+      const checkedAt = Date.parse(report.checkedAt),
+        instance = Date.parse(report.instanceStartedAt),
+        at = Date.now();
+      // Receipt time alone would make a replay or delayed request immortal.
+      // Both native clock and receipt bound the fact to fifteen seconds.
+      if (
+        !Number.isFinite(checkedAt) ||
+        !Number.isFinite(instance) ||
+        instance > checkedAt ||
+        checkedAt > at ||
+        checkedAt <= at - 15_000 ||
+        new Set(report.children.map((child) => child.agentId)).size !== report.children.length ||
+        report.children.some(
+          (child) =>
+            !Number.isFinite(Date.parse(child.stateSince)) ||
+            Date.parse(child.stateSince) < instance ||
+            Date.parse(child.stateSince) > checkedAt,
+        )
+      )
+        return false;
+      const agent = await resolver?.resolve(pane).catch(() => undefined);
+      const session = agent?.session;
+      if (
+        agent?.agent !== "claude" ||
+        !session ||
+        (session.kind === "id" ? session.value : basename(session.value, ".jsonl")) !== hook.sessionId
+      )
+        return false;
+      const owner = await runtime
+        .proveSimulatorSeat({ seatId: pane, holderId: `claude:${hook.sessionId}` })
+        .catch(() => undefined);
+      if (
+        !owner ||
+        owner.occupantId !== proof.nativeOccupantId ||
+        (owner.fleet ?? "default") !== proof.fleet ||
+        owner.pane !== proof.pane ||
+        !isDeepStrictEqual(owner.binding, proof.binding) ||
+        !isDeepStrictEqual(owner.processes, proof.processes) ||
+        !proof.processes.some((process) => process.pid === report.producerPid)
+      )
+        return false;
+      if (!(await Promise.all(owner.processes.map(probeProcess))).every((state) => state === "live"))
+        return false;
+      const key = JSON.stringify([owner.fleet ?? "default", owner.seatId, owner.holderId]);
+      const previous = nativeProducers.get(key);
+      if (
+        previous &&
+        isDeepStrictEqual(previous.owner, owner) &&
+        (instance < previous.instance ||
+          (instance === previous.instance && report.sequence <= previous.sequence) ||
+          checkedAt < previous.checkedAt)
+      )
+        return false;
+      if (Date.now() - checkedAt >= 15_000) return false;
+      // This root entry is only the producer's sequence fence. The native
+      // API does not identify root turns, so it never renews a root lease.
+      nativeProducers.set(key, { owner, instance, sequence: report.sequence, checkedAt });
+      while (nativeProducers.size > 128) nativeProducers.delete(nativeProducers.keys().next().value!);
+      const holders = new Set(
+        report.children.map((child) => `claude:${hook.sessionId}:agent:${child.agentId}`),
+      );
+      for (const [id, entry] of nativeActivity) {
+        if (
+          id !== key &&
+          entry.owner.seatId === owner.seatId &&
+          entry.owner.occupantId === owner.occupantId &&
+          entry.owner.holderId?.startsWith(`claude:${hook.sessionId}:agent:`) &&
+          !holders.has(entry.owner.holderId)
+        )
+          nativeActivity.delete(id);
+      }
+      for (const child of report.children) {
+        const childOwner = { ...owner, holderId: `claude:${hook.sessionId}:agent:${child.agentId}` };
+        nativeActivity.set(JSON.stringify([owner.fleet ?? "default", owner.seatId, childOwner.holderId]), {
+          owner: childOwner,
+          instance,
+          sequence: report.sequence,
+          checkedAt,
+          state: child.state,
+          stateSince: Date.parse(child.stateSince),
+          until: Math.min(checkedAt + 15_000, at + 15_000),
+        });
+      }
+      while (nativeActivity.size > 128) nativeActivity.delete(nativeActivity.keys().next().value!);
+      await simulators.tick();
+      return true;
+    },
     async observeSeats(seats) {
       seen = seats.map(({ seatId, status, paneId }) => ({ seatId, status, ...(paneId ? { paneId } : {}) }));
       await noticeHolders();
@@ -434,7 +561,6 @@ export async function createFleetResourceRuntime(input: {
       if (!cached?.leases.some((lease) => lease.kind === "simulator" && lease.seatId === seatId)) return;
       if (!["idle", "done", "blocked", "working"].includes(status)) return;
       const current = await observe({ seatId });
-      if (current.status !== status) return;
       await simulators.observeSeatState(current.identity, status);
     },
     async noticeExternalSimulators() {

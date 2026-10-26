@@ -20,17 +20,125 @@ let failures = 0;
 let retryAfter = 0;
 let accepted;
 const activeTurns = new Set();
+let activitySession;
+let activityInstance;
+let activitySequence = 0;
+let reportingActivity = false;
+let activityFingerprint;
+const childActivity = new Map();
+
+async function reportActivity($) {
+  if (!interactive || reportingActivity) return;
+  reportingActivity = true;
+  try {
+    const sessionId = await $.session.id();
+    const now = await $.clock.now();
+    if (activitySession !== sessionId) {
+      activitySession = sessionId;
+      activityInstance = now;
+      activitySequence = 0;
+      childActivity.clear();
+      activityFingerprint = undefined;
+    }
+    const instance = activityInstance;
+    const pane = await $.env.get("HERDR_PANE_ID");
+    const socket = await $.env.get("HERDR_SOCKET_PATH");
+    // Native 2.1.310 returns exact child agent IDs and current task states.
+    // It excludes the root. Root turn events use generated agent IDs without
+    // a verified root discriminator, so they must not renew a root lease.
+    const agents = await $.agent.list();
+    if (
+      !Array.isArray(agents) ||
+      agents.length > 64 ||
+      agents.some(
+        (agent) =>
+          typeof agent.id !== "string" ||
+          !agent.id ||
+          agent.id.length > 200 ||
+          (agent.teammateId !== undefined && (typeof agent.teammateId !== "string" || !agent.teammateId)) ||
+          !["running", "waiting", "idle", "completed", "failed", "killed", "paused"].includes(agent.status),
+      ) ||
+      new Set(agents.map((agent) => agent.id)).size !== agents.length
+    )
+      return;
+    const currentSession = await $.session.id();
+    if (
+      !pane ||
+      !socket ||
+      !interactive ||
+      currentSession !== sessionId ||
+      activitySession !== sessionId ||
+      activityInstance !== instance
+    )
+      return;
+    const children = agents
+      .filter((agent) => agent.teammateId === undefined)
+      .map((agent) => {
+        const state = agent.status === "running" ? "working" : "idle";
+        const previous = childActivity.get(agent.id);
+        const since = previous?.state === state ? previous.since : now;
+        childActivity.set(agent.id, { state, since });
+        return { agentId: agent.id, state, stateSince: new Date(since).toISOString() };
+      });
+    const ids = new Set(children.map((child) => child.agentId));
+    for (const id of childActivity.keys()) if (!ids.has(id)) childActivity.delete(id);
+    children.sort((left, right) => left.agentId.localeCompare(right.agentId));
+    const fingerprint = JSON.stringify(children);
+    // Only working children need continuous renewals. Send idle transitions
+    // once, without adding an observer subprocess to every idle pane timer.
+    if (
+      !children.some((child) => child.state === "working") &&
+      (fingerprint === activityFingerprint || (children.length === 0 && activityFingerprint === undefined))
+    )
+      return;
+    const helper =
+      $.plugin.name === "clankie-worker"
+        ? `${$.plugin.root}/mods/activity.mjs`
+        : `${$.plugin.root}/worker/mods/activity.mjs`;
+    const result = await $.process.run(["node", helper], {
+      stdin: JSON.stringify({
+        sessionId,
+        activity: {
+          instanceStartedAt: new Date(instance).toISOString(),
+          sequence: ++activitySequence,
+          checkedAt: new Date(now).toISOString(),
+          children,
+        },
+      }),
+      timeoutMs: 4500,
+    });
+    if (
+      result.exitCode === 0 &&
+      interactive &&
+      activitySession === sessionId &&
+      activityInstance === instance
+    )
+      activityFingerprint = fingerprint;
+  } catch {
+    // Lost native observation expires its facts; it never holds work.
+  } finally {
+    reportingActivity = false;
+  }
+}
 
 export function register(on) {
   on("session.start", async ($, event, next) => {
     interactive = event.isInteractive;
     if (interactive) {
+      activitySession = await $.session.id();
+      activityInstance = await $.clock.now();
+      activitySequence = 0;
+      activeTurns.clear();
+      childActivity.clear();
+      activityFingerprint = undefined;
+      await reportActivity($);
       await scheduleProbe($);
       watcher?.cancel();
       // This runs in the original native session. Native Claude consumes MCP
       // list_changed itself; observing its accepted catalog needs no prompt,
       // SDK query, fork, plugin reload, or all-server reconnect.
       watcher = $.clock.every(WATCH_MS, async () => {
+        await reportActivity($);
         if ((await $.clock.now()) >= nextWatchAfter) await scheduleProbe($, false);
       });
     }
@@ -42,6 +150,11 @@ export function register(on) {
     watcher?.cancel();
     watcher = undefined;
     activeTurns.clear();
+    activeTools = 0;
+    activitySession = undefined;
+    activityInstance = undefined;
+    childActivity.clear();
+    activityFingerprint = undefined;
     nextWatchAfter = 0;
     retryAfter = 0;
     failures = 0;
@@ -58,6 +171,7 @@ export function register(on) {
       return await next(event);
     } finally {
       activeTurns.delete(event.turnId);
+      await reportActivity($);
       if (interactive) await scheduleProbe($, false);
     }
   });

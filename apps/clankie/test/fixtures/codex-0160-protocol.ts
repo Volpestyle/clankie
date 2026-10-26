@@ -65,6 +65,7 @@ export async function codex0160Protocol(
   let ownerReply: Record<string, unknown> | undefined;
   const turns: Turn[] = [];
   const requests: Rpc[] = [];
+  const resourceThreads = new Map<string, Record<string, unknown>>();
   const errors: Error[] = [];
   const notify = (method: string, params: Record<string, unknown>) => {
     // App-server notifications are delivered only after thread/resume subscribes
@@ -132,6 +133,10 @@ export async function codex0160Protocol(
             nextLoadedInventory = undefined;
             break;
           case "thread/read":
+            if (resourceThreads.has(String(request.params.threadId))) {
+              result = { thread: resourceThreads.get(String(request.params.threadId)) };
+              break;
+            }
             if (nextRead) {
               const held = nextRead;
               nextRead = undefined;
@@ -278,6 +283,9 @@ export async function codex0160Protocol(
     close,
     startView: () => {
       loaded = true;
+    },
+    resourceThread(id: string, parentThreadId: string | null, status: "active" | "idle") {
+      resourceThreads.set(id, { id, parentThreadId, status: { type: status, activeFlags: [] } });
     },
     nextLoadedInventory(value: unknown) {
       nextLoadedInventory = value;

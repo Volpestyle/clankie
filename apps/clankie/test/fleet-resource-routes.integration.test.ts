@@ -665,7 +665,7 @@ it("plans through authenticated HTTP and the CLI warns before submitting a new d
   });
   expect(result).toMatchObject({ outcome: "acquired" });
   expect(effectsAtWarning).toEqual([]);
-  expect(progress.some((line) => line.includes("touch the lease"))).toBe(true);
+  expect(progress.some((line) => line.includes("explicit touch still works"))).toBe(true);
   expect((await f.commands()).filter((command) => command[0] === "create")).toHaveLength(1);
 });
 

@@ -538,6 +538,10 @@ export function createCodexSeatAdapter(
             async status() {
               return state;
             },
+            async holderStatus(holderId) {
+              if (closed || !holderId.startsWith("codex:") || !seat?.holderStatus) return "unknown";
+              return seat.holderStatus(holderId.slice("codex:".length));
+            },
             async statusReason() {
               const pending = questions.keys().next();
               return pending.done ? undefined : `Waiting on a question (${String(pending.value)})`;

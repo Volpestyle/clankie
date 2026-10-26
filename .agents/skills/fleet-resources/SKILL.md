@@ -16,11 +16,12 @@ rules that matter on most turns:
 3. Dev servers and long-lived services use the server lane. Never launch one
    ungoverned, and stop it when you are done.
 4. Boot simulators only through `clankie simulator acquire`, verify the lease
-   before driving the device, touch it while you work and release it after.
+   before driving the device and release it after. Verified native activity or
+   exact-holder heavy work retains supported holders without timer touches.
 5. A wait is the governor working. Never bypass it with another registry,
    launch route or `HOME`, and never stop a job you can't prove is yours.
 6. Search with `rg`, or with `find` from a narrow directory and a `-maxdepth`.
-7. Wait outside your turn. Run a long heavy command, gate or lease touch loop
+7. Wait outside your turn. Run a long heavy command, gate or integration wait
    as your harness's background task and continue on its completion notice;
    never loop on `sleep` in the foreground to poll a log or a status. Each
    foreground step re-reads your whole context.
@@ -142,12 +143,29 @@ own seat identity; never copy a lead's `CLANKIE_SEAT_*` values.
 Verify before installing, launching or driving; abort the operation if it
 refuses. Raw `simctl`, Xcode and external MCP tools must run that check
 themselves. Never drive a sibling's device because its UDID is visible in
-status, and never use your lead's or a sibling's holder identity. Touch the
-lease while you work (idle timeout ten minutes), including while a capture
-waits for a heavy slot, and release it when finished.
+status, and never use your lead's or a sibling's holder identity. The ten-minute idle deadline starts when a verified holder returns to its prompt.
+Fresh exact-holder native activity or a live queued/held heavy permit retains the
+lease without model-driven touches. Heavy association requires both the task
+holder and native process ancestry; a sibling or copied label cannot renew it.
+Unknown/stale activity never renews time. Explicit touch remains available.
+
+Native turn coverage currently supports Codex roots/children through read-only
+thread ancestry, and Claude local children through the original-native mod's
+finite renewals. Claude root turn identity is not yet proven by that API; a root
+lease needs exact-holder heavy work or explicit touch until that boundary is
+implemented. Missing/older native support also needs explicit touch. Never run a
+foreground touch loop; keep any necessary fallback outside the model turn.
+Release when finished. Details and source-proof limits are in the simulator
+reference.
 
 Release, idle expiry or a verified seat exit shuts the device down and keeps it
 for reuse; nothing deletes devices except an explicit owner tidy naming exact
 stopped UDIDs. Never run global shutdown, erase, delete-all or unavailable-device
 cleanup for fleet work. Queues, holder identity, device choice, usage readings,
 runaway shutdown and create receipts: [simulators](reference/simulators.md).
+
+For an already submitted integration request, run
+`clankie integrate status UUID --wait` as a harness background task and continue
+on its completion notice. A new `clankie integrate ... --push` already waits by
+default. A terminal held, failed, cancelled or interrupted result remains that
+result; waiting never resubmits or overrides it.

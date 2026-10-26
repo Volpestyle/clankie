@@ -1217,7 +1217,7 @@ gate then applies its own per-package equivalent (VUH-2166).
 
 ```bash
 clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]
-clankie integrate status [UUID]
+clankie integrate status [UUID] [--wait]
 clankie integrate push UUID
 clankie integrate cancel UUID --actor NAME --reason TEXT
 clankie integrate revert PASSED_BATCH_UUID [--push]
@@ -1226,8 +1226,13 @@ clankie integrate hold --holder NAME --reason TEXT --minutes 1-60 [--pane ID|--s
 clankie integrate release UUID --actor NAME --reason TEXT
 ```
 
-To use the queue, push a branch, run `clankie integrate <sha>... --push --no-wait`, then
-follow with `clankie integrate status`. Composition cherry-picks exactly the listed
+To use the queue, push a branch and run `clankie integrate <sha>... --push` as a
+harness background task; it blocks until the request settles. For a request
+already submitted, `clankie integrate status UUID --wait` blocks through queueing,
+gating, isolation and pushing and returns its actual terminal result. `--wait`
+requires a UUID; without it status remains an immediate snapshot. Existing
+per-request transport timeouts and terminal held/failed/cancelled/interrupted
+results are preserved; waiting never resubmits or cancels the request. Composition cherry-picks exactly the listed
 commits, oldest first, so a request lists every unlanded commit of its change.
 `run` refuses a request whose listed commits build on an unlanded commit that is
 neither listed earlier nor in a request already queued ahead; the refusal names the
@@ -4359,6 +4364,18 @@ refuses acquire/plan instead of falling back to a seat-level lease. A different 
 cannot inherit or release the lease. Status lists that holder beside the seat.
 These labels never replace native seat proof or grant cleanup authority.
 
+Leases retain verified activity for the exact holder: fresh native turn state or
+same-holder queued/held heavy work with proven native process ancestry. Idle
+expiry counts from returning to the prompt; repeated idle readings do not renew
+it. Explicit touch still works. Unknown/stale observations cannot preserve a
+cached working state. Native turn coverage is Codex roots/children and Claude
+local children with the original-native activity mod; Claude root turn-only
+renewal remains unproven/unsupported because its API does not identify root turns.
+Those roots and other unsupported native paths need exact-holder heavy work or
+explicit touch. Run waits/fallbacks outside model turns and release on completion.
+See the [simulator reference](../.agents/skills/fleet-resources/reference/simulators.md)
+for finite native evidence and cleanup guards.
+
 Simulator leases in `fleet resources` and `simulator status` carry optional
 `usage`: timestamp, availability, process count, `footprintBytes`, `rssBytes`,
 CPU time and, after two observations, interval `cpuPercent` (100% is one core).
@@ -4373,7 +4390,7 @@ the footprint twice.
 `simulator plan JSON` gives read-only creation/reuse advice and the current idle
 timeout. Acquire reads that plan before its native request, warns on stderr
 when creation is needed and its first boot can be expensive, and reminds the
-caller to touch while using the lease. The plan does not reserve a slot;
+caller of the idle deadline and native activity rule. The plan does not reserve a slot;
 acquire rechecks availability and authority. `fleet simulator` is an alias
 for `simulator`.
 

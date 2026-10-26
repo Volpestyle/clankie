@@ -184,7 +184,10 @@ const RETRY_MS = 5_000;
  * restart; a definite change of occupant still ends the wait at once (VUH-2055).
  */
 const UNPROVEN_GRACE_MS = 120_000;
-type SeatProof = { owner: SimulatorOwner } | { unproven: string } | { refuted: true };
+type SeatProof =
+  | { owner: SimulatorOwner; status: string; activityUntilMs?: number; idleSinceMs?: number }
+  | { unproven: string }
+  | { refuted: true };
 /** Internal only: converted to an actionable `owner_unavailable` before any caller sees it. */
 type Unproven = { outcome: "unproven"; detail: string };
 const REFUTED_DETAIL = "The seat's native occupant changed or its process exited.";
@@ -265,7 +268,13 @@ export function createSimulatorManager(input: {
   governor: FleetResourceGovernor;
   adapter?: SimulatorAdapter;
   observeSeat?: (identity: SeatIdentity) => Promise<
-    | { identity: SimulatorOwner; processes?: SimulatorOwner["processes"]; status: string }
+    | {
+        identity: SimulatorOwner;
+        processes?: SimulatorOwner["processes"];
+        status: string;
+        activityUntilMs?: number;
+        idleSinceMs?: number;
+      }
     /** The observation itself failed, so the occupant is neither proven nor disproven. */
     | { unproven: string }
     | undefined
@@ -362,6 +371,9 @@ export function createSimulatorManager(input: {
   };
   /** Lease id to the first consecutive runaway-level CPU sample, by this manager's clock. */
   const hot = new Map<string, number>();
+  // Activity is re-proven every tick, never restored from cached pane status.
+  // Losing the observer loses this grace, not the explicit touch deadline.
+  const activity = new Map<string, { active: boolean; at: number }>();
   /** Why a shutdown was submitted, so a later settlement records its cause. */
   const shuttingDown = new Map<string, SimulatorSettleReason>();
   /** Recent settlements, so the holder's next call learns why its lease is gone. */
@@ -373,6 +385,7 @@ export function createSimulatorManager(input: {
     await input.governor.releaseSimulator(lease.id, lease.token);
     reason = shuttingDown.get(lease.id) ?? reason;
     hot.delete(lease.id);
+    activity.delete(lease.id);
     shuttingDown.delete(lease.id);
     if (reason) {
       settled.set(lease.id, reason);
@@ -443,7 +456,12 @@ export function createSimulatorManager(input: {
     if (states.includes("exited")) return { refuted: true };
     if (states.some((state) => state !== "live"))
       return { unproven: "The seat's process could not be observed." };
-    return { owner: observed.identity };
+    return {
+      owner: observed.identity,
+      status: observed.status,
+      ...(observed.activityUntilMs === undefined ? {} : { activityUntilMs: observed.activityUntilMs }),
+      ...(observed.idleSinceMs === undefined ? {} : { idleSinceMs: observed.idleSinceMs }),
+    };
   };
   const prove = async (identity: SeatIdentity): Promise<SimulatorOwner | undefined> => {
     const proof = await proveSeat(identity);
@@ -1349,7 +1367,8 @@ export function createSimulatorManager(input: {
       return { outcome: "held", lease: view(lease), retryAfterMs: RETRY_MS };
     },
     async observeSeatState(identity: SimulatorOwner, _status: string): Promise<void> {
-      // Harness turns do not renew simulator use. Only touch/acquire is activity.
+      // The hint is not liveness: tick obtains fresh native evidence for each
+      // exact holder rather than adopting the caller's pane status.
       if ((await reservations()).some((lease) => matchesNativeOwner(lease, identity))) await manager.tick();
     },
     async observeSeatExited(identity: SimulatorOwner): Promise<void> {
@@ -1429,13 +1448,46 @@ export function createSimulatorManager(input: {
               (await Promise.all(processes.map(probe))).every((state) => state === "exited");
             const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS;
             const hotFor = runawayFor(lease, usage, pressure);
+            let active = false;
+            let promptAt: number | undefined;
+            if (!exited && !stale) {
+              try {
+                const proof = await proveSeat(lease);
+                if ("owner" in proof && matchesOwner(lease, proof.owner)) {
+                  if (["idle", "done", "blocked"].includes(proof.status))
+                    promptAt =
+                      Number.isFinite(proof.idleSinceMs) && proof.idleSinceMs! <= now()
+                        ? proof.idleSinceMs
+                        : now();
+                  active =
+                    (proof.status === "working" &&
+                      Number.isFinite(proof.activityUntilMs) &&
+                      proof.activityUntilMs! > now() &&
+                      proof.activityUntilMs! <= now() + 5 * 60_000) ||
+                    (await input.governor.simulatorHolderHasHeavyWork(lease));
+                }
+              } catch {
+                // Missing evidence cannot renew a previous working state.
+              }
+            }
+            const previous = activity.get(lease.id);
+            if (active) activity.set(lease.id, { active: true, at: now() });
+            else if (previous?.active) {
+              // Retain the last heavy/turn sample if the native prompt
+              // predates that work. Lost evidence never starts a new clock.
+              activity.set(lease.id, {
+                active: false,
+                at: Math.max(previous.at, promptAt ?? previous.at),
+              });
+            }
+            const idleFrom = Math.max(lease.lastUsedAtMs, activity.get(lease.id)?.at ?? 0);
             await reconcile(
               lease,
               exited
                 ? "owner_exited"
                 : stale
                   ? "reservation_stale"
-                  : now() - lease.lastUsedAtMs >= policy.simulatorIdleMs
+                  : !active && now() - idleFrom >= policy.simulatorIdleMs
                     ? "idle"
                     : hotFor >= RUNAWAY_SUSTAIN_MS
                       ? "runaway"

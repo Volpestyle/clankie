@@ -1198,6 +1198,7 @@ it("a push request reads pushing from its pass until it lands, and one whose pus
     await resumed;
   });
 
+  await expect(runIntegrationCommand(["status", "--wait"], cli)).rejects.toThrow("Usage:");
   // A push that never starts (its lock is busy) rests at a landable pass.
   const idle = randomUUID();
   const started = await runIntegrationCommand(
@@ -1223,9 +1224,16 @@ it("a push request reads pushing from its pass until it lands, and one whose pus
   });
   // Historical receipts in a fresh queue are not live ownership.
   expect(await new IntegrationQueue(f.queue.options).commitHandoffs(f.core.source, [parkedSha])).toEqual([]);
+  let statusSettled = false;
+  const statusWait = runIntegrationCommand(["status", parkedId, "--wait"], cli).then((result) => {
+    statusSettled = true;
+    return result;
+  });
   const waiting = runIntegrationCommand([parkedSha, "--id", parkedId, "--push"], cli);
   expect((await runIntegrationCommand(["status", parkedId], cli)).batch?.state).toBe("pushing");
+  expect(statusSettled).toBe(false);
   resume();
+  expect((await statusWait).batch?.state).toBe("pushed");
   expect((await waiting).batch?.state).toBe("pushed");
   expect(await git(f.core.source, "ls-remote", "origin", "refs/heads/main")).toContain(
     (await f.queue.status(parkedId)).repos[0]!.head,
