@@ -12,13 +12,20 @@ const Intent = z.object({
   id: z.uuid(),
   ref: z.string().min(1).max(256),
   initiator: z.unknown().transform(parseUpdateInitiator),
+  /** Consecutive failed attempts, durable so a restart loop cannot retry forever. */
+  failures: z.number().int().min(0).default(0),
 });
+
+/** A waiting update whose attempts keep failing is dropped, which releases the integrate dispatcher. */
+export const INTEGRATION_UPDATE_MAX_FAILURES = 5;
 
 export function integrationSafeUpdates(options: {
   updater: RuntimeUpdater;
   holds: DeployHolds;
   path: string;
   onError: (error: unknown) => void;
+  /** Tells the lead that a waiting update gave up and no longer holds the integrate queue. */
+  onGaveUp?: (message: string) => void;
   intervalMs?: number;
 }): RuntimeUpdater & { check(): Promise<void>; close(): void } {
   const read = () => (existsSync(options.path) ? Intent.parse(readPrivateJson(options.path)) : undefined);
@@ -44,30 +51,49 @@ export function integrationSafeUpdates(options: {
       const guard = async () => {
         if (closed || read()?.id !== intent.id) throw Error("Waiting update was cancelled or replaced");
       };
-      await options.holds.landing(
-        `integration-update:${intent.id}`,
-        [],
-        async () => {
-          await guard();
-          const target = await options.updater.preview?.(intent.ref);
-          if (target?.newCommit === options.updater.runtime.commit) {
+      const failed = async (error: unknown) => {
+        const current = read();
+        if (closed || current?.id !== intent.id || error instanceof DeployHeldError) return;
+        const failures = current.failures + 1;
+        if (failures < INTEGRATION_UPDATE_MAX_FAILURES) {
+          await durableJson(options.path, { ...current, failures }, guard);
+          return;
+        }
+        clear();
+        const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
+        options.onGaveUp?.(
+          `Runtime update to ${intent.ref} failed ${failures} times while waiting for integration (${reason}). It was dropped and no longer holds the integrate queue; request it again once the ref resolves.`,
+        );
+      };
+      await options.holds
+        .landing(
+          `integration-update:${intent.id}`,
+          [],
+          async () => {
             await guard();
-            clear();
-            return;
-          }
-          // An intent is already authenticated and durable, like a deferred source update.
-          // Ordinary/canary holds are checked again; an earlier override is never reused.
-          const result = await options.updater.request(intent.ref, {
-            guard,
-            current: () => !closed && read()?.id === intent.id,
-            initiator: intent.initiator,
-          });
-          if (result.accepted || result.upToDate) {
-            if (read()?.id === intent.id) clear();
-          }
-        },
-        { guard },
-      );
+            const target = await options.updater.preview?.(intent.ref);
+            if (target?.newCommit === options.updater.runtime.commit) {
+              await guard();
+              clear();
+              return;
+            }
+            // An intent is already authenticated and durable, like a deferred source update.
+            // Ordinary/canary holds are checked again; an earlier override is never reused.
+            const result = await options.updater.request(intent.ref, {
+              guard,
+              current: () => !closed && read()?.id === intent.id,
+              initiator: intent.initiator,
+            });
+            if (result.accepted || result.upToDate) {
+              if (read()?.id === intent.id) clear();
+            }
+          },
+          { guard },
+        )
+        .catch(async (error: unknown) => {
+          await failed(error).catch(() => undefined);
+          throw error;
+        });
     })()
       .catch((error: unknown) => {
         if (!closed && read() && !(error instanceof DeployHeldError)) options.onError(error);
@@ -93,6 +119,11 @@ export function integrationSafeUpdates(options: {
           !authority.overriddenHolds?.some((overridden) => overridden.id === hold.id),
       );
       if (!holds.length) return options.updater.request(ref, authority, request);
+      // Refuse an unresolvable ref now; a durable intent must not retry one forever.
+      await options.updater.preview?.(ref).catch((error: unknown) => {
+        const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0];
+        throw Error(`Update ref "${ref}" does not resolve to a commit: ${reason}`);
+      });
       const intent = {
         id: randomUUID(),
         ref,

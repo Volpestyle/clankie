@@ -61,7 +61,20 @@ export async function updateCommit(
   if (!ref || ref.length > 256 || ref.startsWith("-") || ref.includes("\0") || /\s/u.test(ref))
     throw Error("Invalid runtime ref");
   let resolvedRef = ref;
-  if (ref !== "HEAD" && !/^[a-f0-9]{40,64}$/u.test(ref) && !ref.startsWith("refs/tags/")) {
+  if (/^[a-f0-9]{4,64}$/u.test(ref)) {
+    // A hex ref is a commit, never `refs/heads/<hex>`. A local commit resolves as is; otherwise fetch
+    // main so a newly landed object is present. Git refuses an unknown or ambiguous abbreviation.
+    const commit = () =>
+      run("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], checkout);
+    resolvedRef = await Promise.resolve(commit()).catch(async () => {
+      await run(
+        "git",
+        ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"],
+        checkout,
+      );
+      return commit();
+    });
+  } else if (ref !== "HEAD" && !ref.startsWith("refs/tags/")) {
     const branch = ref.replace(/^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/u, "");
     await run("git", ["check-ref-format", `refs/heads/${branch}`], checkout);
     resolvedRef = `refs/remotes/origin/${branch}`;

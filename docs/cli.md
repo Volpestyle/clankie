@@ -534,7 +534,12 @@ canary, locks and reconciliation applies to both. A source checkout follows `mai
 `clankie update` fetches `origin/main` and stages its exact commit. Named branches
 (including `origin/BRANCH` and `refs/heads/BRANCH`) fetch that branch from origin;
 failed fetches refuse the update without using a cached or local tip. Use a full
-commit SHA, `HEAD`, or `refs/tags/TAG` for an explicit local target. The result
+commit SHA (full or abbreviated), `HEAD`, or `refs/tags/TAG` for an explicit local
+target. A SHA is always a commit, never a branch: a local commit resolves as is, a
+missing one is looked up after fetching `origin/main`, and an unknown or ambiguous
+SHA is refused when requested. A deploy waiting for integration batches validates its
+ref up front and gives up after five failed attempts, dropping the wait (so the
+integrate queue resumes) and alerting the lead. The result
 records `resolvedRef` and `newCommit`, with `older-than-current-pin` or
 `diverged-from-current-pin` warnings when applicable. It installs dependencies
 in an independent detached worktree and schedules a fixed helper in a separate
