@@ -38,6 +38,7 @@ const WORK_USAGE = [
   "  | lease ITEM [--minutes N] [--release]",
   "  | review-diff BASE HEAD   (read-only local Git change between two commits of --repo; no service)",
   "  | review-patch FILE   (read-only local Git patch file; no Git, repository or service)",
+  "  | review save --json REVIEW | review show|list [ID] --issue ITEM | review edit ID --issue ITEM --json EDIT   (durable local guided reviews)",
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | call TOOL [--json ARGS]   (Clankie's call to the built-in tracker, for the owner)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker; agents never use it)",
@@ -349,6 +350,39 @@ function trackerRequest(
               ? WorkInboxSnoozeSchema
               : WorkInboxUnsnoozeSchema;
       return { path: "/v1/tracker/call", body: { repo, name, arguments: schema.parse(toolArgs) } };
+    }
+    case "review": {
+      const [action, id, ...extra] = rest;
+      const allowed = new Set(["--json", "--issue", ...(action === "list" ? ["--limit", "--cursor"] : [])]);
+      for (const [flag, values] of parsed.flags)
+        if (!allowed.has(flag) || values.length !== 1) throw new Error(WORK_USAGE);
+      if (extra.length) throw new Error(WORK_USAGE);
+      const call = (name: string, toolArgs: Record<string, unknown>) => ({
+        path: "/v1/tracker/call",
+        body: { repo, name, arguments: toolArgs },
+      });
+      if (action === "save" || action === "edit") {
+        const value: unknown = JSON.parse(one(parsed, "--json") ?? "null");
+        if (!value || typeof value !== "object" || Array.isArray(value))
+          throw new Error("--json requires a review object");
+        if (action === "save" && id === undefined && one(parsed, "--issue") === undefined)
+          return call("save_guided_review", value as Record<string, unknown>);
+        if (action === "edit" && id !== undefined && one(parsed, "--issue"))
+          return call("post_guided_finding", { ...value, id, issueId: one(parsed, "--issue") });
+      }
+      if (
+        (action === "show" || action === "list") &&
+        one(parsed, "--issue") &&
+        one(parsed, "--json") === undefined &&
+        (action === "show" ? id !== undefined : id === undefined)
+      )
+        return call(action === "show" ? "get_guided_review" : "list_guided_reviews", {
+          issueId: one(parsed, "--issue"),
+          ...(id === undefined ? {} : { id }),
+          ...(one(parsed, "--limit") === undefined ? {} : { limit: Number(one(parsed, "--limit")) }),
+          ...(one(parsed, "--cursor") === undefined ? {} : { cursor: one(parsed, "--cursor") }),
+        });
+      throw new Error(WORK_USAGE);
     }
     case "view": {
       const viewCall = (name: string, toolArgs: Record<string, unknown>) => ({

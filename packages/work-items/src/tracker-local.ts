@@ -1,3 +1,13 @@
+import {
+  captureGuidedReview,
+  validateGuidedReviewContent,
+  type CreateGuidedReviewInput,
+  type GuidedReviewIdentity,
+  type GuidedReviewCapture,
+  type GuidedReviewFindingInput,
+  type GuidedReviewStep,
+  type GuidedFindingAction,
+} from "./guided-review.ts";
 import type { AutoWorkQueue } from "@clankie/protocol/auto-rounds";
 import {
   WorkInboxTargetSchema,
@@ -47,6 +57,7 @@ import {
   TRACKER_TOOLS,
   SAVED_ISSUE_VIEW_TOOLS,
   INBOX_TOOLS,
+  GUIDED_REVIEW_TOOLS,
   validateTrackerToolArgs,
   type DeliveryStage,
   type IssueEventType,
@@ -64,6 +75,25 @@ interface Entity {
   /** Host-authenticated writers (VUH-1916); absent on records written before actors. */
   createdByActor?: TrackerActor;
   updatedByActor?: TrackerActor;
+}
+
+/** Source and anchors are immutable after creation; only discussion state changes. */
+export interface GuidedReviewRecord extends Entity {
+  schemaVersion: 1;
+  storeId: string;
+  issueId: string;
+  projectId: string | null;
+  runId?: string;
+  identity: GuidedReviewIdentity;
+  inspection: GuidedReviewCapture["inspection"];
+  snapshotSha256: string;
+  walkthrough: GuidedReviewStep[];
+  findings: (GuidedReviewFindingInput & {
+    id: string;
+    resolved: boolean;
+    replies: { id: string; body: string; actor: TrackerActor; at: string }[];
+    history: ({ id: string; actor: TrackerActor; at: string } & GuidedFindingAction)[];
+  })[];
 }
 
 /** One idempotency key's settled outcome, committed in the same replacement as its effect. */
@@ -328,6 +358,7 @@ interface Store {
   /** Runs of issue work (VUH-1918). */
   runs?: Run[];
   bundles?: EvidenceBundle[];
+  guidedReviews?: GuidedReviewRecord[];
   /** Links to ADR 0245 records; no question, answer or parallel ask lifecycle here. */
   ownerAsks?: { eventId: string; issueId: string; runId?: string; requestId: string }[];
 }
@@ -655,6 +686,15 @@ function parseStore(content: string): Store {
         throw new Error("Invalid local saved issue view binding");
     }
   }
+  if (store.guidedReviews !== undefined) {
+    if (
+      !Array.isArray(store.guidedReviews) ||
+      store.guidedReviews.length > 1000 ||
+      new Set(store.guidedReviews.map((review) => review.id)).size !== store.guidedReviews.length
+    )
+      throw new Error("Invalid guided review collection");
+    for (const review of store.guidedReviews) validateStoredGuidedReview(store, review);
+  }
   if (store.inboxSnoozes !== undefined) {
     if (!Array.isArray(store.inboxSnoozes) || store.inboxSnoozes.length > 1000)
       throw new Error("Invalid inbox snooze collection");
@@ -797,6 +837,7 @@ const ENTITY_TYPES = [
   ["statusUpdates", "status_update"],
   ["labels", "label"],
   ["issueViews", "issue_view"],
+  ["guidedReviews", "guided_review"],
 ] as const;
 
 /** The write time (or its transaction operation times) identifies touched records. */
@@ -1524,6 +1565,100 @@ function checkBundle(
     ...(body === undefined ? {} : { body }),
   });
   bundle.checked = { actor: context.actor, at: now, eventId: store.events!.at(-1)!.id };
+}
+
+const guidedSnapshotHash = (
+  review: Pick<GuidedReviewRecord, "identity" | "inspection" | "walkthrough" | "findings">,
+) =>
+  createHash("sha256")
+    .update(
+      canonical({
+        identity: review.identity,
+        inspection: review.inspection,
+        walkthrough: review.walkthrough,
+        findings: review.findings.map(({ body, severity, anchor }) => ({ body, severity, anchor })),
+      }),
+    )
+    .digest("hex");
+
+function validateStoredGuidedReview(store: Store, review: GuidedReviewRecord): void {
+  const issue = store.issues.find((entry) => entry.id === review.issueId);
+  if (
+    review.schemaVersion !== 1 ||
+    typeof review.id !== "string" ||
+    !issue ||
+    review.storeId !== (store.storeId ?? store.team.id) ||
+    !(review.projectId === null || store.projects.some((entry) => entry.id === review.projectId)) ||
+    !Number.isFinite(Date.parse(review.createdAt)) ||
+    !Number.isFinite(Date.parse(review.updatedAt)) ||
+    (review.runId !== undefined &&
+      !(store.runs ?? []).some((run) => run.id === review.runId && run.issueId === issue.id))
+  )
+    throw new Error("Invalid guided review binding");
+  validateGuidedReviewContent(review.inspection, review.walkthrough, review.findings);
+  const actual: GuidedReviewIdentity =
+    "source" in review.inspection
+      ? { kind: "patch", sha256: review.inspection.patch.sha256 }
+      : {
+          kind: "git",
+          gitDirectory: review.inspection.gitDirectory,
+          baseCommit: review.inspection.base.commit,
+          headCommit: review.inspection.head.commit,
+        };
+  if (
+    canonical(actual) !== canonical(review.identity) ||
+    guidedSnapshotHash(review) !== review.snapshotSha256 ||
+    new Set(review.findings.map((finding) => finding.id)).size !== review.findings.length
+  )
+    throw new Error("Invalid guided review snapshot integrity");
+  for (const finding of review.findings) {
+    if (
+      typeof finding.id !== "string" ||
+      typeof finding.resolved !== "boolean" ||
+      !Array.isArray(finding.replies) ||
+      finding.replies.length > 1000 ||
+      !Array.isArray(finding.history) ||
+      finding.history.length > 2000
+    )
+      throw new Error("Invalid guided finding discussion");
+    const validActor = (actor: TrackerActor) =>
+      actor &&
+      typeof actor.id === "string" &&
+      ["human", "agent-worker", "app"].includes(actor.type) &&
+      Array.isArray(actor.onBehalfOf);
+    for (const reply of finding.replies)
+      if (
+        typeof reply.id !== "string" ||
+        typeof reply.body !== "string" ||
+        !reply.body.trim() ||
+        reply.body.length > 16000 ||
+        !validActor(reply.actor) ||
+        !Number.isFinite(Date.parse(reply.at))
+      )
+        throw new Error("Invalid guided finding reply");
+    for (const event of finding.history)
+      if (
+        typeof event.id !== "string" ||
+        !validActor(event.actor) ||
+        !Number.isFinite(Date.parse(event.at)) ||
+        (event.action !== "reply" && event.action !== "resolve") ||
+        (event.action === "reply"
+          ? typeof event.body !== "string" || !event.body.trim() || event.body.length > 16000
+          : typeof event.resolved !== "boolean")
+      )
+        throw new Error("Invalid guided finding history");
+  }
+}
+
+function guidedReviewForIssue(store: Store, args: Record<string, unknown>, options: LocalTrackerOptions) {
+  const issue = findIssue(store, args.issueId as string);
+  options.assertIssueWrite?.(issueView(store, issue));
+  const review = (store.guidedReviews ?? []).find(
+    (entry) => entry.id === args.id && entry.issueId === issue.id,
+  );
+  if (!review || review.storeId !== (store.storeId ?? store.team.id))
+    throw new Error("Guided review not found on this issue");
+  return review;
 }
 
 async function saveBundle(
@@ -2486,6 +2621,77 @@ async function dispatch(
   context: WriteContext,
 ): Promise<unknown> {
   switch (name) {
+    case "save_guided_review": {
+      const issue = findIssue(store, args.issueId as string);
+      options.assertIssueWrite?.(issueView(store, issue));
+      if ((store.guidedReviews?.length ?? 0) >= 1000) throw new Error("Guided review limit reached");
+      const runId = args.runId as string | undefined;
+      if (runId !== undefined) {
+        const run = (store.runs ?? []).find((entry) => entry.id === runId && entry.issueId === issue.id);
+        if (!run || (actorKey(run.actor) !== actorKey(context.actor) && !ownerOrLead(context.actor)))
+          throw new Error("Guided review run must belong to this issue and caller");
+      }
+      const capture = await captureGuidedReview(args as unknown as CreateGuidedReviewInput);
+      const review: GuidedReviewRecord = {
+        id: randomUUID(),
+        schemaVersion: 1,
+        storeId: store.storeId ?? store.team.id,
+        issueId: issue.id,
+        projectId: issue.projectId,
+        ...(runId === undefined ? {} : { runId }),
+        identity: capture.identity,
+        inspection: capture.inspection,
+        walkthrough: structuredClone(args.walkthrough as GuidedReviewStep[]),
+        findings: (args.findings as GuidedReviewFindingInput[]).map((finding) => ({
+          ...structuredClone(finding),
+          id: randomUUID(),
+          resolved: false,
+          replies: [],
+          history: [],
+        })),
+        snapshotSha256: "",
+        createdAt: now,
+        updatedAt: now,
+      };
+      review.snapshotSha256 = guidedSnapshotHash(review);
+      (store.guidedReviews ??= []).push(review);
+      return review;
+    }
+    case "get_guided_review":
+      return guidedReviewForIssue(store, args, options);
+    case "list_guided_reviews": {
+      const issue = findIssue(store, args.issueId as string);
+      options.assertIssueWrite?.(issueView(store, issue));
+      return page(
+        (store.guidedReviews ?? [])
+          .filter((review) => review.issueId === issue.id)
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .map((review) => ({ ...review })),
+        args,
+        "guidedReviews",
+        name,
+      );
+    }
+    case "post_guided_finding": {
+      const review = guidedReviewForIssue(store, args, options);
+      if (canonical(review.identity) !== canonical(args.expectedSource))
+        throw new TrackerWriteRefused("source_mismatch", "Guided finding source does not match this review");
+      if (args.ifUpdatedAt === undefined) throw new Error("ifUpdatedAt is required for guided finding edits");
+      assertUnchangedSince(review, args);
+      const finding = review.findings.find((entry) => entry.id === args.findingId);
+      if (!finding) throw new Error("Guided finding not found");
+      if (finding.history.length >= 2000) throw new Error("Guided finding history limit reached");
+      const edit = args.edit as GuidedFindingAction;
+      const event = { ...structuredClone(edit), id: randomUUID(), actor: context.actor, at: now };
+      if (edit.action === "reply") {
+        if (finding.replies.length >= 1000 || !edit.body.trim())
+          throw new Error("Invalid or excessive finding reply");
+        finding.replies.push({ id: event.id, body: edit.body, actor: context.actor, at: now });
+      } else finding.resolved = edit.resolved;
+      finding.history.push(event);
+      review.updatedAt = now;
+      return review;
+    }
     case "save_issue_view": {
       const project = issueViewProject(store, args);
       const existing = args.id === undefined ? undefined : savedIssueView(store, args);
@@ -3878,6 +4084,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         // Validate every operation before dispatch; one receipt owns the whole transaction.
         for (const operation of command.operations) {
           validateTrackerToolArgs(operation.name, operation.arguments);
+          if (GUIDED_REVIEW_TOOLS.has(operation.name))
+            throw new Error("Guided reviews require the authenticated direct tool route");
           if (
             !/^(?:save|create|post)_/u.test(operation.name) ||
             operation.arguments.idempotencyKey !== undefined
@@ -4841,6 +5049,21 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     },
     async call(name, args, callOptions) {
       validateTrackerToolArgs(name, args);
+      if (GUIDED_REVIEW_TOOLS.has(name)) {
+        const actor = callOptions?.actor;
+        if (
+          !actor ||
+          !actor.id ||
+          !["human", "agent-worker", "app"].includes(actor.type) ||
+          !Array.isArray(actor.onBehalfOf)
+        )
+          throw new Error("Guided reviews require an authenticated host actor");
+        if (
+          /^(?:save|post)_/u.test(name) &&
+          (typeof args.idempotencyKey !== "string" || !args.idempotencyKey.trim())
+        )
+          throw new Error("Guided review writes require an idempotency key");
+      }
       if (INBOX_TOOLS.has(name)) throw new Error("Inbox requires the authenticated owner mailbox route");
       const operation = strictReadOperation(name, options);
       return withTrackerStoreLock(path, async (assertHeld) => {
@@ -4851,6 +5074,13 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           callOptions?.beforeRead !== undefined &&
           callOptions.onReadPrepared !== undefined;
         let { store, clock, initialized, readIdentity } = await load({ mutable: writing, captureRead });
+        // Scope checks also fence receipt replay after issue moves or authority changes.
+        if (GUIDED_REVIEW_TOOLS.has(name)) {
+          const issue = findIssue(store, args.issueId as string);
+          options.assertIssueWrite?.(issueView(store, issue));
+          if (name === "get_guided_review" || name === "post_guided_finding")
+            guidedReviewForIssue(store, args, options);
+        }
         const rolloverDue = cyclesDue(store, clock);
         if (
           captureRead &&

@@ -3190,6 +3190,37 @@ hunks), non-UTF-8, truncated, contradictory or unsupported patches answer
 `{ "outcome": "refused", "code" }` and exit 1. Contract: [guided
 reviews](guided-reviews.md#reading-a-supplied-patch).
 
+### `work review save|show|list|edit` (built-in tracker)
+
+Persist an inspected local Git change or supplied patch with an ordered
+walkthrough, anchored severity findings, replies and resolution history:
+
+```bash
+clankie work review save --json "$(cat review.json)"
+clankie work review show REVIEW_ID --issue ITEM
+clankie work review list --issue ITEM --limit 20 [--cursor CURSOR]
+clankie work review edit REVIEW_ID --issue ITEM --json "$(cat edit.json)"
+```
+
+Save JSON requires `issueId`, `source`, `expectedSource`, `walkthrough`,
+`findings` and `idempotencyKey`; `runId` is optional. Git source is
+`{kind:"git",repository,base,head}` with expected identity
+`{kind:"git",gitDirectory,baseCommit,headCommit}` copied from `review-diff`.
+Patch source is `{kind:"patch",path}` with
+`{kind:"patch",sha256}` copied from `review-patch`. Save re-inspects locally
+and refuses incomplete or changed sources. Saved snapshots remain readable
+after source removal.
+
+Edit JSON requires `findingId`, saved `identity` as `expectedSource`, current
+review `updatedAt` as `ifUpdatedAt`, a fresh `idempotencyKey`, and
+`edit: {action:"reply",body}` or `edit: {action:"resolve",resolved:true}`.
+Set `resolved:false` to reopen. Sources and anchors cannot be edited.
+
+These service calls require explicit authenticated actors and an existing
+built-in issue. They use tracker receipts/audit, never verify acceptance or
+write an upstream verdict. They provide no UI/device sync projection.
+Full payload examples and limits: [guided reviews](guided-reviews.md#saving-a-local-guided-review).
+
 ### `work inbox list|get|snooze|unsnooze` (built-in tracker)
 
 Defer attention on a current tracker-linked pending decision, gate or verification

@@ -240,3 +240,28 @@ footage is not permission to publish it. Distinguish a candidate from
 a delivered build, keep important blockers, and end with what lands next and any
 decision waiting on a human. A demo that shows a milestone working also goes in
 the status update, so it plays in project Activity.
+
+## Local guided reviews
+
+For an authorized review on a built-in tracker issue, inspect first with
+`clankie work review-diff BASE HEAD --repo /abs/repo` or
+`clankie work review-patch /abs/change.patch`. Save the complete inspection with
+`work review save --json JSON`, including `issueId`, source, exact
+`expectedSource`, ordered walkthrough, anchored findings and an idempotency key.
+Git identity uses returned `gitDirectory` and full commit IDs; patch identity
+uses the parsed byte SHA-256, never its claimed object IDs. Save re-inspects and
+refuses changed/incomplete sources. Use `review show ID --issue ITEM` and
+`review list --issue ITEM --limit N --cursor CURSOR` to read persisted snapshots.
+
+Native tools are `linear_save_guided_review`, `linear_get_guided_review`,
+`linear_list_guided_reviews` and `linear_post_guided_finding`. These require an
+explicit authenticated actor; external actors and other tracker backends refuse.
+For edits, read first and send `findingId`, saved identity as `expectedSource`,
+current review `updatedAt` as `ifUpdatedAt`, a new idempotency key, and
+`edit:{action:"reply",body}` or `edit:{action:"resolve",resolved:true}`.
+`resolved:false` reopens. CLI: `review edit ID --issue ITEM --json JSON`.
+Existing tracker audit/receipts retain actor attribution; anchors and source
+stay immutable and reads survive source removal. Finding resolution is not owner
+verification or an upstream verdict. No Work UI/device sync is provided; publish
+artifact bytes through the existing evidence store. Payloads and limits:
+`docs/guided-reviews.md`.

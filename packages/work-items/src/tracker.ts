@@ -16,6 +16,7 @@ import { createRepoTracker } from "./tracker-repo.ts";
 import {
   refuseBuiltInTrackerFeatures,
   SAVED_ISSUE_VIEW_TOOLS,
+  GUIDED_REVIEW_TOOLS,
   TRACKER_TOOLS,
   type TrackerActor,
   type TrackerToolBackend,
@@ -123,6 +124,14 @@ function builtInToolsFor(convention: WorkConvention, deps: TrackerDeps): Tracker
   return {
     catalog: () => TRACKER_TOOLS,
     async call(name, args, callbacks) {
+      if (GUIDED_REVIEW_TOOLS.has(name)) {
+        // Recheck the binding under the backend's store lock, including receipt replays.
+        return builtIn
+          .open((issue) => {
+            if (issue.projectId !== builtIn.projectId) throw new WorkItemScopeError();
+          })
+          .call(name, args, { ...deps, ...callbacks });
+      }
       // Saved filters always use this repo's exact built-in project, even locally.
       // Store identity is rechecked by the backend, never cached in this binding.
       if (SAVED_ISSUE_VIEW_TOOLS.has(name)) {

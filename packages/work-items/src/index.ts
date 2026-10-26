@@ -26,6 +26,7 @@ export { readProjectDetails } from "./project-details.ts";
 export { readProjectWork } from "./project-read.ts";
 export * from "./releases.ts";
 export * from "./review-git.ts";
+export * from "./guided-review.ts";
 export {
   readReviewPatch,
   REVIEW_PATCH_LIMITS,

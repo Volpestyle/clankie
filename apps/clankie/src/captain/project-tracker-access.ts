@@ -3,6 +3,10 @@ import { validateTrackerToolArgs } from "@clankie/work-items";
  * Unknown operations stay unavailable until their target can be proved.
  */
 const TOOLS = new Set([
+  "save_guided_review",
+  "get_guided_review",
+  "list_guided_reviews",
+  "post_guided_finding",
   "save_issue_view",
   "get_issue_view",
   "list_issue_views",
@@ -66,6 +70,12 @@ export async function authorizeProjectTrackerCall(
   if (args.project !== undefined) await projectRef(args.project);
   if (args.projectId !== undefined) await projectRef(args.projectId);
   switch (name) {
+    case "save_guided_review":
+    case "get_guided_review":
+    case "list_guided_reviews":
+    case "post_guided_finding":
+      await issueRef(args.issueId);
+      break;
     case "save_issue_view":
     case "get_issue_view":
     case "list_issue_views":

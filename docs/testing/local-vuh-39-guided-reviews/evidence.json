@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "cli-journey.json",
+      "size": 154212,
+      "sha256": "0bc0f16c21d029d0599ae7c2dbdd830066d24dcb2e420ed4b710b315b09002af",
+      "url": "clankie://evidence/sha256/0bc0f16c21d029d0599ae7c2dbdd830066d24dcb2e420ed4b710b315b09002af"
+    },
+    {
+      "path": "worker-journey.json",
+      "size": 62755,
+      "sha256": "384b14770fd035eecfef17ff40609a268265c5eb17ac19fd6bae9a0f4df0412a",
+      "url": "clankie://evidence/sha256/384b14770fd035eecfef17ff40609a268265c5eb17ac19fd6bae9a0f4df0412a"
+    }
+  ]
+}

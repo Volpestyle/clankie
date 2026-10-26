@@ -1,3 +1,9 @@
+import {
+  guidedReviewCreateProperties,
+  guidedReviewIdentitySchema,
+  guidedFindingActionSchema,
+} from "./guided-review.ts";
+
 /** The tracker speaks the Linear subset already used by Clankie and his workers. */
 export interface TrackerToolDescriptor {
   readonly name: string;
@@ -85,6 +91,14 @@ export const SAVED_ISSUE_VIEW_TOOLS: ReadonlySet<string> = new Set([
   "post_delete_issue_view",
 ]);
 
+/** Local source reviews live in the existing built-in issue store. */
+export const GUIDED_REVIEW_TOOLS: ReadonlySet<string> = new Set([
+  "save_guided_review",
+  "get_guided_review",
+  "list_guided_reviews",
+  "post_guided_finding",
+]);
+
 /** Mailbox capability is supplied by the authenticated HTTP route, never MCP arguments. */
 export const INBOX_TOOLS: ReadonlySet<string> = new Set([
   "inbox_pending_questions",
@@ -97,6 +111,7 @@ export const INBOX_TOOLS: ReadonlySet<string> = new Set([
 export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   ...INBOX_TOOLS,
   ...SAVED_ISSUE_VIEW_TOOLS,
+  ...GUIDED_REVIEW_TOOLS,
   "get_write_receipt",
   "list_audit_events",
   "post_issue_event",
@@ -381,6 +396,37 @@ function tool(
 
 /** Schemas deliberately cover the supported subset; unavailable features fail explicitly. */
 export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
+  tool(
+    "save_guided_review",
+    "Built-in only. Save an immutable local two-ref or supplied-patch review after re-inspecting its exact expected source identity. Ordered walkthrough and severity findings use inspected hunk lines. No upstream verdict or owner verification.",
+    { ...guidedReviewCreateProperties, idempotencyKey },
+    ["issueId", "source", "expectedSource", "walkthrough", "findings", "idempotencyKey"],
+  ),
+  tool(
+    "get_guided_review",
+    "Built-in only. Re-read a saved local review and its durable finding replies/resolutions in its exact issue.",
+    { issueId: string, id: string },
+    ["issueId", "id"],
+  ),
+  tool(
+    "list_guided_reviews",
+    "Built-in only. List saved local reviews for one issue; follow cursor.",
+    { issueId: string, ...pagination },
+    ["issueId"],
+  ),
+  tool(
+    "post_guided_finding",
+    "Built-in only. Reply to or resolve/reopen a saved finding. Requires unchanged review revision and exact immutable source identity; never approves work or writes to a host.",
+    {
+      issueId: string,
+      id: string,
+      findingId: string,
+      expectedSource: guidedReviewIdentitySchema,
+      edit: guidedFindingActionSchema,
+      ...writeControls,
+    },
+    ["issueId", "id", "findingId", "expectedSource", "edit", "ifUpdatedAt", "idempotencyKey"],
+  ),
   {
     name: "inbox_pending_questions",
     description:

@@ -1,10 +1,10 @@
 # Guided reviews: local Git changes
 
-A guided review starts from one exact change. The first piece of VUH-1906
-(Requirements E) reads that change from a local Git repository the caller
-names, between two commits, and hands it to a person or agent as typed data. It renders nothing, writes no
-verdict and reaches no host. The Work UI, review-agent runs and host writeback
-build on it later.
+A guided review starts from one exact change: two local Git commits or a supplied
+patch. The readers return typed inspection data without a service. The built-in
+tracker can then save that exact inspection, an ordered walkthrough and findings,
+with durable replies and resolution state. Upstream verdicts, the Work UI,
+review-agent runs and host writeback remain separate future work.
 
 ## Reading a change
 
@@ -99,8 +99,9 @@ ruled out and any file is reported binary, the result is `complete: false` with
 reason `repository_attributes`. Nothing fetches, applies a patch, or updates refs,
 the index, the worktree or configuration.
 
-Naming a repository is the authorization: this API exposes no new machine tool,
-HTTP or MCP route, and it does not widen what a remote caller may read.
+These read-only inspection commands remain local. Saving a review through the
+authenticated built-in tracker API below re-inspects the explicitly named local
+source; it does not fetch from a remote code host.
 
 ## Reading a supplied patch
 
@@ -169,3 +170,109 @@ content, as with `review-diff`: hunk lines are counted from their headers, so a
 filename or line shaped like `diff --git`, `+++` or `@@` stays data, and a name
 like `../../outside.txt` is reported, never followed. The API accepts lower or
 higher `limits`; the CLI always uses the defaults.
+
+## Saving a local guided review
+
+Inspection commands remain read-only. Saving requires the running service, an
+existing built-in tracker issue and an authenticated host actor. Other backends
+refuse these tools. Use absolute source paths accessible to the service; source
+content is untrusted data, never instructions.
+
+First inspect the change with `work review-diff` or `work review-patch`. Build
+`expectedSource` from that result, not from guessed branch names or patch headers.
+For Git it contains `kind: "git"`, the returned `gitDirectory`, and `baseCommit`
+and `headCommit` copied from `base.commit` and `head.commit`. For example, after
+inspecting `/abs/repo` between `main` and `feature`, save this JSON (substitute the
+actual full commit IDs and Git directory):
+
+```json
+{
+  "issueId": "LOCAL-VUH-39",
+  "source": { "kind": "git", "repository": "/abs/repo", "base": "main", "head": "feature" },
+  "expectedSource": {
+    "kind": "git",
+    "gitDirectory": "/abs/repo/.git",
+    "baseCommit": "1111111111111111111111111111111111111111",
+    "headCommit": "2222222222222222222222222222222222222222"
+  },
+  "walkthrough": [
+    { "title": "Validate the input", "body": "Read the changed validation branch.", "fileIndex": 0 }
+  ],
+  "findings": [
+    {
+      "body": "Describe the observed issue and its consequence.",
+      "severity": "warning",
+      "anchor": { "fileIndex": 0, "side": "new", "line": 12 }
+    }
+  ],
+  "idempotencyKey": "review-39-1"
+}
+```
+
+```bash
+clankie work review save --json "$(cat review.json)"
+clankie work review show REVIEW_ID --issue LOCAL-VUH-39
+clankie work review list --issue LOCAL-VUH-39 --limit 20
+clankie work review list --issue LOCAL-VUH-39 --limit 20 --cursor CURSOR
+```
+
+For a patch, replace only `source` and `expectedSource` in the save request:
+
+```json
+{
+  "source": { "kind": "patch", "path": "/abs/change.patch" },
+  "expectedSource": { "kind": "patch", "sha256": "COPY_THE_64_HEX_CHARACTERS_FROM_patch.sha256" }
+}
+```
+
+Save re-reads through the same existing parser, requires a complete result, and
+refuses if the identity differs. An optional `runId` must name a run on the same
+issue; its runner or an authorized owner/lead may bind it. File indices are
+zero-based. Each finding chooses `old` or `new` and an inclusive `line` through
+optional `endLine`; every line must exist on that side in inspected hunks.
+Binary files and files without hunks cannot anchor findings. A review allows
+1–200 walkthrough steps, up to 200 findings, and spans of up to 200 lines.
+Finding bodies and step bodies allow 16,000 characters; step titles allow 240.
+Severity is `info`, `warning`, `error` or `critical`.
+
+The saved inspection survives branch moves, source-file removal and service
+restart. Reads do not re-open the source. Supplied patch object IDs remain
+unverified claims. Source identity, walkthrough, finding bodies and anchors are
+immutable after creation; discussion state can change.
+
+## Replying and resolving
+
+Read back the review first. Use its `id`, finding `id`, exact `identity` as
+`expectedSource`, and current review `updatedAt` as `ifUpdatedAt`:
+
+```json
+{
+  "findingId": "FINDING_ID",
+  "expectedSource": { "kind": "patch", "sha256": "COPY_THE_SAVED_64_HEX_SHA256" },
+  "ifUpdatedAt": "COPY_THE_REVIEW_updatedAt",
+  "idempotencyKey": "finding-reply-1",
+  "edit": { "action": "reply", "body": "The reproducer also fails with an empty input." }
+}
+```
+
+```bash
+clankie work review edit REVIEW_ID --issue LOCAL-VUH-39 --json "$(cat edit.json)"
+```
+
+To resolve, use `"edit": { "action": "resolve", "resolved": true }`; `false`
+reopens the finding. Each new edit needs a fresh idempotency key and current
+`updatedAt`. Stale revisions and mismatched source identities refuse. Replies
+and resolution changes retain the authenticated actor, timestamp and history.
+Resolution never verifies acceptance, changes delivery stage or supplies an
+upstream approval.
+
+The native tracker tool names are `linear_save_guided_review`,
+`linear_get_guided_review`, `linear_list_guided_reviews` and
+`linear_post_guided_finding`; their underlying tracker names omit `linear_`.
+All require `issueId`; reads and edits by review ID also require `id`. The list
+returns `guidedReviews` and the normal tracker pagination metadata. Writes use
+the existing atomic tracker store, actor-scoped idempotency receipts and audit
+log. Calls without an explicit authenticated actor, and external actors, refuse.
+These are direct API/CLI reads; no Work UI or device sync projection is supplied.
+Evidence bytes still use the existing evidence-store publication path; saving a
+review does not upload artifacts or write to a remote code host.
