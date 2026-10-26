@@ -3208,13 +3208,27 @@ Save JSON requires `issueId`, `source`, `expectedSource`, `walkthrough`,
 `{kind:"git",gitDirectory,baseCommit,headCommit}` copied from `review-diff`.
 Patch source is `{kind:"patch",path}` with
 `{kind:"patch",sha256}` copied from `review-patch`. Save re-inspects locally
-and refuses incomplete or changed sources. Saved snapshots remain readable
-after source removal.
+and refuses incomplete or changed sources. The host defaults to denying source
+reads: canonical local project workspace repositories and existing approved
+genuine linked worktrees are eligible; arbitrary, symlink-aliased or remote-machine
+host paths are not. Worker tool/project ceilings still apply. Missing source
+authority returns `source_authority_required`, disallowed sources return
+`guided_review_source_refused`, and changed issue bindings return
+`source_authority_changed`. Capture runs outside the store lock; identity/binding
+checks under the lock and a publication fence guard the write. Saved snapshots
+remain readable after source removal.
 
 Edit JSON requires `findingId`, saved `identity` as `expectedSource`, current
 review `updatedAt` as `ifUpdatedAt`, a fresh `idempotencyKey`, and
 `edit: {action:"reply",body}` or `edit: {action:"resolve",resolved:true}`.
 Set `resolved:false` to reopen. Sources and anchors cannot be edited.
+
+At most three reviews are retained per issue. Serialized reviews plus successful
+guided write receipts share an 8 MiB store budget, enforced on saves and edits.
+Receipts reference one immutable inspection and reconstruct full historical
+responses on replay. `list` returns summaries without inspections or bodies;
+`show` returns the full review. Ordinary loads check shallow metadata; full
+snapshot integrity checks apply to selected full reads and writes.
 
 These service calls require explicit authenticated actors and an existing
 built-in issue. They use tracker receipts/audit, never verify acceptance or

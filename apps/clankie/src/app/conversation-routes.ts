@@ -1165,7 +1165,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             409,
           );
         return context.json(
-          { error: "tracker_refused", detail: error instanceof Error ? error.message : String(error) },
+          {
+            error: "tracker_refused",
+            detail: error instanceof Error ? error.message : String(error),
+            ...(error instanceof TrackerWriteRefused ? { reason: error.reason } : {}),
+          },
           422,
         );
       }

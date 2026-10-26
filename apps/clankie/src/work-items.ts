@@ -1,4 +1,5 @@
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
+import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -550,6 +551,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     ((assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void) =>
       createLocalTracker({
         directory: options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"),
+        ...(options.projects === undefined
+          ? {}
+          : {
+              authorizeGuidedReviewSource: createGuidedReviewSourceAuthorizer({
+                projects: options.projects,
+                ...(options.projectsFence === undefined ? {} : { projectsFence: options.projectsFence }),
+                ...(options.localMachineId === undefined ? {} : { localMachineId: options.localMachineId }),
+              }),
+            }),
         ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       }));

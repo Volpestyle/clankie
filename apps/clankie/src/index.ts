@@ -1,4 +1,5 @@
 import { createInboundReportMigrationGate } from "./captain/conversations/inbound-report-migration.ts";
+import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { readProjectWorkQueue } from "./project-work-queue.ts";
 import { createDeliverableProjectReader } from "./fleet-project-deliverable.ts";
 import { MachineJoins } from "./machine-joins.ts";
@@ -681,6 +682,13 @@ const evidenceStore =
         new (await import("./evidence-s3.ts")).S3EvidenceBlobs(startupSettings.evidence),
       );
 const builtInTrackerOptions = {
+  authorizeGuidedReviewSource: createGuidedReviewSourceAuthorizer({
+    projects: async () => (await settingsStore.read()).projects,
+    projectsFence: async () => {
+      const snapshot = await settingsStore.loadFenced();
+      return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
+    },
+  }),
   directory: join(stateRoot, "tracker"),
   validateEvidence: async (_issueKey: string, references: readonly EvidenceReference[]) => {
     for (const ref of references) {

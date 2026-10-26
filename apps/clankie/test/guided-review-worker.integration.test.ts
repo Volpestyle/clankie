@@ -1,8 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { createGuidedReviewSourceAuthorizer } from "../src/guided-review-source.ts";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker, readReviewPatch, TRACKER_OWNER } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
@@ -18,7 +21,15 @@ it("attributes guided review edits to the authenticated worker and preserves own
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const now = "2026-10-05T09:00:00.000Z";
+  const workspace = join(root, "workspace");
+  await mkdir(workspace);
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main"], { cwd: workspace });
+  const authorizeGuidedReviewSource = createGuidedReviewSourceAuthorizer({
+    projects: async () => (await settings.load()).projects,
+    localMachineId: "local",
+  });
   const tracker = createLocalTracker({
+    authorizeGuidedReviewSource,
     directory: join(root, "tracker"),
     clock: () => new Date(now),
   });
@@ -44,13 +55,12 @@ it("attributes guided review edits to the authenticated worker and preserves own
     trackerRepoForCall: (name, args) => workItems.resolveTrackerRepo(name, args),
     logger: { info() {}, warn() {} },
   });
-  const workspace = join(root, "workspace");
-  await mkdir(workspace);
   workItems = createWorkItemsService({
     stateDirectory: join(root, "work"),
     globalTrackerDirectory: join(root, "tracker"),
     workspace: () => workspace,
     mcpHost: host,
+    projects: async () => (await settings.load()).projects,
   });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
@@ -117,6 +127,19 @@ it("attributes guided review edits to the authenticated worker and preserves own
 
   try {
     const project = await owner("save_project", { name: "Clankie Work", addTeams: ["LOCAL"] });
+    await settings.update((current) => ({
+      ...current,
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "worker-review",
+            name: "Clankie Work",
+            trackerProjectId: project.id,
+            workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: workspace }],
+          },
+        ],
+      }),
+    }));
     const issue = await owner("save_issue", { team: "LOCAL", project: project.id, title: "Worker review" });
     const runResult = await call("linear_save_run", { issueId: issue.id });
     // Native writes return concise receipts; re-read through the same authenticated route.
@@ -125,7 +148,7 @@ it("attributes guided review edits to the authenticated worker and preserves own
     );
     expect(run).toMatchObject({ actor: { type: "agent-worker" } });
     expect(run.actor.id).not.toBe("owner");
-    const path = join(root, "change.patch");
+    const path = join(workspace, "change.patch");
     await writeFile(
       path,
       "diff --git a/example.txt b/example.txt\nindex df967b9..3e75765 100644\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-before\n+after\n",

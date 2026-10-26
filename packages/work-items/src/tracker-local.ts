@@ -3,6 +3,7 @@ import {
   validateGuidedReviewContent,
   type CreateGuidedReviewInput,
   type GuidedReviewIdentity,
+  type GuidedReviewSource,
   type GuidedReviewCapture,
   type GuidedReviewFindingInput,
   type GuidedReviewStep,
@@ -379,6 +380,7 @@ const MIRROR_EVENTS_RETAINED = 5_000;
 /** Who and why for one write, threaded into item events. */
 interface WriteContext {
   readonly actor: TrackerActor;
+  readonly guidedReviewCapture?: GuidedReviewCapture;
   readonly via?: string;
   readonly authorizeLeadClosure?: TrackerToolCallOptions["authorizeLeadClosure"];
   readonly closureFences?: (() => void)[];
@@ -518,6 +520,12 @@ export interface LocalTrackerOptions {
   readonly issueResolver?: (reference: string) => Promise<{ id: string; identifier: string } | undefined>;
   /** Repo membership is checked under the store lock, including comment edits and replies. */
   readonly assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void;
+  /** Host-only issue/project source authority; absent capability refuses filesystem reads. */
+  readonly authorizeGuidedReviewSource?: (
+    issue: Readonly<Record<string, unknown>>,
+    source: GuidedReviewSource,
+    actor: TrackerActor,
+  ) => Promise<() => void>;
   /**
    * The live seat, pane and hire behind a run's actor, from the host's own hire records
    * (VUH-1918). Read on every view; the tracker keeps no copy of seat state.
@@ -693,7 +701,8 @@ function parseStore(content: string): Store {
       new Set(store.guidedReviews.map((review) => review.id)).size !== store.guidedReviews.length
     )
       throw new Error("Invalid guided review collection");
-    for (const review of store.guidedReviews) validateStoredGuidedReview(store, review);
+    // Ordinary tracker reads inspect only metadata, never hash every retained patch.
+    for (const review of store.guidedReviews) validateGuidedReviewMetadata(store, review);
   }
   if (store.inboxSnoozes !== undefined) {
     if (!Array.isArray(store.inboxSnoozes) || store.inboxSnoozes.length > 1000)
@@ -1581,7 +1590,68 @@ const guidedSnapshotHash = (
     )
     .digest("hex");
 
-function validateStoredGuidedReview(store: Store, review: GuidedReviewRecord): void {
+export const GUIDED_REVIEW_LIMITS = Object.freeze({ perIssue: 3, totalBytes: 8 * 1024 * 1024 });
+
+/** Only review payloads and successful review receipts count; ordinary tracker bookkeeping is separate. */
+function assertGuidedReviewBudget(store: Store, nextReceipt: WriteReceipt): void {
+  const receipts = (store.receipts ?? []).filter(
+    (receipt) =>
+      (receipt.tool === "save_guided_review" || receipt.tool === "post_guided_finding") &&
+      receipt.state === "applied",
+  );
+  const bytes = Buffer.byteLength(
+    JSON.stringify({ guidedReviews: store.guidedReviews ?? [], receipts: [...receipts, nextReceipt] }),
+  );
+  if (bytes > GUIDED_REVIEW_LIMITS.totalBytes)
+    throw new TrackerWriteRefused(
+      "guided_review_budget",
+      "Guided reviews and their result receipts exceed the stored byte budget",
+    );
+}
+
+/** Keep the immutable inspection once; historical discussion state still replays exactly. */
+function guidedReviewReceiptResult(review: GuidedReviewRecord) {
+  const { inspection: _inspection, ...result } = review;
+  return { guidedReviewSnapshot: review.id, result };
+}
+
+function replayGuidedReviewReceipt(store: Store, value: unknown): unknown {
+  if (!value || typeof value !== "object" || !("guidedReviewSnapshot" in value)) return value;
+  const receipt = value as { guidedReviewSnapshot: string; result: Omit<GuidedReviewRecord, "inspection"> };
+  const review = (store.guidedReviews ?? []).find((entry) => entry.id === receipt.guidedReviewSnapshot);
+  if (!review || receipt.result.id !== review.id || receipt.result.snapshotSha256 !== review.snapshotSha256)
+    throw new Error("Guided review receipt snapshot is unavailable");
+  validateStoredGuidedReview(store, review);
+  const restored = { ...receipt.result, inspection: review.inspection };
+  validateStoredGuidedReview(store, restored);
+  return restored;
+}
+
+function guidedReviewSummary(review: GuidedReviewRecord): Record<string, unknown> {
+  return {
+    id: review.id,
+    schemaVersion: review.schemaVersion,
+    storeId: review.storeId,
+    issueId: review.issueId,
+    projectId: review.projectId,
+    ...(review.runId === undefined ? {} : { runId: review.runId }),
+    identity: review.identity,
+    createdAt: review.createdAt,
+    updatedAt: review.updatedAt,
+    fileCount: review.inspection.fileCount,
+    stepCount: review.walkthrough.length,
+    findingCount: review.findings.length,
+    unresolvedCount: review.findings.filter((finding) => !finding.resolved).length,
+    findings: review.findings.map((finding) => ({
+      id: finding.id,
+      severity: finding.severity,
+      resolved: finding.resolved,
+      replyCount: finding.replies.length,
+    })),
+  };
+}
+
+function validateGuidedReviewMetadata(store: Store, review: GuidedReviewRecord): void {
   const issue = store.issues.find((entry) => entry.id === review.issueId);
   if (
     review.schemaVersion !== 1 ||
@@ -1595,6 +1665,49 @@ function validateStoredGuidedReview(store: Store, review: GuidedReviewRecord): v
       !(store.runs ?? []).some((run) => run.id === review.runId && run.issueId === issue.id))
   )
     throw new Error("Invalid guided review binding");
+  if (
+    !review.inspection ||
+    typeof review.inspection !== "object" ||
+    review.inspection.complete !== true ||
+    !Number.isSafeInteger(review.inspection.fileCount) ||
+    review.inspection.fileCount! < 0 ||
+    review.inspection.fileCount! > 200 ||
+    !Array.isArray(review.walkthrough) ||
+    review.walkthrough.length < 1 ||
+    review.walkthrough.length > 200 ||
+    !Array.isArray(review.findings) ||
+    review.findings.length > 200 ||
+    !/^[a-f0-9]{64}$/u.test(review.snapshotSha256) ||
+    !review.identity ||
+    (review.identity.kind !== "patch" && review.identity.kind !== "git")
+  )
+    throw new Error("Invalid guided review metadata");
+  if (
+    review.identity.kind === "patch"
+      ? !/^[a-f0-9]{64}$/u.test(review.identity.sha256)
+      : typeof review.identity.gitDirectory !== "string" ||
+        review.identity.gitDirectory.length > 4096 ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(review.identity.baseCommit) ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(review.identity.headCommit)
+  )
+    throw new Error("Invalid guided review identity metadata");
+  for (const finding of review.findings)
+    if (
+      !finding ||
+      typeof finding.id !== "string" ||
+      finding.id.length > 128 ||
+      typeof finding.resolved !== "boolean" ||
+      !["info", "warning", "error", "critical"].includes(finding.severity) ||
+      !Array.isArray(finding.replies) ||
+      finding.replies.length > 1000 ||
+      !Array.isArray(finding.history) ||
+      finding.history.length > 2000
+    )
+      throw new Error("Invalid guided finding metadata");
+}
+
+function validateStoredGuidedReview(store: Store, review: GuidedReviewRecord): void {
+  validateGuidedReviewMetadata(store, review);
   validateGuidedReviewContent(review.inspection, review.walkthrough, review.findings);
   const actual: GuidedReviewIdentity =
     "source" in review.inspection
@@ -2625,13 +2738,27 @@ async function dispatch(
       const issue = findIssue(store, args.issueId as string);
       options.assertIssueWrite?.(issueView(store, issue));
       if ((store.guidedReviews?.length ?? 0) >= 1000) throw new Error("Guided review limit reached");
+      if (
+        (store.guidedReviews ?? []).filter((review) => review.issueId === issue.id).length >=
+        GUIDED_REVIEW_LIMITS.perIssue
+      )
+        throw new TrackerWriteRefused(
+          "guided_review_limit",
+          "This issue has reached its saved guided review limit",
+        );
       const runId = args.runId as string | undefined;
       if (runId !== undefined) {
         const run = (store.runs ?? []).find((entry) => entry.id === runId && entry.issueId === issue.id);
         if (!run || (actorKey(run.actor) !== actorKey(context.actor) && !ownerOrLead(context.actor)))
           throw new Error("Guided review run must belong to this issue and caller");
       }
-      const capture = await captureGuidedReview(args as unknown as CreateGuidedReviewInput);
+      const capture = context.guidedReviewCapture;
+      if (!capture) throw new Error("Guided review capture must be prepared before acquiring the store lock");
+      if (canonical(capture.identity) !== canonical(args.expectedSource))
+        throw new TrackerWriteRefused(
+          "source_mismatch",
+          "Prepared guided review source does not match expectedSource",
+        );
       const review: GuidedReviewRecord = {
         id: randomUUID(),
         schemaVersion: 1,
@@ -2654,11 +2781,15 @@ async function dispatch(
         updatedAt: now,
       };
       review.snapshotSha256 = guidedSnapshotHash(review);
+      validateStoredGuidedReview(store, review);
       (store.guidedReviews ??= []).push(review);
       return review;
     }
-    case "get_guided_review":
-      return guidedReviewForIssue(store, args, options);
+    case "get_guided_review": {
+      const review = guidedReviewForIssue(store, args, options);
+      validateStoredGuidedReview(store, review);
+      return review;
+    }
     case "list_guided_reviews": {
       const issue = findIssue(store, args.issueId as string);
       options.assertIssueWrite?.(issueView(store, issue));
@@ -2666,7 +2797,7 @@ async function dispatch(
         (store.guidedReviews ?? [])
           .filter((review) => review.issueId === issue.id)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-          .map((review) => ({ ...review })),
+          .map(guidedReviewSummary),
         args,
         "guidedReviews",
         name,
@@ -2674,6 +2805,7 @@ async function dispatch(
     }
     case "post_guided_finding": {
       const review = guidedReviewForIssue(store, args, options);
+      validateStoredGuidedReview(store, review);
       if (canonical(review.identity) !== canonical(args.expectedSource))
         throw new TrackerWriteRefused("source_mismatch", "Guided finding source does not match this review");
       if (args.ifUpdatedAt === undefined) throw new Error("ifUpdatedAt is required for guided finding edits");
@@ -3258,7 +3390,7 @@ async function read(
       tool: receipt.tool,
       at: receipt.at,
       ...(receipt.state === "applied"
-        ? { result: receipt.result }
+        ? { result: replayGuidedReviewReceipt(store, receipt.result) }
         : { reason: receipt.reason, detail: receipt.detail }),
     };
   }
@@ -3748,6 +3880,22 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           "This store mirrors Linear; make the change in Linear until cutover",
         );
       result = await apply(store, now, context);
+      if (name === "save_guided_review" || name === "post_guided_finding") {
+        // Project exactly the actor stamps and compact result receipt persisted below.
+        // This runs inside the rollback path, so a budget refusal keeps the previous snapshot.
+        const review = result as GuidedReviewRecord;
+        if (review.createdAt >= now) review.createdByActor = actor;
+        review.updatedByActor = actor;
+        assertGuidedReviewBudget(store, {
+          actorKey: actorKey(actor),
+          idempotencyKey: key!,
+          tool: name,
+          fingerprint,
+          state: "applied",
+          at: now,
+          result: guidedReviewReceiptResult(review),
+        });
+      }
       await recordIssueChanges(before, store, name, context, now);
     } catch (error) {
       // Nothing the write changed survives. The refusal itself is recorded,
@@ -3829,7 +3977,10 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         fingerprint,
         state: "applied",
         at: now,
-        result: settled,
+        result:
+          name === "save_guided_review" || name === "post_guided_finding"
+            ? guidedReviewReceiptResult(settled as GuidedReviewRecord)
+            : settled,
       });
     appendSync(before, store, actor, name, now, key);
     await persist(path, store, assertHeld, {
@@ -5048,6 +5199,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       });
     },
     async call(name, args, callOptions) {
+      if (name === "save_guided_review") args = structuredClone(args);
       validateTrackerToolArgs(name, args);
       if (GUIDED_REVIEW_TOOLS.has(name)) {
         const actor = callOptions?.actor;
@@ -5066,6 +5218,47 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       }
       if (INBOX_TOOLS.has(name)) throw new Error("Inbox requires the authenticated owner mailbox route");
       const operation = strictReadOperation(name, options);
+      let guidedReviewCapture: GuidedReviewCapture | undefined;
+      let guidedSourceFence: (() => void) | undefined;
+      let guidedBinding: { storeId: string; issueId: string; projectId: string | null } | undefined;
+      if (name === "save_guided_review") {
+        // Only the short issue/receipt read holds the tracker lock. Git/file capture never does.
+        const prepared = await withTrackerStoreLock(path, async () => {
+          const { store } = await load({ mutable: false });
+          const issue = findIssue(store, args.issueId as string);
+          options.assertIssueWrite?.(issueView(store, issue));
+          return {
+            issue: structuredClone(issueView(store, issue)),
+            binding: {
+              storeId: store.storeId ?? store.team.id,
+              issueId: issue.id,
+              projectId: issue.projectId,
+            },
+            replay:
+              store.receipts?.some(
+                (entry) =>
+                  entry.actorKey === actorKey(callOptions!.actor!) &&
+                  entry.idempotencyKey === args.idempotencyKey,
+              ) ?? false,
+          };
+        });
+        guidedBinding = prepared.binding;
+        if (!prepared.replay) {
+          if (!options.authorizeGuidedReviewSource)
+            throw new TrackerWriteRefused(
+              "source_authority_required",
+              "Guided review source authority is unavailable",
+            );
+          guidedSourceFence = await options.authorizeGuidedReviewSource(
+            prepared.issue,
+            args.source as GuidedReviewSource,
+            callOptions!.actor!,
+          );
+          guidedSourceFence();
+          guidedReviewCapture = await captureGuidedReview(args as unknown as CreateGuidedReviewInput);
+          guidedSourceFence();
+        }
+      }
       return withTrackerStoreLock(path, async (assertHeld) => {
         const writing = /^(?:save|create|post)_/u.test(name);
         const captureRead =
@@ -5078,6 +5271,17 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         if (GUIDED_REVIEW_TOOLS.has(name)) {
           const issue = findIssue(store, args.issueId as string);
           options.assertIssueWrite?.(issueView(store, issue));
+          if (
+            guidedBinding &&
+            (guidedBinding.storeId !== (store.storeId ?? store.team.id) ||
+              guidedBinding.issueId !== issue.id ||
+              guidedBinding.projectId !== issue.projectId)
+          )
+            throw new TrackerWriteRefused(
+              "source_authority_changed",
+              "Guided review issue source binding changed during inspection",
+            );
+          guidedSourceFence?.();
           if (name === "get_guided_review" || name === "post_guided_finding")
             guidedReviewForIssue(store, args, options);
         }
@@ -5163,7 +5367,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           assertHeld();
           callOptions?.onDispatch?.();
           callOptions?.effectConfirmed?.();
-          return structuredClone(prior.result);
+          return structuredClone(replayGuidedReviewReceipt(store, prior.result));
         }
         return write(
           store,
@@ -5174,7 +5378,13 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           actor,
           callOptions,
           assertHeld,
-          (target, now, context) => dispatch(target, name, request, options, now, context),
+          (target, now, context) => {
+            if (guidedSourceFence) context.closureFences?.push(guidedSourceFence);
+            return dispatch(target, name, request, options, now, {
+              ...context,
+              ...(guidedReviewCapture === undefined ? {} : { guidedReviewCapture }),
+            });
+          },
         );
       });
     },

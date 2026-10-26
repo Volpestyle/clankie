@@ -251,7 +251,14 @@ For an authorized review on a built-in tracker issue, inspect first with
 Git identity uses returned `gitDirectory` and full commit IDs; patch identity
 uses the parsed byte SHA-256, never its claimed object IDs. Save re-inspects and
 refuses changed/incomplete sources. Use `review show ID --issue ITEM` and
-`review list --issue ITEM --limit N --cursor CURSOR` to read persisted snapshots.
+`review list --issue ITEM --limit N --cursor CURSOR` for summaries; `show` returns
+the full persisted inspection. The host denies source reads by default: use only
+canonical paths in the issue project's bound local workspace repository or an
+existing approved genuine linked worktree. Arbitrary host paths, symlink aliases
+and remote-machine paths refuse; source paths never bypass tool/project ceilings.
+Refusals include `source_authority_required`, `guided_review_source_refused` and
+`source_authority_changed`. Capture runs outside the store lock, followed by
+under-lock identity/binding checks and a source publication fence.
 
 Native tools are `linear_save_guided_review`, `linear_get_guided_review`,
 `linear_list_guided_reviews` and `linear_post_guided_finding`. These require an
@@ -261,7 +268,11 @@ current review `updatedAt` as `ifUpdatedAt`, a new idempotency key, and
 `edit:{action:"reply",body}` or `edit:{action:"resolve",resolved:true}`.
 `resolved:false` reopens. CLI: `review edit ID --issue ITEM --json JSON`.
 Existing tracker audit/receipts retain actor attribution; anchors and source
-stay immutable and reads survive source removal. Finding resolution is not owner
+stay immutable and reads survive source removal. Each issue is capped at three
+reviews; serialized reviews and successful guided receipts share an 8 MiB store
+budget on saves and edits. Receipts reference the single inspection and rebuild
+the original full response on replay. Ordinary loads check shallow metadata;
+selected full reads/writes check snapshot integrity. Finding resolution is not owner
 verification or an upstream verdict. No Work UI/device sync is provided; publish
 artifact bytes through the existing evidence store. Payloads and limits:
 `docs/guided-reviews.md`.

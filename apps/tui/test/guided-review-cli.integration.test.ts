@@ -11,6 +11,7 @@ import { createLocalTracker, readReviewDiff, readReviewPatch, trackerToolsFor } 
 import { createClankieApp } from "../../clankie/src/app.ts";
 import type { GuidedReviewRecord } from "../../../packages/work-items/src/tracker-local.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
+import { createGuidedReviewSourceAuthorizer } from "../../clankie/src/guided-review-source.ts";
 import { createWorkItemsService } from "../../clankie/src/work-items.ts";
 
 const execute = promisify(execFile);
@@ -57,7 +58,7 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
     git("add", ".");
     git("commit", "--quiet", "-m", "head");
     const head = git("rev-parse", "HEAD");
-    const patchPath = join(root, "change.patch");
+    const patchPath = join(repo, "change.patch");
     await writeFile(patchPath, execFileSync("git", ["diff", base, head], { cwd: repo, env }));
     let tracker = createLocalTracker({ directory });
     const project = (await tracker.call("save_project", { name: "Review fixture", addTeams: ["LOCAL"] })) as {
@@ -98,13 +99,21 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
         decidedAt: new Date().toISOString(),
       }),
     );
+    const authorizeGuidedReviewSource = createGuidedReviewSourceAuthorizer({
+      projects: async () => projects,
+      localMachineId: "local",
+    });
     const start = async () => {
-      tracker = createLocalTracker({ directory });
+      tracker = createLocalTracker({ directory, authorizeGuidedReviewSource });
       const work = createWorkItemsService({
         stateDirectory: join(root, "state"),
         globalTrackerDirectory: directory,
         builtInTracker: (assertIssueWrite) =>
-          createLocalTracker({ directory, ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }) }),
+          createLocalTracker({
+            directory,
+            authorizeGuidedReviewSource,
+            ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
+          }),
         workspace: () => repo,
         projects: async () => projects,
       });
@@ -227,6 +236,10 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
       "resolve",
     ]);
     expect(current.findings[0]!.replies.map((reply) => reply.body)).toEqual(["Confirmed context"]);
+    // Compact receipts must reconstruct historical responses, not return current discussion state.
+    expect(await cli("review", "save", "--json", JSON.stringify(save))).toEqual(saved);
+    const savedReceipt = await call("get_write_receipt", { idempotencyKey: "git-review" });
+    expect((await savedReceipt.json()).result.result).toEqual(saved);
     const patchSaved = await cli(
       "review",
       "save",
@@ -239,6 +252,19 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
       }),
     );
     await rm(patchPath);
+    expect(
+      await cli(
+        "review",
+        "save",
+        "--json",
+        JSON.stringify({
+          ...save,
+          source: { kind: "patch", path: patchPath },
+          expectedSource: { kind: "patch", sha256: patch.patch.sha256 },
+          idempotencyKey: "patch-review",
+        }),
+      ),
+    ).toEqual(patchSaved);
     await stop();
     host = await start();
     expect(await cli("review", "show", saved.id, "--issue", issue.id)).toEqual(current);
@@ -268,6 +294,36 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
         })
       ).status,
     ).toBe(422);
+    const outsideRepository = join(root, "outside-repository");
+    await mkdir(outsideRepository);
+    execFileSync("git", ["clone", "--quiet", repo, outsideRepository], { env });
+    const outsidePatch = join(root, "outside.patch");
+    await writeFile(outsidePatch, execFileSync("git", ["diff", base, head], { cwd: repo, env }));
+    for (const source of [
+      { kind: "git", repository: outsideRepository, base, head },
+      { kind: "patch", path: outsidePatch },
+    ]) {
+      const denied = await call("save_guided_review", {
+        ...save,
+        source,
+        expectedSource:
+          source.kind === "patch"
+            ? { kind: "patch", sha256: patch.patch.sha256 }
+            : { ...expectedSource, gitDirectory: join(outsideRepository, ".git") },
+        idempotencyKey: `outside-${source.kind}`,
+      });
+      expect(denied.status).toBe(422);
+      expect(await denied.json()).toMatchObject({ error: "tracker_refused" });
+    }
+    await expect(
+      createLocalTracker({ directory }).call(
+        "save_guided_review",
+        { ...save, idempotencyKey: "missing-source-authority" },
+        {
+          actor: { type: "agent-worker", id: "fixture-worker", onBehalfOf: [] },
+        },
+      ),
+    ).rejects.toThrow(/source.*author|author.*source/i);
     for (const invalid of [
       {
         ...save,
