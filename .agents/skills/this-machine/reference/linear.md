@@ -145,3 +145,22 @@ a one-minute interval; honor refusal retry times. Automated operator scripts use
 `clankie linear read TOOL --json-stdin --background`; fleet polls use
 `clankie_call({name, arguments, background: true})`. Ordinary owner and lead reads,
 writes and webhook context retain priority within the hard cap.
+
+### Deferred tools and CLI diagnostics
+
+The CLI's `linear read` and `linear graphql` use the connected directory's
+`mcp_tool_call`; absence from the initial flat tool list does not mean refusal.
+Doctor checks that same operator catalog and credential audience, without running
+a provider query. `linearGraphql.scope: "operator_connected_catalog"` names that
+scope; it grants nothing to a worker or project lead. Typed
+`lane_tool_unavailable` / `project_grant_tool_denied` responses retain lane and
+service readiness. Never route around a project fence with GraphQL.
+
+Read project updates with `get_status_updates` arguments
+`{type:"project",project:"PROJECT-UUID",limit:1}`; the key is `project`, not
+`projectId`. In an admitted native bridge, discover with `mcp_tool_search` and
+call `mcp_tool_call({name:"linear_get_status_updates",arguments:{...}})`.
+Workers use their `clankie_tools` / `clankie_call` pair. Publishing uses
+`linear_save_status_update` with `{type:"project",project,body,health?}`;
+`health` is `onTrack`, `atRisk` or `offTrack`. Add `id` only when replacing the
+complete body after reading it. A supported route does not authorize a post.

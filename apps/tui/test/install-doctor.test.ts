@@ -222,14 +222,18 @@ describe("install doctor", () => {
     expect(JSON.stringify(disabled)).not.toContain("isolated-doctor-fixture");
   });
 
-  it("reports whether linear_graphql has an app credential and which actor it runs as", async () => {
+  it("does not report GraphQL usable from credentials alone when the CLI lane is unavailable", async () => {
     const root = await installRoot();
     const credentials = new FileCredentialStore(join(root, "credentials.json"));
     const inspect = () =>
       inspectInstall({
         repoRoot: root,
         env: {
-          HOME: join(root, "home"),
+          HOME: root,
+          XDG_DATA_HOME: join(root, "data"),
+          XDG_STATE_HOME: join(root, "xdg-state"),
+          XDG_CACHE_HOME: join(root, "cache"),
+          XDG_RUNTIME_DIR: join(root, "runtime"),
           XDG_CONFIG_HOME: join(root, "config"),
           CLANKIE_STATE: join(root, "state"),
         },
@@ -243,6 +247,7 @@ describe("install doctor", () => {
     const mcpOnly = await inspect();
     expect(mcpOnly.linearGraphql).toEqual({
       usable: false,
+      reason: "graphql_credential_unavailable",
       detail: "connect the Linear API app from /connect linear",
     });
     expect(formatDoctorReport(mcpOnly)).toContain(
@@ -266,16 +271,11 @@ describe("install doctor", () => {
       },
     });
     const connected = await inspect();
-    expect(connected.linearGraphql).toEqual({
-      usable: true,
-      credential: "linear-api",
-      actor: "app",
-      account: "Clankie",
-      workspace: "Vuhlp",
+    expect(connected.linearGraphql).toMatchObject({
+      usable: false,
+      reason: "lane_credential_unavailable",
     });
-    expect(formatDoctorReport(connected)).toContain(
-      "✓ Linear GraphQL · runs as Clankie (app) in Vuhlp · linear-api",
-    );
+    expect(formatDoctorReport(connected)).toContain("○ Linear GraphQL · unavailable");
     expect(JSON.stringify(connected)).not.toContain("isolated-doctor-access");
   });
 

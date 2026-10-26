@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "receipts.tar",
+      "size": 27136,
+      "sha256": "a890b4e76117b0d5c65652fe3d133982d88f15b3f60d55b90bede164cc8fcbe1",
+      "url": "clankie://evidence/sha256/a890b4e76117b0d5c65652fe3d133982d88f15b3f60d55b90bede164cc8fcbe1"
+    }
+  ]
+}

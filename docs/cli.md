@@ -1931,7 +1931,12 @@ printf '%s' '{"query":"mutation($id:String!){documentDelete(id:$id){success}}","
   | clankie linear graphql --json-stdin
 ```
 
-`clankie doctor` shows whether it is usable and which app account it runs as.
+`clankie doctor` checks the same CLI operator lane's connected catalog and the
+local credential audience. `linearGraphql.usable: true` has
+`scope: "operator_connected_catalog"`: the tool is exposed there; it does not
+prove a provider query succeeded or that a worker or project lead has that grant.
+An unavailable catalog or lane credential reports `usable: false` with a reason.
+The app account fields identify the configured credential, not a fresh viewer query.
 It needs the Linear API app (`linear-api`) or a workspace app connected as `linear`;
 the MCP OAuth token cannot call Linear's GraphQL API.
 
@@ -1964,13 +1969,29 @@ observations remain explicit. These fixed limits need no owner setup.
 
 Read through the connected Linear tool bank using JSON arguments on stdin.
 Use `--background` for automated polling; owner reads default to interactive
-priority. The fleet equivalent is `clankie_call({name, arguments, background: true})`.
+priority. Reads and GraphQL dispatch through `mcp_tool_call`, so deferred tools
+are reachable without adding their schemas to the initial tool list. A missing
+tool returns a typed `lane_tool_unavailable` or `project_grant_tool_denied`
+refusal with the lane and service readiness; it never expands the grant.
+The fleet equivalent is `clankie_call({name, arguments, background: true})`.
 Background markers do not grant authority or downgrade writes. Each logical
 read gets its own admission and may finish its provider pages. For example:
 
 ```sh
 printf '%s' '{"team":"VUH"}' | clankie linear read list_issues --json-stdin --background
 ```
+
+For project updates, use `get_status_updates` with
+`{"type":"project","project":"PROJECT-UUID","limit":1}` (`project`, not
+`projectId`). In an admitted native connected bridge, discover schemas with
+`mcp_tool_search({names:["linear_get_status_updates","linear_save_status_update"]})`
+and call `mcp_tool_call({name:"linear_get_status_updates",arguments:{type:"project",project:"PROJECT-UUID",limit:1}})`.
+Fleet workers use `clankie_tools` and `clankie_call` with the same qualified names.
+Creation uses `linear_save_status_update` with `{type:"project",project,body,health?}`;
+`health` is `onTrack`, `atRisk` or `offTrack`. Replacement adds `id` and replaces
+the complete body, so read first. These are connected Clankie routes; project
+fences and room mutation refusals remain in force. Arbitrary GraphQL stays
+unavailable to a project-fenced lead.
 
 Initial account setup and OAuth token endpoint calls are outside the connected
 Linear request counter; GraphQL identity verification during a connected app's

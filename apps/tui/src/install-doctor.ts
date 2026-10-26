@@ -1,3 +1,4 @@
+import { inspectLinearGraphqlLane } from "./command/linear.ts";
 import { readVoiceProviderReadiness } from "@clankie/discord-presence-core";
 import {
   autonomyDrift,
@@ -171,16 +172,17 @@ export interface InstallDoctorReport {
     readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";
     readonly directory?: string;
   };
-  /** Whether `linear_graphql` has a GraphQL-audience app credential; nothing is probed. */
+  /** Credential audience plus the same connected catalog used by the CLI; no query is executed. */
   readonly linearGraphql?:
     | {
         readonly usable: true;
+        readonly scope: "operator_connected_catalog";
         readonly credential: string;
         readonly actor: "app";
         readonly account: string;
         readonly workspace: string;
       }
-    | { readonly usable: false; readonly detail: string };
+    | { readonly usable: false; readonly detail: string; readonly reason?: string };
   readonly mcpServers: readonly string[];
   readonly credentials: readonly InstallDoctorCredential[];
   /**
@@ -337,22 +339,35 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   // Mirrors the service's selection: the registered API app, then a workspace
   // app stored as `linear`. MCP OAuth is audience-restricted and never qualifies.
   const linearGraphql: NonNullable<InstallDoctorReport["linearGraphql"]> = await (async () => {
-    if (linearServer?.enabled === false) return { usable: false, detail: "Linear is disabled" };
+    if (linearServer?.enabled === false)
+      return { usable: false, reason: "linear_disabled", detail: "Linear is disabled" };
     for (const [id, auth] of [
       [LINEAR_API_PROVIDER_ID, "api"],
       [LINEAR_PROVIDER_ID, "app"],
     ] as const) {
       const stored = await credentialStore.get(id).catch(() => undefined);
-      if (stored?.type === "oauth" && stored.linearAuth === auth && stored.account?.actor === "app")
+      if (stored?.type === "oauth" && stored.linearAuth === auth && stored.account?.actor === "app") {
+        const lane = await inspectLinearGraphqlLane({
+          env,
+          credentials: credentialStore,
+          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        });
+        if (!lane.usable) return lane;
         return {
           usable: true,
+          scope: lane.scope,
           credential: id,
           actor: "app",
           account: stored.account.name,
           workspace: stored.account.workspaceName,
         };
+      }
     }
-    return { usable: false, detail: "connect the Linear API app from /connect linear" };
+    return {
+      usable: false,
+      reason: "graphql_credential_unavailable",
+      detail: "connect the Linear API app from /connect linear",
+    };
   })();
   const linear = linearFollowStatus(
     settings.linearWebhook,

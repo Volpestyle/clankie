@@ -177,7 +177,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
       ? []
       : [
           report.linearGraphql.usable
-            ? `  ✓ Linear GraphQL · runs as ${clean(report.linearGraphql.account)} (app) in ${clean(report.linearGraphql.workspace)} · ${report.linearGraphql.credential}`
+            ? `  ✓ Linear GraphQL · CLI operator catalog · configured app ${clean(report.linearGraphql.account)} in ${clean(report.linearGraphql.workspace)} · ${report.linearGraphql.credential}`
             : `  ○ Linear GraphQL · unavailable · ${clean(report.linearGraphql.detail)}`,
         ]),
     ...(report.discordRoomDelivery && "rooms" in report.discordRoomDelivery

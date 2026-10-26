@@ -223,16 +223,26 @@ function serviceDirectoryTools(
         additionalProperties: false,
       },
       async call(args) {
-        const byName = new Map((await refresh()).map((tool) => [tool.qualifiedName, tool]));
-        const tool = typeof args.name === "string" ? byName.get(args.name) : undefined;
+        const catalog = await deps.mcp.catalog(lane);
+        const candidate = catalog.find(
+          (tool) => tool.qualifiedName === args.name && tool.server !== "minecraft",
+        );
+        const grantDenied =
+          candidate !== undefined && serviceAccess !== undefined && !serviceAccess.allows(candidate);
+        const tool = grantDenied ? undefined : candidate;
         if (tool === undefined) {
           return {
-            content: [
-              {
-                type: "text",
-                text: `No connected tool named ${String(args.name)}. Search with mcp_tool_search.`,
-              },
-            ],
+            content: toolJson({
+              outcome: "refused",
+              reason: grantDenied ? "project_grant_tool_denied" : "lane_tool_unavailable",
+              lane,
+              tool: String(args.name),
+              services: await status(),
+              possiblyDispatched: false,
+              detail: grantDenied
+                ? "This project lead grant does not expose that connected tool. Arbitrary GraphQL cannot prove the target project."
+                : "This lane's connected catalog does not expose that tool. Check mcp_tool_search for server readiness; lane and credential constraints still apply.",
+            }).content,
             isError: true,
           };
         }
