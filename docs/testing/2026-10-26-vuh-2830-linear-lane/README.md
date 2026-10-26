@@ -60,5 +60,15 @@ TUI source and all four test typecheck partitions passed. Root landing and
 exact-patch standing review are reported separately on the issue. GLOBAL owns
 integration, rollout and installed same-context doctor/query acceptance.
 
+The first two root-gate failures are retained locally as
+`.local/vuh-2830/landing-first-failed.log` (doctor discarded a connection-close
+error) and `landing-second-failed.log` (fixture called an HTTP-only method on
+Hono's server union). The doctor now reports close failures explicitly. Installed
+`@hono/node-server` 2.0.8 declares `ServerType` as HTTP, HTTP/2 or secure HTTP/2;
+the fixture follows `lane-mcp.test.ts` by checking `"closeAllConnections" in server`
+before calling it, while retaining `server.close` callback error propagation.
+The two corrections are retained in `.local/vuh-2830/cleanup-correction.diff`
+and `fixture-lifecycle-correction.diff`. These failed gates are not green proof.
+
 The receipts are bundled in [receipts.tar](clankie://evidence/sha256/a890b4e76117b0d5c65652fe3d133982d88f15b3f60d55b90bede164cc8fcbe1), published by `clankie evidence push`; only this README and
 `evidence.json` belong in Git.

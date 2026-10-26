@@ -143,7 +143,7 @@ it("reaches deferred Linear reads through the CLI without widening room or crede
     () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
-        server.closeAllConnections();
+        if ("closeAllConnections" in server) server.closeAllConnections();
       }),
   );
   await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
