@@ -505,6 +505,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     primeStatus: () => readPrimeAccounts(),
     fleet: async (id) => (await refreshFleets()).find((entry) => entry.id === id),
     ...(deps.fleets?.shell === undefined ? {} : { shell: deps.fleets.shell }),
+    get signal() {
+      return shutdown.signal;
+    },
   });
   // A linked fleet that just failed its census is skipped (reported unknown)
   // until a background probe answers, rather than costing every census its

@@ -411,6 +411,8 @@ export async function readMachineWorkerAccounts(
     readonly now?: number;
     /** This Mac rather than a linked machine. */
     readonly local?: boolean;
+    /** A stopped runtime must not persist an observation after its state directory is handed over. */
+    readonly signal?: AbortSignal;
   } = {},
 ): Promise<MachineWorkerAccounts> {
   const harnesses = options.harnesses ?? WORKER_ACCOUNT_HARNESSES;
@@ -439,6 +441,7 @@ export async function readMachineWorkerAccounts(
       ),
     };
   }
+  options.signal?.throwIfAborted();
   const missing = (parsed.missing ?? []).filter((harness) => harnesses.includes(harness));
   return {
     machine: fleet.id,
@@ -827,6 +830,8 @@ export function createWorkerAccountsReader(options: {
   readonly primeStatus?: () => readonly WorkerAccountStatus[];
   readonly fleet: (id: string) => Promise<HerdrFleet | undefined>;
   readonly shell?: (fleet: HerdrFleet) => FleetShellRun;
+  /** Aborted when the owning runtime closes; later reads fail instead of writing the registry. */
+  readonly signal?: AbortSignal;
 }) {
   const registry = harnessAccountIdentities(options.identityPath);
   const readAccounts = async (
@@ -841,7 +846,12 @@ export function createWorkerAccountsReader(options: {
     const holds = current.workerAccountHolds
       .filter((hold) => names.has(hold.machine))
       .map((hold) => ({ ...hold, machine }));
-    const read = { registry, holds, ...(harnesses === undefined ? {} : { harnesses }) };
+    const read = {
+      registry,
+      holds,
+      ...(harnesses === undefined ? {} : { harnesses }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    };
     const local =
       fleetId === undefined ||
       options.localFleet?.(fleetId) === true ||
@@ -905,6 +915,7 @@ export function createWorkerAccountsReader(options: {
     harnesses?: readonly WorkerAccountHarness[],
   ): Promise<MachineWorkerAccounts> => {
     const read = await readAccounts(fleetId, harnesses);
+    options.signal?.throwIfAborted();
     registry.deliver(options.notifyIdentityChange);
     const report = {
       ...read,
