@@ -101,13 +101,27 @@ without retaining raw media or secrets. The viewer caps sound scheduling at
 
 ## Official SDK viewer
 
-`GET /.proxy/activity/config` selects explicit `official` or local mode. Official
+`GET /.proxy/activity/config` reports the mode for this request. The default is
+`shares`: only a fragment share grant opens media. Official
 mode requires an application ID and loads the bundled `/activity-client.js`
 through the same proxy. The shipped Embedded App SDK runs ready, authorize and
 authenticate. `POST /.proxy/activity/admit {code,instanceId}` returns trusted
 `{session,grant,expiresAt,mediaPath,accessToken}`; the viewer sends the grant as
 its first WebSocket message. SDK guild/channel claims and fragments confer no
 hosted scope. Config/admission failure never opens legacy media.
+
+## Local dev viewer
+
+The anonymous legacy `/frames` and `/.proxy/frames` stream is a development
+aid. It opens only with `CLANKIE_ACTIVITY_LOCAL_VIEWER=1` (`viewerMode:
+{mode:"local"}`), and then only to a direct loopback request: a loopback peer,
+a loopback `Host`, a loopback or absent `Origin`, and no proxy headers
+(`cf-connecting-ip`, `cf-ray`, `x-forwarded-*`, `forwarded`, `x-real-ip`,
+`true-client-ip`). cloudflared connects from loopback but adds those headers,
+so a tunnelled viewer gets `{mode:"shares"}` and needs a grant. Without the
+flag, the `http://127.0.0.1:4320` watch link and `pnpm viewer-probe` are
+refused too. Pending share admissions are capped at 64 in total and four per
+client, keyed by `cf-connecting-ip` behind the tunnel.
 
 The private HTTP viewer projection releases its bounded registry slot on
 response cancellation. Its grant form keeps the delegated grant's expiry;
@@ -239,10 +253,10 @@ distinguishes three states an operator repairs differently:
 
 ## Two listeners, on purpose
 
-| Listener | Bind      | Exposure                        | Purpose                                             |
-| -------- | --------- | ------------------------------- | --------------------------------------------------- |
-| Viewer   | tunnelled | public directly and via Discord | serves the client and `/.proxy/frames` media socket |
-| Producer | 127.0.0.1 | loopback only, never tunnelled  | `/producer` media ingress                           |
+| Listener | Bind      | Exposure                        | Purpose                                            |
+| -------- | --------- | ------------------------------- | -------------------------------------------------- |
+| Viewer   | tunnelled | public directly and via Discord | serves the client and grant-admitted media sockets |
+| Producer | 127.0.0.1 | loopback only, never tunnelled  | `/producer` media ingress                          |
 
 The producer endpoint is a **separate listener**, not a path on the viewer
 server. A producer path mounted on the tunnelled server would be reachable by

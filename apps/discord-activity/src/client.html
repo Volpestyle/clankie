@@ -832,6 +832,9 @@
               },
               Math.max(0, Date.parse(admitted.expiresAt) - Date.now()),
             );
+          } else if (config.mode === "shares") {
+            // Without the explicit loopback dev mode, only a share grant opens media.
+            if (!scoped) throw new Error("activity_grant_required");
           } else if (config.mode !== "local") throw new Error("activity_configuration_invalid");
           if (!lifetime.signal.aborted) connect();
         } catch {

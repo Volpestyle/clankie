@@ -143,7 +143,7 @@ function browser(html: string, port: number, hash: string) {
     AudioContext,
     URLSearchParams,
     AbortController,
-    fetch: async () => ({ ok: true, json: async () => ({ mode: "local" }) }),
+    fetch: (path: string, init?: RequestInit) => fetch(`http://127.0.0.1:${port}${path}`, init),
     atob: (value: string) => Buffer.from(value, "base64").toString("binary"),
     setInterval() {},
     setTimeout: (callback: () => void) => reconnects.push(callback),
@@ -245,10 +245,25 @@ it("a scoped launch with missing admission never opens the public legacy stream"
   }
 });
 
+it("without the loopback dev mode, a viewer with no share grant never opens the legacy stream", async () => {
+  const activity = createDiscordActivityServer({ hub: new RenderedSurfaceHub() });
+  const port = await activity.listen(0);
+  let view: ReturnType<typeof browser> | undefined;
+  try {
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    view = browser(html, port, "");
+    await vi.waitFor(() => expect(view!.get("empty-title").textContent).toBe("Access unavailable"));
+    expect(view.sockets).toEqual([]);
+  } finally {
+    view?.close();
+    await activity.close();
+  }
+});
+
 it("keeps legacy game media compatible and resets delayed decoding on producer replacement", async () => {
   const hub = new RenderedSurfaceHub();
   const producer = createFrameProducerServer({ hub, token: "control" });
-  const activity = createDiscordActivityServer({ hub });
+  const activity = createDiscordActivityServer({ hub, viewerMode: { mode: "local" } });
   const p = await producer.listen(0),
     v = await activity.listen(0);
   const old = new WebSocket(`ws://127.0.0.1:${p}/producer`, { headers: { authorization: "Bearer control" } });

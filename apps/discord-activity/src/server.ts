@@ -26,8 +26,15 @@ export interface DiscordActivityServerOptions {
   shares?: ActivityShareRegistry;
   /** Unauthenticated sockets cannot hold an unbounded admission queue. */
   maxPendingViewers?: number;
+  /** One client cannot take the whole admission queue for itself. */
+  maxPendingViewersPerClient?: number;
   admissionTimeoutMs?: number;
-  /** Official hosting never exposes the public legacy compatibility stream. */
+  /**
+   * Viewers arrive through share grants by default. Official hosting adds the
+   * Discord SDK admission. `local` is an explicit development mode that opens
+   * the legacy unauthenticated `/frames` stream, and only to a direct loopback
+   * request: a tunnelled, proxied or cross-origin request still needs a grant.
+   */
   viewerMode?: { mode: "official"; applicationId: string } | { mode: "local" };
 }
 
@@ -40,8 +47,13 @@ export interface DiscordActivityServer {
 export function createDiscordActivityServer(options: DiscordActivityServerOptions): DiscordActivityServer {
   const { hub } = options;
   const maxPendingViewers = bounded(options.maxPendingViewers ?? 64, 64);
+  const maxPendingPerClient = bounded(
+    options.maxPendingViewersPerClient ?? Math.min(4, maxPendingViewers),
+    maxPendingViewers,
+  );
   const admissionTimeoutMs = bounded(options.admissionTimeoutMs ?? 5_000, 5_000);
   let pendingViewers = 0;
+  const pendingByClient = new Map<string, number>();
   const maxPayload = bounded(options.maxPayloadBytes ?? 16 * 1024, 16 * 1024);
   const wss = new WebSocketServer({
     noServer: true,
@@ -62,16 +74,22 @@ export function createDiscordActivityServer(options: DiscordActivityServerOption
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     const share = /^\/(?:\.proxy\/)?(?:activity\/)?shares\/([a-f0-9-]+)\/frames$/u.exec(path);
     if (share !== null && options.shares !== undefined) {
-      if (pendingViewers >= maxPendingViewers) {
+      const client = clientKey(request);
+      const clientPending = pendingByClient.get(client) ?? 0;
+      if (pendingViewers >= maxPendingViewers || clientPending >= maxPendingPerClient) {
         socket.destroy();
         return;
       }
       pendingViewers += 1;
+      pendingByClient.set(client, clientPending + 1);
       let counted = true;
       const releasePending = () => {
         if (!counted) return;
         counted = false;
         pendingViewers -= 1;
+        const remaining = (pendingByClient.get(client) ?? 1) - 1;
+        if (remaining > 0) pendingByClient.set(client, remaining);
+        else pendingByClient.delete(client);
       };
       // An invalid WebSocket handshake may never call handleUpgrade's
       // callback; its TCP close still releases the bounded admission slot.
@@ -81,7 +99,7 @@ export function createDiscordActivityServer(options: DiscordActivityServerOption
       });
       return;
     }
-    if (!FRAME_PATHS.has(path) || options.viewerMode?.mode === "official") {
+    if (!FRAME_PATHS.has(path) || effectiveViewerMode(options, request).mode !== "local") {
       socket.destroy();
       return;
     }
@@ -182,6 +200,73 @@ function attachShareViewer(
   socket.on("error", cleanup);
 }
 
+type EffectiveViewerMode =
+  | { mode: "official"; applicationId: string }
+  | { mode: "local" }
+  | { mode: "shares" };
+
+function effectiveViewerMode(
+  options: DiscordActivityServerOptions,
+  request: IncomingMessage,
+): EffectiveViewerMode {
+  const mode = options.viewerMode;
+  if (mode?.mode === "official") return mode;
+  if (mode?.mode === "local" && isDirectLoopbackRequest(request)) return mode;
+  return { mode: "shares" };
+}
+
+/**
+ * Headers a reverse proxy or tunnel adds. cloudflared connects from loopback,
+ * so the peer address alone cannot tell a tunnelled viewer from a local one.
+ */
+const FORWARDING_HEADERS = [
+  "forwarded",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+  "true-client-ip",
+  "cf-connecting-ip",
+  "cf-ray",
+  "cf-visitor",
+];
+
+function isDirectLoopbackRequest(request: IncomingMessage): boolean {
+  if (!isLoopbackAddress(request.socket.remoteAddress)) return false;
+  if (FORWARDING_HEADERS.some((name) => request.headers[name] !== undefined)) return false;
+  if (!isLoopbackHostname(hostnameOf(`http://${request.headers.host ?? ""}`))) return false;
+  // A browser page on another site may open a loopback WebSocket; its Origin says so.
+  const origin = request.headers.origin;
+  return origin === undefined || isLoopbackHostname(hostnameOf(origin));
+}
+
+function hostnameOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLoopbackHostname(hostname: string | undefined): boolean {
+  if (hostname === undefined) return false;
+  return hostname === "localhost" || hostname === "[::1]" || isLoopbackAddress(hostname);
+}
+
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (address === undefined) return false;
+  const v4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+  return v4 === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(v4);
+}
+
+/** Behind the tunnel every peer is loopback; Cloudflare names the real client. */
+function clientKey(request: IncomingMessage): string {
+  const forwarded = request.headers["cf-connecting-ip"];
+  return typeof forwarded === "string" && forwarded.length > 0 && forwarded.length <= 64
+    ? `cf:${forwarded}`
+    : `peer:${request.socket.remoteAddress ?? "unknown"}`;
+}
+
 function bounded(value: number, maximum: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) throw new Error("invalid_viewer_limit");
   return value;
@@ -196,7 +281,7 @@ async function serveRequest(
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
   if (request.method === "GET" && (path === "/activity/config" || path === "/.proxy/activity/config")) {
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    response.end(JSON.stringify(options.viewerMode ?? { mode: "local" }));
+    response.end(JSON.stringify(effectiveViewerMode(options, request)));
     return;
   }
   if (request.method === "GET" && (path === "/activity-client.js" || path === "/.proxy/activity-client.js")) {

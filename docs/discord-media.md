@@ -127,9 +127,12 @@ The local process has two listeners:
 The production hostname is `https://activity.clankie.bot`. The Discord
 Developer Portal Activity URL Mapping and Entry Point must target that HTTPS
 origin, while `~/.cloudflared/config.yml` maps only the viewer hostname to
-`http://127.0.0.1:4320`. Never expose port 4322. The public viewer is
-unauthenticated: anyone who can reach the hostname can see the current retained
-frame.
+`http://127.0.0.1:4320`. Never expose port 4322. Public viewers need a share
+grant or official admission: the server refuses an unauthenticated media socket.
+The legacy anonymous `/frames` stream opens only in the explicit loopback dev
+mode (`CLANKIE_ACTIVITY_LOCAL_VIEWER=1`), and then only to direct loopback
+requests; tunnelled, proxied or cross-origin requests still need a grant
+([VUH-2594](https://linear.app/vuhlp/issue/VUH-2594)).
 
 Use `clankie restart activity`, `clankie restart tunnel`, and `clankie health`
 for the launcher-owned services. A public `502` means the Cloudflare edge is
