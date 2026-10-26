@@ -244,7 +244,8 @@ export function trackerToolsFor(
     return {
       catalog: () => TRACKER_TOOLS,
       async call(name, args, callbacks) {
-        if (local === undefined || SAVED_ISSUE_VIEW_TOOLS.has(name)) refuseBuiltInTrackerFeatures(name, args);
+        if (local === undefined || SAVED_ISSUE_VIEW_TOOLS.has(name) || GUIDED_REVIEW_TOOLS.has(name))
+          refuseBuiltInTrackerFeatures(name, args);
         const scoped =
           name === "list_issues" ||
           name === "search_issues" ||

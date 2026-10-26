@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import { expect, it } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
-import { createLocalTracker, readReviewDiff, readReviewPatch } from "@clankie/work-items";
+import { createLocalTracker, readReviewDiff, readReviewPatch, trackerToolsFor } from "@clankie/work-items";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import type { GuidedReviewRecord } from "../../../packages/work-items/src/tracker-local.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
@@ -242,6 +242,20 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
     await stop();
     host = await start();
     expect(await cli("review", "show", saved.id, "--issue", issue.id)).toEqual(current);
+    for (const backend of ["linear", "markdown"] as const) {
+      const unsupported = trackerToolsFor(
+        repo,
+        {
+          schemaVersion: 1,
+          backend,
+          decidedBy: "owner",
+          decidedAt: new Date().toISOString(),
+          ...(backend === "linear" ? { linear: { team: "LOCAL" } } : { directory: "tasks" }),
+        },
+        { actor: { type: "agent-worker", id: "fixture-worker", onBehalfOf: [] } },
+      );
+      await expect(unsupported.call("save_guided_review", save)).rejects.toThrow(/built-in tracker/);
+    }
     expect(await cli("review", "show", patchSaved.id, "--issue", issue.id)).toEqual(patchSaved);
     const before = JSON.parse(await readFile(join(directory, "tracker.json"), "utf8"));
     expect((await call("get_guided_review", { issueId: foreignIssue.id, id: saved.id })).status).toBe(422);
