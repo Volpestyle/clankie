@@ -317,43 +317,45 @@ export async function inspectLinearGraphqlLane(options: {
 > {
   let upstream: LaneToolUpstream | undefined;
   try {
-    const credential = await resolveOperatorCredential({ env: options.env, store: options.credentials });
-    if (!credential)
-      return {
-        usable: false,
-        reason: "lane_credential_unavailable",
-        detail: "No credential for the CLI operator lane; use the admitted connected bridge.",
-      };
-    upstream = await connectLaneUpstream({
-      host: commandHost({ env: options.env }),
-      bearer: credential.token,
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-    });
-    const result = await upstream.callTool("mcp_tool_search", { names: ["linear_graphql"] });
-    const catalog = z
-      .object({ tools: z.array(z.object({ name: z.string() })) })
-      .safeParse(decodeMcpResult(result));
-    if (result.isError || !catalog.success)
-      return {
-        usable: false,
-        reason: "lane_catalog_unavailable",
-        detail: "The CLI operator lane did not return a connected catalog.",
-      };
-    if (!catalog.data.tools.some((tool) => tool.name === "linear_graphql"))
-      return {
-        usable: false,
-        reason: "lane_tool_unavailable",
-        detail:
-          "linear_graphql is absent from this CLI operator lane's connected catalog; lane grants, server readiness or credential audience may restrict it. Use mcp_tool_search in the admitted connected bridge for its own scope.",
-      };
-    return { usable: true, scope: "operator_connected_catalog" };
+    try {
+      const credential = await resolveOperatorCredential({ env: options.env, store: options.credentials });
+      if (!credential)
+        return {
+          usable: false,
+          reason: "lane_credential_unavailable",
+          detail: "No credential for the CLI operator lane; use the admitted connected bridge.",
+        };
+      upstream = await connectLaneUpstream({
+        host: commandHost({ env: options.env }),
+        bearer: credential.token,
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      });
+      const result = await upstream.callTool("mcp_tool_search", { names: ["linear_graphql"] });
+      const catalog = z
+        .object({ tools: z.array(z.object({ name: z.string() })) })
+        .safeParse(decodeMcpResult(result));
+      if (result.isError || !catalog.success)
+        return {
+          usable: false,
+          reason: "lane_catalog_unavailable",
+          detail: "The CLI operator lane did not return a connected catalog.",
+        };
+      if (!catalog.data.tools.some((tool) => tool.name === "linear_graphql"))
+        return {
+          usable: false,
+          reason: "lane_tool_unavailable",
+          detail:
+            "linear_graphql is absent from this CLI operator lane's connected catalog; lane grants, server readiness or credential audience may restrict it. Use mcp_tool_search in the admitted connected bridge for its own scope.",
+        };
+      return { usable: true, scope: "operator_connected_catalog" };
+    } finally {
+      await upstream?.close();
+    }
   } catch (error) {
     return {
       usable: false,
       reason: "lane_catalog_unavailable",
       detail: `CLI operator lane catalog unavailable: ${error instanceof Error ? error.message : String(error)}`,
     };
-  } finally {
-    await upstream?.close().catch(() => undefined);
   }
 }
