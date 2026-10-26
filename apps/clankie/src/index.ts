@@ -1296,7 +1296,15 @@ const integrationUpdates =
         updater: installedUpdater,
         holds: deployHolds,
         path: join(process.env.HOME || homedir(), ".clankie", "updates", "integration-wait.json"),
-        onGaveUp: (message) => void captain.notifyRuntimeHealthAlert(message).catch(() => undefined),
+        onGaveUp: (message) =>
+          void captain
+            .notifyRuntimeHealthAlert(message)
+            .catch((error: unknown) =>
+              logger.warn(
+                { event: "runtime.update.integration_wait", error },
+                "Lead alert was not delivered",
+              ),
+            ),
         onError: (error) =>
           logger.warn({ event: "runtime.update.integration_wait", error }, "Runtime update is waiting"),
       })

@@ -72,6 +72,7 @@ export async function updateCommit(
     const fetchMain = async () =>
       run("git", ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"], checkout);
     if (ref.length < 40) {
+      // allow-swallowed-rejection -- an unreachable origin falls back to local objects; the lookup below still refuses an unknown ref
       await fetchMain().catch(() => undefined);
       resolvedRef = await commit();
     } else {

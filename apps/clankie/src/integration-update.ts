@@ -91,7 +91,7 @@ export function integrationSafeUpdates(options: {
           { guard },
         )
         .catch(async (error: unknown) => {
-          await failed(error).catch(() => undefined);
+          await failed(error).catch(options.onError);
           throw error;
         });
     })()
