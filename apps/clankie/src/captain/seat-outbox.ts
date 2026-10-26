@@ -117,11 +117,19 @@ export class SeatLinkInterruptedError extends Error {
 
 export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
   | { readonly outcome: "delivered"; readonly messageId?: string }
-  | { readonly outcome: "replied"; readonly text: string }
+  /** `coveredBy` names the newer event whose one answer also closes this one; its text posts there. */
+  | { readonly outcome: "replied"; readonly text: string; readonly coveredBy?: string }
   | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string }
-  | { readonly outcome: "unbound" }
+  /** `takeover`: the seat held its lane, then went silent past the hold; the service lane may run it. */
+  | { readonly outcome: "unbound"; readonly takeover?: true }
   | { readonly outcome: "aborted" }
 );
+
+/** A held lane went silent with work waiting, so the service lane takes over (VUH-2874). */
+export interface SeatTakeover {
+  readonly lastAskAt: number;
+  readonly silentForMs: number;
+}
 
 export interface SeatBridgeStateChange {
   readonly from: OperatorSeatBridgeStatus["state"];
@@ -149,6 +157,12 @@ export interface SeatDeliveryInput {
   readonly wantsReply: boolean;
   /** A supplied native binding pins every source to its original recipient. */
   readonly recipientBinding?: string;
+  /**
+   * Escalations sharing this key that wait together reach the seat as one
+   * event, and a reply to the newer one also answers the older ones the seat
+   * already holds (VUH-2874). Each keeps its own receipt.
+   */
+  readonly coalesce?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -174,6 +188,9 @@ interface Pending {
   readonly fingerprint: string;
   readonly holdUntilTurnEnd: boolean;
   readonly exactRecipient: boolean;
+  readonly coalesce?: string;
+  /** Older escalations this event carried to the seat; its ack and reply settle them too. */
+  covers?: Pending[];
   readonly onAdmitted?: SeatDeliveryInput["onAdmitted"];
   admission?: "started" | "steered";
   readonly event: OperatorSeatEvent;
@@ -221,6 +238,12 @@ export class SeatOutbox {
   private readonly onBridgeIssue: ((detail: string) => void) | undefined;
   private readonly onDeliveryEvent: ((event: SeatDeliveryEvent) => void) | undefined;
   private readonly onBridgeState: ((change: SeatBridgeStateChange) => void) | undefined;
+  private readonly onTakeover: ((takeover: SeatTakeover) => void) | undefined;
+  private readonly laneHoldMs: number;
+  /** When a seat last asked for events, before or after proving its source. */
+  private lastAskAt: number | undefined;
+  /** This silence has already been reported as a takeover. */
+  private tookOver = false;
   private observedState: OperatorSeatBridgeStatus["state"] = "disconnected";
   private stateTimer: ReturnType<typeof setTimeout> | undefined;
   private lastPollAt: number | undefined;
@@ -375,12 +398,23 @@ export class SeatOutbox {
       readonly onDeliveryEvent?: (event: SeatDeliveryEvent) => void;
       /** One call per bridge state change, for the service log (VUH-2036). */
       readonly onBridgeState?: (change: SeatBridgeStateChange) => void;
+      /**
+       * How long a seat that keeps asking holds its lane between polls,
+       * including a poll still waiting for admission (VUH-2874). Deliveries
+       * wait for it instead of running on the service lane. Defaults to 0:
+       * only a parked poll and the bound grace hold it.
+       */
+      readonly laneHoldMs?: number;
+      /** The held lane went silent with work waiting; called once per silence. */
+      readonly onTakeover?: (takeover: SeatTakeover) => void;
     } = {},
   ) {
     this.onUnresolved = options.onUnresolved;
     this.onBridgeIssue = options.onBridgeIssue;
     this.onDeliveryEvent = options.onDeliveryEvent;
     this.onBridgeState = options.onBridgeState;
+    this.onTakeover = options.onTakeover;
+    this.laneHoldMs = options.laneHoldMs ?? 0;
     this.fence = new DeliveryFence(options.uncertaintyPath);
     this.delivered = new DeliveryFence(
       options.uncertaintyPath === undefined ? undefined : `${options.uncertaintyPath}.delivered`,
@@ -568,7 +602,7 @@ export class SeatOutbox {
    */
   public routesToSeat(content: string, messageId?: string): boolean {
     return (
-      (this.bound() && this.usageLimited() === undefined) ||
+      (this.holdsLane() && this.usageLimited() === undefined) ||
       this.conflict({ content, ...(messageId === undefined ? {} : { messageId }) }) !== undefined
     );
   }
@@ -673,6 +707,44 @@ export class SeatOutbox {
   }
 
   /**
+   * The seat holds its lane while bound, while a poll is still proving its
+   * source or waiting for admission, and while it asked within the lane hold.
+   * A held lane takes this conversation's input; the service lane runs it
+   * only after an explicit takeover (VUH-2874).
+   */
+  public holdsLane(): boolean {
+    return this.bound() || this.remainingLaneHoldMs() > 0;
+  }
+
+  /**
+   * Input reaches this seat without waiting behind the conversation's other
+   * runs: it is bound, or holds its lane with no poll still waiting for
+   * admission. Such input is stored at the seat until the next poll takes it.
+   */
+  public takesInput(): boolean {
+    return this.bound() || (this.arriving === 0 && this.holdsLane());
+  }
+
+  private remainingLaneHoldMs(): number {
+    if (this.closed || this.laneHoldMs <= 0 || this.lastAskAt === undefined) return 0;
+    if (this.arriving > 0) return this.laneHoldMs;
+    return Math.max(0, this.lastAskAt + this.laneHoldMs - this.now());
+  }
+
+  /** True when a held lane lapsed; the first such delivery records the takeover. */
+  private takeover(): boolean {
+    if (this.laneHoldMs <= 0 || this.lastAskAt === undefined) return false;
+    if (this.tookOver) return true;
+    this.tookOver = true;
+    try {
+      this.onTakeover?.({ lastAskAt: this.lastAskAt, silentForMs: this.now() - this.lastAskAt });
+    } catch {
+      /* The record is diagnostic; the takeover itself proceeds. */
+    }
+    return true;
+  }
+
+  /**
    * A poll has asked and is proving its source before it parks. Deliveries
    * meanwhile wait for it instead of settling unbound: a ~10s proof against an
    * unreachable machine otherwise read as the seat leaving (VUH-2245). The
@@ -681,6 +753,7 @@ export class SeatOutbox {
    */
   public pollArriving(): () => void {
     this.arriving += 1;
+    this.asked();
     let released = false;
     return () => {
       if (released) return;
@@ -740,7 +813,7 @@ export class SeatOutbox {
     const parkedPoll = this.pollers.size > 0;
     const lastPollAgeMs = this.lastPollAt === undefined ? undefined : this.now() - this.lastPollAt;
     const observed = { parkedPoll, ...(lastPollAgeMs === undefined ? {} : { lastPollAgeMs }) };
-    if ((!this.bound() && this.arriving === 0) || this.usageLimited() !== undefined) {
+    if ((!this.holdsLane() && this.arriving === 0) || this.usageLimited() !== undefined) {
       this.deliveryEvent({ eventId: "", source: input.source, outcome: "unbound", ...observed });
       return Promise.resolve({ outcome: "unbound", deliveryStage: "unavailable" });
     }
@@ -797,6 +870,7 @@ export class SeatOutbox {
         fingerprint,
         holdUntilTurnEnd: input.delivery === "queue",
         exactRecipient: input.original !== undefined,
+        ...(input.coalesce === undefined || input.kind !== "escalation" ? {} : { coalesce: input.coalesce }),
         ...(input.onAdmitted === undefined ? {} : { onAdmitted: input.onAdmitted }),
         event,
         wantsReply: input.wantsReply,
@@ -850,7 +924,9 @@ export class SeatOutbox {
       input.signal?.addEventListener("abort", onAbort, { once: true });
       const waitForReceiver = (): void => {
         const waitMs =
-          this.pollers.size > 0 || this.arriving > 0 ? this.boundGraceMs : this.remainingGraceMs();
+          this.pollers.size > 0 || this.arriving > 0
+            ? this.boundGraceMs
+            : Math.max(this.remainingGraceMs(), Math.min(this.boundGraceMs, this.remainingLaneHoldMs()));
         pending.timer = setTimeout(() => {
           if (pending.taken || pending.settled) return;
           // An arriving poll takes it once its source proof parks it.
@@ -861,13 +937,21 @@ export class SeatOutbox {
             // A turn that went quiet releases its hold on the next check.
             this.wakePoller();
             if (!pending.taken && !pending.settled) waitForReceiver();
-          } else pending.settle({ outcome: "unbound" });
+          } else if (this.holdsLane()) waitForReceiver();
+          else if (this.takeover()) pending.settle({ outcome: "unbound", takeover: true });
+          else pending.settle({ outcome: "unbound" });
         }, waitMs);
         pending.timer.unref?.();
       };
       waitForReceiver();
       this.queued.push(pending);
-      if (pending.holdUntilTurnEnd && this.turnHolds()) pending.onAdmitted?.("queued");
+      // Waiting for a turn to end, or for a seat that holds its lane between
+      // polls, is storage at the seat; a parked or arriving poll takes it now.
+      if (
+        (pending.holdUntilTurnEnd && this.turnHolds()) ||
+        (this.pollers.size === 0 && this.arriving === 0 && !this.bound())
+      )
+        pending.onAdmitted?.("queued");
       this.wakePoller();
     });
   }
@@ -882,6 +966,7 @@ export class SeatOutbox {
     if (this.closed) return Promise.resolve([]);
     // The seat is back: from here, its own polls decide whether it is bound.
     this.reconnectUntil = undefined;
+    this.asked();
     const changed = JSON.stringify(this.lastCapabilities) !== JSON.stringify(capabilities);
     this.lastCapabilities = capabilities;
     this.lastBridgePollAt = this.now();
@@ -951,8 +1036,25 @@ export class SeatOutbox {
       if (!this.matchesRecipient(pending, recipientBinding)) return false;
       if (!pending.acknowledged) this.ackPending(pending);
     }
+    // One answer, with the later message in view, closes the older ones the
+    // seat already holds. Each keeps its own receipt; the text posts once.
+    for (const older of this.coveredBy(pending, recipientBinding))
+      older.settle({ outcome: "replied", text, coveredBy: eventId });
     pending.settle({ outcome: "replied", text });
     return true;
+  }
+
+  private coveredBy(pending: Pending, recipientBinding?: string): Pending[] {
+    if (pending.coalesce === undefined) return [];
+    const carried = new Set(pending.covers ?? []);
+    return [...this.awaitingReply.values()].filter(
+      (older) =>
+        older !== pending &&
+        !older.settled &&
+        older.coalesce === pending.coalesce &&
+        (carried.has(older) ||
+          (older.startedAt <= pending.startedAt && this.matchesRecipient(older, recipientBinding))),
+    );
   }
 
   /**
@@ -1051,6 +1153,11 @@ export class SeatOutbox {
     return Math.max(reconnect, elapsed < this.boundGraceMs ? this.boundGraceMs - elapsed : 0);
   }
 
+  private asked(): void {
+    this.lastAskAt = this.now();
+    this.tookOver = false;
+  }
+
   /** Durable evidence that a seat is polling, read by the next service after a restart. */
   private recordPresence(recipientBinding: string | undefined): void {
     if (this.presencePath === undefined) return;
@@ -1109,6 +1216,9 @@ export class SeatOutbox {
     }
     if (pending.admission !== undefined) pending.onAdmitted?.(pending.admission);
     if (pending.timer !== undefined) clearTimeout(pending.timer);
+    // One wire event carried them; its ack is theirs.
+    for (const member of pending.covers ?? [])
+      if (!member.acknowledged && !member.settled) this.ackPending(member);
     if (!pending.wantsReply) {
       pending.settle({ outcome: "delivered", messageId: pending.event.id });
       return;
@@ -1127,9 +1237,11 @@ export class SeatOutbox {
   }
 
   private take(recipientBinding?: string, capabilities?: OperatorSeatCapabilities): OperatorSeatEvent[] {
-    const taken = [...this.queued];
+    // The owner is heard first; wakes, watches and reports follow (VUH-2874).
+    const taken = [...this.queued].sort((left, right) => ownerFirst(left) - ownerFirst(right));
     const events: OperatorSeatEvent[] = [];
     for (const pending of taken) {
+      if (pending.taken || pending.settled) continue;
       if (!this.matchesRecipient(pending, recipientBinding)) {
         pending.settle({ outcome: "unbound" });
         continue;
@@ -1147,6 +1259,23 @@ export class SeatOutbox {
         pending.settle({ outcome: "unbound" });
         continue;
       }
+      // Same-channel escalations waiting together go as one event under the
+      // newest one's id: one input, one answer (VUH-2874).
+      const group =
+        pending.coalesce === undefined
+          ? [pending]
+          : this.queued.filter(
+              (candidate) =>
+                candidate.coalesce === pending.coalesce &&
+                !candidate.taken &&
+                !candidate.settled &&
+                this.matchesRecipient(candidate, recipientBinding),
+            );
+      const primary = group[group.length - 1]!;
+      if (primary !== pending) {
+        // The newest carries the group; it is next in this same pass.
+        continue;
+      }
       // Project only declared fields. The Oct 6 bridge has a strict schema.
       const origin = original.ownerOrigin;
       const wire: OperatorSeatEvent = {
@@ -1157,34 +1286,40 @@ export class SeatOutbox {
         source: original.source,
         createdAt: original.createdAt,
         content:
-          fallback && origin
-            ? fitSeatChannel(
-                `[Owner app turn from ${origin.surfaceClientId}; ${origin.principal.kind} ${origin.principal.id}, verified by the service.]\n\n${original.content}`,
-              )
-            : original.content,
+          group.length > 1
+            ? coalescedContent(group)
+            : fallback && origin
+              ? fitSeatChannel(
+                  `[Owner app turn from ${origin.surfaceClientId}; ${origin.principal.kind} ${origin.principal.id}, verified by the service.]\n\n${original.content}`,
+                )
+              : original.content,
         ...(capabilities?.ownerOrigin && !fallback && origin ? { ownerOrigin: origin } : {}),
       };
-      this.queued.splice(this.queued.indexOf(pending), 1);
       // Expiry only stops a quiet turn blocking delivery; it never proves the seat idle.
-      pending.admission = this.turnActive ? "steered" : "started";
+      const admission = this.turnActive ? "steered" : "started";
       this.turnGeneration += 1;
       this.turnActive = true;
       this.turnObservedAt = this.now();
-      pending.taken = true;
-      pending.takenAt = this.now();
-      if (pending.timer !== undefined) clearTimeout(pending.timer);
-      this.inFlight.push(pending);
-      pending.timer = setTimeout(
-        () =>
-          pending.settle({
-            outcome: "unconfirmed",
-            messageId: pending.event.id,
-            detail:
-              "The bridge took the event but did not acknowledge it; inspect the seat before resending.",
-          }),
-        this.ackTimeoutMs,
-      );
-      pending.timer.unref?.();
+      for (const member of group) {
+        this.queued.splice(this.queued.indexOf(member), 1);
+        member.admission = admission;
+        member.taken = true;
+        member.takenAt = this.now();
+        if (member.timer !== undefined) clearTimeout(member.timer);
+        this.inFlight.push(member);
+        member.timer = setTimeout(
+          () =>
+            member.settle({
+              outcome: "unconfirmed",
+              messageId: member.event.id,
+              detail:
+                "The bridge took the event but did not acknowledge it; inspect the seat before resending.",
+            }),
+          this.ackTimeoutMs,
+        );
+        member.timer.unref?.();
+      }
+      if (group.length > 1) pending.covers = group.slice(0, -1);
       events.push(wire);
     }
     if (events.length > 0) this.lastPollAt = this.now();
@@ -1210,6 +1345,25 @@ export class SeatOutbox {
     const ready = this.take(first.recipientBinding, first.capabilities);
     if (ready.length > 0) first.finish(ready, "wake");
   }
+}
+
+/** Owner turns and escalations sort ahead of wakes, watches and reports. */
+function ownerFirst(pending: Pending): number {
+  return pending.event.kind === "escalation" || pending.event.kind === "turn" ? 0 : 1;
+}
+
+/** One input for owner messages that waited together; each stays attributed, oldest first. */
+function coalescedContent(group: readonly Pending[]): string {
+  const primary = group[group.length - 1]!;
+  return fitSeatChannel(
+    [
+      `[${String(group.length)} owner messages from the same channel arrived together, oldest first. Later messages are context for earlier ones. Answer once, with all of them in view, by replying to event_id ${primary.event.id}; that one answer closes every message here.]`,
+      ...group.map(
+        (member, index) =>
+          `--- Message ${String(index + 1)} of ${String(group.length)} (event ${member.event.id}, ${member.event.createdAt}) ---\n${member.event.content}`,
+      ),
+    ].join("\n\n"),
+  );
 }
 
 function readAlerted(path: string | undefined): readonly string[] {

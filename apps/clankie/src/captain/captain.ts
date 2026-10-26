@@ -390,6 +390,12 @@ const HEAD_BOUND_GRACE_MS = 30_000;
 /** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
 const HEAD_ACK_TIMEOUT_MS = 2_000;
 /**
+ * A head that keeps asking holds its lane this long without a parked poll:
+ * past one bridge timeout (35s) and its retry (5s). Only longer silence lets
+ * the service lane take over, and that takeover is recorded (VUH-2874).
+ */
+const HEAD_LANE_HOLD_MS = 45_000;
+/**
  * The longest a routine worker report or completion waits for an idle native
  * lead seat's next round. On 2026-10-13 replaying the seat's own events at 10
  * minutes halved the turns that woke it from idle (VUH-2274).
@@ -1407,6 +1413,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : {
               boundGraceMs: options.headBoundGraceMs ?? HEAD_BOUND_GRACE_MS,
               ackTimeoutMs: HEAD_ACK_TIMEOUT_MS,
+              laneHoldMs: options.headLaneHoldMs ?? HEAD_LANE_HOLD_MS,
+              onTakeover: ({ lastAskAt, silentForMs }) => {
+                if (!shutdown.signal.aborted)
+                  conversations.recordServiceNotice(
+                    conversationId,
+                    `Clankie's service lane took over this conversation: its seat last asked for events at ${new Date(lastAskAt).toISOString()} and stayed silent for ${String(Math.round(silentForMs / 1000))}s with input waiting.`,
+                  );
+              },
             }),
         startedAt: serviceStartedAt,
         onBridgeIssue: (detail) => {
@@ -2045,6 +2059,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   const durablePiRoom = new DurablePiRoom(join(options.stateDir, "durable-pi-room"), options.durablePiRoom);
   const roomLoops = new RoomLoops(options.roomLoop);
+  /** Linked-channel request ids by native event id, so a covered request names the reply that answered it. */
+  const linkedOwnerDeliveries = new Map<string, string>();
 
   function seatEventKind(
     conversationId: string,
@@ -2316,7 +2332,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       console.warn("Lead continuation report could not be retained", id, String(error));
     }
   };
-  conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.bound() === true;
+  conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.takesInput() === true;
   // Only an idle native seat gains from waiting: a turn already running hears
   // reports for free, and the service lane is not woken per report.
   conversations.reportRoundMs = (id) => {
@@ -6849,7 +6865,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 childId: admittedChild.conversationId,
               });
           },
-          async () => {
+          async (release) => {
             const child = admittedChild!;
             if (child.roomHandoff?.state !== "pending") {
               burst?.close();
@@ -6864,6 +6880,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 const { discord, plan, owner, sender, key, access, mainConversation } = await resolveGrant();
                 if (mainConversation) {
                   burst?.close();
+                  // It only waits for the main answer now; its room slot goes to the next message.
+                  release();
                   const mainId = conversations.defaultGlobalConversationId();
                   const turnId = child.conversationId;
                   const executor = conversations.nativeSource(mainId)?.agent ?? headSeat?.harness;
@@ -6894,10 +6912,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       attachments: request.trigger.attachments,
                     }),
                   ].join("\n\n");
-                  const completed = await conversations.replyToLinkedChannel(mainId, content, {
-                    messageId,
-                    guard,
-                  });
+                  linkedOwnerDeliveries.set(messageId, request.deliveryId);
+                  const completed = await conversations
+                    .replyToLinkedChannel(mainId, content, {
+                      messageId,
+                      guard,
+                      coalesce: `discord-main:${request.trigger.channelId}`,
+                    })
+                    .finally(() => {
+                      // Requests it covered may settle a moment later and still look it up.
+                      setTimeout(() => linkedOwnerDeliveries.delete(messageId), 60_000).unref?.();
+                    });
+                  if (completed.coveredBy !== undefined) {
+                    // Answered by the one reply to a newer message from this channel (VUH-2874).
+                    const replyDeliveryId = linkedOwnerDeliveries.get(completed.coveredBy);
+                    return {
+                      state: "absorbed",
+                      captainSessionId: mainId,
+                      turnId,
+                      deliveryStage: completed.deliveryStage ?? "responded",
+                      ...(replyDeliveryId === undefined ? {} : { replyDeliveryId }),
+                    };
+                  }
                   const result = roomSeatTurnResult(
                     completed.response === undefined
                       ? completed.deliveryStage === "uncertain"

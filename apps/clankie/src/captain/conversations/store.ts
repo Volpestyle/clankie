@@ -2094,14 +2094,22 @@ export class ConversationStore {
       readonly guard: () => Promise<void>;
       /** Which owner surface asked: a linked Discord channel, or a device call (VUH-2682). */
       readonly surfaceClientId?: "discord-main" | "voice-call";
+      /** Requests from one channel waiting together reach a native seat as one input (VUH-2874). */
+      readonly coalesce?: string;
     },
-  ): Promise<{ readonly response?: string; readonly deliveryStage?: DeliveryStage }> {
+  ): Promise<{
+    readonly response?: string;
+    readonly deliveryStage?: DeliveryStage;
+    /** The native seat answered this together with that newer request. */
+    readonly coveredBy?: string;
+  }> {
     const meta = this.metas.get(conversationId);
     if (meta?.scope.kind !== "global" || !meta.isDefault)
       throw new Error("Linked owner channels require the main conversation");
     await input.guard();
     let response: string | undefined;
     let deliveryStage: DeliveryStage | undefined;
+    let coveredBy: string | undefined;
     const accepted = this.enqueue(
       meta,
       message,
@@ -2119,7 +2127,13 @@ export class ConversationStore {
           },
           {
             ...context,
-            nativeOriginal: { messageId: input.messageId },
+            nativeOriginal: {
+              messageId: input.messageId,
+              ...(input.coalesce === undefined ? {} : { coalesce: input.coalesce }),
+            },
+            deliveryCovered: (by) => {
+              coveredBy = by;
+            },
             deliveryReceipt: (stage) => {
               deliveryStage = stage;
               context.deliveryReceipt?.(stage);
@@ -2137,6 +2151,7 @@ export class ConversationStore {
     return {
       ...(response === undefined ? {} : { response }),
       ...(deliveryStage === undefined ? {} : { deliveryStage }),
+      ...(coveredBy === undefined ? {} : { coveredBy }),
     };
   }
 

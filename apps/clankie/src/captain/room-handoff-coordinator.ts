@@ -25,12 +25,18 @@ export class RoomHandoffCoordinator<T> {
     signal.addEventListener("abort", () => this.drain(), { once: true });
   }
 
+  /**
+   * `execute` may call `release` once its work runs elsewhere and it only
+   * waits, like a linked main-conversation message: its slot goes to the next
+   * request, so the owner's later messages never queue behind earlier
+   * answers (VUH-2874).
+   */
   public submit(
     roomId: string,
     id: string,
     fingerprint: string,
     admit: () => void,
-    execute: () => Promise<T>,
+    execute: (release: () => void) => Promise<T>,
   ): Promise<T> {
     const existing = this.deliveries.get(id);
     if (existing !== undefined) {
@@ -60,19 +66,25 @@ export class RoomHandoffCoordinator<T> {
         }
         this.active += 1;
         this.roomActive.set(roomId, (this.roomActive.get(roomId) ?? 0) + 1);
+        let held = true;
+        const release = (): void => {
+          if (!held) return;
+          held = false;
+          this.active -= 1;
+          const remaining = (this.roomActive.get(roomId) ?? 1) - 1;
+          if (remaining === 0) this.roomActive.delete(roomId);
+          else this.roomActive.set(roomId, remaining);
+          this.drain();
+        };
         const run = Promise.resolve()
           .then(() => {
             this.signal.throwIfAborted();
-            return execute();
+            return execute(release);
           })
           .then(resolve, reject)
           .finally(() => {
-            this.active -= 1;
-            const remaining = (this.roomActive.get(roomId) ?? 1) - 1;
-            if (remaining === 0) this.roomActive.delete(roomId);
-            else this.roomActive.set(roomId, remaining);
             this.running.delete(run);
-            this.drain();
+            release();
           });
         this.running.add(run);
       });

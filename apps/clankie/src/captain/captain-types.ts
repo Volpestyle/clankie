@@ -100,6 +100,8 @@ export interface CaptainOptions {
   ) => Promise<import("@clankie/protocol/auto-rounds").AutoWorkQueue>;
   /** How long an operator head stays held after a completed poll; defaults to 30s (VUH-2045). */
   readonly headBoundGraceMs?: number;
+  /** How long a head that keeps asking holds its lane between polls (VUH-2874). */
+  readonly headLaneHoldMs?: number;
   /**
    * How long a routine worker report or completion waits for an idle native
    * lead's next round (VUH-2274). The service passes `REPORT_ROUND_MS`;

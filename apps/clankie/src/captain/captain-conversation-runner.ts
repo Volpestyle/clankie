@@ -217,7 +217,17 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                       : {}),
                   }
                 : {}),
-              ...(context.delivery === undefined ? {} : { delivery: context.delivery }),
+              // The owner never waits behind a long native turn: a seat hears
+              // a linked-channel request mid-turn (VUH-2874). The service lane
+              // still runs it as its own queued turn, which carries its reply.
+              ...(kind === "escalation" && context.nativeOriginal !== undefined
+                ? { delivery: "steer" as const }
+                : context.delivery === undefined
+                  ? {}
+                  : { delivery: context.delivery }),
+              ...(context.nativeOriginal?.coalesce === undefined
+                ? {}
+                : { coalesce: context.nativeOriginal.coalesce }),
               onAdmitted: (state) => {
                 if (state === "queued") queuedAtSeat = true;
                 context.deliveryOutcome?.({ state });
@@ -257,10 +267,13 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
               });
             if (delivery.deliveryStage !== undefined && delivery.outcome !== "unbound")
               context.deliveryReceipt?.(delivery.deliveryStage);
-            if (delivery.outcome === "replied") {
+            if (delivery.outcome === "replied" && delivery.coveredBy !== undefined)
+              context.deliveryCovered?.(delivery.coveredBy);
+            else if (delivery.outcome === "replied") {
               publish({ type: "message", role: "captain", text: delivery.text, streaming: false });
             }
-            if (delivery.outcome === "unbound" && queuedAtSeat) {
+            // A recorded takeover hands even stored input to the service lane (VUH-2874).
+            if (delivery.outcome === "unbound" && queuedAtSeat && delivery.takeover !== true) {
               context.deliveryOutcome?.({
                 state: "rejected",
                 detail: "The channel disconnected before taking this message. Nothing was sent.",

@@ -408,7 +408,9 @@ export function seatEventKindFor(
   isHeadConversation: boolean,
 ): OperatorSeatEventKind | undefined {
   if (context.internal === true) {
-    if (context.origin === "hook") return "wake";
+    // An internal input (a question resolved elsewhere) is a host observation:
+    // it must reach a live seat, never run beside it (VUH-2874).
+    if (context.origin === "hook" || context.origin === "input") return "wake";
     if (context.origin === "wake" || context.origin === "watch" || context.origin === "message")
       return context.origin;
     return undefined;

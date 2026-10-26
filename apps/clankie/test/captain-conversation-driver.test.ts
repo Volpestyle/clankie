@@ -110,7 +110,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture(pendingOwnerAction = false, headBoundGraceMs?: number) {
+async function fixture(pendingOwnerAction = false, headBoundGraceMs?: number, headLaneHoldMs?: number) {
   const root = mkdtempSync(join(tmpdir(), "captain-conversation-driver-"));
   if (pendingOwnerAction) {
     const store = new ConversationStore(join(root, "conversations"), async () => {});
@@ -149,6 +149,7 @@ async function fixture(pendingOwnerAction = false, headBoundGraceMs?: number) {
     settings: new SettingsStore(join(root, "settings.json")),
     personaImages: async () => ({ images: [], hash: "fake", files: [] }),
     ...(headBoundGraceMs === undefined ? {} : { headBoundGraceMs }),
+    ...(headLaneHoldMs === undefined ? {} : { headLaneHoldMs }),
     nativeCensusRunner: async (_command, args) => {
       // Use the same current native identity as agent/get. A stored worker
       // report needs fresh census proof, not an empty display-only fixture.
@@ -531,8 +532,9 @@ it("an attaching project waits for its admitted Pi answer, then receives queued 
 
 it("a definite native refusal resumes the project service runner once", async () => {
   // A head that completed a poll keeps its hold through acknowledgment gaps
-  // (30s by default, VUH-2045); this case is about what follows its lapse.
-  const { captain, id, journal, send } = await fixture(false, 2_000);
+  // (30s by default, VUH-2045) and its lane while it keeps asking (45s,
+  // VUH-2874); this case is about what follows their lapse.
+  const { captain, id, journal, send } = await fixture(false, 2_000, 2_000);
   // Establish then leave a poll within its grace without taking the send.
   expect(await captain.pollSeatEvents(1, undefined, id)).toEqual([]);
   expect(await send("Resume after the seat left")).toMatchObject({
@@ -548,6 +550,13 @@ it("a definite native refusal resumes the project service runner once", async ()
   );
   expect(fake.prompts).toHaveLength(1);
   expect(fake.prompts[0]).toContain("Resume after the seat left");
+  // The takeover is explicit in the conversation, not silent.
+  expect(journal.read(id)).toContainEqual(
+    expect.objectContaining({
+      type: "message",
+      text: expect.stringContaining("Clankie's service lane took over this conversation"),
+    }),
+  );
   expect(await captain.pollSeatEvents(0, undefined, id)).toEqual([]);
 });
 

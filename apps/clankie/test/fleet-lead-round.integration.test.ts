@@ -220,8 +220,10 @@ async function fixture(
         fleetRoundIntervalMs: roundMs,
         ...(fleetResources ? { fleetResources } : {}),
         // These cases park a seat with one short poll and expect it gone within
-        // the original 2s; the 30s head hold has its own coverage (VUH-2045).
+        // the original 2s; the 30s head hold (VUH-2045) and the lane hold
+        // (VUH-2874) have their own coverage.
         headBoundGraceMs: 2_000,
+        headLaneHoldMs: 0,
         workerReportBridgeStatus: (_fleet, pane) => reportHealth?.get(pane),
         ...(remote?.fleetEfficiencyDeadlineMs === undefined
           ? {}
