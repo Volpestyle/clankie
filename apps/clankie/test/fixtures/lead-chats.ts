@@ -61,7 +61,7 @@ export async function leadChatFixture(
   await seeded.close();
   const sessionId = randomUUID();
   const prefix = remote ? "pc/" : "";
-  const head: HerdrAgentSnapshot = {
+  let head: HerdrAgentSnapshot = {
     paneId: `${prefix}w4:p2`,
     terminalId: `${prefix}term_work`,
     agent: "claude",
@@ -78,6 +78,17 @@ export async function leadChatFixture(
     title: "Clankie Work",
     agent_session: { ...head.session! },
     cwd: root,
+  };
+  /** The pane's occupant changes, as when a relaunch starts a new session in it (VUH-2860). */
+  const occupy = (next: { sessionId: string; terminalId?: string }) => {
+    const terminal = next.terminalId ?? "term_work";
+    head = {
+      ...head,
+      terminalId: `${prefix}${terminal}`,
+      session: { ...head.session!, value: next.sessionId },
+    };
+    wire.terminal_id = terminal;
+    wire.agent_session = { ...head.session! };
   };
   const herdrResponse = (args: readonly string[]) => {
     wire.agent_status = options.nativeStatus?.() ?? "idle";
@@ -225,6 +236,7 @@ export async function leadChatFixture(
     open,
     leads,
     head,
+    occupy,
     bridge,
     messageSeat,
     workerDelivery,

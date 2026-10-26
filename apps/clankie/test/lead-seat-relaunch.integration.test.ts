@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   createLeadSeatRelaunch,
   readClaudeSessionUsage,
@@ -11,6 +12,7 @@ import {
 } from "../src/captain/lead-seat-relaunch.ts";
 import { ConversationStore } from "../src/captain/conversations/store.ts";
 import { paneInputLine } from "../src/captain/pane-draft.ts";
+import { capabilities, leadChatFixture } from "./fixtures/lead-chats.ts";
 
 // ADR 0271 (VUH-2274): the lead seat restarts fresh in its own pane. The old
 // harness is a real process the relaunch must end with a real signal; Herdr's
@@ -20,6 +22,7 @@ const golden = (state: string) =>
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
+  vi.restoreAllMocks();
 });
 
 async function fixture(
@@ -318,6 +321,78 @@ it("leaves an uncertain receipt, and launches nothing, when the old session will
     outcome: "uncertain",
     detail: "The old session was signalled; no new launch is recorded.",
   });
+});
+
+// VUH-2860: the first live relaunch (receipt 3f20b480) started a new session in
+// the lead's pane, but the conversation's stored source still named the session
+// it ended. The service's own seat lookup refused the new session, so every hire
+// failed and the receipt stayed `launching`. This drives that lookup itself.
+it("attaches a relaunch's new session in the same terminal by its open receipt, and refuses it without one", async () => {
+  const f = await leadChatFixture(false, cleanup, { nativeSourceProof: true });
+  const work = f.leads[1]!;
+  const poll = () => f.captain.pollSeatEvents(50, undefined, work, capabilities);
+  const source = async () =>
+    (
+      JSON.parse(await readFile(join(f.root, "conversations", work, "meta.json"), "utf8")) as {
+        nativeSource?: { terminalId: string; session?: { value: string } };
+      }
+    ).nativeSource;
+  await poll();
+  const ended = f.head.session!.value;
+  expect(await source()).toMatchObject({ terminalId: "term_work", session: { value: ended } });
+
+  // The relaunched session runs in the pane. With no receipt it is refused, as before.
+  const next = randomUUID();
+  f.occupy({ sessionId: next });
+  await poll();
+  expect((await source())?.session?.value).toBe(ended);
+
+  // The receipt a relaunch leaves when its wait for the new session times out, in the live shape.
+  const journal = join(f.root, "lead-seat-relaunches.json");
+  const receiptId = randomUUID();
+  await writeFile(
+    journal,
+    JSON.stringify({
+      schemaVersion: 1,
+      receipts: [
+        {
+          receiptId,
+          conversationId: work,
+          paneId: "w4:p2",
+          reason: "fresh_restart",
+          from: { harness: "claude" },
+          to: { harness: "claude" },
+          previousSessionId: ended,
+          startedAt: "2026-10-26T04:34:28.525Z",
+          stage: "launching",
+        },
+      ],
+      launches: {},
+    }),
+  );
+  const receipt = async () =>
+    (JSON.parse(await readFile(journal, "utf8")) as { receipts: unknown[] }).receipts.at(-1);
+
+  // The receipt proves only the stored source's own terminal.
+  f.occupy({ sessionId: next, terminalId: "term_other" });
+  await poll();
+  expect((await source())?.session?.value).toBe(ended);
+  expect(await receipt()).toMatchObject({ receiptId, stage: "launching" });
+
+  f.occupy({ sessionId: next });
+  await poll();
+  expect(await source()).toMatchObject({ terminalId: "term_work", session: { value: next } });
+  expect(await receipt()).toMatchObject({
+    receiptId,
+    stage: "relaunched",
+    sessionId: next,
+    seatId: "term_work",
+  });
+
+  // A settled receipt proves nothing further: a later session there is refused again.
+  f.occupy({ sessionId: randomUUID() });
+  await poll();
+  expect((await source())?.session?.value).toBe(next);
 });
 
 it("reads a Claude session's start and latest main-thread context, unknown after a compaction", async () => {

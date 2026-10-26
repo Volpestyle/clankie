@@ -507,6 +507,43 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         running.delete(input.conversationId);
       }
     },
+    /**
+     * The relaunch that proves `next` succeeds `previous`, the conversation's
+     * stored seat (VUH-2860): its latest receipt ended exactly that session and
+     * launched the target harness in that pane, and the same terminal now runs a
+     * different session of it. While the receipt is open any such session is
+     * the one it launched; once settled, only the session it recorded. Anything
+     * else, an unreadable journal included, is no proof.
+     */
+    successorReceipt(conversationId: string, previous: LeadSeatPane, next: LeadSeatPane): string | undefined {
+      if (
+        previous.paneId !== next.paneId ||
+        previous.terminalId !== next.terminalId ||
+        previous.sessionId === undefined ||
+        next.sessionId === undefined ||
+        next.sessionId === previous.sessionId
+      )
+        return undefined;
+      let receipt: Receipt | undefined;
+      try {
+        receipt = read().receipts.findLast((entry) => entry.conversationId === conversationId);
+      } catch {
+        return undefined;
+      }
+      if (
+        receipt === undefined ||
+        receipt.paneId !== next.paneId ||
+        receipt.previousSessionId !== previous.sessionId ||
+        receipt.to.harness !== next.harness
+      )
+        return undefined;
+      if (receipt.stage === "launching") return receipt.receiptId;
+      return receipt.stage === "relaunched" &&
+        receipt.sessionId === next.sessionId &&
+        receipt.seatId === next.terminalId
+        ? receipt.receiptId
+        : undefined;
+    },
     /** Read-only: what became of a relaunch, never another attempt. */
     async reconcileLeadSeatRelaunch(receiptId: string): Promise<RelaunchLeadSeatResult> {
       const receipt = read().receipts.find((entry) => entry.receiptId === receiptId);

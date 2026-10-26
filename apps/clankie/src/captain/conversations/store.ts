@@ -475,6 +475,13 @@ export class ConversationStore {
     };
   }
   public linearFollowing: (() => Promise<boolean>) | undefined;
+  /**
+   * True when a lead relaunch receipt proves `next`, in the same pane and
+   * terminal, succeeds the conversation's stored native source (VUH-2860).
+   */
+  public relaunchSuccessor:
+    | ((conversationId: string, previous: HerdrAgentSnapshot, next: HerdrAgentSnapshot) => boolean)
+    | undefined;
   /** Told when a question to the owner is asked or settled (the fleet room, VUH-2184). */
   public onQuestionChange:
     | ((change: {

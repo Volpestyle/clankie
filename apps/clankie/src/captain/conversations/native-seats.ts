@@ -198,7 +198,11 @@ export function nativeConversationForSeat(
   return matches[0] === undefined ? undefined : publicConversation(matches[0]);
 }
 
-/** Existing authenticated transcript attachment, never a pane/title guess. */
+/**
+ * Existing authenticated transcript attachment, never a pane/title guess. A
+ * different session in the stored source's own terminal attaches only when a
+ * relaunch receipt proves it succeeds the stored session (VUH-2860).
+ */
 export function attachedConversationForNative(
   ctx: ConversationStore,
   source: HerdrAgentSnapshot,
@@ -214,11 +218,11 @@ export function attachedConversationForNative(
     if (meta.scope.kind !== "global" && meta.scope.kind !== "workspace" && meta.scope.kind !== "room")
       return false;
     const native = meta.nativeSource;
+    if (native && (native.paneId !== source.paneId || native.terminalId !== source.terminalId)) return false;
     if (
       native &&
-      (native.paneId !== source.paneId ||
-        native.terminalId !== source.terminalId ||
-        JSON.stringify(native.session) !== JSON.stringify(source.session))
+      JSON.stringify(native.session) !== JSON.stringify(source.session) &&
+      ctx.relaunchSuccessor?.(meta.conversationId, native, source) !== true
     )
       return false;
     return (

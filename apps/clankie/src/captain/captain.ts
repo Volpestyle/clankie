@@ -3822,7 +3822,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         !(await validateConversationOwner({ conversationId: report.conversationId }))
       )
         return undefined;
-      conversations.rememberNativeSource(report.conversationId, current);
+      await rememberOperatorSource(report.conversationId, current);
     }
     const health = toolCatalogHealth.record(identity, report, expected);
     fleetChanges.touch();
@@ -5426,18 +5426,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   // ADR 0271: the default lead seat restarts fresh in its own pane instead of
   // compacting for days. VUH-2273 moves a usage-limited seat with the same call.
+  const leadSeatPane = (source: HerdrAgentSnapshot) => {
+    const sessionId = nativeSessionId(source);
+    return {
+      paneId: source.paneId,
+      terminalId: source.terminalId,
+      harness: source.agent,
+      ...(sessionId === undefined ? {} : { sessionId }),
+    };
+  };
   const leadSeats = createLeadSeatRelaunch({
     journalPath: join(options.stateDir, "lead-seat-relaunches.json"),
     seat: async (conversationId) => {
       const source = await operatorNativeSource(conversationId);
-      if (source === undefined) return undefined;
-      const sessionId = nativeSessionId(source);
-      return {
-        paneId: source.paneId,
-        terminalId: source.terminalId,
-        harness: source.agent,
-        ...(sessionId === undefined ? {} : { sessionId }),
-      };
+      return source === undefined ? undefined : leadSeatPane(source);
     },
     paneShell: async (paneId) => {
       if (herdrRunner.paneShell === undefined) throw new Error("Herdr process info is unavailable");
@@ -5469,6 +5471,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ).outcome === "delivered",
     notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
   });
+  // VUH-2860: the stored source names the session a relaunch ended, so the new
+  // session in that terminal attaches only by that relaunch's receipt.
+  conversations.relaunchSuccessor = (conversationId, previous, next) =>
+    leadSeats.successorReceipt(conversationId, leadSeatPane(previous), leadSeatPane(next)) !== undefined;
+  /**
+   * Persist a conversation's proven native source. A relaunch's successor
+   * replaces the session it ended, and its receipt settles by the relaunch's own
+   * read-only reconciliation; a relaunch still waiting sees it and delivers its brief.
+   */
+  async function rememberOperatorSource(conversationId: string, source: HerdrAgentSnapshot): Promise<void> {
+    const previous = conversations.nativeSource(conversationId);
+    const receiptId =
+      previous === undefined
+        ? undefined
+        : leadSeats.successorReceipt(conversationId, leadSeatPane(previous), leadSeatPane(source));
+    conversations.rememberNativeSource(conversationId, source);
+    if (receiptId !== undefined)
+      await leadSeats.reconcileLeadSeatRelaunch(receiptId).catch((error: unknown) => {
+        console.warn("Lead relaunch reconciliation unavailable", receiptId, String(error));
+      });
+  }
   const leadFailover = createLeadSeatFailover({
     statePath: join(options.stateDir, "lead-seat-failover.json"),
     launcher: leadSeats,
@@ -7728,7 +7751,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               pollSignal.throwIfAborted();
               machineFleet = source === undefined ? undefined : splitFleetQualified(source.paneId)?.fleet;
               recipientBinding = inboundBinding(source);
-              if (source !== undefined) conversations.rememberNativeSource(binding.conversationId, source);
+              if (source !== undefined) await rememberOperatorSource(binding.conversationId, source);
               await admit();
             },
           )
