@@ -676,8 +676,15 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
   await session.gatewayReady();
   await session.voiceStateChanged(GUILD, true, { channelId: CHANNEL, occupants: [] });
   let mode: "act" | "refuse" | "lose" = "act";
+  let held: { reached: () => void; hold: Promise<void> } | undefined;
   const actions = {
     async execute(input: { action: string; callId: string }) {
+      if (input.action === "watch_start" && held !== undefined) {
+        const gate = held;
+        held = undefined;
+        gate.reached();
+        await gate.hold;
+      }
       if (mode === "refuse")
         return { ok: false, message: "I need to be in your admitted voice channel first." };
       const kind = input.action === "watch_start" ? "activity_start" : "activity_stop";
@@ -717,6 +724,14 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
     session,
     actions,
     setMode: (next: typeof mode) => (mode = next),
+    /** Delays the body's next watch_start until released. */
+    holdNextStart() {
+      let release!: () => void, reached!: () => void;
+      const hold = new Promise<void>((done) => (release = done));
+      const arrived = new Promise<void>((done) => (reached = done));
+      held = { reached, hold };
+      return { release, arrived };
+    },
   };
 }
 
@@ -856,3 +871,43 @@ it("a refused room launch ends its share; an uncertain one keeps it and is never
   expect(admitted.status).toBe(200);
   expect(admitted.body.session.shareId).toBe(uncertain.session.shareId);
 });
+
+// Adapted from the reviewer's probe: a launch whose body hop is still pending
+// cannot republish an invite or reopen admission after a later stop settles.
+it.each([{ turns: "the same turn" }, { turns: "separate turns" }] as const)(
+  "a stop during a pending room launch leaves no invite, share or admission ($turns)",
+  async ({ turns }) => {
+    const discord = discordRest();
+    const s = await stack({
+      presenceRuntime: new DiscordBotPresenceRuntime({
+        botToken: "fixture-bot",
+        rest: discord.rest as never,
+        activityApplicationIds: { gba_emulator: APP },
+      }),
+    });
+    const playSink = s.play.createSink("FireRed");
+    const body = await roomBody(s);
+    const starter = roomTool(s, body);
+    const stopper = turns === "the same turn" ? starter : roomTool(s, body);
+    const launch = body.holdNextStart();
+    const starting = starter.invoke({ action: "start", sourceId: "play" });
+    await launch.arrived;
+    const share = s.shares.stats()[0]!.shareId;
+    let stopSettled = false;
+    const stopping = stopper
+      .invoke({ action: "stop", shareId: share, generation: 1 })
+      .finally(() => (stopSettled = true));
+    // The stop waits for the pending launch rather than racing it.
+    await new Promise((done) => setTimeout(done, 200));
+    expect(stopSettled).toBe(false);
+    launch.release();
+    expect((await starting).receipt).toMatchObject({ outcome: "confirmed" });
+    expect(await stopping).toMatchObject({ stopped: true, receipt: { outcome: "confirmed" } });
+    await new Promise((done) => setTimeout(done, 100));
+    expect(discord.invites.size).toBe(0);
+    expect(s.shares.stats()).toHaveLength(0);
+    expect((await s.admit("member-code", "i-here")).status).toBe(403);
+    playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+    expect(s.shares.stats()).toHaveLength(0);
+  },
+);

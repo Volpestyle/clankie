@@ -38,8 +38,10 @@ body posts the invite through its `watch_start` action, whose presence write
 records the launch for admission. Its receipt is `confirmed`, `refused` (the
 share is ended) or `uncertain` (the body may have acted; the share is kept and
 nothing is resent). `stop` ends the share and revokes the invite through
-`watch_stop`. Local owner API/CLI requests can still create and switch
-delegated shares without an adapter.
+`watch_stop`. Room share operations run one at a time across turns, so a stop
+waits for a pending launch and no older launch can republish after it. Local
+owner API/CLI requests can still create and switch delegated shares without an
+adapter.
 
 ## Self-hosted official viewer
 

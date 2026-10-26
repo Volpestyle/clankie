@@ -71,7 +71,9 @@ admission configured, a room turn's `start` or `image` opens the share in the
 voice channel the bot occupies in that server and posts the invite through the
 room body's existing `watch_start` action, whose `activity_start` presence write
 records the launch above. No new launch authority exists; a transport failure
-is reported as uncertain, never resent.
+is reported as uncertain, never resent. Room share operations run whole and in
+order across turns, because the invite is posted outside the sharing queue: a
+stop waits for a pending launch, so no older launch republishes after it.
 
 A `#share` fragment still opens a delegated grant on a self-hosted viewer
 outside Discord. Hosted config never sets `delegated`, so hosted viewers keep
