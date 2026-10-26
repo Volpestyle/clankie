@@ -247,6 +247,7 @@ export async function createFleetResourceRuntime(input: {
       proof.processes.length === 0
     )
       throw owner("Simulator native process ownership is unavailable.");
+    // allow-swallowed-rejection -- Failed native activity reads confer no renewal; unknown evidence expires.
     const activity = await resolver.activity?.(before, request.holderId).catch(() => undefined);
     const after = await resolver.resolve(seatId);
     if (
@@ -476,6 +477,7 @@ export async function createFleetResourceRuntime(input: {
         )
       )
         return false;
+      // allow-swallowed-rejection -- Failed seat resolution rejects this activity admission below.
       const agent = await resolver?.resolve(pane).catch(() => undefined);
       const session = agent?.session;
       if (
@@ -486,6 +488,7 @@ export async function createFleetResourceRuntime(input: {
         return false;
       const owner = await runtime
         .proveSimulatorSeat({ seatId: pane, holderId: `claude:${hook.sessionId}` })
+        // allow-swallowed-rejection -- Unavailable ownership proof rejects this activity admission below.
         .catch(() => undefined);
       if (
         !owner ||
