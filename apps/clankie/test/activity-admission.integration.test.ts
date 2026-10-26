@@ -426,3 +426,48 @@ it("the authenticated presence route records the bot's launch and stop", async (
   expect(s.shares.stats()).toHaveLength(0);
   expect((await s.admit("member-code", "i-here")).status).toBe(403);
 });
+
+// Adapted from the reviewer's probe: a launch's cleanup never reaches media
+// granted under the launch that replaced it, and without a replacement the
+// second viewer shares the first viewer's opening.
+it.each([
+  { replacement: "none" },
+  { replacement: "relaunch" },
+  { replacement: "stop then relaunch" },
+] as const)(
+  "a fresh viewer keeps its stream when a held opening resolves ($replacement)",
+  async ({ replacement }) => {
+    const s = await stack();
+    const playSink = s.play.createSink("FireRed");
+    s.launches.launched(GUILD, CHANNEL);
+    const opening = s.hold("POST", "/shares");
+    const stale = s.admit("member-code", "i-here");
+    await opening.arrived;
+    const stopping = replacement === "stop then relaunch" ? s.launches.stopped(GUILD, CHANNEL) : undefined;
+    if (replacement !== "none") s.launches.launched(GUILD, CHANNEL);
+    const fresh = await s.admit("member-code", "i-here");
+    expect(fresh.status).toBe(200);
+    const socket = new WebSocket(`ws://127.0.0.1:${s.viewerPort}${fresh.body.mediaPath}`, {
+      headers: TUNNEL,
+    });
+    cleanup.push(() => socket.terminate());
+    const messages: Record<string, any>[] = [];
+    let closed: number | undefined;
+    socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    socket.on("close", (code) => (closed = code));
+    await new Promise<void>((done, reject) => {
+      socket.once("open", done);
+      socket.once("error", reject);
+    });
+    socket.send(JSON.stringify({ kind: "admit", grant: fresh.body.grant }));
+    await vi.waitFor(() => expect(messages[0]?.kind).toBe("session"));
+    opening.release();
+    expect((await stale).status).toBe(replacement === "none" ? 200 : 403);
+    await stopping;
+    expect(s.shares.stats()).toHaveLength(1);
+    playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+    await vi.waitFor(() => expect(messages.some((message) => message.kind === "frame")).toBe(true));
+    expect(messages.some((message) => message.kind === "stopped")).toBe(false);
+    expect(closed).toBeUndefined();
+  },
+);

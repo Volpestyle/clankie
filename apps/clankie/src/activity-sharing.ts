@@ -143,10 +143,16 @@ export class ActivitySharing {
   public async grantForDestination(
     guildId: string,
     channelId: string,
+    eligible: (shareId: string) => boolean = () => true,
   ): Promise<{ session: ActivityShareSession; grant: string; expiresAt: string }> {
     const admitted = async () => !this.closed;
     const session = (await this.sessions(admitted))
-      .filter((candidate) => candidate.scope.guildId === guildId && candidate.scope.channelId === channelId)
+      .filter(
+        (candidate) =>
+          candidate.scope.guildId === guildId &&
+          candidate.scope.channelId === channelId &&
+          eligible(candidate.shareId),
+      )
       .at(-1);
     if (session === undefined) throw new Error("activity_share_gone");
     await this.admit(session.scope, admitted);
