@@ -206,7 +206,9 @@ one uses separate APIs from `@clankie/protocol/model-keys`:
 
 Populate providers/methods from `methods` and models from the catalog. Current
 policy permits local ChatGPT browser/device sign-in and SuperGrok device-code
-sign-in on self-hosted bodies. Claude subscription sign-in is removed. Managed
+sign-in on self-hosted bodies. Claude subscription sign-in is removed; on a
+self-hosted Mac, [`clankie claude`](cli.md#seat-commands) seats Clankie in
+Claude Code on the owner's own plan instead. Managed
 bodies refuse all subscription sign-in and customer API keys; use AI credits.
 These APIs reuse `/auth`'s sign-in helpers; self-hosted API-key setup remains available.
 

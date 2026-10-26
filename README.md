@@ -47,7 +47,9 @@ checkouts do not install the app.
 
 `/setup` connects a model (subscription, API key, or local runtime), then
 offers phone pairing, account connections, and a first agent. Only the model is
-required.
+required. That model can't be a Claude subscription; to talk to Clankie on your
+own Claude or ChatGPT plan, run `clankie claude` or `clankie codex`, which opens
+that harness as him ([seat commands](docs/cli.md#seat-commands)).
 
 - [Install and pair the app](https://docs.clankie.bot/get-started/): the full onboarding path
 - [Run from source](CONTRIBUTING.md): development setup and checks
