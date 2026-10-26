@@ -1,11 +1,12 @@
 import { ensureActivityProducerCredential } from "@clankie/credential-broker";
+import { applyDiscordSettingsToEnvironment, SettingsStore } from "@clankie/settings";
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RenderedSurfaceHub } from "./frame-hub.ts";
 import { createFrameProducerServer } from "./producer.ts";
-import { createDiscordActivityServer } from "./server.ts";
+import { createDiscordActivityServer, forwardAdmissionToService } from "./server.ts";
 import { ActivityShareRegistry } from "./share-registry.ts";
 
 /**
@@ -24,11 +25,25 @@ if (
   // The unauthenticated legacy stream opens only on request (the launcher asks
   // for the owner's watch link) and then only to direct loopback viewers (VUH-2594).
   const localViewer = process.env.CLANKIE_ACTIVITY_LOCAL_VIEWER?.trim() === "1";
+  // A configured Activity application means Discord viewers admit through the
+  // service, which holds the client secret and bot token (VUH-2833).
+  applyDiscordSettingsToEnvironment((await new SettingsStore().load()).discord);
+  const applicationId = process.env.DISCORD_ACTIVITY_APPLICATION_ID_GBA?.trim();
+  const serviceUrl = process.env.CLANKIE_CONTROL_PLANE_URL?.trim() || "http://127.0.0.1:4310";
+  let producerToken: string | undefined;
   const activity = createDiscordActivityServer({
     hub,
     shares,
     avatarDirectory: join(stateRoot, "captain", "persona-avatars"),
     ...(localViewer ? { viewerMode: { mode: "local" as const } } : {}),
+    ...(applicationId
+      ? {
+          officialAdmission: {
+            applicationId,
+            admit: forwardAdmissionToService({ serviceUrl, token: () => producerToken }),
+          },
+        }
+      : {}),
   });
   const bound = await activity.listen(port);
   process.stdout.write(`clankie activity surface listening on 127.0.0.1:${String(bound)}\n`);
@@ -37,6 +52,7 @@ if (
   // runner only resolves, which avoids two processes minting different tokens.
   // The bearer never comes from the environment.
   const token = await ensureActivityProducerCredential();
+  producerToken = token;
   const producerPort = positiveInt(
     // 4321 is the captain's default port; colliding defaults meant the
     // activity server refused to start on a machine running the captain.

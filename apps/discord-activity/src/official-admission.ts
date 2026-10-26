@@ -23,11 +23,9 @@ export async function admitOfficialActivity(applicationId: string, signal: Abort
       { once: true },
     );
   });
-  const handshake = async () => {
-    // Discord's ready -> authorize -> exchange -> authenticate sequence. The
-    // SDK's guild/channel query parameters are never sent as authority.
-    await sdk.ready();
-    if (deadline.signal.aborted) throw new Error("activity_cancelled");
+  // Authorize -> exchange. The SDK's guild/channel query parameters are never
+  // sent as authority; the server reads the instance itself.
+  const admit = async (admission: AbortSignal) => {
     const { code } = await sdk.commands.authorize({
       client_id: applicationId,
       response_type: "code",
@@ -41,7 +39,7 @@ export async function admitOfficialActivity(applicationId: string, signal: Abort
       body: JSON.stringify({ code, instanceId: sdk.instanceId }),
       cache: "no-store",
       credentials: "omit",
-      signal: deadline.signal,
+      signal: admission,
     });
     if (!response.ok) throw new Error("activity_admission_denied");
     const result: unknown = await response.json();
@@ -62,9 +60,30 @@ export async function admitOfficialActivity(applicationId: string, signal: Abort
       value.mediaPath !== `/.proxy/activity/shares/${session.shareId}/frames`
     )
       throw new Error("activity_admission_invalid");
-    const authenticated = await sdk.commands.authenticate({ access_token: value.accessToken });
+    return {
+      session,
+      grant: value.grant,
+      expiresAt: value.expiresAt,
+      mediaPath: value.mediaPath,
+      accessToken: value.accessToken,
+    };
+  };
+  // A later admission for the same viewer, before its grant lapses (VUH-2833).
+  const renew = async () => {
+    if (signal.aborted) throw new Error("activity_cancelled");
+    const { accessToken: _token, ...next } = await admit(
+      AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    );
+    return { ...next, renew };
+  };
+  const handshake = async () => {
+    // Discord's ready -> authorize -> exchange -> authenticate sequence.
+    await sdk.ready();
+    if (deadline.signal.aborted) throw new Error("activity_cancelled");
+    const { accessToken, ...admitted } = await admit(deadline.signal);
+    const authenticated = await sdk.commands.authenticate({ access_token: accessToken });
     if (!authenticated || deadline.signal.aborted) throw new Error("activity_authentication_failed");
-    return { session, grant: value.grant, expiresAt: value.expiresAt, mediaPath: value.mediaPath };
+    return { ...admitted, renew };
   };
   try {
     return await Promise.race([handshake(), interrupted]);

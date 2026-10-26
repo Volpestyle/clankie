@@ -835,6 +835,17 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
           result,
           expiresAtMs: ctx.clock().getTime() + DELIVERY_RETENTION_MS,
         });
+        if (write.payload.kind === "activity_start")
+          ctx.dependencies.activityLaunches?.launched(write.payload.guildId, write.payload.channelId);
+        if (write.payload.kind === "activity_stop")
+          await ctx.dependencies.activityLaunches
+            ?.stopped(write.payload.guildId, write.payload.channelId)
+            .catch((error: unknown) =>
+              logger.warn(
+                { errorName: error instanceof Error ? error.name.slice(0, 64) : "Error" },
+                "Activity launch stop could not end its shares",
+              ),
+            );
         logger.info(
           {
             correlationId: write.identity.correlationId,

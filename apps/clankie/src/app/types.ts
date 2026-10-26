@@ -284,6 +284,19 @@ export interface ClankieAppDependencies {
   deliveredFiles?: Pick<DeliveredFileStore, "read">;
   /** Local owner-authorized projection of delivered artifacts; hosted launch/admission is separate. */
   activitySharing?: ActivitySharing;
+  /**
+   * Self-hosted official Activity admission (VUH-2833). Only the local activity
+   * server reaches it, presenting the broker-held activity producer bearer.
+   */
+  activityAdmission?: {
+    token(): Promise<string | undefined>;
+    admit(input: unknown): Promise<import("../activity-admission.ts").SelfHostedActivityAdmission>;
+  };
+  /** Records the bot's own Activity launches so admission serves only those channels. */
+  activityLaunches?: {
+    launched(guildId: string, channelId: string): void;
+    stopped(guildId: string, channelId: string): Promise<void>;
+  };
   hostedActivity?: Pick<HostedBodyClient, "bootstrap" | "keys" | "revalidateActivity">;
   memory?: MemoryStores;
   personaImages?: PersonaImageSource;

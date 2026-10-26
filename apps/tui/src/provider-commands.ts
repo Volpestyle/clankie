@@ -8,6 +8,7 @@ import { FEATURED_MODEL_PROVIDERS as FEATURED_PROVIDERS } from "@clankie/protoco
 import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
   createDefaultCredentialStore,
+  DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID,
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_USER_SESSION_PROVIDER_ID,
   LINEAR_PROVIDER_ID,
@@ -217,6 +218,7 @@ const FEATURED_SERVICE_PROVIDERS: readonly MenuOption[] = [
 
 /** Owner-authored non-LLM credentials that share the broker with /auth. */
 const SERVICE_CREDENTIAL_IDS = new Set([
+  DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID,
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_USER_SESSION_PROVIDER_ID,
   "elevenlabs",
@@ -645,6 +647,7 @@ function describeCredentialKind(id: string, redacted: RedactedCredential, now: n
   if (redacted.type === "wellknown") return "well-known";
   if (redacted.type === "api") {
     if (id === DISCORD_BOT_PROVIDER_ID) return "bot token";
+    if (id === DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID) return "client secret";
     if (id === DISCORD_USER_SESSION_PROVIDER_ID) return "user token";
     if (id === "email") return "app password";
     return "API key";

@@ -52,9 +52,9 @@ The hosted path uses the existing encrypted paired-device transport and the
 official bot's server-owned launch/audience adapter. Launch/stop receipts remain
 confirmed, refused or uncertain; neither client replays an uncertain effect.
 Hosted customers do not configure bot keys, app registrations or tunnels.
-Local self-hosting retains delegated fragment grants; automatic official-app
-launch/participant admission is a separate adapter and is not supplied by that
-compatibility path.
+Local self-hosting retains delegated fragment grants. A self-hosted bot admits
+participants of its own `/activity` launch (see Self-hosted official admission);
+it has no share launch adapter.
 
 Private control on port 4322 requires the broker-owned producer bearer:
 
@@ -121,9 +121,19 @@ a loopback `Host`, a loopback or absent `Origin`, and no proxy headers
 `true-client-ip`). cloudflared connects from loopback but adds those headers,
 so a tunnelled viewer gets `{mode:"shares"}` and needs a grant. A bare
 `pnpm start` without the flag refuses the `http://127.0.0.1:4320` watch link
-and `pnpm viewer-probe` too. The self-hosted `/activity` voice-channel launch
-arrives through the tunnel, so it shows "Access unavailable" until a
-self-hosted official admission adapter exists. Pending share admissions are capped at 64 in total and four per
+and `pnpm viewer-probe` too.
+
+## Self-hosted official admission
+
+With `DISCORD_ACTIVITY_APPLICATION_ID_GBA` configured, tunnelled viewers get
+`{mode:"official",applicationId,delegated:true}`. `POST /.proxy/activity/admit`
+(4 KiB body, 16 in flight) is relayed with the producer bearer to the service's
+`POST /v1/activity/admit`, which holds the client secret and bot token
+([ADR 0295](../../docs/adr/0295-a-self-hosted-bot-admits-its-own-activity-viewers.md)).
+`delegated` lets a `#share` fragment open its grant outside Discord, and makes the
+client renew its five-minute grant before expiry through the same SDK instance.
+Without the application id, the self-hosted `/activity` launch shows "Access
+unavailable". Pending share admissions are capped at 64 in total and four per
 client, keyed by `cf-connecting-ip` behind the tunnel.
 
 The private HTTP viewer projection releases its bounded registry slot on

@@ -31,9 +31,26 @@ action. A local stream without the adapter makes no claim that Discord launched.
 
 Discord room turns refuse `start`, `image` and `switch` with
 `activity_official_bot_required` when no official launch adapter is configured.
-This includes self-hosted official bots: their OAuth/instance admission adapter
-remains outside this batch. Local owner API/CLI requests can still create and
-switch delegated shares without a Discord launch adapter.
+This includes self-hosted official bots: they admit viewers of their own
+`/activity` launch (below) but have no share launch adapter. Local owner API/CLI
+requests can still create and switch delegated shares without one.
+
+## Self-hosted official viewer
+
+A self-hosted bot with an Activity application id and its OAuth2 client secret
+admits voice-channel viewers of its own `/activity` launch
+([ADR 0295](adr/0295-a-self-hosted-bot-admits-its-own-activity-viewers.md)).
+Store the secret in the console at `/discord` → Tokens → Activity client secret;
+it lives only in the credential broker as `discord_activity_client_secret`.
+Without it, admission fails closed with a 503 naming that step.
+
+The activity server relays the SDK's code and instance ID to the service. The
+service exchanges the code, reads the Activity instance with the bot token, and
+admits only a participant of an instance in a channel where Clankie's bot posted
+the launch. The first admission while play is running opens that channel's play
+share. Grants last five minutes; the viewer renews before expiry, and each
+renewal re-reads the instance, so a viewer who leaves keeps media for at most
+about five minutes ([VUH-2834](https://linear.app/vuhlp/issue/VUH-2834)).
 
 ## Official hosted viewer
 
@@ -60,8 +77,8 @@ Customers do not register an application, configure a tunnel or handle bot keys.
 
 Self-hosted local mode retains `/#share=SHARE_ID&grant=GRANT`. Read-only grants
 remain in the fragment; never substitute an operator or producer bearer. This
-is delegated access, not proof of Discord membership. The local self-hosted
-path does not automatically provide the official launch/participant adapter.
+is delegated access, not proof of Discord membership. Participant admission
+for voice-channel viewers is the self-hosted official viewer above.
 
 Grants last at most five minutes and terminate existing admitted viewers at
 expiry. Source switch clears old image/text/audio, advances the generation and

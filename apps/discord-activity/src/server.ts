@@ -36,6 +36,15 @@ export interface DiscordActivityServerOptions {
    * request: a tunnelled, proxied or cross-origin request still needs a grant.
    */
   viewerMode?: { mode: "official"; applicationId: string } | { mode: "local" };
+  /**
+   * A self-hosted official bot's admission (VUH-2833). Viewers outside direct
+   * loopback get official config; the admit body goes to the service, which
+   * holds every credential. A `#share` fragment still opens a delegated grant.
+   */
+  officialAdmission?: {
+    applicationId: string;
+    admit(body: string): Promise<{ status: number; body: string }>;
+  };
 }
 
 export interface DiscordActivityServer {
@@ -201,7 +210,7 @@ function attachShareViewer(
 }
 
 type EffectiveViewerMode =
-  | { mode: "official"; applicationId: string }
+  | { mode: "official"; applicationId: string; delegated?: true }
   | { mode: "local" }
   | { mode: "shares" };
 
@@ -212,6 +221,8 @@ function effectiveViewerMode(
   const mode = options.viewerMode;
   if (mode?.mode === "official") return mode;
   if (mode?.mode === "local" && isDirectLoopbackRequest(request)) return mode;
+  if (options.officialAdmission !== undefined)
+    return { mode: "official", applicationId: options.officialAdmission.applicationId, delegated: true };
   return { mode: "shares" };
 }
 
@@ -272,6 +283,74 @@ function bounded(value: number, maximum: number): number {
   return value;
 }
 
+/** Relays an admission body to the service, presenting the activity producer bearer. */
+export function forwardAdmissionToService(options: {
+  serviceUrl: string;
+  token: () => string | undefined;
+}): (body: string) => Promise<{ status: number; body: string }> {
+  return async (body) => {
+    const token = options.token();
+    if (token === undefined) throw new Error("activity_admission_unavailable");
+    const response = await fetch(new URL("/v1/activity/admit", options.serviceUrl), {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body,
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+    return { status: response.status, body: await response.text() };
+  };
+}
+
+const admissionsInFlight = new WeakMap<DiscordActivityServerOptions, number>();
+
+/** Bounded relay of `{code,instanceId}`; this process never sees a credential. */
+async function forwardAdmission(
+  request: IncomingMessage,
+  response: ServerResponse,
+  options: DiscordActivityServerOptions,
+): Promise<void> {
+  const admission = options.officialAdmission;
+  if (admission === undefined) {
+    response.writeHead(404).end();
+    return;
+  }
+  if (request.method !== "POST") {
+    response.writeHead(405).end();
+    return;
+  }
+  const inFlight = admissionsInFlight.get(options) ?? 0;
+  if (inFlight >= 16) {
+    response.writeHead(429, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify({ error: "activity_busy" }));
+    return;
+  }
+  admissionsInFlight.set(options, inFlight + 1);
+  try {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const raw of request) {
+      const chunk = Buffer.from(raw as Uint8Array);
+      size += chunk.length;
+      if (size > 4096) {
+        response.writeHead(413).end();
+        return;
+      }
+      chunks.push(chunk);
+    }
+    let result: { status: number; body: string };
+    try {
+      result = await admission.admit(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      result = { status: 503, body: JSON.stringify({ error: "activity_admission_unavailable" }) };
+    }
+    response.writeHead(result.status, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(result.body);
+  } finally {
+    admissionsInFlight.set(options, (admissionsInFlight.get(options) ?? 1) - 1);
+  }
+}
+
 async function serveRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -279,6 +358,10 @@ async function serveRequest(
 ): Promise<void> {
   const { avatarDirectory } = options;
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (path === "/activity/admit" || path === "/.proxy/activity/admit") {
+    await forwardAdmission(request, response, options);
+    return;
+  }
   if (request.method === "GET" && (path === "/activity/config" || path === "/.proxy/activity/config")) {
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     response.end(JSON.stringify(effectiveViewerMode(options, request)));

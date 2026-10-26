@@ -695,13 +695,13 @@
         setWorkStatus("Session ended", "ended");
       }
 
-      function connect() {
+      function connect(keepView = false) {
         if (scoped && (!shareId || !viewerGrant || sessionEnded)) {
           endSession();
           return;
         }
         sessionEnded = false;
-        resetView();
+        if (!keepView) resetView();
         setStatus("Connecting", "idle");
         setWorkStatus("Connecting", "waiting");
         const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -802,6 +802,40 @@
         socket.addEventListener("error", () => socket.close());
       }
 
+      // Self-hosted grants last minutes. Admission runs again before expiry,
+      // which re-checks that this viewer is still in the Activity; a refused
+      // renewal lets the old grant lapse and the server end the stream.
+      function scheduleRenewal(admitted) {
+        setTimeout(
+          async () => {
+            if (sessionEnded || lifetime.signal.aborted) return;
+            try {
+              const next = await admitted.renew();
+              if (
+                lifetime.signal.aborted ||
+                sessionEnded ||
+                next.session.scope.guildId !== admittedScope.guildId ||
+                next.session.scope.channelId !== admittedScope.channelId
+              )
+                return;
+              const sameShare = next.session.shareId === shareId;
+              shareId = next.session.shareId;
+              viewerGrant = next.grant;
+              mediaPath = next.mediaPath;
+              admittedScope = next.session.scope;
+              if (!sameShare) currentSession = next.session;
+              const previous = currentSocket;
+              connect(sameShare);
+              previous?.close();
+              scheduleRenewal(next);
+            } catch {
+              // The current grant keeps working until it expires.
+            }
+          },
+          Math.max(5_000, Date.parse(admitted.expiresAt) - Date.now() - 30_000),
+        );
+      }
+
       async function launchViewer() {
         try {
           // A failed official configuration/admission never opens the public
@@ -812,7 +846,10 @@
           });
           if (!response.ok) throw new Error("activity_configuration_unavailable");
           const config = await response.json();
-          if (config.mode === "official") {
+          if (config.mode === "official" && config.delegated === true && scoped) {
+            // A self-hosted bot also serves delegated `#share` links outside
+            // Discord; the grant still has to admit the socket (VUH-2833).
+          } else if (config.mode === "official") {
             scoped = true;
             shareId = null;
             viewerGrant = null;
@@ -825,13 +862,15 @@
             currentSession = admitted.session;
             admittedScope = admitted.session.scope;
             mediaPath = admitted.mediaPath;
-            setTimeout(
-              () => {
-                endSession();
-                currentSocket?.close();
-              },
-              Math.max(0, Date.parse(admitted.expiresAt) - Date.now()),
-            );
+            if (config.delegated === true) scheduleRenewal(admitted);
+            else
+              setTimeout(
+                () => {
+                  endSession();
+                  currentSocket?.close();
+                },
+                Math.max(0, Date.parse(admitted.expiresAt) - Date.now()),
+              );
           } else if (config.mode === "shares") {
             // Without the explicit loopback dev mode, only a share grant opens media.
             if (!scoped) throw new Error("activity_grant_required");

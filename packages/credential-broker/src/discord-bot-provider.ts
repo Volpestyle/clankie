@@ -4,6 +4,8 @@ import { CapabilityTokenIssuer } from "./capability-token.ts";
 import type { CredentialStore } from "./credential-store.ts";
 
 export const DISCORD_BOT_PROVIDER_ID = "discord_bot";
+/** The official application's OAuth client secret for self-hosted Activity admission (VUH-2833). */
+export const DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID = "discord_activity_client_secret";
 export const DISCORD_PRESENCE_CAPABILITIES = ["discord.presence.act", "discord.presence.read"] as const;
 export type DiscordPresenceCapability = (typeof DISCORD_PRESENCE_CAPABILITIES)[number];
 

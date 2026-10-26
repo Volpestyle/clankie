@@ -23,7 +23,9 @@ including when no prior bot reply exists. Delivery IDs and stored request IDs ar
 
 1. Start the clankie service once so it mints the internal bridge bearers.
 2. In the TUI, use `/discord` to store the official bot token under provider id
-   `discord_bot` and configure the body. Use `/voice` to select OpenAI Realtime
+   `discord_bot` and configure the body. For voice-channel `/activity` viewers,
+   also store the application's OAuth2 client secret as
+   `discord_activity_client_secret` (`/discord` → Tokens). Use `/voice` to select OpenAI Realtime
    or Grok Voice, models, voice, reasoning, and the brokered provider API key.
 3. Use that flow for application/guild ids, ambient bindings, ingress and
    presence allowlists, voice policy, activity application id, and play

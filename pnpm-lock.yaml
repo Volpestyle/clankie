@@ -210,6 +210,9 @@ importers:
       '@clankie/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@clankie/settings':
+        specifier: workspace:*
+        version: link:../../packages/settings
       '@discord/embedded-app-sdk':
         specifier: 2.5.0
         version: 2.5.0

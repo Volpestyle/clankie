@@ -29,7 +29,9 @@ import { ActivityPlaySource } from "./activity-play-source.ts";
 import { createActivityArtifactSources } from "./activity-artifact-source.ts";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
 import { ActivitySharing } from "./activity-sharing.ts";
+import { createActivityLaunches, createSelfHostedActivityAdmission } from "./activity-admission.ts";
 import {
+  DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID,
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_USER_SESSION_PROVIDER_ID,
   resolveActivityProducerCredential,
@@ -627,6 +629,32 @@ const activitySharing = new ActivitySharing({
         onBusyChange: (active) => runtimeProvider.heartbeat?.activitySharing(active),
       }),
 });
+
+// A self-hosted official bot admits Activity participants itself (VUH-2833);
+// hosted bodies admit through the gateway instead.
+const activityApplicationId = process.env.DISCORD_ACTIVITY_APPLICATION_ID_GBA?.trim();
+const activityLaunches =
+  hostedBody === undefined && activityApplicationId ? createActivityLaunches(activitySharing) : undefined;
+const activityAdmission =
+  activityLaunches === undefined || !activityApplicationId
+    ? undefined
+    : (() => {
+        const admission = createSelfHostedActivityAdmission({
+          applicationId: activityApplicationId,
+          clientSecret: async () =>
+            apiKey(await operatorCredentialStore.get(DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID)),
+          botToken: async () => apiKey(await operatorCredentialStore.get(DISCORD_BOT_PROVIDER_ID)),
+          grant: (guildId, channelId) => activityLaunches.grant(guildId, channelId),
+        });
+        return {
+          token: () => resolveActivityProducerCredential(),
+          admit: (input: unknown) => admission.admit(input),
+        };
+      })();
+
+function apiKey(credential: Awaited<ReturnType<typeof operatorCredentialStore.get>>): string | undefined {
+  return credential?.type === "api" && credential.key.length > 0 ? credential.key : undefined;
+}
 
 // The captain's tools reach the same in-process authorities the routes use.
 // The app needs the captain and the captain's deps need the app, so the app
@@ -2497,6 +2525,8 @@ const clankie = await createClankieApp({
   skinDrafts,
   herdrRuntime: herdr.status,
   activitySharing,
+  ...(activityAdmission === undefined ? {} : { activityAdmission }),
+  ...(activityLaunches === undefined ? {} : { activityLaunches }),
   ...(hostedBody === undefined ? {} : { hostedActivity: hostedBody }),
   herdrBinding: herdr.binding,
   runtimes,

@@ -135,6 +135,24 @@ export class ActivitySharing {
     return response;
   }
 
+  /**
+   * A read-only grant for the share Clankie is running in this voice channel.
+   * The caller has already proven Discord membership of the channel's Activity
+   * instance; that proof, not an operator, is the authority here (VUH-2833).
+   */
+  public async grantForDestination(
+    guildId: string,
+    channelId: string,
+  ): Promise<{ session: ActivityShareSession; grant: string; expiresAt: string }> {
+    const admitted = async () => !this.closed;
+    const session = (await this.sessions(admitted))
+      .filter((candidate) => candidate.scope.guildId === guildId && candidate.scope.channelId === channelId)
+      .at(-1);
+    if (session === undefined) throw new Error("activity_share_gone");
+    await this.admit(session.scope, admitted);
+    return { session, ...(await (await this.getClient()).grant(session)) };
+  }
+
   public close(): void {
     this.closed = true;
     const active = [...this.active.values()];

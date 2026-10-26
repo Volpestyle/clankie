@@ -93,6 +93,13 @@ const DISCORD_CREDENTIALS = [
     description: "Official application bot token from the Discord developer portal.",
   },
   {
+    id: "discord_activity_client_secret",
+    label: "Activity client secret",
+    hint: "VC watch admission",
+    description:
+      "OAuth2 client secret of the Activity application. Admits voice-channel viewers of /activity launches.",
+  },
+  {
     id: "discord_user_session",
     label: "User token (personal-lab only)",
     hint: "Go Live / user body",

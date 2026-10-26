@@ -373,3 +373,133 @@ it.skipIf(process.env.ACTIVITY_BROWSER_INTEGRATION !== "1")(
   },
   30_000,
 );
+
+it.skipIf(process.env.ACTIVITY_BROWSER_INTEGRATION !== "1")(
+  "a self-hosted bot admits through the shipped SDK, renews before the grant lapses and still serves #share links",
+  async () => {
+    const shares = new ActivityShareRegistry();
+    const hub = new RenderedSurfaceHub();
+    const producer = createFrameProducerServer({ hub, shares, token: "fixture-private-producer" });
+    const client = createActivityShareClient({
+      url: `http://127.0.0.1:${await producer.listen(0)}`,
+      token: "fixture-private-producer",
+    });
+    const session = await client.start({
+      scope: { tenantId: "local", installationId: "install", guildId: "111", channelId: "222" },
+      source: { kind: "game", id: "play", title: "FireRed" },
+      ttlMs: 60_000,
+    });
+    // The service's admission, as the activity server forwards it. The short
+    // expiry makes the client renew five seconds in.
+    const admissions: unknown[] = [];
+    const activity = createDiscordActivityServer({
+      hub,
+      shares,
+      officialAdmission: {
+        applicationId: "90001",
+        admit: async (body) => {
+          admissions.push(JSON.parse(body));
+          const grant = await client.grant(session);
+          return {
+            status: 200,
+            body: JSON.stringify({
+              session,
+              grant: grant.grant,
+              expiresAt: new Date(Date.now() + 35_000).toISOString(),
+              mediaPath: `/.proxy/activity/shares/${session.shareId}/frames`,
+              accessToken: "fixture-viewer-user-token",
+            }),
+          };
+        },
+      },
+    });
+    const activityPort = await activity.listen(0);
+    const host = createServer((request, response) => {
+      void (async () => {
+        const path = new URL(request.url ?? "/", "http://localhost");
+        if (path.pathname === "/discord-host") {
+          response.writeHead(200, { "content-type": "text/html" }).end(discordHost("instance-a"));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const upstream = await fetch(`http://127.0.0.1:${activityPort}${request.url ?? "/"}`, {
+          method: request.method ?? "GET",
+          headers: { "content-type": request.headers["content-type"] ?? "application/json" },
+          ...(request.method === "POST" ? { body: Buffer.concat(chunks) } : {}),
+        });
+        response
+          .writeHead(upstream.status, Object.fromEntries(upstream.headers))
+          .end(Buffer.from(await upstream.arrayBuffer()));
+      })().catch(() => response.writeHead(500).end());
+    });
+    host.on("upgrade", (request, socket, head) => activity.server.emit("upgrade", request, socket, head));
+    await new Promise<void>((done) => host.listen(0, "127.0.0.1", done));
+    const address = host.address();
+    if (address === null || typeof address === "string") throw new Error("fixture_not_listening");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const browser = await chromium.launch({
+      executablePath:
+        process.env.ACTIVITY_TEST_CHROMIUM ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      headless: true,
+    });
+    const sink = client.sink(session);
+    try {
+      const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      const page = await context.newPage();
+      const sockets: string[] = [];
+      page.on("websocket", (ws) => sockets.push(ws.url()));
+      await page.goto(`${origin}/discord-host`);
+      const view = page.frameLocator("#viewer");
+      const pixel = () =>
+        view
+          .locator("#screen")
+          .evaluate((canvas) =>
+            Array.from((canvas as HTMLCanvasElement).getContext("2d")!.getImageData(0, 0, 1, 1).data),
+          );
+      await vi.waitFor(() => expect(shares.stats()[0]?.viewerCount).toBe(1), { timeout: 5000 });
+      await vi.waitFor(() => expect(sink.connected).toBe(true));
+      sink.publishFrame(png(240, 60, 60));
+      await vi.waitFor(async () => expect(await pixel()).toEqual([240, 60, 60, 255]));
+      // Renewal: a second authorize and admission, no second authenticate, and a
+      // fresh socket that keeps the picture.
+      await vi.waitFor(() => expect(admissions).toHaveLength(2), { timeout: 10_000, interval: 200 });
+      await vi.waitFor(() => expect(sockets).toHaveLength(2));
+      await vi.waitFor(() => expect(shares.stats()[0]?.viewerCount).toBe(1));
+      expect(await pixel()).toEqual([240, 60, 60, 255]);
+      sink.publishFrame(png(40, 210, 100, 1));
+      await vi.waitFor(async () => expect(await pixel()).toEqual([40, 210, 100, 255]));
+      expect(await page.evaluate(() => (window as unknown as { rpcCommands: string[] }).rpcCommands)).toEqual(
+        ["AUTHORIZE", "AUTHENTICATE", "AUTHORIZE"],
+      );
+      expect(admissions).toEqual([
+        { code: "fixture-code-instance-a", instanceId: "instance-a" },
+        { code: "fixture-code-instance-a", instanceId: "instance-a" },
+      ]);
+      // Outside Discord, a delegated #share link still opens with its own grant.
+      const delegated = await context.newPage();
+      const grant = await client.grant(session);
+      await delegated.goto(`${origin}/#share=${session.shareId}&grant=${grant.grant}`);
+      await vi.waitFor(() => expect(shares.stats()[0]?.viewerCount).toBe(2), { timeout: 5000 });
+      sink.publishFrame(png(60, 90, 240, 2));
+      await vi.waitFor(async () =>
+        expect(
+          await delegated
+            .locator("#screen")
+            .evaluate((canvas) =>
+              Array.from((canvas as HTMLCanvasElement).getContext("2d")!.getImageData(0, 0, 1, 1).data),
+            ),
+        ).toEqual([60, 90, 240, 255]),
+      );
+      expect(admissions).toHaveLength(2);
+    } finally {
+      sink.close();
+      client.close();
+      await browser.close();
+      await new Promise<void>((done) => host.close(() => done()));
+      await activity.close();
+      await producer.close();
+    }
+  },
+  30_000,
+);

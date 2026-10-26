@@ -87,6 +87,7 @@ export {
   type PublicGatewayCredentialOptions,
 } from "./public-gateway-credential.ts";
 export {
+  DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID,
   DISCORD_BOT_PROVIDER_ID,
   DISCORD_PRESENCE_CAPABILITIES,
   DiscordBotCredentialProvider,
