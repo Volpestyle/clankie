@@ -261,6 +261,20 @@ allows 256 KiB of serialized discussion (reply projections and event history).
 last accepted state; other reviews remain writable even when the shared snapshot
 pool is full. Finding reply/history count limits also apply.
 
+Replies, resolve and reopen events share that discussion budget. After replies
+consume most of it, a few small resolve/reopen events may still fit; once the
+remaining capacity is exhausted, those edits also refuse with
+`guided_review_discussion_budget`. Nobody can resolve or reopen that saturated
+review in place. The refusal preserves its last accepted state.
+
+For `guided_review_limit`, `guided_review_budget` or
+`guided_review_discussion_budget`, the recovery path is an authenticated owner
+retiring an eligible review with `clankie work owner post_retire_guided_review`,
+then saving a new revision on the same issue. For a saturated discussion, retire
+that review. Use fresh idempotency keys: an earlier refused key retains its
+original refusal. Ordinary workers and unproven native leads cannot retire;
+legacy full/pointer receipts can make a review ineligible, as described below.
+
 This unlanded contract changes successful save/edit responses to compact mutation
 receipts rather than full historical review payloads. Save, reply, resolve and
 retire return exactly these fields:

@@ -16,6 +16,14 @@ import { createGuidedReviewSourceAuthorizer } from "../../../apps/clankie/src/gu
 
 const actor: TrackerActor = { type: "human", id: "bounds-owner", onBehalfOf: [] };
 
+function expectCapacityRefusal(error: unknown, reason: string) {
+  expect(error).toMatchObject({ reason, message: expect.any(String) });
+  const message = (error as Error).message;
+  expect(message).toContain("clankie work owner post_retire_guided_review");
+  expect(message).toMatch(/same issue/i);
+  expect(message).not.toContain("or lead");
+}
+
 async function fixture(bytes: number) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "guided-review-bounds-")));
   const repository = join(root, "repo");
@@ -90,7 +98,10 @@ it("caps reviews per issue and returns small summaries without inspection or dis
     expect(f.patchBytes.length).toBeLessThan(REVIEW_PATCH_LIMITS.maxPatchBytes);
     const issue = await f.issue("Near-limit patch");
     for (let index = 0; index < GUIDED_REVIEW_LIMITS.perIssue; index++) await f.save(issue.id);
-    await expect(f.save(issue.id)).rejects.toMatchObject({ reason: "guided_review_limit" });
+    await expect(f.save(issue.id)).rejects.toSatisfy((error: unknown) => {
+      expectCapacityRefusal(error, "guided_review_limit");
+      return true;
+    });
     const list = (await f.tracker.call("list_guided_reviews", { issueId: issue.id }, { actor })) as {
       guidedReviews: Record<string, unknown>[];
     };
@@ -217,7 +228,7 @@ it("isolates shared snapshot exhaustion and per-review discussion exhaustion fro
       try {
         await f.save(issue.id);
       } catch (error) {
-        expect(error).toMatchObject({ reason: "guided_review_budget" });
+        expectCapacityRefusal(error, "guided_review_budget");
         exhausted = true;
         break;
       }
@@ -250,7 +261,7 @@ it("isolates shared snapshot exhaustion and per-review discussion exhaustion fro
       try {
         first = await reply(first, `large-reply-${index}`, "r".repeat(16000));
       } catch (error) {
-        expect(error).toMatchObject({ reason: "guided_review_discussion_budget" });
+        expectCapacityRefusal(error, "guided_review_discussion_budget");
         discussionFull = true;
         break;
       }
@@ -386,3 +397,102 @@ it("refuses retirement while legacy receipts require retaining the original payl
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+it("keeps resolve and reopen within the discussion budget and recovers on a new revision of the same issue", async () => {
+  const f = await fixture(1024);
+  try {
+    const issue = await f.issue("Full discussion recovery");
+    let review = await f.save(issue.id);
+    const edit = async (action: Record<string, unknown>, key: string) => {
+      const receipt = (await f.tracker.call(
+        "post_guided_finding",
+        {
+          issueId: issue.id,
+          id: review.id,
+          findingId: review.findings[0]!.id,
+          expectedSource: review.identity,
+          ifUpdatedAt: review.updatedAt,
+          idempotencyKey: key,
+          edit: action,
+        },
+        { actor },
+      )) as GuidedReviewMutationReceipt;
+      review = (await f.tracker.call(
+        "get_guided_review",
+        { issueId: issue.id, id: receipt.reviewId },
+        { actor },
+      )) as GuidedReviewRecord;
+      return receipt;
+    };
+    let replyFull = false;
+    for (let index = 0; index < 12; index++) {
+      try {
+        await edit({ action: "reply", body: "r".repeat(16000) }, `freeze-reply-${index}`);
+      } catch (error) {
+        expectCapacityRefusal(error, "guided_review_discussion_budget");
+        replyFull = true;
+        break;
+      }
+    }
+    expect(replyFull).toBe(true);
+    let frozen = false;
+    for (let index = 0; index < 300; index++) {
+      const before = structuredClone(review);
+      try {
+        await edit({ action: "resolve", resolved: !review.findings[0]!.resolved }, `freeze-toggle-${index}`);
+      } catch (error) {
+        expectCapacityRefusal(error, "guided_review_discussion_budget");
+        expect(
+          await f.tracker.call("get_guided_review", { issueId: issue.id, id: review.id }, { actor }),
+        ).toEqual(before);
+        frozen = true;
+        break;
+      }
+    }
+    expect(frozen).toBe(true);
+    // A true event is slightly smaller than false in JSON; consume any last
+    // headroom before pinning refusal of both resolution directions.
+    try {
+      await edit({ action: "resolve", resolved: true }, "freeze-smallest-event");
+    } catch (error) {
+      expectCapacityRefusal(error, "guided_review_discussion_budget");
+    }
+    const saturated = structuredClone(review);
+    for (const resolved of [true, false]) {
+      await expect(edit({ action: "resolve", resolved }, `freeze-final-${resolved}`)).rejects.toSatisfy(
+        (error: unknown) => {
+          expectCapacityRefusal(error, "guided_review_discussion_budget");
+          return true;
+        },
+      );
+      expect(
+        await f.tracker.call("get_guided_review", { issueId: issue.id, id: review.id }, { actor }),
+      ).toEqual(saturated);
+    }
+    const retiredId = review.id;
+    await f.tracker.call(
+      "post_retire_guided_review",
+      {
+        issueId: issue.id,
+        id: review.id,
+        expectedSource: review.identity,
+        ifUpdatedAt: review.updatedAt,
+        idempotencyKey: "retire-frozen-discussion",
+      },
+      { actor },
+    );
+    review = await f.save(issue.id);
+    expect(review.id).not.toBe(retiredId);
+    expect(review.issueId).toBe(issue.id);
+    expect((await edit({ action: "resolve", resolved: true }, "replacement-resolve")).operation).toBe(
+      "resolve",
+    );
+    expect(review.findings[0]!.resolved).toBe(true);
+    expect((await edit({ action: "resolve", resolved: false }, "replacement-reopen")).operation).toBe(
+      "resolve",
+    );
+    expect(review.findings[0]!.resolved).toBe(false);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+}, 30000);

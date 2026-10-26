@@ -215,7 +215,13 @@ it("retires guided revisions through production HTTP and ordinary CLI without lo
       const before = await domains();
       const response = await call(name, args);
       expect(response.status).toBe(422);
-      expect(await response.json()).toMatchObject({ error: "tracker_refused", reason });
+      const refusal = await response.json();
+      expect(refusal).toMatchObject({ error: "tracker_refused", reason });
+      if (reason === "guided_review_limit") {
+        expect(refusal.detail).toContain("clankie work owner post_retire_guided_review");
+        expect(refusal.detail).toMatch(/same issue/i);
+        expect(refusal.detail).not.toContain("or lead");
+      }
       expect(await domains()).toEqual(before);
     };
     await refused(

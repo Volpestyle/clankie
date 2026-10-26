@@ -274,6 +274,16 @@ three active reviews; active immutable snapshots share an 8 MiB store budget.
 Discussion and mutation receipts are excluded. Each review independently allows
 256 KiB serialized discussion; `guided_review_discussion_budget` affects only
 that review. Other reviews stay editable even when snapshot capacity is full.
+Replies and resolve/reopen events share that same budget. Once saturated,
+`guided_review_discussion_budget` can refuse resolution and reopening too,
+preserving the last accepted state; no actor can edit past that limit in place.
+For all three capacity refusals (`guided_review_limit`, `guided_review_budget`,
+`guided_review_discussion_budget`), an authenticated owner retires an eligible
+review with `clankie work owner post_retire_guided_review`, then saves a new
+revision on the same issue. Retire the saturated review to recover discussion.
+Use fresh keys; a previously refused key keeps its original refusal. Workers
+and unproven native leads cannot reclaim; legacy full/pointer receipts may block
+retirement as described below.
 
 This unlanded contract returns compact save/edit/retire results with
 `schemaVersion:1,reviewId,storeId,issueId,projectId,identity,snapshotSha256,operation,eventId,updatedAt,actor`.

@@ -1636,7 +1636,7 @@ function assertGuidedReviewBudget(store: Store, review: GuidedReviewRecord, tool
     if (Buffer.byteLength(JSON.stringify(snapshots)) > GUIDED_REVIEW_LIMITS.totalBytes)
       throw new TrackerWriteRefused(
         "guided_review_budget",
-        "Guided review snapshots exceed the stored byte budget",
+        "Guided review snapshots exceed the stored byte budget. An authenticated owner can retire an eligible review with clankie work owner post_retire_guided_review, then save a new revision on the same issue.",
       );
   }
   const discussion = review.findings.map(({ resolved, replies, history }) => ({
@@ -1647,7 +1647,7 @@ function assertGuidedReviewBudget(store: Store, review: GuidedReviewRecord, tool
   if (Buffer.byteLength(JSON.stringify(discussion)) > GUIDED_REVIEW_LIMITS.discussionBytes)
     throw new TrackerWriteRefused(
       "guided_review_discussion_budget",
-      "This guided review has reached its discussion byte budget",
+      "This guided review has reached its discussion byte budget. Replies, resolve and reopen edits share this budget. An authenticated owner can retire an eligible review with clankie work owner post_retire_guided_review, then save a new revision on the same issue.",
     );
 }
 
@@ -2861,7 +2861,7 @@ async function dispatch(
       )
         throw new TrackerWriteRefused(
           "guided_review_limit",
-          "This issue has reached its active review limit; an owner or lead can explicitly retire an older review",
+          "This issue has reached its active review limit. An authenticated owner can retire an eligible review with clankie work owner post_retire_guided_review, then save a new revision on the same issue.",
         );
       const runId = args.runId as string | undefined;
       if (runId !== undefined) {
