@@ -81,6 +81,7 @@ import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.
 import { OPERATOR_PERSONA_PATH } from "./discord-attention.ts";
 import {
   isWorkerAccountsRoute,
+  isUsageReportRoute,
   USAGE_PATH,
   USAGE_SETTINGS_PATH,
   WORKER_ACCOUNTS_PATH,
@@ -431,7 +432,7 @@ export function publicGatewayTargetFor(
   if (method === "GET" && path === `${PROJECTS_PATH}?includeAutonomy=true`) path = PROJECTS_PATH;
   if (method === "GET" && isDiscordDirectoryRoute(path)) path = DISCORD_DIRECTORY_PATH;
   if (method === "GET" && isWorkerAccountsRoute(path)) path = WORKER_ACCOUNTS_PATH;
-  if (method === "GET" && path === `${USAGE_PATH}?refresh=1`) path = USAGE_PATH;
+  if (method === "GET" && isUsageReportRoute(path)) path = USAGE_PATH;
   if (method === "GET" && isViewRoute(path)) return "relay";
   if (method === "POST" && path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`)
     path = PROJECT_UPDATE_SETTINGS_PATH;

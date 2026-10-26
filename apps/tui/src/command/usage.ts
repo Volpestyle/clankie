@@ -2,6 +2,9 @@ import {
   USAGE_PATH,
   USAGE_SETTINGS_PATH,
   UsageReportSchema,
+  FleetUsageReportSchema,
+  FleetUsageQuerySchema,
+  type FleetUsageReport,
   UsageSettingsSnapshotSchema,
   USAGE_WORDING,
   type UsageReport,
@@ -12,7 +15,7 @@ import {
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 
 const USAGE_COMMAND_USAGE =
-  "Usage: clankie usage [--refresh] [--json] | usage overlay [on|off] [--expected-revision REV] | usage warning [on|off|HOURS] [--expected-revision REV]";
+  "Usage: clankie usage [--refresh] [--fleet [--days N | --since ISO] [--until ISO]] [--json] | usage overlay [on|off] [--expected-revision REV] | usage warning [on|off|HOURS] [--expected-revision REV]";
 
 /**
  * `clankie usage` (VUH-1961): this Mac's Claude and Codex accounts with each
@@ -28,6 +31,30 @@ export async function runUsageCommand(
 ): Promise<UsageReport | UsageSettingsSnapshot> {
   const api = await ownerSettingsApi(options);
   args = args.filter((arg) => arg !== "--json");
+  if (args.includes("--fleet")) {
+    const params = new URLSearchParams({ fleet: "1" });
+    const seen = new Set<string>();
+    for (let index = 0; index < args.length; index++) {
+      const flag = args[index]!;
+      if (seen.has(flag)) throw new Error(USAGE_COMMAND_USAGE);
+      seen.add(flag);
+      if (flag === "--fleet") continue;
+      if (flag === "--refresh") {
+        params.set("refresh", "1");
+        continue;
+      }
+      if (!["--days", "--since", "--until"].includes(flag) || args[index + 1] === undefined)
+        throw new Error(USAGE_COMMAND_USAGE);
+      params.set(flag.slice(2), args[++index]!);
+    }
+    FleetUsageQuerySchema.parse({
+      ...(params.has("days") ? { days: Number(params.get("days")) } : {}),
+      ...(params.has("since") ? { since: params.get("since") } : {}),
+      ...(params.has("until") ? { until: params.get("until") } : {}),
+    });
+    // The required ledger field makes an older body explicit rather than silently showing account meters alone.
+    return api.get(`${USAGE_PATH}?${params}`, UsageReportSchema.extend({ fleet: FleetUsageReportSchema }));
+  }
   if (args.length === 0 || (args.length === 1 && args[0] === "--refresh"))
     return api.get(`${USAGE_PATH}${args[0] === "--refresh" ? "?refresh=1" : ""}`, UsageReportSchema);
   if (args[0] !== "overlay" && args[0] !== "warning") throw new Error(USAGE_COMMAND_USAGE);
@@ -177,6 +204,7 @@ export function formatUsageTable(report: UsageReport, now = Date.now(), timeZone
     ]),
     ...(report.allocation?.recommendations.map((entry) => `${USAGE_WORDING.nextHire}: ${entry.reason}`) ??
       []),
+    ...(report.fleet === undefined ? [] : ["", formatFleetUsageTable(report.fleet)]),
     `Overlay meters ${report.settings.display.overlay ? "shown" : "hidden"}${
       warning === undefined
         ? ""
@@ -185,4 +213,26 @@ export function formatUsageTable(report: UsageReport, now = Date.now(), timeZone
           : " · run-out warning off"
     } · --json for the raw report`,
   ].join("\n");
+}
+
+/** Native context volume by session and UTC day, beside vendor account meters. */
+export function formatFleetUsageTable(report: FleetUsageReport): string {
+  const lines = [
+    `Fleet context: ${report.since} → ${report.until} (UTC days; local native transcripts)`,
+    "SESSION / ROLE / HARNESS  DAY  CALLS  CONTEXT TOKENS  MEDIAN  ABOVE BUDGET  TOKENS ABOVE 400K  COMPACTS  FOREGROUND SLEEPS",
+  ];
+  for (const seat of report.seats) {
+    lines.push(
+      `${seat.sessionId}${seat.subagentId ? ` / ${seat.subagentId}` : ""} / ${seat.role} / ${seat.harness} · budget ${seat.budgetTokens}`,
+    );
+    for (const day of seat.days)
+      lines.push(
+        `  ${day.day}  ${day.modelCalls}  ${day.contextTokens}  ${day.medianContextTokens}  ${(100 * day.aboveBudgetTokenShare).toFixed(1)}%  ${day.above400KContextTokens}  ${day.compactions}  ${day.foregroundSleepCalls}`,
+      );
+  }
+  lines.push(
+    `Total: ${report.totals.modelCalls} calls · ${report.totals.contextTokens} context tokens · median ${report.totals.medianContextTokens} · ${(100 * report.totals.aboveBudgetTokenShare).toFixed(1)}% above budget · ${report.totals.compactions} compactions · ${report.totals.foregroundSleepCalls} foreground sleeps`,
+  );
+  for (const warning of report.warnings) lines.push(`Incomplete/attribution note: ${warning}`);
+  return lines.join("\n");
 }

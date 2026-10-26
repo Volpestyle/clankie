@@ -2467,7 +2467,7 @@ clankie huddle
 clankie huddle close hud_abc123def456
 ```
 
-### `usage [--refresh] [--json]` / `usage overlay [on|off]` / `usage warning [on|off|HOURS]`
+### `usage [--refresh] [--fleet [--days N | --since ISO] [--until ISO]] [--json]` / `usage overlay [on|off]` / `usage warning [on|off|HOURS]`
 
 `usage` prints one row per registered Claude profile and Codex account: harness,
 account, plan (Claude's tier as the profile last fetched it, e.g. "Max 20x"; else
@@ -2475,6 +2475,37 @@ the harness plan, e.g. "Pro"), and the five-hour and weekly windows as percent u
 with a small bar and the reset in local time ("3pm", "Wed 6am"). Model-scoped
 limits in use follow on an indented line, as does "held: …", "not signed in — …"
 or why usage is unknown.
+
+`usage --fleet --days 7` adds local native context spend beside the account meters.
+`--json` includes it in `fleet`; the same owner API read is
+`GET /v1/usage?fleet=1&days=7`. Each native session and UTC day reports model calls,
+context tokens, median context per call, the share of tokens in calls strictly
+above its budget, compactions and foreground sleep calls. Lead budget is 250K;
+worker/subagent budget is 300K. This measures raw native input, including cache
+reads and writes; the vendor account windows retain their own meaning.
+
+For reproducible comparisons, use `--since ISO --until ISO` instead of `--days`.
+The start is inclusive, the end exclusive; `--until` defaults to now. Days and
+intervals are positive and at most 366 days. Ordinary account reads never scan
+transcripts. Explicit fleet reads stream the local native files and share the
+same query for one minute; `--refresh` rereads both meters and the ledger.
+
+The fleet ledger also reports `above400KContextTokens` per seat/day for ADR 0293’s fixed worker comparison; divide its worker sum by worker `contextTokens` to measure the parent’s under-10% goal.
+
+Claude calls are deduped by native message ID, including separate subagent
+transcripts. Codex context comes from `token_count.last_token_usage.input_tokens`,
+which already includes cached input; response IDs dedupe its snapshots, with
+cumulative snapshot identity as the fallback for older rollouts. A retained copy
+of a native message contributes once. UTC days use the latest usage record for
+each native call. A compaction counts only in the requested interval.
+
+Roles come from native census and retained hire/lead-relaunch records. Historical
+sessions without attribution are labeled `unknown` and use the worker review
+budget; child transcripts have their own `subagent` rows. Unreadable or malformed
+sources stay visible in `warnings`. Foreground sleeps count literal shell/tool
+calls with `sleep`; explicit background calls and quoted mention-only commands
+are excluded. The ledger reads metadata and native transcripts and takes no
+fleet action. Linked machines are outside this local report.
 
 Prime Agent's providers follow, one row each, from the kinds in Prime's
 `auth.json` (`PRIME_AGENT_CODING_AGENT_DIR` or `~/.prime/agent`) and the
@@ -2547,6 +2578,8 @@ everything. The app's Usage screen shows the same report and toggles both.
 ```sh
 clankie usage
 clankie usage --refresh --json
+clankie usage --fleet --days 7 --json
+clankie usage --fleet --since 2026-10-18T01:40:00Z --until 2026-10-25T01:41:00Z --json
 clankie usage overlay off
 clankie usage warning 24
 ```

@@ -4,6 +4,8 @@ import { bodyLimit } from "hono/body-limit";
 import {
   USAGE_PATH,
   USAGE_SETTINGS_PATH,
+  FleetUsageQuerySchema,
+  isUsageReportRoute,
   UpdateUsageSettingsSchema,
   type UsageAccount,
   type UsageReport,
@@ -12,6 +14,7 @@ import {
 import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 import type { MachineWorkerAccounts } from "./captain/harness-accounts.ts";
 import { CLAUDE_USAGE_MIN_VERSION, usageHeadroom } from "./captain/harness-usage.ts";
+import { createFleetTokenLedger } from "./fleet-token-ledger.ts";
 import { allocateAccounts } from "./captain/account-allocation.ts";
 
 /** Meters poll; spawning every profile's CLI on each poll would load the Mac for nothing. */
@@ -78,6 +81,7 @@ export function createUsageRoutes(
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
   read: (() => Promise<MachineWorkerAccounts>) | undefined,
   clock: () => number = Date.now,
+  ledger = createFleetTokenLedger(),
 ): Hono {
   const app = new Hono();
   let cached: { at: number; report: Promise<MachineWorkerAccounts> } | undefined;
@@ -121,6 +125,21 @@ export function createUsageRoutes(
     });
   app.get(USAGE_PATH, async (context) => {
     if (!read) return context.json({ error: "usage_unavailable" }, 503);
+    const target = new URL(context.req.url);
+    if (!isUsageReportRoute(`${target.pathname}${target.search}`))
+      return context.json({ error: "invalid_fleet_usage_query" }, 400);
+    const fleet = context.req.query("fleet");
+    const ledgerArgs = FleetUsageQuerySchema.safeParse({
+      ...(context.req.query("days") === undefined ? {} : { days: Number(context.req.query("days")) }),
+      ...(context.req.query("since") === undefined ? {} : { since: context.req.query("since") }),
+      ...(context.req.query("until") === undefined ? {} : { until: context.req.query("until") }),
+    });
+    if (
+      (fleet !== undefined && fleet !== "1") ||
+      !ledgerArgs.success ||
+      (fleet === undefined && ["days", "since", "until"].some((key) => context.req.query(key) !== undefined))
+    )
+      return context.json({ error: "invalid_fleet_usage_query" }, 400);
     const current = await settings.load();
     let machine: MachineWorkerAccounts;
     try {
@@ -146,6 +165,16 @@ export function createUsageRoutes(
       settings: usageSettings(current),
       allocation: allocateAccounts(machine, now),
     };
+    if (fleet === "1") {
+      try {
+        body.fleet = await ledger(ledgerArgs.data, context.req.query("refresh") === "1");
+      } catch (error) {
+        return context.json(
+          { error: "fleet_usage_failed", detail: error instanceof Error ? error.message : "Unavailable" },
+          error instanceof RangeError ? 400 : 503,
+        );
+      }
+    }
     return context.json(body);
   });
   app.get(USAGE_SETTINGS_PATH, async (context) => context.json(usageSettings(await settings.load())));

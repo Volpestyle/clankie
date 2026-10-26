@@ -3122,7 +3122,7 @@ paths:
     get:
       tags: [Operator]
       operationId: getUsage
-      summary: Read this machine's account usage and where the next hires go
+      summary: Read account usage, optional native fleet context spend and where the next hires go
       description: >-
         Each registered Claude profile and Codex account with identity, plan, headroom and its usage windows (percent used,
         length, reset, source and observation age), read through each harness's own CLI and shared for a minute across
@@ -3130,11 +3130,48 @@ paths:
         per day (planWeight, tier, remaining, sparePerDay, window, burnPerDay, resetsAt, runsOut, rank, reason);
         `allocation.recommendations` names the next automatic hire per harness with its reason (ADR 0261). `settings`
         carries the overlay and run-out warning settings with their revision. Never credentials (UsageReportSchema).
+        fleet=1 adds an on-demand local native-transcript ledger in `fleet`, cached for one minute independently of account
+        polling. Each session and UTC day reports modelCalls, contextTokens, medianContextTokens,
+        aboveBudgetContextTokens, aboveBudgetTokenShare, above400KContextTokens, compactions and foregroundSleepCalls. Claude input includes cache
+        reads and writes; Codex uses token_count input (cached input is already included). Native message/response IDs
+        deduplicate streaming records and retained copies; older Codex responses use repeated cumulative snapshot identity.
+        Children have separate subagent rows. Role attribution comes from the native census, hire journal and lead relaunch
+        journal; unknown historical roles use the 300K worker review budget and are labeled unknown. Lead budget is 250K.
+        Above-budget share is the fraction of context tokens in calls strictly above that seat budget. Warnings preserve
+        unreadable/malformed sources and unknown attribution. These are raw token volumes; vendor account windows remain
+        independent. days defaults to 7 (1..366); since and days are mutually exclusive; until defaults to now, with a
+        positive interval no longer than 366 days. Ordinary meter reads never scan transcripts.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - { name: refresh, in: query, required: false, schema: { type: string, enum: ["1"] } }
+        - { name: fleet, in: query, required: false, schema: { type: string, enum: ["1"] } }
+        - {
+            name: days,
+            in: query,
+            required: false,
+            schema: { type: integer, minimum: 1, maximum: 366 },
+            description: Fleet ledger only; rolling days ending at until,
+            default 7,
+          }
+        - {
+            name: since,
+            in: query,
+            required: false,
+            schema: { type: string, format: date-time },
+            description: Fleet ledger only; inclusive start,
+            mutually exclusive with days,
+          }
+        - {
+            name: until,
+            in: query,
+            required: false,
+            schema: { type: string, format: date-time },
+            description: Fleet ledger only; exclusive end,
+            defaults to now,
+          }
       responses:
-        "200": { description: Usage report with allocation; Cache-Control no-store }
+        "200": { description: Usage report with allocation and optional fleet ledger; Cache-Control no-store }
+        "400": { description: Invalid fleet ledger query or interval }
         "401": { description: Authentication required }
         "403": { description: Current owner or Take Control authority required }
         "409": { description: The accounts could not be read }

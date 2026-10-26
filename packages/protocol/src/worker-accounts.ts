@@ -336,6 +336,96 @@ export const UpdateUsageSettingsSchema = z
   );
 export type UpdateUsageSettings = z.infer<typeof UpdateUsageSettingsSchema>;
 
+/** Native transcript ledger (VUH-2826); raw context volume, independently of account limits. */
+export const FleetUsageQuerySchema = z
+  .strictObject({
+    days: z.number().int().min(1).max(366).optional(),
+    since: z.iso.datetime().optional(),
+    until: z.iso.datetime().optional(),
+  })
+  .refine((value) => value.since === undefined || value.days === undefined, "Use days or since, not both");
+export type FleetUsageQuery = z.infer<typeof FleetUsageQuerySchema>;
+
+/** The only owner usage queries that cross hosted/relay boundaries. */
+export function isUsageReportRoute(route: string): boolean {
+  if (route === USAGE_PATH) return true;
+  if (
+    !route.startsWith(`${USAGE_PATH}?`) ||
+    route.includes("#") ||
+    route.indexOf("?", route.indexOf("?") + 1) !== -1
+  )
+    return false;
+  const params = new URLSearchParams(route.slice(USAGE_PATH.length + 1));
+  const keys = [...params.keys()];
+  if (
+    new Set(keys).size !== keys.length ||
+    keys.some((key) => !["refresh", "fleet", "days", "since", "until"].includes(key))
+  )
+    return false;
+  if (params.has("refresh") && params.get("refresh") !== "1") return false;
+  if (!params.has("fleet")) return keys.every((key) => key === "refresh");
+  if (params.get("fleet") !== "1") return false;
+  const parsed = FleetUsageQuerySchema.safeParse({
+    ...(params.has("days") ? { days: Number(params.get("days")) } : {}),
+    ...(params.has("since") ? { since: params.get("since") } : {}),
+    ...(params.has("until") ? { until: params.get("until") } : {}),
+  });
+  if (!parsed.success) return false;
+  if (parsed.data.since && parsed.data.until) {
+    const duration = Date.parse(parsed.data.until) - Date.parse(parsed.data.since);
+    if (duration <= 0 || duration > 366 * 86_400_000) return false;
+  }
+  return true;
+}
+const FleetUsageMetricsSchema = z.object({
+  modelCalls: z.number().int().nonnegative(),
+  contextTokens: z.number().int().nonnegative(),
+  medianContextTokens: z.number().nonnegative(),
+  aboveBudgetContextTokens: z.number().int().nonnegative(),
+  /** Parent ADR 0293 comparison: tokens in calls strictly above 400K. */
+  above400KContextTokens: z.number().int().nonnegative(),
+  aboveBudgetTokenShare: z.number().min(0).max(1),
+  compactions: z.number().int().nonnegative(),
+  foregroundSleepCalls: z.number().int().nonnegative(),
+});
+export const FleetUsageReportSchema = z.object({
+  schemaVersion: z.literal(1),
+  source: z.literal("local-native-transcripts"),
+  observedAt: z.iso.datetime(),
+  since: z.iso.datetime(),
+  until: z.iso.datetime(),
+  dayBoundary: z.literal("UTC"),
+  budgets: z.object({ lead: z.literal(250000), worker: z.literal(300000) }),
+  totals: FleetUsageMetricsSchema,
+  seats: z
+    .array(
+      z.object({
+        seatKey: z.string().min(1).max(1024),
+        sessionId: z.string().min(1).max(512),
+        subagentId: z.string().min(1).max(512).optional(),
+        seatId: z.string().min(1).max(512).optional(),
+        harness: z.enum(["claude", "codex"]),
+        role: z.enum(["lead", "worker", "subagent", "unknown"]),
+        roleSource: z.enum([
+          "native-census",
+          "lead-relaunch-journal",
+          "hire-journal",
+          "native-subagent",
+          "unattributed",
+        ]),
+        budgetTokens: z.number().int().positive(),
+        totals: FleetUsageMetricsSchema,
+        days: z
+          .array(FleetUsageMetricsSchema.extend({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u) }))
+          .max(367),
+      }),
+    )
+    .max(20000),
+  sources: z.object({ filesRead: z.number().int().nonnegative(), bytesRead: z.number().int().nonnegative() }),
+  warnings: z.array(z.string()).max(1000),
+});
+export type FleetUsageReport = z.infer<typeof FleetUsageReportSchema>;
+
 export const UsageReportSchema = z.object({
   notices: z.array(AccountIdentityNoticeSchema).optional(),
   schemaVersion: z.literal(1),
@@ -346,6 +436,8 @@ export const UsageReportSchema = z.object({
   settings: UsageSettingsSnapshotSchema,
   /** Where the next automatic hires go and why (VUH-1974); absent from older bodies. */
   allocation: MachineAllocationSchema.optional(),
+  /** Explicit --fleet read only; absent from ordinary meter polling and older bodies. */
+  fleet: FleetUsageReportSchema.optional(),
 });
 export type UsageReport = z.infer<typeof UsageReportSchema>;
 

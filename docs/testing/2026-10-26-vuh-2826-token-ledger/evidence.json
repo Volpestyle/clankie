@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "baseline.png",
+      "size": 171281,
+      "sha256": "2c0b29366c5338f29134557a923d4fce107fc7d9cd569a3f10b77d01120db4bc",
+      "url": "clankie://evidence/sha256/2c0b29366c5338f29134557a923d4fce107fc7d9cd569a3f10b77d01120db4bc"
+    },
+    {
+      "path": "usage.json",
+      "size": 374387,
+      "sha256": "9234bfaa75f062e4a217e10d302e37ddfb55c51bad393ec9f4731bafb5990ce5",
+      "url": "clankie://evidence/sha256/9234bfaa75f062e4a217e10d302e37ddfb55c51bad393ec9f4731bafb5990ce5"
+    },
+    {
+      "path": "usage.txt",
+      "size": 48759,
+      "sha256": "714266824d5ede565e5d095e1170e2e3e8f9850ec84baf1283c396ac2e954269",
+      "url": "clankie://evidence/sha256/714266824d5ede565e5d095e1170e2e3e8f9850ec84baf1283c396ac2e954269"
+    }
+  ]
+}

@@ -179,6 +179,15 @@ Closure follows `fleet.closure` ("Status stays true" in `work-items`).
 already-linked machines; `owner` means ask first. Neither grants sign-ins,
 payments, credentials or destructive actions.
 
+For context-spend comparisons, use `clankie usage --fleet --days 7 --json` beside
+account usage. The local native ledger reports each session's role/harness and
+UTC-day calls, context tokens, median, above-budget token share, compactions and
+foreground sleeps. Use explicit `--since ISO --until ISO` to freeze a baseline;
+keep its interval, warnings and unknown historical attribution in the evidence.
+The operator head and native children are included in this ledger even though
+the head is excluded from the worker efficiency endpoint. The ledger takes no
+action; use the figures to judge the fleet's results against its spend.
+
 ## Keep the record small
 
 Progress lives in the project's tracker, written through Clankie's connected

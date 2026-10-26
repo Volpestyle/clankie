@@ -17,6 +17,7 @@ import { OperatorConversationServiceRequestSchema } from "./operator-service.ts"
 import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
 import {
   isWorkerAccountsRoute,
+  isUsageReportRoute,
   USAGE_PATH,
   USAGE_SETTINGS_PATH,
   WORKER_ACCOUNT_HOLDS_PATH,
@@ -66,7 +67,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
     return method === "GET" || method === "POST";
   // Worker accounts read one machine through the only query that route accepts.
   if (isWorkerAccountsRoute(path)) return method === "GET";
-  if (path === `${USAGE_PATH}?refresh=1`) return method === "GET";
+  if (isUsageReportRoute(path)) return method === "GET";
   if (path === FLEET_ROSTER_WORK_PATH) return method === "GET";
   if (isViewRoute(path)) return method === "GET";
   if (path === "/operator/v1/dispatch" && method === "POST") {
