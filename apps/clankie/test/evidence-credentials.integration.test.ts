@@ -78,6 +78,7 @@ for (const field of [
   "malformed",
   "future",
   "overlong",
+  "before-request",
 ] as const) {
   it(`refuses a signed but incorrectly bound ${field} reply and clears prior authority`, async () => {
     const root = await mkdtemp(join(tmpdir(), "evidence-refusal-"));
@@ -87,6 +88,8 @@ for (const field of [
       await resolve();
       f.advance(450_001);
       f.transform((lease) => {
+        if (field === "before-request")
+          return { ...lease, issuedAtMs: f.now - 2000, expiresAtMs: f.now + 898_000 };
         if (field === "malformed") return { bad: true };
         if (field === "expired") return { ...lease, expiresAtMs: f.now - 1 };
         if (field === "future") return { ...lease, issuedAtMs: f.now + 5000 };
@@ -268,6 +271,66 @@ it("requires fresh admission after reconciling an earlier process's uncertain ex
     expect(f.requests[1]!.reconcile).toBe(true);
     expect(f.requests[2]!.nonce === f.requests[1]!.nonce).toBe(false);
     expect(f.requests[2]!.reconcile).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("keeps generic network errors retryable and recovers on the same exchange identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "evidence-network-retry-"));
+  try {
+    const f = await fleetFixture(root),
+      credentials = f.provider.credentials(f.destination, "read");
+    const original = await credentials();
+    f.advance(450_001);
+    f.mode("network");
+    expect((await credentials()).accessKeyId === original.accessKeyId).toBe(true);
+    const current = await f.broker.get(evidenceCredentialId(f.binding("read")));
+    expect(current?.type === "evidence-storage" && current.enabled).toBe(true);
+    f.advance(5000);
+    f.mode("ok");
+    expect((await credentials()).accessKeyId === original.accessKeyId).toBe(false);
+    expect(f.requests.at(-1)!.nonce === f.requests.at(-2)!.nonce).toBe(true);
+    expect(f.requests.at(-1)!.reconcile).toBe(true);
+    const cold = await fleetFixture(join(root, "cold"));
+    cold.mode("network");
+    await expect(cold.provider.credentials(cold.destination, "read")()).rejects.toThrow(
+      "evidence_session_unavailable",
+    );
+    const refused = await cold.broker.get(evidenceCredentialId(cold.binding("read")));
+    expect(refused?.type === "evidence-storage" && refused.enabled).toBe(true);
+    cold.advance(5000);
+    cold.mode("ok");
+    await new BrokerEvidenceCredentials(cold.providerOptions).credentials(cold.destination, "read")();
+    // Reconcile keeps original issue/expiry, including replies older than one
+    // exchange deadline but inside the original signed-request window.
+    const lost = await fleetFixture(join(root, "lost"));
+    lost.mode("uncertain");
+    await expect(lost.provider.credentials(lost.destination, "read")()).rejects.toThrow(
+      "evidence_session_unavailable",
+    );
+    lost.advance(20_000);
+    lost.mode("ok");
+    await lost.provider.credentials(lost.destination, "read")();
+    expect(lost.requests[0]!.nonce === lost.requests[1]!.nonce).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("refuses an unreconciled reply after the original nonce window without extending it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "evidence-nonce-window-"));
+  try {
+    const f = await fleetFixture(root);
+    f.mode("uncertain");
+    await expect(f.provider.credentials(f.destination, "read")()).rejects.toThrow(
+      "evidence_session_unavailable",
+    );
+    f.advance(300_001);
+    f.mode("ok");
+    await expect(f.provider.credentials(f.destination, "read")()).rejects.toThrow(
+      "evidence_session_unavailable",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

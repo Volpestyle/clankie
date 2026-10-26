@@ -29,6 +29,12 @@ export class EvidenceSessionUnavailable extends EvidenceRefusal {
     super(503, "evidence_session_unavailable");
   }
 }
+/** Only an explicit issuer denial uses this type; ordinary transport errors are transient. */
+export class EvidenceSessionDenied extends Error {
+  constructor() {
+    super("evidence_session_denied");
+  }
+}
 export class EvidenceSessionTransient extends Error {
   constructor() {
     super("evidence_session_transport_unavailable");
@@ -47,6 +53,11 @@ type BrokerEvidenceCredentialsOptions = {
   key: ECDH;
   verifyKeys: ReadonlyMap<string, KeyObject>;
   hostExpiresAtMs(): number;
+  /** Reconcile repeats the original nonce/body, never a new issuance identity.
+   * Throw EvidenceSessionDenied only for an explicit denial; all other throws
+   * (including fetch/5xx/timeout failures) preserve admission and retry.
+   * Completed malformed payloads must reach the decoder (undefined for invalid
+   * JSON); do not turn body validation into a thrown transport exception. */
   exchange(
     request: {
       destinationId: string;
@@ -166,16 +177,23 @@ export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
           ),
           timeout,
         ]);
-        lease = decodeEvidenceLease(reply, {
-          binding,
-          nonce: claimed.nonce,
-          key: o.key,
-          verifyKeys: o.verifyKeys,
-          nowMs: clock(),
-          hostExpiresAtMs: o.hostExpiresAtMs(),
-        });
+        // A received but invalid reply withdraws authority. A thrown transport
+        // error is different: it cannot prove that the issuer denied the grant.
+        try {
+          lease = decodeEvidenceLease(reply, {
+            binding,
+            nonce: claimed.nonce,
+            key: o.key,
+            verifyKeys: o.verifyKeys,
+            nowMs: clock(),
+            hostExpiresAtMs: o.hostExpiresAtMs(),
+            requestStartedAtMs: claimed.startedAtMs,
+          });
+        } catch {
+          // A completed but invalid reply withdraws authority below.
+        }
       } catch (error) {
-        transient = error instanceof EvidenceSessionTransient;
+        transient = !(error instanceof EvidenceSessionDenied);
       } finally {
         clearTimeout(timer);
       }

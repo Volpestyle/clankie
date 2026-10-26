@@ -2,6 +2,7 @@ import { createDecipheriv, createHash, hkdfSync, verify, type ECDH, type KeyObje
 import { z } from "zod";
 import {
   EvidenceLeaseSchema,
+  EVIDENCE_EXCHANGE_WINDOW_MS,
   type EvidenceLease,
   type EvidenceSessionBinding,
 } from "@clankie/protocol/evidence-credentials";
@@ -65,6 +66,7 @@ export function decodeEvidenceLease(
     key: ECDH;
     verifyKeys: ReadonlyMap<string, KeyObject>;
     nowMs: number;
+    requestStartedAtMs: number;
     hostExpiresAtMs: number;
   },
 ): EvidenceLease {
@@ -102,7 +104,8 @@ export function decodeEvidenceLease(
       !sameEvidenceBinding(lease.binding, options.binding) ||
       lease.nonce !== options.nonce ||
       lease.issuedAtMs > options.nowMs + 1000 ||
-      lease.issuedAtMs < options.nowMs - 10_000 ||
+      lease.issuedAtMs < options.requestStartedAtMs - 1000 ||
+      options.nowMs > options.requestStartedAtMs + EVIDENCE_EXCHANGE_WINDOW_MS ||
       lease.expiresAtMs <= options.nowMs ||
       lease.expiresAtMs <= lease.issuedAtMs ||
       lease.expiresAtMs - lease.issuedAtMs > 900_000 ||

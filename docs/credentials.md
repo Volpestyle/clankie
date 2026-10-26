@@ -36,12 +36,24 @@ logs, argv, worker auth or evidence.
 
 Renewal starts on demand at half-life, with a ten-second deadline, coalesced
 broker claims and bounded retry backoff. An uncertain exchange retains its
-original nonce for transport reconciliation. Only a previously admitted process
-may use its existing session during a transient outage, and only with more than
+original nonce, timestamp and body digest for transport reconciliation. An
+identical authenticated nonce/digest inside the original five-minute nonce
+window returns the identical sealed reply with unchanged issue/expiry times;
+a different digest or admission binding is an explicit denial. The private
+handler requires durable atomic replay storage, not a fixture-only map.
+Transport implementations use `EvidenceSessionDenied` only for explicit issuer
+denial; every other exchange exception, including unknown network errors and
+HTTP 5xx, is transient. Completed payloads reach the decoder, including invalid
+JSON as an invalid input; received malformed/unbound replies still withdraw
+authority. A ten-second attempt deadline does not discard an otherwise valid
+original reply; decoding checks its original request window and session expiry.
+After restart, reconciliation alone does not replace fresh live admission.
+Only a previously admitted process may use its existing session during a transient outage, and only with more than
 60 seconds left. Invalid or denied replies withdraw local authority immediately;
 revocation/replacement fences prevent late publication. Restart requires fresh
 fleet admission before any persisted session is used. Signed GET expiry is
-bounded by the session and 15 minutes.
+bounded by the session and 15 minutes. The offline retry delay is one second;
+escalating backoff and issuance limits remain activation checks.
 
 This is an offline implementation seam, not an available hosted storage service.
 The private injected issuer is unmounted; no production issuer transport, STS

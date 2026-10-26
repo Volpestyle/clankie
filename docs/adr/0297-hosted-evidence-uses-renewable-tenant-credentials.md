@@ -137,6 +137,31 @@ revoked replies invalidate the local session immediately. Do not log upstream
 response bodies. Preserve the request identity when reconciling an uncertain
 exchange; a retry cannot widen scope or manufacture activation.
 
+The transport contract distinguishes explicit denial from delivery failure:
+only `EvidenceSessionDenied` represents an explicit issuer denial. Every other
+exchange exception (including fetch `TypeError`, resets, DNS failures, timeouts
+and HTTP 5xx) is transient. A received reply that fails decoding/binding still
+invalidates immediately. A transport must not turn an unclassified error into a
+revocation tombstone.
+
+Reconciliation repeats the original authenticated nonce, request timestamp and
+body digest. Within that signed request's original five-minute nonce window and
+the original session lifetime, an identical nonce/digest returns the **identical
+sealed reply**, without issuing another session or extending issue/expiry times.
+The same nonce with a different digest or admission binding is an explicit
+denial. Pending issuance returns a transient response; it cannot be repeated
+while its outcome is unknown. The private handler therefore requires atomic,
+durable reservation and sealed-response storage before it can be mounted; a
+fixture-only replay map is insufficient. Cached replies still require current
+host/grant checks. The decoder binds issue time to the original request and
+checks the original nonce window and absolute expiry; the ten-second deadline
+bounds each attempt, not the lifetime of a recoverable reply. A restarted body
+must settle the old identity and obtain fresh live admission before using it.
+
+The offline implementation currently delays retries by a fixed one second per
+broker entry. Escalating backoff, issuance rate limits and pending-claim recovery
+must be assessed before activation.
+
 Every renewal checks the current installation, tenant enablement, destination
 allowlist and monotonic grant revision. Publish only a validated reply whose
 revision still matches the broker's admission state. Revocation and replacement

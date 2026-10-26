@@ -14,7 +14,11 @@ import { expect, it } from "vitest";
 import { EvidenceStore, createEvidenceRoutes } from "../src/evidence-store.ts";
 import { S3EvidenceBlobs } from "../src/evidence-s3.ts";
 import { evidenceS3Client } from "../src/evidence-storage.ts";
-import { BrokerEvidenceCredentials, EvidenceSessionTransient } from "../src/evidence-credentials.ts";
+import {
+  BrokerEvidenceCredentials,
+  EvidenceSessionTransient,
+  EvidenceSessionDenied,
+} from "../src/evidence-credentials.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
 import { fleetFixture } from "./fixtures/evidence-session/fleet.ts";
 import { startEvidenceMinio } from "./fixtures/evidence-session/minio.ts";
@@ -39,6 +43,8 @@ it.runIf(Boolean(process.env.EVIDENCE_OFFLINE_MINIO_BINARY && process.env.EVIDEN
       /* @vite-ignore */ pathToFileURL(process.env.EVIDENCE_OFFLINE_ISSUER_FIXTURE!).href
     );
     const issuer = await privateFixture.startOfflineEvidenceIssuer({
+      directory: root,
+      denied: () => new EvidenceSessionDenied(),
       signer: f.signer,
       body: f.body,
       bodyPublic: f.bodyPublic,
@@ -228,6 +234,27 @@ it.runIf(Boolean(process.env.EVIDENCE_OFFLINE_MINIO_BINARY && process.env.EVIDEN
         ),
       ).toBe(false);
       expect(/X-Amz-(?:Signature|Credential)|[?&]signature=/iu.test(all)).toBe(false);
+      const exchange = issuer.exchange;
+      let lost = false,
+        originalReply = "",
+        replayedReply = "";
+      const beforeLost = issuer.calls;
+      f.providerOptions.exchange = async (request, signal) => {
+        const reply = await exchange(request, signal);
+        if (!lost) {
+          lost = true;
+          originalReply = JSON.stringify(reply);
+          throw new TypeError("fixture lost response");
+        }
+        replayedReply = JSON.stringify(reply);
+        return reply;
+      };
+      f.advance(450_001);
+      await store.deviceFetch({ sha256: sha, offset: 0, length: bytes.length });
+      f.advance(20_000);
+      await store.deviceFetch({ sha256: sha, offset: 0, length: bytes.length });
+      expect(issuer.calls).toBe(beforeLost + 1);
+      expect(Boolean(originalReply) && replayedReply === originalReply).toBe(true);
       f.advance(900_001);
       f.providerOptions.exchange = async () => {
         throw new EvidenceSessionTransient();
@@ -274,6 +301,7 @@ it.runIf(Boolean(process.env.EVIDENCE_OFFLINE_MINIO_BINARY && process.env.EVIDEN
             issuerCalls: issuer.calls,
             receiptStates: ["applied"],
             renewalCoalesced: true,
+            lostResponseReconciledThroughIssuer: true,
             historicalReadPreserved: true,
             secretCaptureClean: true,
             cleanup: {

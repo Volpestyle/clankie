@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+export const EVIDENCE_EXCHANGE_WINDOW_MS = 5 * 60_000;
 export const EVIDENCE_ISSUER_PATH = "/fleet/v1/body/evidence-session";
 const id = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
 export const EvidenceSessionBindingSchema = z

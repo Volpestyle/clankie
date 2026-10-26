@@ -17,6 +17,7 @@ import {
   admitEvidenceSession,
   BrokerEvidenceCredentials,
   EvidenceSessionTransient,
+  EvidenceSessionDenied,
 } from "../../../src/evidence-credentials.ts";
 import { join } from "node:path";
 
@@ -95,7 +96,7 @@ export async function fleetFixture(root: string, issue?: () => Promise<EvidenceS
   const binding = (purpose: "read" | "write"): EvidenceSessionBinding => ({ ...common, purpose });
   let now = Date.now(),
     calls = 0,
-    mode: "ok" | "outage" | "deny" | "uncertain" = "ok";
+    mode: "ok" | "outage" | "deny" | "uncertain" | "network" = "ok";
   let transform = (lease: EvidenceLease): unknown => lease;
   let wire = (reply: unknown): unknown => reply;
   const replies = new Map<string, unknown>();
@@ -122,7 +123,8 @@ export async function fleetFixture(root: string, issue?: () => Promise<EvidenceS
     if (request.reconcile && replies.has(request.nonce)) return replies.get(request.nonce);
     await hold?.();
     if (mode === "outage") throw new EvidenceSessionTransient();
-    if (mode === "deny") throw new Error("denied");
+    if (mode === "deny") throw new EvidenceSessionDenied();
+    if (mode === "network") throw new TypeError("fetch failed");
     if (replay) return previousReply;
     const session = issue
       ? await issue()

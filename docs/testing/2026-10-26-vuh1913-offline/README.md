@@ -73,5 +73,29 @@ transport/STS adapter. Real cloud proof and activation require separate explicit
 owner authorization. New direct requests can start until session/URL expiry;
 already-started transfers can continue afterward. VUH-1913 remains open.
 
-Public review, private PR/CI, and an owner-granted landing window are required
+Public review, private PR/CI, and a lead-granted landing window are required
 before root gates or any push. The private PR must stop before merge.
+
+## Review repair proof
+
+The two required changes from candidate `7484234c` are repaired. Only
+`EvidenceSessionDenied` or a completed invalid reply withdraws admission;
+unclassified exchange exceptions preserve it and retry. Generic network errors
+are tested for fallback, retained admission and later recovery. Fixed one-second
+retry spacing remains an activation follow-up.
+
+The private issuer now owns a durable SQLite replay store. The HTTP transport
+has no reply map. An intentionally lost renewal response is recovered through
+the actual handler after 20 seconds, with the identical sealed reply and no
+second issuance. Same nonce with a different digest refuses. The decoder accepts
+reconciliation only inside the original five-minute request window, while
+retaining session expiry, binding and fresh-process admission checks.
+
+The final governed run passed 26/26 in the two affected public test files,
+including the actual CLI/HTTP/MinIO proof, with no skips. Both focused public and
+private compiler checks passed; the private handler suite passed 22/22 and all
+six private app typechecks passed in the isolated sibling snapshot. The private
+code matches the repair; the snapshot's public provider predates only an
+equivalent invalid-reply catch cleanup. `review-repair-proof.zip` retains the
+final public outputs, clean capture and teardown record. Original archives above
+remain unchanged. No root gate, push, remote CI or hosted proof is claimed.
