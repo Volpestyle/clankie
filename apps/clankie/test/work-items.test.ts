@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   OperatorConversationServiceResultSchema,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
@@ -9,7 +9,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
-import { createWorkItemsService } from "../src/work-items.ts";
+import { createWorkItemsService, defaultRun } from "../src/work-items.ts";
 
 const clock = () => new Date("2026-09-26T12:00:00.000Z");
 const noGit = async () => {
@@ -49,6 +49,31 @@ describe("the work-items service", () => {
       backend: "default",
       decidedBy: "discovery",
     });
+  });
+
+  it("lists a repo's linked worktrees as that repo, never by their folder names (VUH-2848)", async () => {
+    // A real checkout and a worktree where Claude Code keeps a subagent's: `.claude/worktrees/agent-…`.
+    const repo = await mkdtemp(join(tmpdir(), "work-checkout-"));
+    const git = (...args: string[]) =>
+      defaultRun("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], repo);
+    await git("init", "-q", "-b", "main");
+    await writeFile(join(repo, "README.md"), "x\n");
+    await git("add", "README.md");
+    await git("commit", "-q", "-m", "init");
+    const worktree = join(repo, ".claude", "worktrees", "agent-a1d73e1df10623670");
+    await git("worktree", "add", "-q", "--detach", worktree);
+    const stateDirectory = await mkdtemp(join(tmpdir(), "work-state-"));
+    const service = createWorkItemsService({ stateDirectory, run: defaultRun, clock });
+    const names = async () => {
+      const result = await service.handle({ action: "repos" }, true);
+      return "repos" in result ? result.repos.map((entry) => [entry.name, entry.root]) : [];
+    };
+    // An agent in the worktree names its path first: it is named after its checkout.
+    await service.handle({ action: "create", repo: worktree, title: "From the worktree" }, true);
+    expect(await names()).toEqual([[basename(repo), worktree]]);
+    // Once the checkout itself is known, the list offers it alone.
+    await service.handle({ action: "list", repo }, true);
+    expect(await names()).toEqual([[basename(repo), repo]]);
   });
 
   it("never lets a device name a path or write", async () => {

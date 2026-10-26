@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { readFileSync, statSync } from "node:fs";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
@@ -441,13 +441,51 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       : [{ id: "workspace", path: resolve(workspace), name: basename(workspace) }, ...repos];
   };
 
+  /**
+   * A linked Git worktree's main checkout, or undefined for a main checkout
+   * or a folder Git doesn't know. A hire's worktree, or Claude Code's
+   * `.claude/worktrees/agent-…`, is that checkout's repo, not one named after
+   * its folder (VUH-2848). Read once per path.
+   */
+  const checkouts = new Map<string, Promise<string | undefined>>();
+  const mainCheckout = (path: string): Promise<string | undefined> => {
+    let main = checkouts.get(path);
+    if (main === undefined) {
+      main = run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"], path).then(
+        (output) => {
+          const [common, own] = output.trim().split("\n");
+          return common && own && common !== own && basename(common) === ".git" ? dirname(common) : undefined;
+        },
+        () => undefined,
+      );
+      checkouts.set(path, main);
+    }
+    return main;
+  };
+
+  /** The repos to offer: a worktree of a listed checkout is that checkout, and any other worktree is named after it. */
+  const listed = async () => {
+    const repos = await known();
+    const paths = new Set(repos.map((repo) => repo.path));
+    const shown: typeof repos = [];
+    for (const repo of repos) {
+      const main = await mainCheckout(repo.path);
+      if (main !== undefined && paths.has(main)) continue;
+      shown.push(main === undefined ? repo : { ...repo, name: basename(main) });
+    }
+    return shown;
+  };
+
   /** Registers a local path the operator or an agent named, so the app can read it later. */
   const register = async (path: string) => {
     const repos = await readRegistry();
     const absolute = resolve(path);
     const existing = (await known()).find((repo) => repo.path === absolute);
     if (existing !== undefined) return existing;
-    const entry = { id: repoId(absolute), path: absolute, name: basename(absolute) };
+    // A worktree keeps its own path, so file-backed work is written where its agent commits;
+    // it is named after its checkout, and the repo list offers the checkout (see `listed`).
+    const main = await mainCheckout(absolute);
+    const entry = { id: repoId(absolute), path: absolute, name: basename(main ?? absolute) };
     await writeRegistry([...repos.filter((repo) => repo.path !== absolute), entry].slice(-50));
     return entry;
   };
@@ -1703,7 +1741,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         const repos = [
           ...((await projectReader?.repos()) ?? []),
           ...((await linearProjects?.repos().catch(() => [])) ?? []),
-          ...(await Promise.all((await known()).map(describe))),
+          ...(await Promise.all((await listed()).map(describe))),
         ];
         if (repos.length > WORK_REPO_LIST_MAX)
           throw new WorkRequestError("result_too_large", "There are too many work trackers to list at once.");

@@ -2962,6 +2962,10 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   exact Linear UUID associates a World project; names do not. Projects cut over
   to the built-in tracker are listed through that tracker. A local command that
   names a repository path still registers it; paired devices name returned IDs.
+  A linked Git worktree (a hire's, or Claude Code's `.claude/worktrees/agent-…`)
+  registers under its own path, so file-backed work stays where its agent
+  commits. It is named after its main checkout, and while that checkout is
+  registered the list offers the checkout alone.
 - `clankie work list [--status todo,in_progress] [--owner NAME] [--label L]`,
   `work show ID`. `--label` keeps items carrying that label, matched
   case-insensitively; it is how a role station reads its backlog
