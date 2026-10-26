@@ -1,10 +1,13 @@
+import {
+  createCaptainOperatorConversationClient,
+  createCaptainRouteClient,
+  resolveCaptainRouteToken,
+} from "../session/operator-conversations.ts";
+import { commandHost } from "./io.ts";
 import { workTrackerSettings } from "./work-tracker.ts";
 import {
-  OperatorFleetSeatSchema,
-  OPERATOR_CONVERSATION_DISPATCH_PATH,
   type OperatorFleetSeat,
   type OperatorFleetReadWarnings,
-  OperatorFleetReadWarningsSchema,
   effectiveHireProfile,
   FleetAutonomySchema,
   FleetGateModeSchema,
@@ -98,18 +101,20 @@ export interface FleetCommandResult {
 
 /** Fleet status uses the same operator roster and efficiency observations as the dock. */
 async function seatContextStatus(
-  api: OwnerSettingsApi,
+  options: FleetCommandOptions,
 ): Promise<NonNullable<FleetCommandResult["seatContext"]>> {
   try {
-    const result = await api.write(
-      OPERATOR_CONVERSATION_DISPATCH_PATH,
-      { op: "roster", schemaVersion: 1 },
-      z.object({
-        op: z.literal("roster"),
-        seats: z.array(OperatorFleetSeatSchema),
-        readWarnings: OperatorFleetReadWarningsSchema.optional(),
-      }),
-    );
+    const token = options.ownerFetcher
+      ? undefined
+      : await resolveCaptainRouteToken({ env: options.env ?? process.env });
+    const transport =
+      options.ownerFetcher ??
+      createCaptainRouteClient({
+        host: commandHost(options),
+        ...(token === undefined ? {} : { captainToken: token }),
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      });
+    const result = await createCaptainOperatorConversationClient(transport, transport).rosterRead!();
     return {
       seats: result.seats,
       ...(result.readWarnings === undefined ? {} : { readWarnings: result.readWarnings }),
@@ -356,7 +361,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
       : { autonomyConfirmedAt: snapshot.autonomyConfirmedAt }),
     deployHolds: await deployHoldStatus(api),
     leadRestart: await leadRestartStatus(api),
-    seatContext: await seatContextStatus(api),
+    seatContext: await seatContextStatus(options),
   };
 }
 
