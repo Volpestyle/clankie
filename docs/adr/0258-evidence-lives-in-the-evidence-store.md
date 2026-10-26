@@ -145,6 +145,12 @@ one LFS server and its quota, and has no issue or actor records. A
 tracker-only attachment store would leave repo evidence in git. Keeping
 everything in git is the cost above.
 
+## Proposed hosted credential follow-up
+
+[ADR 0297](0297-hosted-evidence-uses-renewable-tenant-credentials.md) proposes
+default-off tenant credential brokerage and renewal for VUH-1913. It is awaiting
+James's decision and authorizes no hosted rollout or owner activation.
+
 ## Consequences
 
 Implementation note (VUH-1913, partial): the public S3 blob adapter keeps the
