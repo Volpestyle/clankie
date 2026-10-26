@@ -281,7 +281,10 @@ export async function readFleetTokenLedger(
     visitedRoots.add(root);
     for await (const relative of glob("**/*.jsonl", { cwd: root })) {
       const path = join(root, relative);
-      const meta = await lstat(path).catch(() => undefined);
+      const meta = await lstat(path).catch(() => {
+        warnings.push(`Unreadable native transcript metadata: ${basename(path)}`);
+        return undefined;
+      });
       if (!meta?.isFile() || meta.mtimeMs < Date.parse(since)) continue;
       const inode = `${meta.dev}:${meta.ino}`;
       if (visitedFiles.has(inode)) continue;
@@ -444,6 +447,7 @@ export async function readFleetTokenLedger(
         lines.close();
         stream.destroy();
         // FileHandle.createReadStream owns its descriptor, including error/early-close paths.
+        // allow-swallowed-rejection -- read errors are reported above; explicit teardown can also reject with premature close.
         await finished(stream).catch(() => undefined);
       }
     }
