@@ -54,8 +54,14 @@ with `--conversation <id>` there. The new session binds to the same conversation
 and receives the brief once. The conversation still names the ended session as
 its seat, so the new one binds through the receipt: a session of the launched
 harness in that same pane terminal, while the receipt is open or names it
-(VUH-2860). The old session stays on disk and resumable. Each restart records a
-service notice in the conversation.
+(VUH-2860). Until that session reports itself, which a trust prompt can delay
+for hours, the conversation still hires: only into the project its owner binding
+or Auto routing assigns it, and only while the receipt is open, the process
+observer proves a launched process with no session, and a fresh read shows the
+receipt's harness in the same terminal (VUH-2868). A missing proof or read, any
+session, or another terminal is refused as a changed agent. The old session
+stays on disk and resumable. Each restart records a service notice in the
+conversation.
 
 Every refusal is definite: nothing was ended and nothing was launched. After the
 signal, the result is either relaunched or an uncertain receipt that is

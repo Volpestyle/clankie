@@ -36,6 +36,8 @@ export const ProjectHireProcessProofSchema = z
   .strict();
 export interface ProjectHireProcessProof {
   readonly nativeOccupantId: string;
+  /** The observed process has not reported a native session; never persisted with a hire. */
+  readonly nativeSessionPending?: true;
   readonly fleet: string;
   readonly pane: string;
   readonly binding: { readonly socketPath: string; readonly session?: string };

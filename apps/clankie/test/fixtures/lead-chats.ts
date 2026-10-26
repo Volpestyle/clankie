@@ -22,6 +22,7 @@ import {
   type HerdrWatchRunner,
 } from "../../src/captain/herdr-watch.ts";
 import type { CaptainDeps } from "../../src/captain/deps.ts";
+import type { CaptainOptions } from "../../src/captain/captain-types.ts";
 
 export const capabilities = {
   schemaVersion: 1 as const,
@@ -41,6 +42,8 @@ export async function leadChatFixture(
     leadRestartCheckMs?: number;
     defaultLead?: boolean;
     beforeOpen?: (sessionId: string) => Promise<void>;
+    projectHireIdentity?: CaptainOptions["projectHireIdentity"];
+    paneReadFails?: () => boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
@@ -73,7 +76,15 @@ export async function leadChatFixture(
     session: { source: "herdr:claude", kind: "id", value: sessionId },
     workingDirectory: root,
   };
-  const wire = {
+  const wire: {
+    pane_id: string;
+    terminal_id: string;
+    agent: string;
+    agent_status: string;
+    title: string;
+    agent_session?: HerdrAgentSnapshot["session"];
+    cwd: string;
+  } = {
     pane_id: "w4:p2",
     terminal_id: "term_work",
     agent: "claude",
@@ -82,16 +93,25 @@ export async function leadChatFixture(
     agent_session: { ...head.session! },
     cwd: root,
   };
-  /** The pane's occupant changes, as when a relaunch starts a new session in it (VUH-2860). */
-  const occupy = (next: { sessionId: string; terminalId?: string }) => {
+  /**
+   * The pane's occupant changes, as when a relaunch starts a new session in it
+   * (VUH-2860), or launches one that has not reported a session yet (VUH-2868).
+   */
+  const occupy = (next: { sessionId: string | undefined; terminalId?: string; agent?: string }) => {
     const terminal = next.terminalId ?? "term_work";
+    const { session: _session, ...occupant } = head;
     head = {
-      ...head,
+      ...occupant,
       terminalId: `${prefix}${terminal}`,
-      session: { ...head.session!, value: next.sessionId },
+      agent: next.agent ?? "claude",
+      ...(next.sessionId === undefined
+        ? {}
+        : { session: { source: "herdr:claude", kind: "id" as const, value: next.sessionId } }),
     };
     wire.terminal_id = terminal;
-    wire.agent_session = { ...head.session! };
+    wire.agent = head.agent;
+    if (head.session === undefined) delete wire.agent_session;
+    else wire.agent_session = { ...head.session };
   };
   const herdrResponse = (args: readonly string[]) => {
     wire.agent_status = options.nativeStatus?.() ?? "idle";
@@ -111,7 +131,10 @@ export async function leadChatFixture(
   vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
   const runner: HerdrWatchRunner = {
     ...(options.slowFleetMs === undefined && !options.nativeSourceProof ? {} : { list: async () => [head] }),
-    get: async () => head,
+    get: async () => {
+      if (options.paneReadFails?.()) throw new Error("Herdr pane read unavailable");
+      return head;
+    },
     resolveTerminal: async (id) => (id === head.terminalId ? head : Promise.reject(new Error("gone"))),
     wait: async () => head,
   };
@@ -190,6 +213,9 @@ export async function leadChatFixture(
       },
       settings,
       ...(options.leadRestartCheckMs === undefined ? {} : { leadRestartCheckMs: options.leadRestartCheckMs }),
+      ...(options.projectHireIdentity === undefined
+        ? {}
+        : { projectHireIdentity: options.projectHireIdentity }),
       discordEnvironment: {},
       seatAdapters: [],
     });
@@ -246,6 +272,8 @@ export async function leadChatFixture(
     open,
     leads,
     head,
+    /** The pane's current occupant, as Herdr reports it now. */
+    current: () => head,
     occupy,
     bridge,
     messageSeat,

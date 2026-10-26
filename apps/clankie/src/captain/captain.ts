@@ -780,14 +780,29 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (native) {
       const fleet = splitFleetQualified(native.terminalId)?.fleet ?? "default";
       const proof = await options.projectHireIdentity?.(fleet, native.paneId);
-      source = await nativeHireProject(
-        projects,
-        native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
-        proof,
-        (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
-        options.projectHireWorkspace,
-        configuredProject,
-      );
+      // VUH-2868: the service's own open relaunch ended the stored session, and the
+      // same terminal now runs a process with no native session yet (Claude's trust
+      // prompt can hold it for hours). Then the conversation hires as one without a
+      // native source does: only into the project its owner binding or Auto routing
+      // assigns it. A missing proof or read, a proven session, another terminal or
+      // no exact open receipt is checked as before.
+      const pending =
+        configuredProject !== undefined && origin !== undefined && proof?.nativeSessionPending === true
+          ? // allow-swallowed-rejection -- an unreadable pane proves nothing; the unchanged guard below refuses.
+            await herdrRunner.get(native.paneId).catch(() => undefined)
+          : undefined;
+      source =
+        pending !== undefined &&
+        leadSeats.pendingReceipt(origin!, leadSeatPane(native), leadSeatPane(pending)) !== undefined
+          ? configuredProject
+          : await nativeHireProject(
+              projects,
+              native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
+              proof,
+              (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
+              options.projectHireWorkspace,
+              configuredProject,
+            );
     } else if (configuredProject !== undefined) {
       source = configuredProject;
     } else if (origin !== undefined) {

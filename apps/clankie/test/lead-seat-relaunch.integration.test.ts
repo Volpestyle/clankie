@@ -1,10 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import {
   createLeadSeatRelaunch,
   readClaudeSessionUsage,
@@ -624,6 +627,164 @@ it.each([false, true])(
     );
   },
 );
+
+// VUH-2868: the second live relaunch (receipt 9965d2ff) launched Claude in the
+// lead's pane, where it waited at the home-folder trust prompt with no session.
+// The stored source still named the ended session, so the service body's hire
+// for its routed project was refused as a changed agent. These drive hire_agent.
+it("hires into the routed project while an open relaunch's successor has no session, and refuses anything less", async () => {
+  let proofUnavailable = false;
+  let paneReadFails = false;
+  const f = await leadChatFixture(false, cleanup, {
+    nativeSourceProof: true,
+    defaultLead: true,
+    paneReadFails: () => paneReadFails,
+    // As the service's own observer reports the pane: a session's occupant, or a
+    // proven startup process that has not reported a session yet.
+    projectHireIdentity: async (fleet, pane) => {
+      if (proofUnavailable) return undefined;
+      const occupant = f.current();
+      return {
+        fleet,
+        pane,
+        ...(occupant.session === undefined
+          ? { nativeOccupantId: `process-${occupant.terminalId}`, nativeSessionPending: true as const }
+          : { nativeOccupantId: occupantIdForHerdrSession(occupant.session) }),
+        binding: { socketPath: join(f.root, "herdr.sock") },
+        processes: [{ pid: process.pid, startTime: "fixture" }],
+        shell: { pid: process.pid, startTime: "fixture" },
+      };
+    },
+  });
+  const conversation = "global-default";
+  await f.captain.pollSeatEvents(50, undefined, conversation, capabilities);
+  const ended = f.head.session!.value;
+  const source = async () =>
+    (
+      JSON.parse(await readFile(join(f.root, "conversations", conversation, "meta.json"), "utf8")) as {
+        nativeSource?: { terminalId: string; session?: { value: string } };
+      }
+    ).nativeSource;
+  expect(await source()).toMatchObject({ terminalId: "term_work", session: { value: ended } });
+
+  // global-default leads `clankie` by Auto routing; `unrouted` is no project it leads.
+  const folder = async (name: string) => {
+    await mkdir(join(f.root, name));
+    return realpath(join(f.root, name));
+  };
+  const clankie = await folder("clankie");
+  const unrouted = await folder("unrouted");
+  await f.settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "clankie",
+          name: "Clankie",
+          auto: true,
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: clankie }],
+        },
+        {
+          id: "unrouted",
+          name: "Unrouted",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: unrouted }],
+        },
+      ],
+    }),
+  }));
+  const bank = await f.captain.laneToolBank("operator", conversation);
+  const spawn = vi.spyOn(HerdrWatchStore.prototype, "spawnSeat");
+  const hire = async (workingDirectory = clankie, projectId: string | null = "clankie") => {
+    const result = await bank.tools
+      .find((tool) => tool.name === "hire_agent")!
+      .call({
+        harness: "codex",
+        effort: "medium",
+        effortReason: "One bounded runtime fix and its proof.",
+        title: "Iris",
+        role: "builder",
+        workingDirectory,
+        ...(projectId === null ? {} : { projectId }),
+        brief: "Own VUH-2825.",
+      });
+    const text = result.content.find((part) => part.type === "text");
+    return JSON.parse(text?.type === "text" ? text.text : "null") as Record<string, unknown>;
+  };
+  const refused = (detail: string) => ({
+    outcome: "failed",
+    reason: "not_ready",
+    detail: expect.stringContaining(detail),
+  });
+  const changed = refused("original agent has changed");
+  const journal = (receipt: Record<string, unknown> = {}) =>
+    writeFile(
+      join(f.root, "lead-seat-relaunches.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        receipts: [
+          {
+            receiptId: randomUUID(),
+            conversationId: conversation,
+            paneId: "w4:p2",
+            reason: "fresh_restart",
+            from: { harness: "claude" },
+            to: { harness: "claude" },
+            previousSessionId: ended,
+            startedAt: "2026-10-26T15:13:04.825Z",
+            stage: "launching",
+            ...receipt,
+          },
+        ],
+        launches: {},
+      }),
+    );
+
+  // The relaunch's Claude waits at the trust prompt: same terminal, no session.
+  f.occupy({ sessionId: undefined });
+  // With no receipt, or one that ended another session, the change is unexplained.
+  expect(await hire()).toMatchObject(changed);
+  await journal({ previousSessionId: randomUUID() });
+  expect(await hire()).toMatchObject(changed);
+
+  await journal();
+  // A missing proof or pane read is no proof that the successor has no session.
+  proofUnavailable = true;
+  expect(await hire()).toMatchObject(changed);
+  proofUnavailable = false;
+  paneReadFails = true;
+  expect(await hire()).toMatchObject(changed);
+  paneReadFails = false;
+  // Another terminal, another harness, or a proven session is a changed agent.
+  for (const occupant of [
+    { sessionId: undefined, terminalId: "term_other" },
+    { sessionId: undefined, agent: "codex" },
+    { sessionId: randomUUID() },
+  ]) {
+    f.occupy(occupant);
+    expect(await hire(), JSON.stringify(occupant)).toMatchObject(changed);
+  }
+  f.occupy({ sessionId: undefined });
+  // Only the project this conversation's routing assigns it, in that project's folder.
+  expect(await hire(unrouted, "unrouted")).toMatchObject(changed);
+  expect(await hire(clankie, null)).toMatchObject(changed);
+  expect(await hire(unrouted, "clankie")).toMatchObject(refused("different projects"));
+  expect(spawn).not.toHaveBeenCalled();
+
+  // The exact open receipt: the hire passes both project admissions and stops only
+  // because this fixture has no harness adapter.
+  expect(await hire()).toMatchObject({
+    outcome: "failed",
+    reason: "harness_unavailable",
+    control: { reason: "pane_run_unavailable" },
+  });
+  expect(spawn).toHaveBeenCalledOnce();
+  expect(await source()).toMatchObject({ terminalId: "term_work", session: { value: ended } });
+
+  // A settled receipt proves nothing more about a pane without a session.
+  await journal({ stage: "relaunched", sessionId: randomUUID(), seatId: "term_work" });
+  expect(await hire()).toMatchObject(changed);
+  expect(spawn).toHaveBeenCalledOnce();
+});
 
 it("reads a Claude session's start and latest main-thread context, unknown after a compaction", async () => {
   const root = await mkdtemp(join(tmpdir(), "lead-seat-usage-"));

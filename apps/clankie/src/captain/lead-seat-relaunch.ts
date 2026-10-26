@@ -690,6 +690,35 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         ? receipt.receiptId
         : undefined;
     },
+    /**
+     * The open relaunch whose successor has not reported a session yet (VUH-2868):
+     * `next` runs the target harness in the same pane and terminal as `previous`,
+     * the conversation's stored seat, with no native session, and the latest
+     * receipt is still launching after ending exactly that stored session. Claude's
+     * trust prompt can hold a successor here for hours. Anything else, an
+     * unreadable journal included, is no proof.
+     */
+    pendingReceipt(conversationId: string, previous: LeadSeatPane, next: LeadSeatPane): string | undefined {
+      if (
+        previous.paneId !== next.paneId ||
+        previous.terminalId !== next.terminalId ||
+        previous.sessionId === undefined ||
+        next.sessionId !== undefined
+      )
+        return undefined;
+      let receipt: Receipt | undefined;
+      try {
+        receipt = read().receipts.findLast((entry) => entry.conversationId === conversationId);
+      } catch {
+        return undefined;
+      }
+      return receipt?.stage === "launching" &&
+        receipt.paneId === next.paneId &&
+        receipt.previousSessionId === previous.sessionId &&
+        receipt.to.harness === next.harness
+        ? receipt.receiptId
+        : undefined;
+    },
     /** Read-only: what became of a relaunch, never another attempt. */
     reconcileLeadSeatRelaunch: reconcile,
     /**
