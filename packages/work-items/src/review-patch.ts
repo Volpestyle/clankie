@@ -268,6 +268,11 @@ function parseHunks(
     // An empty side names the line before the change; normalize so both sides line up.
     const oldFirst = oldLines === 0 ? oldStart + 1 : oldStart;
     const newFirst = newLines === 0 ? newStart + 1 : newStart;
+    const oldEnd = oldFirst + oldLines;
+    const newEnd = newFirst + newLines;
+    // Keep normalized empty-side positions, line increments and exclusive ends exact too.
+    if (![oldFirst, newFirst, oldEnd, newEnd].every(Number.isSafeInteger))
+      throw malformed(number, "hunk range out of range.");
     if (oldFirst < previousEnd.old || newFirst < previousEnd.new)
       throw malformed(number, "hunks overlap or are out of order.");
     if (newFirst - oldFirst !== delta)
@@ -312,8 +317,8 @@ function parseHunks(
       if (newSide) newLeft -= 1;
     }
     ended = oldClosed || newClosed;
-    delta += newLines - oldLines;
-    previousEnd = { old: oldFirst + oldLines, new: newFirst + newLines };
+    delta = newEnd - oldEnd;
+    previousEnd = { old: oldEnd, new: newEnd };
     hunks.push({ oldStart, oldLines, newStart, newLines, heading: header[5] ?? "", lines: body });
   }
   return { hunks, next: index };
@@ -337,7 +342,8 @@ function parse(text: string, limits: ReviewPatchLimits): ReviewPatchFile[] {
         : malformed(number, "unexpected text between file sections.");
     if (files.length === limits.maxFiles)
       throw new ReviewPatchError("too_many_files", `More than ${limits.maxFiles} files; refused whole.`);
-    const names = gitHeaderNames(first.slice("diff --git ".length), number);
+    const headerNames = first.slice("diff --git ".length);
+    const names = gitHeaderNames(headerNames, number);
     index += 1;
     const headers: Headers = {};
     const once = <K extends keyof Headers>(key: K, value: Headers[K], at: number) => {
@@ -409,7 +415,7 @@ function parse(text: string, limits: ReviewPatchLimits): ReviewPatchFile[] {
     }
     if (index < lines.length && !lines[index]!.startsWith("diff --"))
       throw malformed(index + 1, "unrecognized line in a file section.");
-    files.push(section(number, names, headers, oldMarker, newMarker, hunks, touched));
+    files.push(section(number, names, headerNames, headers, oldMarker, newMarker, hunks, touched));
   }
   return files;
 }
@@ -444,6 +450,7 @@ function binaryLabels(
 function section(
   number: number,
   names: readonly [string, string] | null,
+  headerNames: string,
   headers: Headers,
   oldMarker: string | null | undefined,
   newMarker: string | null | undefined,
@@ -481,6 +488,8 @@ function section(
   const oldName = agreed(oldNames);
   const newName = agreed(newNames);
   if (oldName === undefined || newName === undefined) throw fail("ambiguous file names");
+  // Ambiguous unquoted rename/copy names must still match the entire original header.
+  if (names === null && headerNames !== `a/${oldName} b/${newName}`) throw fail("file header names disagree");
   if (!renamed && !copied && oldName !== newName) throw fail("names differ without a rename or copy");
   if (added && oldMarker !== undefined && oldMarker !== null)
     throw fail('an added file needs "--- /dev/null"');
@@ -552,8 +561,19 @@ function section(
   const newMode = deleted ? null : (headers.newFileMode ?? headers.newMode ?? mode ?? null);
   const submodule = oldMode === "160000" || newMode === "160000";
   // A gitlink's only content is its commit pointer; anything else is not what Git prints.
-  if (submodule && hunks.some((hunk) => hunk.lines.some((line) => !GITLINK_LINE.test(line.text))))
-    throw fail("gitlink hunk is not a Subproject commit line");
+  if (submodule && hunks.length > 0) {
+    const hunk = hunks[0]!;
+    if (
+      hunks.length !== 1 ||
+      hunk.oldStart !== (added ? 0 : 1) ||
+      hunk.oldLines !== (added ? 0 : 1) ||
+      hunk.newStart !== (deleted ? 0 : 1) ||
+      hunk.newLines !== (deleted ? 0 : 1)
+    )
+      throw fail("gitlink hunk must describe its single commit-pointer line");
+    if (hunk.lines.some((line) => !GITLINK_LINE.test(line.text)))
+      throw fail("gitlink hunk is not a Subproject commit line");
+  }
   return {
     change: added ? "added" : deleted ? "deleted" : renamed ? "renamed" : copied ? "copied" : "modified",
     oldPath: added ? null : oldName,

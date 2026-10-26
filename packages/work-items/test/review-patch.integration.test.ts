@@ -323,6 +323,27 @@ it("refuses empty, oversized, invalid UTF-8, truncated, contradictory and unsupp
   const moved = git(repo, ["diff", "-M", "main~1", "main"]);
   const cases: [string, string | Buffer, ReviewPatchError["code"]][] = [
     ["empty.patch", "", "empty"],
+    // Independent acceptance found these four complete-looking but invalid patches.
+    [
+      "contradictory-diff-header.patch",
+      edit.replace("diff --git a/edit.txt b/edit.txt", "diff --git a/decoy b/other"),
+      "malformed",
+    ],
+    [
+      "malformed-diff-header.patch",
+      edit.replace("diff --git a/edit.txt b/edit.txt", "diff --git nonsense"),
+      "malformed",
+    ],
+    [
+      "overflow-anchors.patch",
+      "diff --git a/f b/f\nindex 1111111..2222222 100644\n--- a/f\n+++ b/f\n@@ -9007199254740991,3 +9007199254740991,3 @@\n-old\n+new\n context1\n context2\n",
+      "malformed",
+    ],
+    [
+      "gitlink-line-two.patch",
+      `diff --git a/sub b/sub\nindex 1111111..2222222 160000\n--- a/sub\n+++ b/sub\n@@ -2 +2 @@\n-Subproject commit ${"1".repeat(40)}\n+Subproject commit ${"2".repeat(40)}\n`,
+      "malformed",
+    ],
     ["no-final-newline.patch", text.slice(0, -1), "malformed"],
     ["cut-mid-hunk.patch", edit.slice(0, edit.indexOf("+2\n")), "malformed"],
     ["cut-after-markers.patch", edit.slice(0, edit.indexOf("@@")), "malformed"],
