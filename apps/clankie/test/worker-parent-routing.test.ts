@@ -12,6 +12,8 @@ import {
   FleetSeatMessageReceiverSchema,
   LEGACY_OPERATOR_SEAT_EVENT_KINDS,
   OPERATOR_SEAT_CAPABILITIES_HEADER,
+  OPERATOR_SEAT_BINDINGS_PATH,
+  OPERATOR_SEAT_BRIDGE_CLAIM_HEADER,
   type OperatorSeatCapabilities,
   OperatorConversationServiceResultSchema,
   OperatorConversationStreamEventSchema,
@@ -32,6 +34,7 @@ import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { LocalFleetLink, type LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
+import { OperatorSeatBindings, seatNonceHash } from "../src/operator-seat-bindings.ts";
 
 // Herdr transports are injected below. An unavailable native history/OS probe
 // cannot escape the fixture into the owner's processes or an SSH connection.
@@ -258,8 +261,47 @@ async function fixture(
       projectProof: async (_socket, pane) => proof("default", pane),
     });
     const admitted = new WeakMap<Request, LocalFleetIdentity>();
+    // This consumer fixture substitutes raw kernel observations, not admission.
+    // These operator processes/sockets are independent of the fleet proof above:
+    // launcher 101 -> harness 202 -> bridge 303. Native-process acceptance lives
+    // in operator-seat-binding-native.integration.test.ts, not this table.
+    const launcherSocket = { destroyed: false } as Socket;
+    const bridgeSocket = { destroyed: false } as Socket;
+    const chain = [
+      { pid: 303, ppid: 202, birth: ["bridge-start", "0"] as [string, string] },
+      { pid: 202, ppid: 101, birth: ["harness-start", "0"] as [string, string] },
+      { pid: 101, ppid: 1, birth: ["launcher-start", "0"] as [string, string] },
+    ];
+    const nonce = randomUUID();
+    const operatorSeatBindings = new OperatorSeatBindings({
+      birth: async (pid) => chain.find((process) => process.pid === pid)?.birth,
+      processes: async (controller, harness) => {
+        const pair = [controller, harness].map((pid) => chain.find((process) => process.pid === pid));
+        if (pair.some((process) => process === undefined)) return undefined;
+        return {
+          schemaVersion: 1,
+          processes: pair.map((process) => ({
+            ...process!,
+            uid: 501,
+            executable: "/fixture/node",
+            argv: [],
+          })),
+        };
+      },
+      socket: async (socket) => {
+        const index = socket === launcherSocket ? 2 : socket === bridgeSocket ? 0 : -1;
+        if (index < 0) return undefined;
+        const owner = chain[index]!;
+        return {
+          schemaVersion: 1,
+          owner: { pid: owner.pid, uid: 501, birth: owner.birth, socket: "fixture-operator" },
+          ancestors: chain.slice(index),
+        };
+      },
+    });
     const app = await createClankieApp({
       captain,
+      operatorSeatBindings,
       localFleet: link,
       fleetLinks: {
         authenticate: (token) => (token === "away-token" ? "away" : undefined),
@@ -312,13 +354,39 @@ async function fixture(
         admitted.delete(request);
       }
     };
+    const bridgeRequest = (path: string, init: RequestInit = {}, claim: string | null = nonce) =>
+      app.app.request(
+        path,
+        {
+          ...init,
+          headers: {
+            ...Object.fromEntries(new Headers(init.headers)),
+            authorization: "Bearer operator",
+            ...(claim === null ? {} : { [OPERATOR_SEAT_BRIDGE_CLAIM_HEADER]: claim }),
+          },
+        },
+        { incoming: { socket: bridgeSocket } } as HttpBindings,
+      );
+    const registerOperator = async (conversationId: string) => {
+      const response = await app.app.request(
+        OPERATOR_SEAT_BINDINGS_PATH,
+        {
+          method: "PUT",
+          headers: { authorization: "Bearer operator", "content-type": "application/json" },
+          body: JSON.stringify({ conversationId, harnessPid: 202, nonceHash: seatNonceHash(nonce) }),
+        },
+        { incoming: { socket: launcherSocket } } as HttpBindings,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+    };
     const operatorRequest = (
       path: string,
       body?: unknown,
       signal?: AbortSignal,
       capabilities?: OperatorSeatCapabilities,
     ) =>
-      app.app.request(path, {
+      bridgeRequest(path, {
         ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
         ...(signal === undefined ? {} : { signal }),
         headers: {
@@ -340,7 +408,7 @@ async function fixture(
       await captain.close();
     };
     services.push({ close });
-    return { captain, app, nativeRequest, operatorRequest, close };
+    return { captain, app, nativeRequest, operatorRequest, bridgeRequest, registerOperator, close };
   };
   const service = await open();
   return {
@@ -423,25 +491,34 @@ async function conversation(service: Service, scope: OperatorConversationScope =
   return result.conversation.conversationId;
 }
 
-async function poll(service: Service, conversationId: string) {
+async function poll(
+  service: Service,
+  conversationId: string,
+  admission: { register?: boolean; claim?: string | null } = {},
+) {
+  if (admission.register !== false) await service.registerOperator(conversationId);
   const stop = new AbortController();
   // Distinguish this fixture bridge from presence retained across a service restart.
   const sourceHash = createHash("sha256").update(randomUUID()).digest("hex");
-  const pending = service.operatorRequest(
+  const pending = service.bridgeRequest(
     `/v1/seat/events?conversationId=${conversationId}&wait=30000`,
-    undefined,
-    stop.signal,
     {
-      schemaVersion: 1,
-      eventKinds: [...LEGACY_OPERATOR_SEAT_EVENT_KINDS],
-      ownerOrigin: false,
-      sourceHash,
+      signal: stop.signal,
+      headers: {
+        [OPERATOR_SEAT_CAPABILITIES_HEADER]: JSON.stringify({
+          schemaVersion: 1,
+          eventKinds: [...LEGACY_OPERATOR_SEAT_EVENT_KINDS],
+          ownerOrigin: false,
+          sourceHash,
+        }),
+      },
     },
+    admission.claim,
   );
   // Authentication reserves intent before native proof/policy preparation.
   // A tick is not its completion: wait for this poll's capabilities at the
   // real mailbox boundary before starting reports or count-based race gates.
-  await expect
+  const ready = expect
     .poll(async () => {
       const status = OperatorConversationServiceResultSchema.parse(
         await service.captain.serveOperatorConversation({ schemaVersion: 1, op: "seat_bridges" }),
@@ -450,10 +527,26 @@ async function poll(service: Service, conversationId: string) {
       return status.bridges.find((bridge) => bridge.conversationId === conversationId)?.sourceHash;
     })
     .toBe(sourceHash);
+  // A refused HTTP request cannot publish capabilities. Report its typed error
+  // immediately instead of hiding it behind the unchanged readiness deadline.
+  const checked = pending.then(async (response) => {
+    if (response.status !== 200) {
+      const body = await response.clone().json();
+      const error = /^seat_[a-z_]+$/u.test(body.error) ? body.error : "unknown_refusal";
+      throw new Error(`Operator poll refused: HTTP ${response.status} ${error}`);
+    }
+    return response;
+  });
+  try {
+    await Promise.race([ready, checked.then(() => ready)]);
+  } catch (error) {
+    stop.abort();
+    throw error;
+  }
   return {
     stop,
     events: async () => {
-      const response = await pending;
+      const response = await checked;
       expect(response.status).toBe(200);
       return OperatorSeatEventsPageSchema.parse(await response.json()).events;
     },
@@ -681,6 +774,24 @@ it.each([false, true])(
     ).toBe(true);
   },
 );
+
+it.each([
+  { name: "absent registration", admission: { register: false }, error: "seat_binding_required" },
+  { name: "wrong claim", admission: { claim: "wrong-claim" }, error: "seat_bridge_claim_invalid" },
+  { name: "missing claim", admission: { claim: null }, error: "seat_bridge_claim_invalid" },
+])("operator polling fails closed with an early typed refusal for $name", async ({ admission, error }) => {
+  const f = await fixture();
+  const target = await conversation(f.service, { kind: "workspace", workspaceId: f.root });
+  await expect(poll(f.service, target, admission)).rejects.toThrow(
+    `Operator poll refused: HTTP 403 ${error}`,
+  );
+  const status = OperatorConversationServiceResultSchema.parse(
+    await f.service.captain.serveOperatorConversation({ schemaVersion: 1, op: "seat_bridges" }),
+  );
+  if (status.op !== "seat_bridges") throw new Error("Seat bridge status unavailable");
+  expect(status.bridges.find((bridge) => bridge.conversationId === target)?.sourceHash).toBeUndefined();
+  expect(f.service.captain.operatorSeatReady(target)).toBe(false);
+});
 
 it.each([false, true])(
   "an authenticated %s remote parent's native session routes to its live workspace outbox",
@@ -1348,7 +1459,7 @@ it("reports applied IDs and every refusal reason in a mixed MCP acknowledgment",
   let sessionId: string | undefined;
   let requestId = 0;
   const rpc = async (method: string, params: unknown) => {
-    const response = await f.service.app.app.request("/v1/mcp", {
+    const response = await f.service.bridgeRequest("/v1/mcp?conversationId=global-default", {
       method: "POST",
       headers: {
         authorization: "Bearer operator",
