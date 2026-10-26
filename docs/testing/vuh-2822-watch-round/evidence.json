@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "native-failure-proof.tar",
+      "size": 22528,
+      "sha256": "8045e0a5c5a70351dc75495c270efa7703f912dc85981bb0522c7d67647e86fb",
+      "url": "clankie://evidence/sha256/8045e0a5c5a70351dc75495c270efa7703f912dc85981bb0522c7d67647e86fb"
+    },
+    {
       "path": "proof-bundle.tar",
       "size": 28672,
       "sha256": "aefd7cb9b8660f0a8663fa7ed7e50c3978efb8f98708ca74452bb564bebc72c0",

@@ -11,7 +11,7 @@ its existing round delivery.
 ## Proof boundary
 
 `apps/clankie/test/fleet-lead-round.integration.test.ts` exercises the real
-production components above, with a synthetic native Herdr transport. No Herdr
+production components above, with a synthetic native Herdr transport. The failure case also uses the real Claude hook log and adapter. No Herdr
 process or live pane is started or accessed. The fixture explicitly asserts an
 empty workspace census (zero restored workspaces). Vitest's existing setup
 provides private scratch HOME, XDG config/state/data/cache, credentials and
@@ -60,3 +60,24 @@ complete post-deployment days and compare the same inclusion rules. The lead
 owns that follow-up and issue closure.
 
 Raw logs, baseline and scan method: [proof bundle](clankie://evidence/sha256/aefd7cb9b8660f0a8663fa7ed7e50c3978efb8f98708ca74452bb564bebc72c0).
+
+## Native failure while the pane still says working
+
+The final revision rechecks native events every five seconds while waiting for
+the same report round, preserving its original deadline. A real Claude
+`SeatHookLog` and `createClaudeWorkerSeatAdapter` fixture records an uncorrelated
+Stop, then a `StopFailure` without changing Herdr's working status. The failure
+must reach the captain's outbox before the ten-second round expires. This
+avoids treating a stale terminal status as authority over a native failure.
+
+The final focused selector adds `|native failure overtakes` to the command above:
+4 cases pass. The native-failure case also runs against preceding patch
+`83ac7c749`, demonstrating why the extra recheck is needed. The initial required
+landing gate failed its swallowed-rejections phase; the revised wait logs
+unexpected observation failures and uses the ordinary retry backoff. The next
+gate was deliberately stopped after this further source change, and neither run
+is represented as a passing gate.
+
+Final revision: all 101 neighboring watch/round tests pass. The native-failure
+case fails on preceding patch `83ac7c749` and passes with the recheck.
+[Final proof and first gate failure](clankie://evidence/sha256/8045e0a5c5a70351dc75495c270efa7703f912dc85981bb0522c7d67647e86fb).

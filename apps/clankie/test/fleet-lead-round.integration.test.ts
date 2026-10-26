@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
+import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
+import { SeatHookLog, createClaudeWorkerSeatAdapter } from "../src/captain/claude-worker-seat.ts";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { FileCredentialStore } from "@clankie/credential-broker";
@@ -69,6 +71,7 @@ async function fixture(
     fleetEfficiencyDeadlineMs?: number;
     fleetProbeMinMs?: number;
     reportRoundMs?: number;
+    seatAdapters?: readonly HarnessSeatAdapter[];
   },
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-lead-round-"));
@@ -212,7 +215,7 @@ async function fixture(
         }),
         nativeCensusRunner: async (_cmd, args) => ({ stdout: await execute(args), stderr: "" }),
         nativeSummariesPath: join(root, "summaries.json"),
-        seatAdapters: [],
+        seatAdapters: remote?.seatAdapters ?? [],
         discordEnvironment: {},
         fleetRoundIntervalMs: roundMs,
         ...(fleetResources ? { fleetResources } : {}),
@@ -939,6 +942,76 @@ it("an escalation overtakes a working watch still held for its round", async () 
   const [event] = await f.captain.pollSeatEvents(2_000, undefined, "global-default");
   expect(event?.content).toContain("agent status blocked");
   expect(event?.content).not.toContain("agent status working");
+  await f.finish(event!.id);
+});
+
+it("a native failure overtakes a working notice even before Herdr changes its status", async () => {
+  const adapters: HarnessSeatAdapter[] = [];
+  let hooks!: SeatHookLog;
+  let paneId!: string;
+  let sessionId!: string;
+  const f = await fixture(
+    60 * 60_000,
+    undefined,
+    false,
+    true,
+    async (root, rows) => {
+      // Use the unowned scratch pane: changing its harness creates no ownership claim.
+      const row = rows[3]!;
+      row.agent = "claude";
+      row.agent_session.source = "herdr:claude";
+      paneId = row.pane_id;
+      sessionId = /([0-9a-f-]{36})\.jsonl$/u.exec(row.agent_session.value)![1]!;
+      const transcript = await readFile(row.agent_session.value, "utf8");
+      row.agent_session.value = join(root, `${sessionId}.jsonl`);
+      await writeFile(row.agent_session.value, transcript);
+      hooks = new SeatHookLog(join(root, "failure-hooks.json"));
+      hooks.record(paneId, { schemaVersion: 1, event: "SessionStart", sessionId });
+      adapters.push(
+        createClaudeWorkerSeatAdapter({
+          hooks,
+          consent: async () => ({ approved: true }),
+          agent: async () => ({
+            paneId,
+            terminalId: row.terminal_id,
+            agent: "claude",
+            status: row.agent_status,
+            session: row.agent_session,
+          }),
+          transcript: async () => undefined,
+          mailbox: { bound: () => true, deliver: async () => false },
+        }),
+      );
+    },
+    undefined,
+    false,
+    true,
+    undefined,
+    undefined,
+    { reportRoundMs: 10_000, seatAdapters: adapters },
+  );
+  const bank = await f.captain.laneToolBank("operator", "global-default");
+  await bank.tools
+    .find((tool) => tool.name === "herdr_watch")!
+    .call({ agent: paneId, reason: "Failure must overtake the round" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  hooks.record(paneId, {
+    schemaVersion: 1,
+    event: "Stop",
+    sessionId,
+    lastMessage: "Uncorrelated earlier result",
+  });
+  expect(await f.captain.pollSeatEvents(300, undefined, "global-default")).toEqual([]);
+  hooks.record(paneId, {
+    schemaVersion: 1,
+    event: "StopFailure",
+    sessionId,
+    error: "native_failure_before_status_change",
+  });
+  const [event] = await f.captain.pollSeatEvents(6_000, undefined, "global-default");
+  expect(event?.content).toContain("native_failure_before_status_change");
+  expect(event?.content).toContain("StopFailure");
+  expect(f.rows[3]!.agent_status).toBe("working");
   await f.finish(event!.id);
 });
 
