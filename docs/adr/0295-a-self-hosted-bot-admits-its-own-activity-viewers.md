@@ -30,17 +30,22 @@ The service performs the handshake:
    a successful `activity_start` presence write records it, and `activity_stop`
    retires it and stops its shares. Each launch is its own incarnation and
    owns the shares it opened or claimed; a relaunch retires the previous one.
-   Admissions and stop cleanup for one channel run one at a time, so choosing,
-   claiming and granting a share never interleaves with cleanup ending it. An
+   Admissions and stop cleanup run one at a time across every channel,
+   because all channels share one producer client whose status listing
+   reconciles all of its shares. Choosing, claiming and granting a share
+   never interleaves with cleanup ending it, here or in another channel. An
    admission rechecks its launch after every await and, once that launch is
    retired, ends what it took and refuses. Stop ends only retired launches'
    shares, so a replacement launch's media survives an older launch's cleanup.
    A caller waits at most ten seconds and is then refused; its abandoned
-   admission takes nothing when it resumes. The channel stays held until that
+   admission takes nothing when it resumes. The queue stays held until that
    work settles, bounded by each producer request's own 15-second abort.
    Releasing it early is unsafe: the share client reconciles its status
    listings, so a stale listing delivered after the next admission opened a
-   share would evict that share. Stop cleanup always finishes.
+   share would evict that share. The client itself now ignores a listing's
+   silence about any share it learned after requesting that listing, which
+   also protects shares the owner opens through the sharing API meanwhile.
+   Stop cleanup always finishes.
    A participant in an instance someone else started gets nothing.
 4. It grants the channel's play share, opening one on first admission while play
    is running, and returns `{session,grant,expiresAt,mediaPath,accessToken}`.

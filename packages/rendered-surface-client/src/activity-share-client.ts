@@ -201,8 +201,11 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
   const mutations = new Set<string>();
   const records = new Map<
     string,
-    { session: ActivityShareSession; producerToken: string; sink?: ActivityShareSink }
+    { session: ActivityShareSession; producerToken: string; sink?: ActivityShareSink; learnedAt: number }
   >();
+  // Counts records learned; a status listing speaks only for records learned
+  // before it was requested.
+  let learned = 0;
 
   const ensureOpen = (operation: Operation, session?: ActivityShareSession): void => {
     if (closed) {
@@ -328,7 +331,7 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
     }
     prune();
     records.get(result.session.shareId)?.sink?.close();
-    records.set(result.session.shareId, structuredClone(result));
+    records.set(result.session.shareId, { ...structuredClone(result), learnedAt: ++learned });
     return structuredClone(result.session);
   };
   const fence = (session: ActivityShareSession): ActivityShareSession =>
@@ -501,6 +504,7 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
     },
     async status() {
       prune();
+      const requestedAt = learned;
       const sessions = parseResponse(
         (value) => {
           if (
@@ -517,10 +521,13 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
         "status",
       );
       // Reconcile stale, never-attached capabilities after a server-side stop
-      // without evicting an operation whose response is still in flight.
+      // without evicting an operation whose response is still in flight, or a
+      // share this client learned after the listing was requested: a slow
+      // listing cannot know it, so its absence there proves nothing.
       const live = new Map(sessions.map((session) => [session.shareId, session.generation]));
       for (const record of records.values()) {
         if (
+          record.learnedAt <= requestedAt &&
           !mutations.has(record.session.shareId) &&
           live.get(record.session.shareId) !== record.session.generation
         ) {

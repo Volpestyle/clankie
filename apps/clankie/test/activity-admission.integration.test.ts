@@ -22,6 +22,7 @@ import { DeliveredFileStore } from "../src/delivered-files.ts";
 const APP = "90001";
 const GUILD = "111";
 const CHANNEL = "222";
+const OTHER_CHANNEL = "333";
 const PRODUCER_BEARER = "control-secret";
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=",
@@ -72,6 +73,12 @@ async function discordFixture() {
       instance_id: "i-elsewhere",
       location: { kind: "gc", guild_id: GUILD, channel_id: "999" },
       users: ["503"],
+    },
+    "i-other": {
+      application_id: APP,
+      instance_id: "i-other",
+      location: { kind: "gc", guild_id: GUILD, channel_id: OTHER_CHANNEL },
+      users: ["501"],
     },
     "i-foreign": {
       application_id: "77777",
@@ -228,7 +235,19 @@ async function stack(options: { clientSecret?: string | undefined; lockTimeoutMs
     });
     return { status: response.status, body: (await response.json()) as Record<string, any> };
   };
-  return { discord, play, launches, shares, service, hold, serviceUrl, viewerUrl, viewerPort, admit };
+  return {
+    discord,
+    play,
+    sharing,
+    launches,
+    shares,
+    service,
+    hold,
+    serviceUrl,
+    viewerUrl,
+    viewerPort,
+    admit,
+  };
 }
 
 it("admits a verified participant of Clankie's own launch to live play media, through the tunnel", async () => {
@@ -521,4 +540,71 @@ it("a hung producer call fails admissions closed until it settles, then the chan
   await vi.waitFor(() => expect(messages[0]?.kind).toBe("session"));
   playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
   await vi.waitFor(() => expect(messages.some((message) => message.kind === "frame")).toBe(true));
+});
+
+async function watch(s: Awaited<ReturnType<typeof stack>>, admitted: { body: Record<string, any> }) {
+  const socket = new WebSocket(`ws://127.0.0.1:${s.viewerPort}${admitted.body.mediaPath}`, {
+    headers: TUNNEL,
+  });
+  cleanup.push(() => socket.terminate());
+  const messages: Record<string, any>[] = [];
+  const view = { messages, closed: undefined as number | undefined };
+  socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+  socket.on("close", (code) => (view.closed = code));
+  await new Promise<void>((done, reject) => {
+    socket.once("open", done);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({ kind: "admit", grant: admitted.body.grant }));
+  await vi.waitFor(() => expect(messages[0]?.kind).toBe("session"));
+  return view;
+}
+
+// Adapted from the reviewer's probe: every channel shares one producer client,
+// whose status listing reconciles all of its shares.
+it("a held listing in one channel never ends another channel's stream", async () => {
+  const s = await stack();
+  const playSink = s.play.createSink("FireRed");
+  s.launches.launched(GUILD, CHANNEL);
+  s.launches.launched(GUILD, OTHER_CHANNEL);
+  const lookup = s.hold("GET", "/shares");
+  const here = s.admit("member-code", "i-here");
+  await lookup.arrived;
+  let otherSettled = false;
+  const other = s.admit("member-code", "i-other").finally(() => (otherSettled = true));
+  // The other channel waits its turn instead of opening a share under the held listing.
+  await new Promise((done) => setTimeout(done, 300));
+  expect(otherSettled).toBe(false);
+  expect(s.shares.stats()).toHaveLength(0);
+  lookup.release();
+  expect((await here).status).toBe(200);
+  const otherAdmitted = await other;
+  expect(otherAdmitted.status).toBe(200);
+  expect(otherAdmitted.body.session.scope.channelId).toBe(OTHER_CHANNEL);
+  const view = await watch(s, otherAdmitted);
+  playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+  await vi.waitFor(() => expect(view.messages.some((message) => message.kind === "frame")).toBe(true));
+  expect(s.shares.stats()).toHaveLength(2);
+  expect(view.messages.some((message) => message.kind === "stopped")).toBe(false);
+  expect(view.closed).toBeUndefined();
+});
+
+// An admission's listing is slow while the owner opens a share of their own
+// through the sharing API; the late listing cannot speak for that share.
+it("a late admission listing never ends a share the owner opened meanwhile", async () => {
+  const s = await stack();
+  s.play.createSink("FireRed");
+  s.launches.launched(GUILD, CHANNEL);
+  const lookup = s.hold("GET", "/shares");
+  const admission = s.admit("member-code", "i-here");
+  await lookup.arrived;
+  const owned = (await s.sharing.request(
+    { action: "start", sourceId: "play", guildId: GUILD, channelId: OTHER_CHANNEL },
+    async () => true,
+  )) as { session: { shareId: string } };
+  lookup.release();
+  expect((await admission).status).toBe(200);
+  await new Promise((done) => setTimeout(done, 100));
+  expect(s.shares.stats().map((share) => share.shareId)).toContain(owned.session.shareId);
+  expect(s.shares.stats()).toHaveLength(2);
 });
