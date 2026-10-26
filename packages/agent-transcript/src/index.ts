@@ -701,6 +701,7 @@ const TRANSCRIPT_DISCOVERY_RECHECK_MS = 1_000;
 
 interface TranscriptPathLookup {
   readonly path: string | undefined;
+  readonly candidates: readonly string[];
   readonly fileIdentity: string | undefined;
   readonly directories: ReadonlyMap<string, string | undefined>;
   readonly expiresAt: number;
@@ -848,6 +849,7 @@ function uniqueTranscript(
   const stats = path === undefined ? undefined : pathStats(path);
   return {
     path: stats?.isFile() ? path : undefined,
+    candidates: matches,
     fileIdentity: stats?.isFile() ? fileIdentity(stats) : undefined,
     directories,
     expiresAt: dated && stats?.isFile() ? Infinity : Date.now() + TRANSCRIPT_DISCOVERY_RECHECK_MS,
@@ -864,6 +866,7 @@ async function uniqueTranscriptAsync(
   const stats = path === undefined ? undefined : await pathStatsAsync(path);
   return {
     path: stats?.isFile() ? path : undefined,
+    candidates: matches,
     fileIdentity: stats?.isFile() ? fileIdentity(stats) : undefined,
     directories,
     expiresAt: dated && stats?.isFile() ? Infinity : Date.now() + TRANSCRIPT_DISCOVERY_RECHECK_MS,
@@ -1014,6 +1017,27 @@ export async function resolveHerdrSeatTranscriptPathAsync(
   } finally {
     if (transcriptSearches.get(key) === search) transcriptSearches.delete(key);
   }
+}
+
+/** Diagnose a refused lookup without choosing between ambiguous native profiles. */
+export async function inspectHerdrSeatTranscriptPathAsync(
+  agent: string,
+  session: HerdrAgentSession,
+): Promise<{
+  readonly path?: string;
+  readonly candidates: readonly string[];
+  readonly searched: readonly string[];
+}> {
+  const path = await resolveHerdrSeatTranscriptPathAsync(agent, session);
+  const candidates =
+    session.kind === "path"
+      ? [session.value]
+      : (transcriptPaths.get(transcriptPathKey(agent, session))?.candidates ?? []);
+  const searched =
+    session.kind === "path"
+      ? [session.value]
+      : [...(transcriptPaths.get(transcriptPathKey(agent, session))?.directories.keys() ?? [])];
+  return { ...(path === undefined ? {} : { path }), candidates, searched };
 }
 
 function grokSessionForProcess(processId: number | undefined): HerdrAgentSession | undefined {

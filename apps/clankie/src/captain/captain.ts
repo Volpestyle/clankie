@@ -94,7 +94,7 @@ import {
   readCodexGoal,
   readClaudeSubagents,
   readCodexSubagents,
-  resolveHerdrSeatTranscriptPathAsync,
+  inspectHerdrSeatTranscriptPathAsync,
 } from "@clankie/agent-transcript";
 import { createLeadSeatRelaunch, readClaudeSessionUsage } from "./lead-seat-relaunch.ts";
 import { createLeadSeatFailover } from "./lead-seat-failover.ts";
@@ -394,15 +394,15 @@ const HEAD_ACK_TIMEOUT_MS = 2_000;
 export const REPORT_ROUND_MS = 10 * 60_000;
 /** How often the service considers a fresh restart of the default lead seat (ADR 0271). */
 const LEAD_RESTART_CHECK_MS = 5 * 60_000;
-/** Half of the lead seat's 1M window: Claude records no window, so this is a token budget. */
-const LEAD_RESTART_CONTEXT_TOKENS = 500_000;
-const LEAD_RESTART_AGE_MS = 24 * 60 * 60_000;
+/** ADR 0293's accepted work budget, independent of Claude's model window. */
+const LEAD_RESTART_CONTEXT_TOKENS = 250_000;
+const LEAD_RESTART_AGE_MS = 12 * 60 * 60_000;
 /** The owner has not written for this long, from the pane or any app. */
 const LEAD_RESTART_QUIET_OWNER_MS = 15 * 60_000;
 /** A brief that did not lead to a restart is not asked for again sooner than this. */
 const LEAD_RESTART_RETRY_MS = 60 * 60_000;
 const LEAD_HANDOFF_REQUEST = [
-  "Scheduled fresh restart (ADR 0271). Your session is large or a day old, so Clankie will relaunch you fresh in this pane once this turn ends. The previous session stays resumable.",
+  "Scheduled fresh restart (ADR 0271 / 0293). Your session reached 250K context tokens or 12 hours, so Clankie will relaunch you fresh in this pane once this turn ends. The previous session stays resumable.",
   "Answer this escalation with `reply` and a handoff brief for your successor, who starts from the shared conversation log plus this brief: work in flight and its owners, decisions waiting on James, commitments and timers you hold, and anything you would otherwise lose. Keep it under 2,000 words. Do nothing else in this turn.",
 ].join("\n\n");
 
@@ -5441,7 +5441,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     journalPath: join(options.stateDir, "lead-seat-relaunches.json"),
     seat: async (conversationId) => {
       const source = await operatorNativeSource(conversationId);
-      return source === undefined ? undefined : leadSeatPane(source);
+      // The launcher resolves --conversation through seat-context, which can
+      // override the shell cwd. Check the directory it will actually launch in.
+      const directory = seatContext(conversationId)?.cwd;
+      return source === undefined
+        ? undefined
+        : {
+            ...leadSeatPane(source),
+            ...(directory === undefined ? {} : { workingDirectory: directory }),
+          };
     },
     paneShell: async (paneId) => {
       if (herdrRunner.paneShell === undefined) throw new Error("Herdr process info is unavailable");
@@ -5513,19 +5521,46 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const conversationId = conversations.defaultGlobalConversationId();
     if (shutdown.signal.aborted) return;
     if ((await settings()).fleet.leadRestarts === "off") return leadSeats.restartSettled(conversationId);
+    // A service/app lead has no native session to retire. An offline native
+    // lead remains marked native, so losing its source still records a refusal.
+    if (!conversations.hasNativeSeat(conversationId) && headSeat === undefined)
+      return leadSeats.restartSettled(conversationId);
     if (leadRestartAskedAt !== undefined && Date.now() - leadRestartAskedAt < LEAD_RESTART_RETRY_MS) return;
-    const source = await operatorNativeSource(conversationId);
-    if (source?.agent !== "claude" || source.session === undefined) return;
-    const path = await resolveHerdrSeatTranscriptPathAsync(source.agent, source.session);
-    const usage = path === undefined ? {} : await readClaudeSessionUsage(path);
+    leadRestartCheck = { at: new Date().toISOString() };
+    let sourceDetail = "No native Claude session could be proven for the default lead.";
+    let source: HerdrAgentSnapshot | undefined;
+    try {
+      source = await operatorNativeSource(conversationId, (detail) => {
+        sourceDetail = detail;
+      });
+    } catch (error) {
+      sourceDetail = String(error);
+    }
+    if (source?.agent !== "claude" || source.session === undefined)
+      return leadSeats.restartRefused(conversationId, "source_unproven", sourceDetail);
+    let usage: Awaited<ReturnType<typeof readClaudeSessionUsage>>;
+    let usageDetail: string;
+    try {
+      const lookup = await inspectHerdrSeatTranscriptPathAsync(source.agent, source.session);
+      usageDetail = `${source.session.value}: candidates ${JSON.stringify(lookup.candidates)}${lookup.candidates.length ? "" : `; searched ${JSON.stringify(lookup.searched)}`}`;
+      if (lookup.path === undefined)
+        return leadSeats.restartRefused(conversationId, "usage_unreadable", usageDetail);
+      usage = await readClaudeSessionUsage(lookup.path);
+    } catch (error) {
+      return leadSeats.restartRefused(conversationId, "usage_unreadable", String(error));
+    }
     const large = (usage.contextTokens ?? 0) >= LEAD_RESTART_CONTEXT_TOKENS;
     const old = usage.startedAt !== undefined && Date.now() - usage.startedAt >= LEAD_RESTART_AGE_MS;
     leadRestartCheck = {
       at: new Date().toISOString(),
       ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
       ...(usage.startedAt === undefined ? {} : { sessionStartedAt: new Date(usage.startedAt).toISOString() }),
-      due: large || old,
+      ...(large || old || (usage.contextTokens !== undefined && usage.startedAt !== undefined)
+        ? { due: large || old }
+        : {}),
     };
+    if (!large && !old && leadRestartCheck.due === undefined)
+      return leadSeats.restartRefused(conversationId, "usage_unreadable", usageDetail);
     if (!large && !old) return leadSeats.restartSettled(conversationId);
     const launch = await leadSeats.leadSeatLaunch(conversationId);
     if (launch === undefined) return leadSeats.restartRefused(conversationId, "no_launch");
@@ -5804,9 +5839,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // A complete inventory that could not answer (an unreachable machine waits out
   // its ssh timeout, ~10s) resolves no source. Remember that briefly per source
   // so every head poll and ack does not wait for the same answer (VUH-2196).
-  const unprovenSources = new Map<string, { key: string; until: number }>();
+  const unprovenSources = new Map<string, { key: string; until: number; detail: string }>();
   const UNPROVEN_SOURCE_RETRY_MS = 60_000;
-  async function operatorNativeSource(conversationId: string): Promise<HerdrAgentSnapshot | undefined> {
+  async function operatorNativeSource(
+    conversationId: string,
+    onUnproven?: (detail: string) => void,
+  ): Promise<HerdrAgentSnapshot | undefined> {
+    const refuse = (detail: string) => {
+      onUnproven?.(detail);
+      return undefined;
+    };
     const fleet = await observeFleet(true);
     const occupants = [...(fleet.head === undefined ? [] : [fleet.head]), ...fleet.seats];
     const attached = occupants.filter(
@@ -5821,27 +5863,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       let inventory: HerdrAgentSnapshot[];
       let unproven: string | undefined;
       try {
-        if (herdrRunner.list === undefined) return undefined;
+        if (herdrRunner.list === undefined) return refuse("Local Herdr inventory is unavailable.");
         await refreshFleets();
         const identities = JSON.stringify([...fleetIdentities]);
         unproven = JSON.stringify([inboundBinding(source), identities]);
         const remembered = unprovenSources.get(conversationId);
-        if (remembered?.key === unproven && Date.now() < remembered.until) return undefined;
+        if (remembered?.key === unproven && Date.now() < remembered.until) return refuse(remembered.detail);
+        const list = async (id?: string) => {
+          try {
+            return await herdrRunner.list!(id);
+          } catch (error) {
+            throw new Error(`Herdr inventory ${id ?? "local"} did not answer: ${String(error)}`);
+          }
+        };
         inventory = (
-          await Promise.all([
-            herdrRunner.list(),
-            ...[...remoteFleets, ...namedLocal].map((fleet) => herdrRunner.list!(fleet.id)),
-          ])
+          await Promise.all([list(), ...[...remoteFleets, ...namedLocal].map((fleet) => list(fleet.id))])
         ).flat();
         await refreshFleets();
-        if (JSON.stringify([...fleetIdentities]) !== identities) return undefined;
-      } catch {
+        if (JSON.stringify([...fleetIdentities]) !== identities)
+          return refuse("Herdr inventory identities changed during source proof.");
+      } catch (error) {
+        const detail = String(error);
         if (unproven !== undefined)
           unprovenSources.set(conversationId, {
             key: unproven,
             until: Date.now() + UNPROVEN_SOURCE_RETRY_MS,
+            detail,
           });
-        return undefined;
+        return refuse(detail);
       }
       unprovenSources.delete(conversationId);
       if (
@@ -5852,14 +5901,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             nativeSessionId(candidate) === undefined,
         )
       )
-        return undefined;
+        return refuse("Herdr inventory has an occupant without a native session ID.");
       const matches = inventory.filter((candidate) => nativeSessionId(candidate) === sessionId);
       if (
         sessionId === undefined ||
         matches.length !== 1 ||
         inboundBinding(matches[0]!) !== inboundBinding(source)
       )
-        return undefined;
+        return refuse(
+          `Herdr inventory found ${String(matches.length)} matching native sessions for ${sessionId ?? "unknown"}; a unique matching binding is required.`,
+        );
     }
     return source;
   }

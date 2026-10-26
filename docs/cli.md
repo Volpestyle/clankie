@@ -4470,8 +4470,9 @@ No shell or Herdr connection is opened by these resource API/UI paths.
 
 `--lead-restarts on` (the default) lets the service restart the default lead
 seat fresh in its own pane when it is idle, the owner has written nothing for 15
-minutes, the pane holds no unsent draft, and its session has 500k tokens of
-context or is a day old. The seat first answers an escalation with a handoff
+minutes, the pane holds no unsent draft, and its session has 250k tokens of
+context or is 12 hours old (ADR 0293). Claude lead launches set
+`autoCompactWindow` to 300k as a backstop. The seat first answers an escalation with a handoff
 brief, which becomes the new session's first message; the old session stays
 resumable and each restart leaves a notice in the conversation. Only a seat
 started with `clankie <command>` from the pane's shell is restarted. `off`
@@ -4482,7 +4483,19 @@ while a due restart keeps being refused, its wait: when it began, the latest
 reason (such as `busy`, `owner_active`, `draft` or `draft_unknown`) and a count
 per reason. The wait survives service restarts. After two hours of refusals the
 conversation gets one notice naming the reason; the wait ends when the seat
-relaunches or is no longer due (VUH-2821).
+relaunches or is no longer due (VUH-2821). A source that cannot be proven records
+`source_unproven`, including the inventory that did not answer; a missing,
+ambiguous or unreadable transcript records `usage_unreadable` with its candidate
+paths or read error. In those cases `check.due` is absent and the CLI says
+`budget unknown`; the refusal remains visible and gets the same two-hour notice.
+
+Claude Code accepts trust at the home directory for that session only. An
+unattended relaunch into home therefore refuses `trust_required` before ending
+the lead, even with a saved trust flag. The check uses the conversation's
+resolved launch directory, which can override the pane's cwd. The notice names
+the owner action: choose a trusted project with `clankie workdir set PATH`,
+restart captain, then open the conversation with the selected Claude account
+and accept folder trust there once. An unprovable launch directory also refuses.
 
 `--auto-tidy 1h` (the default; also `30m`, `4h`, `1d`) lets the service tidy
 finished hires on its own (VUH-2392). Every five minutes it closes a local hire's

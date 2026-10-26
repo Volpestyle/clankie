@@ -157,7 +157,7 @@ export function formatLeadRestartLines(status: FleetCommandResult["leadRestart"]
   const seen =
     check === undefined
       ? "not checked since the service started"
-      : `${check.contextTokens === undefined ? "context unknown" : `${String(Math.round(check.contextTokens / 1000))}K tokens`}${check.sessionStartedAt === undefined ? "" : `, session since ${check.sessionStartedAt}`}, ${check.due ? "due" : "not due"} (checked ${check.at})`;
+      : `${check.contextTokens === undefined ? "context unknown" : `${String(Math.round(check.contextTokens / 1000))}K tokens`}${check.sessionStartedAt === undefined ? "" : `, session since ${check.sessionStartedAt}`}, ${check.due === undefined ? "budget unknown" : check.due ? "due" : "not due"} (checked ${check.at})`;
   const wait = status.waiting;
   return [
     `lead restart: ${status.setting} · budget ${budget} · ${seen}`,

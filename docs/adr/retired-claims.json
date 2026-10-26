@@ -74,7 +74,7 @@
     {
       "pattern": "at 80% of the window",
       "adr": "0293",
-      "now": "Leads retire a seat past about 300K tokens of context (lead skill). ADR 0293 proposes service-enforced token budgets, tracked in VUH-2820."
+      "now": "Leads retire a seat past about 300K tokens of context (lead skill). Accepted ADR 0293 sets the default lead's 250K / 12h restart and 300K Claude backstop; hired-seat automation remains tracked in VUH-2820."
     }
   ]
 }

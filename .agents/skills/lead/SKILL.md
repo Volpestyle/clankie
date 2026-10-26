@@ -22,6 +22,15 @@ division of priority, dispatch, tracking and integration, with one dispatch and
 integration authority; do not redo a planner's queue audit or a tracker's
 ticket upkeep.
 
+The default lead restarts fresh at 250K context tokens or 12 hours, with Claude's
+300K `autoCompactWindow` backstop (ADR 0293). `clankie fleet status` shows its
+latest check and refused wait. `source_unproven` names a failed inventory;
+`usage_unreadable` names transcript candidates or a read error. Unknown budget
+is a refusal, not proof of a small session. After two hours one notice names
+the reason. `trust_required` leaves the lead running: home-directory trust is
+session-only in Claude Code. Follow its owner workdir/trust action; never edit
+trust flags or answer a trust prompt for the owner.
+
 ## Each turn
 
 1. Answer the owner's message, if there is one.

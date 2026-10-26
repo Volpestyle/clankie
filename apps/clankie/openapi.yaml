@@ -5426,7 +5426,7 @@ paths:
       description: |
         Operator-only. The ADR 0271 budget (context tokens and session age), the
         latest check since service start (context, session start, whether a restart
-        is due), and a due restart's refused wait: when it began, the latest refusal
+        is due; due is absent if source or usage is unknown), and the refused wait: when it began, the latest refusal
         and a count per refusal reason, and when the owner was told. The wait lasts
         across service restarts until the seat relaunches or is no longer due.
         Contract: LeadRestartStatusSchema in packages/protocol/src/fleet-settings.ts.

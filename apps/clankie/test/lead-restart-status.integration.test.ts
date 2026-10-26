@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { FLEET_LEAD_RESTART_PATH } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { registerLeadRestartRoutes } from "../src/app/lead-restart-routes.ts";
@@ -11,6 +11,116 @@ import { createLeadSeatRelaunch } from "../src/captain/lead-seat-relaunch.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { fleetStatus, formatLeadRestartLines } from "../../tui/src/command/fleet.ts";
 import { fleetSettingsClient } from "../../tui/test/fixtures/fleet-settings-client.ts";
+import { leadChatFixture } from "./fixtures/lead-chats.ts";
+
+const cleanup: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  for (const close of cleanup.splice(0).reverse()) await close();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+it.each([
+  { tokens: 249_999, ageMs: 12 * 3_600_000 - 1, due: false },
+  { tokens: 250_000, ageMs: 1_000, due: true },
+  { tokens: 50_000, ageMs: 12 * 3_600_000, due: true },
+])("checks the accepted lead budget at $tokens tokens / $ageMs ms", async ({ tokens, ageMs, due }) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime("2026-10-26T12:00:00Z");
+  const f = await leadChatFixture(false, cleanup, {
+    nativeSourceProof: true,
+    defaultLead: true,
+    leadRestartCheckMs: 25,
+    beforeOpen: async (sessionId) => {
+      const path = join(process.env.CLAUDE_CONFIG_DIR!, "projects", "-scratch", `${sessionId}.jsonl`);
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(
+        path,
+        [
+          { type: "user", timestamp: new Date(Date.now() - ageMs).toISOString() },
+          { type: "assistant", message: { usage: { input_tokens: tokens } } },
+        ]
+          .map((line) => JSON.stringify(line))
+          .join("\n") + "\n",
+      );
+    },
+  });
+  await expect
+    .poll(() => f.captain.leadRestartStatus!())
+    .toMatchObject({ check: { contextTokens: tokens, due } });
+  // No launcher in this census fixture: due checks refuse before asking for a brief.
+  if (due)
+    await expect
+      .poll(() => f.captain.leadRestartStatus!())
+      .toMatchObject({ waiting: { lastReason: "no_launch" } });
+  else expect((await f.captain.leadRestartStatus!()).waiting).toBeUndefined();
+});
+
+// Production rounds, source proof, transcript discovery, persisted wait and
+// authenticated status route. The named machine times out; uniqueness stays strict.
+it.each(["source_unproven", "ambiguous", "missing", "empty"])(
+  "records and exposes %s, and tells the owner once across two hours",
+  async (scenario) => {
+    const reason = scenario === "source_unproven" ? "source_unproven" : "usage_unreadable";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime("2026-10-26T12:00:00Z");
+    const candidates: string[] = [];
+    const f = await leadChatFixture(false, cleanup, {
+      nativeSourceProof: true,
+      defaultLead: true,
+      leadRestartCheckMs: 25,
+      ...(reason === "source_unproven" ? { slowFleetMs: 1 } : {}),
+      beforeOpen: async (sessionId) => {
+        if (scenario === "source_unproven" || scenario === "missing") return;
+        for (const profile of scenario === "ambiguous" ? [".claude", ".claude-stale"] : [".claude"]) {
+          const path = join(homedir(), profile, "projects", "-scratch", `${sessionId}.jsonl`);
+          await mkdir(join(path, ".."), { recursive: true });
+          await writeFile(path, "{}\n");
+          candidates.push(path);
+        }
+      },
+    });
+    const app = new Hono();
+    registerLeadRestartRoutes(app, {
+      captain: f.captain,
+      authenticateOperator: createBearerAuthenticator("scratch-owner", { operatorId: "owner" }),
+    });
+    const status = async () => {
+      const response = await app.request(FLEET_LEAD_RESTART_PATH, {
+        headers: { authorization: "Bearer scratch-owner" },
+      });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    await expect.poll(status).toMatchObject({
+      budget: { contextTokens: 250_000, ageHours: 12 },
+      check: { at: expect.stringMatching(/^2026-10-26T12:00:0/u) },
+      waiting: { lastReason: reason },
+    });
+    const first = await status();
+    expect(first.check.due).toBeUndefined();
+    expect(formatLeadRestartLines(first)[0]).toContain("budget unknown");
+    if (reason === "source_unproven") expect(first.waiting.lastDetail).toContain("inventory pc");
+    else {
+      for (const path of candidates) expect(first.waiting.lastDetail).toContain(path);
+      if (scenario === "missing") expect(first.waiting.lastDetail).toContain("projects");
+    }
+    vi.setSystemTime("2026-10-26T14:00:00Z");
+    await expect
+      .poll(status)
+      .toMatchObject({ waiting: { noticedAt: expect.stringMatching(/^2026-10-26T14:00:0/u) } });
+    const noticedAt = (await status()).waiting.noticedAt;
+    await f.captain.close();
+    const reopened = f.open();
+    await expect
+      .poll(() => reopened.leadRestartStatus!())
+      .toMatchObject({ waiting: { lastReason: reason, noticedAt } });
+    const log = await readFile(join(f.root, "conversations", "global-default", "events.jsonl"), "utf8");
+    expect(
+      log.split("\n").filter((line) => line.includes("fresh restart check (ADR 0271) has been refused")),
+    ).toHaveLength(1);
+  },
+);
 
 // VUH-2821: `clankie fleet status` reads the lead seat's restart wait from the
 // service route, over the same owner bearer as the fleet settings it already reads.

@@ -63,6 +63,8 @@ const SEAT_SETTINGS = {
   // His notes live in the service's `memory`, which every harness and room
   // reads; Claude Code's own memory would be a second copy only this seat sees.
   autoMemoryEnabled: false,
+  // ADR 0293: a refused fresh restart still has a native compaction backstop.
+  autoCompactWindow: 300_000,
   // Session-only: never fetch the owner's claude.ai connectors.
   disableClaudeAiConnectors: true,
 };

@@ -295,7 +295,8 @@ export const LeadRestartStatusSchema = z
         at: z.string().datetime(),
         contextTokens: z.number().int().nonnegative().optional(),
         sessionStartedAt: z.string().datetime().optional(),
-        due: z.boolean(),
+        /** Absent when the source or usage cannot establish whether the budget is exceeded. */
+        due: z.boolean().optional(),
       })
       .strict()
       .optional(),

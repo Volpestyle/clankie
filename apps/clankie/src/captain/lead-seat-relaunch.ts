@@ -15,7 +15,8 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, isAbsolute } from "node:path";
 import { LeadRestartStatusSchema, type LeadRestartStatus, type LeadRestartWait } from "@clankie/protocol";
 import { z } from "zod";
@@ -63,6 +64,7 @@ type LeadSeatRelaunchRefusal =
   | "owner_active"
   | "draft"
   | "draft_unknown"
+  | "trust_required"
   | "invalid_target"
   | "in_progress"
   | "launch_failed";
@@ -84,6 +86,8 @@ export interface LeadSeatPane {
   readonly terminalId: string;
   readonly harness: string;
   readonly sessionId?: string;
+  /** The launcher's resolved conversation directory, not the harness's possibly changed cwd. */
+  readonly workingDirectory?: string;
   /** The session's native delivery binding: a delivery pinned to it reaches no other session. */
   readonly binding?: string;
 }
@@ -126,6 +130,9 @@ const RESTART_REFUSALS: Readonly<Record<string, string>> = {
   owner_active: "you had written in the last 15 minutes",
   draft: "the pane held an unsent draft",
   draft_unknown: "the pane's input line could not be read",
+  source_unproven: "the lead's native source could not be proven",
+  usage_unreadable: "the lead's transcript usage could not be read uniquely",
+  trust_required: "Claude's workspace trust needs an owner action",
   no_seat: "no native seat was bound",
   no_launch: "the pane's `clankie` launcher could not be found",
   no_brief: "the seat did not answer the handoff request",
@@ -292,7 +299,7 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         .sort(([, a], [, b]) => b - a)
         .map(([name, count]) => `${name} ×${String(count)}`)
         .join(", ");
-      wait.pendingNotice = `Clankie's seat has been due a fresh restart (ADR 0271) since ${wait.since}, ${String(Math.floor(waited / 60_000))} minutes, and every attempt was refused. The latest: ${reason} (${RESTART_REFUSALS[reason] ?? "see the relaunch receipt"}). All refusals: ${counts}. \`clankie fleet status\` shows the wait; \`clankie fleet set --lead-restarts off\` stops it.`;
+      wait.pendingNotice = `Clankie's fresh restart check (ADR 0271) has been refused since ${wait.since}, ${String(Math.floor(waited / 60_000))} minutes. The latest: ${reason} (${RESTART_REFUSALS[reason] ?? "see the relaunch receipt"}).${wait.lastDetail === undefined ? "" : ` ${wait.lastDetail}`} All refusals: ${counts}. \`clankie fleet status\` shows the wait; \`clankie fleet set --lead-restarts off\` stops it.`;
     }
     writeWaits({ ...waits, [conversationId]: wait });
     if (wait.pendingNotice === undefined) return;
@@ -429,6 +436,22 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
     input: RelaunchLeadSeatInput,
     seat: LeadSeatPane,
   ): Promise<RelaunchLeadSeatResult | undefined> {
+    if (input.harness === "claude") {
+      // Claude Code 2.1.310 deliberately accepts home-directory trust for only
+      // the current session. Never end that session for an unattended launch
+      // which will need the owner again, even if its persisted flag says true.
+      const directory = seat.workingDirectory;
+      const paths = await Promise.all([
+        directory === undefined ? undefined : realpath(directory).catch(() => undefined),
+        realpath(homedir()).catch(() => undefined),
+      ]);
+      if (paths[0] === undefined || paths[1] === undefined || paths[0] === paths[1])
+        return {
+          outcome: "refused",
+          reason: "trust_required",
+          detail: `Claude's launch directory ${directory ?? "(unknown)"} ${paths[0] === paths[1] && paths[0] !== undefined ? "is home; trust there is session-only" : "could not be verified outside home"}. Owner action: use \`clankie workdir set PATH\` for a trusted project, restart captain, then open this conversation with the selected Claude account and accept folder trust there once. The current session was left running.`,
+        };
+    }
     if (input.guards.requireIdle && !deps.idle(input.conversationId))
       return { outcome: "refused", reason: "busy" };
     const owner = deps.lastOwnerMessageAt(input.conversationId);

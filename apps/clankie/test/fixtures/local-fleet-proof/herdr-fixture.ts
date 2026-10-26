@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -44,6 +44,9 @@ export async function isolatedHerdr(logDirectory: string) {
   delete env.ENV;
   delete env.BASH_ENV;
   Object.assign(env, {
+    HOME: join(root, "home"),
+    USERPROFILE: join(root, "home"),
+    CLAUDE_CONFIG_DIR: join(root, "home", ".claude"),
     HERDR_SOCKET_PATH: socketPath,
     HERDR_CONFIG_PATH: configPath,
     XDG_CONFIG_HOME: join(root, "config"),
@@ -54,6 +57,9 @@ export async function isolatedHerdr(logDirectory: string) {
     SHELL: "/bin/sh",
   });
   await mkdir(env.XDG_RUNTIME_DIR!, { recursive: true });
+  await mkdir(env.HOME!, { recursive: true });
+  const sessionPath = resolve(env.XDG_CONFIG_HOME!, "herdr", "session.json");
+  if (!sessionPath.startsWith(`${root}/`)) throw new Error("Herdr session path escaped scratch root");
   const children: ChildProcess[] = [];
   const controlSockets = new Set<Socket>();
   const clients = new Map<string, { socket: Socket; pid: number }>();
@@ -119,18 +125,21 @@ export async function isolatedHerdr(logDirectory: string) {
       spawnError = error;
     });
     const deadline = Date.now() + 10_000;
+    let restoredWorkspaces: unknown;
     for (;;) {
       if (spawnError) throw spawnError;
       if (daemon.exitCode !== null)
         throw new Error(`Owned Herdr exited ${daemon.exitCode}; see ${logDirectory}`);
       try {
-        await cli("workspace", "list");
+        restoredWorkspaces = (await cli("workspace", "list")).result.workspaces;
         break;
       } catch (error) {
         if (Date.now() >= deadline) throw error;
         await delay(30);
       }
     }
+    if (!Array.isArray(restoredWorkspaces) || restoredWorkspaces.length !== 0)
+      throw new Error("Scratch Herdr restored workspaces; refusing to run proof");
     const created = await cli("workspace", "create", "--cwd", root, "--no-focus");
     const pane = created.result.root_pane.pane_id as string;
     const other = await cli("pane", "split", pane, "--direction", "right", "--cwd", root, "--no-focus");
@@ -158,6 +167,8 @@ export async function isolatedHerdr(logDirectory: string) {
     let id = 0;
     return {
       root,
+      env,
+      restoredWorkspaceCount: restoredWorkspaces.length,
       pane,
       foreignPane,
       shellPid,

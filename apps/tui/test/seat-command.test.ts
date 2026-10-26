@@ -104,6 +104,7 @@ describe("clankie claude (the operator seat)", () => {
     expect(plan.args).toContain("server:clankie");
     expect(plan.args).toContain("--strict-mcp-config");
     const settings = JSON.parse(plan.args[plan.args.indexOf("--settings") + 1]!);
+    expect(settings.autoCompactWindow).toBe(300_000);
     expect(settings.enabledPlugins).toEqual({
       [SEAT_PLUGIN_ID]: false,
       "clankie-worker@clankie": false,

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -34,6 +34,7 @@ async function fixture(
     now?: () => number;
     root?: string;
     notice?: (conversationId: string, text: string) => void;
+    workingDirectory?: string;
   } = {},
 ) {
   // A shared root is the same service state seen by a restarted service.
@@ -67,6 +68,7 @@ async function fixture(
       terminalId: "term_lead",
       harness: "claude",
       sessionId: session,
+      workingDirectory: options.workingDirectory ?? root,
       binding: `binding:${session}`,
     }),
     paneShell: async () => ({
@@ -112,6 +114,38 @@ const restart: RelaunchLeadSeatInput = {
   guards: { requireNoDraft: true, quietOwnerMs: 15 * 60_000, requireIdle: true },
   handoffBrief: "In flight: VUH-2274 slice 3. Waiting on James: nothing.",
 };
+
+it.each([false, true])(
+  "refuses home-directory trust before ending the lead (persisted flag %s)",
+  async (accepted) => {
+    const config = process.env.CLAUDE_CONFIG_DIR!;
+    mkdirSync(config, { recursive: true });
+    await writeFile(
+      join(config, ".claude.json"),
+      JSON.stringify({ projects: { [homedir()]: { hasTrustDialogAccepted: accepted } } }),
+    );
+    let clock = Date.now();
+    const f = await fixture({ workingDirectory: homedir(), now: () => clock });
+    const refused = await f.relaunch.preflight(restart);
+    expect(refused).toMatchObject({
+      outcome: "refused",
+      reason: "trust_required",
+      detail: expect.stringContaining("clankie workdir set PATH"),
+    });
+    expect(await f.relaunch.relaunchLeadSeat(restart)).toEqual(refused);
+    expect(f.alive()).toBe(true);
+    expect(f.launched).toEqual([]);
+    expect(f.briefs).toEqual([]);
+    if (refused?.outcome !== "refused") throw new Error("Missing trust refusal");
+    f.relaunch.restartRefused("global-default", refused.reason, refused.detail);
+    clock += 2 * 3_600_000;
+    f.relaunch.restartRefused("global-default", refused.reason, refused.detail);
+    expect(f.notices).toEqual([expect.stringContaining("clankie workdir set PATH")]);
+    expect(await readFile(join(config, ".claude.json"), "utf8")).toBe(
+      JSON.stringify({ projects: { [homedir()]: { hasTrustDialogAccepted: accepted } } }),
+    );
+  },
+);
 
 it("relaunches the same command in the same pane, delivers the brief and keeps the launch", async () => {
   const f = await fixture();
@@ -441,7 +475,13 @@ it("hands a relaunch's kept brief to its new session when it binds after the rel
   const delivered: string[] = [];
   const relaunch = createLeadSeatRelaunch({
     journalPath: join(f.root, "lead-seat-relaunches.json"),
-    seat: async () => ({ paneId: "w4:p2", terminalId: "term_work", harness: "claude", sessionId: ended }),
+    seat: async () => ({
+      paneId: "w4:p2",
+      terminalId: "term_work",
+      harness: "claude",
+      sessionId: ended,
+      workingDirectory: f.root,
+    }),
     paneShell: async () => ({
       shellPid: 4242,
       foreground: alive

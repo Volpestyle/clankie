@@ -26,9 +26,10 @@ log is already the source of truth: a fresh seat starts from its projection
 it fresh in the same pane, after the old session writes a handoff brief.**
 
 A check every five minutes considers it when the seat's Claude transcript shows
-at least 500k tokens of context in its latest main-thread call (half its 1M
-window; Claude records no window, so this is a token budget), or a session that
-started 24 hours ago. All of these must hold, and are read again just before
+at least 250k tokens of context in its latest main-thread call, or a session that
+started 12 hours ago. [ADR 0293](0293-a-seat-is-sized-by-its-work-not-its-window.md)
+amends the original 500k / 24-hour budget and sets Claude's `autoCompactWindow`
+to 300k as a backstop. All of these must hold, and are read again just before
 the old session is ended:
 
 - the seat is bound and not in a turn;
@@ -36,6 +37,9 @@ the old session is ended:
   pane or any app;
 - the pane holds no unsent draft (the same styled-cell read that guards
   closing a worker pane; an unreadable input line refuses).
+- Claude's resolved launch directory is provably outside home: Claude Code
+  2.1.310 deliberately keeps home trust session-only. Otherwise `trust_required`
+  leaves the current session running and names the owner workdir/trust action.
 
 The service then sends the seat one escalation asking for a handoff brief and
 waits for its `reply`. A seat that does not answer is not restarted, and the
@@ -62,6 +66,12 @@ session; no later session takes it, and a brief whose delivery does not confirm
 is never resent. A receipt from before briefs were kept settles
 with a notice that its brief was unavailable.
 
+An unproven source or missing/ambiguous/unreadable transcript is also a recorded
+refusal (`source_unproven` / `usage_unreadable`), including the failed inventory
+or candidate paths. Unknown usage never establishes that the seat is below
+budget. The wait and its two-hour owner notice use the same journal as other
+refusals.
+
 The fleet setting `leadRestarts` (`on` by default) turns this off. It is set
 through the revision-fenced fleet settings API, `clankie fleet set
 --lead-restarts on|off` and the TUI's `/fleet`.
@@ -75,7 +85,7 @@ sequenceDiagram
   participant S as Service (every 5 min)
   participant L as Lead seat (pane shell)
   participant N as New lead session
-  S->>S: large or a day old? idle, owner quiet 15 min, no draft?
+  S->>S: 250K or 12h? idle, owner quiet 15 min, no draft, launch outside home?
   S->>L: escalation: write a handoff brief
   L-->>S: reply(brief)
   S->>S: guards again, durable receipt
@@ -104,5 +114,5 @@ sequenceDiagram
   ran meanwhile.
 - Only seats launched by `clankie <command>` from a shell can be restarted;
   others are refused as `not_shell_launch`.
-- The context threshold assumes the seat's current 1M window. A smaller window
-  compacts before it is reached, and the 24-hour rule still applies.
+- The token budget is independent of the model window. A smaller window
+  compacts before it is reached, and the 12-hour rule still applies.

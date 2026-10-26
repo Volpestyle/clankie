@@ -256,7 +256,7 @@ confirmed idleness with an open decision, or active work with neither a
 scheduled self-wake nor live workers; the observer never wakes, approves or
 repairs work for you.
 
-An idle default lead seat whose session is large or a day old is restarted fresh
+An idle default lead seat at 250K context tokens or 12 hours is restarted fresh
 in its own pane ([ADR 0271](../../../../docs/adr/0271-the-lead-seat-restarts-fresh-in-its-own-pane.md));
 the escalation that precedes it says what the handoff brief holds.
 Harness-native timers such as cron rounds die with the old session; the new

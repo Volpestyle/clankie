@@ -38,6 +38,9 @@ export async function leadChatFixture(
     localUnavailable?: () => boolean;
     nativeStatus?: () => string;
     nativeSourceProof?: boolean;
+    leadRestartCheckMs?: number;
+    defaultLead?: boolean;
+    beforeOpen?: (sessionId: string) => Promise<void>;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
@@ -186,15 +189,22 @@ export async function leadChatFixture(
         return { stdout: herdrResponse(args), stderr: "" };
       },
       settings,
+      ...(options.leadRestartCheckMs === undefined ? {} : { leadRestartCheckMs: options.leadRestartCheckMs }),
       discordEnvironment: {},
       seatAdapters: [],
     });
     cleanup.push(() => opened.close());
     return opened;
   };
+  await options.beforeOpen?.(sessionId);
   const captain = open();
   // The lead's own hook sync attaches its native session to its conversation.
-  expect(captain.syncSeatTranscript(leads[1]!, { sessionId, entries: [] })).toBe(true);
+  expect(
+    captain.syncSeatTranscript(options.defaultLead ? "global-default" : leads[1]!, {
+      sessionId,
+      entries: [],
+    }),
+  ).toBe(true);
   const roster = await captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
   if (roster.op !== "roster") throw new Error("roster missing");
   expect(roster.seats.map((seat) => seat.seatId)).toContain(head.terminalId);
