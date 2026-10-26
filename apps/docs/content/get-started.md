@@ -40,7 +40,11 @@ computer**. The launcher starts his service and opens the console, and `/setup`
 walks you through the rest:
 
 1. **A model.** Connect a subscription, API key, or local provider, then pick a
-   model. Sign-ins and keys go into the credential broker.
+   model. Sign-ins and keys go into the credential broker. Claude subscriptions
+   aren't offered here: to talk to Clankie on your Claude plan, run
+   `clankie claude`, which opens Claude Code as him under its own sign-in
+   ([seat commands](/cli/#seat-commands)). The model you pick still runs the
+   console, app, Discord and his own work.
 2. **Your phone.** Setup signs this Mac in for remote access and shows a pairing
    QR. Install the app, scan it, and accept.
 3. **Services and a first agent.** Connect accounts with `/connect`, then give a

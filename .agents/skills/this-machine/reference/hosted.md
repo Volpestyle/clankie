@@ -79,7 +79,9 @@ reach its model, inspect the installed provider with `clankie doctor` and
 Self-hosted native harness sign-ins remain available through `clankie harness
 login claude|codex` or the app. Login links and codes are for the owner's screen
 only; never put them in a conversation. Clankie's own Claude subscription auth
-remains removed; self-hosted `/auth anthropic` is API-key-only.
+remains removed; self-hosted `/auth anthropic` is API-key-only. An owner who
+wants to talk to Clankie on their Claude plan runs `clankie claude`, which seats
+him in Claude Code under that harness's own sign-in.
 
 ## Managed Discord connection
 

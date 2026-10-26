@@ -3611,7 +3611,9 @@ credentials in the service broker, selects the requested model and updates
 shared readiness without a restart. Only the initiating principal can read or
 cancel its job. Requests have a ten-second deadline and never retry an uncertain
 start. Provider/transport errors return fixed codes, without raw error text.
-Claude subscription sign-in remains unsupported. See [model keys](model-keys.md)
+Claude subscription sign-in remains unsupported. To talk to Clankie on the owner's
+Claude plan, use [`clankie claude`](#seat-commands), which runs Claude Code under
+its own sign-in. See [model keys](model-keys.md)
 for the API, hosted policy and first-run Mac key-entry guard.
 
 ### `model refresh`
@@ -8826,7 +8828,8 @@ servers are not supervised.
 subscription login or refresh; replace any legacy token with an Anthropic API
 key (or remove it through `/auth`). Doctor/setup do not count that legacy OAuth
 entry as usable authentication. Self-hosted native Claude Code and Codex retain
-their own login.
+their own login, and [`clankie claude`](#seat-commands) seats Clankie in Claude
+Code on that login.
 
 Managed Clankie uses AI credits only. Model and native subscription sign-in,
 customer-key entry and customer-model selection are refused with an explanatory

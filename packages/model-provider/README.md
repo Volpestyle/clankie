@@ -127,7 +127,7 @@ still reports the configured effort. The catalog already gated the variant on
 
 `oauth/openai-codex.ts` implements ChatGPT/Codex subscription OAuth for the `openai-codex` provider: the browser flow (PKCE + localhost callback), the headless device flow, refresh-token rotation, and the fetch adapter that reroutes Responses API requests to the Codex backend with subscription headers.
 
-Anthropic is API-key-only in Clankie: `/auth anthropic` or `ANTHROPIC_API_KEY`. The Claude subscription adapter and login are removed; stale OAuth credentials and subscription-shaped keys are refused without automatically deleting owner credentials. Native Claude Code retains its own authentication.
+Anthropic is API-key-only in Clankie: `/auth anthropic` or `ANTHROPIC_API_KEY`. The Claude subscription adapter and login are removed; stale OAuth credentials and subscription-shaped keys are refused without automatically deleting owner credentials. Native Claude Code retains its own authentication; `clankie claude` seats Clankie there ([seat commands](../../docs/cli.md#seat-commands)).
 
 `subscription-policy.ts` gates hosted ChatGPT login and inference pending owner-obtained OpenAI approval. Managed bodies are identified by `CLANKIE_HOSTED_BOOTSTRAP_FILE`; their API-key and included-usage paths remain available. Browser/device login fails before opening a URL or making a request, and the hosted customer loopback refuses token forwarding. Local/self-hosted ChatGPT precedence remains as described above. See [ADR 0052](../../docs/adr/0052-subscription-precedence-over-metered-api-key.md) and [ADR 0197](../../docs/adr/0197-hosted-workers-reach-the-owners-model-through-the-body.md).
 
