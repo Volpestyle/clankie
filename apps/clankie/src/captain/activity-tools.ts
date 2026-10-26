@@ -15,6 +15,10 @@ export interface ActivityRoomLauncher {
   /** The voice channel Clankie's bot occupies in this server, from presence. */
   voiceChannel(guildId: string): Promise<string | undefined>;
   watch(action: "watch_start" | "watch_stop", callId: string): Promise<"confirmed" | "refused" | "uncertain">;
+  /** Names a launch before its body call, so a later stop can revoke it. */
+  reserve(callId: string, guildId: string, channelId: string): void;
+  /** Revokes every reserved launch in this channel, even one whose body call is still running. */
+  revoke(guildId: string, channelId: string): void;
 }
 
 const ActivityShareParameters = Type.Object({
@@ -139,6 +143,10 @@ export function activityTools(
             )
           )
             throw new Error("activity_destination_refused");
+          const stopping = listed.sessions.find((session) => session.shareId === shareId);
+          // Revoke first: a launch still in its body call must not land after this stop.
+          if (roomLaunch !== undefined && action === "stop" && stopping !== undefined)
+            roomLaunch.revoke(stopping.scope.guildId, stopping.scope.channelId);
           result = await sharing.request(parsed, authorize);
           if (roomLaunch !== undefined && action === "stop")
             result = {
@@ -150,6 +158,7 @@ export function activityTools(
         result = await sharing.request(parsed, authorize);
         if (roomLaunch !== undefined && (action === "start" || action === "image")) {
           const session = (result as { session: LaunchedSession }).session;
+          roomLaunch.reserve(callId, session.scope.guildId, session.scope.channelId);
           const outcome = await roomLaunch.watch("watch_start", callId);
           // A refused launch posted nothing: end the share it would have shown.
           if (outcome === "refused")
@@ -191,7 +200,7 @@ function roomLifecycle<T>(sharing: ActivitySharing, work: () => Promise<T>): Pro
 interface LaunchedSession {
   shareId: string;
   generation: number;
-  scope: { guildId: string };
+  scope: { guildId: string; channelId: string };
 }
 
 async function launchReceipt(

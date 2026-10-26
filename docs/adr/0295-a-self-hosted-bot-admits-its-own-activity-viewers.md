@@ -73,7 +73,11 @@ room body's existing `watch_start` action, whose `activity_start` presence write
 records the launch above. No new launch authority exists; a transport failure
 is reported as uncertain, never resent. Room share operations run whole and in
 order across turns, because the invite is posted outside the sharing queue: a
-stop waits for a pending launch, so no older launch republishes after it.
+stop waits for a pending launch, so no older launch republishes after it. A
+caller's timeout does not prove the body stopped, so each room launch reserves
+its call id before the body call, a stop revokes the channel's reservations,
+and the presence route refuses a revoked launch's `activity_start` before it
+posts an invite or registers.
 
 A `#share` fragment still opens a delegated grant on a self-hosted viewer
 outside Discord. Hosted config never sets `delegated`, so hosted viewers keep

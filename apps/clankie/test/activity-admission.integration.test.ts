@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { DiscordPresenceSession } from "@clankie/discord-presence-core";
 import { DiscordBotPresenceRuntime } from "../../discord-bridge/src/bot-presence-runtime.ts";
 import { ActivityShareFrameSchema } from "@clankie/interactive-environment";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, get, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -675,7 +675,9 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
   await session.start();
   await session.gatewayReady();
   await session.voiceStateChanged(GUILD, true, { channelId: CHANNEL, occupants: [] });
-  let mode: "act" | "refuse" | "lose" = "act";
+  let mode: "act" | "refuse" | "lose" | "late" = "act";
+  // "late": the caller's timeout fires first; the body's write lands when released.
+  let lateWrite: (() => Promise<number>) | undefined;
   let held: { reached: () => void; hold: Promise<void> } | undefined;
   const actions = {
     async execute(input: { action: string; callId: string }) {
@@ -688,33 +690,40 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
       if (mode === "refuse")
         return { ok: false, message: "I need to be in your admitted voice channel first." };
       const kind = input.action === "watch_start" ? "activity_start" : "activity_stop";
-      const response = await post(
-        "/v1/discord/presence-actions",
-        {
-          schemaVersion: 1,
-          idempotencyKey: `room:${input.callId}:${kind}`,
-          action: `discord.presence.${kind}`,
-          identity: {
-            presenceSessionId: `discord:${GUILD}:${CHANNEL}`,
-            correlationId: `room:${input.callId}`,
-            profileHash: "unversioned",
-            characterId: "clankie",
-            credentialRef: "discord_bot",
-            transportKind: "bot",
+      const write = () =>
+        post(
+          "/v1/discord/presence-actions",
+          {
+            schemaVersion: 1,
+            // The bridge keys a captain action write by its call (captain-action-control.ts).
+            idempotencyKey: `captain:${input.callId}:${input.action}`,
+            action: `discord.presence.${kind}`,
+            identity: {
+              presenceSessionId: `discord:${GUILD}:${CHANNEL}`,
+              correlationId: `discord-captain-action:${input.callId}`,
+              profileHash: "unversioned",
+              characterId: "clankie",
+              credentialRef: "discord_bot",
+              transportKind: "bot",
+            },
+            payload: {
+              kind,
+              guildId: GUILD,
+              channelId: CHANNEL,
+              ...(kind === "activity_start" ? { surface: "gba_emulator" } : {}),
+            },
           },
-          payload: {
-            kind,
-            guildId: GUILD,
-            channelId: CHANNEL,
-            ...(kind === "activity_start" ? { surface: "gba_emulator" } : {}),
+          {
+            "x-clankie-discord-presence-session": session.record.sessionId,
+            "x-clankie-discord-presence-phase": session.record.phase,
+            "x-clankie-discord-presence-revision": String(session.record.revision),
           },
-        },
-        {
-          "x-clankie-discord-presence-session": session.record.sessionId,
-          "x-clankie-discord-presence-phase": session.record.phase,
-          "x-clankie-discord-presence-revision": String(session.record.revision),
-        },
-      );
+        );
+      if (mode === "late" && kind === "activity_start") {
+        lateWrite = async () => (await write()).status;
+        return { ok: false, message: DISCORD_BODY_UNREACHABLE_MESSAGE };
+      }
+      const response = await write();
       // "lose": the body acted, but its answer never arrived.
       if (mode === "lose") return { ok: false, message: DISCORD_BODY_UNREACHABLE_MESSAGE };
       return response.ok ? { ok: true, message: "posted" } : { ok: false, message: "refused" };
@@ -724,6 +733,8 @@ async function roomBody(s: Awaited<ReturnType<typeof stack>>) {
     session,
     actions,
     setMode: (next: typeof mode) => (mode = next),
+    /** Lets a "late" body's held presence write land now; its HTTP status. */
+    releaseLate: () => lateWrite!(),
     /** Delays the body's next watch_start until released. */
     holdNextStart() {
       let release!: () => void, reached!: () => void;
@@ -764,7 +775,7 @@ function roomTool(
     },
   };
   const deps = {
-    ...(selfHosted ? { activitySelfHostedLaunch: true as const } : {}),
+    ...(selfHosted ? { activitySelfHostedLaunch: s.launches } : {}),
     discordActions: body.actions,
     presence: { listSessions: async () => [body.session.record] },
   } as unknown as CaptainDeps;
@@ -773,11 +784,10 @@ function roomTool(
     turn as never,
     activityRoomLauncher(deps, turn as never, "discord_presence"),
   )[0]!;
-  let calls = 0;
   return {
     revoke: () => (current = false),
     invoke: async (input: Record<string, unknown>) =>
-      (await tool.execute(`call-${++calls}`, input as never, undefined, undefined, undefined as never))
+      (await tool.execute(`call-${randomUUID()}`, input as never, undefined, undefined, undefined as never))
         .details as Record<string, any>,
   };
 }
@@ -911,3 +921,44 @@ it.each([{ turns: "the same turn" }, { turns: "separate turns" }] as const)(
     expect(s.shares.stats()).toHaveLength(0);
   },
 );
+
+// Adapted from the reviewer's probe: the room tool's body call timed out
+// (uncertain), a stop then confirmed, and the body's own write lands after.
+it("a body write that outlives its launch's timeout cannot land after a confirmed stop", async () => {
+  const discord = discordRest();
+  const s = await stack({
+    presenceRuntime: new DiscordBotPresenceRuntime({
+      botToken: "fixture-bot",
+      rest: discord.rest as never,
+      activityApplicationIds: { gba_emulator: APP },
+    }),
+  });
+  const playSink = s.play.createSink("FireRed");
+  const body = await roomBody(s);
+  body.setMode("late");
+  const started = await roomTool(s, body).invoke({ action: "start", sourceId: "play" });
+  expect(started.receipt).toMatchObject({ outcome: "uncertain" });
+  body.setMode("act");
+  const stopped = await roomTool(s, body).invoke({
+    action: "stop",
+    shareId: started.session.shareId,
+    generation: 1,
+  });
+  expect(stopped).toMatchObject({ stopped: true, receipt: { outcome: "confirmed" } });
+  expect(s.shares.stats()).toHaveLength(0);
+  // The late write is refused before it posts an invite or records a launch.
+  expect(await body.releaseLate()).toBe(409);
+  expect(discord.invites.size).toBe(0);
+  expect(
+    discord.calls.filter((call) => call.startsWith("POST /channels/") && call.endsWith("/invites")),
+  ).toEqual([]);
+  expect((await s.admit("member-code", "i-here")).status).toBe(403);
+  playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
+  expect(s.shares.stats()).toHaveLength(0);
+  // A fresh launch afterwards is a different call and still works.
+  const fresh = await roomTool(s, body).invoke({ action: "start", sourceId: "play" });
+  expect(fresh.receipt).toMatchObject({ outcome: "confirmed" });
+  const admitted = await s.admit("member-code", "i-here");
+  expect(admitted.status).toBe(200);
+  expect(admitted.body.session.shareId).toBe(fresh.session.shareId);
+});

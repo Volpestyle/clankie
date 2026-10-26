@@ -294,6 +294,7 @@ export interface ClankieAppDependencies {
   };
   /** Records the bot's own Activity launches so admission serves only those channels. */
   activityLaunches?: {
+    allowsLaunch(idempotencyKey: string): boolean;
     launched(guildId: string, channelId: string): void;
     stopped(guildId: string, channelId: string): Promise<void>;
   };

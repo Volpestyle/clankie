@@ -1904,9 +1904,10 @@ export function activityRoomLauncher(
   lane: CaptainSessionLaneV2,
 ): ActivityRoomLauncher | undefined {
   const actions = deps.discordActions;
+  const fence = deps.activitySelfHostedLaunch;
   const { actorId, guildId, channelId, messageId } = turn;
   if (
-    deps.activitySelfHostedLaunch !== true ||
+    fence === undefined ||
     actions === undefined ||
     !lane.startsWith("discord_") ||
     actorId === undefined ||
@@ -1921,6 +1922,8 @@ export function activityRoomLauncher(
         .filter((record) => record.transportKind === "bot")
         .flatMap((record) => record.voiceRooms ?? [])
         .find((room) => room.guildId === server)?.channelId,
+    reserve: (callId, server, voice) => fence.reserveLaunch(callId, server, voice),
+    revoke: (server, voice) => fence.revokeLaunches(server, voice),
     watch: async (action, callId) => {
       const result = await actions.execute({ action, callId, actorId, guildId, channelId, messageId });
       if (result.ok) return "confirmed";

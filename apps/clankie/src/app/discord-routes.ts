@@ -534,6 +534,13 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     const parsed = DiscordPresenceWriteSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_discord_presence_write" }, 400);
     const write = parsed.data;
+    // A room launch a confirmed stop revoked never posts or registers, even if
+    // its body handler outlived the room tool's timeout (VUH-2835).
+    if (
+      write.payload.kind === "activity_start" &&
+      ctx.dependencies.activityLaunches?.allowsLaunch(write.idempotencyKey) === false
+    )
+      return context.json({ error: "activity_launch_revoked" }, 409);
     // Transport is bound to *authentication*, never to the request body.
     if (write.identity.transportKind !== captainTransportKind(captain)) {
       return context.json({ error: "discord_presence_transport_not_authenticated" }, 403);

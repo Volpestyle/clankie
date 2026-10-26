@@ -1452,7 +1452,7 @@ const captain = createCaptain(
     harnessProcesses,
     refreshWorkerCatalogs: (input, authority) => workerToolRefresh.refresh(input, authority),
     activitySharing,
-    ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: true as const }),
+    ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined
       ? {}

@@ -182,6 +182,10 @@ export function createActivityLaunches(
   }
   const launched = new Map<string, Launch>();
   const retired = new Map<string, Set<Launch>>();
+  // Room launch call ids per destination, and those a stop revoked. Call ids
+  // are unique per tool call, so the revoked set only grows by stopped launches.
+  const reserved = new Map<string, Set<string>>();
+  const revoked = new Set<string>();
   // One queue for every destination: they share one producer client whose
   // status listing reconciles all of its shares, so admissions and cleanup in
   // different channels must not interleave either. They are rare and
@@ -240,6 +244,27 @@ export function createActivityLaunches(
     retired.set(destination, set);
   };
   return {
+    /** A room launch about to call its body (VUH-2835); see `allowsLaunch`. */
+    reserveLaunch(callId: string, guildId: string, channelId: string) {
+      const destination = key(guildId, channelId);
+      const set = reserved.get(destination) ?? new Set<string>();
+      set.add(callId);
+      reserved.set(destination, set);
+    },
+    /**
+     * A confirmed room stop revokes every launch reserved here before it, so a
+     * body call that outlived its caller's timeout cannot land afterwards.
+     */
+    revokeLaunches(guildId: string, channelId: string) {
+      const destination = key(guildId, channelId);
+      for (const callId of reserved.get(destination) ?? []) revoked.add(callId);
+      reserved.delete(destination);
+    },
+    /** False for the presence write of a revoked room launch: it must not post or register. */
+    allowsLaunch(idempotencyKey: string) {
+      const callId = /^captain:(.+):watch_start$/u.exec(idempotencyKey)?.[1];
+      return callId === undefined || !revoked.has(callId);
+    },
     launched(guildId: string, channelId: string) {
       const destination = key(guildId, channelId);
       retire(destination);
