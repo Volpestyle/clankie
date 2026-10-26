@@ -4,6 +4,7 @@ import {
   fleetUpdate,
   formatDeployHoldLines,
   formatLeadRestartLines,
+  formatSeatContextLines,
   formatFleetLines,
   runFleetCommand,
   type FleetCommandOptions,
@@ -95,6 +96,7 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
         : []),
       ...formatDeployHoldLines(result.deployHolds),
       ...formatLeadRestartLines(result.leadRestart),
+      ...formatSeatContextLines(result.seatContext),
       "",
       ...formatWorkingPreferences(result.workingPreferences),
       ...(result.workTracker

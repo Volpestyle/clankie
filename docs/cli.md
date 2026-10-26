@@ -5720,9 +5720,13 @@ tracker settlement. Fleet observation completes before the daily check runs.
 for every seat that conversation leads, including linked fleets. Each existing
 roster seat may carry `efficiency`: observed assignment, native model and effort,
 context occupancy, progress and reporting evidence, and plain-text `flags`.
-Context percentage is the latest native Codex model-input snapshot and may age
-between responses. Claude context/effort and OpenCode or remote telemetry remain
-unknown. Original report acceptance or a reporting attempt remains progress after
+`contextTokens` is the latest main-thread native model input for Claude and Codex,
+including Claude cache reads and writes. Codex also retains `contextPercent` when
+its native window is known. Context may age between responses and is unknown after
+a compaction until the next model call. At 300,000 tokens a `context` flag asks
+for the lead's judgment; it takes no action. `clankie fleet status` also reports
+each seat's context tokens and context flag. Claude effort and OpenCode or remote
+telemetry remain unknown. Original report acceptance or a reporting attempt remains progress after
 a later acknowledgment; acknowledgment creates no new progress. The TUI shows
 these flags in the agent dock. Every watch wake calls for reviewing all owned
 seats. Periodic checks default to every 30 minutes; unchanged, unflagged evidence

@@ -191,7 +191,12 @@ it("does not manufacture working preferences or send new project leaves to an ol
   const legacy = {
     ...f.client,
     fetchImpl: (async (url: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "POST") mutations++;
+      // The operator roster uses POST for a read-only dispatch.
+      if (
+        init?.method === "POST" &&
+        !(String(url).endsWith("/operator/v1/dispatch") && JSON.parse(String(init.body)).op === "roster")
+      )
+        mutations++;
       const response = await f.client.fetchImpl(url, init);
       const value = await response.json();
       delete value.workingPreferences;

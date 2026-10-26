@@ -278,13 +278,10 @@ export class SeatEfficiencyStore {
     )
       flags.push("reports failing");
     const contextPercent = input.telemetry?.contextPercent;
-    if (
-      contextPercent !== undefined &&
-      Number.isFinite(contextPercent) &&
-      contextPercent >= 80 &&
-      contextPercent <= 100
-    )
-      flags.push(`context ${Math.round(contextPercent)}%`);
+    const contextTokens = input.telemetry?.contextTokens;
+    const knownContext =
+      contextTokens !== undefined && Number.isSafeInteger(contextTokens) && contextTokens >= 0;
+    if (knownContext && contextTokens >= 300_000) flags.push(`context ${contextTokens} tokens (300K budget)`);
     const baseline = latest(record.assignedAt ?? record.firstObservedAt, record.lastProgressAt)!;
     if (this.now() - Date.parse(baseline) >= 2 * 60 * 60 * 1000) flags.push("no progress in 2h");
     if (input.status === "done" || input.goal?.status === "complete" || record.assignmentStatus === "done")
@@ -326,6 +323,7 @@ export class SeatEfficiencyStore {
       contextPercent > 100
         ? {}
         : { contextPercent }),
+      ...(knownContext ? { contextTokens } : {}),
       ...(record.lastProgressAt === undefined ? {} : { lastProgressAt: record.lastProgressAt }),
       ...(record.inactiveSince === undefined ? {} : { inactiveSince: record.inactiveSince }),
       ...(record.lastReportAt === undefined ? {} : { lastReportAt: record.lastReportAt }),

@@ -49,7 +49,7 @@ export function fleetEfficiencyTools(actions: FleetEfficiencyActions, turn: Turn
       name: "fleet_efficiency",
       label: "Review the agents you lead",
       description:
-        "Show every seat this conversation leads with assignment, native effort/context and reporting/progress flags. " +
+        "Show every seat this conversation leads with assignment, native effort/context tokens and reporting/progress flags. Context at 300K tokens is flagged for your judgment; no action is taken. " +
         "Load the lead skill for review and intervention guidance. Review records inspected scope/tracker status or " +
         "a substantive finding/commit time for one exact owned native session; include its evidence. " +
         "Use deliverable for a reassigned issue, or ownedIssues for the issues you report live on this session or its subagents; an empty list clears that claim. " +

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "native-context.png",
+      "size": 155182,
+      "sha256": "b9823300171e18aad5a44750cea0e0adb3a1ee5421d5e46ac479c62f3e1fa4d8",
+      "url": "clankie://evidence/sha256/b9823300171e18aad5a44750cea0e0adb3a1ee5421d5e46ac479c62f3e1fa4d8"
+    }
+  ]
+}

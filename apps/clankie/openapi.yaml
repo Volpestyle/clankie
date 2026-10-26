@@ -8111,6 +8111,11 @@ components:
         currentIssue: { type: string, minLength: 1, maxLength: 64 }
         model: { type: string, minLength: 1, maxLength: 256 }
         effort: { type: string, minLength: 1, maxLength: 64 }
+        contextTokens:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Latest main-thread model input tokens, including cache reads and writes; unknown after compaction until the next call. At 300000 tokens the context flag asks for lead judgment, without taking action.
         contextPercent:
           type: number
           minimum: 0

@@ -119,7 +119,8 @@ it("joins exact local native context with durable assignment and protocol eviden
   expect(OperatorSeatEfficiencySchema.parse(result)).toMatchObject({
     assignedDeliverable: "VUH-1662",
     currentIssue: "VUH-1662",
-    flags: ["context 82%"],
+    contextTokens: 82_000,
+    flags: [],
   });
   const restored = new SeatEfficiencyStore(join(dir, "efficiency.json"), { now: () => now });
   expect(
@@ -149,7 +150,10 @@ it("invalidates context after compaction and does not guess Claude capacity or u
       },
     }) + "\n",
   );
-  expect(await readSeatTelemetry(observed(claude, "claude"))).toEqual({ model: "claude-sonnet-4-5" });
+  expect(await readSeatTelemetry(observed(claude, "claude"))).toEqual({
+    model: "claude-sonnet-4-5",
+    contextTokens: 200_000,
+  });
   expect(await readSeatTelemetry(observed(path, "opencode"))).toBeUndefined();
   expect(await readSeatTelemetry({ ...observed(path), fleet: "remote" })).toBeUndefined();
   expect(
@@ -195,6 +199,7 @@ it("reads the latest bounded native tail after a large provider body without tre
     model: "gpt-6-sol",
     effort: "high",
     contextPercent: 82,
+    contextTokens: 82_000,
   });
 });
 
@@ -307,7 +312,7 @@ it("records preaccept native MCP report failures once and keeps acknowledged rep
   const store = new SeatEfficiencyStore(join(dir, "efficiency.json"), { now: () => now });
   const input = { occupantId: "session-worker-1", seatId: "seat-1", owner, telemetry };
   expect(store.observe(input)).toMatchObject({
-    flags: ["reports failing", "context 82%"],
+    flags: ["reports failing"],
     reportFailures: 1,
   });
   expect(telemetry).not.toHaveProperty("lastReportAt");
@@ -1118,4 +1123,52 @@ it("retries an unchanged observation after its prior durable save failed", async
   await rm(path, { recursive: true });
   store.observe(input);
   expect(JSON.parse(await readFile(path, "utf8"))[input.occupantId].observed.flags).toEqual([]);
+});
+
+it("carries Claude cached context across the reader/store boundary and flags 300K without taking action", async () => {
+  const dir = await directory();
+  const path = join(dir, "claude-budget.jsonl");
+  const seat = observed(path, "claude");
+  const store = new SeatEfficiencyStore(join(dir, "efficiency.json"));
+  const call = (input: number, extra: object = {}) =>
+    JSON.stringify({
+      type: "assistant",
+      sessionId,
+      timestamp: startedAt,
+      message: {
+        id: "native-message",
+        model: "claude-opus-4-6",
+        usage: {
+          input_tokens: input,
+          cache_read_input_tokens: 290_000,
+          cache_creation_input_tokens: 9_999,
+        },
+      },
+      ...extra,
+    }) + "\n";
+  const read = async () =>
+    store.observe({
+      occupantId: seat.occupantId,
+      seatId: seat.seatId,
+      owner,
+      telemetry: await readSeatTelemetry(seat),
+    });
+  await writeFile(path, call(0));
+  expect(await read()).toMatchObject({ contextTokens: 299_999, flags: [] });
+  await appendFile(path, call(1));
+  expect(await read()).toMatchObject({
+    contextTokens: 300_000,
+    flags: ["context 300000 tokens (300K budget)"],
+  });
+  // Sidechain or different-session usage and compaction must not change this seat.
+  await appendFile(path, call(900_000, { isSidechain: true }) + call(900_000, { sessionId: "other" }));
+  expect((await read()).contextTokens).toBe(300_000);
+  await appendFile(path, JSON.stringify({ type: "system", subtype: "compact_boundary", sessionId }) + "\n");
+  expect(await read()).not.toHaveProperty("contextTokens");
+  expect((await read()).flags).toEqual([]);
+  await appendFile(path, call(5));
+  expect((await read()).contextTokens).toBe(300_004);
+  expect(await readSeatTelemetry(seat)).not.toHaveProperty("contextPercent");
+  await appendFile(path, call(-1));
+  expect(await read()).not.toHaveProperty("contextTokens");
 });

@@ -5,7 +5,7 @@ import { open, readdir, lstat, realpath, type FileHandle } from "node:fs/promise
 import { homedir } from "node:os";
 import { isAbsolute, relative, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { herdrSeatTranscriptEntries } from "@clankie/agent-transcript";
+import { herdrSeatTranscriptEntries, resolveHerdrSeatTranscriptPathAsync } from "@clankie/agent-transcript";
 import type {
   OperatorAgentActivity,
   OperatorAgentActivityKind,
@@ -18,6 +18,8 @@ export interface SeatTelemetry {
   readonly model?: string;
   readonly effort?: string;
   readonly contextPercent?: number;
+  /** Latest main-thread model input, including cache reads and writes. */
+  readonly contextTokens?: number;
   /** Explicit commit/report/finding evidence only; native activity is not progress. */
   readonly lastProgressAt?: string;
   /** Advanced descendant commit on the seat's admitted exclusive worktree/branch. */
@@ -165,7 +167,9 @@ export async function prepareSeatTelemetry(
     const session = observed.session!;
     if (session.source !== `herdr:${observed.harness}`) return undefined;
     if (session.kind === "path") return isAbsolute(session.value) ? session.value : undefined;
-    if (observed.harness !== "codex" || !NativeId.test(session.value)) return undefined;
+    if (!NativeId.test(session.value)) return undefined;
+    if (observed.harness === "claude") return resolveHerdrSeatTranscriptPathAsync("claude", session);
+    if (observed.harness !== "codex") return undefined;
     const home = codexHome(observed);
     if (!isAbsolute(home)) return undefined;
     // Only UUIDv7 supplies a date. Other native IDs require an explicit path.
@@ -375,10 +379,21 @@ function parseSeatTelemetry(
         // usage counter and token_usage_record are lifetime/turn usage, not context.
         occupancy = count(object(info.last_token_usage).input_tokens);
       }
+    } else if (entry.type === "system" && entry.subtype === "compact_boundary") {
+      occupancy = undefined;
     } else if (entry.type === "assistant") {
-      model = text(object(entry.message).model, 256) ?? model;
-      // Claude's retained message usage has no native context-window contract;
-      // report model only rather than guessing a capacity from its spelling.
+      const message = object(entry.message);
+      model = text(message.model, 256) ?? model;
+      const usage = object(message.usage);
+      if (message.usage !== undefined) {
+        const input = count(usage.input_tokens);
+        const read = usage.cache_read_input_tokens === undefined ? 0 : count(usage.cache_read_input_tokens);
+        const write =
+          usage.cache_creation_input_tokens === undefined ? 0 : count(usage.cache_creation_input_tokens);
+        const total =
+          input === undefined || read === undefined || write === undefined ? undefined : input + read + write;
+        occupancy = total !== undefined && Number.isSafeInteger(total) ? total : undefined;
+      }
     }
   }
   for (const entry of herdrSeatTranscriptEntries(harness, records)) {
@@ -390,6 +405,7 @@ function parseSeatTelemetry(
   return {
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
+    ...(occupancy === undefined ? {} : { contextTokens: occupancy }),
     ...(window === undefined || window === 0 || occupancy === undefined
       ? {}
       : { contextPercent: Math.min(100, (100 * occupancy) / window) }),

@@ -1,5 +1,10 @@
 import { workTrackerSettings } from "./work-tracker.ts";
 import {
+  OperatorFleetSeatSchema,
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
+  type OperatorFleetSeat,
+  type OperatorFleetReadWarnings,
+  OperatorFleetReadWarningsSchema,
   effectiveHireProfile,
   FleetAutonomySchema,
   FleetGateModeSchema,
@@ -86,6 +91,46 @@ export interface FleetCommandResult {
     | { readonly unavailable: string };
   /** Status only: the lead seat's fresh-restart check and any refused wait (VUH-2821). */
   readonly leadRestart?: LeadRestartStatus | { readonly unavailable: string };
+  readonly seatContext?:
+    | { seats: OperatorFleetSeat[]; readWarnings?: OperatorFleetReadWarnings }
+    | { unavailable: string };
+}
+
+/** Fleet status uses the same operator roster and efficiency observations as the dock. */
+async function seatContextStatus(
+  api: OwnerSettingsApi,
+): Promise<NonNullable<FleetCommandResult["seatContext"]>> {
+  try {
+    const result = await api.write(
+      OPERATOR_CONVERSATION_DISPATCH_PATH,
+      { op: "roster", schemaVersion: 1 },
+      z.object({
+        op: z.literal("roster"),
+        seats: z.array(OperatorFleetSeatSchema),
+        readWarnings: OperatorFleetReadWarningsSchema.optional(),
+      }),
+    );
+    return {
+      seats: result.seats,
+      ...(result.readWarnings === undefined ? {} : { readWarnings: result.readWarnings }),
+    };
+  } catch (error) {
+    return { unavailable: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function formatSeatContextLines(status: FleetCommandResult["seatContext"]): string[] {
+  if (!status) return [];
+  if ("unavailable" in status) return [`seat context: unavailable (${status.unavailable})`];
+  return [
+    "seat context:",
+    ...status.seats.map((seat) => {
+      const tokens = seat.efficiency?.contextTokens;
+      const flags = seat.efficiency?.flags.filter((flag) => flag.startsWith("context ")) ?? [];
+      return `  ${seat.title} (${seat.seatId}, ${seat.harness}): ${tokens === undefined ? "unknown" : `${tokens} tokens`}${flags.length ? ` · ${flags.join(", ")}` : ""}`;
+    }),
+    ...(status.readWarnings ? [`  incomplete census: ${JSON.stringify(status.readWarnings)}`] : []),
+  ];
 }
 
 async function leadRestartStatus(
@@ -311,6 +356,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
       : { autonomyConfirmedAt: snapshot.autonomyConfirmedAt }),
     deployHolds: await deployHoldStatus(api),
     leadRestart: await leadRestartStatus(api),
+    seatContext: await seatContextStatus(api),
   };
 }
 
