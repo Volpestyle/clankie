@@ -78,3 +78,5 @@ GLOBAL owns final integration/harvest; the fresh independent reviewer must read
 all launcher diffs line by line before any final root gate.
 
 Inspected raw proof archive: [source hashes, failures and green runs](clankie://evidence/sha256/082cd44aaa0009c1270ff4fa8a67d8cef5c1fa448474462ebfda81aad64bd87e).
+
+Final source checkpoint: `e01aa37517f6fbd1c7d78f530514409949a6974f`, cleanly rebased only this owned branch onto `ffd2bafc471d3168da92a7ccff4d4b6610af1f4f` (Hazel VUH-2794). Its net patch SHA-256 is `0c01dd5229b8756b90e2a7d8424cfd75675eb1a9a5c6052cc04cd26ee83739d8`. A focused typecheck of all changed TS files passed after rebase. The final source hashes and all earlier captures are in the [final proof archive](clankie://evidence/sha256/35bbf1b0f3d32800e1d1ba35f8e173ddc51180ca2f69969987b68df83171eb8e); the registry still matches the nonce-revert restored SHA-256 `7e27b61e67b8ac153aa92617155ee217a83bd3289b7b9512ce38e8bf694b3d41`. Later evidence-only commits do not alter these source bytes.
