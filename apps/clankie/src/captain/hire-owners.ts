@@ -28,7 +28,13 @@ const RecordSchema = z
   })
   .strict();
 export const HireOwnersStateSchema = z
-  .object({ schemaVersion: z.literal(1), hires: z.array(RecordSchema) })
+  .object({
+    schemaVersion: z.literal(1),
+    hires: z.array(RecordSchema),
+    restartSuccessors: z
+      .array(z.object({ receiptId: z.string().min(1), previous: RecordSchema, next: RecordSchema }).strict())
+      .optional(),
+  })
   .strict();
 type HireOwnerRecord = z.infer<typeof RecordSchema>;
 
@@ -261,6 +267,50 @@ export class HireOwners {
     this.save({ schemaVersion: 1, hires: [...this.state.hires, { id, owner }] });
     return id;
   }
+  /** An original runtime's journaled fresh restart, never ordinary re-adoption. */
+  public restartSuccessor(input: {
+    receiptId: string;
+    paneId: string;
+    previousSeatId: string;
+    previousOccupantId: string;
+    previousSessionKey: string;
+    seatId: string;
+    occupantId: string;
+    sessionKey: string;
+    owner: ConversationOwner;
+  }): void {
+    const prior = this.state.hires.find((entry) => entry.paneId === input.paneId);
+    if (
+      !input.receiptId ||
+      !prior ||
+      prior.hired !== true ||
+      prior.seatId !== input.previousSeatId ||
+      prior.occupantId !== input.previousOccupantId ||
+      prior.sessionKey !== input.previousSessionKey ||
+      prior.owner.conversationId !== input.owner.conversationId ||
+      input.sessionKey === prior.sessionKey ||
+      this.state.hires.some(
+        (entry) =>
+          entry !== prior && (entry.seatId === input.seatId || entry.sessionKey === input.sessionKey),
+      )
+    )
+      throw new Error("Restart successor does not match the original hire owner");
+    const next = {
+      ...prior,
+      seatId: input.seatId,
+      occupantId: input.occupantId,
+      sessionKey: input.sessionKey,
+    };
+    this.save({
+      schemaVersion: 1,
+      hires: this.state.hires.map((entry) => (entry !== prior ? entry : next)),
+      restartSuccessors: [
+        ...(this.state.restartSuccessors ?? []),
+        { receiptId: input.receiptId, previous: prior, next },
+      ],
+    });
+  }
+
   public bind(
     paneId: string,
     owner: ConversationOwner,
@@ -316,7 +366,14 @@ export class HireOwners {
     this.save(next);
   }
   private save(input: z.infer<typeof HireOwnersStateSchema>): void {
-    const next = HireOwnersStateSchema.parse(input);
+    const next = HireOwnersStateSchema.parse({
+      ...input,
+      ...((input.restartSuccessors ?? this.state.restartSuccessors) === undefined
+        ? {}
+        : {
+            restartSuccessors: input.restartSuccessors ?? this.state.restartSuccessors,
+          }),
+    });
     mkdirSync(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${String(process.pid)}.tmp`;
     const file = openSync(temporary, "w", 0o600);

@@ -4514,7 +4514,7 @@ channel or Discord.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--lead-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -4559,6 +4559,38 @@ selector preserves the existing snapshot shape. Machine policy updates use
 supported IDs. A linked governor supplies its own specs, status and configuration
 through the service's host adapter; native Windows provisioning is VUH-2091.
 No shell or Herdr connection is opened by these resource API/UI paths.
+
+`--seat-restarts on` (the default) enables fresh-session restarts for idle
+hired seats at 450K context tokens in their own panes with the original brief,
+work item and a fresh handoff brief. `--seat-restarts off`
+leaves those sessions alone. This is independent of `--lead-restarts`, which
+controls the default lead seat. Both settings are also available in `/fleet`.
+
+`fleet status` reads `seatRestarts` from `GET /v1/fleet/seat-restarts`: each exact
+native session's latest token check, refusal counts and handoff/restart receipt.
+Before exit, the original native controller proves idle input, an empty styled
+composer and the same process birth/shell/binding; the owner must have been quiet
+for 15 minutes in both the pane and its leading conversation. A fresh private
+registry/ancestry read refuses held or queued resources in all three lanes,
+including native children and simulator reservations in every phase. Unrelated
+work with proven different ancestry does not block it; unknown attribution does.
+The worker saves `.local/HANDOFF-<name>.md` and a confirmed comment on its existing
+work item before the service keeps all recovery inputs and starts a fresh session
+from the original launch. Refusals lasting two hours produce one service notice.
+An uncertain original receipt is retained and never repeated automatically.
+
+Only a surviving original local Claude/Codex shell launch can currently restart.
+Prepared command panes and a service replacement that lost the original native
+controller refuse visibly; remote restart control remains unavailable. These
+are engineering limitations, not a request to type into or replace the pane.
+Claude hires set `autoCompactWindow: 500000` and launch with
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW=500000` so saved model-specific windows cannot
+override the backstop; Codex hires pass native
+`model_auto_compact_token_limit=500000` and
+`model_auto_compact_token_limit_scope="total"`. Codex's smaller native model
+window can clamp that backstop. The installed Codex 0.163.0 binary exposes both
+keys, and [its tagged native configuration](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/config/src/config_toml.rs)
+declares their token threshold and scope. These launch settings do not alter lead restart ownership.
 
 `--lead-restarts on` (the default) lets the service restart the default lead
 seat fresh in its own pane when it is idle, the owner has written nothing for 15

@@ -98,6 +98,8 @@ import {
   inspectHerdrSeatTranscriptPathAsync,
 } from "@clankie/agent-transcript";
 import { createLeadSeatRelaunch, readClaudeSessionUsage } from "./lead-seat-relaunch.ts";
+import { createHiredSeatRestarts, RestartRefusal } from "./hired-seat-restarts.ts";
+import { readHiredRestartObservation } from "./hired-restart-observation.ts";
 import { createLeadSeatFailover } from "./lead-seat-failover.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
@@ -5694,6 +5696,85 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         `Clankie's seat restart is unconfirmed (receipt ${result.receiptId}): ${result.detail} It is never retried automatically; check the pane.`,
       );
   }, options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS);
+  const hiredSeatRestarts = createHiredSeatRestarts({
+    path: join(options.stateDir, "hired-seat-restart-policy.json"),
+    enabled: async () => (await settings()).fleet.seatRestarts !== "off",
+    candidates: () => herdrWatches.freshRestartCandidates(),
+    receipts: () => herdrWatches.hiredRestartReceipts(),
+    observe: readHiredRestartObservation,
+    authority: async (candidate) => {
+      if (shutdown.signal.aborted || !(await validateConversationOwner(candidate.owner)))
+        throw new RestartRefusal("authority_unavailable");
+    },
+    resources: async (candidate) => {
+      const guard = await options.fleetResources?.restartGuard(candidate.agent);
+      if (!guard?.clear)
+        throw new RestartRefusal(
+          guard?.reason ?? "resource_guard_unavailable",
+          guard && !guard.clear ? guard.detail : undefined,
+        );
+    },
+    lastOwnerMessageAt: (owner) => conversations.lastOwnerMessageAt(owner.conversationId),
+    workItem: async (candidate, nonce, requestedAt) => {
+      if (!deps.workItems?.prepareSeatIssueTracker || !candidate.agent.session || !candidate.workItem)
+        throw new RestartRefusal("work_item_proof_unavailable");
+      const attribution = await prepareSeatIssueAttribution(
+        {
+          fleet: "default",
+          pane: candidate.agent.paneId,
+          nativeOccupantId: occupantIdForHerdrSession(candidate.agent.session),
+        },
+        {
+          proof: (fleet, pane) => options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
+          watches: herdrWatches,
+          workItems: { prepareSeatIssueTracker: deps.workItems.prepareSeatIssueTracker },
+          projects: async () => (await settingsStore.read()).projects,
+        },
+      );
+      const scope = await attribution.resolve();
+      const issue = (await scope.call("get_issue", { id: candidate.workItem }, "background")) as Record<
+        string,
+        unknown
+      >;
+      if (issue.id !== candidate.workItem && issue.identifier !== candidate.workItem)
+        throw new RestartRefusal("work_item_identity_changed");
+      let comment: unknown;
+      let cursor: string | undefined;
+      const seen = new Set<string>();
+      for (;;) {
+        const result = await scope.call(
+          "list_comments",
+          { issueId: candidate.workItem, limit: 100, ...(cursor ? { cursor } : {}) },
+          "background",
+        );
+        const page = result as { comments?: unknown; hasNextPage?: boolean; cursor?: string };
+        const comments = Array.isArray(result) ? result : page.comments;
+        if (!Array.isArray(comments)) throw new RestartRefusal("work_item_comments_unreadable");
+        comment = comments.find(
+          (entry: Record<string, unknown>) =>
+            typeof entry.id === "string" &&
+            typeof entry.body === "string" &&
+            entry.body.includes(nonce) &&
+            typeof entry.createdAt === "string" &&
+            Date.parse(entry.createdAt) >= Date.parse(requestedAt),
+        );
+        if (comment || page.hasNextPage !== true) break;
+        cursor = page.cursor;
+        if (!cursor || seen.has(cursor) || seen.size >= 100)
+          throw new RestartRefusal("work_item_comments_unreadable");
+        seen.add(cursor);
+      }
+      if (!comment) throw new RestartRefusal("work_item_handoff_not_saved");
+      await attribution.resolve();
+      return { scope: scope.identity, issue, comment };
+    },
+    notice: (owner, text) => conversations.recordServiceNotice(owner.conversationId, text),
+    signal: shutdown.signal,
+  });
+  const stopHiredSeatRestarts = startFleetRounds(
+    () => hiredSeatRestarts.tick(),
+    options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS,
+  );
   herdrWatches.start(
     async (conversationId, prompt, discord, guard, original) => {
       const owner = { conversationId, ...(discord === undefined ? {} : { discord }) };
@@ -7673,6 +7754,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     recordRuntimeHealthNotice: (text: string) =>
       conversations.recordServiceNotice(conversations.defaultGlobalConversationId(), text),
 
+    seatRestartStatus: () => hiredSeatRestarts.status(),
     async leadRestartStatus() {
       return leadSeats.restartStatus({
         conversationId: conversations.defaultGlobalConversationId(),
@@ -8607,6 +8689,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       stopFleetRounds();
       stopAutoRounds();
       stopLeadRestarts();
+      stopHiredSeatRestarts();
       stopLeadFailbacks();
       stopAutoTidyPanes();
       stopAutoTidyWorktrees();

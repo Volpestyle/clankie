@@ -157,6 +157,8 @@ describe("Codex harness seat adapter", () => {
       "mcp_servers.worker.required=false",
       'mcp_servers.worker.env.CLANKIE_EXPECTED_TOOL_NAMES="[]"',
       'mcp_servers.worker.default_tools_approval_mode="approve"',
+      "model_auto_compact_token_limit=500000",
+      'model_auto_compact_token_limit_scope="total"',
     ]);
     if (started.outcome === "started") await started.control.close();
     const ordinary = createCodexSeatAdapter({
@@ -165,7 +167,11 @@ describe("Codex harness seat adapter", () => {
       trackerOverrides: async () => [...inherited],
     });
     const local = await ordinary.start({ harness: "codex", cwd: "/scratch", brief: "" }, f.view);
-    expect(f.start.mock.calls.at(-1)![0].config).toEqual(inherited);
+    expect(f.start.mock.calls.at(-1)![0].config).toEqual([
+      ...inherited,
+      "model_auto_compact_token_limit=500000",
+      'model_auto_compact_token_limit_scope="total"',
+    ]);
     if (local.outcome === "started") await local.control.close();
   });
 
@@ -301,7 +307,13 @@ describe("Codex harness seat adapter", () => {
     expect(started.outcome).toBe("started");
     expect(f.trackerOverrides).toHaveBeenCalledWith("/scratch", { CODEX_HOME: "/h" });
     expect(f.start).toHaveBeenCalledWith(
-      expect.objectContaining({ config: ["mcp_servers.linear.enabled=false"] }),
+      expect.objectContaining({
+        config: [
+          "mcp_servers.linear.enabled=false",
+          "model_auto_compact_token_limit=500000",
+          'model_auto_compact_token_limit_scope="total"',
+        ],
+      }),
     );
     if (started.outcome === "started") await started.control.close();
   });

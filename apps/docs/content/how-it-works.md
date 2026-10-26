@@ -95,7 +95,9 @@ screen access. Ordinary self-hosted limits are service preferences. On an instal
 Mac, the owner can prepare an OS-bounded launch with a private home and approved
 workspaces; the running service reports verified enforcement. A new launch is
 needed to restore full access. Live activation remains owner-held. The [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md#tool-flow-and-current-support)
-lists support and limits.
+lists support and limits. Supported idle hired seats can restart fresh in the
+same pane after saving their handoff and work item; fleet status names any
+refusal ([settings and safeguards](/cli/)).
 
 Registered local owner checkouts follow main automatically while the service
 runs, preserving local edits and reporting anything that blocks advancement.

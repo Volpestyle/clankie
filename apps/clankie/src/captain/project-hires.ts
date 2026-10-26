@@ -57,6 +57,18 @@ const AllocationSchema = z
     seat: z.string().optional(),
     occupantId: z.string().optional(),
     proof: ProjectHireProcessProofSchema.optional(),
+    restartPredecessors: z
+      .array(
+        z
+          .object({
+            receiptId: z.string().min(1),
+            seat: z.string(),
+            occupantId: z.string(),
+            proof: ProjectHireProcessProofSchema,
+          })
+          .strict(),
+      )
+      .optional(),
     selection: z
       .object({
         at: z.string().datetime(),
@@ -393,6 +405,46 @@ export class ProjectHires {
         // A later matching session cannot retroactively prove the process we launched.
         if (firstObservation) a.proof = observed;
       }
+    });
+  }
+  /** Original allocation continues only under an explicit journaled predecessor CAS. */
+  public restartSuccessor(
+    id: string,
+    receiptId: string,
+    previous: {
+      pane: string;
+      seat: string;
+      occupantId: string;
+      proof: ProjectHireProcessProof;
+    },
+    next: { seat: string; occupantId: string; proof: ProjectHireProcessProof },
+  ): void {
+    this.change((state) => {
+      const allocation = state.allocations.find((entry) => entry.id === id);
+      if (
+        !receiptId ||
+        !allocation ||
+        !allocation.started ||
+        !allocation.confirmed ||
+        allocation.gone ||
+        allocation.pane !== previous.pane ||
+        allocation.seat !== previous.seat ||
+        allocation.occupantId !== previous.occupantId ||
+        !isDeepStrictEqual(allocation.proof, previous.proof) ||
+        next.proof.pane !== previous.pane ||
+        next.proof.nativeOccupantId !== next.occupantId ||
+        !isDeepStrictEqual(previous.proof.shell, next.proof.shell)
+      )
+        throw new Error("Restart successor does not match the original project allocation");
+      allocation.seat = next.seat;
+      allocation.occupantId = next.occupantId;
+      (allocation.restartPredecessors ??= []).push({
+        receiptId,
+        seat: previous.seat,
+        occupantId: previous.occupantId,
+        proof: ProjectHireProcessProofSchema.parse(previous.proof),
+      });
+      allocation.proof = ProjectHireProcessProofSchema.parse(next.proof);
     });
   }
   /** Only pre-launch failures release immediately; all native uncertainty remains counted. */

@@ -293,7 +293,14 @@ export async function observeSimulatorReferents(needles: readonly string[]): Pro
 }
 let pendingSnapshot: Promise<ProcessIdentity[]> | undefined;
 let snapshotCache: { at: number; rows: ProcessIdentity[] } | undefined;
-export async function processSnapshot(): Promise<ProcessIdentity[]> {
+export async function processSnapshot(fresh = false): Promise<ProcessIdentity[]> {
+  if (fresh) {
+    const reply = await observe("snapshot", {}, helperTimeoutMs);
+    if (!Array.isArray(reply) || reply.length > 10_000) throw new Error("Fleet process snapshot unavailable");
+    const rows = reply.map(identityReply);
+    if (rows.some((row) => row === undefined)) throw new Error("Fleet process snapshot invalid");
+    return rows as ProcessIdentity[];
+  }
   if (snapshotCache && Date.now() - snapshotCache.at < 250) return snapshotCache.rows;
   if (pendingSnapshot) return pendingSnapshot;
   pendingSnapshot = observe("snapshot", {}, helperTimeoutMs)

@@ -220,6 +220,7 @@ export interface CaptainPort {
   fleetEfficiency?(conversationId: string, review?: FleetEfficiencyReview): Promise<FleetEfficiencyResult>;
   /** The default lead seat's fresh restart: budget, latest check and any refused wait (VUH-2821). */
   leadRestartStatus?(): Promise<import("@clankie/protocol").LeadRestartStatus>;
+  seatRestartStatus?(): Promise<import("@clankie/protocol").SeatRestartStatus>;
   checkoutReport?(): Promise<import("@clankie/protocol").CheckoutReport>;
   syncCheckouts?(repository?: string): Promise<import("@clankie/settings").CheckoutSyncResult[]>;
   /** Record worth_landing or safe_to_drop for one linked worktree's unlanded work (VUH-1814). */

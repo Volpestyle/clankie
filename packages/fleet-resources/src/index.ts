@@ -1,4 +1,5 @@
 export * from "./model.ts";
+export type { RestartResourceGuard } from "./restart-guard.ts";
 export { createResourceGovernor } from "./governor.ts";
 export {
   observeSimulatorReferents,

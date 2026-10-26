@@ -43,13 +43,14 @@ import {
 } from "./owner-settings-api.ts";
 import { FLEET_AUTO_TIDY, FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema } from "@clankie/protocol";
 import { FLEET_LEAD_RESTART_PATH, LeadRestartStatusSchema, type LeadRestartStatus } from "@clankie/protocol";
+import { FLEET_SEAT_RESTARTS_PATH, SeatRestartStatusSchema, type SeatRestartStatus } from "@clankie/protocol";
 import { DeployHoldSchema, describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
 import { z } from "zod";
 import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
-  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--lead-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
+  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
@@ -94,6 +95,7 @@ export interface FleetCommandResult {
     | { readonly unavailable: string };
   /** Status only: the lead seat's fresh-restart check and any refused wait (VUH-2821). */
   readonly leadRestart?: LeadRestartStatus | { readonly unavailable: string };
+  readonly seatRestarts?: SeatRestartStatus | { readonly unavailable: string };
   readonly seatContext?:
     | { seats: readonly OperatorFleetSeat[]; readWarnings?: OperatorFleetReadWarnings }
     | { unavailable: string };
@@ -147,6 +149,36 @@ async function leadRestartStatus(
     // An older service has no such read; the rest of the status stands.
     return { unavailable: error instanceof Error ? error.message : String(error) };
   }
+}
+
+async function hiredRestartStatus(
+  api: OwnerSettingsApi,
+): Promise<NonNullable<FleetCommandResult["seatRestarts"]>> {
+  try {
+    return await api.get(FLEET_SEAT_RESTARTS_PATH, SeatRestartStatusSchema);
+  } catch (error) {
+    return { unavailable: String(error) };
+  }
+}
+
+export function formatHiredRestartLines(status: FleetCommandResult["seatRestarts"]): string[] {
+  if (!status) return [];
+  if ("unavailable" in status) return [`hired seat restarts: unavailable (${status.unavailable})`];
+  return [
+    `hired seat restarts: ${status.setting} · budget 450K tokens`,
+    ...status.seats.map(
+      (seat) =>
+        `  ${seat.paneId}: ${seat.check?.contextTokens === undefined ? "context unknown" : `${seat.check.contextTokens} tokens`}${seat.waiting ? `; refused ${seat.waiting.reason} since ${seat.waiting.since} (${JSON.stringify(seat.waiting.counts)})${seat.waiting.detail ? `: ${seat.waiting.detail}` : ""}` : ""}${seat.receiptId ? `; receipt ${seat.receiptId}` : ""}${seat.handoff ? `; handoff ${seat.handoff.id} ${seat.handoff.state}` : ""}`,
+    ),
+    ...(status.receipts ?? [])
+      .filter((receipt) =>
+        ["uncertain", "ending", "launching", "handoff_sending", "handoff_sent"].includes(receipt.stage),
+      )
+      .map(
+        (receipt) =>
+          `  original receipt ${receipt.id} (${receipt.paneId}): ${receipt.stage}${receipt.reason ? ` — ${receipt.reason}` : ""}`,
+      ),
+  ];
 }
 
 export function formatLeadRestartLines(status: FleetCommandResult["leadRestart"]): string[] {
@@ -261,6 +293,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
     `remote gates: ${fleet.remoteGates ?? "off"} — ${fleet.remoteGates === "on" ? "integrate gates may run on a linked machine's fleet workspace while this Mac is saturated" : "integrate gates run on this machine"}`,
     `worker sandbox: ${fleet.workerSandbox ?? "off"} — ${fleet.workerSandbox === "on" ? "new hires run under an OS profile that denies reading the owner's protected credentials" : "hired workers can read what the owner's user can"}`,
+    `seat restarts: ${fleet.seatRestarts ?? "on"} — ${fleet.seatRestarts === "off" ? "hired seats keep their sessions until someone restarts them" : "idle hired seats restart fresh with a handoff brief at 450K context tokens"}`,
     `lead restarts: ${fleet.leadRestarts ?? "on"} — ${fleet.leadRestarts === "off" ? "the lead seat keeps its session until someone restarts it" : "an idle lead seat restarts fresh in its pane with a handoff brief once its session is large or a day old"}`,
     `auto tidy: ${fleet.autoTidy ?? "1h"} — ${fleet.autoTidy === "off" ? "finished panes and landed worktrees wait for the lead to tidy them" : `a hire's pane closes after ${fleet.autoTidy ?? "1h"} idle once its reports are read and its work landed; landed, clean worktrees untouched for a day are removed`}`,
     `worker defaults: ${formatHireDefaults(fleet.hire)}`,
@@ -363,6 +396,7 @@ export async function fleetStatus(options: FleetCommandOptions = {}): Promise<Fl
       : { autonomyConfirmedAt: snapshot.autonomyConfirmedAt }),
     deployHolds: await deployHoldStatus(api),
     leadRestart: await leadRestartStatus(api),
+    seatRestarts: await hiredRestartStatus(api),
     seatContext: await seatContextStatus(options),
   };
 }
@@ -581,6 +615,9 @@ async function parseSet(
     } else if (flag === "--worker-sandbox" && change.workerSandbox === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--worker-sandbox must be on or off.");
       change.workerSandbox = value;
+    } else if (flag === "--seat-restarts" && change.seatRestarts === undefined) {
+      if (value !== "on" && value !== "off") throw new Error("--seat-restarts must be on or off.");
+      change.seatRestarts = value;
     } else if (flag === "--lead-restarts" && change.leadRestarts === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--lead-restarts must be on or off.");
       change.leadRestarts = value;

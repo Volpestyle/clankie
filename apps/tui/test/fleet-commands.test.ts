@@ -80,6 +80,7 @@ describe("clankie fleet", () => {
         remoteGates: "off",
         workerSandbox: "off",
         leadRestarts: "on",
+        seatRestarts: "on",
         autoTidy: "1h",
       },
     });
@@ -87,6 +88,7 @@ describe("clankie fleet", () => {
     const selects: Parameters<SetupFlow["readSelect"]>[0][] = [];
     const picks = [
       "codex",
+      "off",
       "off",
       "off",
       "off",
@@ -125,6 +127,7 @@ describe("clankie fleet", () => {
       { currentValue: "connected" },
       { currentValue: "on" },
       { currentValue: "on" },
+      { currentValue: "on" },
       { currentValue: "1h" },
       { currentValue: "lead" },
       { currentValue: "lead" },
@@ -148,6 +151,7 @@ describe("clankie fleet", () => {
       remoteGates: "off",
       workerSandbox: "off",
       leadRestarts: "off",
+      seatRestarts: "off",
       autoTidy: "4h",
     });
     expect(read().autonomy.fleet).toEqual(
@@ -181,6 +185,7 @@ describe("clankie fleet budget", () => {
       remoteGates: "off",
       workerSandbox: "off",
       leadRestarts: "on",
+      seatRestarts: "on",
       autoTidy: "1h",
       ...FleetAutonomySchema.parse({}),
     });
@@ -205,6 +210,7 @@ describe("clankie fleet budget", () => {
       remoteGates: "off",
       workerSandbox: "off",
       leadRestarts: "on",
+      seatRestarts: "on",
     });
     const lines = formatFleetLines(status.fleet).join("\n");
     expect(lines).not.toContain("fleet size:");
@@ -237,6 +243,7 @@ describe("clankie fleet peer messages", () => {
       remoteGates: "off",
       workerSandbox: "off",
       leadRestarts: "on",
+      seatRestarts: "on",
       autoTidy: "1h",
       ...FleetAutonomySchema.parse({}),
     });

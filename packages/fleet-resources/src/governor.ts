@@ -51,6 +51,7 @@ import {
   simulatorBootSettleMs,
 } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
+import { proveRestartResources } from "./restart-guard.ts";
 import {
   heavyJobArgs,
   heavyJobEnvironment,
@@ -1179,6 +1180,8 @@ export function createResourceGovernor(
       return project(state);
     },
     snapshot,
+    restartGuard: (owner) =>
+      proveRestartResources(owner, () => Promise.all([store.read(), lightStore.read(), serverStore.read()])),
     async admitBuilder() {
       const state = await store.read(),
         sample = await pressure.sample(state.policy);

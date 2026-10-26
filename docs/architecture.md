@@ -311,6 +311,7 @@ flowchart LR
   Pane -->|"clankie_tools / clankie_call"| Accounts["Connected accounts<br/>Linear · GitHub · mail"]
   Lead --> Work["Tracker or task files"]
   Pane --> Work
+  Adapter -->|"guarded fresh session · kept handoff"| Pane
   Herdr["Herdr native events"] --> Cursor["Fleet cursor<br/>personas · seats · channels"]
   Cursor --> Views["TUI dock · app · Discord"]
 ```
@@ -1016,6 +1017,18 @@ caps, hiring, tracker binding, and worker report ownership remain separate.
 tool boundary; [ADR 0207](adr/0207-work-records-and-native-agent-delivery.md) and
 [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md) record native
 delivery and report routing.
+
+Hired-seat context restarts are separate from lead-seat ownership (ADR 0293).
+The service's [policy](../apps/clankie/src/captain/hired-seat-restarts.ts) reads
+native context and owner input, verifies a durable file/brief/work-item handoff,
+and consults a fresh private resource/ancestry proof. The
+[original native controller](../apps/clankie/src/captain/hired-seat-restart.ts)
+then rechecks idle input, draft, process birth and shell identity, journals the
+effect, and starts a fresh session in that same pane with the original launch.
+Unknown control, state or receipts refuse and remain visible through fleet
+status; an uncertain effect is never dispatched again. The
+[CLI reference](cli.md)
+describes current supported controls and engineering limitations.
 
 ## Current architecture constraints
 

@@ -373,6 +373,10 @@ export interface FleetResourceGovernor {
   arbitration(): HeavyArbitration | undefined;
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   snapshot(): Promise<ResourceSnapshot>;
+  /** Fresh private registry + native birth/ancestry proof; never invert a positive liveness predicate. */
+  restartGuard?(
+    owner: import("./simulators.ts").SimulatorOwner,
+  ): Promise<import("./restart-guard.ts").RestartResourceGuard>;
   /** Hire admission: refuses only on low available memory or an unverifiable probe. */
   admitBuilder(): Promise<{
     allowed: boolean;

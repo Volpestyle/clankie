@@ -31,6 +31,12 @@ the reason. `trust_required` leaves the lead running: home-directory trust is
 session-only in Claude Code. Follow its owner workdir/trust action; never edit
 trust flags or answer a trust prompt for the owner.
 
+Hired seats have their own default-on `seatRestarts`
+setting. `clankie fleet set --seat-restarts on|off` (also in `/fleet`) controls
+fresh-session restarts at 450K context tokens in each idle hired seat’s own pane,
+with its original brief, work item and a fresh handoff brief, independently
+of the default lead's `leadRestarts` setting.
+
 ## Each turn
 
 1. Answer the owner's message, if there is one.

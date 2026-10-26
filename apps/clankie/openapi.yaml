@@ -5477,6 +5477,25 @@ paths:
         "503":
           description: Authentication or the lead restart status unavailable
 
+  /v1/fleet/seat-restarts:
+    get:
+      tags: [Operator]
+      operationId: getHiredSeatRestartStatus
+      summary: Read hired-seat restart checks, durable refusals and original receipts
+      description: |
+        Operator-only, no-store. Reports the default-on seatRestarts setting,
+        450K token budget, checks and refusal counts for each exact native session,
+        and handoff/restart receipt IDs. Unknown native state refuses an exit.
+        Contract: SeatRestartStatusSchema in packages/protocol/src/seat-restarts.ts.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Current no-store hired-seat restart status
+        "401":
+          description: Operator authentication required
+        "503":
+          description: Authentication or hired-seat restart status unavailable
+
   /v1/fleet/seats/{paneId}/messages/health:
     post:
       tags: [Operator]

@@ -160,16 +160,18 @@ it("persists public fleet controls through the owner API/client and fences stale
   const before = await f.settings.load();
   const original = await f.client.fleetSettings();
   expect(original.workingPreferences).toBe(true);
+  expect(original.fleet.seatRestarts).toBe("on");
   expect(original.fleet).toEqual({ ...before.fleet, ...FleetAutonomySchema.parse({}) });
   const updated = FleetSettingsSnapshotSchema.parse(
     await f.client.updateFleetSettings({
       schemaVersion: 1,
       expectedRevision: original.revision,
-      changes: { closure: "owner", machineSetup: "owner" },
+      changes: { closure: "owner", machineSetup: "owner", seatRestarts: "off" },
     }),
   );
   expect(updated.fleet).toEqual({
     ...before.fleet,
+    seatRestarts: "off",
     ...FleetAutonomySchema.parse({}),
     closure: "owner",
     machineSetup: "owner",
@@ -180,6 +182,7 @@ it("persists public fleet controls through the owner API/client and fences stale
     closure: "owner",
     machineSetup: "owner",
   });
+  expect(saved.fleet.seatRestarts).toBe("off");
   expect(saved.projects).toEqual(before.projects);
   expect(saved.fleet.tools).toBe(before.fleet.tools);
   await expect(

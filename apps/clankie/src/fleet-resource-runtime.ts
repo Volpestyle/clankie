@@ -78,6 +78,7 @@ export interface FleetResourceRuntime {
   bindSeats(resolver: SeatResolver): void;
   /** Cached metadata only. Neither health nor a roster read probes the host. */
   status(): ResourceSnapshot | undefined;
+  restartGuard(agent: HerdrAgentSnapshot): Promise<import("@clankie/fleet-resources").RestartResourceGuard>;
   /** Cached real arbiter verdicts; unavailable observations never mean recovery. */
   progress(): readonly FleetProgressObservation[];
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
@@ -420,6 +421,28 @@ export async function createFleetResourceRuntime(input: {
       resolver = value;
     },
     status: () => cached,
+    async restartGuard(agent) {
+      try {
+        const qualified = splitFleetQualified(agent.paneId);
+        if (!(await local(qualified?.fleet)))
+          return { clear: false, reason: "restart_resource_host_unavailable" };
+        const observed = await observe({
+          seatId: agent.terminalId,
+          ...(qualified ? { fleet: qualified.fleet } : {}),
+        });
+        if (
+          !agent.session ||
+          observed.identity.occupantId !== occupantIdForHerdrSession(agent.session) ||
+          observed.identity.pane !== (qualified?.id ?? agent.paneId) ||
+          observed.status !== "idle"
+        )
+          return { clear: false, reason: "restart_resource_native_changed" };
+        if (!governor.restartGuard) return { clear: false, reason: "restart_resource_guard_unavailable" };
+        return await governor.restartGuard(observed.identity);
+      } catch (error) {
+        return { clear: false, reason: "restart_resource_proof_unknown", detail: String(error) };
+      }
+    },
     progress() {
       if (!progress || Date.now() - progressAt > 5_000)
         throw Error("Heavy arbiter admission observation unavailable");

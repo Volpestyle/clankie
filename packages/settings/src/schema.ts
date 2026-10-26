@@ -424,6 +424,8 @@ export const FleetSettingsSchema = z
      * brief, once its session grows large or old (VUH-2274, ADR 0271).
      */
     leadRestarts: z.enum(["on", "off"]).default("on"),
+    /** Idle hired seats restart fresh with a handoff brief (VUH-2824). */
+    seatRestarts: z.enum(["on", "off"]).default("on"),
     /**
      * Clankie closes a finished hire's pane once it has sat idle this long with its reports
      * read and its work landed, and removes landed, clean, idle worktrees in enrolled roots

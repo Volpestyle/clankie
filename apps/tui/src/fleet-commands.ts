@@ -4,6 +4,7 @@ import {
   fleetUpdate,
   formatDeployHoldLines,
   formatLeadRestartLines,
+  formatHiredRestartLines,
   formatSeatContextLines,
   formatFleetLines,
   runFleetCommand,
@@ -96,6 +97,7 @@ async function showFleetStatus(shell: ClankieFaceShell, services: FleetCommandSe
         : []),
       ...formatDeployHoldLines(result.deployHolds),
       ...formatLeadRestartLines(result.leadRestart),
+      ...formatHiredRestartLines(result.seatRestarts),
       ...formatSeatContextLines(result.seatContext),
       "",
       ...formatWorkingPreferences(result.workingPreferences),
@@ -306,6 +308,25 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
       allowBack: true,
     });
     if (leadRestarts !== "on" && leadRestarts !== "off") return;
+    const seatRestarts = await flow.readSelect({
+      message: "Fleet — fresh hired seat restarts",
+      options: [
+        {
+          value: "on",
+          label: "on",
+          description: "Idle hired seats restart fresh with a handoff brief at 450K context tokens.",
+        },
+        {
+          value: "off",
+          label: "off",
+          description: "Hired seats keep their sessions until someone restarts them.",
+        },
+      ],
+      initialValue: current.seatRestarts ?? "on",
+      currentValue: current.seatRestarts ?? "on",
+      allowBack: true,
+    });
+    if (seatRestarts !== "on" && seatRestarts !== "off") return;
     const autoTidy = await flow.readSelect({
       message: "Fleet — automatic tidy of finished hires",
       options: FLEET_AUTO_TIDY.map((value) => ({
@@ -440,6 +461,7 @@ async function editFleet(shell: ClankieFaceShell, services: FleetCommandServices
         tools,
         peerMessages,
         leadRestarts,
+        seatRestarts,
         autoTidy: autoTidy as FleetAutoTidy,
         closure,
         machineSetup,

@@ -140,6 +140,7 @@ import { remoteLeadRoutes } from "./remote-lead-routes.ts";
 import { registerAppMetricsRoutes } from "./app-metrics-routes.ts";
 import { registerFleetHealthMetricsRoutes } from "./fleet-health-metrics-routes.ts";
 import { registerLeadRestartRoutes } from "./lead-restart-routes.ts";
+import { registerSeatRestartRoutes } from "./seat-restart-routes.ts";
 import {
   type ClankieApp,
   type ClankieAppDependencies,
@@ -559,6 +560,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
   registerFleetHealthMetricsRoutes(app, dependencies);
   registerLeadRestartRoutes(app, dependencies);
+  registerSeatRestartRoutes(app, dependencies);
   const supportAuditedRequests = new WeakSet<Request>();
   let managedDiscordClosed = false;
   let managedDiscordSyncRunning = false;

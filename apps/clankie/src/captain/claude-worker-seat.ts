@@ -157,6 +157,8 @@ function claudeWorkerSettings(
   // Managed denies, tracker denies and the permission hook remain authoritative;
   // auto mode does not blanket-allow Bash or approve gated calls.
   return JSON.stringify({
+    // ADR 0293: a long turn or refused fresh restart still has a native backstop.
+    autoCompactWindow: 500_000,
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
     // A local hire's MCP profile (VUH-2388): Claude starts no other server.
     ...(allowedMcpServers === undefined ? {} : { allowedMcpServers }),

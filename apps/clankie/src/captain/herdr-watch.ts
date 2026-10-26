@@ -1,3 +1,8 @@
+import {
+  HiredSeatRestarts,
+  type HiredRestartCandidate,
+  type HiredRestartReceipt,
+} from "./hired-seat-restart.ts";
 import { hireAdmissionReport, hireAdmissionChoice, HireAdmissionError } from "./hire-admission.ts";
 import type {
   StopNativeTaskResult,
@@ -929,6 +934,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly path: string;
   private readonly hireReceipts: DeliveryFence;
   private readonly hireOwners: HireOwners;
+  private readonly hiredRestarts: HiredSeatRestarts;
   private readonly validateOwner: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   private readonly onReadopted:
     | ((seat: { occupantId: string; title: string; harness: string; name?: string }) => void)
@@ -1119,6 +1125,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         : "Native receipt not observed; no replay is authorized.";
     });
     this.projectPolicy = options.projectHirePolicy;
+
     this.fleetHireTools = options.fleetHireTools;
     this.hireReceipts = new DeliveryFence(`${path}.hire-receipts.json`);
     this.skillBundle = options.skillBundle;
@@ -1136,6 +1143,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.hireRefusal = options.hireRefusal;
     this.hireCapacity = options.hireCapacity;
     this.runner = options.runner ?? createHerdrWatchRunner(options.available);
+    this.hiredRestarts = new HiredSeatRestarts(`${path}.hired-restarts.json`, this.runner, async (pane) => {
+      const proof = await this.projectPolicy?.proof?.("default", pane);
+      if (!proof || proof.nativeSessionPending) return undefined;
+      const { nativeOccupantId, fleet, binding, processes, shell } = proof;
+      return ProjectHireProcessProofSchema.parse({
+        nativeOccupantId,
+        fleet,
+        pane: proof.pane,
+        binding,
+        processes,
+        shell,
+      }) as ProjectHireProcessProof;
+    });
     this.resumeInventory = options.resumeInventory;
     this.seatAdapters = new Map((options.seatAdapters ?? []).map((adapter) => [adapter.harness, adapter]));
     const remoteSeatAdapters = options.remoteSeatAdapters;
@@ -1176,6 +1196,32 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.lastReply = options.lastReply;
     this.awaitRound = options.awaitRound;
     this.state = this.read();
+  }
+
+  /** Only this service's original successful native launches carry restart authority. */
+  public async freshRestartCandidates(): Promise<readonly HiredRestartCandidate[]> {
+    const candidates = [...(await this.hiredRestarts.candidates())];
+    // Keep original receipt-backed refusals visible even if a supplemental census fails.
+    const inventory = this.runner.list ? await this.runner.list().catch(() => []) : [];
+    for (const agent of inventory) {
+      if (
+        !agent.session ||
+        splitFleetQualified(agent.paneId) ||
+        candidates.some((candidate) => candidate.agent.paneId === agent.paneId)
+      )
+        continue;
+      const claim = this.hireOwners.claim(
+        agent.paneId,
+        agent.terminalId,
+        occupantIdForHerdrSession(agent.session),
+      );
+      if (claim?.hired === true) candidates.push(this.hiredRestarts.unavailable(agent, claim.owner));
+    }
+    return candidates;
+  }
+
+  public hiredRestartReceipts(): readonly HiredRestartReceipt[] {
+    return this.hiredRestarts.journal();
   }
 
   public start(wake: InternalWake, projectSeat?: ProjectSeat): void {
@@ -2526,7 +2572,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return "refused" in choice ? failed(choice.refused) : { harness: choice.harness, why: choice.why };
   }
 
-  private async admitProjectLaunch(input: SpawnOperatorSeat, dispatched = false): Promise<void> {
+  private async admitProjectLaunch(
+    input: SpawnOperatorSeat,
+    dispatched = false,
+    authorityOverride?: ConversationAuthority,
+  ): Promise<void> {
     await this.runProjectPolicy(async () => {
       await this.requireWorkerAccess?.(input.fleet);
       const defaultPolicy = this.hireDefaultPolicies.get(input);
@@ -2542,7 +2592,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (!id || !context || !this.projectPolicy) return;
       const policy = this.projectPolicy;
       const settings = await policy.settings();
-      const project = await policy.project(input, settings, context.authority);
+      const project = await policy.project(input, settings, authorityOverride ?? context.authority);
       const latest = await policy.settings();
       if (project !== context.projectId || projectsRevision(settings) !== projectsRevision(latest))
         throw new Error(
@@ -4482,6 +4532,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       if (claudeHome)
         skillLaunch = { ...skillLaunch, env: { ...skillLaunch.env, CLAUDE_CONFIG_DIR: claudeHome } };
+      // The native environment wins over saved per-model windows (ADR 0293).
+      // This is a new hire's launch only, never the lead or an existing pane.
+      if (input.harness === "claude")
+        skillLaunch = {
+          ...skillLaunch,
+          env: { ...skillLaunch.env, CLAUDE_CODE_AUTO_COMPACT_WINDOW: "500000" },
+        };
       if (input.placement === "split" && !input.pipeline)
         throw new Error("Split placement requires a named pipeline; provide pipeline or choose new-tab.");
       // External Herdr panes inherit the server's environment, not this
@@ -4786,23 +4843,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
             });
           },
         };
+        const effectiveLaunch: SeatLaunch = nativeLaunch ?? {
+          harness: adapter.harness,
+          cwd: input.workingDirectory,
+          brief: brief ?? "",
+          ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
+          ...(model === undefined ? {} : { model }),
+          ...(input.effort === undefined ? {} : { effort: input.effort }),
+          ...(skillLaunch.env === undefined ? {} : { env: { ...skillLaunch.env } }),
+          harnessArgs: [...skillLaunch.args, ...chromeArgs],
+          ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
+          ...workerMcp,
+        };
         const started = nativePrepared
           ? await nativePrepared.start(launchView)
-          : await adapter.start(
-              {
-                harness: adapter.harness,
-                cwd: input.workingDirectory,
-                brief: brief ?? "",
-                ...(resume === undefined ? {} : { resumeSessionId: resume.sessionId }),
-                ...(model === undefined ? {} : { model }),
-                ...(input.effort === undefined ? {} : { effort: input.effort }),
-                ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
-                harnessArgs: [...skillLaunch.args, ...chromeArgs],
-                ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
-                ...workerMcp,
-              },
-              launchView,
-            );
+          : await adapter.start(effectiveLaunch, launchView);
         if (started.outcome === "failed") {
           await nativePrepared?.dispose();
           const failure = await this.startupFailure(paneId, input.harness, started.detail, started.reason);
@@ -4862,6 +4917,141 @@ export class HerdrWatchStore implements HerdrWatchPort {
             finalNativeProof,
           );
           await labelConfirmedResume(agent);
+          if (
+            remote === undefined &&
+            authority !== undefined &&
+            ["claude", "codex"].includes(input.harness)
+          ) {
+            const observed: ProjectHireProcessProof | undefined =
+              finalNativeProof ?? (await this.projectPolicy?.proof?.("default", paneId));
+            const proof =
+              observed && !observed.nativeSessionPending
+                ? (ProjectHireProcessProofSchema.parse({
+                    nativeOccupantId: observed.nativeOccupantId,
+                    fleet: observed.fleet,
+                    pane: observed.pane,
+                    binding: observed.binding,
+                    processes: observed.processes,
+                    shell: observed.shell,
+                  }) as ProjectHireProcessProof)
+                : undefined;
+            let restartAgent = agent;
+            const restartAuthority: ConversationAuthority = {
+              owner: authority.owner,
+              current: () => !this.closed,
+              authorize: async () => (await this.validateOwner?.(authority.owner)) === true,
+            };
+            const restartGuard = async () => {
+              await assertConversationAuthority(restartAuthority);
+              const currentClaim = restartAgent.session
+                ? this.hireOwners.claim(
+                    paneId,
+                    restartAgent.terminalId,
+                    occupantIdForHerdrSession(restartAgent.session),
+                  )
+                : undefined;
+              if (!currentClaim?.hired || !isDeepStrictEqual(currentClaim.owner, authority.owner))
+                throw new Error("Original persisted hire owner changed");
+              await this.requireWorkerAccess?.(input.fleet);
+              const restartPolicySeat = structuredClone(input);
+              if (restartPolicySeat.ownerWork) delete restartPolicySeat.ownerWork.overrideUsage;
+              await this.nativeLaunchPolicy?.admit({
+                seat: restartPolicySeat,
+                phase: "launch",
+                ...(account === undefined ? {} : { account: { ...account } }),
+                resumed: false,
+              });
+              await this.admitProjectLaunch(input, false, restartAuthority);
+              await checkExpectedTools();
+              await assertConversationAuthority(restartAuthority);
+            };
+            const beforeRestartMutation = async () => {
+              await restartGuard();
+              if (this.fleetResources)
+                this.noteResourceAdmission(input, await this.fleetResources.admitHire(input));
+              await restartGuard();
+            };
+            const restartView: SeatView = {
+              paneId,
+              name: subject,
+              ...(expectedToolNames === undefined ? {} : { expectedToolNames }),
+              guard: restartGuard,
+              question: (ref, question) => this.forwardNativeQuestion(ref, question),
+              run: async (argv) => {
+                await beforeRestartMutation();
+                if (nativePrepared || !runInPane)
+                  throw new Error("Prepared native restart has no terminal fallback");
+                await runInPane(paneId, argv);
+              },
+              start: async (harness, args) => {
+                await beforeRestartMutation();
+                if (nativePrepared) throw new Error("Prepared native restart cannot launch another process");
+                await startAgent({ name: subject, kind: harness, paneId, ...(args.length ? { args } : {}) });
+              },
+            };
+            this.hiredRestarts.register({
+              agent,
+              originalBrief: effectiveLaunch.brief,
+              workItem: input.deliverable,
+              owner: authority.owner,
+              adapter,
+              launch: structuredClone(effectiveLaunch),
+              view: launchView,
+              restartView,
+              control: started.control,
+              proof,
+              prepared: nativePrepared !== undefined,
+              successor: async (previous, next, nextProof, restartReceiptId) => {
+                const receipt = this.hiredRestarts.journal().find((entry) => entry.id === restartReceiptId);
+                if (
+                  !receipt ||
+                  receipt.stage !== "launching" ||
+                  receipt.paneId !== paneId ||
+                  receipt.previousSessionId !== nativeSessionId(previous) ||
+                  !receipt.previousProof ||
+                  !previous.session ||
+                  !next.session
+                )
+                  throw new Error("Original restart receipt does not authorize this successor");
+                const previousOccupantId = occupantIdForHerdrSession(previous.session);
+                const occupantId = occupantIdForHerdrSession(next.session);
+                const sessionKey = this.nativeSessionKey(next);
+                const previousSessionKey = this.nativeSessionKey(previous);
+                if (!sessionKey || !previousSessionKey)
+                  throw new Error("Successor native session key unavailable");
+                const allocation = this.projectAllocations.get(input);
+                if (allocation)
+                  this.projectHires.restartSuccessor(
+                    allocation,
+                    restartReceiptId,
+                    {
+                      pane: paneId,
+                      seat: previous.terminalId,
+                      occupantId: previousOccupantId,
+                      proof: receipt.previousProof as ProjectHireProcessProof,
+                    },
+                    { seat: next.terminalId, occupantId, proof: nextProof },
+                  );
+                this.hireOwners.restartSuccessor({
+                  receiptId: restartReceiptId,
+                  paneId,
+                  previousSeatId: previous.terminalId,
+                  previousOccupantId,
+                  previousSessionKey,
+                  seatId: next.terminalId,
+                  occupantId,
+                  sessionKey,
+                  owner: authority.owner,
+                });
+                this.retireReboundWatches(
+                  [{ seatId: previous.terminalId, occupantId: previousOccupantId }],
+                  next,
+                );
+                this.watchHiredSeat(next.terminalId, occupantId, authority.owner);
+                restartAgent = next;
+              },
+            });
+          }
           return {
             ...spawnedSeat(agent, paneId, subject, input, account),
             control,

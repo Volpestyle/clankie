@@ -37,6 +37,7 @@ export * from "./projects.ts";
 export * from "./autonomy.ts";
 export * from "./fleet-gates.ts";
 export * from "./fleet-settings.ts";
+export * from "./seat-restarts.ts";
 export * from "./discord-attention.ts";
 export * from "./worker-accounts.ts";
 export * from "./huddles.ts";
