@@ -269,10 +269,21 @@ current review `updatedAt` as `ifUpdatedAt`, a new idempotency key, and
 `resolved:false` reopens. CLI: `review edit ID --issue ITEM --json JSON`.
 Existing tracker audit/receipts retain actor attribution; anchors and source
 stay immutable and reads survive source removal. Each issue is capped at three
-reviews; serialized reviews and successful guided receipts share an 8 MiB store
-budget on saves and edits. Receipts reference the single inspection and rebuild
-the original full response on replay. Ordinary loads check shallow metadata;
-selected full reads/writes check snapshot integrity. Finding resolution is not owner
+reviews; immutable snapshots share an 8 MiB store budget checked on saves.
+Discussion and edit receipts do not consume shared snapshot capacity. Each
+review has an independent 256 KiB serialized discussion budget; a typed
+`guided_review_discussion_budget` refusal affects only that review. Other
+reviews remain editable even when snapshot capacity is full. Constant-size
+receipts reference review/event/timestamp and rebuild the exact historical
+response from ordered history on replay. Snapshots are retained without
+overwrite/retirement in this slice. At three
+source revisions (`guided_review_limit`), preserve those reviews and use a linked
+successor issue for later revisions; do not rebind a review or edit tracker files.
+At a discussion limit, use another review slot or successor issue. A full shared
+snapshot pool refuses new saves (`guided_review_budget`) but preserves edits to
+existing reviews within their own budgets. Capacity/retirement changes require
+separate tracked work. Ordinary loads check shallow metadata; selected full
+reads/writes check snapshot integrity. Finding resolution is not owner
 verification or an upstream verdict. No Work UI/device sync is provided; publish
 artifact bytes through the existing evidence store. Payloads and limits:
 `docs/guided-reviews.md`.

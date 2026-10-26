@@ -69,7 +69,7 @@ async function fixture(bytes: number) {
   });
   const save = (issueId: string) =>
     tracker.call("save_guided_review", input(issueId), { actor }) as Promise<GuidedReviewRecord>;
-  return { root, directory, tracker, issue, save, patchBytes, authorizeGuidedReviewSource };
+  return { root, directory, tracker, issue, save, input, patchBytes, authorizeGuidedReviewSource };
 }
 
 it("caps reviews per issue and returns small summaries without inspection or discussion bodies", async () => {
@@ -96,55 +96,151 @@ it("caps reviews per issue and returns small summaries without inspection or dis
   }
 });
 
-it("bounds aggregate saved bytes and edit receipt amplification while preserving the last accepted state", async () => {
-  const f = await fixture(950 * 1024);
+it("keeps edit receipts constant-size and replays exact historical discussion after reopen", async () => {
+  const f = await fixture(1024);
   try {
-    const issues = await Promise.all([f.issue("First"), f.issue("Second"), f.issue("Third")]);
-    let latest!: GuidedReviewRecord;
-    for (let index = 0; index < 8; index++) latest = await f.save(issues[Math.floor(index / 3)]!.id);
-    await expect(f.save(issues[2]!.id)).rejects.toMatchObject({ reason: "guided_review_budget" });
-    let refused = false;
-    for (let index = 0; index < 12; index++) {
-      try {
-        latest = (await f.tracker.call(
-          "post_guided_finding",
-          {
-            issueId: latest.issueId,
-            id: latest.id,
-            findingId: latest.findings[0]!.id,
-            expectedSource: latest.identity,
-            ifUpdatedAt: latest.updatedAt,
-            idempotencyKey: `bounds-reply-${index}`,
-            edit: { action: "reply", body: "r".repeat(16000) },
-          },
-          { actor },
-        )) as GuidedReviewRecord;
-      } catch (error) {
-        expect(error).toMatchObject({ reason: "guided_review_budget" });
-        refused = true;
-        break;
+    const issue = await f.issue("Long discussion");
+    const saveInput = f.input(issue.id);
+    saveInput.findings.push({ ...saveInput.findings[0]!, body: "Second finding" });
+    const initial = (await f.tracker.call("save_guided_review", saveInput, { actor })) as GuidedReviewRecord;
+    let latest = initial;
+    let historical!: GuidedReviewRecord;
+    let historicalInput!: Record<string, unknown>;
+    const otherActor: TrackerActor = { type: "human", id: "reply-author", onBehalfOf: [] };
+    for (let index = 0; index < 200; index++) {
+      const input = {
+        issueId: issue.id,
+        id: latest.id,
+        findingId: latest.findings[index % 2]!.id,
+        expectedSource: latest.identity,
+        ifUpdatedAt: latest.updatedAt,
+        idempotencyKey: `small-reply-${index}`,
+        edit:
+          index % 7 === 0
+            ? { action: "resolve", resolved: index % 14 === 0 }
+            : { action: "reply", body: "r".repeat(200) },
+      };
+      latest = (await f.tracker.call("post_guided_finding", input, {
+        actor: otherActor,
+      })) as GuidedReviewRecord;
+      if (index === 5) {
+        historical = latest;
+        historicalInput = input;
       }
     }
-    expect(refused).toBe(true);
-    expect(
-      await f.tracker.call("get_guided_review", { issueId: latest.issueId, id: latest.id }, { actor }),
-    ).toEqual(latest);
     const store = JSON.parse(await readFile(join(f.directory, "tracker.json"), "utf8"));
     const receipts = store.receipts.filter(
       (entry: { tool: string; state: string }) =>
-        ["save_guided_review", "post_guided_finding"].includes(entry.tool) && entry.state === "applied",
+        entry.tool === "post_guided_finding" && entry.state === "applied",
     );
+    expect(receipts).toHaveLength(200);
     expect(
-      Buffer.byteLength(JSON.stringify({ guidedReviews: store.guidedReviews, receipts })),
-    ).toBeLessThanOrEqual(GUIDED_REVIEW_LIMITS.totalBytes);
+      Buffer.byteLength(JSON.stringify(receipts.map((entry: { result: unknown }) => entry.result))),
+    ).toBeLessThan(40 * 1024);
     for (const receipt of receipts) {
-      expect(receipt.result.guidedReviewSnapshot).toBeTypeOf("string");
-      expect(receipt.result.result).not.toHaveProperty("inspection");
+      expect(Object.keys(receipt.result).sort()).toEqual(["eventId", "guidedReviewSnapshot", "updatedAt"]);
+      expect(Buffer.byteLength(JSON.stringify(receipt.result))).toBeLessThan(200);
     }
+    const reopened = createLocalTracker({
+      directory: f.directory,
+      authorizeGuidedReviewSource: f.authorizeGuidedReviewSource,
+    });
+    expect(await reopened.call("post_guided_finding", historicalInput, { actor: otherActor })).toEqual(
+      historical,
+    );
+    expect(await reopened.call("save_guided_review", saveInput, { actor })).toEqual(initial);
+    const receipt = (await reopened.call(
+      "get_write_receipt",
+      { idempotencyKey: historicalInput.idempotencyKey },
+      { actor: otherActor },
+    )) as { result: unknown };
+    expect(receipt.result).toEqual(historical);
+    expect(await reopened.call("get_guided_review", { issueId: issue.id, id: latest.id }, { actor })).toEqual(
+      latest,
+    );
+    await expect(
+      reopened.call(
+        "post_guided_finding",
+        { ...historicalInput, edit: { action: "reply", body: "changed replay" } },
+        { actor: otherActor },
+      ),
+    ).rejects.toMatchObject({ reason: "idempotency_conflict" });
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
-});
+}, 30000);
+
+it("isolates shared snapshot exhaustion and per-review discussion exhaustion from other issues' edits", async () => {
+  const f = await fixture(950 * 1024);
+  try {
+    const firstIssue = await f.issue("First discussion");
+    const secondIssue = await f.issue("Other issue");
+    let first = await f.save(firstIssue.id);
+    let second = await f.save(secondIssue.id);
+    let exhausted = false;
+    for (let index = 0; index < 12; index++) {
+      const issue = await f.issue(`Snapshot ${index}`);
+      try {
+        await f.save(issue.id);
+      } catch (error) {
+        expect(error).toMatchObject({ reason: "guided_review_budget" });
+        exhausted = true;
+        break;
+      }
+    }
+    expect(exhausted).toBe(true);
+    const reply = (review: GuidedReviewRecord, key: string, body: string) =>
+      f.tracker.call(
+        "post_guided_finding",
+        {
+          issueId: review.issueId,
+          id: review.id,
+          findingId: review.findings[0]!.id,
+          expectedSource: review.identity,
+          ifUpdatedAt: review.updatedAt,
+          idempotencyKey: key,
+          edit: { action: "reply", body },
+        },
+        { actor },
+      ) as Promise<GuidedReviewRecord>;
+    // Filling the immutable snapshot pool cannot disable discussions already saved.
+    second = await reply(second, "other-after-global-cap", "still writable");
+    let discussionFull = false;
+    for (let index = 0; index < 12; index++) {
+      try {
+        first = await reply(first, `large-reply-${index}`, "r".repeat(16000));
+      } catch (error) {
+        expect(error).toMatchObject({ reason: "guided_review_discussion_budget" });
+        discussionFull = true;
+        break;
+      }
+    }
+    expect(discussionFull).toBe(true);
+    expect(
+      await f.tracker.call("get_guided_review", { issueId: first.issueId, id: first.id }, { actor }),
+    ).toEqual(first);
+    second = await reply(second, "other-after-thread-cap", "another issue still writable");
+    expect(second.findings[0]!.replies.map((entry) => entry.body)).toEqual([
+      "still writable",
+      "another issue still writable",
+    ]);
+    const store = JSON.parse(await readFile(join(f.directory, "tracker.json"), "utf8"));
+    const discussion = store.guidedReviews
+      .find((entry: { id: string }) => entry.id === first.id)
+      .findings.map(
+        ({ resolved, replies, history }: { resolved: boolean; replies: unknown[]; history: unknown[] }) => ({
+          resolved,
+          replies,
+          history,
+        }),
+      );
+    expect(Buffer.byteLength(JSON.stringify(discussion))).toBeLessThanOrEqual(
+      GUIDED_REVIEW_LIMITS.discussionBytes,
+    );
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+}, 30000);
 
 it("checks snapshot integrity on selected get/edit without hashing unrelated retained inspections", async () => {
   const f = await fixture(1024);

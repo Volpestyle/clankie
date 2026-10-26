@@ -1590,39 +1590,86 @@ const guidedSnapshotHash = (
     )
     .digest("hex");
 
-export const GUIDED_REVIEW_LIMITS = Object.freeze({ perIssue: 3, totalBytes: 8 * 1024 * 1024 });
+export const GUIDED_REVIEW_LIMITS = Object.freeze({
+  perIssue: 3,
+  totalBytes: 8 * 1024 * 1024,
+  discussionBytes: 256 * 1024,
+});
 
-/** Only review payloads and successful review receipts count; ordinary tracker bookkeeping is separate. */
-function assertGuidedReviewBudget(store: Store, nextReceipt: WriteReceipt): void {
-  const receipts = (store.receipts ?? []).filter(
-    (receipt) =>
-      (receipt.tool === "save_guided_review" || receipt.tool === "post_guided_finding") &&
-      receipt.state === "applied",
-  );
-  const bytes = Buffer.byteLength(
-    JSON.stringify({ guidedReviews: store.guidedReviews ?? [], receipts: [...receipts, nextReceipt] }),
-  );
-  if (bytes > GUIDED_REVIEW_LIMITS.totalBytes)
+/** Shared capacity is reserved for immutable captures; discussion has its own per-review budget. */
+function assertGuidedReviewBudget(store: Store, review: GuidedReviewRecord, tool: string): void {
+  if (tool === "save_guided_review") {
+    const snapshots = (store.guidedReviews ?? []).map((entry) => ({
+      ...entry,
+      updatedAt: entry.createdAt,
+      updatedByActor: entry.createdByActor,
+      findings: entry.findings.map(
+        ({ resolved: _resolved, replies: _replies, history: _history, ...finding }) => finding,
+      ),
+    }));
+    if (Buffer.byteLength(JSON.stringify(snapshots)) > GUIDED_REVIEW_LIMITS.totalBytes)
+      throw new TrackerWriteRefused(
+        "guided_review_budget",
+        "Guided review snapshots exceed the stored byte budget",
+      );
+  }
+  const discussion = review.findings.map(({ resolved, replies, history }) => ({
+    resolved,
+    replies,
+    history,
+  }));
+  if (Buffer.byteLength(JSON.stringify(discussion)) > GUIDED_REVIEW_LIMITS.discussionBytes)
     throw new TrackerWriteRefused(
-      "guided_review_budget",
-      "Guided reviews and their result receipts exceed the stored byte budget",
+      "guided_review_discussion_budget",
+      "This guided review has reached its discussion byte budget",
     );
 }
 
-/** Keep the immutable inspection once; historical discussion state still replays exactly. */
+/** Event references keep every receipt constant-size as discussion grows. */
 function guidedReviewReceiptResult(review: GuidedReviewRecord) {
-  const { inspection: _inspection, ...result } = review;
-  return { guidedReviewSnapshot: review.id, result };
+  const latest = review.findings
+    .flatMap((finding) => finding.history)
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .at(-1);
+  return { guidedReviewSnapshot: review.id, eventId: latest?.id ?? null, updatedAt: review.updatedAt };
 }
 
 function replayGuidedReviewReceipt(store: Store, value: unknown): unknown {
   if (!value || typeof value !== "object" || !("guidedReviewSnapshot" in value)) return value;
-  const receipt = value as { guidedReviewSnapshot: string; result: Omit<GuidedReviewRecord, "inspection"> };
+  const receipt = value as {
+    guidedReviewSnapshot: string;
+    result?: Omit<GuidedReviewRecord, "inspection">;
+    eventId?: string | null;
+    updatedAt?: string;
+  };
   const review = (store.guidedReviews ?? []).find((entry) => entry.id === receipt.guidedReviewSnapshot);
-  if (!review || receipt.result.id !== review.id || receipt.result.snapshotSha256 !== review.snapshotSha256)
-    throw new Error("Guided review receipt snapshot is unavailable");
+  if (!review) throw new Error("Guided review receipt snapshot is unavailable");
   validateStoredGuidedReview(store, review);
-  const restored = { ...receipt.result, inspection: review.inspection };
+  // Read the original compact receipts written before event references were introduced.
+  if (receipt.result) {
+    if (receipt.result.id !== review.id || receipt.result.snapshotSha256 !== review.snapshotSha256)
+      throw new Error("Guided review receipt snapshot is unavailable");
+    const restored = { ...receipt.result, inspection: review.inspection };
+    validateStoredGuidedReview(store, restored);
+    return restored;
+  }
+  const events = review.findings
+    .flatMap((finding) => finding.history)
+    .sort((a, b) => a.at.localeCompare(b.at));
+  const end = receipt.eventId === null ? -1 : events.findIndex((event) => event.id === receipt.eventId);
+  if (receipt.eventId !== null && end < 0) throw new Error("Guided review receipt event is unavailable");
+  const included = new Set(events.slice(0, end + 1).map((event) => event.id));
+  const restored = structuredClone(review);
+  for (const finding of restored.findings) {
+    finding.history = finding.history.filter((event) => included.has(event.id));
+    finding.replies = finding.replies.filter((reply) => included.has(reply.id));
+    finding.resolved = false;
+    for (const event of finding.history) if (event.action !== "reply") finding.resolved = event.resolved;
+  }
+  restored.updatedAt = receipt.updatedAt!;
+  if (end >= 0) restored.updatedByActor = events[end]!.actor;
+  else if (restored.createdByActor) restored.updatedByActor = restored.createdByActor;
+  else delete restored.updatedByActor;
   validateStoredGuidedReview(store, restored);
   return restored;
 }
@@ -3886,15 +3933,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         const review = result as GuidedReviewRecord;
         if (review.createdAt >= now) review.createdByActor = actor;
         review.updatedByActor = actor;
-        assertGuidedReviewBudget(store, {
-          actorKey: actorKey(actor),
-          idempotencyKey: key!,
-          tool: name,
-          fingerprint,
-          state: "applied",
-          at: now,
-          result: guidedReviewReceiptResult(review),
-        });
+        assertGuidedReviewBudget(store, review, name);
       }
       await recordIssueChanges(before, store, name, context, now);
     } catch (error) {
@@ -5270,7 +5309,6 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         // Scope checks also fence receipt replay after issue moves or authority changes.
         if (GUIDED_REVIEW_TOOLS.has(name)) {
           const issue = findIssue(store, args.issueId as string);
-          options.assertIssueWrite?.(issueView(store, issue));
           if (
             guidedBinding &&
             (guidedBinding.storeId !== (store.storeId ?? store.team.id) ||
@@ -5281,6 +5319,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               "source_authority_changed",
               "Guided review issue source binding changed during inspection",
             );
+          options.assertIssueWrite?.(issueView(store, issue));
           guidedSourceFence?.();
           if (name === "get_guided_review" || name === "post_guided_finding")
             guidedReviewForIssue(store, args, options);

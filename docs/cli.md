@@ -3223,10 +3223,15 @@ review `updatedAt` as `ifUpdatedAt`, a fresh `idempotencyKey`, and
 `edit: {action:"reply",body}` or `edit: {action:"resolve",resolved:true}`.
 Set `resolved:false` to reopen. Sources and anchors cannot be edited.
 
-At most three reviews are retained per issue. Serialized reviews plus successful
-guided write receipts share an 8 MiB store budget, enforced on saves and edits.
-Receipts reference one immutable inspection and reconstruct full historical
-responses on replay. `list` returns summaries without inspections or bodies;
+At most three reviews are retained per issue. Immutable snapshots share an
+8 MiB store budget checked on saves; discussion and edit receipts are excluded.
+Each review independently allows 256 KiB of serialized discussion. A
+`guided_review_discussion_budget` refusal affects only that review, leaving
+other reviews editable even when the shared snapshot pool is full. Constant-size
+review/event/timestamp receipts reconstruct exact historical responses on replay.
+At the three-review cap, track further source revisions on a linked successor
+issue; this slice has no snapshot overwrite/retirement operation.
+`list` returns summaries without inspections or bodies;
 `show` returns the full review. Ordinary loads check shallow metadata; full
 snapshot integrity checks apply to selected full reads and writes.
 
