@@ -1389,7 +1389,11 @@ export async function runMcpCommand(
         `The ${input.lane} lane has no bearer on this side; the seat serves the operator lane.`,
       );
     }
-    if (env.CLANKIE_OPERATOR_TOKEN === undefined && !parentArgvIsOperatorHarness(parentArgv)) {
+    // A hired worker's pane is never Clankie's own seat, whatever its parent harness (VUH-2592).
+    if (
+      env.CLANKIE_WORKER_PANE === "1" ||
+      (!env.CLANKIE_OPERATOR_TOKEN && !parentArgvIsOperatorHarness(parentArgv))
+    ) {
       throw new Error(
         "clankie mcp --lane operator is Clankie's own seat and runs only as a native harness's MCP server " +
           "(claude, codex, opencode, grok). Missing worker tools do not authorize his lane: " +

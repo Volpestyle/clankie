@@ -1,0 +1,114 @@
+{
+  "startedAt": "2026-10-26T02:37:58.166Z",
+  "checkout": "/Users/james/dev/clankie-wt/vuh-2590",
+  "protect": {
+    "created": true,
+    "moved": true
+  },
+  "ownerResolves": {
+    "source": "store",
+    "matchesMinted": true
+  },
+  "controlUnsandboxedScript": {
+    "sandboxed": false,
+    "denied": {
+      "protectedKeychain": false,
+      "fileBroker": false,
+      "checkoutEnvLocal": true,
+      "pinnedEnvLocal": false,
+      "loginKeychain": false,
+      "ordinaryFile": false
+    }
+  },
+  "herdrIsolation": {
+    "sessionPath": "/private/tmp/clankie-ws-e2e-Gb7VmR/herdr/config/herdr/session.json",
+    "home": "/private/tmp/clankie-ws-e2e-Gb7VmR/herdr/home",
+    "configHome": "/private/tmp/clankie-ws-e2e-Gb7VmR/herdr/config"
+  },
+  "probeShell": [
+    "SHELL=/bin/zsh CLANKIE_WORKER_PANE=1 CLANKIE_OPERATOR_TOKEN=[]",
+    "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
+    "keychain-read exit=44",
+    "cat: /private/tmp/clankie-ws-e2e-Gb7VmR/credentials.json: Operation not permitted",
+    "file-broker-read exit=1",
+    "cp: /private/tmp/clankie-ws-e2e-Gb7VmR/clankie.keychain-db: Operation not permitted",
+    "keychain-copy exit=1",
+    "{\"outcome\":\"refused\",\"code\":\"worker_pane\"}",
+    "ordinary-read exit=0",
+    "PROBE-DONE"
+  ],
+  "probePaneShell": {
+    "sandboxed": true,
+    "denied": {
+      "protectedKeychain": true,
+      "fileBroker": true,
+      "checkoutEnvLocal": true,
+      "pinnedEnvLocal": true,
+      "loginKeychain": false,
+      "ordinaryFile": false
+    }
+  },
+  "claude": {
+    "process": "claude",
+    "kernel": {
+      "sandboxed": true,
+      "denied": {
+        "protectedKeychain": true,
+        "fileBroker": true,
+        "checkoutEnvLocal": true,
+        "pinnedEnvLocal": true,
+        "loginKeychain": false,
+        "ordinaryFile": false
+      }
+    },
+    "screen": [
+      " ▐▛███▛█   Claude Code v2.1.310",
+      "▝▜██████▀  Opus 5.5 with xhigh effort · Claude Max",
+      " ▝▝   ▝▝   ~/dev/clankie-wt/vuh-2590 · /rc",
+      "⚠ Allow rule Bash(git -C * push origin *) allows any option at its * · use an exact value",
+      "  ⎿  SessionStart:startup says: This is a Clankie plugin session. Post Linear evidence through clankie_tools /",
+      "     clankie_call as the Clankie app; if unavailable, ask your lead with message_clankie. Inherited Linear connectors",
+      "     are denied here. Plain Claude sessions without this plugin keep the owner's connector access.",
+      "  ⎿  SessionStart:startup hook error",
+      "  ⎿  Failed with non-blocking status code: clankie: CLANKIE_OPERATOR_TOKEN must not be empty",
+      "⏺ clankie-worker: its classic.SessionStart hook was skipped. \"cc-plugin-sec-default\" runs first and sent the",
+      "  event on past it.",
+      "                                                                                                     ◉ xhigh · /effort"
+    ]
+  },
+  "codex": {
+    "process": "codex",
+    "kernel": {
+      "sandboxed": true,
+      "denied": {
+        "protectedKeychain": true,
+        "fileBroker": true,
+        "checkoutEnvLocal": true,
+        "pinnedEnvLocal": true,
+        "loginKeychain": false,
+        "ordinaryFile": false
+      }
+    },
+    "screen": [
+      "  >_ OpenAI Codex (v0.163.0)",
+      "     ~/dev/clankie-wt/vuh-2590",
+      "  permissions: YOLO mode",
+      "› Ask Codex to do anything",
+      "  GPT-6.1-Sol xhigh · ~/dev/clankie-wt/vuh-2590 · Context 0% used",
+      "  ? for shortcuts                                                                             ⚠ 2 warnings · f2 to view"
+    ]
+  },
+  "codexAppServer": {
+    "sandboxed": true,
+    "denied": {
+      "protectedKeychain": true,
+      "fileBroker": true,
+      "checkoutEnvLocal": true,
+      "pinnedEnvLocal": true,
+      "loginKeychain": false,
+      "ordinaryFile": false
+    }
+  },
+  "finishedAt": "2026-10-26T02:38:16.977Z",
+  "ownerHerdrSessionUntouched": true
+}

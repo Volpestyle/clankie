@@ -302,12 +302,13 @@ const bodyTransfer = new BodyTransfer({
 await bodyTransfer.boot();
 if (bodyTransfer.dormant()) {
   const store = createDefaultCredentialStore();
-  await ensureOperatorCredential({ env: process.env, store });
+  await ensureOperatorCredential({ env: process.env, store, protectedFirst: true });
   process.exit(
     await serveDormantBody({
       transfer: bodyTransfer,
       settingsStore,
       store,
+      protectedFirst: true,
       stateRoot,
       eventLogPath: process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "events.jsonl"),
       env: process.env,
@@ -350,7 +351,7 @@ const port = Number(process.env.PORT ?? 4310);
 const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
 
 const operatorCredentialStore = createDefaultCredentialStore();
-await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore });
+await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore, protectedFirst: true });
 const discordBodyInLoadout =
   serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);
 const hostedBootstrap = readHostedBodyBootstrap(process.env);
@@ -2531,6 +2532,7 @@ const clankie = await createClankieApp({
   authenticateOperator: createCredentialBackedOperatorAuthenticator({
     env: process.env,
     store: operatorCredentialStore,
+    protectedFirst: true,
     identity: {
       operatorId: process.env.CLANKIE_OPERATOR_ID ?? "local-operator",
       steerSourceLane: "tui",

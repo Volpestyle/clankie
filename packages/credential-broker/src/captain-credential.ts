@@ -98,6 +98,8 @@ export async function ensureCaptainCredential(
 function readEnvironmentToken(env: NodeJS.ProcessEnv): string | undefined {
   const token = env.CLANKIE_CAPTAIN_TOKEN;
   if (token === undefined) return undefined;
+  // A hired pane's environment blanks bearers it may have inherited from Herdr's server (VUH-2592).
+  if (token.length === 0 && env.CLANKIE_WORKER_PANE === "1") return undefined;
   if (token.length === 0) {
     throw new CaptainCredentialError(
       "invalid_environment_override",

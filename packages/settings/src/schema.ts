@@ -415,6 +415,11 @@ export const FleetSettingsSchema = z
      */
     remoteGates: z.enum(["on", "off"]).default("off"),
     /**
+     * Hired workers run under an OS profile that denies reading the owner's protected
+     * credentials (VUH-2592). Off until the owner or lead turns it on.
+     */
+    workerSandbox: z.enum(["on", "off"]).default("off"),
+    /**
      * An idle native lead seat restarts fresh in its own pane, with a handoff
      * brief, once its session grows large or old (VUH-2274, ADR 0271).
      */

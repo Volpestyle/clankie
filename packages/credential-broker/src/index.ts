@@ -173,6 +173,7 @@ export {
   mintOperatorToken,
   OPERATOR_CREDENTIAL_PROVIDER_ID,
   OperatorCredentialError,
+  protectOperatorCredential,
   resolveOperatorCredential,
   rotateOperatorCredential,
   type OperatorCredentialConsistency,
@@ -181,6 +182,7 @@ export {
   type OperatorCredentialStatus,
   type ResolvedOperatorCredential,
 } from "./operator-credential.ts";
+export { protectedKeychainPath } from "./protected-keychain.ts";
 
 export {
   GOOGLE_OAUTH_APP_PROVIDER_ID,

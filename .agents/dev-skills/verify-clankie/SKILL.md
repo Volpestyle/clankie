@@ -147,6 +147,29 @@ each advertised capability and outcome, exact check commands and exit codes,
 and any unpinned input. Use `trace-clankie` afterward to correlate durable
 runtime trails when the live result disagrees with the test.
 
+## Scratch Herdr servers
+
+A proof's own `herdr server` must get scratch `HOME`, `XDG_CONFIG_HOME`,
+`XDG_STATE_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_RUNTIME_DIR`, not
+only `HERDR_SOCKET_PATH` and `HERDR_CONFIG_PATH`. Herdr keeps its session in
+`$XDG_CONFIG_HOME/herdr/session.json`, else `~/.config/herdr`. A server that
+finds the owner's session restores every workspace and resumes the agents in
+it, and on exit it writes over the owner's session file. That happened on
+2026-10-26 (VUH-2592). Before starting the server, refuse if the resolved
+session path is outside the scratch root. After it starts, stop if
+`herdr workspace list` shows any workspace before the proof creates one.
+`apps/clankie/test/fixtures/local-fleet-proof/herdr-fixture.ts` and
+`apps/clankie/scripts/verify-worker-sandbox.ts --dry-run` do both. A proof
+starts only sessions it owns.
+
+Never start a real harness in a mixed environment: the owner's HOME with scratch
+XDG roots, or the reverse. Installers and updaters write HOME- and XDG-relative
+paths together. On 2026-10-26, Claude Code's native updater, running in a proof
+pane, installed into a scratch `XDG_DATA_HOME` and repointed the owner's
+`~/.local/bin/claude` at it. Deleting the scratch root then broke every Claude
+launch on the Mac. Prove confinement with fixture processes; a real harness run
+needs the lead's go-ahead.
+
 ## Checkout-only live proofs
 
 These commands exist in a source checkout. They are not on an installed

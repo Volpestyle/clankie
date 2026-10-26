@@ -462,7 +462,7 @@ export type CodexServerLauncher = (input: {
  * Unix transport is WebSocket over HTTP Upgrade (not JSONL). The private socket
  * avoids a shared daemon losing the pane identity (VUH-1398), and TCP exposure.
  */
-const localCodexServer: CodexServerLauncher = async (input) => {
+export const localCodexServer: CodexServerLauncher = async (input) => {
   if (input.socketRoot !== undefined) {
     for (let current = input.socketRoot; ; current = dirname(current)) {
       const ancestor = await lstat(current);
@@ -496,22 +496,33 @@ const localCodexServer: CodexServerLauncher = async (input) => {
   // Redirect stderr to a file: a pipe back to the service would break on exit.
   const stderrPath = join(directory, "app-server.log");
   const stderrFd = openSync(stderrPath, "a", 0o600);
+  const argv = [
+    ...input.configArgs,
+    ...(input.catalogRefresh
+      ? ["-c", `mcp_servers.worker.env.CLANKIE_CODEX_CATALOG_SIGNAL=${JSON.stringify(catalogSignalPath)}`]
+      : []),
+    "app-server",
+    "--listen",
+    `unix://${socketPath}`,
+  ];
+  // A hired worker's tools run here, outside its pane, so the server takes the
+  // pane's sandbox (VUH-2592). Seatbelt cannot nest: Codex's own sandbox modes
+  // keep their native confinement, and only full access gets this profile.
+  const profile = input.env?.CLANKIE_WORKER_SANDBOX_PROFILE;
+  const confined =
+    profile !== undefined && input.configArgs.some((value) => value === 'sandbox_mode="danger-full-access"');
   let child: ReturnType<typeof spawn>;
   try {
     child = spawn(
-      "codex",
-      [
-        ...input.configArgs,
-        ...(input.catalogRefresh
-          ? ["-c", `mcp_servers.worker.env.CLANKIE_CODEX_CATALOG_SIGNAL=${JSON.stringify(catalogSignalPath)}`]
-          : []),
-        "app-server",
-        "--listen",
-        `unix://${socketPath}`,
-      ],
+      confined ? "/usr/bin/sandbox-exec" : "codex",
+      confined ? ["-p", profile, "codex", ...argv] : argv,
       {
         cwd: input.cwd,
-        env: { ...env, ...input.env },
+        env: {
+          ...env,
+          ...input.env,
+          ...(input.env?.CLANKIE_WORKER_SHELL ? { SHELL: input.env.CLANKIE_WORKER_SHELL } : {}),
+        },
         detached: true,
         stdio: ["ignore", "ignore", stderrFd],
       },

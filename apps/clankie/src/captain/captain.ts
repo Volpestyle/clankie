@@ -361,6 +361,7 @@ import { CaptainResourceLoader, skillSearchExtension } from "./skill-catalog.ts"
 import { createStanceStore } from "./stances.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "./tool-catalog-health.ts";
+import { createWorkerSandbox } from "../worker-sandbox.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 import {
   sessionExecutionIdentity,
@@ -879,6 +880,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     validateOwner: validateConversationOwner,
     hireDefaults: async () => (await settings()).fleet.hire ?? {},
     maximumTrustMode: async () => (await settings()).maximumTrustMode,
+    workerSandbox: async () =>
+      (await settings()).fleet.workerSandbox === "on"
+        ? createWorkerSandbox({ repoRoot: options.repoRoot })
+        : undefined,
     resolveHireModel: async (harness, model) => {
       if (harness === "pi" && deps.piSeatModel) {
         const selected = await deps.piSeatModel();

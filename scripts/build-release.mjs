@@ -246,6 +246,11 @@ async function copyRuntimeAssets(targetRoot) {
       "packages/credential-broker/src/keychain-status.py",
       "packages/credential-broker/src/keychain-status.py",
     ],
+    [
+      "packages/credential-broker/src/protected-keychain.py",
+      "packages/credential-broker/src/protected-keychain.py",
+    ],
+    ["apps/clankie/src/worker-shell.sh", "apps/clankie/src/worker-shell.sh"],
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
     ["packages/fleet-resources/src/linux-namespace.py", "packages/fleet-resources/src/linux-namespace.py"],
     ["packages/fleet-resources/src/server-cpu.py", "packages/fleet-resources/src/server-cpu.py"],

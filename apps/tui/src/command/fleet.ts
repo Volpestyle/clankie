@@ -41,7 +41,7 @@ import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
-  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
+  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--lead-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
@@ -208,6 +208,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
     `remote gates: ${fleet.remoteGates ?? "off"} — ${fleet.remoteGates === "on" ? "integrate gates may run on a linked machine's fleet workspace while this Mac is saturated" : "integrate gates run on this machine"}`,
+    `worker sandbox: ${fleet.workerSandbox ?? "off"} — ${fleet.workerSandbox === "on" ? "new hires run under an OS profile that denies reading the owner's protected credentials" : "hired workers can read what the owner's user can"}`,
     `lead restarts: ${fleet.leadRestarts ?? "on"} — ${fleet.leadRestarts === "off" ? "the lead seat keeps its session until someone restarts it" : "an idle lead seat restarts fresh in its pane with a handoff brief once its session is large or a day old"}`,
     `auto tidy: ${fleet.autoTidy ?? "1h"} — ${fleet.autoTidy === "off" ? "finished panes and landed worktrees wait for the lead to tidy them" : `a hire's pane closes after ${fleet.autoTidy ?? "1h"} idle once its reports are read and its work landed; landed, clean worktrees untouched for a day are removed`}`,
     `worker defaults: ${formatHireDefaults(fleet.hire)}`,
@@ -524,6 +525,9 @@ async function parseSet(
     } else if (flag === "--remote-gates" && change.remoteGates === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--remote-gates must be on or off.");
       change.remoteGates = value;
+    } else if (flag === "--worker-sandbox" && change.workerSandbox === undefined) {
+      if (value !== "on" && value !== "off") throw new Error("--worker-sandbox must be on or off.");
+      change.workerSandbox = value;
     } else if (flag === "--lead-restarts" && change.leadRestarts === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--lead-restarts must be on or off.");
       change.leadRestarts = value;

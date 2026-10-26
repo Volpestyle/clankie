@@ -78,6 +78,7 @@ describe("clankie fleet", () => {
         tools: "connected",
         peerMessages: "on",
         remoteGates: "off",
+        workerSandbox: "off",
         leadRestarts: "on",
         autoTidy: "1h",
       },
@@ -145,6 +146,7 @@ describe("clankie fleet", () => {
       tools: "off",
       peerMessages: "off",
       remoteGates: "off",
+      workerSandbox: "off",
       leadRestarts: "off",
       autoTidy: "4h",
     });
@@ -177,6 +179,7 @@ describe("clankie fleet budget", () => {
       tools: "off",
       peerMessages: "on",
       remoteGates: "off",
+      workerSandbox: "off",
       leadRestarts: "on",
       autoTidy: "1h",
       ...FleetAutonomySchema.parse({}),
@@ -200,6 +203,7 @@ describe("clankie fleet budget", () => {
       tools: "connected",
       peerMessages: "on",
       remoteGates: "off",
+      workerSandbox: "off",
       leadRestarts: "on",
     });
     const lines = formatFleetLines(status.fleet).join("\n");
@@ -231,6 +235,7 @@ describe("clankie fleet peer messages", () => {
       tools: "off",
       peerMessages: "off",
       remoteGates: "off",
+      workerSandbox: "off",
       leadRestarts: "on",
       autoTidy: "1h",
       ...FleetAutonomySchema.parse({}),

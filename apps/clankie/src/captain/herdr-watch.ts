@@ -125,6 +125,7 @@ import type {
   HireRecoveryEvidence,
   LocalHireSettlementEvidence,
 } from "@clankie/protocol";
+import { WORKER_PANE_ENV, type WorkerSandbox } from "../worker-sandbox.ts";
 import { workerSkills } from "./worker-skills.ts";
 import {
   readHerdrSeatTranscript,
@@ -986,6 +987,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly requireWorkerAccess: ((fleet?: string) => Promise<void | MachineAccessFence>) | undefined;
   private readonly hireDefaults: (() => Promise<HireProfile>) | undefined;
   private readonly maximumTrustMode: (() => Promise<boolean>) | undefined;
+  private readonly workerSandbox: (() => Promise<WorkerSandbox | undefined>) | undefined;
   private readonly resolveModel: ((harness: string, model: string) => Promise<string>) | undefined;
   private readonly claudeAccounts: (() => Promise<readonly CodexAccount[]>) | undefined;
   private readonly accounts: () => Promise<readonly CodexAccount[]>;
@@ -1013,6 +1015,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
       /** The owner's maximum trust mode (VUH-2048), read at each launch. Absent, it is off. */
       readonly maximumTrustMode?: () => Promise<boolean>;
+      /** The OS profile local hires start under (VUH-2592), read at each launch. Absent, none. */
+      readonly workerSandbox?: () => Promise<WorkerSandbox | undefined>;
       readonly resolveHireModel?: (harness: string, model: string) => Promise<string>;
       readonly claudeAccounts?: () => Promise<readonly CodexAccount[]>;
       readonly codexAccounts?: () => Promise<readonly CodexAccount[]>;
@@ -1118,6 +1122,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.hireDefaults = options.hireDefaults;
     if (options.workerAccountsReport) this.workerAccountsReport = options.workerAccountsReport;
     this.maximumTrustMode = options.maximumTrustMode;
+    this.workerSandbox = options.workerSandbox;
     this.resolveModel = options.resolveHireModel;
     this.claudeAccounts = options.claudeAccounts;
     this.accounts = options.codexAccounts ?? (async () => codexAccounts());
@@ -4445,6 +4450,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let nativePrepared: PreparedSeatLaunch | undefined;
     let nativeLaunch: SeatLaunch | undefined;
     let startupTools: readonly string[] | undefined;
+    let sandbox: WorkerSandbox | undefined;
     let skillLaunch: Awaited<ReturnType<typeof workerSkills>> = prepared ?? {
       args: [],
       ...(remote !== undefined
@@ -4481,8 +4487,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           env: {
             ...skillLaunch.env,
             CLANKIE_STATE: resolve(process.env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie")),
+            // A hire never holds the owner's bearers (VUH-2592), even if Herdr's server did.
+            ...WORKER_PANE_ENV,
           },
         };
+        sandbox = await this.workerSandbox?.();
+        if (sandbox) skillLaunch = { ...skillLaunch, env: { ...skillLaunch.env, ...sandbox.env } };
       }
       startupTools = ["claude", "codex"].includes(input.harness)
         ? await this.expectedHireTools(input)
@@ -4568,10 +4578,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
         label: hirePaneLabel(input.title, input.taskTitle, input.role),
         ...(resume === undefined ? {} : { paneLabel: resumePaneLabel(resume) }),
         ...(nativePrepared === undefined
-          ? skillLaunch.env === undefined
+          ? skillLaunch.env === undefined && sandbox === undefined
             ? {}
-            : { env: skillLaunch.env }
-          : { command: nativePrepared.command, env: { ...skillLaunch.env, ...nativePrepared.env } }),
+            : { env: { ...skillLaunch.env, ...sandbox?.shellEnv } }
+          : {
+              command: sandbox ? sandbox.wrap(nativePrepared.command) : nativePrepared.command,
+              env: { ...skillLaunch.env, ...nativePrepared.env },
+            }),
         ...(remote === undefined ? {} : { fleet: remote }),
       });
     } catch (caught) {

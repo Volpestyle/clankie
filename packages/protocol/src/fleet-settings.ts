@@ -38,6 +38,7 @@ const FleetPolicySchema = z
     tools: z.enum(["connected", "off"]).optional(),
     peerMessages: z.enum(["on", "off"]).optional(),
     remoteGates: z.enum(["on", "off"]).optional(),
+    workerSandbox: z.enum(["on", "off"]).optional(),
     leadRestarts: z.enum(["on", "off"]).optional(),
     autoTidy: z.enum(FLEET_AUTO_TIDY).optional(),
     hire: HireProfileSchema.optional(),

@@ -627,6 +627,8 @@ panes. Deterministic server and bridge regressions do not establish that live re
   Fleet tool access does not invent a persona or grant worker attribution.
 - Provider permissions still apply. Ordinary launch isolation is not an OS sandbox;
   direct access to an operator bearer or the owner's broker provides other authority.
+  The [worker sandbox](#worker-sandbox) narrows what a hire can read; it isn't a full
+  boundary yet.
   Keep credentials out of transcripts and use the
   [tracker identity contract](worker-tracker-identity.md) and
   [Linear worker publishing](linear-worker-posts.md) for attribution.
@@ -689,6 +691,53 @@ Owner API clients read `GET /v1/operator/projects` for the current settings and
 revision, then call `POST /v1/operator/projects/remove-workspace` with
 `projectId`, `workspaceId` and `expectedRevision`. A stale revision, tracker
 reference, changed owner authority or concurrent settings edit refuses removal.
+
+## Worker sandbox
+
+A hire runs as the owner's macOS user, so only the kernel can keep it from reading
+the owner's credentials (VUH-2592, [ADR 0296](adr/0296-hired-workers-run-under-an-os-profile.md)).
+
+Every local hire's environment carries `CLANKIE_WORKER_PANE=1` and blank
+`CLANKIE_OPERATOR_TOKEN` and `CLANKIE_CAPTAIN_TOKEN`. That happens whether or not
+the sandbox is on: a bearer that Herdr's server inherited never reaches the
+worker. In a worker pane, a blank bearer counts as absent. When no credential can
+be read there, `clankie` says hired workers don't hold the owner's credential,
+instead of reporting a Keychain fault.
+
+With `clankie fleet set --worker-sandbox on` (off by default), each new local hire
+starts under `/usr/bin/sandbox-exec`:
+
+- The pane's shell starts through `apps/clankie/src/worker-shell.sh`, which execs
+  the owner's login shell under the profile. Claude and Codex, which Herdr starts
+  in that shell, inherit it.
+- A prepared command (OpenCode, Pi, Grok, Prime) is wrapped directly.
+- The Codex app-server, which runs Codex's tools, gets the same profile when Codex
+  runs with full access. Seatbelt can't nest, so in Codex's own sandbox modes it
+  keeps only Codex's confinement.
+
+The profile allows everything else and denies reading or writing:
+
+- the protected keychain (`clankie operator-credential protect` moves the
+  operator bearer there);
+- the file broker, `~/.config/clankie/credentials.json` or `$CLANKIE_CREDENTIALS_FILE`;
+- the service checkout's and `~/.clankie/pinned`'s `.env.local`.
+
+Their ancestor directories can't be renamed or removed, because that would give a
+protected file a path the profile doesn't name. Files inside those directories can
+still be created, edited and deleted. The owner's login keychain stays readable, so
+a harness keeps its own sign-in.
+Inside the lowered runtime's envelope (ADR 0257), hires already inherit that
+envelope and get no second profile.
+
+Limits until the follow-ups land:
+
+- **Escapes:** a confined worker can still ask the unconfined Herdr server for a
+  new pane, submit a launchd job, drive another app with Apple Events, or write
+  code the owner or service runs later (VUH-2836).
+- **Worker commands:** `evidence push`, `simulator` and `work` still use the
+  operator bearer until VUH-2837, so protect the bearer only after that lands.
+- **Other secrets:** the remaining broker items, `~/.config/clankie`, `~/.ssh`,
+  `~/.config/gh` and provider keys aren't covered yet (VUH-2838, VUH-2839, VUH-2840).
 
 ## Owner-authorized work-item gestures
 

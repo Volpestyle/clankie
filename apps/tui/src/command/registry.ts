@@ -303,6 +303,8 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  operator-credential rotate [--json]",
       "                           Rotate the local operator credential",
+      "  operator-credential protect [--json]",
+      "                           Move it to the protected keychain hired workers can't read",
     ],
   },
   { nouns: ["play"], lines: ["  play status              Live embodiment session (JSON)"] },
@@ -478,7 +480,7 @@ const HEADLESS_COMMAND_HELP = [
       "  fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards",
 
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",
-      "          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]",
+      "          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]",
       "                           Read or set fleet routing, budget, autonomy and connected tools",
     ],
   },
@@ -716,7 +718,7 @@ export function commandHelp(): string {
     "  --set selects the first listed model as captain.",
     "  Config writes need `clankie restart`, except Linear follow (live).",
     "",
-    "pair / devices / operator-credential rotate default to human text; pass --json.",
+    "pair / devices / operator-credential rotate|protect default to human text; pass --json.",
     "play stop prints 'Nothing is playing.' (not JSON) when idle.",
     "prompt / memory-card print plain text, and only for the bearer's own lane:",
     "  operator, discord_voice, discord_presence, gameplay (default: operator).",

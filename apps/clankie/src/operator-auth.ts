@@ -9,6 +9,8 @@ export interface CredentialBackedOperatorAuthenticatorOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly identity: TrustedOperatorIdentity;
   readonly store: CredentialStore;
+  /** The service's own broker: the protected keychain comes first once it exists (VUH-2592). */
+  readonly protectedFirst?: boolean;
 }
 
 /**
@@ -24,6 +26,7 @@ export function createCredentialBackedOperatorAuthenticator(
       const credential = await resolveOperatorCredential({
         env: options.env ?? process.env,
         store: options.store,
+        ...(options.protectedFirst ? { protectedFirst: true } : {}),
       });
       if (credential === undefined) return undefined;
       return createBearerAuthenticator(credential.token, options.identity)(request);

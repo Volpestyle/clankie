@@ -57,6 +57,8 @@ export async function serveDormantBody(options: {
   transfer: BodyTransfer;
   settingsStore: SettingsStore;
   store: CredentialStore;
+  /** The service's own broker: the protected operator keychain comes first once it exists. */
+  protectedFirst?: boolean;
   stateRoot: string;
   eventLogPath: string;
   env: NodeJS.ProcessEnv;
@@ -98,6 +100,7 @@ export async function serveDormantBody(options: {
     authenticateOperator: createCredentialBackedOperatorAuthenticator({
       env,
       store: options.store,
+      ...(options.protectedFirst ? { protectedFirst: true } : {}),
       identity: { operatorId: env.CLANKIE_OPERATOR_ID ?? "local-operator", steerSourceLane: "tui" },
     }),
     ...(hostedPairing === undefined ? {} : { hostedPairing }),

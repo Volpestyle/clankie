@@ -132,7 +132,7 @@ device and machine tables, credential-rotate sentence). Everything else is alrea
 | `prompt …`, `memory-card …`                                                                                                   | Plain text: the prompt or card itself, verbatim                                              |
 | `seat`                                                                                                                        | Interactive (TTY); `seat --dry-run` is JSON                                                  |
 | `mcp`                                                                                                                         | JSON-RPC for a harness, never for people                                                     |
-| `pair`, `devices`, `machines`, `herdr status`, `operator-credential rotate`                                                   | Human text; pass `--json`                                                                    |
+| `pair`, `devices`, `machines`, `herdr status`, `operator-credential rotate`, `protect`                                        | Human text; pass `--json`                                                                    |
 | `help`                                                                                                                        | This index (plain text)                                                                      |
 | `--version`                                                                                                                   | `clankie <version>`                                                                          |
 
@@ -3404,6 +3404,20 @@ Mint a new local operator bearer. Existing operator sessions are invalid
 immediately. JSON: `{ "ok": true, "status": "rotated", "source": "store" }`.
 The new secret is not printed.
 
+### `operator-credential protect [--json]`
+
+macOS, from the owner's own terminal. This moves the operator bearer out of
+the login keychain into Clankie's protected keychain,
+`~/Library/Keychains/clankie.keychain-db`, which isn't on the search list. A
+random unlock password for it lives in the login keychain. The token is
+unchanged, so running sessions keep working, and the login copy is deleted only
+after the protected copy reads back. Hired workers under the worker sandbox
+can't read the protected keychain. JSON:
+`{ "ok": true, "status": "protected"|"already_protected", "created", "moved" }`.
+Refused from a hired worker pane. Run it only once worker CLI commands no
+longer need the bearer (VUH-2837); until then a worker's `evidence push`,
+`simulator` and `work` stop working after protection.
+
 ### `play status`
 
 The live embodiment session (`GET /v1/embodiment/sessions/live`). JSON
@@ -4402,7 +4416,7 @@ channel or Discord.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--lead-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--lead-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -4507,6 +4521,13 @@ otherwise; installing an update does not change that setting.
 
 `--remote-gates on` lets an integrate batch gate on a linked machine while this
 one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).
+
+`--worker-sandbox on` starts each new local hire under an OS profile that denies
+reading or writing the owner's protected credential stores: the protected
+keychain, the file broker and the checkouts' `.env.local`
+([worker access](worker-access.md#worker-sandbox)). It defaults to off and
+applies only to hires started after the change. Codex hires are confined only
+in maximum trust mode, because Codex's own sandbox can't nest inside it.
 
 `--closure` and `--machine-setup` both default to `lead`:
 
