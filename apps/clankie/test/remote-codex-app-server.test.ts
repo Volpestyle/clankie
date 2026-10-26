@@ -327,6 +327,7 @@ describe("replying to a Codex session Clankie did not start on another machine (
       `saved in full at C:\\Users\\volpe\\.clankie\\seat-messages\\m.md (UTF-8, SHA-256 ${sha256})`,
     );
     expect(argv).not.toContain("paths");
+    expect(argv).toContain("After reading and verifying it, delete this staged file.");
   });
 
   it("queues nothing when a long message cannot be staged intact", async () => {
@@ -340,7 +341,10 @@ describe("replying to a Codex session Clankie did not start on another machine (
       deliveryStage: "unavailable",
       detail: expect.stringContaining("nothing was queued"),
     });
-    expect(commands).toHaveLength(2);
+    expect(commands).toHaveLength(3);
+    expect(decoded(commands[2]!)).toContain("Remove-Item -LiteralPath $path");
+    // Cleanup targets the generated name, never the unverified response path.
+    expect(decoded(commands[2]!)).not.toContain("C:\\x.md");
   });
 
   it("calls codex directly on a POSIX machine and reports a session that is gone", async () => {

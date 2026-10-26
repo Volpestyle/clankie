@@ -7049,7 +7049,17 @@ otherwise nothing is sent. A check without the split runs in full under the same
 deadline. A timeout reports undelivered and never sends on late approval
 (VUH-2779). Private, changed
 or unproved homes refuse the fallback; a private native receipt cannot authorize
-a second send through CLI.
+a second send through CLI. A Windows queue command line above 30,000 escaped
+characters, or a PC Claude channel body above 16,384 characters, stages the exact
+UTF-8 body on the PC under
+`%USERPROFILE%\.clankie\seat-messages\<uuid>.md`, verifies its SHA-256 and queues a
+short pointer. The channel keeps the original full-body receipt fingerprint;
+its native transcript confirms the pointer. Other seat events retain their
+existing clipping notice when they exceed the channel contract. The receiver reads and verifies the body, then deletes that file.
+Staging failures, authority refusals and proven pre-launch failures attempt
+immediate deletion of that send's generated file. Accepted and uncertain pointers
+retain their files for consumption; files older than seven days are pruned on a
+later staging write. A cleanup failure preserves the original delivery result.
 Clankie checks the current pane/session, native process lifetimes and ancestry,
 private-home consistency, listener and actual connected TCP owner before steering
 through the fleet's native SSH forwarding. Private queues reach the same proven

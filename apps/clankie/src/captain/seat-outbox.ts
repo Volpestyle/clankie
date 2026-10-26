@@ -143,6 +143,8 @@ export interface SeatDeliveryInput {
   readonly source: string;
   readonly ownerOrigin?: OperatorOwnerTurnOrigin;
   readonly content: string;
+  /** A staged pointer on the wire; receipts and deduplication retain the full body. */
+  readonly channelContent?: string;
   /** An escalation holds its run open for the seat's answer; a wake or watch settles once taken. */
   readonly wantsReply: boolean;
   /** A supplied native binding pins every source to its original recipient. */
@@ -754,7 +756,7 @@ export class SeatOutbox {
         conversationId: input.conversationId,
         source: input.source,
         ...(input.ownerOrigin === undefined ? {} : { ownerOrigin: input.ownerOrigin }),
-        content: fitSeatChannel(input.content),
+        content: fitSeatChannel(input.channelContent ?? input.content),
         createdAt: new Date(this.now()).toISOString(),
       };
       input.original?.prepare({

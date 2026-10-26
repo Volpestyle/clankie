@@ -1,3 +1,4 @@
+import { stageWindowsMessage, stagedMessagePointer } from "./remote-seat-message.ts";
 import { discordGuildSettings } from "@clankie/protocol";
 import { listedOnLane } from "./mcp-tool-surface.ts";
 import { RoomLoops } from "./room-loops.ts";
@@ -143,7 +144,7 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
 import { NativePaneNotFoundError, nativeRequest } from "../herdr-native-request.ts";
 import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
@@ -712,7 +713,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         );
         return mailbox.bound() || mailbox.uncertain();
       },
-      deliver: async (seatId, text, source?: string, recipientBinding?: string) => {
+      deliver: async (seatId, text, source?: string, recipientBinding?: string, originalMessage?: string) => {
         const delivery = await fleetSeatMailbox(
           fleetMailboxes,
           seatId,
@@ -722,7 +723,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           kind: "message",
           conversationId: conversations.conversationIdForSeat(seatId) ?? seatId,
           source: source ?? "captain",
-          content: text,
+          content: originalMessage ?? text,
+          ...(originalMessage === undefined ? {} : { channelContent: text }),
           wantsReply: false,
           ...(recipientBinding === undefined ? {} : { recipientBinding }),
         });
@@ -3096,23 +3098,66 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const fallback = async (): Promise<FleetSeatDelivery> => {
       const live = fleetMailboxes.get(seatId);
       if (live?.boundTo(inboundBinding(current) ?? "") || live?.uncertain()) {
-        await deliveryOptions?.guard?.();
-        if (deliveryOptions?.fence && !(await deliveryOptions.fence(current)))
-          return {
-            outcome: "undelivered",
-            deliveryStage: "rejected",
-            detail: "Peer authority changed before mailbox delivery; nothing was sent.",
-          };
-        if (context.delivery && current?.session?.kind === "id" && current.status === "working")
-          live.observeTurn(current.session.value, "responding", { onlyIfUnknown: true });
-        return deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
-          ...context,
-          ...(deliveryOptions?.recipientBinding !== undefined
-            ? { recipientBinding: deliveryOptions.recipientBinding }
-            : context.delivery && inboundBinding(current)
-              ? { recipientBinding: inboundBinding(current)! }
-              : {}),
-        });
+        let staged: Awaited<ReturnType<typeof stageWindowsMessage>> | undefined;
+        let dispatched = false;
+        try {
+          const fleetId = current && splitFleetQualified(current.paneId)?.fleet;
+          const fleet = fleetId && (await refreshFleets()).find((entry) => entry.id === fleetId);
+          if (
+            current?.agent === "claude" &&
+            message.length > OPERATOR_CONVERSATION_TEXT_MAX &&
+            fleet &&
+            fleet.ssh.shell === "powershell"
+          ) {
+            const revision = fleetRevisions.get(fleet.id) ?? 0;
+            try {
+              staged = await stageWindowsMessage(async (...args) => {
+                await refreshFleets();
+                if ((fleetRevisions.get(fleet.id) ?? 0) !== revision || !deps.fleets?.shell)
+                  throw new Error("Machine connection changed");
+                return deps.fleets.shell(fleet)(...args);
+              }, message);
+            } catch (error) {
+              throw new HerdrFleetError("staging_failed", `Nothing was sent: ${String(error)}`, "not_sent");
+            }
+          }
+          if (staged) {
+            const observed = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+            if (
+              !observed ||
+              observed.paneId !== current?.paneId ||
+              inboundBinding(observed) !== inboundBinding(current)
+            )
+              return {
+                outcome: "undelivered",
+                deliveryStage: "unavailable",
+                detail: "The native recipient changed while staging; nothing was sent.",
+              };
+          }
+          await deliveryOptions?.guard?.();
+          if (deliveryOptions?.fence && !(await deliveryOptions.fence(current)))
+            return {
+              outcome: "undelivered",
+              deliveryStage: "rejected",
+              detail: "Peer authority changed before mailbox delivery; nothing was sent.",
+            };
+          if (context.delivery && current?.session?.kind === "id" && current.status === "working")
+            live.observeTurn(current.session.value, "responding", { onlyIfUnknown: true });
+          dispatched = true;
+          const result = await deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
+            ...context,
+            ...(staged === undefined ? {} : { channelContent: stagedMessagePointer(staged, message) }),
+            ...(deliveryOptions?.recipientBinding !== undefined
+              ? { recipientBinding: deliveryOptions.recipientBinding }
+              : context.delivery && inboundBinding(current)
+                ? { recipientBinding: inboundBinding(current)! }
+                : {}),
+          });
+          if (result.outcome === "undelivered" || result.outcome === "offline") dispatched = false;
+          return result;
+        } finally {
+          if (staged && !dispatched) await staged.remove().catch(() => undefined);
+        }
       }
       if (context.delivery === "steer")
         return {

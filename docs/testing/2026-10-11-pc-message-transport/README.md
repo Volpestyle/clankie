@@ -36,7 +36,7 @@ bootstrap exit 127 to 1; the unique launch marker still proves no child started.
   nonzero workspace check is retained beside the passing rerun.
 - Integrator supplies the required exact-tree root landing gate.
 
-## Open acceptance gaps
+## Historical acceptance gaps (updated 2026-10-26)
 
 This is the transport/receipt slice, not completed VUH-2135 acceptance. No real PC
 worker seat received a brief; existing KH2 panes were untouched. After landing
@@ -51,3 +51,9 @@ does not establish `message_seat` native acceptance.
 
 The raw logs, boundary probe and tested source provenance are in the evidence
 archive manifest beside this README.
+
+The Windows argv gap above was subsequently addressed by VUH-2258
+(`2d2d558fd`, `1718f70f1`), which stages full-size standalone queue bodies and
+sends a SHA-256 pointer. The [current verification and cleanup follow-up](../2026-10-26-vuh-2135/README.md)
+records the refreshed PC proof and live-seat acceptance; the original results
+above describe the October 11 slice.

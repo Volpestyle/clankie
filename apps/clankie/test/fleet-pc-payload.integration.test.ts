@@ -5,9 +5,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { expect, it } from "vitest";
 import { remoteCodexQueue } from "../src/captain/remote-codex-app-server.ts";
 import {
+  HerdrFleetError,
   createFleetShellRun,
   powershellScriptCommand,
   remoteProgramCommand,
+  powershellLiteral,
   type HerdrFleet,
 } from "../src/herdr-fleet.ts";
 
@@ -142,6 +144,111 @@ it.skipIf(!process.env.FLEET_PAYLOAD_PC_HOST)(
       expect(readBack.trim()).toBe(sha256);
     } finally {
       // Close only this proof's own SSH master; preserve every fleet connection.
+      const control = calls[0]?.find((arg) => arg.startsWith("ControlPath="));
+      if (control)
+        await new Promise<void>((resolve) =>
+          execFile("ssh", ["-o", control, "-O", "exit", "--", host], () => resolve()),
+        );
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+// Exercise the cleanup boundary with real PC files and shell transport. Queue
+// dispatch is deliberately refused/faulted here: no live seat is ever targeted.
+it
+  .skipIf(!process.env.FLEET_PAYLOAD_PC_HOST)
+  .each(["mismatch", "stage_lost_reply", "guard", "not_sent", "uncertain", "accepted"] as const)(
+  "cleans or retains a staged PC body after %s without replay",
+  async (mode) => {
+    const root = await mkdtemp("/tmp/cc-");
+    const host = process.env.FLEET_PAYLOAD_PC_HOST!;
+    const pc: HerdrFleet = { id: "cleanup-proof", session: "default", ssh: { host, shell: "powershell" } };
+    const calls: string[][] = [];
+    const run: typeof execFile = ((file: string, args: string[], options: object, callback: Function) => {
+      calls.push(args);
+      return execFile(file, args, options, callback as never);
+    }) as typeof execFile;
+    const shell = createFleetShellRun(pc, { controlDirectory: root, execFile: run });
+    const text = "VUH-2135 cleanup proof ".repeat(2_000).slice(0, 32_768);
+    const sha256 = createHash("sha256").update(text).digest("hex");
+    const records: object[] = [];
+    try {
+      let path: string | undefined;
+      let nativeCalls = 0;
+      const failure = new HerdrFleetError(
+        "fleet_command_failed",
+        "injected queue boundary failure",
+        mode === "not_sent" ? "not_sent" : undefined,
+      );
+      const transport = async (command: string, timeoutMs?: number) => {
+        const script = Buffer.from(/-EncodedCommand (\S+)$/u.exec(command)![1]!, "base64").toString(
+          "utf16le",
+        );
+        if (script.includes("Get-Command node -CommandType Application")) {
+          nativeCalls += 1;
+          if (mode === "accepted") return "queued";
+          throw failure;
+        }
+        const stdout = await shell(command, timeoutMs);
+        if (script.includes("WriteAllBytes")) {
+          path = stdout.trim().split("|")[0]!;
+          if (mode === "mismatch") return path + "|wrong-hash";
+          if (mode === "stage_lost_reply") throw new Error("staging reply lost after write");
+        }
+        return stdout;
+      };
+      try {
+        const outcome = await remoteCodexQueue(pc, transport)(
+          randomUUID(),
+          text,
+          async () => mode !== "guard",
+        ).catch((error: unknown) => error);
+        if (process.env.FLEET_PAYLOAD_EVIDENCE)
+          appendFileSync(
+            process.env.FLEET_PAYLOAD_EVIDENCE,
+            JSON.stringify({
+              cleanupAttempt: mode,
+              path,
+              outcome: outcome instanceof Error ? String(outcome) : outcome,
+            }) + "\n",
+          );
+        expect(path).toBeTruthy();
+        const retained = mode === "uncertain" || mode === "accepted";
+        const observed = (
+          await shell(
+            powershellScriptCommand(
+              `$path = ${powershellLiteral(path!)}; if (Test-Path -LiteralPath $path) { $b = [IO.File]::ReadAllBytes($path); [Console]::WriteLine([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($b)).Replace('-','').ToLowerInvariant()) } else { [Console]::WriteLine('absent') }`,
+            ),
+          )
+        ).trim();
+        expect(observed).toBe(retained ? sha256 : "absent");
+        expect(nativeCalls).toBe(
+          mode === "mismatch" || mode === "stage_lost_reply" || mode === "guard" ? 0 : 1,
+        );
+        if (mode === "uncertain" || mode === "not_sent") expect(outcome).toBe(failure);
+        else if (mode === "accepted") expect(outcome).toBe(true);
+        else expect(outcome).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+        records.push({
+          mode,
+          observed,
+          nativeCalls,
+          outcome: outcome instanceof Error ? String(outcome) : outcome,
+        });
+      } finally {
+        // This probe acts as the consuming reader for retained files.
+        if (path) {
+          await shell(
+            powershellScriptCommand(
+              `if (Test-Path -LiteralPath ${powershellLiteral(path)}) { Remove-Item -LiteralPath ${powershellLiteral(path)} -Force }; Test-Path -LiteralPath ${powershellLiteral(path)}`,
+            ),
+          ).then((stdout) => expect(stdout.trim()).toBe("False"));
+        }
+      }
+      if (process.env.FLEET_PAYLOAD_EVIDENCE)
+        appendFileSync(process.env.FLEET_PAYLOAD_EVIDENCE, JSON.stringify({ cleanup: records }) + "\n");
+    } finally {
       const control = calls[0]?.find((arg) => arg.startsWith("ControlPath="));
       if (control)
         await new Promise<void>((resolve) =>

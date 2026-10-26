@@ -81,8 +81,11 @@ export interface ClaudeWorkerSeatDeps {
       text: string,
       source?: string,
       recipientBinding?: string,
+      originalMessage?: string,
     ): Promise<boolean | Extract<SeatDelivery, { readonly outcome: "unconfirmed" | "accepted" }>>;
   };
+  /** Stage an oversized body on the launch host before the final dispatch checks. */
+  readonly prepareMessage?: (text: string) => Promise<{ text: string; remove(): Promise<void> } | undefined>;
   /**
    * The seat's pane: its styled visible screen and one named key press there.
    * Absent, the seat offers no Stop (VUH-2680).
@@ -858,91 +861,120 @@ class ClaudeWorkerSeatControl implements SeatControl {
       };
     if (!this.deps.mailbox.bound(agent.terminalId))
       return { outcome: "released", deliveryStage: "unavailable" };
-    const before = await transcriptBefore(this.deps, agent);
-    const current = await this.observe();
-    if (current?.agent === undefined || current.agent.terminalId !== agent.terminalId)
-      return {
-        outcome: "offline",
-        deliveryStage: "unavailable",
-        detail: "The seat binding changed before dispatch",
-      };
-    if (options?.beforeDispatch && !(await options.beforeDispatch().catch(() => false)))
-      return {
-        outcome: "offline",
-        deliveryStage: "unavailable",
-        detail: "Peer authority changed before channel dispatch; no message was sent",
-      };
+    const originalMessage = message;
+    let prepared: { text: string; remove(): Promise<void> } | undefined;
     try {
-      this.deps.hooks.beginDispatch(this.ref, agent.terminalId);
-    } catch {
+      prepared = await this.deps.prepareMessage?.(message);
+    } catch (error) {
       return {
-        outcome: "unconfirmed",
+        outcome: "offline",
         deliveryStage: "unavailable",
-        messageId: "",
-        detail: "The settlement boundary could not be saved; no message was sent",
+        detail: `The message could not be staged; nothing was sent: ${String(error)}`,
       };
     }
-    const delivery = await (options?.recipientBinding !== undefined
-      ? this.deps.mailbox.deliver(agent.terminalId, message, options.source, options.recipientBinding)
-      : options?.source === undefined
-        ? this.deps.mailbox.deliver(agent.terminalId, message)
-        : this.deps.mailbox.deliver(agent.terminalId, message, options.source));
-    // A bridge ACK only proves a stdout write. In particular Claude can lose
-    // that notification during startup. Require the exact native prompt too.
-    if (typeof delivery !== "boolean" && delivery.outcome === "unconfirmed")
-      return { ...delivery, deliveryStage: "uncertain" };
-    if (!delivery) return { outcome: "released", deliveryStage: "unavailable" };
-    const id = await receipt(
-      this.deps,
-      agent,
-      message,
-      before.ids,
-      options?.timeoutMs ?? this.receiptMs,
-      this.pollMs,
-    );
-    const after = await this.observe();
-    if (after?.agent === undefined || after.agent.terminalId !== agent.terminalId)
-      return {
-        outcome: "unconfirmed",
-        deliveryStage: "uncertain",
-        messageId: id ?? "",
-        detail: "The seat binding became unavailable after channel dispatch; completion is unknown",
-      };
-    if (id === undefined) {
-      // Claude writes a channel event that arrives mid-turn to its transcript
-      // only when it absorbs it at the next tool boundary, often minutes later
-      // (VUH-2779). The exact bridge ACK plus a receiver this session already
-      // proved, and a turn still running, is a queued delivery, not an unknown one.
-      const sessionId = sessionIdOf(agent);
-      if (
-        typeof delivery !== "boolean" &&
-        (after.status === "working" || after.status === "blocked") &&
-        (before.channel || (sessionId !== undefined && this.channels.has(sessionId)))
-      )
+    if (prepared) message = prepared.text;
+    let keepPrepared = false;
+    try {
+      const before = await transcriptBefore(this.deps, agent);
+      const current = await this.observe();
+      if (current?.agent === undefined || current.agent.terminalId !== agent.terminalId)
         return {
-          outcome: "accepted",
-          deliveryStage: "delivered",
-          messageId: delivery.messageId,
-          state: "queued",
-          detail:
-            "Claude's channel took it during an active turn; Claude records it when it next pauses between steps. Not proof it was read.",
+          outcome: "offline",
+          deliveryStage: "unavailable",
+          detail: "The seat binding changed before dispatch",
         };
+      if (options?.beforeDispatch && !(await options.beforeDispatch().catch(() => false)))
+        return {
+          outcome: "offline",
+          deliveryStage: "unavailable",
+          detail: "Peer authority changed before channel dispatch; no message was sent",
+        };
+      try {
+        this.deps.hooks.beginDispatch(this.ref, agent.terminalId);
+      } catch {
+        return {
+          outcome: "unconfirmed",
+          deliveryStage: "unavailable",
+          messageId: "",
+          detail: "The settlement boundary could not be saved; no message was sent",
+        };
+      }
+      keepPrepared = true;
+      const delivery = await (prepared
+        ? this.deps.mailbox.deliver(
+            agent.terminalId,
+            message,
+            options?.source,
+            options?.recipientBinding,
+            originalMessage,
+          )
+        : options?.recipientBinding !== undefined
+          ? this.deps.mailbox.deliver(agent.terminalId, message, options.source, options.recipientBinding)
+          : options?.source === undefined
+            ? this.deps.mailbox.deliver(agent.terminalId, message)
+            : this.deps.mailbox.deliver(agent.terminalId, message, options.source));
+      // A bridge ACK only proves a stdout write. In particular Claude can lose
+      // that notification during startup. Require the exact native prompt too.
+      if (typeof delivery !== "boolean" && delivery.outcome === "unconfirmed")
+        return { ...delivery, deliveryStage: "uncertain" };
+      if (!delivery) {
+        keepPrepared = false;
+        return { outcome: "released", deliveryStage: "unavailable" };
+      }
+      const id = await receipt(
+        this.deps,
+        agent,
+        message,
+        before.ids,
+        options?.timeoutMs ?? this.receiptMs,
+        this.pollMs,
+      );
+      const after = await this.observe();
+      if (after?.agent === undefined || after.agent.terminalId !== agent.terminalId)
+        return {
+          outcome: "unconfirmed",
+          deliveryStage: "uncertain",
+          messageId: id ?? "",
+          detail: "The seat binding became unavailable after channel dispatch; completion is unknown",
+        };
+      if (id === undefined) {
+        // Claude writes a channel event that arrives mid-turn to its transcript
+        // only when it absorbs it at the next tool boundary, often minutes later
+        // (VUH-2779). The exact bridge ACK plus a receiver this session already
+        // proved, and a turn still running, is a queued delivery, not an unknown one.
+        const sessionId = sessionIdOf(agent);
+        if (
+          typeof delivery !== "boolean" &&
+          (after.status === "working" || after.status === "blocked") &&
+          (before.channel || (sessionId !== undefined && this.channels.has(sessionId)))
+        )
+          return {
+            outcome: "accepted",
+            deliveryStage: "delivered",
+            messageId: delivery.messageId,
+            state: "queued",
+            detail:
+              "Claude's channel took it during an active turn; Claude records it when it next pauses between steps. Not proof it was read.",
+          };
+        return {
+          outcome: "unconfirmed",
+          deliveryStage: "uncertain",
+          messageId: typeof delivery === "boolean" ? "" : delivery.messageId,
+          detail: "The worker channel took the message, but it has not appeared in the session transcript",
+        };
+      }
+      const sessionId = sessionIdOf(agent);
+      if (sessionId !== undefined) remember(this.channels, sessionId);
       return {
-        outcome: "unconfirmed",
-        deliveryStage: "uncertain",
-        messageId: typeof delivery === "boolean" ? "" : delivery.messageId,
-        detail: "The worker channel took the message, but it has not appeared in the session transcript",
+        outcome: "accepted",
+        deliveryStage: "consumed",
+        messageId: id,
+        // Transcript insertion can be a queued attachment, even while Herdr still looks idle.
+        state: "queued",
       };
+    } finally {
+      if (prepared && !keepPrepared) await prepared.remove().catch(() => undefined);
     }
-    const sessionId = sessionIdOf(agent);
-    if (sessionId !== undefined) remember(this.channels, sessionId);
-    return {
-      outcome: "accepted",
-      deliveryStage: "consumed",
-      messageId: id,
-      // Transcript insertion can be a queued attachment, even while Herdr still looks idle.
-      state: "queued",
-    };
   }
 
   public async settled(signal?: AbortSignal, _messageId?: string, armedAt?: string): Promise<SeatEvent> {

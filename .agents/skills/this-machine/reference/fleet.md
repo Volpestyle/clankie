@@ -90,6 +90,14 @@ endpoint proof immediately before sending; a timeout means undelivered. The SSH
 `codex queue` fallback runs only for a proven default-home standalone TUI: private
 or unproved homes refuse it, a private native receipt never authorizes a second
 send, and an unavailable endpoint grants no tools or authority to another session.
+A Windows default-home queue message whose escaped command line exceeds 30,000
+characters, or a PC Claude body above its 16,384-character channel bound, is
+staged as UTF-8 on the PC, hash-verified, and delivered as a short
+path/SHA-256 pointer. The receiver reads and verifies the complete body, then
+removes the file. Staging failures, authority refusals and proven pre-launch
+failures attempt immediate cleanup of that send's generated file. Accepted or
+uncertain pointers retain it for consumption; abandoned files older than seven
+days are pruned on a later staging write. Cleanup failure never changes a receipt.
 A reset, timeout or lost native acknowledgment is uncertain and must not be
 replayed. Automated briefs and messages never fall back to terminal typing. Remote
 hire addresses carry their fleet (`<fleet>/wC:p2`); address normalization never

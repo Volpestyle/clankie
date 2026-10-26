@@ -9,6 +9,7 @@ import { SeatOutbox, type SeatDeliveryEvent } from "./seat-outbox.ts";
 
 export interface FleetSeatMessageContext {
   readonly conversationId: string;
+  readonly channelContent?: string;
   readonly source: string;
   readonly recipientBinding?: string;
   readonly delivery?: "steer" | "queue";
@@ -163,6 +164,7 @@ export async function deliverFleetSeatMessage(
         conversationId: context.conversationId,
         source: context.source,
         content: message,
+        ...(context.channelContent === undefined ? {} : { channelContent: context.channelContent }),
         wantsReply: false,
         onAdmitted: (state) => {
           if (context.delivery !== undefined)

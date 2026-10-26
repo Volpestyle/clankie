@@ -4,10 +4,18 @@
  * later. Real seat adapter, mailbox, hook log, fleet seat control and remote
  * transcript reader, over a Claude JSONL in the shapes a PC seat wrote.
  */
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { createLocalAgentHost } from "@clankie/agent-hosts";
 import { SeatHookLog, createClaudeWorkerSeatAdapter } from "../src/captain/claude-worker-seat.ts";
@@ -29,7 +37,12 @@ function channelPrompt(id: string, text: string): string {
   return `<channel source="${SERVER}" kind="message" conversation="pc/term_1" source="captain" event_id="${id}" created_at="${new Date().toISOString()}">\n${text}\n</channel>`;
 }
 
-function fixture(options: { earlierChannel: boolean; absorbAfterMs: number; inFlightWaitMs?: number }) {
+function fixture(options: {
+  earlierChannel: boolean;
+  absorbAfterMs: number;
+  inFlightWaitMs?: number;
+  staged?: boolean;
+}) {
   const home = mkdtempSync(join(tmpdir(), "claude-mid-turn-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
   const projects = join(home, ".claude", "projects", "-w");
@@ -137,7 +150,21 @@ function fixture(options: { earlierChannel: boolean; absorbAfterMs: number; inFl
     return read(snapshot);
   };
   const hooks = new SeatHookLog(join(home, "hooks.json"));
+  const stagedPath = join(home, "staged-message.txt");
   const adapter = createClaudeWorkerSeatAdapter({
+    ...(options.staged
+      ? {
+          prepareMessage: async (text: string) => {
+            writeFileSync(stagedPath, text);
+            return {
+              text: `Read the complete message at ${stagedPath}; SHA-256 ${createHash("sha256").update(text).digest("hex")}. Delete after reading.`,
+              remove: async () => {
+                rmSync(stagedPath, { force: true });
+              },
+            };
+          },
+        }
+      : {}),
     consent: async () => ({ approved: true }),
     hooks,
     agent: async () => agent(),
@@ -145,12 +172,13 @@ function fixture(options: { earlierChannel: boolean; absorbAfterMs: number; inFl
     mailbox: {
       bound: () => mailbox.bound() || mailbox.uncertain(),
       // As the service maps its fleet mailbox for Claude seats.
-      deliver: async (_seatId, text) => {
+      deliver: async (_seatId, text, _source, _binding, originalMessage) => {
         const delivery = await mailbox.deliver({
           kind: "message",
           conversationId: "pc/term_1",
           source: "captain",
-          content: text,
+          content: originalMessage ?? text,
+          ...(originalMessage === undefined ? {} : { channelContent: text }),
           wantsReply: false,
         });
         return delivery.outcome === "unconfirmed"
@@ -194,6 +222,8 @@ function fixture(options: { earlierChannel: boolean; absorbAfterMs: number; inFl
   );
   return {
     adapter,
+    stagedPath,
+    mailbox,
     control,
     absorbed,
     /** Every message the bridge wrote to Claude, in order. */
@@ -342,3 +372,21 @@ it("never reports a message that lost the recipient at its dispatch recheck as u
   expect(await lead).toMatchObject({ outcome: "delivered" });
   expect(f.taken).toEqual(["VUH-2779 lead probe"]);
 });
+
+it.each([20_480, 32_768])(
+  "delivers an oversized %i-character body by pointer without clipping or losing original receipts",
+  async (size) => {
+    const f = fixture({ earlierChannel: false, absorbAfterMs: 10, staged: true });
+    expect((await f.resume()).outcome).toBe("started");
+    const text = "VUH-2135 full-body proof\n".repeat(2_000).slice(0, size);
+    const result = await f.control.deliverToSeat("term_1", text);
+    expect(result).toMatchObject({ outcome: "delivered", deliveryStage: "consumed" });
+    expect(f.taken).toHaveLength(1);
+    expect(f.taken[0]!.length).toBeLessThan(16_384);
+    expect(f.taken[0]).not.toContain("Clipped");
+    expect(f.mailbox.receipt(text)).toMatchObject({ outcome: "delivered" });
+    expect(readFileSync(f.stagedPath, "utf8")).toBe(text);
+    rmSync(f.stagedPath);
+    expect(existsSync(f.stagedPath)).toBe(false);
+  },
+);

@@ -1,9 +1,10 @@
+import { stageWindowsMessage, stagedMessagePointer } from "./remote-seat-message.ts";
 import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 import { LINEAR_MCP_RESOURCE } from "@clankie/credential-broker";
 import { z } from "zod";
 import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
-import { CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
+import { CLAUDE_WORKER_PLUGIN_ID, OPERATOR_CONVERSATION_TEXT_MAX } from "@clankie/protocol";
 import {
   posixQuote,
   posixScriptCommand,
@@ -303,6 +304,11 @@ export function createRemoteClaudeWorkerSeatAdapter(
 ): HarnessSeatAdapter {
   return createClaudeWorkerSeatAdapter({
     ...deps,
+    prepareMessage: async (text) => {
+      if (fleet.ssh.shell !== "powershell" || text.length <= OPERATOR_CONVERSATION_TEXT_MAX) return undefined;
+      const staged = await stageWindowsMessage(shell, text);
+      return { text: stagedMessagePointer(staged, text), remove: staged.remove };
+    },
     consent: remoteClaudeConsent(fleet, shell),
     trackerDeny: remoteClaudeTrackerDeny(fleet, shell),
     settingsArg: remoteClaudeSettings(fleet, shell),
