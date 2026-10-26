@@ -186,6 +186,9 @@ const HerdrWatchRecordSchema = z
     /** Native accepted turn identity; never infer its completion from another idle turn. */
     messageId: z.string().min(1).max(512).optional(),
     wakeReceipt: HerdrWatchWakeReceiptSchema.optional(),
+    /** A nonterminal working notice was accepted; retain observation without repeating it. */
+    workingNoticeDelivered: z.boolean().optional(),
+    noticeSequence: z.number().int().nonnegative().optional(),
     reason: z.string().min(1),
     createdAt: z.string().min(1),
     discord: DiscordWatchOriginSchema.optional(),
@@ -5830,9 +5833,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   private async run(record: HerdrWatchRecord, signal: AbortSignal): Promise<void> {
     let prompt: string;
-    // A clean completion can wait for the lead's round; a gone pane, an
-    // unverified or failed turn, or a pane waiting on someone is heard now.
+    // Clean completions and unverified working observations join the round.
+    // Gone, failed and waiting workers still need attention at once.
     let routine = false;
+    let workingObservation = false;
+    let observedPane: HerdrAgentSnapshot | undefined;
     let harvestMessageId = record.messageId;
     let completion: z.infer<typeof NativeCompletionSchema> | undefined;
     try {
@@ -5843,6 +5848,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return;
       }
       if (this.endsOnNativeChange(record, current)) return;
+      if (current?.status !== "working" && record.workingNoticeDelivered) {
+        delete record.workingNoticeDelivered;
+        this.save();
+      }
       if (current === undefined || current.status === "unknown") {
         prompt = watchPrompt(record, current, "The watched pane is gone.");
       } else {
@@ -5869,7 +5878,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           const after = await this.runner.resolveTerminal(record.terminalId).catch(() => undefined);
           if (this.endsOnNativeChange(record, after)) return;
           prompt = watchPrompt(record, after ?? current, undefined, event);
-          routine = event.type === "turn_completed" && event.ok;
+          observedPane = after ?? current;
+          workingObservation =
+            event.type === "settlement_unconfirmed" &&
+            event.observedStop?.ok !== false &&
+            observedPane.status === "working";
+          routine = (event.type === "turn_completed" && event.ok) || workingObservation;
         } else {
           const settled = SETTLED_STATUSES.has(current.status)
             ? current
@@ -5878,7 +5892,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           // A transcript that cannot be read leaves the ordinary no-report wake.
           const reply = await this.lastReply?.(settled).catch(() => undefined);
           prompt = watchPrompt(record, settled, undefined, undefined, reply?.trim() || undefined);
-          routine = settled.status === "done" || settled.status === "idle";
+          observedPane = settled;
+          workingObservation = settled.status === "working";
+          routine = settled.status === "done" || settled.status === "idle" || workingObservation;
         }
       }
     } catch {
@@ -5890,6 +5906,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return;
     }
     if (signal.aborted) return;
+    if (workingObservation && record.workingNoticeDelivered) {
+      // Re-read native completion on retry: a correlated completion or failure
+      // outranks an unchanged pane status. Never harvest this message as done.
+      await this.retryWorking(record, observedPane, signal);
+      return;
+    }
     try {
       const owner = this.watchOwner(record);
       if (owner === undefined) {
@@ -5914,7 +5936,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           nativeChanged
         )
           throw new Error("The watched worker changed its leading conversation before acceptance");
-        if (record.hired && harvestMessageId && record.occupantId) {
+        if (!workingObservation && record.hired && harvestMessageId && record.occupantId) {
           const claim = this.harvestClaim(record.terminalId, record.occupantId, harvestMessageId);
           const superseded =
             record.messageId === undefined &&
@@ -5946,7 +5968,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // Watches retain their existing owner and prompt with an optional exact receipt
       // reservation. Automatic harvests also refresh adoption at the host boundary.
       const original: HerdrWatchWakeContext = {
-        messageId: `seat-watch-${record.id}`,
+        messageId: `seat-watch-${record.id}${record.noticeSequence ? `-${record.noticeSequence}` : ""}`,
         get receipt() {
           return record.wakeReceipt;
         },
@@ -5968,13 +5990,36 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
       if (!this.wake) return;
       if (routine && owner.discord === undefined && record.wakeReceipt === undefined) {
-        await this.awaitRound?.(owner.conversationId, signal);
+        // A blocker arriving before the round must not wait behind this notice.
+        const waiting = new AbortController();
+        const abort = () => waiting.abort();
+        signal.addEventListener("abort", abort, { once: true });
+        try {
+          const round = this.awaitRound?.(owner.conversationId, waiting.signal).then(() => "round");
+          const change =
+            round && workingObservation && observedPane && this.runner.waitForChange
+              ? this.runner.waitForChange(observedPane.paneId, "working", waiting.signal).then(() => "change")
+              : undefined;
+          if ((await (change && round ? Promise.race([round, change]) : round)) === "change") {
+            this.retry(record, 0);
+            return;
+          }
+        } finally {
+          waiting.abort();
+          signal.removeEventListener("abort", abort);
+        }
         if (signal.aborted || this.closed || !this.state.watches.some((watch) => watch.id === record.id))
           return;
       }
       const result = await this.wake(owner.conversationId, prompt, owner.discord, guard, original);
       if (result === "deferred") this.retry(record);
-      else this.remove(record.id);
+      else if (workingObservation) {
+        record.workingNoticeDelivered = true;
+        record.noticeSequence = (record.noticeSequence ?? 0) + 1;
+        delete record.wakeReceipt;
+        this.save();
+        await this.retryWorking(record, observedPane, signal);
+      } else this.remove(record.id);
     } catch (error) {
       if (error instanceof HerdrWatchWakeAbandonedError) {
         this.settle(record, "wake_abandoned", record.wakeReceipt?.messageId);
@@ -6062,12 +6107,37 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.remove(record.id);
   }
 
-  private retry(record: HerdrWatchRecord): void {
+  /** Observe state changes promptly, but still check native completion if status stays working. */
+  private async retryWorking(
+    record: HerdrWatchRecord,
+    pane: HerdrAgentSnapshot | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!pane || !this.runner.waitForChange) {
+      this.retry(record);
+      return;
+    }
+    const waiting = new AbortController();
+    const abort = () => waiting.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    await Promise.race([
+      delay(RETRY_ADMISSION_MS),
+      this.runner.waitForChange(pane.paneId, "working", waiting.signal),
+    ])
+      .catch(() => undefined)
+      .finally(() => {
+        waiting.abort();
+        signal.removeEventListener("abort", abort);
+        if (!signal.aborted) this.retry(record, 0);
+      });
+  }
+
+  private retry(record: HerdrWatchRecord, delayMs = RETRY_ADMISSION_MS): void {
     if (this.closed) return;
     const timer = setTimeout(() => {
       this.retryTimers.delete(timer);
       if (this.state.watches.some((watch) => watch.id === record.id)) this.launch(record);
-    }, RETRY_ADMISSION_MS);
+    }, delayMs);
     timer.unref?.();
     this.retryTimers.add(timer);
   }

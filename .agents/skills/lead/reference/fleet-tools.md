@@ -115,7 +115,7 @@ their fleet prefix (`FLEET/term_…`); a local pane ID is a different terminal.
 Use the returned seat ID with `herdr_watch` when a completion watch is needed,
 and reuse an existing one. An accepted Codex follow-up arms a harvest for its
 exact native turn, so add no explicit watch for it. While your native seat is
-idle, routine reports and clean completion watches arrive together in report
+idle, routine reports, clean completions and unverified working watches arrive together in report
 batches (at most ten minutes apart); an urgent report, an owner turn or any
 other wake brings the waiting ones with it.
 
