@@ -29,13 +29,13 @@ The service performs the handshake:
 3. The destination must be a channel where Clankie's own bot posted the launch:
    a successful `activity_start` presence write records it, and `activity_stop`
    retires it and stops its shares. Each launch is its own incarnation and
-   owns the shares it opened or first claimed; a relaunch retires the previous
-   one. An admission rechecks its launch after every lookup, opening and grant.
-   Stop waits for a retired launch's in-flight opening, then ends only the
-   shares retired launches own. So nothing begun before a stop reaches media
-   after it, and a stale admission's cleanup never reaches a share the
-   replacement launch already granted. A participant in an instance someone
-   else started gets nothing.
+   owns the shares it opened or claimed; a relaunch retires the previous one.
+   Admissions and stop cleanup for one channel run one at a time, so choosing,
+   claiming and granting a share never interleaves with cleanup ending it. An
+   admission rechecks its launch after every await and, once that launch is
+   retired, ends what it took and refuses. Stop ends only retired launches'
+   shares, so a replacement launch's media survives an older launch's cleanup.
+   A participant in an instance someone else started gets nothing.
 4. It grants the channel's play share, opening one on first admission while play
    is running, and returns `{session,grant,expiresAt,mediaPath,accessToken}`.
 

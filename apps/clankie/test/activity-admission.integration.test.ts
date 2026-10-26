@@ -141,11 +141,15 @@ async function stack(options: { clientSecret?: string | undefined } = {}) {
     hold: Promise<void>;
     reached: () => void;
   }[] = [];
-  const hold = (method: string, path: string) => {
+  const hold = (method: string, path: string | RegExp) => {
     let release!: () => void, reached!: () => void;
     const held = new Promise<void>((done) => (release = done));
     const arrived = new Promise<void>((done) => (reached = done));
-    gates.push({ match: (m, p) => m === method && p === path, hold: held, reached });
+    gates.push({
+      match: (m, p) => m === method && (typeof path === "string" ? p === path : path.test(p)),
+      hold: held,
+      reached,
+    });
     return { release, arrived };
   };
   const sharing = new ActivitySharing({
@@ -322,6 +326,8 @@ it("fails closed with a clear reason when the client secret is not stored", asyn
   expect(s.shares.stats()).toHaveLength(0);
 });
 
+// Admission and stop for one channel run one at a time: a stop or a
+// replacement waits for the held operation, then the stale one is refused.
 it("an admission waiting on its lookup when the launch stops gets nothing", async () => {
   const s = await stack();
   s.play.createSink("FireRed");
@@ -329,8 +335,9 @@ it("an admission waiting on its lookup when the launch stops gets nothing", asyn
   const lookup = s.hold("GET", "/shares");
   const pending = s.admit("member-code", "i-here");
   await lookup.arrived;
-  await s.launches.stopped(GUILD, CHANNEL);
+  const stopping = s.launches.stopped(GUILD, CHANNEL);
   lookup.release();
+  await stopping;
   expect((await pending).status).toBe(403);
   expect(s.shares.stats()).toHaveLength(0);
 });
@@ -356,9 +363,10 @@ it("a relaunch does not revive an admission begun under the stopped launch", asy
   const lookup = s.hold("GET", "/shares");
   const stale = s.admit("member-code", "i-here");
   await lookup.arrived;
-  await s.launches.stopped(GUILD, CHANNEL);
+  const stopping = s.launches.stopped(GUILD, CHANNEL);
   s.launches.launched(GUILD, CHANNEL);
   lookup.release();
+  await stopping;
   expect((await stale).status).toBe(403);
   const fresh = await s.admit("member-code", "i-here");
   expect(fresh.status).toBe(200);
@@ -427,16 +435,19 @@ it("the authenticated presence route records the bot's launch and stop", async (
   expect((await s.admit("member-code", "i-here")).status).toBe(403);
 });
 
-// Adapted from the reviewer's probe: a launch's cleanup never reaches media
-// granted under the launch that replaced it, and without a replacement the
-// second viewer shares the first viewer's opening.
+// Adapted from the reviewer's probes: a launch's cleanup never reaches media
+// granted under the launch that replaced it, including when the replacement's
+// grant response is itself delayed; without a replacement the second viewer
+// shares the first viewer's share.
 it.each([
-  { replacement: "none" },
-  { replacement: "relaunch" },
-  { replacement: "stop then relaunch" },
+  { replacement: "none", delayGrant: false },
+  { replacement: "relaunch", delayGrant: false },
+  { replacement: "relaunch", delayGrant: true },
+  { replacement: "stop then relaunch", delayGrant: false },
+  { replacement: "stop then relaunch", delayGrant: true },
 ] as const)(
-  "a fresh viewer keeps its stream when a held opening resolves ($replacement)",
-  async ({ replacement }) => {
+  "a fresh viewer keeps its stream when a held opening resolves ($replacement, delayed grant: $delayGrant)",
+  async ({ replacement, delayGrant }) => {
     const s = await stack();
     const playSink = s.play.createSink("FireRed");
     s.launches.launched(GUILD, CHANNEL);
@@ -445,7 +456,16 @@ it.each([
     await opening.arrived;
     const stopping = replacement === "stop then relaunch" ? s.launches.stopped(GUILD, CHANNEL) : undefined;
     if (replacement !== "none") s.launches.launched(GUILD, CHANNEL);
-    const fresh = await s.admit("member-code", "i-here");
+    const granting = delayGrant ? s.hold("POST", /^\/shares\/[^/]+\/grant$/u) : undefined;
+    const pending = s.admit("member-code", "i-here");
+    opening.release();
+    expect((await stale).status).toBe(replacement === "none" ? 200 : 403);
+    await stopping;
+    if (granting !== undefined) {
+      await granting.arrived;
+      granting.release();
+    }
+    const fresh = await pending;
     expect(fresh.status).toBe(200);
     const socket = new WebSocket(`ws://127.0.0.1:${s.viewerPort}${fresh.body.mediaPath}`, {
       headers: TUNNEL,
@@ -461,9 +481,6 @@ it.each([
     });
     socket.send(JSON.stringify({ kind: "admit", grant: fresh.body.grant }));
     await vi.waitFor(() => expect(messages[0]?.kind).toBe("session"));
-    opening.release();
-    expect((await stale).status).toBe(replacement === "none" ? 200 : 403);
-    await stopping;
     expect(s.shares.stats()).toHaveLength(1);
     playSink.publishFrame({ ...frame, schemaVersion: 1, surface: "gba_emulator", frame: 1 });
     await vi.waitFor(() => expect(messages.some((message) => message.kind === "frame")).toBe(true));
