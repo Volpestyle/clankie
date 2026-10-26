@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "reproof.zip",
+      "size": 26040,
+      "sha256": "7a00b1a6975084f9c0d1675d7bc5fd6990963a6f5a2dc10f84de5d42dfaf217d",
+      "url": "clankie://evidence/sha256/7a00b1a6975084f9c0d1675d7bc5fd6990963a6f5a2dc10f84de5d42dfaf217d"
+    }
+  ]
+}
