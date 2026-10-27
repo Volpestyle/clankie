@@ -51,7 +51,6 @@ import {
   INBOX_TOOLS,
   type InboxPendingFence,
   readTrackerStoreRecords,
-  readTrackerStoreSnapshot,
   refuseBuiltInTrackerFeatures,
   trackerArgumentReferences,
   TRACKER_OWNER,
@@ -575,51 +574,17 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       }));
-  // Every built-in tracker project each record reference may belong to, rebuilt when the store
-  // changes. Only a readable, valid store is cached; anything else refuses (VUH-2829).
-  let recordProjects: { version: string; index: Map<string, Set<string>> } | undefined;
-  const builtInRecordProjects = async () => {
-    const path = join(
-      options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"),
-      "tracker.json",
-    );
-    // Taken before the read, so a racing write leaves a stale version and the next call rereads.
-    const version = trackerVersion(path);
-    if (recordProjects?.version === version) return recordProjects.index;
-    const unusable = () =>
-      new WorkRequestError(
+  const routingTracker = openBuiltIn();
+  const builtInRecordProjects = async (references: readonly string[]) => {
+    try {
+      return await routingTracker.referenceProjects(references);
+    } catch {
+      // A missing, damaged or replaced store must never become "no cut-over item".
+      throw new WorkRequestError(
         "backend_unavailable",
         "The built-in tracker that holds cut-over projects cannot be read, so this tracker call has nowhere safe to go.",
       );
-    // The tracker's own validation: a snapshot it would refuse never reads as "no cut-over item".
-    let store: Readonly<Record<string, unknown>> | undefined;
-    try {
-      store = await readTrackerStoreSnapshot(dirname(path));
-    } catch {
-      throw unusable();
     }
-    if (store === undefined) throw unusable();
-    const index = new Map<string, Set<string>>();
-    const records = (key: string) =>
-      (Array.isArray(store[key]) ? store[key] : []) as Record<string, unknown>[];
-    const add = (value: unknown, projectId: unknown) => {
-      if (typeof value !== "string" || typeof projectId !== "string") return;
-      const key = value.toLowerCase();
-      index.set(key, (index.get(key) ?? new Set()).add(projectId));
-    };
-    for (const project of records("projects"))
-      for (const value of [project.id, project.name, project.slugId]) add(value, project.id);
-    const issueProjects = new Map<unknown, unknown>();
-    for (const issue of records("issues")) {
-      issueProjects.set(issue.id, issue.projectId);
-      const previous = Array.isArray(issue.previousIdentifiers) ? issue.previousIdentifiers : [];
-      for (const value of [issue.id, issue.identifier, ...previous]) add(value, issue.projectId);
-    }
-    for (const key of ["comments", "statusUpdates", "documents", "milestones"])
-      for (const record of records(key))
-        add(record.id, record.projectId ?? issueProjects.get(record.issueId));
-    recordProjects = { version, index };
-    return index;
   };
   /** The tracker project the owner bound this workspace's settings project to, if any. */
   const builtInBinding = async (path: string): Promise<TrackerDeps["builtIn"]> => {
@@ -777,7 +742,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         });
     }
     if (cutover.size === 0) return undefined;
-    const index = await builtInRecordProjects();
+    const index = await builtInRecordProjects(references);
     const matched = new Set<string>();
     for (const reference of references) {
       const owners = [...(index.get(reference.toLowerCase()) ?? [])];

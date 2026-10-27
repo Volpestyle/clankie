@@ -536,6 +536,8 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
   ): Promise<LinearImportReport>;
   /** Host-only: what a webhook mirror plans against; undefined when this is not a mirror store. */
   linearMirrorView(projectId: string): Promise<LinearMirrorView | undefined>;
+  /** Host-only routing from the validated committed snapshot; never seeds or rolls the store. */
+  referenceProjects(references: readonly string[]): Promise<ReadonlyMap<string, ReadonlySet<string>>>;
   /** The persisted store identity; it changes when a cutover or switch-back replaces the store. */
   storeId(): Promise<string>;
   /**
@@ -2490,7 +2492,9 @@ interface KeyIndex {
   /** The newest array of the line; only it is extended. */
   tip: readonly unknown[];
 }
-type IndexKey = (entry: never) => string;
+type IndexValues = string | readonly string[];
+type IndexKey = (entry: never) => IndexValues;
+const indexValues = (value: IndexValues): readonly string[] => (typeof value === "string" ? [value] : value);
 const keyIndexes = new WeakMap<readonly unknown[], Map<IndexKey, KeyIndex>>();
 /** Exact for strings, null and undefined, as `===` compares them. */
 const lookupKey = (...parts: unknown[]) =>
@@ -2498,16 +2502,32 @@ const lookupKey = (...parts: unknown[]) =>
 const recordIdKey = (entry: { id?: unknown }) => lookupKey(entry.id);
 const receiptKey = (entry: WriteReceipt) => lookupKey(entry.actorKey, entry.idempotencyKey);
 const bundleKey = (entry: EvidenceBundle) => lookupKey(entry.issueId, entry.runId);
+// Routing uses the same incrementally extended committed-array indexes, including aliases
+// and duplicate references. Changing a reference's keys starts a fresh index for that array.
+const routingKeys = (values: readonly unknown[]) => [
+  ...new Set(
+    values.filter((value): value is string => typeof value === "string").map((value) => value.toLowerCase()),
+  ),
+];
+const routingIdKeys = (entry: { id?: unknown }) => routingKeys([entry.id]);
+const routingProjectKeys = (entry: Project) =>
+  routingKeys([entry.id, entry.name, (entry as unknown as Record<string, unknown>).slugId]);
+const routingIssueKeys = (entry: Issue) => {
+  const previous = (entry as unknown as Record<string, unknown>).previousIdentifiers;
+  return routingKeys([entry.id, entry.identifier, ...(Array.isArray(previous) ? previous : [])]);
+};
 
-function keyIndex<T>(list: readonly T[], key: (entry: T) => string): KeyIndex {
+function keyIndex<T>(list: readonly T[], key: (entry: T) => IndexValues): KeyIndex {
   let byKey = keyIndexes.get(list);
   let index = byKey?.get(key as IndexKey);
   if (index !== undefined) return index;
   const positions = new Map<string, number[]>();
   for (let at = 0; at < list.length; at++) {
-    const found = positions.get(key(list[at]!));
-    if (found === undefined) positions.set(key(list[at]!), [at]);
-    else found.push(at);
+    for (const value of indexValues(key(list[at]!))) {
+      const found = positions.get(value);
+      if (found === undefined) positions.set(value, [at]);
+      else found.push(at);
+    }
   }
   index = { positions, tip: list };
   if (byKey === undefined) keyIndexes.set(list, (byKey = new Map()));
@@ -2524,13 +2544,20 @@ function extendKeyIndexes(
   if (byKey === undefined) return;
   const next = new Map<IndexKey, KeyIndex>();
   for (const [key, index] of byKey) {
-    const of = key as (entry: unknown) => string;
-    if (index.tip !== previous || change.replaced.some((at) => of(records[at]) !== of(previous[at])))
+    const of = key as (entry: unknown) => IndexValues;
+    if (
+      index.tip !== previous ||
+      change.replaced.some(
+        (at) => lookupKey(...indexValues(of(records[at]))) !== lookupKey(...indexValues(of(previous[at]))),
+      )
+    )
       continue;
     for (let at = change.from; at < records.length; at++) {
-      const found = index.positions.get(of(records[at]));
-      if (found === undefined) index.positions.set(of(records[at]), [at]);
-      else found.push(at);
+      for (const value of indexValues(of(records[at]))) {
+        const found = index.positions.get(value);
+        if (found === undefined) index.positions.set(value, [at]);
+        else found.push(at);
+      }
     }
     index.tip = records;
     next.set(key, index);
@@ -2541,7 +2568,11 @@ function extendKeyIndexes(
  * Ascending positions of `wanted` in a committed collection or a draft of one, without walking
  * it. Undefined for any other list; the caller walks that.
  */
-function positionsOf<T>(list: readonly T[], key: (entry: T) => string, wanted: string): number[] | undefined {
+function positionsOf<T>(
+  list: readonly T[],
+  key: (entry: T) => IndexValues,
+  wanted: string,
+): number[] | undefined {
   if (Object.isFrozen(list)) {
     const found = keyIndex(list, key).positions.get(wanted) ?? [];
     return found.at(-1)! < list.length ? found : found.filter((at) => at < list.length);
@@ -2557,9 +2588,10 @@ function positionsOf<T>(list: readonly T[], key: (entry: T) => string, wanted: s
     if (at >= base.length) break;
     if (!replaced.has(at)) found.push(at);
   }
-  for (const at of change.replaced) if (key(list[at]!) === wanted) found.push(at);
+  for (const at of change.replaced) if (indexValues(key(list[at]!)).includes(wanted)) found.push(at);
   if (change.replaced.length) found.sort((a, b) => a - b);
-  for (let at = change.from; at < list.length; at++) if (key(list[at]!) === wanted) found.push(at);
+  for (let at = change.from; at < list.length; at++)
+    if (indexValues(key(list[at]!)).includes(wanted)) found.push(at);
   return found;
 }
 /** The caller's receipt for a key, as `find` would return it. */
@@ -6152,6 +6184,32 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       // No store yet: nothing to move or checkpoint, and no directory or lock to create.
       if (!existsSync(path)) return;
       await checkpointNow();
+    },
+    async referenceProjects(references) {
+      // readStore checks disk identity/version and shares our own durable commits across backends.
+      // Unlike load(), a missing store refuses rather than seeding one during routing.
+      const store = await readStore(false);
+      const index = new Map<string, Set<string>>();
+      const add = (reference: string, projectId: unknown) => {
+        if (typeof projectId === "string")
+          index.set(reference, (index.get(reference) ?? new Set()).add(projectId));
+      };
+      for (const reference of references.map((value) => value.toLowerCase())) {
+        for (const at of positionsOf(store.projects, routingProjectKeys, reference) ?? [])
+          add(reference, store.projects[at]!.id);
+        for (const at of positionsOf(store.issues, routingIssueKeys, reference) ?? [])
+          add(reference, store.issues[at]!.projectId);
+        for (const records of [store.comments, store.statusUpdates, store.documents, store.milestones])
+          for (const at of positionsOf(records ?? [], routingIdKeys, reference) ?? []) {
+            const record = records![at]! as unknown as Record<string, unknown>;
+            const issueAt = positionsOf(store.issues, recordIdKey, lookupKey(record.issueId))?.[0];
+            add(
+              reference,
+              record.projectId ?? (issueAt === undefined ? undefined : store.issues[issueAt]?.projectId),
+            );
+          }
+      }
+      return index;
     },
     async storeId() {
       const { store } = await load({ mutable: false });

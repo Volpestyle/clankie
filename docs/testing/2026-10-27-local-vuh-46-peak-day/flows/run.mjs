@@ -1,7 +1,8 @@
 // Run ONLY inside `clankie heavy --server -- node .../run.mjs APP_CHECKOUT SCRATCH_SEED OUT`.
 // The governor retains its normal environment; the proof child receives no owner state.
-import { mkdir, mkdtemp, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, readFile, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 
 const [app, seed, output] = process.argv.slice(2).map((value) => resolve(value));
@@ -39,9 +40,30 @@ if ((await stat(seed)).isFile()) {
   );
   if (generated.status !== 0) process.exit(generated.status ?? 1);
 }
+const sourceSha256 = Object.fromEntries(
+  await Promise.all(
+    [
+      "scripts/manual/tracker-peak-day.ts",
+      "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/run.mjs",
+      "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/fixture.ts",
+      "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/browser.ts",
+      "apps/clankie/src/work-items.ts",
+      "packages/work-items/src/tracker-local.ts",
+    ].map(async (file) => [
+      file,
+      createHash("sha256")
+        .update(await readFile(file))
+        .digest("hex"),
+    ]),
+  ),
+);
+await writeFile(
+  join(output, "sources.json"),
+  JSON.stringify({ sourceSha256, mode: process.argv[5] ?? "peak" }, null, 2),
+);
 const child = spawn(
   resolve("apps/clankie/node_modules/.bin/tsx"),
-  [resolve("scripts/manual/tracker-peak-day.ts"), app, source, output, root],
+  [resolve("scripts/manual/tracker-peak-day.ts"), app, source, output, root, process.argv[5] ?? "peak"],
   { env, stdio: "inherit" },
 );
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
