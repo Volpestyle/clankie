@@ -201,3 +201,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0294: Owner activity glimpses follow live presence](0294-owner-activity-glimpses-follow-live-presence.md) — VUH-2819.
 - [0295: A self-hosted bot admits its own Activity viewers](0295-a-self-hosted-bot-admits-its-own-activity-viewers.md) — VUH-2833. Extends ADR 0233.
 - [0296: Hired workers run under an OS profile that keeps the owner's credentials](0296-hired-workers-run-under-an-os-profile.md) — VUH-2592.
+- [0298: Linked repos are read-only sources, never owners](0298-linked-repos-are-read-only-sources.md) — LOCAL-VUH-41. Extends ADR 0270.

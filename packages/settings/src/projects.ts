@@ -6,6 +6,8 @@ import {
   ProjectSchema,
   projectRolePolicy,
   type ProjectsSettings,
+  type Project,
+  type ProjectLinkedRepo,
   type ProjectMembership,
   UpdateProjectSettingsSchema,
   type UpdateProjectSettings,
@@ -21,6 +23,37 @@ export function projectsRevision(settings: ProjectsSettings): string {
   return createHash("sha256")
     .update(JSON.stringify(ProjectsSettingsSchema.parse(settings)))
     .digest("hex");
+}
+
+const sameRepo = (
+  workspace: { machineId: string; platform: string; path: string },
+  repo: ProjectLinkedRepo,
+) =>
+  workspace.machineId === repo.machineId &&
+  workspace.platform === repo.platform &&
+  workspace.path === repo.path;
+
+/** Why a project cannot link this repo, or undefined when exactly one other project owns it. */
+export function linkedRepoRefusal(
+  settings: ProjectsSettings,
+  projectId: string,
+  repo: ProjectLinkedRepo,
+): string | undefined {
+  const owners = settings.projects.filter((project) => project.workspaces.some((w) => sameRepo(w, repo)));
+  if (owners.some((owner) => owner.id === projectId)) return "the project already owns this workspace";
+  if (owners.length === 0) return "no project owns this path as a workspace";
+  if (owners.length > 1) return "more than one project owns this workspace";
+  return undefined;
+}
+
+/**
+ * The linked repos still honored now: each a workspace of exactly one other project.
+ * Readers re-check on every read, so a link never outlives its owner's workspace.
+ */
+export function readableLinkedRepos(settings: ProjectsSettings, project: Project): ProjectLinkedRepo[] {
+  return (project.linkedRepos ?? []).filter(
+    (repo) => linkedRepoRefusal(settings, project.id, repo) === undefined,
+  );
 }
 
 /** Edit only project policy; full validation preserves assignments, labels and unrelated authority. */
@@ -68,6 +101,14 @@ export function updateProjectSettings(
   else if (input.changes.focus !== undefined) project.focus = input.changes.focus;
   if (input.changes.productPaths === null) delete project.productPaths;
   else if (input.changes.productPaths !== undefined) project.productPaths = input.changes.productPaths;
+  if (input.changes.linkedRepos === null) delete project.linkedRepos;
+  else if (input.changes.linkedRepos !== undefined) {
+    for (const repo of input.changes.linkedRepos) {
+      const refusal = linkedRepoRefusal(settings, project.id, repo);
+      if (refusal !== undefined) throw new Error(`Cannot link ${repo.path}: ${refusal}`);
+    }
+    project.linkedRepos = input.changes.linkedRepos;
+  }
   for (const field of ["wipCap", "ownerLoop", "autoUpdates", "hiring", "review"] as const) {
     if (input.changes[field] === null) delete project[field];
     else if (input.changes[field] !== undefined) Object.assign(project, { [field]: input.changes[field] });
@@ -253,6 +294,11 @@ export function removeProjectWorkspace(
     throw new Error("Workspace is referenced by a worktree root; remove that root first");
   if (project.trackerRef?.workspaceId === input.workspaceId)
     throw new Error("Workspace is referenced by the project tracker; move or remove that binding first");
+  const removed = project.workspaces.find((workspace) => workspace.id === input.workspaceId)!;
+  const linking = settings.projects.find((entry) =>
+    entry.linkedRepos?.some((repo) => sameRepo(removed, repo)),
+  );
+  if (linking) throw new Error(`Workspace is linked by project ${linking.id}; unlink it there first`);
   return ProjectsSettingsSchema.parse({
     ...settings,
     projects: settings.projects.map((entry) =>

@@ -86,6 +86,14 @@ lockfiles/generated/binary files excluded first. `null` restores the default:
 tests, fixtures, rigs, scripts, tools and CI are tooling, docs/Markdown are docs,
 and the rest is product. `/project` → Product paths edits the same setting.
 
+A project whose code lives in another project's repo (Clankie Work's lives in
+clankie) links it read-only with `clankie project settings PROJECT --link-repo
+PATH` (`--unlink-repo PATH` removes it). Guided reviews on its issues may then read
+that repo. Its churn counts only the linked repo's commits that name one of its
+issue keys. Ownership, settings context, the review gate and hire placement still
+belong to the owning project alone, so never register a second owning workspace
+instead. ADR 0298 has the rules.
+
 For read-only historical drift proof, use `clankie auto rounds --replay --project
 ID --since ISO --until ISO` (at most 14 days, complete local days). It reads tracker
 state spans and fetched git/mirror history without waking anyone, writing tracker

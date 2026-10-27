@@ -110,8 +110,10 @@ function churnBucket(path: string, productPaths: readonly string[] | undefined, 
   return productPaths?.length ? "tooling" : "product";
 }
 
-/** Matches the tracker identifier convention used across the service. */
-const issueKeys = (message: string) => [...new Set(message.match(/\b[A-Z][A-Z0-9]*-\d+\b/gu) ?? [])];
+/** Tracker identifiers, including built-in `LOCAL-TEAM-n` keys whole, never as `TEAM-n`. */
+const issueKeys = (message: string) => [
+  ...new Set(message.match(/\b(?:LOCAL-[A-Z][A-Z0-9]*|[A-Z][A-Z0-9]*)-\d+\b/gu) ?? []),
+];
 
 async function git(repository: string, args: readonly string[]) {
   return run("git", ["-C", repository, ...args], { timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_MAX_BUFFER });

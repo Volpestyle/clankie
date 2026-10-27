@@ -13,6 +13,7 @@ import {
   removeProjectWorktreeRoot,
   observeLocalProjectWorktreeRoot,
   type ObserveProjectWorktreeRoot,
+  linkedRepoRefusal,
   type SettingsStore,
   updateProjectSettings,
   type ClankieSettings,
@@ -50,6 +51,7 @@ function projectSnapshot(
       delete project.auto;
       delete project.focus;
       delete project.productPaths;
+      delete project.linkedRepos;
     }
     if (!includeAutoUpdates) delete project.autoUpdates;
     if (!includeReview) delete project.review;
@@ -71,6 +73,7 @@ function projectSnapshot(
           fleetGates: true,
           projectsAuto: true,
           productPaths: true,
+          linkedRepos: true,
           linearProjectBindings: true,
         }
       : {}),
@@ -205,6 +208,11 @@ export function createProjectRoutes(
       }
     } catch (error) {
       return context.json({ error: "invalid_hire_model", detail: String(error) }, 400);
+    }
+    for (const repo of input.data.changes.linkedRepos ?? []) {
+      const refusal = linkedRepoRefusal((await settings.load()).projects, input.data.projectId, repo);
+      if (refusal !== undefined)
+        return context.json({ error: "linked_repo_refused", detail: `${repo.path}: ${refusal}` }, 400);
     }
     const trackerProjectId = input.data.changes.trackerProjectId;
     // Legacy binding edits must not bypass the item-retention confirmation on an active built-in tracker.

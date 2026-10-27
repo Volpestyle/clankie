@@ -5,6 +5,7 @@ import {
   projectWorktreeMatches,
   observeLocalProjectWorktreeRoot,
   observeLocalProjectGitWorktree,
+  readableLinkedRepos,
   type ProjectsSettings,
 } from "@clankie/settings";
 import { TrackerWriteRefused, type LocalTrackerOptions } from "@clankie/work-items";
@@ -41,7 +42,8 @@ export function createGuidedReviewSourceAuthorizer(options: {
       return suffix === "" || (!isAbsolute(suffix) && suffix !== ".." && !suffix.startsWith(`..${sep}`));
     };
     let allowedRoot: string | undefined;
-    for (const workspace of project[0]!.workspaces) {
+    // Read-only linked repos are another project's workspaces; reading one confers no ownership.
+    for (const workspace of [...project[0]!.workspaces, ...readableLinkedRepos(projects, project[0]!)]) {
       if (workspace.machineId !== machine || workspace.platform !== platform) continue;
       let root: string;
       try {
@@ -74,7 +76,9 @@ export function createGuidedReviewSourceAuthorizer(options: {
       }
     }
     if (!allowedRoot)
-      refuse("Source is outside the issue project's local repositories and registered worktrees");
+      refuse(
+        "Source is outside the issue project's local repositories, linked repos and registered worktrees",
+      );
     const identity = (path: string) => {
       const info = lstatSync(path, { bigint: true });
       return `${info.dev}:${info.ino}:${info.birthtimeNs}`;

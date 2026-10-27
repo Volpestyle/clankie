@@ -143,6 +143,7 @@ and render original Clankie. This does not change World/chat lead art.
 | Role harness and account; "no preference"                                                 | same                                                      | ✓                                                         | ✓            | — (kept from the original)                                         | —    | Advanced |
 | Project fleet size/models override                                                        | create only; not in the update schema                     | ✓                                                         | ✓            | —                                                                  | —    | Advanced |
 | Workspaces, worktree roots                                                                | `POST …/remove-workspace`, `…/add-worktree-root`          | ✓                                                         | ✓            | —                                                                  | —    | Advanced |
+| Read-only linked repos (`linkedRepos`, ADR 0298)                                          | `POST …/update`, `?includeAutonomy=true` view             | ✓ `project settings --link-repo --unlink-repo`            | —            | —                                                                  | —    | Advanced |
 
 ### 6. Worker accounts
 

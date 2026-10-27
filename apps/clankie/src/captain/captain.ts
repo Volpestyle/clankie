@@ -70,7 +70,7 @@ import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/proto
 import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
 import type { LeadRestartStatus } from "@clankie/protocol";
 import { autoHireAuthority } from "./auto-hire-policy.ts";
-import { effectiveFleetAutonomy } from "@clankie/settings";
+import { effectiveFleetAutonomy, readableLinkedRepos } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { ReviewGate } from "./review-gate.ts";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
@@ -5255,6 +5255,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       options.projectOutcomes ??
       (async () => ({ state: "unavailable" as const, reason: "no tracker outcome reader in this service" })),
     history: (project) => projectMirrors.history(project),
+    linkedRepos: async (project) =>
+      readableLinkedRepos((await settings()).projects, project)
+        .filter((repo) => repo.machineId === "local")
+        .map((repo) => repo.path),
     churn: readRepositoryChurn,
   };
   const settleAutoRound = (

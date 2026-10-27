@@ -261,7 +261,8 @@ uses the parsed byte SHA-256, never its claimed object IDs. Save re-inspects and
 refuses changed/incomplete sources. Use `review show ID --issue ITEM` and
 `review list --issue ITEM --limit N --cursor CURSOR` for summaries; `show` returns
 the full active inspection or a retired identity tombstone. The host denies source reads by default: use only
-canonical paths in the issue project's bound local workspace repository or an
+canonical paths in the issue project's bound local workspace repository, one of
+its read-only linked repos (`project settings PROJECT --link-repo PATH`), or an
 existing approved genuine linked worktree. Arbitrary host paths, symlink aliases
 and remote-machine paths refuse; source paths never bypass tool/project ceilings.
 Refusals include `source_authority_required`, `guided_review_source_refused` and

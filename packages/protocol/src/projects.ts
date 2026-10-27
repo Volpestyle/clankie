@@ -37,6 +37,14 @@ export const ProjectWorktreeRootSchema = ProjectWorkspaceSchema.extend({
   commonDirectory: z.string().min(1).max(4096),
 }).strict();
 export type ProjectWorktreeRoot = z.infer<typeof ProjectWorktreeRootSchema>;
+/**
+ * A read-only link to another project's workspace repository. Only guided-review
+ * source authority and churn measurement read it; membership, settings context,
+ * the review gate and hire placement ignore it, so the repo keeps one owner.
+ */
+export const ProjectLinkedRepoSchema = ProjectWorkspaceSchema.omit({ id: true }).strict();
+export type ProjectLinkedRepo = z.infer<typeof ProjectLinkedRepoSchema>;
+const ProjectLinkedReposSchema = z.array(ProjectLinkedRepoSchema).max(32);
 export const ProjectRoleSchema = z
   .object({
     role: OperatorAgentRoleSchema,
@@ -126,6 +134,8 @@ export const ProjectSchema = z
     name: z.string().trim().min(1).max(100),
     workspaces: z.array(ProjectWorkspaceSchema).max(256).default([]),
     worktreeRoots: z.array(ProjectWorktreeRootSchema).max(32).default([]),
+    /** Another project's workspaces this project's reviews and churn may read; never ownership. */
+    linkedRepos: ProjectLinkedReposSchema.optional(),
     trackerRef: z
       .object({ workspaceId: ProjectIdSchema, path: z.literal(".clankie/tracking.json") })
       .strict()
@@ -177,6 +187,17 @@ export const ProjectSchema = z
       project.worktreeRoots.map((root) => root.id),
       "Worktree root IDs must be unique",
     );
+    unique(
+      (project.linkedRepos ?? []).map((repo) => JSON.stringify([repo.machineId, repo.platform, repo.path])),
+      "Linked repos must be unique",
+    );
+    for (const repo of project.linkedRepos ?? [])
+      if (
+        project.workspaces.some(
+          (w) => w.machineId === repo.machineId && w.platform === repo.platform && w.path === repo.path,
+        )
+      )
+        ctx.addIssue({ code: "custom", message: "A project cannot link its own workspace" });
     unique(
       project.roles.map((r) => operatorAgentRoleKey(r.role)),
       "Role keys must be unique",
@@ -268,6 +289,8 @@ export const ProjectsSnapshotSchema = z
     /** Advertises project Auto and focus (ADR 0264); absent on an older service. */
     projectsAuto: z.literal(true).optional(),
     productPaths: z.literal(true).optional(),
+    /** Advertises read-only linked repos; absent on an older service. */
+    linkedRepos: z.literal(true).optional(),
     /** Opt-in work-policy view only, so existing strict clients retain their response shape. */
     projectWorkPolicy: z.literal(true).optional(),
     projectAutoUpdates: z.literal(true).optional(),
@@ -460,6 +483,8 @@ export const UpdateProjectSettingsSchema = z
         focus: ProjectFocusSchema.nullable().optional(),
         /** null restores default product classification. */
         productPaths: ProductPathsSchema.nullable().optional(),
+        /** The whole list; each must be exactly one other project's workspace. null unlinks all. */
+        linkedRepos: ProjectLinkedReposSchema.min(1).nullable().optional(),
         wipCap: ProjectWipCapSchema.nullable().optional(),
         ownerLoop: ProjectOwnerLoopSchema.nullable().optional(),
         autoUpdates: z.boolean().nullable().optional(),

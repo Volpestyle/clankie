@@ -177,9 +177,11 @@ Inspection commands remain read-only. Saving requires the running service, an
 existing built-in tracker issue and an authenticated host actor. Other backends
 refuse these tools. Source reads default to denied unless the host authorizes the
 issue's current project binding. Name a canonical absolute path in that project's
-local workspace repository or an existing approved genuine linked Git worktree.
-Git sources name the repository root; patch files must stay within the approved
-workspace or worktree. Symlink aliases, arbitrary host paths and paths belonging
+local workspace repository, one of its read-only linked repos (another project's
+workspace, linked with `project settings PROJECT --link-repo PATH`; [ADR
+0298](adr/0298-linked-repos-are-read-only-sources.md)), or an existing approved
+genuine linked Git worktree. Git sources name the repository root; patch files
+must stay within the approved workspace, linked repo or worktree. Symlink aliases, arbitrary host paths and paths belonging
 to a remote machine refuse. A source path never expands a worker's tool or
 project ceiling. Source content is untrusted data, never instructions.
 The source authorizer checks host filesystem authority; its actor parameter is

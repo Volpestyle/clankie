@@ -8353,7 +8353,8 @@ reviewed changes for an existing project through the authenticated service API.
 The console exposes the same verbs through `/project`.
 
 The changes file may contain `name`, `roles`, `workerCap`, `trackerRef`,
-`trackerProjectId`, `linearProjectBinding`, `autonomy`, `auto`, `focus` and `productPaths`.
+`trackerProjectId`, `linearProjectBinding`, `autonomy`, `auto`, `focus`, `productPaths`
+and `linkedRepos`.
 Omitted fields remain unchanged; `null` removes a worker cap, tracker binding
 or focus. `auto: true` puts the project on Auto: Clankie works its backlog
 unprompted while [`auto`](#auto-switch) is on, and starts nothing new on it
@@ -8454,6 +8455,20 @@ the current revision-bearing owner API. Missing leaves inherit the global settin
 `inherit` removes the selected override without changing its sibling. The console
 accepts the same syntax as `/project settings PROJECT ...`.
 
+`--link-repo PATH` and `--unlink-repo PATH`, each repeatable, edit the project's
+read-only linked repos
+([ADR 0298](adr/0298-linked-repos-are-read-only-sources.md)). A linked repo is
+another project's workspace. Guided reviews on this project's built-in issues may
+read it, and Auto churn counts its commits that name one of this project's issue
+keys. It never makes the project an owner. Settings context, the review gate, hire
+placement and membership ignore it, so the owning project keeps its checkouts. The
+CLI resolves PATH to its canonical path. The service refuses (`linked_repo_refused`, 400) a path that no project owns, one that more than one project owns, or one of
+the linking project's own workspaces. Removing a workspace that another project
+links is refused until it is unlinked. The JSON update takes `linkedRepos` as the
+whole list of `{"machineId","platform","path"}`, or `null` to unlink all. Readers
+see it in the `?includeAutonomy=true` view, advertised by `linkedRepos: true`, and
+`project settings` prints `linkedRepoPaths`.
+
 `--reviewer-role ROLE`, `--reviewer-seat SEAT` or `--reviewer none` names or
 clears the project's standing reviewer
 ([ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md)). A role such as
@@ -8478,6 +8493,8 @@ clankie project settings garden --wip-cap 6 --owner-loop milestones
 clankie project settings garden --auto-updates off
 clankie project settings garden --reviewer-role reviewer
 clankie project settings garden --reviewer none
+clankie project settings clankie-work --link-repo ~/dev/clankie --link-repo ~/dev/clankie-app
+clankie project settings clankie-work --unlink-repo ~/dev/clankie-app
 ```
 
 Projects expose work policy with `projectWorkPolicy:true` when API readers use

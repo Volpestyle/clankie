@@ -1,5 +1,7 @@
 import { workTrackerSettings } from "./work-tracker.ts";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { resolve } from "node:path";
+import { linkedRepoRefusal } from "@clankie/settings";
 import {
   inspectOperatorCredential,
   resolveOperatorCredential,
@@ -16,6 +18,7 @@ import {
   ProjectOwnerLoopSchema,
   LinearProjectBindingSchema,
   type UpdateProjectSettings,
+  type ProjectLinkedRepo,
   ProjectsSnapshotSchema,
   UpdateProjectSettingsSchema,
   type ProjectsSnapshot,
@@ -65,7 +68,7 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--link-repo PATH]... [--unlink-repo PATH]... | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
   if (!list && !membership) {
@@ -177,6 +180,8 @@ interface ProjectFleetSettingsResult extends ProjectsSnapshot {
   focus?: string;
   trackerProjectId?: string;
   workTracker?: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
+  /** Read-only repos this project's reviews and churn may read; present when the service supports them. */
+  linkedRepoPaths?: string[];
   fleet: {
     closure: FleetAutonomyMode | "inherit";
     machineSetup: FleetAutonomyMode | "inherit";
@@ -205,7 +210,7 @@ async function runProjectFleetSettings(
   }
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--reviewer-seat SEAT|--reviewer-role ROLE|--reviewer none]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--link-repo PATH]... [--unlink-repo PATH]... [--reviewer-seat SEAT|--reviewer-role ROLE|--reviewer none]",
     );
   const changes: FleetAutonomyPatch = {};
   const work: Pick<
@@ -218,9 +223,12 @@ async function runProjectFleetSettings(
     | "wipCap"
     | "ownerLoop"
     | "review"
+    | "linkedRepos"
   > = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
+  const link: string[] = [];
+  const unlink: string[] = [];
   for (let index = 2; index < args.length; index += 2) {
     const field =
       args[index] === "--closure"
@@ -265,6 +273,9 @@ async function runProjectFleetSettings(
       work.review = ProjectReviewSchema.parse({ role: value });
     else if (args[index] === "--reviewer" && work.review === undefined && value === "none")
       work.review = null;
+    else if ((args[index] === "--link-repo" || args[index] === "--unlink-repo") && value)
+      // Owner workspaces are saved canonical; a path that no longer exists keeps its spelling.
+      (args[index] === "--link-repo" ? link : unlink).push(await realpath(value).catch(() => resolve(value)));
     else if (args[index] === "--release" && releaseMode === undefined) releaseMode = value;
     else if (args[index] === "--release-rule" && releaseRule === undefined) releaseRule = value;
     else if (args[index] === "--gate-preset") {
@@ -330,6 +341,24 @@ async function runProjectFleetSettings(
     throw new Error("This service does not support project reviewers; update it before setting one.");
   if (("wipCap" in work || "ownerLoop" in work) && snapshot.projectWorkPolicy !== true)
     throw new Error("This service does not support project work policy; update it before editing it.");
+  if (link.length || unlink.length) {
+    if (snapshot.linkedRepos !== true)
+      throw new Error("This service does not support linked repos; update it before linking one.");
+    const platform = process.platform === "win32" ? "windows" : "posix";
+    const saved = snapshot.settings.projects.find((project) => project.id === args[1])!.linkedRepos ?? [];
+    const named = (repo: ProjectLinkedRepo, path: string) =>
+      repo.machineId === "local" && repo.platform === platform && repo.path === path;
+    for (const path of unlink)
+      if (!saved.some((repo) => named(repo, path))) throw new Error(`${path} is not a linked repo`);
+    const linkedRepos = saved.filter((repo) => !unlink.some((path) => named(repo, path)));
+    for (const path of link) {
+      const repo = { machineId: "local", platform, path } as const;
+      const refusal = linkedRepoRefusal(snapshot.settings, args[1]!, repo);
+      if (refusal !== undefined) throw new Error(`Cannot link ${path}: ${refusal}`);
+      if (!linkedRepos.some((entry) => named(entry, path))) linkedRepos.push(repo);
+    }
+    work.linkedRepos = linkedRepos.length ? linkedRepos : null;
+  }
   if (Object.keys(changes).length || Object.keys(work).length) {
     snapshot = await runProjectSettingsCommand(
       [
@@ -369,6 +398,9 @@ async function runProjectFleetSettings(
       ? { auto: project.auto === true, ...(project.focus === undefined ? {} : { focus: project.focus }) }
       : {}),
     ...(snapshot.projectReview === true ? { reviewer: project.review ?? "none" } : {}),
+    ...(snapshot.linkedRepos === true
+      ? { linkedRepoPaths: (project.linkedRepos ?? []).map((repo) => repo.path) }
+      : {}),
     // Every seat already working here can submit, including ones hired before the reviewer (VUH-2662).
     ...(snapshot.projectReview === true && project.review !== undefined
       ? {

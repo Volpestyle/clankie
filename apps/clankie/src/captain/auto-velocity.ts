@@ -38,6 +38,8 @@ export interface VelocityDeps {
     },
   ) => Promise<ProjectOutcomesRead>;
   readonly history: ProjectMirrors["history"];
+  /** Local read-only linked repos still owned by exactly one other project; none when absent. */
+  readonly linkedRepos?: (project: Project) => Promise<readonly string[]>;
   readonly churn: (repository: string, window: ChurnWindow) => Promise<RepositoryChurn>;
   readonly timeZone?: string;
 }
@@ -75,26 +77,45 @@ function trackerMilestones(outcomes: TrackerOutcomes): VelocityMilestone[] {
   ].sort((a, b) => a.at.localeCompare(b.at));
 }
 
-/** Default-branch commits across the project's repositories, each once. */
+/**
+ * Default-branch commits across the project's repositories, each once. A linked repo
+ * belongs to another project, so only its commits naming one of `issueKeys` count.
+ */
 async function readCommits(
   project: Project,
   window: ChurnWindow,
   deps: VelocityDeps,
+  issueKeys: ReadonlySet<string> | undefined,
 ): Promise<{ state: "known"; commits: ChurnCommit[] } | Unknown> {
   const history = await deps.history(project);
-  if (history.state === "unknown") return history;
+  const linked = (await deps.linkedRepos?.(project)) ?? [];
+  if (history.state === "unknown" && linked.length === 0) return history;
+  const sources: { repository: string; linked?: true }[] = [
+    ...(history.state === "unknown" ? [] : history.repositories.map((repository) => ({ repository }))),
+    ...linked.map((repository) => ({ repository, linked: true as const })),
+  ];
   const commits = new Map<string, ChurnCommit>();
-  const reasons: string[] = [];
-  for (const repository of history.repositories) {
-    const churn = await deps.churn(repository, {
+  const reasons = history.state === "unknown" ? [history.reason] : [];
+  let read = 0;
+  for (const source of sources) {
+    if (source.linked && issueKeys === undefined) {
+      reasons.push(`linked ${source.repository}: issue keys unknown without the tracker read`);
+      continue;
+    }
+    const churn = await deps.churn(source.repository, {
       ...window,
       ...(project.productPaths === undefined ? {} : { productPaths: project.productPaths }),
     });
-    if (churn.state === "unknown") reasons.push(churn.reason);
-    else for (const commit of churn.commits) commits.set(commit.sha, commit);
+    if (churn.state === "unknown") {
+      reasons.push(churn.reason);
+      continue;
+    }
+    read++;
+    for (const commit of churn.commits)
+      if (!source.linked || commit.issueKeys.some((key) => issueKeys!.has(key)))
+        commits.set(commit.sha, commit);
   }
-  if (reasons.length === history.repositories.length)
-    return { state: "unknown", reason: reasons.join("; ") || "no repository" };
+  if (read === 0) return { state: "unknown", reason: reasons.join("; ") || "no repository" };
   return { state: "known", commits: [...commits.values()] };
 }
 
@@ -175,6 +196,14 @@ export async function measureVelocity(
       project,
       { since: new Date(Date.parse(daysSince) - CLASSIFY_BEFORE_MS), until: now, timeZone },
       deps,
+      // The issues this read can see: closed in it, started now, or changed since it began.
+      "state" in outcomes
+        ? undefined
+        : new Set(
+            [...outcomes.closed, ...outcomes.started.issues, ...(outcomes.history ?? [])].map(
+              (issue) => issue.identifier,
+            ),
+          ),
     );
   } catch (error) {
     commits = { state: "unknown", reason: reasonOf(error) };
