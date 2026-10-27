@@ -31,6 +31,7 @@ it("routes opaque bundle/run ids through hired worker MCP in a fresh isolated pr
     const result = JSON.parse(stdout.trim().split("\n").at(-1)!);
     expect(result).toMatchObject({
       check: { outcome: "ok" },
+      cycle: { outcome: "ok" },
       appended: { outcome: "ok" },
       unknown: { outcome: "refused", possiblyDispatched: false },
       selfCheck: { outcome: "refused" },

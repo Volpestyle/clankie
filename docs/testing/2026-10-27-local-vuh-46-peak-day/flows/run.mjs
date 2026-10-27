@@ -40,6 +40,21 @@ if ((await stat(seed)).isFile()) {
   );
   if (generated.status !== 0) process.exit(generated.status ?? 1);
 }
+const appRevision = spawnSync("git", ["-C", app, "rev-parse", "HEAD"], { encoding: "utf8" });
+if (appRevision.status !== 0) throw new Error("App checkout revision unavailable");
+const appSourceSha256 = Object.fromEntries(
+  await Promise.all(
+    [
+      "packages/command-center/src/workItems/syncPool.ts",
+      "packages/command-center/src/workItems/syncStorage.ts",
+    ].map(async (file) => [
+      file,
+      createHash("sha256")
+        .update(await readFile(join(app, file)))
+        .digest("hex"),
+    ]),
+  ),
+);
 const sourceSha256 = Object.fromEntries(
   await Promise.all(
     [
@@ -59,7 +74,16 @@ const sourceSha256 = Object.fromEntries(
 );
 await writeFile(
   join(output, "sources.json"),
-  JSON.stringify({ sourceSha256, mode: process.argv[5] ?? "peak" }, null, 2),
+  JSON.stringify(
+    {
+      appRevision: appRevision.stdout.trim(),
+      appSourceSha256,
+      sourceSha256,
+      mode: process.argv[5] ?? "peak",
+    },
+    null,
+    2,
+  ),
 );
 const child = spawn(
   resolve("apps/clankie/node_modules/.bin/tsx"),

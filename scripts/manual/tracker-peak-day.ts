@@ -1,9 +1,9 @@
 // Manual composition proof, not CI. Invoked by run.mjs under clankie heavy.
 import { Session } from "node:inspector";
-import { statSync, promises as fsPromises } from "node:fs";
+import fsSync, { statSync, promises as fsPromises } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { PerformanceObserver } from "node:perf_hooks";
-import { cp, writeFile, stat } from "node:fs/promises";
+import { cp, writeFile, stat, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
@@ -46,7 +46,29 @@ const directory = join(root, "tracker");
 await cp(source, directory, { recursive: true, filter: (path) => !path.includes("tracker.pre-journal-") });
 const seeded = createLocalTracker({ directory });
 await seeded.checkpoint();
-const rawSeed: any = await readTrackerStoreSnapshot(directory);
+let rawSeed: any = await readTrackerStoreSnapshot(directory);
+let sealPrefill: Record<string, number> | undefined;
+if (mode === "seal" || mode === "bootstrap") {
+  const threshold = Math.max(4 * 1024 * 1024, (await stat(join(directory, "tracker.json"))).size / 8);
+  const journal = join(directory, "tracker.journal");
+  const live = join(
+    journal,
+    (await readdir(journal))
+      .filter((name) => name.endsWith(".jsonl"))
+      .sort()
+      .at(-1)!,
+  );
+  let writes = 0;
+  while ((await stat(live)).size < threshold - 512 * 1024) {
+    await seeded.call("save_comment", {
+      issueId: rawSeed.issues[0].id,
+      body: "seal prefill " + "p".repeat(32 * 1024),
+    });
+    writes++;
+  }
+  sealPrefill = { writes, bytes: (await stat(live)).size, threshold };
+  rawSeed = await readTrackerStoreSnapshot(directory);
+}
 const seedCounts = Object.fromEntries(
   ["issues", "comments", "events", "audit", "receipts", "bundles"].map((key) => [
     key,
@@ -55,6 +77,7 @@ const seedCounts = Object.fromEntries(
 );
 await save("seed.json", {
   source,
+  sealPrefill,
   counts: seedCounts,
   syncId: rawSeed.syncId,
   checkpointBytes: (await stat(join(directory, "tracker.json"))).size,
@@ -112,6 +135,84 @@ const observe = (backend: any) => ({
   },
 });
 const f = await fixture(root, directory, observe);
+// Seal mode prefills below the normal threshold, then uses the original peak lanes/payloads. Observe real fs calls and metadata reads; never hold or replace IO.
+const sealing: { start: number; end?: number; bytes?: number; name: string }[] = [];
+const checkpointReads: { at: number; stack?: string }[] = [];
+const syncIO: { start: number; end: number; ms: number; operation: string; stack?: string }[] = [];
+const sealReaders: { start: number; end: number; ms: number }[] = [];
+let restoreSealProbe = () => {};
+if (mode === "seal") {
+  const originalRead = fsPromises.readFile;
+  const originalOpen = fsPromises.open;
+  const reader = createLocalTracker({ directory });
+  const restores: (() => void)[] = [];
+  for (const operation of [
+    "fsyncSync",
+    "openSync",
+    "statSync",
+    "fstatSync",
+    "readFileSync",
+    "readdirSync",
+    "writeSync",
+    "renameSync",
+  ] as const) {
+    const original = fsSync[operation];
+    (fsSync as any)[operation] = (...args: any[]) => {
+      const start = performance.now();
+      try {
+        return (original as any)(...args);
+      } finally {
+        const end = performance.now();
+        if (end - start > 5)
+          syncIO.push({ start, end, ms: end - start, operation, stack: new Error().stack });
+      }
+    };
+    restores.push(() => {
+      (fsSync as any)[operation] = original;
+    });
+  }
+
+  fsPromises.readFile = (async (...args: Parameters<typeof originalRead>) => {
+    if (String(args[0]) === join(directory, "tracker.json"))
+      checkpointReads.push({ at: performance.now(), stack: new Error().stack });
+    const seal =
+      new Error().stack?.includes("sealSegment") && String(args[0]).startsWith(directory)
+        ? { start: performance.now(), name: String(args[0]), bytes: 0 }
+        : undefined;
+    if (seal) {
+      sealing.push(seal);
+      // This reader arrives after beginPublication, while the real seal is awaiting disk.
+      for (let index = 0; index < 16; index++) {
+        const start = performance.now();
+        track(
+          reader.referenceProjects([f.project.id]).then(() => {
+            const end = performance.now();
+            sealReaders.push({ start, end, ms: end - start });
+          }),
+        );
+      }
+    }
+    const bytes = await originalRead(...args);
+    if (seal) seal.bytes = Buffer.byteLength(bytes);
+    return bytes;
+  }) as typeof originalRead;
+  fsPromises.open = (async (...args: Parameters<typeof originalOpen>) => {
+    // startSegment follows sealSegment's framing validation and hash, under the same fence.
+    if (args[1] === "wx" && String(args[0]).includes("tracker.journal/")) {
+      const seal = sealing.at(-1);
+      if (seal && seal.end === undefined) seal.end = performance.now();
+    }
+    return originalOpen(...args);
+  }) as typeof originalOpen;
+  syncBuiltinESMExports();
+  restoreSealProbe = () => {
+    for (const restore of restores) restore();
+    fsPromises.readFile = originalRead;
+    fsPromises.open = originalOpen;
+    syncBuiltinESMExports();
+  };
+}
+
 const servers: Server[] = [];
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 let running = true;
@@ -457,6 +558,20 @@ async function run() {
     await page.waitForFunction(() => (window as any).snapshot()?.confirmedStoreId, null, {
       timeout: 120_000,
     });
+    if (mode === "bootstrap") {
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      const capture = await page.evaluate(() => (window as any).capture());
+      await save("bootstrap-diagnostic.json", capture);
+      console.log(
+        JSON.stringify({
+          storageErrors: capture.storageErrors,
+          connectionErrors: capture.connectionErrors,
+          models: capture.snapshot.models.length,
+          requests: capture.requests,
+        }),
+      );
+      return;
+    }
     const initial = await f.tracker.sync({ action: "bootstrap", type: "full", projects: ["*"], lazy: true });
     if (initial.outcome !== "bootstrap") throw new Error("Initial bootstrap refused");
     const lines = initial.ndjson
@@ -526,7 +641,7 @@ async function run() {
         perfAt: performance.now(),
         hrtimeUs: Number(process.hrtime.bigint() / 1000n),
       });
-    if (mode === "profile") {
+    if (mode === "profile" || mode === "seal") {
       gcObserver = new PerformanceObserver((list) => {
         for (const entry of list.getEntries())
           gcEntries.push({
@@ -646,9 +761,10 @@ async function run() {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const idleStarted = Date.now();
-    console.log(`traffic ended; starting 10-minute idle window at ${new Date(idleStarted).toISOString()}`);
+    const idleMs = mode === "seal" ? 5_000 : 600_000;
+    console.log(`traffic ended; starting ${idleMs} ms idle window at ${new Date(idleStarted).toISOString()}`);
     // Lead-requested 10 minutes catches readers whose timer exceeds a few seconds.
-    await new Promise((resolve) => setTimeout(resolve, 600_000));
+    await new Promise((resolve) => setTimeout(resolve, idleMs));
     await new Promise((resolve) => setTimeout(resolve, 20));
     clearInterval(loopTimer);
     const loopEnded = Date.now();
@@ -665,9 +781,23 @@ async function run() {
         anchors: profileAnchors,
         gcEntries,
         sampleIntervalUs: 1000,
-        scope:
-          "Traffic, convergence and complete ten-minute idle; excludes cold bootstrap and posthoc snapshot/digest reads. No serial receipt wrappers in this mode.",
+        scope: `Traffic, convergence and ${idleMs} ms idle; excludes cold bootstrap and posthoc snapshot/digest reads. No serial receipt wrappers in this mode.`,
       });
+    }
+    if (mode === "seal") {
+      const waits = sealReaders.map((reader) => reader.ms).sort((a, b) => a - b);
+      await save("sync-io.json", syncIO);
+      await save("checkpoint-reads.json", checkpointReads);
+      await save("sealing.json", {
+        sealing,
+        readers: sealReaders,
+        p95Ms: waits[Math.ceil(waits.length * 0.95) - 1],
+        maxMs: waits.at(-1),
+        boundary:
+          "Sixteen concurrent metadata readers injected at each real seal start; includes the full publication wait. Normal automatic threshold and original peak payloads after prefill; five-second idle, no periodic-idle claim.",
+      });
+      if (!sealing.length || sealing.some((seal) => seal.end === undefined))
+        throw new Error("No complete checkpoint seal observed");
     }
     await save("event-loop.json", {
       start: trafficStarted,
@@ -677,8 +807,7 @@ async function run() {
       maxStallMs: loopMax,
       over100Ms: loopDelays.filter((sample) => sample.delayMs > 100),
       delaysOver5Ms: loopDelays,
-      excludes:
-        "Cold bootstrap and posthoc full-store/digest capture; includes all traffic, convergence and ten-minute idle.",
+      excludes: `Cold bootstrap and posthoc full-store/digest capture; includes all traffic, convergence and ${idleMs} ms idle.`,
     });
     const after: any = await readTrackerStoreSnapshot(directory);
     const capture: any = await page.evaluate(() => (window as any).capture());
@@ -698,9 +827,9 @@ async function run() {
         (key) => expected[key] !== observed[key],
       );
     const syncByKey = new Map(
-      (after.syncLog ?? [])
-        .filter((commit: any) => commit.idempotencyKey?.startsWith("peak-"))
-        .map((commit: any) => [commit.idempotencyKey, commit.syncId]),
+      after.receipts
+        .filter((receipt: any) => receipt.idempotencyKey?.startsWith("peak-"))
+        .map((receipt: any) => [receipt.idempotencyKey, receipt.syncId]),
     );
     const latencies = commits.map((commit) => {
       const syncId = syncByKey.get(commit.key) as number;
@@ -848,6 +977,7 @@ async function run() {
     f.close();
     await Promise.allSettled(active);
     for (const restore of restoreReceiptTimers) restore();
+    restoreSealProbe();
     clearInterval(loadTimer);
     clearInterval(loopTimer);
     peakProfiler?.disconnect();

@@ -78,6 +78,7 @@ try {
       { actor },
     );
   const bundle = await publish();
+  await f.tracker.call("save_issue", { id: issue.id, cycle: "current" }, { actor });
   let sequence = 0;
   const sessions = new Map<string, string>();
   const rpc = (pane: string, method: string, params: unknown) =>
@@ -139,13 +140,20 @@ try {
       ),
     );
     results.checked = checked;
+    const cycles = (await f.tracker.call("list_cycles", { project: project.id })) as any;
+    const cycle = cycles.cycles[0];
+    assert.ok(cycle?.id);
+    results.cycle = await call("reviewer", "get_cycle", { id: cycle.id });
+    assert.equal((results.cycle as any).outcome, "ok", JSON.stringify(results.cycle));
+    assert.equal(JSON.parse((results.cycle as any).content).id, cycle.id);
+
     results.unknown = await call("reviewer", "post_bundle_check", {
       bundleId: randomUUID(),
       idempotencyKey: "unknown-bundle",
     });
     assert.equal((results.unknown as any).outcome, "refused");
     assert.equal((results.unknown as any).possiblyDispatched, false);
-    assert.match((results.unknown as any).detail, /post_bundle_check is available only/);
+    assert.match((results.unknown as any).detail, /matched no cut-over project's record/);
     const later = await publish();
     results.appended = await call("worker", "post_bundle_check", {
       bundleId: later.id,

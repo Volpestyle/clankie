@@ -4854,8 +4854,15 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     // (VUH-2379). The version is taken before the read, so a racing write
     // leaves a stale version that the next read misses.
     const version = storeVersion();
-    if (shared.current?.version !== version) shared.current = await refresh(version);
-    return mutable ? draftOf(shared.current.store) : shared.current.store;
+    const current = shared.current;
+    if (current?.version !== version) {
+      const refreshed = await refresh(version);
+      // A local commit or another reader may have published while refresh awaited disk IO.
+      // Keep that snapshot, including its version, instead of publishing our older read.
+      if (shared.current === current) shared.current = refreshed;
+    }
+    const snapshot = shared.current!;
+    return mutable ? draftOf(snapshot.store) : snapshot.store;
   };
   /** Set after each durable commit: the store version that commit left. */
   let landed: string | undefined;

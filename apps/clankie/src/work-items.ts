@@ -211,7 +211,7 @@ export interface WorkItemsServiceOptions {
    */
   readonly builtInTracker?: (
     assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void,
-  ) => TrackerToolBackend;
+  ) => TrackerToolBackend & Partial<Pick<LocalTrackerBackend, "referenceProjects">>;
   /** The captain's working directory, always readable as `workspace`. */
   readonly workspace?: () => string | undefined;
   readonly mcpHost?: Pick<McpHost, "call"> & Partial<Pick<McpHost, "account" | "binding" | "trackerStatus">>;
@@ -574,10 +574,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       }));
-  const routingTracker = openBuiltIn() as TrackerToolBackend & Pick<LocalTrackerBackend, "referenceProjects">;
+  const routingTracker = openBuiltIn();
+  const referenceProjects =
+    typeof routingTracker.referenceProjects === "function"
+      ? routingTracker.referenceProjects.bind(routingTracker)
+      : undefined;
   const builtInRecordProjects = async (references: readonly string[]) => {
     try {
-      return await routingTracker.referenceProjects(references);
+      if (referenceProjects === undefined) throw new Error("Built-in tracker lacks referenceProjects");
+      return await referenceProjects(references);
     } catch {
       // A missing, damaged or replaced store must never become "no cut-over item".
       throw new WorkRequestError(

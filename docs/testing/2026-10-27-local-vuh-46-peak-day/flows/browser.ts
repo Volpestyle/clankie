@@ -4,12 +4,25 @@ import { createIndexedDBWorkSyncStorage } from "proof-app-storage";
 
 const seen: { cursor: number; at: number }[] = [];
 const requests: { action: string; at: number; waitMs?: number }[] = [];
+const connectionErrors: { error: string; stack?: string }[] = [];
+const storageErrors: { at: number; characters: number; error: string }[] = [];
 let pool: ReturnType<typeof createWorkSyncPool>;
 Object.assign(window, {
   start: async (token: string) => {
+    const storage = createIndexedDBWorkSyncStorage();
     pool = createWorkSyncPool({
       identity: "peak-day-scratch-web",
-      storage: createIndexedDBWorkSyncStorage(),
+      storage: {
+        ...storage,
+        async write(identity, value) {
+          try {
+            await storage.write(identity, value);
+          } catch (error) {
+            storageErrors.push({ at: Date.now(), characters: value.length, error: String(error) });
+            throw error;
+          }
+        },
+      },
       canWrite: () => false,
       requestId: () => crypto.randomUUID(),
       transport: {
@@ -50,10 +63,11 @@ Object.assign(window, {
       );
     });
     void pool.connect(["*"]).catch((error) => {
+      connectionErrors.push({ error: String(error), stack: error?.stack });
       document.querySelector("pre")!.textContent += String(error);
     });
   },
   snapshot: () => pool.getSnapshot(),
-  capture: () => ({ seen, requests, snapshot: pool.getSnapshot() }),
+  capture: () => ({ seen, requests, storageErrors, connectionErrors, snapshot: pool.getSnapshot() }),
   stop: () => pool.stop(),
 });

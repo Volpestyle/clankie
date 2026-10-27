@@ -270,8 +270,14 @@ const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt", "cycleDays", "snaps
 
 /** Other backends fail explicitly instead of silently dropping exactly-once or precondition input. */
 export function refuseBuiltInTrackerFeatures(name: string, args: Record<string, unknown>): void {
-  if (BUILT_IN_TRACKER_TOOLS.has(name))
-    throw new Error(`${name} is available only on Clankie's built-in tracker`);
+  if (BUILT_IN_TRACKER_TOOLS.has(name)) {
+    const references = trackerArgumentReferences(args);
+    throw new Error(
+      references.length > 0
+        ? `${name}: ${references.map((id) => JSON.stringify(id)).join(", ")} matched no cut-over project's record; name a known built-in record or use a built-in project.`
+        : `${name} is available only on Clankie's built-in tracker`,
+    );
+  }
   const used = BUILT_IN_ARGUMENTS.filter((key) => args[key] !== undefined);
   if (used.length > 0)
     throw new Error(

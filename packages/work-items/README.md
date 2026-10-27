@@ -42,11 +42,11 @@ audit log in the same atomic replacement as the effect, and refuses stale
 `ifUpdatedAt` updates. `get_write_receipt` and `list_audit_events` read them.
 Other backends refuse these inputs explicitly (ADR 0226 amendment, VUH-1916).
 
-Every local read rereads the file, including changes from other processes. Each
-backend reuses its last validated snapshot only when the content is identical;
-changed content receives full schema and hash-chain validation. Reads return
-isolated results, and writes (including cycle rollover on a read) use an isolated
-store under the existing lock. Corruption remains a hard error.
+Every local read checks the store's checkpoint/journal generation, including
+changes from other processes. Backends share the validated committed snapshot;
+external changes receive schema and hash-chain validation before reuse. Reads
+return isolated results, and writes (including cycle rollover on a read) use an
+isolated store under the existing lock. Corruption remains a hard error.
 
 Evidence bundles hold validated store references and gaps on items and runs.
 Completion past landed requires the current item bundle and a `bundle_checked`
@@ -213,9 +213,11 @@ its bytes as `tracker.pre-journal-<ms>.json`. Open is the checkpoint plus the
 journal tail, with every chain proven. Cut-over reference routing uses the backend's
 host-only `referenceProjects` against its shared validated committed snapshot
 (LOCAL-VUH-50). Same-process commits update that snapshot without a disk reread;
-Metadata readers wait for disk publication and the shared snapshot update, including
+metadata readers wait for disk publication and the shared snapshot update, including
 failed appends; the fence starts after authorization callbacks to avoid deadlock.
 External changes still trigger validation, and missing or damaged stores refuse.
+A refresh publishes only if its starting snapshot is still current; a concurrent
+local commit keeps its newer snapshot, without a reread or a refused write.
 Reference lookups reuse the committed-array indexes, extended by changed records
 and appended tails. A reference rename or external replacement rebuilds the affected
 metadata index; ordinary commits never reparse the checkpoint for routing. Other
@@ -267,7 +269,11 @@ hand:
 string length (about 537 MB) bounds it. At fleet volume that is about four months.
 `clankie doctor` reports the checkpoint's size against that limit and warns at half
 (`trackerCheckpointSize`). Retention or a streamed open has to land before the limit;
-that is LOCAL-VUH-49.
+that is LOCAL-VUH-49. This string-length bound is not an operational guarantee:
+a sealing stress run aborted in V8 JSON serialization with a 294.83 MB checkpoint
+and 29.15 MB live tail. The exact serialization call remains unproven; the
+[retained Zone OOM finding](../../docs/testing/2026-10-27-local-vuh-51-refresh/README.md#zone-oom-finding-local-vuh-49)
+also belongs to LOCAL-VUH-49's streamed seal/open investigation.
 
 **Rolling back to a journal build from before framing** (`f59461d17` up to
 LOCAL-VUH-47) needs nothing. That build reads framed lines and appends unframed ones,

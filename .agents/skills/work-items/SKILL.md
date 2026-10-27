@@ -50,7 +50,9 @@ tracker always goes there, from any repo or tool. Linear holds only its frozen
 copy; read that copy only with `linearHistory: true`. Evidence `bundleId` and
 run `id`/`runId`/`parentRunId` also route to their issue's project. Unknown ids
 never choose a project; built-in-only calls without a usable reference need the
-hire's built-in project or an explicit `repo`, otherwise they refuse. Saved
+hire's built-in project, otherwise they refuse. An explicit `repo` override is
+operator-only. The operator fallback for bundle/run ids in per-repo stores also
+requires `repo`. Saved
 views still require `project`/`storeId`; guided reviews still require `issueId`.
 Routing never raises a worker's role or request budget.
 Issue summaries have no separate 20,000-character limit: `work create --summary`
