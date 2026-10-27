@@ -127,19 +127,19 @@ mode) uses the same five concurrent lanes, 1.1 s spacing, real default budgets,
 17-create burst and 10-minute idle. CPU/GC profiling remains enabled as in the
 preceding full-lane failure; the workload and thresholds were not tuned.
 
-| Check | Final observed result |
-| --- | --- |
-| LOCAL-VUH-50 AC1 | In-process indexed routing; zero checkpoint rereads in 24 concurrent writes; external changes validated/refused; regression red before fence, green after |
-| LOCAL-VUH-50 amended AC2 (item criterion 4) | PASS: worker serial p95 38.31 ms read / 63.61 ms comment at 60d; 38.88 / 67.35 ms at 1d. Original ratio criterion 2 is superseded by the lead amendment |
-| LOCAL-VUH-50 AC3, request to durable commit | PASS: workers n=459, p50 50 / p95 110 / max 378 ms; lead n=115, p50 13 / p95 33 / max 67 ms |
-| LOCAL-VUH-50 AC3, event loop | PASS: maximum 81.78 ms, zero delays over 100 ms across traffic, convergence and all idle; 70,928 interval samples |
-| Workload | 594 writes, 75 creates, 840 events; 17-create burst 1,075 ms; traffic 138,347 ms |
-| LOCAL-VUH-46 AC1 | 594 applied receipts, 594 audit entries, 594 unique write keys and requests; 20 discarded replies reconciled, zero derived resends |
-| LOCAL-VUH-46 AC2 | All three readers have 56,512 models, zero digest mismatches, cursor 36,595; agent insert projectIds assumed |
-| LOCAL-VUH-46 AC3 | Commit to app pool p95 83 / max 152 ms, 594 samples, none missing |
-| LOCAL-VUH-46 AC4 | Zero periodic reads; one app bootstrap and 596 held subscriptions; one agent snapshot and 622 list_changes requests (620 settled reader pages, one head lookup, one pending reader request) |
-| LOCAL-VUH-46 AC5 | Zero role/budget refusals; rolling-minute worker write maxima 54/54/53/53 of 60; lead 56, exempt |
-| Idle and machine load | Complete 600 s idle, 16:20:06.203–16:30:06.203 UTC; reported idleMs 610,509 includes posthoc capture. 153 load samples, load1 1.08–6.40 |
+| Check                                       | Final observed result                                                                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LOCAL-VUH-50 AC1                            | In-process indexed routing; zero checkpoint rereads in 24 concurrent writes; external changes validated/refused; regression red before fence, green after                                   |
+| LOCAL-VUH-50 amended AC2 (item criterion 4) | PASS: worker serial p95 38.31 ms read / 63.61 ms comment at 60d; 38.88 / 67.35 ms at 1d. Original ratio criterion 2 is superseded by the lead amendment                                     |
+| LOCAL-VUH-50 AC3, request to durable commit | PASS: workers n=459, p50 50 / p95 110 / max 378 ms; lead n=115, p50 13 / p95 33 / max 67 ms                                                                                                 |
+| LOCAL-VUH-50 AC3, event loop                | PASS: maximum 81.78 ms, zero delays over 100 ms across traffic, convergence and all idle; 70,928 interval samples                                                                           |
+| Workload                                    | 594 writes, 75 creates, 840 events; 17-create burst 1,075 ms; traffic 138,347 ms                                                                                                            |
+| LOCAL-VUH-46 AC1                            | 594 applied receipts, 594 audit entries, 594 unique write keys and requests; 20 discarded replies reconciled, zero derived resends                                                          |
+| LOCAL-VUH-46 AC2                            | All three readers have 56,512 models, zero digest mismatches, cursor 36,595; agent insert projectIds assumed                                                                                |
+| LOCAL-VUH-46 AC3                            | Commit to app pool p95 83 / max 152 ms, 594 samples, none missing                                                                                                                           |
+| LOCAL-VUH-46 AC4                            | Zero periodic reads; one app bootstrap and 596 held subscriptions; one agent snapshot and 622 list_changes requests (620 settled reader pages, one head lookup, one pending reader request) |
+| LOCAL-VUH-46 AC5                            | Zero role/budget refusals; rolling-minute worker write maxima 54/54/53/53 of 60; lead 56, exempt                                                                                            |
+| Idle and machine load                       | Complete 600 s idle, 16:20:06.203–16:30:06.203 UTC; reported idleMs 610,509 includes posthoc capture. 153 load samples, load1 1.08–6.40                                                     |
 
 All final owned processes stopped, and the resource service confirmed zero
 heavy, light or server permits held after teardown. The maximum worker latency
