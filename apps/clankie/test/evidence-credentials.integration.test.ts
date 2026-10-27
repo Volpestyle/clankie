@@ -11,6 +11,7 @@ import {
 import { evidenceS3Client } from "../src/evidence-storage.ts";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { fleetFixture } from "./fixtures/evidence-session/fleet.ts";
+import { EVIDENCE_EXCHANGE_WINDOW_MS } from "@clankie/protocol/evidence-credentials";
 
 it("keeps defaults local and managed credentials closed; renews once across concurrent broker instances, refuses expiry/outage and restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "evidence-session-"));
@@ -318,19 +319,78 @@ it("keeps generic network errors retryable and recovers on the same exchange ide
   }
 });
 
+for (const [warm, elapsed] of [
+  [false, EVIDENCE_EXCHANGE_WINDOW_MS],
+  [false, EVIDENCE_EXCHANGE_WINDOW_MS + 1],
+  [true, EVIDENCE_EXCHANGE_WINDOW_MS],
+  [true, EVIDENCE_EXCHANGE_WINDOW_MS + 1],
+] as const) {
+  it(`recovers a ${warm ? "warm" : "cold"} outage after ${elapsed}ms with a fresh identity`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "evidence-expired-pending-"));
+    try {
+      const f = await fleetFixture(root),
+        credentials = f.provider.credentials(f.destination, "read");
+      const first = warm ? await credentials() : undefined;
+      if (warm) f.advance(450_001);
+      f.mode("outage");
+      if (first) expect((await credentials()).accessKeyId === first.accessKeyId).toBe(true);
+      else await expect(credentials()).rejects.toThrow("evidence_session_unavailable");
+      const id = evidenceCredentialId(f.binding("read"));
+      const uncertain = await f.broker.get(id);
+      expect(uncertain?.type === "evidence-storage" && uncertain.enabled && !!uncertain.pending).toBe(true);
+      const oldNonce = f.requests.at(-1)!.nonce;
+      f.advance(elapsed);
+      f.mode("ok");
+      const recovered = await credentials();
+      expect(recovered.expiration.getTime()).toBe(f.now + 900_000);
+      if (first) expect(recovered.accessKeyId === first.accessKeyId).toBe(false);
+      expect(f.requests.at(-1)!.nonce === oldNonce).toBe(false);
+      expect(f.requests.at(-1)!.reconcile).toBe(false);
+      const current = await f.broker.get(id);
+      expect(
+        current?.type === "evidence-storage" && current.enabled && !current.pending && !!current.lease,
+      ).toBe(true);
+      expect(
+        current?.type === "evidence-storage" &&
+          uncertain?.type === "evidence-storage" &&
+          current.epoch === uncertain.epoch,
+      ).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 it("refuses an unreconciled reply after the original nonce window without extending it", async () => {
   const root = await mkdtemp(join(tmpdir(), "evidence-nonce-window-"));
   try {
-    const f = await fleetFixture(root);
+    const f = await fleetFixture(root),
+      credentials = f.provider.credentials(f.destination, "read");
     f.mode("uncertain");
-    await expect(f.provider.credentials(f.destination, "read")()).rejects.toThrow(
-      "evidence_session_unavailable",
-    );
-    f.advance(300_001);
+    await expect(credentials()).rejects.toThrow("evidence_session_unavailable");
+    f.advance(1001);
     f.mode("ok");
-    await expect(f.provider.credentials(f.destination, "read")()).rejects.toThrow(
-      "evidence_session_unavailable",
-    );
+    const exchange = f.providerOptions.exchange;
+    f.providerOptions.exchange = async (request, signal) => {
+      const reply = await exchange(request, signal);
+      // The original identity is live at dispatch, but expires in flight.
+      f.advance(EVIDENCE_EXCHANGE_WINDOW_MS);
+      return reply;
+    };
+    await expect(credentials()).rejects.toThrow("evidence_session_unavailable");
+    const current = await f.broker.get(evidenceCredentialId(f.binding("read")));
+    expect(
+      current?.type === "evidence-storage" && current.enabled && !current.pending && !current.lease,
+    ).toBe(true);
+    expect(f.requests[0]!.nonce === f.requests[1]!.nonce).toBe(true);
+    expect(f.requests[1]!.reconcile).toBe(true);
+    f.providerOptions.exchange = exchange;
+    f.advance(1001);
+    await credentials();
+    expect(f.requests[2]!.nonce === f.requests[1]!.nonce).toBe(false);
+    expect(f.requests[2]!.reconcile).toBe(false);
+    const recovered = await f.broker.get(evidenceCredentialId(f.binding("read")));
+    expect(recovered?.type === "evidence-storage" && recovered.enabled && !!recovered.lease).toBe(true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

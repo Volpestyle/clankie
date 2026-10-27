@@ -99,3 +99,21 @@ code matches the repair; the snapshot's public provider predates only an
 equivalent invalid-reply catch cleanup. `review-repair-proof.zip` retains the
 final public outputs, clean capture and teardown record. Original archives above
 remain unchanged. No root gate, push, remote CI or hosted proof is claimed.
+
+
+## Pending-window repair
+
+Pell's required follow-up abandons an uncertain identity once its original
+five-minute window expires and starts a fresh nonce with `reconcile:false`.
+Cold and warm outage regressions cover both the exact expiry boundary and just
+past it. A reply whose window expires in flight is refused without disabling
+the entry; the tightened regression asserts later fresh issuance succeeds.
+Admission epoch remains unchanged during recovery. ADR and credential guide
+record abandonment and replacement; the private issuer is unchanged.
+
+The final governed run passed 30/30 across the affected provider and actual
+CLI/HTTP/MinIO proof files, with no skips. Focused compilation and formatting
+passed. `pending-window-proof.zip` retains the original outputs, source hashes
+and successful teardown record. Earlier private22/22 and six-app preflight
+remain applicable to unchanged private inputs. Root gates and remote CI remain
+pending review and a lead-granted landing window.

@@ -47,7 +47,12 @@ HTTP 5xx, is transient. Completed payloads reach the decoder, including invalid
 JSON as an invalid input; received malformed/unbound replies still withdraw
 authority. A ten-second attempt deadline does not discard an otherwise valid
 original reply; decoding checks its original request window and session expiry.
-After restart, reconciliation alone does not replace fresh live admission.
+Once the five-minute window expires, a pending identity is abandoned and replaced
+with a new nonce, this provider instance and the current timestamp
+(`reconcile:false`). Results arriving after their request window are discarded
+without withdrawing admission; a later call starts fresh. An unobserved old
+session expires on its own within 15 minutes. After restart, reconciliation alone
+does not replace fresh live admission.
 Only a previously admitted process may use its existing session during a transient outage, and only with more than
 60 seconds left. Invalid or denied replies withdraw local authority immediately;
 revocation/replacement fences prevent late publication. Restart requires fresh

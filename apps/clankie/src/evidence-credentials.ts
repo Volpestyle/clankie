@@ -7,7 +7,10 @@ import {
   type CredentialStore,
   type EvidenceCredential,
 } from "@clankie/credential-broker";
-import type { EvidenceSessionBinding } from "@clankie/protocol/evidence-credentials";
+import {
+  EVIDENCE_EXCHANGE_WINDOW_MS,
+  type EvidenceSessionBinding,
+} from "@clankie/protocol/evidence-credentials";
 import { EvidenceRefusal } from "./evidence-store.ts";
 import type { EvidenceDestination } from "./evidence-storage.ts";
 
@@ -131,11 +134,15 @@ export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
           }
           throw 0;
         }
-        if (current.pending?.inFlight && now - current.pending.attemptAtMs < 10_000) return current;
-        // A deadline or crash leaves the original identity behind. The transport
-        // must reconcile that exact exchange, never mint a replacement request.
-        pending = current.pending
-          ? { ...current.pending, attemptAtMs: now, inFlight: true, reconcile: true }
+        // Reconcile only while the issuer can still replay the original request.
+        // An expired uncertain exchange is abandoned, not evidence of revocation.
+        const retained =
+          current.pending && now < current.pending.startedAtMs + EVIDENCE_EXCHANGE_WINDOW_MS
+            ? current.pending
+            : undefined;
+        if (retained?.inFlight && now - retained.attemptAtMs < 10_000) return current;
+        pending = retained
+          ? { ...retained, attemptAtMs: now, inFlight: true, reconcile: true }
           : {
               nonce: randomBytes(16).toString("base64url"),
               instanceId: this.instanceId,
@@ -209,6 +216,10 @@ export class BrokerEvidenceCredentials implements EvidenceCredentialProvider {
         )
           return current;
         const { pending: _pending, lease: previous, ...base } = current;
+        // Time can pass while awaiting a reply. Discard an expired exchange's
+        // result without withdrawing admission; the next call starts fresh.
+        if (clock() >= claimed.startedAtMs + EVIDENCE_EXCHANGE_WINDOW_MS)
+          return { ...base, ...(previous ? { lease: previous } : {}), retryAtMs: 0 };
         if (lease) {
           if (claimed.instanceId !== this.instanceId && this.validated.get(id) !== epoch)
             reconciledPreviousProcess = true;

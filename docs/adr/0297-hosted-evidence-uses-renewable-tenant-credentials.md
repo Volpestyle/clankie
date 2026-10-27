@@ -155,8 +155,13 @@ durable reservation and sealed-response storage before it can be mounted; a
 fixture-only replay map is insufficient. Cached replies still require current
 host/grant checks. The decoder binds issue time to the original request and
 checks the original nonce window and absolute expiry; the ten-second deadline
-bounds each attempt, not the lifetime of a recoverable reply. A restarted body
-must settle the old identity and obtain fresh live admission before using it.
+bounds each attempt, not the lifetime of a recoverable reply. Once that window
+expires, a pending identity is abandoned and replaced with a new nonce, this
+provider instance and the current timestamp (`reconcile:false`). A result arriving after
+its request window is discarded without withdrawing admission; a later call
+starts fresh. An abandoned unobserved session expires on its own within 15
+minutes. A restarted body must settle a still-recoverable old identity or abandon
+an expired one, then obtain fresh live admission before using credentials.
 
 The offline implementation currently delays retries by a fixed one second per
 broker entry. Escalating backoff, issuance rate limits and pending-claim recovery
