@@ -24,6 +24,11 @@ export interface LeadProgressState {
   paused: boolean;
   workEpoch?: string | undefined;
 }
+/** A lead whose state could not be read this round; its idle epoch and incidents stand. */
+export interface UnavailableLeadProgress {
+  conversationId: string;
+  unavailable: string;
+}
 
 const MAX_TIMER_MS = 2_147_483_647;
 const WAKE_RETRY_START_MS = 5_000;
@@ -185,7 +190,9 @@ export class AutonomyStore {
   }
 
   /** Passive, durable idle epochs. Reports and observations never approve or repair work. */
-  public progress(leads: readonly LeadProgressState[]): readonly FleetProgressObservation[] {
+  public progress(
+    leads: readonly (LeadProgressState | UnavailableLeadProgress)[],
+  ): readonly FleetProgressObservation[] {
     if (this.stateUnreadable) throw Error("Lead continuation observations unavailable: unreadable store");
     if (leads.length > 256) throw Error("Lead continuation inventory exceeds its bound");
     const result: FleetProgressObservation[] = [];
@@ -199,6 +206,15 @@ export class AutonomyStore {
       }
     }
     for (const lead of leads) {
+      if ("unavailable" in lead) {
+        result.push({
+          id: `lead:${lead.conversationId}`,
+          stalled: false,
+          unavailable: true,
+          message: lead.unavailable,
+        });
+        continue;
+      }
       const record = this.state.conversations[lead.conversationId];
       const continuation = record?.continuation;
       const blocking = continuation?.mode === "blocked_on_owner";

@@ -7803,34 +7803,47 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return autonomy.progress(
         leads.map((conversation) => {
           const id = conversation.conversationId;
-          const source = conversations.nativeSource(id);
-          const seat =
-            id === conversations.defaultGlobalConversationId()
-              ? fleet.find((entry) => entry.seatId === headSeat?.seatId)
+          // One unresolvable lead is named by itself; the rest still compute.
+          try {
+            const source = conversations.nativeSource(id);
+            const head = id === conversations.defaultGlobalConversationId();
+            // The census keeps the head out of the fleet (ADR 0152), so the
+            // default lead's native seat is the observed head itself.
+            const seat = head
+              ? undefined
               : fleet.find(
                   (entry) =>
                     entry.conversationId === id ||
                     (source !== undefined && entry.seatId === source.terminalId),
                 );
-          const goal = seat?.goal ?? conversationGoal(id);
-          const assignment = seat?.assignment ?? conversationAssignment(id);
-          const native = conversations.hasNativeSeat(id) || conversationDriver(id) !== undefined;
-          if (native && !seat) throw Error(`Lead ${id} native idle state unavailable`);
-          return {
-            conversationId: id,
-            ...(seat ? { seatId: seat.seatId } : {}),
-            idle:
-              conversations.activeInvocationCount(id) === 0 &&
-              (native ? seat?.status === "idle" || seat?.status === "blocked" : conversations.turnIdle(id)),
-            liveWorkers: fleet.some(
-              (worker) => worker.owner?.conversationId === id && worker.status === "working",
-            ),
-            activeWork: assignment !== undefined || goal?.status === "active" || goal?.status === "blocked",
-            paused:
-              goal !== undefined &&
-              ["paused", "complete", "budget_limited", "usage_limited"].includes(goal.status),
-            workEpoch: assignment?.updatedAt ?? goal?.updatedAt,
-          };
+            const observed = head ? headSeat : seat;
+            const goal = seat?.goal ?? conversationGoal(id);
+            const assignment = seat?.assignment ?? conversationAssignment(id);
+            const native = conversations.hasNativeSeat(id) || conversationDriver(id) !== undefined;
+            if (native && !observed) throw Error(`Lead ${id} native idle state unavailable`);
+            return {
+              conversationId: id,
+              ...(observed ? { seatId: observed.seatId } : {}),
+              idle:
+                conversations.activeInvocationCount(id) === 0 &&
+                (native
+                  ? observed?.status === "idle" || observed?.status === "blocked"
+                  : conversations.turnIdle(id)),
+              liveWorkers: fleet.some(
+                (worker) => worker.owner?.conversationId === id && worker.status === "working",
+              ),
+              activeWork: assignment !== undefined || goal?.status === "active" || goal?.status === "blocked",
+              paused:
+                goal !== undefined &&
+                ["paused", "complete", "budget_limited", "usage_limited"].includes(goal.status),
+              workEpoch: assignment?.updatedAt ?? goal?.updatedAt,
+            };
+          } catch (error) {
+            return {
+              conversationId: id,
+              unavailable: error instanceof Error ? error.message : String(error),
+            };
+          }
         }),
       );
     },

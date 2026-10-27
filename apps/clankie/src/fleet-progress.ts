@@ -7,6 +7,8 @@ export interface FleetProgressObservation {
   id: string;
   stalled: boolean;
   message: string;
+  /** Unknown state for this id and its `id:` incidents: none opens or resolves this round. */
+  unavailable?: true;
 }
 export interface FleetProgressSource {
   prefix: string;
@@ -106,6 +108,9 @@ export class FleetProgressObserver {
         );
         continue; // Unknown does not resolve an incident.
       }
+      const unknown = observations.filter((o) => o.unavailable);
+      for (const o of unknown)
+        this.options.onError(new Error(`Fleet progress ${o.id} unavailable`, { cause: Error(o.message) }));
       for (const observation of observations) {
         if (!observation.stalled || this.incidents.some((i) => i.id === observation.id)) continue;
         // Retain open incidents; prune oldest completed episodes only.
@@ -127,6 +132,7 @@ export class FleetProgressObserver {
       for (const incident of this.incidents) {
         if (!incident.id.startsWith(`${source.prefix}:`) || incident.recovery !== undefined) continue;
         if (observations.some((o) => o.id === incident.id && o.stalled)) continue;
+        if (unknown.some((o) => incident.id.startsWith(`${o.id}:`))) continue;
         incident.recoveredAt = new Date().toISOString();
         incident.recovery = "claimed";
         await this.save();
