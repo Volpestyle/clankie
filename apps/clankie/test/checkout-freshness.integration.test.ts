@@ -115,6 +115,21 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
       expect(seats.every((seat) => !("checkout" in seat))).toBe(true);
     }
     expect(await readFile(trace, "utf8")).toBe("");
+    await checkoutGit(linked, ["switch", "-c", "worker-changes"]);
+    await writeFile(join(linked, "worker.txt"), "worker commit\n");
+    await checkoutGit(linked, ["add", "worker.txt"]);
+    await checkoutGit(linked, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "worker",
+    ]);
+    const workerHead = (await checkoutGit(linked, ["rev-parse", "HEAD"])).trim();
+    await writeFile(join(linked, "draft.txt"), "worker draft\n");
+    await writeFile(trace, "");
     const enriched = await captain.serveOperatorConversation({
       schemaVersion: 1,
       op: "roster",
@@ -125,7 +140,15 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
       seats: expect.arrayContaining([
         expect.objectContaining({
           workingDirectory: linked,
-          checkout: expect.objectContaining({ path: owner, outcome: "observed", dirty: false }),
+          checkout: expect.objectContaining({
+            path: linked,
+            outcome: "observed",
+            branch: "worker-changes",
+            head: workerHead,
+            ahead: 1,
+            behind: 0,
+            dirty: true,
+          }),
         }),
       ]),
     });
@@ -133,6 +156,7 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
     expect(firstTrace).toContain('"worktree","list"');
     const precedingCensus = censusReads;
     await new Promise((resolve) => setTimeout(resolve, 1100));
+    await rm(join(linked, "draft.txt"));
     await writeFile(join(owner, "draft.txt"), "draft\n");
     const repeated = await captain.serveOperatorConversation({
       schemaVersion: 1,
@@ -143,7 +167,7 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
       op: "fleet",
       snapshot: {
         seats: expect.arrayContaining([
-          expect.objectContaining({ checkout: expect.objectContaining({ dirty: false }) }),
+          expect.objectContaining({ checkout: expect.objectContaining({ path: linked, dirty: true }) }),
         ]),
       },
     });
@@ -154,8 +178,14 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
     expect(await readFile(trace, "utf8")).toBe(firstTrace);
     const bounded = new CheckoutObservationCache(2);
     await bounded.observe(owner);
-    await bounded.observe(linked);
-    await bounded.observe(second);
+    await mkdir(join(linked, "src"));
+    expect(await bounded.observe(join(linked, "src"))).toMatchObject({
+      path: linked,
+      branch: "worker-changes",
+      dirty: false,
+      ahead: 1,
+    });
+    expect(await bounded.observe(second)).toMatchObject({ path: second, branch: "", dirty: false, ahead: 0 });
     await writeFile(trace, "");
     expect(await bounded.observe(owner)).toMatchObject({ path: owner, dirty: true });
     expect(await readFile(trace, "utf8")).toContain('"worktree","list"');

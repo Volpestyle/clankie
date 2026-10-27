@@ -1,7 +1,8 @@
 import type { CheckoutStatus } from "@clankie/protocol";
-import { inspectCheckout, ownerCheckout } from "@clankie/settings";
+import { realpath } from "node:fs/promises";
+import { checkoutGit, inspectCheckout } from "@clankie/settings";
 
-/** Opted-in reads share the complete Git observation, including owner discovery. */
+/** Opted-in reads share the complete Git observation, including checkout-root discovery. */
 export class CheckoutObservationCache {
   private readonly capacity: number;
   private readonly ttlMs: number;
@@ -23,7 +24,8 @@ export class CheckoutObservationCache {
     const cached = this.entries.get(path);
     if (cached) return cached.pending;
     while (this.entries.size >= this.capacity) this.entries.delete(this.entries.keys().next().value!);
-    const pending = ownerCheckout(path)
+    const pending = checkoutGit(path, ["rev-parse", "--show-toplevel"])
+      .then((root) => realpath(root.trim()))
       .then(inspectCheckout)
       .catch(() => undefined);
     this.entries.set(path, { expires: now + this.ttlMs, pending });

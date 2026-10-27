@@ -9814,8 +9814,11 @@ since last commit or edit, and any recorded decision, oldest first. Managed
 runtime trees are skipped. Doctor and local roster cards include these observations.
 Cached refs are explicitly identified; status never fetches or edits a checkout.
 Roster/fleet requests opt into checkout cards with `includeCheckouts: true`;
+these describe each local worker’s actual Git root, including a linked worktree
+or a session started below that root, rather than the primary checkout. Different
+worktrees retain their own branch, HEAD, ahead/behind counts and dirty state.
 older callers keep their original response shape and perform no checkout Git
-observation. Opted-in reads cache owner discovery and inspection together for
+observation. Opted-in reads cache root discovery and inspection together for
 30 seconds, retaining at most 128 cwd observations.
 
 `clankie checkouts sync [--repository OWNER_CHECKOUT]` fetches `origin/main`
