@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "source-repair-proof.json",
+      "size": 4146610,
+      "sha256": "c0dabe37a4982fdf95d05255ffcbd74401939deffae0af8546b5bfeba52476ff",
+      "url": "clankie://evidence/sha256/c0dabe37a4982fdf95d05255ffcbd74401939deffae0af8546b5bfeba52476ff"
+    }
+  ]
+}

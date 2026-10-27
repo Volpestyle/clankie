@@ -1,3 +1,4 @@
+import { operatorSeatBindingFixture } from "../../clankie/test/fixtures/operator-seat-binding-fixture.ts";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -39,7 +40,9 @@ it("puts a real room-turn refusal cause in the current bridge's error text", asy
     },
   );
   const room = captain.bodyRoomConversation("discord_presence", "40000:50000");
+  const seatBinding = operatorSeatBindingFixture();
   const service = await createClankieApp({
+    operatorSeatBindings: seatBinding.registry,
     captain,
     settings,
     discordEnvironment: {},
@@ -48,19 +51,24 @@ it("puts a real room-turn refusal cause in the current bridge's error text", asy
         ? { operatorId: "fixture-owner" }
         : undefined,
   });
+  await seatBinding.register(service.app, "global-default", { authorization: "Bearer fixture-operator" });
+  const noncePath = join(root, "bridge-nonce");
+  await writeFile(noncePath, Object.values(seatBinding.headers("global-default"))[0]!, { mode: 0o600 });
   const http = createServer(async (incoming, outgoing) => {
     let body = "";
     for await (const chunk of incoming) body += chunk;
     const headers = new Headers();
     for (const [key, value] of Object.entries(incoming.headers))
       if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(",") : value);
-    const response = await service.app.fetch(
-      new Request(`http://127.0.0.1${incoming.url}`, {
-        method: incoming.method!,
-        headers,
-        ...(body ? { body } : {}),
-      }),
-    );
+    const request = new Request(`http://127.0.0.1${incoming.url}`, {
+      method: incoming.method!,
+      headers,
+      ...(body ? { body } : {}),
+    });
+    // Controlled kernel observation of this sole owned bridge's actual socket;
+    // native process acceptance belongs to its dedicated integration fixture.
+    const env = { incoming, outgoing };
+    const response = await service.app.fetch(request, seatBinding.httpEnv(request, env) ?? env);
     outgoing.writeHead(response.status, Object.fromEntries(response.headers));
     outgoing.end(await response.text());
   });
@@ -82,6 +90,7 @@ it("puts a real room-turn refusal cause in the current bridge's error text", asy
       ...Object.fromEntries(
         Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
       ),
+      CLANKIE_BRIDGE_NONCE_FILE: noncePath,
       CLANKIE_OPERATOR_TOKEN: "fixture-operator",
       CLANKIE_CONTROL_PLANE_URL: `http://127.0.0.1:${address.port}`,
       CLANKIE_DISABLE_MODELS_FETCH: "1",

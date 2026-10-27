@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import type { Hono } from "hono";
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
@@ -47,7 +47,7 @@ export function operatorSeatBindingFixture() {
   function launch(conversationId: string) {
     let entry = launches.get(conversationId);
     if (entry) return entry;
-    entry = { nonce: randomUUID(), launcher, bridge, harnessPid: 101 };
+    entry = { nonce: randomBytes(32).toString("hex"), launcher, bridge, harnessPid: 101 };
     launches.set(conversationId, entry);
     return entry;
   }

@@ -299,6 +299,7 @@ setInterval(() => {}, 1 << 30);
   const named = JSON.parse(
     codexLaunch.argv.find((argument) => argument.startsWith("mcp_servers.worker.env_vars="))!.split("=")[1]!,
   ) as string[];
+  expect(named).toContain("CLANKIE_CONVERSATION_ID");
   const [codexHarness, codexBridge] = InMemoryTransport.createLinkedPair();
   const codexBridgeEnv = Object.fromEntries(
     named.flatMap((name) => (codexLaunch.env[name] ? [[name, codexLaunch.env[name]]] : [])),
@@ -313,9 +314,20 @@ setInterval(() => {}, 1 << 30);
     };
     return runJoinedSeatHook("mcp", ["--seat"], options);
   };
+  expect(codexBridgeEnv.CLANKIE_CONVERSATION_ID).toBe(codexLaunch.env.CLANKIE_CONVERSATION_ID);
+  const [, wrongConversationBridge] = InMemoryTransport.createLinkedPair();
+  await expect(
+    codexBridgeFor(
+      { ...codexBridgeEnv, CLANKIE_CONVERSATION_ID: "unrelated-conversation" },
+      wrongConversationBridge,
+    ),
+  ).rejects.toThrow("remote_lead_conversation_mismatch");
   const codexBridged = codexBridgeFor(codexBridgeEnv, codexBridge);
   const codexClient = new Client({ name: "codex-worker", version: "1" }, { capabilities: {} });
   await codexClient.connect(codexHarness);
+  const workerTools = (await codexClient.listTools()).tools.map((tool) => tool.name);
+  for (const leadTool of ["message_seat", "hire_agent", "worker_reports", "acknowledge_worker_reports"])
+    expect(workerTools).not.toContain(leadTool);
   const codexReport = await codexClient.callTool({
     name: "message_clankie",
     arguments: { text: "Kit: done.", deliveryId: randomUUID() },

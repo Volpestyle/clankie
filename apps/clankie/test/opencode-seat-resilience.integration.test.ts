@@ -1,4 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import type { Socket } from "node:net";
+import { OperatorSeatBindings } from "../src/operator-seat-bindings.ts";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -16,8 +18,9 @@ import { releaseAtLeast } from "../src/captain/native-release.ts";
 import { runOpenCodeSeat } from "../../tui/src/command/opencode-seat.ts";
 
 // VUH-2348: a real OpenCode (1.18 or newer) server runs the shipped seat plugin against the
-// real seat bridge, service and captain. Only the model provider is a fixture,
-// so a turn can end in a provider error on demand. OpenCode and Clankie state
+// real seat bridge, service and captain. The model provider is controlled so a
+// turn can end in a provider error on demand; kernel observations are bounded
+// to the launcher-owned pump below. OpenCode and Clankie state
 // live in a temporary home; the plugin's `clankie mcp` entry resolves to a shim.
 
 const repoRoot = join(import.meta.dirname, "../../..");
@@ -69,7 +72,43 @@ it.skipIf(!opencode || !releaseAtLeast(opencode, "1.18.0"))(
         settings: new SettingsStore(join(root, "settings.json")),
       },
     );
+    // The launcher hosts the pump in this fixture. Substitute only kernel
+    // observations of its owned HTTP sockets and its actual spawned child;
+    // registration and admission remain real. This is not native proof coverage.
+    const launcher = { pid: process.pid, ppid: process.ppid, birth: [randomUUID(), "0"] as [string, string] };
+    let harness: { pid: number; ppid: number; birth: [string, string] } | undefined;
+    const launcherSockets = new WeakSet<Socket>();
+    const operatorSeatBindings = new OperatorSeatBindings({
+      birth: async (pid) =>
+        pid === launcher.pid ? launcher.birth : harness?.pid === pid ? harness.birth : undefined,
+      processes: async (controllerPid, harnessPid) => {
+        if (controllerPid !== launcher.pid || harness?.pid !== harnessPid) return undefined;
+        return {
+          schemaVersion: 1,
+          processes: [launcher, harness].map((entry) => ({
+            ...entry,
+            uid: process.getuid?.() ?? 501,
+            executable: process.execPath,
+            argv: [],
+          })),
+        };
+      },
+      socket: async (socket) =>
+        launcherSockets.has(socket)
+          ? {
+              schemaVersion: 1,
+              owner: {
+                pid: launcher.pid,
+                uid: process.getuid?.() ?? 501,
+                birth: launcher.birth,
+                socket: "fixture-launcher",
+              },
+              ancestors: [launcher],
+            }
+          : undefined,
+    });
     const app = await createClankieApp({
+      operatorSeatBindings,
       captain: new Proxy(captain, {
         get: (target, key, receiver) =>
           key === "laneToolBank"
@@ -88,7 +127,7 @@ it.skipIf(!opencode || !releaseAtLeast(opencode, "1.18.0"))(
     const http = serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: async (request) => {
+      fetch: async (request, env) => {
         if (new URL(request.url).pathname === "/v1/captain/prompt") {
           promptReads++;
           if (stallPrompts > 0) {
@@ -96,7 +135,8 @@ it.skipIf(!opencode || !releaseAtLeast(opencode, "1.18.0"))(
             await new Promise((resolve) => setTimeout(resolve, 11_000));
           }
         }
-        return app.app.fetch(request);
+        launcherSockets.add(env.incoming.socket);
+        return app.app.fetch(request, env);
       },
     }) as HttpServer;
     if (!http.listening) await new Promise<void>((resolve) => http.once("listening", resolve));
@@ -173,7 +213,7 @@ it.skipIf(!opencode || !releaseAtLeast(opencode, "1.18.0"))(
         env,
         stderr: { write: (value: string) => ((stderr += value), true) },
         // The same plugin, bridge and environment; headless so the test can drive the native API.
-        spawnImpl: (command, _args, cwd, childEnv = {}) =>
+        spawnImpl: (command, _args, cwd, childEnv = {}, onSpawn) =>
           new Promise<number>((resolve, reject) => {
             bridge = {
               url: childEnv.CLANKIE_OPENCODE_BRIDGE!,
@@ -189,7 +229,14 @@ it.skipIf(!opencode || !releaseAtLeast(opencode, "1.18.0"))(
             native.stdout?.on("data", listen);
             native.stderr?.on("data", listen);
             native.once("error", reject);
-            native.once("exit", (code) => resolve(code ?? 0));
+            native.once("exit", (code) => {
+              harness = undefined;
+              resolve(code ?? 0);
+            });
+            if (native.pid !== undefined) {
+              harness = { pid: native.pid, ppid: launcher.pid, birth: [randomUUID(), "0"] };
+              onSpawn?.(native.pid);
+            }
           }),
       },
     );
