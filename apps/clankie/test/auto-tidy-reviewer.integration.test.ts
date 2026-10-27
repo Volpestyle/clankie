@@ -16,7 +16,7 @@ const agent = (paneId: string, terminalId: string, title: string): HerdrAgentSna
   session: { source: "herdr:codex", kind: "id", value: `session-${terminalId}` },
 });
 
-it("spares a project's standing reviewer and closes an idle peer", async () => {
+it("spares a project's standing reviewer, named by terminal or pane id, and closes an idle peer", async () => {
   const projects = ProjectsSettingsSchema.parse({
     projects: [
       {
@@ -31,16 +31,24 @@ it("spares a project's standing reviewer and closes an idle peer", async () => {
         workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: "/fixture/by-role" }],
         review: { role: "reviewer" },
       },
+      {
+        // --reviewer-seat also accepts a pane id; the review service resolves either.
+        id: "by-pane",
+        name: "by-pane",
+        workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: "/fixture/by-pane" }],
+        review: { seat: "w1:p3" },
+      },
     ],
   });
-  expect([...reviewerSeatIds(projects)]).toEqual(["term_corvin"]);
+  expect([...reviewerSeatIds(projects)]).toEqual(["term_corvin", "w1:p3"]);
   const reviewer = agent("w1:p1", "term_corvin", "Corvin");
+  const paneReviewer = agent("w1:p3", "term_sage", "Sage");
   const peer = agent("w1:p2", "term_odile", "Odile");
   const closed: string[] = [];
   let clock = Date.parse("2026-10-27T12:00:00Z");
   const auto = createAutoTidy({
     setting: async () => "1h",
-    runner: { list: async () => [reviewer, peer] },
+    runner: { list: async () => [reviewer, paneReviewer, peer] },
     tidy: {
       close: async (input) => {
         closed.push(input.pane);
@@ -68,4 +76,5 @@ it("spares a project's standing reviewer and closes an idle peer", async () => {
   // Every other hard line held for both; only the reviewer is exempt.
   expect(closed).toEqual([peer.paneId]);
   expect(auto.held("lead").map((row) => row.seatId)).not.toContain(reviewer.terminalId);
+  expect(auto.held("lead").map((row) => row.seatId)).not.toContain(paneReviewer.terminalId);
 });

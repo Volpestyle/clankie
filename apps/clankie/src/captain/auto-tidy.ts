@@ -142,7 +142,8 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       const key = JSON.stringify([agent.terminalId, sessionKey, ports.tidy.keepVersion(agent)]);
       seen.add(key);
       // A standing reviewer idles between candidates; closing it stalls every landing (VUH-2920).
-      if (ports.tidy.keptPane(agent) || reviewers.has(agent.terminalId)) {
+      // Matched as the review service resolves review.seat: terminal or pane id.
+      if (ports.tidy.keptPane(agent) || reviewers.has(agent.terminalId) || reviewers.has(agent.paneId)) {
         settledSince.delete(key);
         retryAt.delete(key);
         held.delete(key);
