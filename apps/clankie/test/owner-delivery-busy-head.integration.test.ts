@@ -12,7 +12,10 @@ import { pumpSeatEvents } from "../../tui/src/command/mcp.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
+import { QuestionDraftSchema, type QuestionAuthority } from "../src/captain/conversation-questions.ts";
+import { ConversationStore } from "../src/captain/conversations.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
+import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 
 // VUH-2874 (2026-10-26): while the native head ran one long turn, the owner's
 // Discord messages waited behind it (one ~38 minutes) and each later got its
@@ -94,6 +97,10 @@ async function fixture(holds: { readonly headBoundGraceMs?: number; readonly hea
   vi.spyOn(AutonomyStore.prototype, "start").mockImplementation((run) => {
     autonomous = run;
   });
+  // The captain's own store, for host-side events no portal can raise.
+  const seatIds = vi.spyOn(ConversationStore.prototype, "seatIds");
+  // What reached the head's outbox, in order, before any seat took it.
+  const deliver = vi.spyOn(SeatOutbox.prototype, "deliver");
   const captain = createCaptain(
     {
       herdrAvailable: () => false,
@@ -156,6 +163,8 @@ async function fixture(holds: { readonly headBoundGraceMs?: number; readonly hea
   });
   return {
     captain,
+    store: seatIds.mock.contexts[0] as ConversationStore,
+    queued: () => deliver.mock.calls.map(([input]) => input.content),
     ownerMessage,
     autonomous: (prompt: string) => autonomous("global-default", prompt),
     journal: new ConversationJournal(join(root, "conversations")),
@@ -275,28 +284,39 @@ it("a long native turn hears the owner at once, absorbs messages that waited tog
   );
   expect(head.events().filter((event) => event.kind === "escalation")).toHaveLength(2);
 
-  // One answer, with everything in view, closes all three. It posts once, on
-  // the newest message; the older ones record that this reply answered them.
+  // One answer, with the batch in view, closes both messages it carried. It
+  // posts once, on the newest; the older one records that this reply answered it.
+  let firstSettled = false;
+  void first.then(() => (firstSettled = true));
   expect(
     await f.captain.replySeatEvent(batch!.id, "Heap files are in VUH-2870; TCM can wait.", "global-default"),
   ).toBe(true);
-  const [one, two, three] = await Promise.all([first, second, third]);
+  const [two, three] = await Promise.all([second, third]);
   expect(three).toMatchObject({
     state: "settled",
     response: "Heap files are in VUH-2870; TCM can wait.",
     captainSessionId: "global-default",
   });
-  for (const covered of [one, two])
-    expect(covered).toMatchObject({
-      state: "absorbed",
-      replyDeliveryId: "owner-delivery-3",
-      deliveryStage: "responded",
-      captainSessionId: "global-default",
-    });
-  // The answer is not re-posted for the earlier messages, and their receipts
-  // are stable on a repeat delivery.
-  expect(JSON.stringify([one, two])).not.toContain("TCM can wait");
-  expect(await f.captain.submitDiscordTurn(f.ownerMessage(1, "Any update from TCM?"))).toEqual(one);
+  expect(two).toMatchObject({
+    state: "absorbed",
+    replyDeliveryId: "owner-delivery-3",
+    deliveryStage: "responded",
+    captainSessionId: "global-default",
+  });
+  // The answer is not re-posted for the covered message, and its receipt is
+  // stable on a repeat delivery.
+  expect(JSON.stringify(two)).not.toContain("TCM can wait");
+  expect(await f.captain.submitDiscordTurn(f.ownerMessage(2, "Also, the heap files?"))).toEqual(two);
+  // The first message reached the head in its own event, so the batch's answer
+  // does not close it: it keeps waiting for, and posts, its own.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(firstSettled).toBe(false);
+  expect(await f.captain.replySeatEvent(firstEvent.id, "TCM shipped the fix.", "global-default")).toBe(true);
+  expect(await first).toMatchObject({
+    state: "settled",
+    response: "TCM shipped the fix.",
+    captainSessionId: "global-default",
+  });
 
   // The lower-priority watch and Auto round follow the owner, still to the head.
   expect(await watch).toBe(true);
@@ -323,6 +343,93 @@ it("a long native turn hears the owner at once, absorbs messages that waited tog
       .some((event) => event.type === "message" && event.text.includes("service lane took over")),
   ).toBe(false);
   expect(turn("waiting")).toBe(true);
+});
+
+it("an owner message is taken ahead of a watch that waited for the head before it", async () => {
+  const f = await fixture();
+  const head = seat(f.captain);
+  await head.bound();
+  await head.halt();
+  const watch = f.captain.wakeConversation({ conversationId: "global-default" }, "Watch: w1 settled.");
+  await vi.waitFor(() => expect(f.queued()).toEqual([expect.stringContaining("Watch: w1 settled.")]));
+  const owner = f.captain.submitDiscordTurn(f.ownerMessage(1, "Any update from TCM?"));
+  await vi.waitFor(() => expect(f.queued()).toHaveLength(2));
+  expect(f.queued()[1]).toContain("Any update from TCM?");
+  expect(fake.prompts).toEqual([]);
+
+  // The head returns inside its lane hold and takes both in one poll, owner first.
+  await head.start();
+  await vi.waitFor(() => expect(head.events()).toHaveLength(2));
+  expect(head.events().map((event) => event.kind)).toEqual(["escalation", "watch"]);
+  expect(await watch).toBe(true);
+  expect(await f.captain.replySeatEvent(head.events()[0]!.id, "Not yet.", "global-default")).toBe(true);
+  expect(await owner).toMatchObject({ state: "settled", response: "Not yet." });
+  expect(fake.prompts).toEqual([]);
+});
+
+it("an older owner message answered after a newer one still posts its own answer", async () => {
+  const f = await fixture();
+  const head = seat(f.captain);
+  await head.bound();
+  const first = f.captain.submitDiscordTurn(f.ownerMessage(1, "Please audit the heap files."));
+  await vi.waitFor(() => expect(head.events()).toHaveLength(1));
+  const second = f.captain.submitDiscordTurn(f.ownerMessage(2, "Also, what time is it?"));
+  await vi.waitFor(() => expect(head.events()).toHaveLength(2));
+  const [older, newer] = head.events();
+  expect(older!.content).toContain("heap files");
+  expect(newer!.content).toContain("what time");
+
+  let firstSettled = false;
+  void first.then(() => (firstSettled = true));
+  // The quick question is answered first; the long one is still being worked.
+  expect(await f.captain.replySeatEvent(newer!.id, "It is 5pm.", "global-default")).toBe(true);
+  expect(await second).toMatchObject({ state: "settled", response: "It is 5pm." });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(firstSettled).toBe(false);
+  // The real answer to the older message is accepted and posts.
+  expect(await f.captain.replySeatEvent(older!.id, "The heap audit is done.", "global-default")).toBe(true);
+  expect(await first).toMatchObject({ state: "settled", response: "The heap audit is done." });
+  expect(fake.prompts).toEqual([]);
+});
+
+it("a worker question resolved elsewhere reaches a bound head as a wake, not a service turn", async () => {
+  const f = await fixture();
+  const head = seat(f.captain);
+  await head.bound();
+  const owner: QuestionAuthority = {
+    principal: { kind: "operator", id: "owner" },
+    current: () => true,
+    authorize: async () => true,
+  };
+  f.store.prepareWorkerQuestion = async (seatId, requestId) => ({
+    seatId,
+    requestId,
+    sessionId: "worker-session",
+    questions: [{ id: "q", question: "Which route?" }],
+  });
+  await f.store.requestSurfaceQuestion(
+    "global-default",
+    QuestionDraftSchema.parse({
+      purpose: "decision",
+      kind: "choice",
+      prompt: "Which route?",
+      options: [{ label: "A" }, { label: "B" }],
+      recommendation: "A",
+      waitingOn: "Routing the work",
+      workerQuestion: { seatId: "worker", requestId: "request-1" },
+    }),
+    { current: () => true },
+  );
+  // The worker answered natively; the next listing reconciles it as an
+  // internal input on the head conversation.
+  f.store.reconcileWorkerQuestion = async () => "resolved";
+  await f.store.serve({ op: "input_list", schemaVersion: 1 }, owner);
+  await vi.waitFor(() =>
+    expect(head.events()).toContainEqual(
+      expect.objectContaining({ kind: "wake", content: expect.stringContaining("resolved elsewhere") }),
+    ),
+  );
+  expect(fake.prompts).toEqual([]);
 });
 
 it("a native head that stays silent past its lane hold is taken over explicitly", async () => {

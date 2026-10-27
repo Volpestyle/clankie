@@ -344,6 +344,22 @@ Explicit watches retain
 their arming conversation. See
 [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md).
 
+The head (`global-default`) holds its lane for 45 s from its seat's last ask,
+including a poll still waiting behind admission. This supersedes the 30 s head
+grace as the point where input may leave the seat: input that arrives inside the
+hold waits for the seat's next poll. Only longer silence lets the service lane
+take over, and that takeover is recorded as a service notice in the
+conversation. An internal `input`, such as a worker question resolved elsewhere,
+reaches a live head as a wake. A poll takes owner turns and escalations ahead of
+wakes, watches, Auto rounds and reports. Linked-channel owner messages steer a
+busy native turn. Messages from one channel that wait together arrive as one
+attributed event, and one reply to it answers that batch, posting once. Each
+older member settles `absorbed` with the reply's delivery ID. A message delivered
+in an earlier event keeps its own reply. A linked handoff frees its room slot
+once it reaches the main conversation, so the two-per-room handoff cap does not
+hold back the owner's later messages
+([VUH-2874 amendment](adr/0218-native-seats-drive-their-attached-conversation.md#a-busy-head-hears-its-owner-first-vuh-2874-2026-10-26)).
+
 A five-minute service inactivity watchdog starts at reservation and includes
 cold preparation, before a Pi session exists. Host-observed preparation progress
 and Pi events renew it. The watchdog is suspended while one or more Pi tools

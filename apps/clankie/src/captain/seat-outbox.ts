@@ -117,7 +117,7 @@ export class SeatLinkInterruptedError extends Error {
 
 export type SeatDelivery = { readonly deliveryStage?: DeliveryStage } & (
   | { readonly outcome: "delivered"; readonly messageId?: string }
-  /** `coveredBy` names the newer event whose one answer also closes this one; its text posts there. */
+  /** `coveredBy` names the batch event whose one answer also closes this one; its text posts there. */
   | { readonly outcome: "replied"; readonly text: string; readonly coveredBy?: string }
   | { readonly outcome: "unconfirmed"; readonly messageId: string; readonly detail: string }
   /** `takeover`: the seat held its lane, then went silent past the hold; the service lane may run it. */
@@ -159,8 +159,8 @@ export interface SeatDeliveryInput {
   readonly recipientBinding?: string;
   /**
    * Escalations sharing this key that wait together reach the seat as one
-   * event, and a reply to the newer one also answers the older ones the seat
-   * already holds (VUH-2874). Each keeps its own receipt.
+   * event, and a reply to it also answers the older ones it carried (VUH-2874).
+   * Each keeps its own receipt.
    */
   readonly coalesce?: string;
   readonly signal?: AbortSignal;
@@ -1036,25 +1036,13 @@ export class SeatOutbox {
       if (!this.matchesRecipient(pending, recipientBinding)) return false;
       if (!pending.acknowledged) this.ackPending(pending);
     }
-    // One answer, with the later message in view, closes the older ones the
-    // seat already holds. Each keeps its own receipt; the text posts once.
-    for (const older of this.coveredBy(pending, recipientBinding))
-      older.settle({ outcome: "replied", text, coveredBy: eventId });
+    // One answer to a batch closes the older messages that batch carried. Each
+    // keeps its own receipt; the text posts once. An escalation the seat got in
+    // an earlier event keeps its own answer (VUH-2874).
+    for (const older of pending.covers ?? [])
+      if (!older.settled) older.settle({ outcome: "replied", text, coveredBy: eventId });
     pending.settle({ outcome: "replied", text });
     return true;
-  }
-
-  private coveredBy(pending: Pending, recipientBinding?: string): Pending[] {
-    if (pending.coalesce === undefined) return [];
-    const carried = new Set(pending.covers ?? []);
-    return [...this.awaitingReply.values()].filter(
-      (older) =>
-        older !== pending &&
-        !older.settled &&
-        older.coalesce === pending.coalesce &&
-        (carried.has(older) ||
-          (older.startedAt <= pending.startedAt && this.matchesRecipient(older, recipientBinding))),
-    );
   }
 
   /**

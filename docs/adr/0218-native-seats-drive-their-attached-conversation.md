@@ -520,3 +520,79 @@ With no account that has room, a refused move or an unknown original launch,
 the service lane keeps running the conversation. An unconfirmed move or return
 is reported and never retried. Each move posts a notice, and the lead chat
 roster shows the current move (`seatMove`).
+
+## A busy head hears its owner first (VUH-2874, 2026-10-26)
+
+On 2026-10-26 the owner's linked-channel messages waited behind one long native
+head turn (one for about 38 minutes), and each later got its own late answer.
+Meanwhile the service lane ran lead turns beside the live head and messaged its
+workers. The traced causes:
+
+- an internal `input` (a worker question resolved elsewhere) had no seat event
+  kind, so it always ran on the service lane;
+- a head poll waits behind in-flight service runs before it parks. A service run
+  longer than the bridge's 35 s poll deadline read as the head leaving, so more
+  input routed to the service lane;
+- linked-channel escalations were held until the native turn ended, then released
+  one per turn;
+- the room handoff coordinator admits two handoffs per room, so a third owner
+  message waited for an earlier answer.
+
+This amends "Seat live?" in the selection above for the head (`global-default`):
+
+- **Lane hold.** A head holds its lane for 45 s (`HEAD_LANE_HOLD_MS`) from its
+  seat's last ask: a parked poll, a completed poll, or a poll still proving its
+  source or waiting behind admission (held for as long as it waits). This
+  supersedes the 30 s head grace as the selection boundary. The grace still ends
+  a completed poll's binding, but input that arrives inside the hold is stored at
+  the seat for its next poll, not run by the service lane. 45 s covers one bridge
+  poll timeout (35 s) and its retry (5 s). Worker and room outboxes have no hold.
+- **Recorded takeover.** Input still waiting when the hold lapses settles unbound
+  as a takeover, and the service lane runs it, including input that had been
+  stored at the seat. The first takeover of each silence records a service
+  notice in the conversation ("Clankie's service lane took over this
+  conversation …") with the seat's last ask and how long it was silent. A
+  service run already executing when the head returns still finishes first and
+  reaches the head in the usual handoff.
+- **Internal input is a wake.** An internal `input` on a head conversation
+  reaches a live seat as a `wake`, like a hook.
+- **Owner first.** A poll takes owner turns and escalations ahead of wakes,
+  watches, Auto rounds and reports, whatever order they were queued in.
+- **Owner messages steer.** A linked-channel escalation steers a busy native
+  turn instead of waiting for it to end. On the service lane it is still a
+  queued turn.
+- **Same-batch coalescing.** Escalations from the same linked channel that are
+  waiting together when a poll takes them reach the seat as one attributed
+  event under the newest one's id, oldest first, with the later messages framed
+  as context. One reply to that event answers the whole batch: the answer posts
+  once, on the newest message, and each older member settles `absorbed` with
+  that reply's `replyDeliveryId`. Each message keeps its own receipt. A reply
+  covers only the messages its event carried. An escalation the seat received in
+  an earlier event keeps its own reply, so answering a newer message first never
+  closes an older one.
+- **Early room-slot release.** A linked main-conversation handoff releases its
+  room slot once it reaches the main conversation and only waits for the answer.
+  The two-per-room cap therefore no longer limits linked owner messages; it still
+  bounds room handoffs that do their work in the room.
+
+```mermaid
+flowchart TD
+  Input[Owner escalation, wake, watch, report] --> Live{Head bound?}
+  Live -->|yes| Seat[Seat outbox: owner first, same-channel batch]
+  Live -->|no| Hold{Asked within 45 s,<br/>or a poll waits for admission?}
+  Hold -->|yes| Stored[Stored at the seat for its next poll]
+  Stored --> Seat
+  Hold -->|no, hold lapsed| Takeover[Takeover notice in the conversation]
+  Takeover --> Service[Service lane runs it]
+  Seat --> Reply[One reply per event; covers only its batch]
+```
+
+Regression coverage is
+`apps/clankie/test/owner-delivery-busy-head.integration.test.ts`. It uses the
+real captain, room admission, conversation runner, outbox and channel pump, with
+a scripted model in which any service-lane turn shows up as a prompt. It covers
+the owner heard mid-turn, the batch answered once, an earlier separately
+delivered message keeping its own answer, an owner message taken ahead of a
+watch queued before it, a resolved worker question reaching a bound head as a
+wake, and an explicit takeover after the hold. No live harness or production
+state was exercised.
