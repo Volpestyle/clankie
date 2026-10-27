@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "artifacts/final-captures.json",
+      "size": 682314,
+      "sha256": "4b06873a3880e785e421aed8d5b61842e4c9e41ae439e23a310438559ee85a8a",
+      "url": "clankie://evidence/sha256/4b06873a3880e785e421aed8d5b61842e4c9e41ae439e23a310438559ee85a8a"
+    },
+    {
+      "path": "artifacts/initial-captures.json",
+      "size": 661320,
+      "sha256": "7d2eee1faa8717e5dababa0cba557304bf561e16b4598b9d3629cd5b5815cf03",
+      "url": "clankie://evidence/sha256/7d2eee1faa8717e5dababa0cba557304bf561e16b4598b9d3629cd5b5815cf03"
+    },
+    {
+      "path": "artifacts/run-2/browser.png",
+      "size": 37204,
+      "sha256": "9605f291bf9a6f5517fdbfcf1d5f3c7257a60ec6c80e9f7a64aa700f52d45a31",
+      "url": "clankie://evidence/sha256/9605f291bf9a6f5517fdbfcf1d5f3c7257a60ec6c80e9f7a64aa700f52d45a31"
+    },
+    {
+      "path": "artifacts/run-2/latencies.json",
+      "size": 71369,
+      "sha256": "75694c9c7b82862e4f4efc5fc2e5640abacee288663761438975ef3569f73789",
+      "url": "clankie://evidence/sha256/75694c9c7b82862e4f4efc5fc2e5640abacee288663761438975ef3569f73789"
+    },
+    {
+      "path": "artifacts/run-2/model-digests.json",
+      "size": 20062878,
+      "sha256": "4a1a272a5287ca5321acab7bb0a87e2b85b7ff031fabdead4943b01171f69349",
+      "url": "clankie://evidence/sha256/4a1a272a5287ca5321acab7bb0a87e2b85b7ff031fabdead4943b01171f69349"
+    },
+    {
+      "path": "artifacts/run-2/requests.json",
+      "size": 168753,
+      "sha256": "5a1fc12bed120b27eca142fb7ff239e9855eb7e89ca514f0e9d72b2a4188906a",
+      "url": "clankie://evidence/sha256/5a1fc12bed120b27eca142fb7ff239e9855eb7e89ca514f0e9d72b2a4188906a"
+    },
+    {
+      "path": "artifacts/run-2/summary.json",
+      "size": 173559,
+      "sha256": "b8f13388534b40ff1b3f6b9b8b092f44b8c984302c00dd6bcaf603a3a75b007b",
+      "url": "clankie://evidence/sha256/b8f13388534b40ff1b3f6b9b8b092f44b8c984302c00dd6bcaf603a3a75b007b"
+    },
+    {
+      "path": "artifacts/run-2/writes.json",
+      "size": 105558,
+      "sha256": "35990d5424725b943204648f30eab74ad03c48069e1337a95f716529f2aa1a87",
+      "url": "clankie://evidence/sha256/35990d5424725b943204648f30eab74ad03c48069e1337a95f716529f2aa1a87"
+    },
+    {
+      "path": "artifacts/run-4/browser.png",
+      "size": 35693,
+      "sha256": "19ca74d5793c2c97e8f89380784244127e4a40ad8ddfdea5416d8f1ed2b2efb4",
+      "url": "clankie://evidence/sha256/19ca74d5793c2c97e8f89380784244127e4a40ad8ddfdea5416d8f1ed2b2efb4"
+    },
+    {
+      "path": "artifacts/run-4/latencies.json",
+      "size": 71359,
+      "sha256": "d44990c394c49c6d323ce22c8436b77e763a101317eeaf28f6ad94ea1b0e5186",
+      "url": "clankie://evidence/sha256/d44990c394c49c6d323ce22c8436b77e763a101317eeaf28f6ad94ea1b0e5186"
+    },
+    {
+      "path": "artifacts/run-4/load.json",
+      "size": 27521,
+      "sha256": "9b7f0fcfa42d739c8239f0e27a9c2e158c9f76a03aa4a0b8be88358d801b4b85",
+      "url": "clankie://evidence/sha256/9b7f0fcfa42d739c8239f0e27a9c2e158c9f76a03aa4a0b8be88358d801b4b85"
+    },
+    {
+      "path": "artifacts/run-4/model-digests.json",
+      "size": 20089428,
+      "sha256": "c6eb1a6115eaf7cd2a0bc16c112c7b80d047ab9a5fdb6c7d11e8e0294e7a0b4e",
+      "url": "clankie://evidence/sha256/c6eb1a6115eaf7cd2a0bc16c112c7b80d047ab9a5fdb6c7d11e8e0294e7a0b4e"
+    },
+    {
+      "path": "artifacts/run-4/requests.json",
+      "size": 172827,
+      "sha256": "5773ee5c6434166309cf6961aa9185e889eee7c48404aec84aa15b662a0ff4ec",
+      "url": "clankie://evidence/sha256/5773ee5c6434166309cf6961aa9185e889eee7c48404aec84aa15b662a0ff4ec"
+    },
+    {
+      "path": "artifacts/run-4/summary.json",
+      "size": 177712,
+      "sha256": "cce685fb2ddd8f025e75941d2b3c24f6ce184452e36e304e36933490ff436e30",
+      "url": "clankie://evidence/sha256/cce685fb2ddd8f025e75941d2b3c24f6ce184452e36e304e36933490ff436e30"
+    },
+    {
+      "path": "artifacts/run-4/writes.json",
+      "size": 105558,
+      "sha256": "965eda04dc621b0ed136a276b1aa54f74c7be36f2e107270faa311fc4c7720fb",
+      "url": "clankie://evidence/sha256/965eda04dc621b0ed136a276b1aa54f74c7be36f2e107270faa311fc4c7720fb"
+    }
+  ]
+}

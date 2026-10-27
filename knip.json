@@ -19,6 +19,9 @@
         "integrations/herdr-plugin/claude-path-shim.d.mts",
         "scripts/scratch-stack.mjs",
         "scripts/manual/work-inbox-proof.mjs",
+        "scripts/manual/tracker-peak-day.ts",
+        "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/run.mjs",
+        "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/browser.ts",
         "scripts/dependency-types.mjs",
         "scripts/proof-linux-pi-process.mjs",
         ".agents/skills/shared-checkout/scripts/land.mjs",
@@ -177,6 +180,8 @@
     "scripts/evals/lead-coding-tools.mjs": ["unlisted"],
     "scripts/evals/lead-controller.mjs": ["unlisted"],
     "scripts/evals/lead-model-runtime.mjs": ["unlisted"],
-    "integrations/opencode-plugin/worker-tui.mjs": ["unlisted"]
+    "integrations/opencode-plugin/worker-tui.mjs": ["unlisted"],
+    "scripts/manual/tracker-peak-day.ts": ["unlisted"],
+    "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/browser.ts": ["unlisted"]
   }
 }
