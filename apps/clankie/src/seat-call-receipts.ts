@@ -103,8 +103,16 @@ export class SeatCallReceipts {
     tool: SeatCallTool,
     lane: CaptainSessionLaneV2,
     conversationId?: string,
+    minted = false,
   ): CallToolResult {
-    const record = this.store.read(id) ?? this.fence(id, tool, lane, conversationId);
+    const record = this.store.read(id) ?? (minted ? this.fence(id, tool, lane, conversationId) : undefined);
+    if (record === undefined)
+      return {
+        content: [
+          { type: "text", text: "No matching seat-call receipt in this conversation. Nothing dispatched." },
+        ],
+        isError: true,
+      };
     if (record.tool !== tool || !this.matches(record, lane, conversationId))
       return {
         content: [
@@ -121,7 +129,9 @@ export class SeatCallReceipts {
   /**
    * An ID with no receipt never began: begin() saves before any dispatch. Settle it as not
    * dispatched so a call still in flight (a timed-out or restart-lost request) is refused
-   * when it arrives, which makes "safe to send again" true (VUH-2920).
+   * when it arrives, which makes "safe to send again" true (VUH-2920). Only the bridge
+   * that minted the ID may ask: a native delivery ID is a UUID too, and one delivered
+   * out of this conversation's scope must never read as safe to resend.
    */
   private fence(
     id: string,

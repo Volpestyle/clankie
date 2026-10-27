@@ -488,8 +488,14 @@ it("reconciling an ID the service never received settles it as not dispatched an
       }) as unknown as Transport,
     );
     // VUH-2920: a send lost to a service restart left the lead with only its seat-call ID.
+    // The bridge that minted it names it in the reconcile's seat-call metadata.
     const id = randomUUID();
-    const reconciled = await client.callTool({ name: "reconcile_seat_call", arguments: { deliveryId: id } });
+    const reconcile = {
+      name: "reconcile_seat_call",
+      arguments: { deliveryId: id },
+      _meta: { "clankie/seat-call": { id } },
+    };
+    const reconciled = await client.callTool(reconcile);
     expect(JSON.stringify(reconciled.content)).toContain("Safe to send it again as a new call.");
     expect(reconciled._meta?.["clankie/seat-call"]).toMatchObject({
       id,
@@ -505,7 +511,7 @@ it("reconciling an ID the service never received settles it as not dispatched an
     expect(late.isError).toBe(true);
     expect(await f.effects()).toHaveLength(0);
     // Reconciling again is stable; the resend under a new ID is delivered once.
-    const again = await client.callTool({ name: "reconcile_seat_call", arguments: { deliveryId: id } });
+    const again = await client.callTool(reconcile);
     expect(decodeMcpResult(again)).toEqual(decodeMcpResult(reconciled));
     const resend = await client.callTool({
       name: "message_seat",
@@ -516,6 +522,26 @@ it("reconciling an ID the service never received settles it as not dispatched an
     expect(await f.effects()).toHaveLength(1);
   } finally {
     await client.close();
+    await f.close();
+  }
+});
+
+it("leaves an ID the bridge didn't mint open: a delivered native ID never reads as safe to resend", async () => {
+  const f = await fixture();
+  try {
+    // Native delivery IDs are UUIDs too; this one is outside the stub captain's native lookup.
+    const sent = await f.client.callTool({ name: "message_seat", arguments: { text: "delivered once" } });
+    const native = (decodeMcpResult(sent) as { deliveryId: string }).deliveryId;
+    expect(await f.effects()).toHaveLength(1);
+    for (const deliveryId of [native, native, randomUUID()]) {
+      const read = await f.client.callTool({ name: "reconcile_seat_call", arguments: { deliveryId } });
+      expect(read.isError).toBe(true);
+      expect(JSON.stringify(read.content)).toContain("No matching seat-call receipt in this conversation.");
+      expect(JSON.stringify(read.content)).not.toContain("Safe to send");
+      expect(read._meta?.["clankie/seat-call"]).toBeUndefined();
+    }
+    expect(await f.effects()).toHaveLength(1);
+  } finally {
     await f.close();
   }
 });

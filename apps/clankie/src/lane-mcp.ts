@@ -83,7 +83,9 @@ export function createLaneMcpEndpoint({
     name: RECONCILE_SEAT_CALL,
     description:
       "Read the original operator message_seat or hire_agent receipt by its MCP deliveryId, native channel event ID, or hireId. " +
-      "Read-only: never dispatches, retries, or starts an agent. Use the same conversation as the original call. " +
+      "Never dispatches, retries, or starts an agent. Use the same conversation as the original call. " +
+      "A seat-call ID your bridge minted that the service never received is closed as not dispatched, so the original " +
+      "cannot run late and the action may be sent again as a new call; any other unknown ID is left open. " +
       'With settle: "not_delivered" and a deliveryId, settle an unresolved original that blocks a seat: proven arrival is recorded delivered, ' +
       "otherwise it is recorded not delivered and kept as abandoned-unknown. Nothing is sent, and the original is never resent.",
     inputSchema: {
@@ -229,12 +231,15 @@ export function createLaneMcpEndpoint({
         }
         const id = SeatCallIdSchema.safeParse(args[key]);
         if (!id.success) return failure("Invalid seat-call receipt ID. Nothing dispatched.");
+        // The bridge names an ID it minted itself in this request's seat-call metadata.
+        const minted = SeatCallRequestSchema.safeParse(request.params._meta?.[SEAT_CALL_META]);
         try {
           const original = receipts.read(
             id.data,
             key === "deliveryId" ? "message_seat" : "hire_agent",
             lane,
             conversationId,
+            minted.success && minted.data.id === id.data,
           );
           if (key === "deliveryId" && !original.isError) {
             for (const block of original.content) {

@@ -741,6 +741,8 @@ export async function connectLaneUpstream(input: {
   const retired = new WeakSet<Client>();
   const closing = new WeakSet<Client>();
   const pending = new Map<Client, number>();
+  // Seat-call IDs minted by this bridge, so a reconcile may close one never received.
+  const minted = new Map<string, "message_seat" | "hire_agent">();
   const generationIds = new WeakMap<Client, number>();
   let nextGeneration = 0;
   const listeners = new Set<() => void>();
@@ -922,6 +924,15 @@ export async function connectLaneUpstream(input: {
       // One identity belongs to this intent, including the explicit pre-admission
       // replay above. Receipt recovery never dispatches the intent again.
       const id = tool === undefined ? undefined : randomUUID();
+      if (tool !== undefined && id !== undefined) minted.set(id, tool);
+      const reconciled =
+        name === RECONCILE_SEAT_CALL
+          ? typeof args?.deliveryId === "string" && minted.get(args.deliveryId) === "message_seat"
+            ? args.deliveryId
+            : typeof args?.hireId === "string" && minted.get(args.hireId) === "hire_agent"
+              ? args.hireId
+              : undefined
+          : undefined;
       // Mail's durable idempotency belongs to the mailbox, not the dispatch
       // receipt store. Allocate once before an authorized pre-admission replay.
       const publicationId =
@@ -944,11 +955,15 @@ export async function connectLaneUpstream(input: {
               {
                 name,
                 arguments: args,
-                ...(id === undefined && publicationId === undefined && options?.background !== true
+                ...(id === undefined &&
+                reconciled === undefined &&
+                publicationId === undefined &&
+                options?.background !== true
                   ? {}
                   : {
                       _meta: {
                         ...(id === undefined ? {} : { [SEAT_CALL_META]: { id } }),
+                        ...(reconciled === undefined ? {} : { [SEAT_CALL_META]: { id: reconciled } }),
                         ...(publicationId === undefined
                           ? {}
                           : { [OWNER_UPDATE_PUBLICATION_META]: { publicationId } }),
@@ -969,6 +984,7 @@ export async function connectLaneUpstream(input: {
               {
                 name: RECONCILE_SEAT_CALL,
                 arguments: tool === "message_seat" ? { deliveryId: id } : { hireId: id },
+                _meta: { [SEAT_CALL_META]: { id } },
               },
               undefined,
               { timeout: SEAT_RECONCILE_TIMEOUT_MS },

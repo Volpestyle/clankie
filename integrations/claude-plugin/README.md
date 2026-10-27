@@ -534,9 +534,11 @@ never replay a pending action because the tool may already have run.
 Before protected `message_seat` or `hire_agent` dispatch, the bridge assigns a
 `deliveryId` or `hireId` in MCP `_meta["clankie/seat-call"]`; the service persists
 the receipt before the native effect. Lost results return typed uncertainty with
-the original ID. Use read-only `reconcile_seat_call({deliveryId})` or
+the original ID. Use `reconcile_seat_call({deliveryId})` or
 `reconcile_seat_call({hireId})` from the owning operator conversation to inspect
-that receipt. This never resends a message or starts a replacement hire. Settled
+that receipt. This never resends a message or starts a replacement hire. An ID
+the bridge minted that never reached the service is closed as not dispatched, so
+it can be sent again as a new call. Settled
 receipts survive restart within bounded result-body retention; original IDs
 remain non-replayable, and uncertain originals remain retained. These
 operator call receipts are separate from the fleet peer-message ledger. See

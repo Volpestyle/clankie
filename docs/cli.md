@@ -946,9 +946,13 @@ Protected `message_seat` and `hire_agent` calls receive a `deliveryId` or `hireI
 before dispatch, carried in MCP `_meta["clankie/seat-call"]`. The service persists
 the scoped receipt before the native effect. A lost result returns typed
 uncertainty with that original ID; reconnect never replays the pending action.
-Use the read-only `reconcile_seat_call({deliveryId})` or
+Use `reconcile_seat_call({deliveryId})` or
 `reconcile_seat_call({hireId})` in the owning operator conversation to inspect its
-original receipt, without sending again or launching a replacement. A settled
+original receipt, without sending again or launching a replacement. When the
+bridge that minted an ID reconciles it and the service has no receipt, the call
+never arrived: the ID is closed as not dispatched, so a late arrival is refused
+and the action may be sent again as a new call. Any other unknown ID is left
+open. A settled
 call receipt returns the original tool result, not proof of task completion. The
 journal keeps the latest 1,000 settled result bodies; older IDs remain
 non-replayable and report an expired result, while uncertain originals remain

@@ -287,7 +287,8 @@ while another is in flight waits for it rather than being refused. Reconcile an
 unconfirmed `message_seat` by its exact native `messageId` (or MCP dispatch
 UUID) with `reconcile_seat_call` in the original conversation, and read
 `clankie seat-delivery list` for mailbox and native fences. Never resend to test
-receipt.
+receipt. The one exception: a reconcile that says "Not dispatched … Safe to send
+it again as a new call" closed an ID that never reached the service.
 
 If an unresolved original refuses your new messages to a seat, check the
 recipient's pane or transcript first. If the original never arrived, settle it
