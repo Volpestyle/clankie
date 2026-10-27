@@ -5,7 +5,8 @@ preparation-release decision `beb11ba9-43f6-4582-9058-2a678914b45f`.
 
 The shipped policy is **observe**. Legacy seats retain their tools while the
 service records binding refusals. Doctor lists each binding and exact recovery;
-observe diagnostics follow existing readiness reasons. A future artifact flips
+observe and unknown-mode diagnostics follow existing readiness reasons, except
+while an enforcing update is active or held for unready seats. A future artifact flips
 the policy to enforce. Both checkout and official-release updater gates are
 installed here. Observe retains the pre-existing stray-process gap until that
 later release. No production deployment or restart was performed.
@@ -24,7 +25,12 @@ findings are addressed:
 2. Observe-mode census failures and unbound seats no longer replace existing
    doctor readiness headlines. The same report tests voice refusal with both a
    failed census and a complete unbound census; enforcing mode prioritizes the
-   binding failure. Diagnostics remain in the body.
+   binding failure. Authenticated updater receipts retain the verified target
+   policy as read-only evidence. Active enforcing installs/restarts and the
+   latest `operator-seats-unready` refusal promote the binding blocker even
+   while the service observes. Unknown modes, other operation IDs, completed
+   cutovers and rolled-back updates preserve the voice headline. Removing this
+   exception kills the doctor tests. Diagnostics remain in the body.
 3. Separate tests isolate operator MCP dispatch, the conversation runner, native
    driver fallback, and timed lead failback. Each hold prevents dispatch or
    service takeover, and an unrelated conversation continues. The runner test
@@ -50,28 +56,28 @@ An uncertain spawn remains held. The claim is never repeated.
 
 [proof.tar.gz](proof.tar.gz), with [archive.sha256](archive.sha256), holds sanitized
 drivers, JSON receipts, owned runtime logs, check output and mutation logs.
-The final proof is **run 9**. Preparation ran directly from commit
-`1c65a48848d26c21a8c4922bc1f0c6cb8381fc39`, an ancestor of this candidate, rebased
-onto `origin/main` at `27ac568b15086d1515c2b4fd663b4790de237b83`.
+The final proof is **run 10**. Preparation ran directly from commit
+`bd10a28e4bef850e20b5bc2cf64985a6c00f40e3`, an ancestor of this candidate, rebased
+onto `origin/main` at `3ae2db858a33751f8b38f931713d8ea47bfcdd6b`.
 The driver requires a clean source tree and asserts that its preparation commit
 equals that committed HEAD. The recorded tree is
-`ff0ee398575b363104841f17e8bc5f4fa7d7230a`.
+`2a5e29918f7fdcdf1cd0df482e53ebc234d243b2`.
 
-The scratch enforcing commit `f72f26f0536a2817e88e16661e6fb1bd5d39adf2` differs
+The scratch enforcing commit `4bd38d58c99730fc53dc4b6e639d9856f42bc2e7` differs
 only in `apps/clankie/operator-seat-policy.json`. Its complete diff is archived
-as `proof/enforcing-artifact.patch` and in `run-9/source-bindings.json`.
+as `proof/enforcing-artifact.patch` and in `run-10/source-bindings.json`.
 `proof/proven-to-candidate-source.diff` is empty: after the proven commit, only
 this README, the archive and its digest changed. `proof.json` records matching
 source hashes, checks that the proven commit is reachable from the candidate,
 and checks that every mutation's original guard bytes match the proven source.
-Earlier scratch snapshots in runs 1–8 are retained as history, not candidate
+Earlier scratch snapshots in runs 1–9 are retained as history, not candidate
 source evidence. The lead publishes the replacement archive to the evidence
 store; the previous archive remains at its previous content-addressed link.
 
 ## Actual upgrade
 
 ```sh
-PROOF_REQUIRE_CLEAN=1 PROOF_RUN=run-9 clankie heavy -- node --import ./apps/clankie/node_modules/tsx/dist/loader.mjs .local/vuh2888-proof/upgrade.mts
+PROOF_REQUIRE_CLEAN=1 PROOF_RUN=run-10 clankie heavy -- node --import ./apps/clankie/node_modules/tsx/dist/loader.mjs .local/vuh2888-proof/upgrade.mts
 ```
 
 The archive retains that driver. It boots the full service from exact
@@ -79,7 +85,7 @@ The archive retains that driver. It boots the full service from exact
 engine for the first upgrade, including real Git worktrees, pnpm installation,
 state/link relocation and replacement-service health identity.
 
-| Behavior                                 | Original receipts under `proof/run-9/`                                                                                                                                                                             |
+| Behavior                                 | Original receipts under `proof/run-10/`                                                                                                                                                                            |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Old seats keep tools across prep upgrade | `baseline-native.json`, first `update-*.json`, `legacy-doctor.json`, `legacy-call-after-upgrade.json`: two unchanged old launchers, observe mode, unbound census, actual protected message delivered after upgrade |
 | Reconcile without replay                 | `original-receipt.json`, `original-reconciled.json`: a reply deliberately dropped after original dispatch, then reconciled after upgrade using the bridge's actual receipt ID                                      |
@@ -105,18 +111,22 @@ remains unproven here.
 
 ## Checks and mutations
 
-- Corrected core group: **54 passed** across six files. After rebase, with the
-  current owner-delivery regression included: **61 passed** across seven files.
+- After the final rebase, the corrected core group had **54 passed** across
+  six files, plus **7 passed** in the owner-delivery regression.
 - Restored VUH-2816 native/route/registry/unbound-MCP/doctor/nonce suites:
   **49 passed**, including both real native cases executed.
-- Doctor, checkout updater and actual release-helper integration: **55 passed**.
+- Doctor, checkout updater and actual release-helper integration: **56 passed**.
 - Current service source, changed core tests, TUI project and changed updater
-  tests typechecked; scoped lint and formatting passed. A fresh real
-  `pnpm install --frozen-lockfile` completed after rebase.
-- **27/27 mutations killed**, each with a discovered failing test, then exact
-  source bytes restored. `checks/r2-mutations/results.json` records each command,
+  tests typechecked; scoped lint and formatting passed. A real
+  `pnpm install --frozen-lockfile` completed in this worktree; the final rebase
+  changed no dependency inputs.
+- **28/28 mutations killed**, each with a discovered failing test, then exact
+  source bytes restored. `checks/r3-rebased-mutations/results.json` records each final command,
   replacement, original source hash and test result; adjacent logs retain the
-  failures. The unmodified runs above are green.
+  failures in `r2-mutations`, `r3-mutations` and `r3-rebased-mutations`. Unchanged
+  guard receipts are reused only when their source hash still matches. Changed
+  updater/doctor and rebased failback guards were rerun. The restored runs above
+  are green.
 
 | Mutations | Isolated boundary                                                                                               |
 | --------- | --------------------------------------------------------------------------------------------------------------- |
@@ -125,13 +135,13 @@ remains unproven here.
 | R1–R5     | pending original at claim, bound completion, ready completion, idle preparation, pending original at completion |
 | H1–H4     | MCP dispatch, conversation runner, driver fallback, timed failback                                              |
 | U1–U7     | release pre/post gate, checkout pre/post gate, missing-policy default, enforcing policy, complete inventory     |
-| C1, D1    | deleted executable fallback and observe-mode headline priority                                                  |
+| C1, D1–D2 | deleted executable fallback, observe/unknown headline priority, pending enforcing update headline               |
 
 The first corrected-fixture attempt exposed a selector that kept returning its
 refused driver and a copied Homebrew Node missing its library path; both fixture
 bugs are fixed and their failed logs retained. The original evidence's failed
 attempts and ineffective first mutation configuration are retained and excluded
-from successful proof. Root landing gate, Wynn's replacement-patch approval and
+from successful proof. Root landing gate, Thea's replacement-patch approval and
 the lead's landing window remain pending. No full check or eval was run.
 
 A true-crash outer hire receipt still lacks a durable native-ID mapping, and
