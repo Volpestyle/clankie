@@ -22,11 +22,7 @@ import {
 import { join } from "node:path";
 
 /** Signed, encrypted local fleet fixture. No cloud or installed broker access. */
-function sealFixtureLease(
-  lease: unknown,
-  publicKey: string,
-  signer: ReturnType<typeof generateKeyPairSync>,
-) {
+function sealFixtureLease(lease: unknown, publicKey: string, signer: ReturnType<typeof generateKeyPairSync>) {
   const ephemeral = createECDH("prime256v1");
   ephemeral.generateKeys();
   const salt = randomBytes(16),
