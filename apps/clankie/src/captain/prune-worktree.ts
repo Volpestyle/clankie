@@ -20,6 +20,31 @@ export interface PruneWorktreeResult {
   keptRef?: string;
 }
 
+/** True only for git's own refusal to treat a directory as a repository (or a directory that is gone). */
+export function isNotGitRepository(error: unknown): boolean {
+  const text = `${(error as { stderr?: unknown })?.stderr ?? ""}${error instanceof Error ? error.message : ""}`;
+  return /not a git repository/iu.test(text) || (error as { code?: unknown })?.code === "ENOENT";
+}
+
+/**
+ * Whether any registered owner checkout lists a worktree nested under `path`. A registered
+ * workspace that is not a git repository has no worktrees to nest, so it is skipped; any other
+ * failure still refuses the removal (VUH-2850).
+ */
+export async function hasNestedRegisteredWorktree(owners: readonly string[], path: string): Promise<boolean> {
+  for (const owner of owners) {
+    let raw: string;
+    try {
+      raw = await checkoutGit(owner, ["worktree", "list", "--porcelain", "-z"]);
+    } catch (error) {
+      if (isNotGitRepository(error)) continue;
+      throw error;
+    }
+    if (raw.split("\0").some((field) => field.startsWith(`worktree ${path}/`))) return true;
+  }
+  return false;
+}
+
 /** Hold both HEAD and its branch while Git removes the checkout, so a new commit cannot lose its only ref. */
 async function withStableWorktreeHead(
   repository: string,

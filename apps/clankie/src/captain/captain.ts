@@ -57,10 +57,13 @@ import {
   verifyHireCheckout,
   projectPathContains,
   projectRoleForPersona,
-  checkoutGit,
 } from "@clankie/settings";
 import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
-import { pruneTidyWorktree, type PruneWorktreeResult } from "./prune-worktree.ts";
+import {
+  hasNestedRegisteredWorktree,
+  pruneTidyWorktree,
+  type PruneWorktreeResult,
+} from "./prune-worktree.ts";
 import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
@@ -2598,11 +2601,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       .filter((root) => root.machineId === "local");
     if (!roots.some((root) => root.repoPath === repository && projectPathContains(root.path, path, platform)))
       throw Error("Select a linked worktree in a registered root; managed runtime trees are protected");
-    for (const owner of await checkoutRepositories()) {
-      const raw = await checkoutGit(owner, ["worktree", "list", "--porcelain", "-z"]);
-      if (raw.split("\0").some((field) => field.startsWith(`worktree ${path}/`)))
-        throw Error("Nested registered worktree is still present; keep the parent");
-    }
+    if (await hasNestedRegisteredWorktree(await checkoutRepositories(), path))
+      throw Error("Nested registered worktree is still present; keep the parent");
     return pruneTidyWorktree(
       repository,
       path,

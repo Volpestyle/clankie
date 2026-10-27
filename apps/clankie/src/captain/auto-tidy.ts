@@ -10,7 +10,7 @@ import {
   type PaneTidy,
   type TidyFailure,
 } from "./pane-tidy.ts";
-import type { PruneWorktreeResult } from "./prune-worktree.ts";
+import { isNotGitRepository, type PruneWorktreeResult } from "./prune-worktree.ts";
 import { tidyWorktreeInventory } from "./tidy-worktrees.ts";
 
 /** How often settled hire panes are considered for an automatic close (VUH-2392). */
@@ -65,6 +65,13 @@ export interface AutoTidyPorts {
   readonly now?: () => number;
 }
 
+/** A registered repository the last worktree round could not tidy, and why. */
+export interface AutoTidySkipped {
+  readonly repository: string;
+  readonly reason: "not_a_git_repository" | "inventory_unavailable" | "prune_failed";
+  readonly detail?: string;
+}
+
 /** The newest checkout activity: its root entries, index, HEAD or reflog. */
 async function lastActivity(path: string): Promise<number | undefined> {
   try {
@@ -96,6 +103,8 @@ export function createAutoTidy(ports: AutoTidyPorts) {
   const retryAt = new Map<string, number>();
   /** Why each settled hire past its window is still open, by session key. */
   const held = new Map<string, { owner: string; row: AutoTidyHeld }>();
+  /** Repositories the latest worktree round skipped; replaced each round. */
+  let skipped: AutoTidySkipped[] = [];
 
   async function panes(): Promise<ClosedWorkerPaneHistory[]> {
     const setting = await ports.setting();
@@ -212,6 +221,8 @@ export function createAutoTidy(ports: AutoTidyPorts) {
   async function worktrees(): Promise<PruneWorktreeResult[]> {
     if ((await ports.setting()) === "off") return [];
     const removed: PruneWorktreeResult[] = [];
+    const round: AutoTidySkipped[] = [];
+    // One repository that cannot be tidied is reported, never the end of the round.
     for (const { repository, roots } of await ports.checkouts()) {
       if (ports.stopped()) break;
       let entries: ReturnType<typeof tidyWorktreeInventory>;
@@ -221,7 +232,12 @@ export function createAutoTidy(ports: AutoTidyPorts) {
           await checkoutGit(repository, ["worktree", "list", "--porcelain", "-z"]),
         );
         main = (await checkoutGit(repository, ["rev-parse", "--verify", "origin/main^{commit}"])).trim();
-      } catch {
+      } catch (error) {
+        round.push(
+          isNotGitRepository(error)
+            ? { repository, reason: "not_a_git_repository" }
+            : { repository, reason: "inventory_unavailable", detail: String(error).slice(0, 200) },
+        );
         continue;
       }
       let pruned = 0;
@@ -239,12 +255,23 @@ export function createAutoTidy(ports: AutoTidyPorts) {
           () => false,
         );
         if (!merged) continue;
-        const result = await ports.prune(repository, entry.path);
+        let result: PruneWorktreeResult;
+        try {
+          result = await ports.prune(repository, entry.path);
+        } catch (error) {
+          round.push({ repository, reason: "prune_failed", detail: String(error).slice(0, 200) });
+          break;
+        }
         if (result.outcome !== "removed") continue;
         pruned++;
         removed.push(result);
       }
     }
+    skipped = round;
+    for (const entry of round)
+      console.warn(
+        `Auto-tidy skipped ${entry.repository}: ${entry.reason}${entry.detail ? ` (${entry.detail})` : ""}`,
+      );
     return removed;
   }
 
@@ -253,5 +280,5 @@ export function createAutoTidy(ports: AutoTidyPorts) {
     return [...held.values()].filter((entry) => entry.owner === conversationId).map((entry) => entry.row);
   }
 
-  return { panes, worktrees, held: heldFor };
+  return { panes, worktrees, held: heldFor, skipped: (): readonly AutoTidySkipped[] => skipped };
 }
