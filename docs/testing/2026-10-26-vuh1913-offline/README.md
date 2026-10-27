@@ -100,7 +100,6 @@ equivalent invalid-reply catch cleanup. `review-repair-proof.zip` retains the
 final public outputs, clean capture and teardown record. Original archives above
 remain unchanged. No root gate, push, remote CI or hosted proof is claimed.
 
-
 ## Pending-window repair
 
 Pell's required follow-up abandons an uncertain identity once its original
