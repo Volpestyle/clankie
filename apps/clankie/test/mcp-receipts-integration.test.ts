@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, appendFile, readFile, rm, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server as HttpServer } from "node:http";
-import { serve } from "@hono/node-server";
+import { serve, type HttpBindings } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -31,6 +31,8 @@ async function fixture(unreadableReceiptPath = false) {
   const finish = gate();
   const dropSibling = gate<() => void>();
   let dropArmed = false;
+  // Tool calls whose next POST is lost before the app reads it, in order.
+  const lostBeforeService: string[] = [];
   let banks = 0;
   const secondBank = gate();
   const tools: LaneTool[] = [
@@ -110,7 +112,19 @@ async function fixture(unreadableReceiptPath = false) {
   };
   let service = await boot();
   const http = serve({
-    fetch: (request, env) => service.app.fetch(request, seatBinding.httpEnv(request, env) ?? env),
+    fetch: async (request, env) => {
+      const next = lostBeforeService[0];
+      if (
+        next !== undefined &&
+        request.method === "POST" &&
+        (await request.clone().text()).includes(`"name":"${next}"`)
+      ) {
+        lostBeforeService.shift();
+        (env as HttpBindings).outgoing.destroy();
+        return new Response(null, { status: 503 });
+      }
+      return service.app.fetch(request, seatBinding.httpEnv(request, env) ?? env);
+    },
     hostname: "127.0.0.1",
     port: 0,
   }) as HttpServer;
@@ -183,6 +197,9 @@ async function fixture(unreadableReceiptPath = false) {
     bindingHeaders: (id: string) => seatBinding.headers(id),
     armSiblingDrop: () => {
       dropArmed = true;
+    },
+    loseBeforeService: (...names: string[]) => {
+      lostBeforeService.push(...names);
     },
     admitted: admitted.promise,
     finish: () => finish.release(),
@@ -542,6 +559,54 @@ it("leaves an ID the bridge didn't mint open: a delivered native ID never reads 
     }
     expect(await f.effects()).toHaveLength(1);
   } finally {
+    await f.close();
+  }
+});
+
+it.each([
+  { closer: "the bridge's own recovery", lost: ["message_seat"] },
+  { closer: "a manual reconcile through the bridge", lost: ["message_seat", "reconcile_seat_call"] },
+])("closes a bridge-minted ID the service never received through $closer", async ({ lost }) => {
+  const f = await fixture();
+  const late = new Client({ name: "late-original", version: "1" });
+  const url = new URL("/v1/mcp", f.host);
+  url.searchParams.set("conversationId", "global-default");
+  try {
+    f.loseBeforeService(...lost);
+    const sent = await f.client.callTool({ name: "message_seat", arguments: { text: "never arrives" } });
+    const id = String((sent._meta?.["clankie/seat-call"] as { id?: string } | undefined)?.id);
+    const recovered = lost.length === 1;
+    expect(sent._meta?.["clankie/seat-call"]).toMatchObject({
+      id,
+      tool: "message_seat",
+      state: recovered ? "settled" : "uncertain",
+    });
+    const closed = recovered
+      ? sent
+      : await f.client.callTool({ name: "reconcile_seat_call", arguments: { deliveryId: id } });
+    expect(closed.isError).toBe(true);
+    expect(JSON.stringify(closed.content)).toContain("Not dispatched: the service never received this call");
+    expect(closed._meta?.["clankie/seat-call"]).toMatchObject({ id, tool: "message_seat", state: "settled" });
+    // The original arriving late under the minted ID cannot run.
+    await late.connect(
+      new StreamableHTTPClientTransport(url, {
+        requestInit: {
+          headers: { authorization: `Bearer ${f.bearer}`, ...f.bindingHeaders("global-default") },
+        },
+      }) as unknown as Transport,
+    );
+    const arrived = await late.callTool({
+      name: "message_seat",
+      arguments: { text: "never arrives" },
+      _meta: { "clankie/seat-call": { id } },
+    });
+    expect(arrived.isError).toBe(true);
+    expect(await f.effects()).toHaveLength(0);
+    const resent = await f.client.callTool({ name: "message_seat", arguments: { text: "never arrives" } });
+    expect(resent.isError).not.toBe(true);
+    expect(await f.effects()).toHaveLength(1);
+  } finally {
+    await late.close();
     await f.close();
   }
 });

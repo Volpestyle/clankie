@@ -120,6 +120,17 @@ Both keep the original as `abandoned-unknown` evidence. If it does arrive late,
 the recipient may see both messages; that is accepted over losing lead control
 of the seat.
 
+**Amendment (VUH-2920, 2026-10-27): a minted ID that never arrived is closed.**
+A send lost before it reached the service left the lead with an ID that
+reconcile could only call unknown, while the original might still arrive. The
+bridge now names each ID it minted when it reconciles it, both in its own
+recovery and in the agent's manual call. An ID with no receipt never began,
+because the receipt is saved before dispatch. Such an ID is settled as not
+dispatched, so a late original is refused and the action may be sent again as
+a new call. An unnamed unknown ID, such as a native delivery ID, stays open and
+is only read. A bridge restart forgets its minted IDs, so their reconciles
+become reads.
+
 ## An uncertain delivery fences only itself (VUH-1779)
 
 "Never duplicate an uncertain dispatch" protects that original, not the

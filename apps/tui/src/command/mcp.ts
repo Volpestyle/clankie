@@ -127,6 +127,7 @@ const OPERATOR_CHANNEL_ENTRIES = [
 const REQUEST_TIMEOUT_MS = 10 * 60_000;
 const CONNECT_TIMEOUT_MS = 10_000;
 const SEAT_RECONCILE_TIMEOUT_MS = 10_000;
+const MINTED_SEAT_CALLS = 1_000;
 /** Under the outbox's bound window (45s), so a live bridge is always mid-poll or just back. */
 const OUTBOX_POLL_WAIT_MS = 25_000;
 const OUTBOX_RETRY_MS = 5_000;
@@ -924,7 +925,11 @@ export async function connectLaneUpstream(input: {
       // One identity belongs to this intent, including the explicit pre-admission
       // replay above. Receipt recovery never dispatches the intent again.
       const id = tool === undefined ? undefined : randomUUID();
-      if (tool !== undefined && id !== undefined) minted.set(id, tool);
+      if (tool !== undefined && id !== undefined) {
+        minted.set(id, tool);
+        // Forgetting the oldest fails safe: its reconcile stays read-only.
+        if (minted.size > MINTED_SEAT_CALLS) minted.delete(minted.keys().next().value!);
+      }
       const reconciled =
         name === RECONCILE_SEAT_CALL
           ? typeof args?.deliveryId === "string" && minted.get(args.deliveryId) === "message_seat"
