@@ -102,3 +102,49 @@ it("skips a final journal line with its full length but unwritten bytes, and ref
   );
   await expect(opened(directory)).rejects.toThrow(/torn before its end|not intact/u);
 }, 120_000);
+
+// LOCAL-VUH-47 review: a rollback to a journal build from before framing (f59461d17) appends
+// unframed lines after framed ones. They are records, not damage.
+it("keeps unframed records a rolled-back build appended after framed ones", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "tracker-journal-rollback-"));
+  roots.push(directory);
+  const tracker = createLocalTracker({ directory });
+  for (let index = 0; !existsSync(join(directory, JOURNAL_DIRECTORY)); index++)
+    await tracker.call("save_issue", {
+      team: "LOCAL",
+      title: `large ${String(index)}`,
+      description: "x".repeat(300 * 1024),
+    });
+  for (const title of ["framed 0", "framed 1", "older build 0", "older build 1"])
+    await tracker.call("save_issue", { team: "LOCAL", title });
+  const committed = await opened(directory);
+  const names = (await readdir(join(directory, JOURNAL_DIRECTORY))).filter((name) => name.endsWith(".jsonl"));
+  const live = join(directory, JOURNAL_DIRECTORY, names.sort().at(-1)!);
+
+  // The last two records as the older build's appendCommit wrote them: JSON.stringify(record).
+  const lines = (await readFile(live, "utf8")).split("\n");
+  for (const at of [lines.length - 3, lines.length - 2]) {
+    const { length, ...record } = JSON.parse(lines[at]!) as Record<string, unknown>;
+    expect(typeof length).toBe("number");
+    lines[at] = JSON.stringify(record);
+  }
+  expect(lines.at(-4)).toMatch(/^\{"syncId":\d+,"length":/u);
+  await writeFile(live, lines.join("\n"));
+  expect(await opened(directory)).toEqual(committed);
+
+  // The next framed append, from another process, keeps them.
+  await inChild(
+    directory,
+    `await createLocalTracker({ directory }).call("save_issue", { team: "LOCAL", title: "after rollback" });`,
+  );
+  const after = await opened(directory);
+  expect(after.titles).toEqual([...committed.titles, "after rollback"].sort());
+  expect(after.syncId).toBe(committed.syncId + 1);
+
+  // An unframed final line that does not parse is still an unacknowledged tail.
+  await writeFile(
+    live,
+    `${await readFile(live, "utf8")}{"syncId":${String(after.syncId + 1)},"commit":\0\0\0\n`,
+  );
+  expect(await opened(directory)).toEqual(after);
+}, 120_000);

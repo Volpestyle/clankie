@@ -260,11 +260,19 @@ describe("install doctor", () => {
     // Sparse: the size the doctor reads, without writing a quarter gigabyte.
     await truncate(checkpoint, Math.floor(CHECKPOINT_STRING_LIMIT / 2));
     const large = await inspect();
-    expect(large.trackerCheckpoint?.state).toBe("warn");
+    expect(large.trackerCheckpoint).toMatchObject({ state: "warn" });
     expect(formatDoctorReport(large)).toContain(
       "! Tracker checkpoint · 268 MB of the 537 MB it can be opened at",
     );
     expect(large.remediations).toContainEqual(expect.stringContaining("retention or a streamed open"));
+    expect(large.remediations.join("\n")).toContain("LOCAL-VUH-49");
+
+    // An unreadable store is one unknown field, not a failed card.
+    await rm(store, { recursive: true });
+    await writeFile(store, "not a directory");
+    const unreadable = await inspect();
+    expect(unreadable.trackerCheckpoint).toMatchObject({ status: "unavailable" });
+    expect(formatDoctorReport(unreadable)).toContain("○ Tracker checkpoint · unknown ·");
   });
 
   it("does not report GraphQL usable from credentials alone when the CLI lane is unavailable", async () => {

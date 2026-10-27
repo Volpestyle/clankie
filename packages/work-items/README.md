@@ -225,8 +225,11 @@ index serves each line of committed arrays, and every commit extends it. Under V
 every commit is also checked against whole-collection comparisons.
 
 **Damaged journal lines.** Each line names the byte length of its record:
-`{"syncId":N,"length":L,…}`. Lines written before this have no length and end at their
-newline. Open reads records in order:
+`{"syncId":N,"length":L,…}`. Lines without a length end at their newline. They are
+older lines, or lines that a build from before framing appended after a rollback, such
+as `clankie update` restarting the previous commit, so they can follow framed ones. An
+unframed line after a framed one counts as a record only if it parses. Open reads
+records in order:
 
 - A final line with no newline is an interrupted append. It is left out.
 - A final line whose bytes are not a whole parseable record at its stated length is also
@@ -254,7 +257,12 @@ hand:
 **Checkpoint size.** Open still parses `tracker.json` as one string, so V8's maximum
 string length (about 537 MB) bounds it. At fleet volume that is about four months.
 `clankie doctor` reports the checkpoint's size against that limit and warns at half
-(`trackerCheckpointSize`). Retention or a streamed open has to land before the limit.
+(`trackerCheckpointSize`). Retention or a streamed open has to land before the limit;
+that is LOCAL-VUH-49.
+
+**Rolling back to a journal build from before framing** (`f59461d17` up to
+LOCAL-VUH-47) needs nothing. That build reads framed lines and appends unframed ones,
+and this build reads both again.
 
 **Rolling back to a build without the journal.** That build refuses a checkpoint, so
 it needs the store exported as one legacy file. This keeps every write, including

@@ -306,7 +306,7 @@ so use `--json` to read them. This observation never adds project or tool access
 `trackerCheckpoint` reports the built-in tracker's `tracker.json` (under
 `<CLANKIE_STATE>/tracker`) against the single-string limit its open still parses it
 under, about 537 MB. It is read from file metadata only. Past half, `state` is `warn`
-and a remediation asks for retention or a streamed open (LOCAL-VUH-47). It is absent
+and a remediation asks for retention or a streamed open (LOCAL-VUH-49). It is absent
 when there is no built-in store.
 
 Local fleet discovery uses `<CLANKIE_STATE>/links`, defaulting to

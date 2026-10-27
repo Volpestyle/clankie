@@ -274,20 +274,6 @@ export function journalLine(record: JournalRecord): string {
   const body = JSON.stringify(rest).slice(1);
   return `{"syncId":${String(syncId)},"length":${String(Buffer.byteLength(body))},${body}\n`;
 }
-const FRAMED = /^\{"syncId":\d+,"length":(\d+),/u;
-// Lines written before framing end at their newline.
-const UNFRAMED = /^\{"syncId":\d+,/u;
-/** Where the record starting at `at` ends (its newline), or -1 when it is not a whole record there. */
-function recordEnd(bytes: Buffer, at: number, framedOnly: boolean): number {
-  const head = bytes.toString("latin1", at, Math.min(bytes.length, at + 48));
-  const framed = FRAMED.exec(head);
-  if (framed !== null) {
-    const end = at + framed[0].length + Number(framed[1]);
-    return end < bytes.length && bytes[end] === 0x0a ? end : -1;
-  }
-  // A writer never goes back to unframed lines, so one after a framed line is damage.
-  return framedOnly || !UNFRAMED.test(head) ? -1 : bytes.indexOf(0x0a, at);
-}
 const parses = (line: string) => {
   try {
     JSON.parse(line);
@@ -296,6 +282,25 @@ const parses = (line: string) => {
     return false;
   }
 };
+const FRAMED = /^\{"syncId":\d+,"length":(\d+),/u;
+// Lines written before framing end at their newline.
+const UNFRAMED = /^\{"syncId":\d+,/u;
+/**
+ * Where the record starting at `at` ends (its newline), or -1 when it is not a whole record there.
+ * A build from before framing, after a rollback, appends unframed lines after framed ones; with no
+ * length to check, such a line counts only if it parses (LOCAL-VUH-47 review).
+ */
+function recordEnd(bytes: Buffer, at: number, afterFramed: boolean): number {
+  const head = bytes.toString("latin1", at, Math.min(bytes.length, at + 48));
+  const framed = FRAMED.exec(head);
+  if (framed !== null) {
+    const end = at + framed[0].length + Number(framed[1]);
+    return end < bytes.length && bytes[end] === 0x0a ? end : -1;
+  }
+  if (!UNFRAMED.test(head)) return -1;
+  const end = bytes.indexOf(0x0a, at);
+  return end < 0 || (afterFramed && !parses(bytes.toString("utf8", at, end))) ? -1 : end;
+}
 /**
  * The whole records of a segment and the byte length they cover. What follows them is a torn
  * tail: an interrupted append, or a final line whose bytes are not a record (a power cut that

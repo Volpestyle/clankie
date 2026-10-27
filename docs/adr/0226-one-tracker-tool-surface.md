@@ -1139,6 +1139,9 @@ Status: accepted (lead-approved scope, 2026-10-27).
   - A final line that parses but breaks a chain is refused.
   - A checksum was rejected because it would make a tampered, well-formed final line
     skippable.
+  - A journal build from before framing, after a rollback, appends unframed lines
+    after framed ones. Such a line reads as a record when it parses, so the rollback
+    and the return keep every write.
 - **`clankie doctor` reports the checkpoint against the single-string limit.** Open
   still parses the checkpoint under that limit (536,870,888 characters). Doctor warns
-  at half. Retention or a streamed open remains open work.
+  at half. Retention or a streamed open is LOCAL-VUH-49.

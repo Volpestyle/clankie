@@ -176,7 +176,9 @@ export interface InstallDoctorReport {
    * The built-in store's `tracker.json` against the single-string limit its open still parses
    * under (LOCAL-VUH-47), from file metadata alone; absent without a store.
    */
-  readonly trackerCheckpoint?: CheckpointSize & { readonly directory: string };
+  readonly trackerCheckpoint?:
+    | (CheckpointSize & { readonly directory: string })
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly tracker?: {
     readonly backend: "linear" | "local";
     readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";
@@ -345,9 +347,17 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     env.CLANKIE_STATE?.trim() || join(env.HOME?.trim() || homedir(), ".clankie"),
     "tracker",
   );
-  const checkpointSize = trackerCheckpointSize(builtInTracker);
-  const trackerCheckpoint =
-    checkpointSize === undefined ? undefined : { ...checkpointSize, directory: builtInTracker };
+  // One unreadable field, never a failed card.
+  let trackerCheckpoint: InstallDoctorReport["trackerCheckpoint"];
+  try {
+    const checkpointSize = trackerCheckpointSize(builtInTracker);
+    if (checkpointSize !== undefined) trackerCheckpoint = { ...checkpointSize, directory: builtInTracker };
+  } catch (error) {
+    trackerCheckpoint = {
+      status: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
   const tracker: NonNullable<InstallDoctorReport["tracker"]> = trackerConnected
     ? { backend: "linear", reason: "owner_connected" }
     : {
@@ -817,9 +827,13 @@ function collectRemediations(input: {
     remediations.push(`herdr plugin link ${input.herdrPlugin.bundlePath}`);
   }
   // Months of headroom at the threshold, so it never outranks setup or reachability.
-  if (input.trackerCheckpoint?.state === "warn")
+  if (
+    input.trackerCheckpoint !== undefined &&
+    "state" in input.trackerCheckpoint &&
+    input.trackerCheckpoint.state === "warn"
+  )
     remediations.push(
-      `The built-in tracker's checkpoint is ${String(Math.round(input.trackerCheckpoint.bytes / 1e6))} MB, past half the ${String(Math.round(input.trackerCheckpoint.limitBytes / 1e6))} MB it can be opened at. It needs retention or a streamed open before it reaches that (LOCAL-VUH-47).`,
+      `The built-in tracker's checkpoint is ${String(Math.round(input.trackerCheckpoint.bytes / 1e6))} MB, past half the ${String(Math.round(input.trackerCheckpoint.limitBytes / 1e6))} MB it can be opened at. It needs retention or a streamed open before it reaches that (LOCAL-VUH-49).`,
     );
   return remediations;
 }

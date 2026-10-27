@@ -47,9 +47,9 @@ function formatUnreconciled(worktrees: readonly UnreconciledWorktree[]): string[
     : shown;
 }
 
-/** `/doctor` as a checklist; `/doctor json` keeps the full canonical report. */
 const megabytes = (bytes: number) => `${(bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0)} MB`;
 
+/** `/doctor` as a checklist; `/doctor json` keeps the full canonical report. */
 export function formatDoctorReport(report: InstallDoctorReport): string {
   const captain = report.captain.ready
     ? `${mark(true)} Captain · ${report.captain.model} via ${report.captain.auth}`
@@ -201,11 +201,13 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
           }${report.tracker.directory ? ` · ${report.tracker.directory}` : ""}`,
         ]
       : []),
-    ...(report.trackerCheckpoint
-      ? [
-          `  ${report.trackerCheckpoint.state === "warn" ? "!" : "✓"} Tracker checkpoint · ${megabytes(report.trackerCheckpoint.bytes)} of the ${megabytes(report.trackerCheckpoint.limitBytes)} it can be opened at · warns at ${megabytes(report.trackerCheckpoint.warnAtBytes)}`,
-        ]
-      : []),
+    ...(report.trackerCheckpoint === undefined
+      ? []
+      : "state" in report.trackerCheckpoint
+        ? [
+            `  ${report.trackerCheckpoint.state === "warn" ? "!" : "✓"} Tracker checkpoint · ${megabytes(report.trackerCheckpoint.bytes)} of the ${megabytes(report.trackerCheckpoint.limitBytes)} it can be opened at · warns at ${megabytes(report.trackerCheckpoint.warnAtBytes)}`,
+          ]
+        : [`  ○ Tracker checkpoint · unknown · ${clean(report.trackerCheckpoint.detail)}`]),
     ...(report.linearGraphql === undefined
       ? []
       : [

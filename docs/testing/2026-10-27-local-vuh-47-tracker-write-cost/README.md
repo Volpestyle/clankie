@@ -117,7 +117,9 @@ a reading of the libuv source.
 ## Damaged final journal line
 
 Each journal line now names its record's byte length (`{"syncId":N,"length":L,…}`).
-Older lines without a length still read.
+Lines without a length still read, including those that a pre-framing build such as
+`f59461d17` appends after framed ones following a rollback. Such a line after a framed
+one must parse.
 
 - A final line whose bytes are not a whole parseable record at that length is the
   unacknowledged tail, and open skips it. A power cut can persist the line's size and
@@ -140,6 +142,11 @@ with real stores and fresh processes.
 - The next commit from another process cuts the damaged line off.
 - The same damage to the line before is refused.
 - With the skip disabled, the test fails.
+- A rollback to a build from before framing is covered too, after review. The last two
+  records are rewritten as that build's `appendCommit` writes them,
+  `JSON.stringify(record)`. A fresh process keeps both, and so does the next framed
+  append. An unparseable unframed final line is still skipped. With the old
+  framed-then-unframed rule, the test fails.
 
 ## Checkpoint size
 
@@ -148,5 +155,5 @@ string length (536,870,888), which open still parses it under. It warns at half,
 268 MB. That is about two months at fleet volume of 4.4 MB a day, and about ten months at
 the live rate of about 0.9 MB a day. It reads only file metadata.
 
-Retention or a streamed open is still needed before the limit. This issue only adds the
-warning.
+Retention or a streamed open is still needed before the limit. That is LOCAL-VUH-49;
+this issue only adds the warning.
