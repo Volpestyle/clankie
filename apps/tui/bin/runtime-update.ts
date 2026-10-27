@@ -220,6 +220,8 @@ export interface RuntimeUpdateResult {
   readonly healthy?: boolean;
   readonly rollbackHealthy?: boolean;
   readonly reason?: string;
+  /** Target artifact policy, retained so doctor can explain a pending enforcing cutover. */
+  readonly operatorSeatBindingMode?: "observe" | "enforce";
   /** The exception behind a failed `reason`; rollback failures keep their own. */
   readonly error?: string;
   readonly rollbackError?: string;
@@ -597,6 +599,11 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
   for (const key of ["healthy", "rollbackHealthy"])
     if (value[key] !== undefined && typeof value[key] !== "boolean") throw Error("Invalid update health");
   if (
+    value.operatorSeatBindingMode !== undefined &&
+    !["observe", "enforce"].includes(String(value.operatorSeatBindingMode))
+  )
+    throw Error("Invalid target operator seat policy");
+  if (
     value.serviceReceipts !== undefined &&
     (!Array.isArray(value.serviceReceipts) || value.serviceReceipts.length > 6)
   )
@@ -608,6 +615,11 @@ export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
     newCommit: commitString(value.newCommit),
     phase: value.phase as RuntimeUpdateResult["phase"],
     updatedAt: boundedString(value.updatedAt, 64),
+    ...(value.operatorSeatBindingMode === undefined
+      ? {}
+      : {
+          operatorSeatBindingMode: value.operatorSeatBindingMode as "observe" | "enforce",
+        }),
     ...(value.ownerCheckoutSync === undefined
       ? {}
       : { ownerCheckoutSync: parseCheckoutSyncResult(value.ownerCheckoutSync) }),
@@ -818,6 +830,7 @@ export async function executeRuntimeUpdate(
   const serviceReceipts: RuntimeServiceReceipt[] = [];
   // Set once the new runtime is installed; a rollback restarts everything.
   let keep: readonly string[] = [];
+  let operatorSeatBindingMode: RuntimeUpdateResult["operatorSeatBindingMode"];
   const attempt = async (action: "down" | "restart", expectedCommit: string, retry: boolean) => {
     const keeping = action === "restart" && expectedCommit !== plan.newCommit ? [] : keep;
     const receipt = parseServiceReceipt(await ports.services(plan.runtime, action, keeping));
@@ -868,6 +881,7 @@ export async function executeRuntimeUpdate(
       ...(plan.warning === undefined ? {} : { warning: plan.warning }),
       ...(plan.initiator === undefined ? {} : { initiator: plan.initiator }),
       phase,
+      ...(operatorSeatBindingMode === undefined ? {} : { operatorSeatBindingMode }),
       updatedAt: (ports.now?.() ?? new Date()).toISOString(),
       ...(serviceReceipts.length === 0 ? {} : { serviceReceipts: [...serviceReceipts] }),
       ...(keep.length === 0 ? {} : { keptServices: keep }),
@@ -903,6 +917,8 @@ export async function executeRuntimeUpdate(
       return persist("refused", { reason: "target-update-status-unsupported" });
     if (!existsSync(join(stage, "apps/clankie/src/runtime-canary.ts")))
       return persist("refused", { reason: "target-runtime-canary-unsupported" });
+    operatorSeatBindingMode = targetRequiresSeatBindings(stage) ? "enforce" : "observe";
+    persist("installing");
     installPinnedDependencies(stage, run);
     // Build source-only projected artifacts before stopping the old service.
     if (existsSync(join(stage, "scripts/build-remote-lead.mjs")))
@@ -923,6 +939,8 @@ export async function executeRuntimeUpdate(
     // The preparation release's helper performs this before stopping any
     // service. An old/missing/incomplete census is never readiness evidence.
     const enforceSeats = targetRequiresSeatBindings(stage);
+    operatorSeatBindingMode = enforceSeats ? "enforce" : "observe";
+    persist("installing");
     const readSeats = ports.operatorSeatsReady ? () => ports.operatorSeatsReady!(plan.runtime) : undefined;
     if (enforceSeats && !(await operatorSeatsReady(readSeats)))
       return persist("refused", { reason: "operator-seats-unready" });

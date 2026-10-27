@@ -344,6 +344,7 @@ it("stages an enforcing release but refuses before stopping any unbound operator
   expect(await f.settled(accepted.pending!)).toMatchObject({
     phase: "refused",
     reason: "operator-seats-unready",
+    operatorSeatBindingMode: "enforce",
   });
   expect(f.downloads()).toBe(1);
   expect(f.calls().some((call) => call.action === "down")).toBe(false);
@@ -356,6 +357,7 @@ it("the real release helper refuses complete:false even when ready:true and ever
   expect(await f.settled(accepted.pending!)).toMatchObject({
     phase: "refused",
     reason: "operator-seats-unready",
+    operatorSeatBindingMode: "enforce",
   });
   expect(f.calls().some((call) => call.action === "down")).toBe(false);
 });
@@ -363,7 +365,11 @@ it("the real release helper refuses complete:false even when ready:true and ever
 it("activates an enforcing release only after a complete ready inventory and confirms recovery", async () => {
   const f = await fixture({ enforcing: true, operatorSeatsReady: true });
   const accepted = await f.updater(f.old).request("main", authority);
-  expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy", healthy: true });
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "healthy",
+    healthy: true,
+    operatorSeatBindingMode: "enforce",
+  });
   expect(f.calls().filter((call) => call.action === "doctor").length).toBeGreaterThanOrEqual(2);
   expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.1.0"));
 });

@@ -16,7 +16,7 @@ import { executeRuntimeUpdate, readRuntimeUpdate, type RuntimeUpdatePlan } from 
 import type { InstallCommand } from "../bin/pinned-runtime.ts";
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
-function fixture(buildBridge = false) {
+function fixture(buildBridge = false, seatPolicy?: "enforce" | "observe" | "missing policy") {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-update-")));
   roots.push(home);
   const checkout = join(home, "source");
@@ -36,6 +36,14 @@ function fixture(buildBridge = false) {
     writeFileSync(join(path, "apps/tui/src/command/update.ts"), "fixture");
     mkdirSync(join(path, "apps/clankie/src"), { recursive: true });
     writeFileSync(join(path, "apps/clankie/src/runtime-canary.ts"), "fixture");
+    if (commit === newCommit && seatPolicy) {
+      writeFileSync(join(path, "apps/clankie/src/operator-seat-bindings.ts"), "enforcing legacy source");
+      if (seatPolicy !== "missing policy")
+        writeFileSync(
+          join(path, "apps/clankie/operator-seat-policy.json"),
+          JSON.stringify({ schemaVersion: 1, mode: seatPolicy }),
+        );
+    }
     if (buildBridge) {
       mkdirSync(join(path, "scripts"), { recursive: true });
       writeFileSync(
@@ -150,37 +158,33 @@ it("installs completely before old shutdown and persists exact new health", asyn
   expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
 });
 
-it.each(["enforce", "missing policy"])(
+it.each(["enforce", "missing policy"] as const)(
   "checkout update refuses %s targets before down when seats are unready",
   async (policy) => {
-    const f = fixture();
+    const f = fixture(false, policy);
     f.onInstall(() => {
-      const target = join(f.plan.directory, "staged/apps/clankie");
-      writeFileSync(join(target, "src/operator-seat-bindings.ts"), "enforcing legacy source");
-      if (policy === "enforce")
-        writeFileSync(
-          join(target, "operator-seat-policy.json"),
-          JSON.stringify({ schemaVersion: 1, mode: "enforce" }),
-        );
+      expect(readRuntimeUpdate(f.plan.directory)).toMatchObject({
+        phase: "installing",
+        operatorSeatBindingMode: "enforce",
+      });
     });
     let reads = 0;
     // Only admission is unready. If the pre-stop guard disappears, post-start
     // recovery succeeds, so a second refusal cannot mask the missing guard.
     const result = await executeRuntimeUpdate(f.plan, { ...f, operatorSeatsReady: async () => ++reads > 1 });
-    expect(result).toMatchObject({ phase: "refused", reason: "operator-seats-unready" });
+    expect(result).toMatchObject({
+      phase: "refused",
+      reason: "operator-seats-unready",
+      operatorSeatBindingMode: "enforce",
+    });
+    expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
     expect(f.calls).toEqual(["stage", "install"]);
     expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
   },
 );
 
 it("checkout enforcing activation rolls back when post-restart bindings never recover", async () => {
-  const f = fixture();
-  f.onInstall(() =>
-    writeFileSync(
-      join(f.plan.directory, "staged/apps/clankie/operator-seat-policy.json"),
-      JSON.stringify({ schemaVersion: 1, mode: "enforce" }),
-    ),
-  );
+  const f = fixture(false, "enforce");
   const result = await executeRuntimeUpdate(f.plan, {
     ...f,
     operatorSeatsReady: async () => f.commits.get(f.plan.runtime) === f.plan.oldCommit,
@@ -190,6 +194,18 @@ it("checkout enforcing activation rolls back when post-restart bindings never re
   expect(f.calls.at(-1)).toBe("restart:old");
   expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
 }, 40000);
+it("retains the observe target policy as diagnostic evidence without gating an update", async () => {
+  const f = fixture(false, "observe");
+  f.onInstall(() =>
+    expect(readRuntimeUpdate(f.plan.directory)).toMatchObject({
+      phase: "installing",
+      operatorSeatBindingMode: "observe",
+    }),
+  );
+  const result = await executeRuntimeUpdate(f.plan, { ...f, operatorSeatsReady: async () => false });
+  expect(result).toMatchObject({ phase: "healthy", operatorSeatBindingMode: "observe" });
+  expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
+});
 it("refreshes plugins after healthy cutover and retains incomplete profile receipts without rollback", async () => {
   const f = fixture();
   const result = await executeRuntimeUpdate(f.plan, {

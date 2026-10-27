@@ -241,6 +241,7 @@ export async function executeReleaseUpdate(
       receipt.runtime.instanceId !== plan.oldInstanceId
     );
   };
+  let operatorSeatBindingMode: RuntimeUpdateResult["operatorSeatBindingMode"];
   const persist = (phase: RuntimeUpdateResult["phase"], fields: Partial<RuntimeUpdateResult> = {}) => {
     const result: RuntimeUpdateResult = {
       id: plan.id,
@@ -252,6 +253,7 @@ export async function executeReleaseUpdate(
       ...(plan.warning === undefined ? {} : { warning: plan.warning }),
       ...(plan.initiator === undefined ? {} : { initiator: plan.initiator }),
       phase,
+      ...(operatorSeatBindingMode === undefined ? {} : { operatorSeatBindingMode }),
       updatedAt: (ports.now?.() ?? new Date()).toISOString(),
       ...(serviceReceipts.length === 0 ? {} : { serviceReceipts: [...serviceReceipts] }),
       ...fields,
@@ -281,6 +283,8 @@ export async function executeReleaseUpdate(
         return persist("refused", { reason: "release-directory-conflict" });
       staged = target;
     } else staged = await stageRelease(plan, ports.fetchImpl ?? fetch);
+    operatorSeatBindingMode = targetRequiresSeatBindings(staged) ? "enforce" : "observe";
+    persist("installing");
     // Managed policy must keep working: never install a release its provider cannot serve.
     if (plan.providerApis && !plan.providerApis.includes(releaseManifest(staged).runtimeProviderApi))
       return persist("refused", { reason: "provider-api-unsupported" });
@@ -298,6 +302,8 @@ export async function executeReleaseUpdate(
     if (currentRelease(plan.installRoot) !== plan.oldRelease)
       return persist("refused", { reason: "current-release-changed" });
     const enforceSeats = targetRequiresSeatBindings(target);
+    operatorSeatBindingMode = enforceSeats ? "enforce" : "observe";
+    persist("installing");
     if (
       enforceSeats &&
       !(await operatorSeatsReady(

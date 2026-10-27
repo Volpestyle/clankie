@@ -74,8 +74,12 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
     }) ?? [];
   const detail = [summary, ...seats, ...migrations].join("\n");
   const observed =
-    binding && "available" in binding && binding.mode === "observe" ? seatBindingSummary(report) : undefined;
-  const withObservation = observed ? `${detail}\nObserve mode: ${observed}` : detail;
+    binding && "available" in binding && binding.mode !== "enforce" && !report.pendingEnforcingUpdate
+      ? seatBindingSummary(report)
+      : undefined;
+  const withObservation = observed
+    ? `${detail}\n${binding && "available" in binding && binding.mode === "observe" ? "Observe mode" : "Seat binding diagnostics"}: ${observed}`
+    : detail;
   return report.autonomy?.drift === undefined
     ? withObservation
     : `${withObservation}\n${formatAutonomyDrift(report.autonomy.drift)}`;
@@ -133,9 +137,10 @@ function doctorSummary(report: InstallDoctorReport): string {
   if (report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready")
     return report.credentialStoreHealth.message ?? "Keychain unavailable";
   const binding = report.operatorSeatBindings;
-  // Older enforcing services predate the mode field. Preparation observations
-  // belong below existing readiness reasons; they do not refuse any work.
-  const enforced = binding && "available" in binding && binding.mode !== "observe";
+  // An absent mode is not proof of enforcement. Preparation and unknown-mode
+  // observations stay below existing readiness reasons.
+  const enforced =
+    (binding && "available" in binding && binding.mode === "enforce") || report.pendingEnforcingUpdate;
   const bindingProblem = enforced ? seatBindingSummary(report) : undefined;
   if (bindingProblem) return bindingProblem;
   const refusal =
@@ -497,6 +502,7 @@ export async function doctorCommand(
     }),
     remoteHarnesses,
     operatorSeatBindings: await inspectOperatorSeatBindings(options),
+    pendingEnforcingUpdate: await inspectPendingEnforcingUpdate(options),
     discordRoomDelivery,
     ...(discordVoice === undefined ? {} : { discordVoice }),
     toolCatalogHealth,
@@ -514,6 +520,51 @@ export async function doctorCommand(
     ...(serviceRecovery.length === 0 ? {} : { serviceRecovery }),
     ...(autostart === undefined ? {} : { autostart }),
   };
+}
+
+async function inspectPendingEnforcingUpdate(
+  options: InspectInstallOptions & { host?: string },
+): Promise<boolean> {
+  try {
+    const env = options.env ?? process.env;
+    const credential = await resolveOperatorCredential({
+      env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) return false;
+    const response = await (options.fetchImpl ?? fetch)(
+      new URL("/v1/runtime-update", commandHost({ ...options, env })),
+      {
+        headers: { authorization: `Bearer ${credential.token}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) return false;
+    const status = z
+      .object({
+        pending: z.string().optional(),
+        latest: z
+          .object({
+            id: z.string(),
+            phase: z.string(),
+            reason: z.string().optional(),
+            operatorSeatBindingMode: z.enum(["observe", "enforce"]).optional(),
+          })
+          .optional(),
+      })
+      .parse(await response.json());
+    const latest = status.latest;
+    // A pre-stop refusal retains the intended enforcement activation after its helper exits.
+    // A later terminal operation supersedes it; historical healthy updates never headline.
+    return (
+      latest?.operatorSeatBindingMode === "enforce" &&
+      ((status.pending === latest.id && !["healthy", "rolled-back", "refused"].includes(latest.phase)) ||
+        (latest.phase === "refused" && latest.reason === "operator-seats-unready"))
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function inspectOperatorSeatBindings(

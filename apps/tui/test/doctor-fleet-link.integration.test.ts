@@ -25,6 +25,7 @@ it.each(["healthy", "unavailable"] as const)(
     const linkState = { state: "unreachable", since: "2026-10-04T12:00:00.000Z", error: reason };
     const harnesses = { codex: { registered: true }, claude: [{ profile: "remote", versionMatches: true }] };
     const requests: string[] = [];
+    let updateStatus: unknown = {};
     const server = createServer((request, response) => {
       const path = request.url!;
       requests.push(path);
@@ -36,6 +37,7 @@ it.each(["healthy", "unavailable"] as const)(
       if (path === "/v1/mcp") return json(401, { error: "authentication_required" });
       if (request.headers.authorization !== "Bearer doctor-owner")
         return json(401, { error: "operator_authentication_required" });
+      if (path === "/v1/runtime-update") return json(200, updateStatus);
       if (path === "/operator/v1/dispatch") {
         let body = "";
         request.on("data", (chunk) => (body += chunk));
@@ -113,6 +115,27 @@ it.each(["healthy", "unavailable"] as const)(
       credentialStore: new FileCredentialStore(join(root, "credentials.json")),
     });
     expect(report.remoteHarnesses).toHaveLength(1);
+    const updateReports = [];
+    for (const [phase, mode, pending, reason, expected] of [
+      ["installing", "enforce", "update-1", undefined, true],
+      ["restarting", "enforce", "update-1", undefined, true],
+      ["refused", "enforce", undefined, "operator-seats-unready", true],
+      ["installing", "observe", "update-1", undefined, false],
+      ["installing", undefined, "update-1", undefined, false],
+      ["installing", "enforce", "other-update", undefined, false],
+      ["healthy", "enforce", "update-1", undefined, false],
+      ["rolled-back", "enforce", undefined, undefined, false],
+      ["refused", "enforce", undefined, "current-release-changed", false],
+    ] as const) {
+      updateStatus = { pending, latest: { id: "update-1", phase, reason, operatorSeatBindingMode: mode } };
+      const updateReport = await doctorCommand({
+        repoRoot: root,
+        env,
+        credentialStore: new FileCredentialStore(join(root, "credentials.json")),
+      });
+      expect(updateReport.pendingEnforcingUpdate).toBe(expected);
+      updateReports.push(updateReport);
+    }
     for (const complete of [false, true]) {
       const observed = {
         ...report,
@@ -151,11 +174,29 @@ it.each(["healthy", "unavailable"] as const)(
       expect(summary.split("\n")[0]).toContain("Voice provider openai refused");
       expect(summary).toContain("Observe mode:");
       expect(summary).toContain("UNBOUND launcher unregistered");
+      const { mode: _mode, ...unknownMode } = observed.operatorSeatBindings;
+      const unknownSummary = formatDoctorSummary({ ...withVoice, operatorSeatBindings: unknownMode });
+      expect(unknownSummary.split("\n")[0]).toContain("Voice provider openai refused");
+      expect(unknownSummary).toContain("Seat binding diagnostics:");
       const enforcing = formatDoctorSummary({
         ...withVoice,
         operatorSeatBindings: { ...observed.operatorSeatBindings, mode: "enforce" },
       });
       expect(enforcing.split("\n")[0]).toContain(complete ? "is unbound" : "inventory is unavailable");
+      for (const updateReport of updateReports) {
+        const pendingSummary = formatDoctorSummary({
+          ...updateReport,
+          voice: withVoice.voice,
+          operatorSeatBindings: observed.operatorSeatBindings,
+        });
+        expect(pendingSummary.split("\n")[0]).toContain(
+          updateReport.pendingEnforcingUpdate
+            ? complete
+              ? "is unbound"
+              : "inventory is unavailable"
+            : "Voice provider openai refused",
+        );
+      }
     }
     expect(formatDoctorReport(report)).toContain("✗ Seat bridge conv-kh2 · disconnected · KH2:");
     expect(report.operatorSeatBindings).toMatchObject({
@@ -171,6 +212,7 @@ it.each(["healthy", "unavailable"] as const)(
         ...report,
         operatorSeatBindings: {
           available: false,
+          mode: "enforce",
           error: "seat_binding_helper_missing",
           recovery: "Prepare native helper; relaunch.",
           bindings: [],
@@ -191,8 +233,12 @@ it.each(["healthy", "unavailable"] as const)(
       });
       expect(machine.harnesses).toEqual({ status: "unavailable", detail: "Remote inspection unavailable" });
     }
-    expect(requests.filter((path) => path === "/v1/runtime-connections")).toHaveLength(2);
-    expect(requests.filter((path) => path === "/v1/runtime-connections/pc/harnesses")).toHaveLength(2);
+    expect(requests.filter((path) => path === "/v1/runtime-connections")).toHaveLength(
+      2 + updateReports.length,
+    );
+    expect(requests.filter((path) => path === "/v1/runtime-connections/pc/harnesses")).toHaveLength(
+      2 + updateReports.length,
+    );
     expect(requests).not.toContain("/v1/runtime-connections/default/harnesses");
     expect(JSON.stringify(report.remoteHarnesses)).not.toContain("CLIXML");
   },

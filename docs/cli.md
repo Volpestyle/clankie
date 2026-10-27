@@ -7439,6 +7439,12 @@ VUH-2888 uses two releases. This preparation release sets
 run and report refusals, while admission keeps the old runtime's behavior.
 `clankie doctor --json` includes the mode and a fresh local launcher inventory,
 with bound/unbound status and exact recovery. Observe mode retains the
+existing doctor readiness headline; binding diagnostics follow it. An active
+enforcing update, or the latest update refused for `operator-seats-unready`,
+promotes the inventory/unbound problem to the headline even while the running
+service remains in observe mode. This is read-only target-policy evidence from
+the updater receipt; enforcement always uses the target artifact's policy.
+Observe mode retains the
 pre-existing stray-process gap. A later enforcing artifact changes the policy
 to `enforce`; the preparation release's updater refuses it before stopping
 services if any live launcher/bridge is unbound or the inventory is incomplete.

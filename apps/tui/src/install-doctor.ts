@@ -197,6 +197,8 @@ export interface InstallDoctorReport {
   readonly operatorSeatBindings?:
     | import("@clankie/protocol").OperatorSeatBindingStatus
     | { readonly status: "unavailable"; readonly detail: string };
+  /** Authenticated update receipt: target enforces and is active or refused for unready seats. */
+  readonly pendingEnforcingUpdate?: boolean;
   readonly autonomy?: { readonly level: AutonomyLevelReading; readonly drift?: AutonomyDrift };
   readonly workingPreferences?: import("./command/working-preferences.ts").WorkingPreferencesReport;
   readonly toolCatalogHealth?:
