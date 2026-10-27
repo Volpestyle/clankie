@@ -274,7 +274,7 @@ export function refuseBuiltInTrackerFeatures(name: string, args: Record<string, 
     const references = trackerArgumentReferences(args);
     throw new Error(
       references.length > 0
-        ? `${name}: ${references.map((id) => JSON.stringify(id)).join(", ")} matched no cut-over project's record; name a known built-in record or use a built-in project.`
+        ? `${name} is available only on Clankie's built-in tracker; ${references.map((id) => JSON.stringify(id)).join(", ")} matched no cut-over project's record; name a known built-in record or use a built-in project.`
         : `${name} is available only on Clankie's built-in tracker`,
     );
   }

@@ -253,7 +253,7 @@ it("publishes bound tracker writes without lock reentry and refuses a vanished p
           },
         },
       ),
-    ).rejects.toThrow("Built-in tracker project or store changed");
+    ).rejects.toThrow("Tracker store changed before commit");
     expect(dispatched).toBe(false);
     expect(await readFile(storeFile, "utf8")).toBe(externalBytes);
     expect(await tracker.storeId()).toBe(storeId);
