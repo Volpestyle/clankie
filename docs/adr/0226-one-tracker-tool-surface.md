@@ -1027,6 +1027,13 @@ as a journal.
   3. Under the lock: rename it in, if nothing replaced the store meanwhile.
      Commits keep appending throughout. A crash at any step reopens from the previous
      checkpoint and replays every segment after it.
+- A segment is always created new, never reopened. If a checkpoint stopped before its
+  rename, the empty segment it started stays the live one. The next checkpoint reuses
+  it rather than sealing it.
+- The store directory is fsynced after every rename that switches it: the move onto
+  the journal, a checkpoint, and setting a journal aside. Writes loop until every byte
+  is written, so a short write is never acknowledged.
+- An append checks that it still holds the store lock before it touches the segment.
 - Segments are never pruned: they are the sync history, and a subscribe cursor
   older than the checkpoint reads them.
 - The checkpoint does not grow with the sync log. It does grow with events, audit

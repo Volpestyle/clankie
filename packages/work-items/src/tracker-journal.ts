@@ -1,6 +1,6 @@
 import { createHash, type Hash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
-import { mkdir, open, readdir, readFile, rename } from "node:fs/promises";
+import { type FileHandle, mkdir, open, readdir, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -191,7 +191,7 @@ export function replayJournal<T extends object>(base: T, records: readonly Journ
   return store as T;
 }
 
-const segmentName = (firstSyncId: number) => `${String(firstSyncId).padStart(12, "0")}.jsonl`;
+export const segmentName = (firstSyncId: number) => `${String(firstSyncId).padStart(12, "0")}.jsonl`;
 const SEGMENT = /^(\d{12})\.jsonl$/u;
 const firstSyncIdOf = (name: string) => Number(SEGMENT.exec(name)![1]);
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -311,13 +311,15 @@ export async function appendJournal(
 ): Promise<number> {
   const handle = await open(join(directory, JOURNAL_DIRECTORY, live.name), "r+", 0o600);
   try {
+    // Before touching the segment: a holder whose lock went stale must not cut another
+    // process's acknowledged record.
+    beforeAppend();
     const { size } = await handle.stat();
     if (size < live.size) throw new Error("Tracker journal segment shrank under this backend");
     if (size > live.size) await handle.truncate(live.size);
-    beforeAppend();
     const bytes = Buffer.from(line);
     try {
-      await handle.write(bytes, 0, bytes.length, live.size);
+      await writeAll(handle, bytes, live.size);
       await handle.sync();
     } catch (error) {
       // allow-swallowed-rejection -- the write's own error is thrown; a torn tail left anyway is cut by the next append and skipped at open
@@ -330,12 +332,15 @@ export async function appendJournal(
   }
 }
 
-/** An empty segment: every later append, from any process, lands after this point. */
+/**
+ * A new, empty segment: every later append, from any process, lands after this point. It never
+ * reuses a file, so a segment a checkpoint sealed can never become the live one.
+ */
 export async function startSegment(directory: string, firstSyncId: number): Promise<string> {
   const root = join(directory, JOURNAL_DIRECTORY);
   await mkdir(root, { recursive: true, mode: 0o700 });
   const name = segmentName(firstSyncId);
-  const handle = await open(join(root, name), "a", 0o600);
+  const handle = await open(join(root, name), "wx", 0o600);
   await handle.sync().finally(() => handle.close());
   await syncDirectory(root);
   return name;
@@ -366,7 +371,7 @@ export async function writeSegment(
       const chunk = Buffer.from(line);
       hash.update(chunk);
       bytes += chunk.length;
-      await handle.write(chunk);
+      await writeAll(handle, chunk);
     }
     await handle.sync();
   } finally {
@@ -376,9 +381,25 @@ export async function writeSegment(
   return { name, bytes, sha256: hash.digest("hex") };
 }
 
-async function syncDirectory(path: string): Promise<void> {
+/** Makes a rename or a new file in `path` durable; the rename alone can be lost to a power cut. */
+export async function syncDirectory(path: string): Promise<void> {
   const handle = await open(path, "r");
   await handle.sync().finally(() => handle.close());
+}
+
+/** Writes every byte: a short write would acknowledge a torn record or rename in a cut checkpoint. */
+async function writeAll(handle: FileHandle, bytes: Buffer, position?: number): Promise<void> {
+  let written = 0;
+  while (written < bytes.length) {
+    const { bytesWritten } = await handle.write(
+      bytes,
+      written,
+      bytes.length - written,
+      position === undefined ? null : position + written,
+    );
+    if (bytesWritten === 0) throw new Error("Tracker journal write made no progress");
+    written += bytesWritten;
+  }
 }
 
 /** Moves a journal that no current checkpoint names out of the way; history is never deleted. */
@@ -388,6 +409,7 @@ export async function setJournalAside(directory: string, reason: string): Promis
       join(directory, JOURNAL_DIRECTORY),
       join(directory, `${JOURNAL_DIRECTORY}.${reason}-${String(Date.now())}`),
     );
+    await syncDirectory(directory);
   } catch (error) {
     if (!missing(error)) throw error;
   }
@@ -459,7 +481,7 @@ export async function writeCheckpointFile(
     chunk = "";
     hash.update(buffer);
     bytes += buffer.length;
-    await handle.write(buffer);
+    await writeAll(handle, buffer);
   };
   const write = async (text: string) => {
     chunk += text;

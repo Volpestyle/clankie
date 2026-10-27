@@ -56,9 +56,11 @@ import {
   RECEIPT_RESULT_BYTES,
   replayJournal,
   sealSegment,
+  segmentName,
   setJournalAside,
   startSegment,
   storeChanges,
+  syncDirectory,
   writeCheckpointFile,
   writeSegment,
 } from "./tracker-journal.ts";
@@ -4689,6 +4691,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       const written = await writeCheckpointFile(checkpointContent(store, header), temp);
       ready();
       await rename(temp, path);
+      // The rename is the move onto the journal; losing it would hide acknowledged commits.
+      await syncDirectory(directory);
       return { digest: written.sha256, bytes: written.bytes };
     } finally {
       await rm(temp, { force: true });
@@ -4716,10 +4720,16 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       const names = (await readdir(join(directory, JOURNAL_DIRECTORY)))
         .filter((name) => /^\d{12}\.jsonl$/u.test(name))
         .sort();
-      const unsealed = names.slice(current.journal.header.sealed.length);
-      const sealed = [...current.journal.header.sealed];
-      for (const name of unsealed) sealed.push(await sealSegment(directory, name));
       const syncId = current.store.syncId ?? 0;
+      const unsealed = names.slice(current.journal.header.sealed.length);
+      // An empty segment for the next commit is already the live one: an earlier checkpoint
+      // started it and stopped before its rename. Sealing it would seal the live segment.
+      const reused = unsealed.at(-1) === current.journal.live.name && current.journal.live.size === 0;
+      if (reused && current.journal.live.name !== segmentName(syncId + 1))
+        throw new Error(`Tracker journal segment ${current.journal.live.name} is empty but out of order`);
+      const sealed = [...current.journal.header.sealed];
+      for (const name of reused ? unsealed.slice(0, -1) : unsealed)
+        sealed.push(await sealSegment(directory, name));
       const header: JournalHeader = {
         version: 1,
         syncId,
@@ -4727,7 +4737,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         since: current.journal.header.since,
         sealed,
       };
-      const live = await startSegment(directory, syncId + 1);
+      const live = reused ? current.journal.live.name : await startSegment(directory, syncId + 1);
       shared.current = {
         ...current,
         version: storeVersion(),
@@ -4744,6 +4754,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         if (fileVersion() !== started.base) return;
         assertHeld();
         await rename(temp, path);
+        await syncDirectory(directory);
         const current = shared.current;
         if (current?.journal === undefined || current.digest === written.sha256) return;
         shared.current = {

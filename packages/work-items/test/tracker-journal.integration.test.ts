@@ -23,7 +23,8 @@ import type { LinearImportSnapshot } from "../src/linear-import.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  // A background checkpoint may still be finishing its temp file when a test ends.
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 10 });
 });
 async function scratch(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix));
@@ -83,7 +84,7 @@ const segments = async (directory: string) =>
   (await readdir(join(directory, JOURNAL_DIRECTORY))).filter((name) => name.endsWith(".jsonl")).sort();
 const checkpointHeader = async (directory: string) =>
   JSON.parse(await readFile(join(directory, "tracker.json"), "utf8")) as {
-    journal?: { sealed: { name: string }[] };
+    journal?: { sealed: { name: string; bytes: number }[] };
     syncLog?: unknown;
     receipts?: { resultInJournal?: boolean }[];
   };
@@ -182,6 +183,30 @@ it("reopens the same store from every crash point of a commit and a checkpoint",
      await tracker.checkpoint();`,
   );
   expect((await openedInChild(directory)).titles).toEqual([...unrenamed.titles, "after recovery"].sort());
+}, 120_000);
+
+// LOCAL-VUH-42 review B1: a checkpoint stopped after starting its new segment left that empty
+// segment as the live one. The next start's checkpoint sealed it, and the store no longer opened.
+it("restarts after a checkpoint stopped before its rename, checkpoints and keeps writing", async () => {
+  const directory = await scratch("tracker-journal-interrupted-checkpoint-");
+  const { tracker } = await journalStore(directory);
+  for (let index = 0; index < 2; index++)
+    await tracker.call("save_issue", { team: "LOCAL", title: `kept ${String(index)}` });
+  const previous = await readFile(join(directory, "tracker.json"));
+  await tracker.checkpoint();
+  // Back to the state after phase 1: sealed and started, the old checkpoint still in place.
+  await writeFile(join(directory, "tracker.json"), previous);
+  const before = await openedInChild(directory);
+  // The service's start-up checkpoint runs before any commit, then a write.
+  await inChild(
+    directory,
+    `const tracker = createLocalTracker({ directory });
+     await tracker.checkpoint();
+     await tracker.call("save_issue", { team: "LOCAL", title: "after restart" });`,
+  );
+  const header = await checkpointHeader(directory);
+  expect(header.journal!.sealed.every((segment) => segment.bytes > 0)).toBe(true);
+  expect((await openedInChild(directory)).titles).toEqual([...before.titles, "after restart"].sort());
 }, 120_000);
 
 it("keeps every acknowledged write across twenty kill -9s of another writing process", async () => {

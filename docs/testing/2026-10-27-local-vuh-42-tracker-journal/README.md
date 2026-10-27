@@ -211,6 +211,10 @@ These are integration tests on the real store, real processes and real `kill -9`
   own writes. Every acknowledged write is present, at most the in-flight one is added,
   and a fresh process proves every chain and sealed segment. A killed holder's lock is
   aged past its 60 s stale window rather than waited out.
+- **A checkpoint stopped after starting its new segment, then a restart** (review
+  finding B1): the start-up checkpoint runs before any commit, and a write follows.
+  The empty segment stays live, so no sealed segment is empty, and a fresh process
+  opens the store with the write. Without the fix, that reopen refused the store.
 - **Replay** gives the same store on every open, and a keyed retry after a checkpoint
   returns the original result.
 - **A changed commit hash or sealed-segment byte** refuses the open, for a fresh process

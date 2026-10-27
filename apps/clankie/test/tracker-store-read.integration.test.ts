@@ -79,6 +79,8 @@ it("answers repeated reads of an unchanged store without loading it again", asyn
         description: "x".repeat(1 << 20),
       });
     // A store this size keeps its writes in a journal beside the checkpoint (LOCAL-VUH-42).
+    // Let its background checkpoint finish first: its buffers are not reads, and it writes here.
+    await tracker.checkpoint();
     const journal = join(directory, "tracker.journal");
     let storeBytes = (await stat(join(directory, "tracker.json"))).size;
     for (const name of await readdir(journal).catch(() => []))
