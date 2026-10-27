@@ -23,7 +23,9 @@ Worker request-to-commit latency is much higher: p95 **3,934 ms**, reported belo
   HTTP ports are scratch. There is no real broker, keychain or owner pairing.
   All owned servers and browser processes stop in teardown.
   These captures used a full heavy permit. After the long-holder notice, the
-  lead directed future runs to the server lane; reproduction below uses it.
+  lead initially directed future runs to the server lane. LOCAL-VUH-50 then
+  proved that its CPU repayment suspends Node/Chrome and distorts latency;
+  the lead corrected this to a bounded full-lane replay, used below.
 - The host, relay, pairing/signed device tokens, MCP host, project routing,
   role profiles, budget and journal are real. The unused captain port is a stub.
   As in the existing role/budget integration fixture, a test identity adapter
@@ -89,7 +91,7 @@ Knip registers these entry points and excludes only their `unlisted` diagnostic
 for those imports, without adding duplicate root dependencies.
 
 ```sh
-clankie heavy --server -- node docs/testing/2026-10-27-local-vuh-46-peak-day/flows/run.mjs \
+clankie heavy -- node docs/testing/2026-10-27-local-vuh-46-peak-day/flows/run.mjs \
   /absolute/current-origin-main/clankie-app \
   /absolute/preserved-scratch-template/tracker.json \
   docs/testing/2026-10-27-local-vuh-46-peak-day/artifacts/run

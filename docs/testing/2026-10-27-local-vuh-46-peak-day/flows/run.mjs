@@ -1,4 +1,4 @@
-// Run ONLY inside `clankie heavy --server -- node .../run.mjs APP_CHECKOUT SCRATCH_SEED OUT`.
+// Run ONLY inside bounded `clankie heavy -- node .../run.mjs APP_CHECKOUT SCRATCH_SEED OUT`.
 // The governor retains its normal environment; the proof child receives no owner state.
 import { mkdir, mkdtemp, stat, readFile, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";

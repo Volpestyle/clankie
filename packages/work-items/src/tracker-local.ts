@@ -2640,7 +2640,7 @@ const owned = <T extends object>(collection: T[], entry: T): T =>
   Object.isFrozen(collection) ? entry : own(collection, entry);
 
 /** Each store file's committed snapshot, frozen and shared by every backend instance in the process. */
-const committedStores = new Map<string, { current?: Committed }>();
+const committedStores = new Map<string, { current?: Committed; publishing?: Promise<void> }>();
 /** A store as committed by this process, and where its next commit goes. */
 interface Committed {
   readonly version: string;
@@ -4830,7 +4830,23 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     }
     return openCommitted(bytes, version);
   };
+  // Host metadata readers do not take the write lock (some run in authorization callbacks).
+  // Wait only for actual disk publication, after those callbacks, so our own append is never
+  // mistaken for an external generation. The writer publishes shared.current before release.
+  const beginPublication = () => {
+    if (shared.publishing) throw new Error("Tracker publication already in progress");
+    let release!: () => void;
+    const publishing = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    shared.publishing = publishing;
+    return () => {
+      delete shared.publishing;
+      release();
+    };
+  };
   const readStore = async (mutable = true): Promise<Store> => {
+    while (shared.publishing) await shared.publishing;
     // A different process can replace or edit the store, so every read checks
     // the store's version. Its identity, size and timestamps change with any
     // write; ctime also catches an in-place edit that restores mtime. Reading
@@ -4850,33 +4866,48 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
    */
   const commit = async (store: Store, assertHeld: () => void, callOptions?: TrackerToolCallOptions) => {
     let current = shared.current;
-    if (current !== undefined && current.journal === undefined && current.bytes > JOURNAL_THRESHOLD_BYTES)
-      current = shared.current = await migrateToJournal(current, assertHeld);
+    if (current !== undefined && current.journal === undefined && current.bytes > JOURNAL_THRESHOLD_BYTES) {
+      const finish = beginPublication();
+      try {
+        current = shared.current = await migrateToJournal(current, assertHeld);
+      } finally {
+        finish();
+      }
+    }
+    let finishPublication: (() => void) | undefined;
     const confirmed = {
       ...callOptions,
+      onDispatch: () => {
+        callOptions?.onDispatch?.();
+        finishPublication = beginPublication();
+      },
       effectConfirmed: () => {
         landed = storeVersion();
         callOptions?.effectConfirmed?.();
       },
     };
-    if (current?.journal !== undefined) {
-      shared.current = await appendCommit(current, store, assertHeld, confirmed);
-      if (
-        shared.current.journal!.bytes >=
-        Math.max(CHECKPOINT_MIN_BYTES, shared.current.journal!.checkpointBytes / 8)
-      )
-        scheduleCheckpoint();
-      return;
+    try {
+      if (current?.journal !== undefined) {
+        shared.current = await appendCommit(current, store, assertHeld, confirmed);
+        if (
+          shared.current.journal!.bytes >=
+          Math.max(CHECKPOINT_MIN_BYTES, shared.current.journal!.checkpointBytes / 8)
+        )
+          scheduleCheckpoint();
+        return;
+      }
+      const bytes = await persist(path, store, assertHeld, confirmed);
+      // Exactly what reopening these bytes would hold: open binds stage statuses after reading.
+      bindStageStatuses(store);
+      shared.current = {
+        version: storeVersion(),
+        digest: createHash("sha256").update(bytes).digest("hex"),
+        bytes: bytes.length,
+        store: settle(store, current?.store),
+      };
+    } finally {
+      finishPublication?.();
     }
-    const bytes = await persist(path, store, assertHeld, confirmed);
-    // Exactly what reopening these bytes would hold: open binds stage statuses after reading.
-    bindStageStatuses(store);
-    shared.current = {
-      version: storeVersion(),
-      digest: createHash("sha256").update(bytes).digest("hex"),
-      bytes: bytes.length,
-      store: settle(store, current?.store),
-    };
   };
   const appendCommit = async (
     current: Committed,
@@ -4986,38 +5017,43 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         if (codeOf(error) === "ENOENT") return undefined;
         throw error;
       }
-      let current = shared.current!;
-      // The host checkpoints at start, so a large single-file store moves then, not in a write.
-      if (current.journal === undefined && current.bytes > JOURNAL_THRESHOLD_BYTES)
-        current = shared.current = await migrateToJournal(current, assertHeld);
-      if (current.journal === undefined || current.journal.bytes === 0) return undefined;
-      const names = (await readdir(join(directory, JOURNAL_DIRECTORY)))
-        .filter((name) => /^\d{12}\.jsonl$/u.test(name))
-        .sort();
-      const syncId = current.store.syncId ?? 0;
-      const unsealed = names.slice(current.journal.header.sealed.length);
-      // An empty segment for the next commit is already the live one: an earlier checkpoint
-      // started it and stopped before its rename. Sealing it would seal the live segment.
-      const reused = unsealed.at(-1) === current.journal.live.name && current.journal.live.size === 0;
-      if (reused && current.journal.live.name !== segmentName(syncId + 1))
-        throw new Error(`Tracker journal segment ${current.journal.live.name} is empty but out of order`);
-      const sealed = [...current.journal.header.sealed];
-      for (const name of reused ? unsealed.slice(0, -1) : unsealed)
-        sealed.push(await sealSegment(directory, name));
-      const header: JournalHeader = {
-        version: 1,
-        syncId,
-        syncHash: (current.store.syncLog?.at(-1) ?? current.store.syncBase!).hash,
-        since: current.journal.header.since,
-        sealed,
-      };
-      const live = reused ? current.journal.live.name : await startSegment(directory, syncId + 1);
-      shared.current = {
-        ...current,
-        version: storeVersion(),
-        journal: { ...current.journal, live: { name: live, size: 0 }, bytes: 0 },
-      };
-      return { store: current.store, header, base: fileVersion() };
+      const finish = beginPublication();
+      try {
+        let current = shared.current!;
+        // The host checkpoints at start, so a large single-file store moves then, not in a write.
+        if (current.journal === undefined && current.bytes > JOURNAL_THRESHOLD_BYTES)
+          current = shared.current = await migrateToJournal(current, assertHeld);
+        if (current.journal === undefined || current.journal.bytes === 0) return undefined;
+        const names = (await readdir(join(directory, JOURNAL_DIRECTORY)))
+          .filter((name) => /^\d{12}\.jsonl$/u.test(name))
+          .sort();
+        const syncId = current.store.syncId ?? 0;
+        const unsealed = names.slice(current.journal.header.sealed.length);
+        // An empty segment for the next commit is already the live one: an earlier checkpoint
+        // started it and stopped before its rename. Sealing it would seal the live segment.
+        const reused = unsealed.at(-1) === current.journal.live.name && current.journal.live.size === 0;
+        if (reused && current.journal.live.name !== segmentName(syncId + 1))
+          throw new Error(`Tracker journal segment ${current.journal.live.name} is empty but out of order`);
+        const sealed = [...current.journal.header.sealed];
+        for (const name of reused ? unsealed.slice(0, -1) : unsealed)
+          sealed.push(await sealSegment(directory, name));
+        const header: JournalHeader = {
+          version: 1,
+          syncId,
+          syncHash: (current.store.syncLog?.at(-1) ?? current.store.syncBase!).hash,
+          since: current.journal.header.since,
+          sealed,
+        };
+        const live = reused ? current.journal.live.name : await startSegment(directory, syncId + 1);
+        shared.current = {
+          ...current,
+          version: storeVersion(),
+          journal: { ...current.journal, live: { name: live, size: 0 }, bytes: 0 },
+        };
+        return { store: current.store, header, base: fileVersion() };
+      } finally {
+        finish();
+      }
     });
     if (started === undefined) return;
     const temp = `${path}.${randomUUID()}.tmp`;
@@ -5027,18 +5063,23 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         // Only the checkpoint this one extends may be replaced.
         if (fileVersion() !== started.base) return;
         assertHeld();
-        await rename(temp, path);
-        await syncDirectory(directory);
-        const current = shared.current;
-        if (current?.journal === undefined || current.digest === written.sha256) return;
-        shared.current = {
-          ...current,
-          version: storeVersion(),
-          digest: written.sha256,
-          bytes: written.bytes,
-          store: settle(compactedStore(current.store, started.header)),
-          journal: { ...current.journal, header: started.header, checkpointBytes: written.bytes },
-        };
+        const finish = beginPublication();
+        try {
+          await rename(temp, path);
+          await syncDirectory(directory);
+          const current = shared.current;
+          if (current?.journal === undefined || current.digest === written.sha256) return;
+          shared.current = {
+            ...current,
+            version: storeVersion(),
+            digest: written.sha256,
+            bytes: written.bytes,
+            store: settle(compactedStore(current.store, started.header)),
+            journal: { ...current.journal, header: started.header, checkpointBytes: written.bytes },
+          };
+        } finally {
+          finish();
+        }
       });
     } finally {
       await rm(temp, { force: true });

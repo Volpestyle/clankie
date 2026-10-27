@@ -1,6 +1,7 @@
 // Manual composition proof, not CI. Invoked by run.mjs under clankie heavy.
 import { Session } from "node:inspector";
-import { statSync } from "node:fs";
+import { statSync, promises as fsPromises } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { PerformanceObserver } from "node:perf_hooks";
 import { cp, writeFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -306,6 +307,62 @@ async function run() {
         clientInfo: { name: "peak-day-proof", version: "1" },
       });
       sessions.set(pane, response.headers.get("mcp-session-id")!);
+    }
+    if (mode === "race") {
+      const issue = await lead("save_issue", {
+        title: "Concurrent routing probe",
+        team: f.team,
+        project: f.project.id,
+      });
+      await f.tracker.referenceProjects([issue.id]);
+      const reads: Record<string, any>[] = [],
+        calls: Record<string, any>[] = [];
+      let round = -1,
+        reader = "";
+      const original = fsPromises.readFile;
+      (fsPromises as any).readFile = (...args: any[]) => {
+        if (String(args[0]) === join(directory, "tracker.json"))
+          reads.push({ at: Date.now(), round, reader, stack: new Error().stack });
+        return (original as any)(...args);
+      };
+      syncBuiltinESMExports();
+      try {
+        for (const method of ["referenceProjects", "projectStoreId"] as const)
+          for (round = 0; round < 12; round++) {
+            reader = method;
+            let done = false;
+            const writing = lead("save_comment", {
+              issueId: issue.id,
+              body: `Concurrent ${method}/${round}`,
+            }).finally(() => {
+              done = true;
+            });
+            const reading = (async () => {
+              while (!done) {
+                const start = performance.now();
+                await (method === "referenceProjects"
+                  ? f.tracker.referenceProjects([issue.id])
+                  : f.tracker.projectStoreId(f.project.id));
+                calls.push({ method, round, ms: performance.now() - start });
+                await new Promise((resolve) => setTimeout(resolve, 0));
+              }
+            })();
+            await Promise.all([writing, reading]);
+          }
+      } finally {
+        fsPromises.readFile = original;
+        syncBuiltinESMExports();
+      }
+      await save("race.json", {
+        reads,
+        calls,
+        root,
+        writes: 24,
+        boundary:
+          "Real lead HTTP writes and concurrent host metadata reads against the same scratch journal. readFile observation forwards all original operations; no fake storage.",
+      });
+      console.log(`Concurrent checkpoint reads: ${reads.length}/24 writes`);
+      return;
     }
     if (mode === "serial") {
       const profiler = new Session();

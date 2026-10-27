@@ -213,10 +213,13 @@ its bytes as `tracker.pre-journal-<ms>.json`. Open is the checkpoint plus the
 journal tail, with every chain proven. Cut-over reference routing uses the backend's
 host-only `referenceProjects` against its shared validated committed snapshot
 (LOCAL-VUH-50). Same-process commits update that snapshot without a disk reread;
-external changes still trigger validation, and missing or damaged stores refuse.
+Metadata readers wait for disk publication and the shared snapshot update, including
+failed appends; the fence starts after authorization callbacks to avoid deadlock.
+External changes still trigger validation, and missing or damaged stores refuse.
 Reference lookups reuse the committed-array indexes, extended by changed records
 and appended tails. A reference rename or external replacement rebuilds the affected
-metadata index; ordinary commits never reparse the checkpoint for routing. Other host readers use `readTrackerStoreSnapshot`
+metadata index; ordinary commits never reparse the checkpoint for routing. Other
+host readers use `readTrackerStoreSnapshot`
 (validated), `readTrackerStoreRecords` (for routing; the tracker refuses a broken
 store itself) and `trackerStoreVersion`. `exportTrackerStore` writes the whole store
 as one legacy file for a rollback. Design and numbers:

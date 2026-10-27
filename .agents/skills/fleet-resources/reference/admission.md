@@ -57,6 +57,8 @@ programs and the retained diagnostics under `.local/typechecks/`. A higher
 
 ## Server lane
 
+Latency and event-loop measurements must use a bounded full-lane command, not `--server`: CPU repayment suspends the process (`SSTOP`) and appears as product stalls.
+
 The lane has up to two slots and shares 20% of machine cores (at most 64 cores),
 divided equally between its slots. Tool-native parallelism is capped at two; a
 native supervisor samples the owned process group's CPU every 100 ms and
