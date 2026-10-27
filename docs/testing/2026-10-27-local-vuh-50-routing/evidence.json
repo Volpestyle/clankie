@@ -423,9 +423,9 @@
     },
     {
       "path": "artifacts/type-only-source-proof.json",
-      "size": 92189,
-      "sha256": "f4afa19f9ddda9fcfb1b88e477656dc551d6963acc0a2517756be5d1cdb4f591",
-      "url": "clankie://evidence/sha256/f4afa19f9ddda9fcfb1b88e477656dc551d6963acc0a2517756be5d1cdb4f591"
+      "size": 92639,
+      "sha256": "53c2aaeabce5a163882ab1b486b64f7829749cb93554776ce5267dcb515aba65",
+      "url": "clankie://evidence/sha256/53c2aaeabce5a163882ab1b486b64f7829749cb93554776ce5267dcb515aba65"
     }
   ]
 }

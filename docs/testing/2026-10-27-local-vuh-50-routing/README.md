@@ -261,9 +261,9 @@ sources. Historical `peak-after` matches commit `ee61d5d69`; `peak-profile` and
 `peak-full` match `ed18686e9`. Later diagnostic `race` mode and the launcher
 comment did not change their workload. The final product files are byte-identical
 across the final serial, race and peak captures. After capture, the landing
-typecheck required a type-only `Pick<LocalTrackerBackend, "referenceProjects">`
+typecheck required a type-only `TrackerToolBackend & Pick<LocalTrackerBackend, "referenceProjects">`
 assertion at the host factory seam. Its emitted JavaScript is byte-identical
-to the captured source (esbuild 0.28.1); the [source and comparison proof](clankie://evidence/sha256/f4afa19f9ddda9fcfb1b88e477656dc551d6963acc0a2517756be5d1cdb4f591)
+to the captured source (esbuild 0.28.1); the [source and comparison proof](clankie://evidence/sha256/53c2aaeabce5a163882ab1b486b64f7829749cb93554776ce5267dcb515aba65)
 retains both source hashes. The other five captured files are unchanged.
 Node 26.12.0, 18 logical cores; load is sampled in every run. Periodic load1
 ranges: original serial 2.58–2.92, snapshot-scan serial 2.79–2.94,
