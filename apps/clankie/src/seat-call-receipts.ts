@@ -104,15 +104,56 @@ export class SeatCallReceipts {
     lane: CaptainSessionLaneV2,
     conversationId?: string,
   ): CallToolResult {
-    const record = this.store.read(id);
-    if (record === undefined || record.tool !== tool || !this.matches(record, lane, conversationId))
+    const record = this.store.read(id) ?? this.fence(id, tool, lane, conversationId);
+    if (record.tool !== tool || !this.matches(record, lane, conversationId))
       return {
         content: [
-          { type: "text", text: "No matching seat-call receipt in this conversation. Nothing dispatched." },
+          {
+            type: "text",
+            text: "This seat-call ID belongs to another conversation or tool. Nothing settled or dispatched here.",
+          },
         ],
         isError: true,
       };
     return this.result(record);
+  }
+
+  /**
+   * An ID with no receipt never began: begin() saves before any dispatch. Settle it as not
+   * dispatched so a call still in flight (a timed-out or restart-lost request) is refused
+   * when it arrives, which makes "safe to send again" true (VUH-2920).
+   */
+  private fence(
+    id: string,
+    tool: SeatCallTool,
+    lane: CaptainSessionLaneV2,
+    conversationId?: string,
+  ): ReceiptRecord {
+    const records = this.store.load();
+    const existing = records.get(id);
+    if (existing !== undefined) return existing;
+    const record: ReceiptRecord = {
+      id,
+      tool,
+      lane,
+      conversationId: conversationId ?? "global-default",
+      // No request hashes to this, so the original's begin() refuses its own ID.
+      fingerprint: "reconciled-not-dispatched",
+      createdAt: Date.now(),
+      state: "settled",
+      result: {
+        content: [
+          {
+            type: "text",
+            text: "Not dispatched: the service never received this call, and its ID is now closed, so a late arrival cannot run. Safe to send it again as a new call.",
+          },
+        ],
+        isError: true,
+      },
+    };
+    records.set(id, record);
+    this.store.save();
+    return record;
   }
 
   /** Inspection only; pending originals retain their IDs and are never redispatched. */

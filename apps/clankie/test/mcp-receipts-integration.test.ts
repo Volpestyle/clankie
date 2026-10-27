@@ -473,3 +473,49 @@ it.each(["message_seat", "hire_agent"])(
     }
   },
 );
+
+it("reconciling an ID the service never received settles it as not dispatched and refuses its late arrival", async () => {
+  const f = await fixture();
+  const client = new Client({ name: "lead-after-lost-send", version: "1" });
+  const url = new URL("/v1/mcp", f.host);
+  url.searchParams.set("conversationId", "global-default");
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(url, {
+        requestInit: {
+          headers: { authorization: `Bearer ${f.bearer}`, ...f.bindingHeaders("global-default") },
+        },
+      }) as unknown as Transport,
+    );
+    // VUH-2920: a send lost to a service restart left the lead with only its seat-call ID.
+    const id = randomUUID();
+    const reconciled = await client.callTool({ name: "reconcile_seat_call", arguments: { deliveryId: id } });
+    expect(JSON.stringify(reconciled.content)).toContain("Safe to send it again as a new call.");
+    expect(reconciled._meta?.["clankie/seat-call"]).toMatchObject({
+      id,
+      tool: "message_seat",
+      state: "settled",
+    });
+    // The original arriving late cannot run under the closed ID.
+    const late = await client.callTool({
+      name: "message_seat",
+      arguments: { text: "the lost send" },
+      _meta: { "clankie/seat-call": { id } },
+    });
+    expect(late.isError).toBe(true);
+    expect(await f.effects()).toHaveLength(0);
+    // Reconciling again is stable; the resend under a new ID is delivered once.
+    const again = await client.callTool({ name: "reconcile_seat_call", arguments: { deliveryId: id } });
+    expect(decodeMcpResult(again)).toEqual(decodeMcpResult(reconciled));
+    const resend = await client.callTool({
+      name: "message_seat",
+      arguments: { text: "the lost send" },
+      _meta: { "clankie/seat-call": { id: randomUUID() } },
+    });
+    expect(resend.isError).not.toBe(true);
+    expect(await f.effects()).toHaveLength(1);
+  } finally {
+    await client.close();
+    await f.close();
+  }
+});
