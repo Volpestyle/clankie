@@ -19,14 +19,14 @@ Both runs use current app `ddb7b79`, the same 244-write prefill (32,836,544 byte
 against the normal 33,328,535.75-byte threshold), default budgets, original
 594-write workload and a bounded full permit. No sealing code was changed.
 
-| Metric | Fixed tracker | Base `e32f05e3` |
-| --- | ---: | ---: |
-| Seal reader wait p95 / max, ms | 21.594 / 21.594 | 22.828 / 22.828 |
-| Readers / seals | 16 / 1 | 16 / 1 |
-| Event-loop max, ms | 125.268 | 196.306 |
-| Windows over 100 ms | 3 | 2 |
-| Models in each app / agent / store | 57,000 | 57,000 |
-| Digest mismatches | 0 | 0 |
+| Metric                                    |   Fixed tracker | Base `e32f05e3` |
+| ----------------------------------------- | --------------: | --------------: |
+| Seal reader wait p95 / max, ms            | 21.594 / 21.594 | 22.828 / 22.828 |
+| Readers / seals                           |          16 / 1 |          16 / 1 |
+| Event-loop max, ms                        |         125.268 |         196.306 |
+| Windows over 100 ms                       |               3 |               2 |
+| Models in each app / agent / store        |          57,000 |          57,000 |
+| Digest mismatches                         |               0 |               0 |
 | Writes / applied receipts / audit entries | 594 / 594 / 594 | 594 / 594 / 594 |
 
 Every >100 ms window in these runs falls outside sealing; most of its time is

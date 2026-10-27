@@ -84,8 +84,8 @@ lead timing comparison. `serial.json` retains every sample and its machine load.
 | 60d, snapshot scan             | 41.17 / 43.96 / 44.07                 | 65.36 / 68.18 / 73.05                    | 1.21 / 1.32                   | 7.08 / 8.10                      |
 | 60d, incremental, before fence | 36.97 / 39.01 / 39.06                 | 60.36 / 63.80 / 63.81                    | 1.22 / 1.50                   | 7.17 / 9.31                      |
 | 1d, incremental, before fence  | 36.30 / 38.59 / 40.38                 | 60.13 / 70.38 / 72.43                    | 0.74 / 0.95                   | 5.71 / 6.19                      |
-| 60d, final fenced routing | 36.30 / 38.31 / 39.07 | 61.22 / 63.61 / 64.39 | 1.23 / 1.43 | 7.07 / 8.92 |
-| 1d, final fenced routing | 36.06 / 38.88 / 40.72 | 61.83 / 67.35 / 69.16 | 0.73 / 0.97 | 5.82 / 7.26 |
+| 60d, final fenced routing      | 36.30 / 38.31 / 39.07                 | 61.22 / 63.61 / 64.39                    | 1.23 / 1.43                   | 7.07 / 8.92                      |
+| 1d, final fenced routing       | 36.06 / 38.88 / 40.72                 | 61.83 / 67.35 / 69.16                    | 0.73 / 0.97                   | 5.82 / 7.26                      |
 
 The original **within 2x of the lead** AC2 is not met: worker fixed overhead is
 large relative to the lead's 1–7 ms path. After reviewing the breakdown, the lead
