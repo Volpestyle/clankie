@@ -46,6 +46,7 @@ function writeRelease(
   replaceCurrentOnDown = false,
   target?: string,
   runtimeProviderApi?: number,
+  operatorSeatsReady?: boolean,
 ) {
   mkdirSync(join(root, "bin"), { recursive: true });
   writeFileSync(join(root, "VERSION"), `${version}\n`);
@@ -84,6 +85,7 @@ if (action === "update" && target === "cutover") {
 else if (action === "update") print({ runtime: { root, commit: ${JSON.stringify(revision)}, instanceId: randomUUID(), pid: process.pid } });
 else if (action === "harness") print({ ok: true });
 else if (action === "pair") print({ ok: true, localCompanion: true });
+else if (action === "doctor") print({ operatorSeatBindings: { inventory: { complete: true, ready: ${JSON.stringify(operatorSeatsReady ?? false)}, seats: ${operatorSeatsReady ? "[]" : "[{ bound: false }]"} } } });
 else if (action === "restart" && ${JSON.stringify(restart)} === "fail") print({ ok: false, services: [{ id: target, label: target, ok: false, error: "fixture restart failed" }] }, 1);
 else print({ ok: true, services: [{ id: target, label: target, ok: true, state: action === "down" ? "unreachable" : "healthy" }] });
 `,
@@ -114,6 +116,8 @@ async function fixture(
     /** Pause halfway through a real archive response while work or policy changes. */
     readonly duringDownload?: () => Promise<void>;
     readonly cutoverUnavailable?: boolean;
+    readonly enforcing?: boolean;
+    readonly operatorSeatsReady?: boolean;
   } = {},
 ) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
@@ -128,7 +132,16 @@ async function fixture(
   const install = join(home, "install");
   const oldVersion = input.oldVersion ?? "v1.0.0";
   const old = join(install, "releases", oldVersion);
-  writeRelease(old, oldVersion, "a".repeat(40), "ok", input.replaceCurrentOnDown === "old", input.target);
+  writeRelease(
+    old,
+    oldVersion,
+    "a".repeat(40),
+    "ok",
+    input.replaceCurrentOnDown === "old",
+    input.target,
+    undefined,
+    input.operatorSeatsReady,
+  );
   writeRelease(join(install, "releases", "v1.2.0"), "v1.2.0", "c".repeat(40));
   symlinkSync(join("releases", oldVersion), join(install, "current"));
   mkdirSync(join(home, ".clankie"), { mode: 0o700 });
@@ -142,7 +155,15 @@ async function fixture(
     input.replaceCurrentOnDown === "new",
     input.publishedTarget ?? input.target,
     input.publishedProviderApi,
+    input.operatorSeatsReady,
   );
+  if (input.enforcing) {
+    mkdirSync(join(published, "clankie/apps/clankie"), { recursive: true });
+    writeFileSync(
+      join(published, "clankie/apps/clankie/operator-seat-policy.json"),
+      JSON.stringify({ schemaVersion: 1, mode: "enforce" }),
+    );
+  }
   const archiveName = `clankie-${input.target ?? "darwin-arm64"}.tar.gz`;
   const archive = join(home, archiveName);
   execFileSync("tar", ["-czf", archive, "-C", published, "clankie"]);
@@ -311,6 +332,26 @@ async function fixture(
     controlToken: env.CLANKIE_OPERATOR_TOKEN,
   };
 }
+
+it("stages an enforcing release but refuses before stopping any unbound operator seat", async () => {
+  const f = await fixture({ enforcing: true, operatorSeatsReady: false });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({
+    phase: "refused",
+    reason: "operator-seats-unready",
+  });
+  expect(f.downloads()).toBe(1);
+  expect(f.calls().some((call) => call.action === "down")).toBe(false);
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.0.0"));
+});
+
+it("activates an enforcing release only after a complete ready inventory and confirms recovery", async () => {
+  const f = await fixture({ enforcing: true, operatorSeatsReady: true });
+  const accepted = await f.updater(f.old).request("main", authority);
+  expect(await f.settled(accepted.pending!)).toMatchObject({ phase: "healthy", healthy: true });
+  expect(f.calls().filter((call) => call.action === "doctor").length).toBeGreaterThanOrEqual(2);
+  expect(readlinkSync(join(f.install, "current"))).toBe(join("releases", "v1.1.0"));
+});
 
 it("updates a release install to the latest official release and then reports it current", async () => {
   const f = await fixture();

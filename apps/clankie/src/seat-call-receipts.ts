@@ -114,4 +114,32 @@ export class SeatCallReceipts {
       };
     return this.result(record);
   }
+
+  /** Inspection only; pending originals retain their IDs and are never redispatched. */
+  public pending(conversationId: string): string[] {
+    const uncertain = (body: unknown) =>
+      typeof body === "object" &&
+      body !== null &&
+      (("outcome" in body && ["uncertain", "unconfirmed"].includes(String(body.outcome))) ||
+        ("deliveryStage" in body && body.deliveryStage === "uncertain"));
+    return [...this.store.load().values()]
+      .filter(
+        (record) =>
+          record.conversationId === conversationId &&
+          (record.state !== "settled" ||
+            record.result === undefined ||
+            uncertain(record.result.structuredContent) ||
+            (record.result?._meta?.[SEAT_CALL_META] as { state?: string } | undefined)?.state ===
+              "uncertain" ||
+            record.result?.content.some((block) => {
+              if (block.type !== "text") return false;
+              try {
+                return uncertain(JSON.parse(block.text));
+              } catch {
+                return false;
+              }
+            })),
+      )
+      .map((record) => record.id);
+  }
 }

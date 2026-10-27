@@ -49,6 +49,8 @@ import { RemoteObservationError } from "../remote-fleet-relay.ts";
 import { fleetAdmissionUnavailableResponse } from "../local-fleet-admission.ts";
 import { SeatLinkInterruptedError } from "../captain/seat-outbox.ts";
 import { seatBindingRecovery } from "../operator-seat-bindings.ts";
+import { SeatCallReceipts } from "../seat-call-receipts.ts";
+import { OPERATOR_SEAT_MIGRATIONS_PATH, OperatorSeatMigrationRequestSchema } from "@clankie/protocol";
 import {
   FLEET_REVIEW_CANDIDATES_PATH,
   FLEET_REVIEW_VERDICTS_PATH,
@@ -104,6 +106,88 @@ export interface RegisterSeatRoutesContext {
 }
 
 export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
+  ctx.app.post(OPERATOR_SEAT_MIGRATIONS_PATH, bodyLimit({ maxSize: 8 * 1024 }), async (context) => {
+    const auth = await ctx.authenticateLane(context);
+    if ("denial" in auth) return auth.denial;
+    if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
+    const parsed = OperatorSeatMigrationRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_seat_migration" }, 400);
+    const migrations = ctx.dependencies.operatorSeatMigrations;
+    if (!migrations || !ctx.dependencies.seatCallReceiptPath)
+      return context.json({ error: "seat_migration_unavailable" }, 503);
+    const input = parsed.data;
+    try {
+      if (input.action === "prepare") {
+        const inventory = await ctx.dependencies.operatorSeatInventory?.();
+        const seats = inventory?.seats.filter((seat) => seat.conversationId === input.conversationId);
+        const recovery = await ctx.dependencies.captain.operatorSeatRecovery?.(
+          input.conversationId,
+          seats?.[0]?.sessionId,
+        );
+        if (
+          !inventory?.complete ||
+          seats?.length !== 1 ||
+          !recovery?.sessionId ||
+          !recovery.cwd ||
+          !recovery.profile
+        )
+          throw Error("Exact native session, profile and unique launcher are required; migration held");
+        if (ctx.dependencies.captain.operatorSeatMigrationIdle?.(input.conversationId) !== true)
+          throw Error("Native turn or original delivery is unsettled; reconcile it before migration");
+        migrations.prepare({
+          id: input.id,
+          conversationId: input.conversationId,
+          sessionId: recovery.sessionId,
+          cwd: recovery.cwd,
+          profile: recovery.profile,
+          processes: seats[0]!.processes,
+        });
+      }
+      let migration = migrations.get(input.id);
+      const pendingReceiptIds = new SeatCallReceipts(ctx.dependencies.seatCallReceiptPath).pending(
+        migration.conversationId,
+      );
+      if (input.action === "claim") {
+        if (pendingReceiptIds.length)
+          throw Error("Original call receipts are unresolved; inspect their exact IDs, never replay");
+        migration = await migrations.claim(input.id, {
+          sessionId: input.sessionId,
+          conversationId: input.conversationId,
+          cwd: input.cwd,
+          profile: input.profile,
+        });
+      }
+      if (input.action === "complete") {
+        const inventory = await ctx.dependencies.operatorSeatInventory?.();
+        const seats = inventory?.seats.filter((seat) => seat.conversationId === migration.conversationId);
+        const recovery = await ctx.dependencies.captain.operatorSeatRecovery?.(
+          migration.conversationId,
+          seats?.[0]?.sessionId,
+        );
+        if (
+          pendingReceiptIds.length ||
+          !inventory?.complete ||
+          seats?.length !== 1 ||
+          seats[0]?.bound !== true ||
+          recovery?.sessionId !== migration.sessionId ||
+          recovery.cwd !== migration.cwd ||
+          recovery.profile !== migration.profile ||
+          ctx.dependencies.captain.operatorSeatReady?.(migration.conversationId) !== true
+        )
+          throw Error("Exact resumed session binding/readiness is unconfirmed; migration remains held");
+        migration = migrations.complete(input.id);
+      }
+      return context.json({ migration, pendingReceiptIds });
+    } catch (error) {
+      return context.json(
+        {
+          error: "seat_migration_held",
+          detail: error instanceof Error ? error.message : "Migration evidence unavailable",
+        },
+        409,
+      );
+    }
+  });
   const seatBinding = (
     context: Context,
     lane: string,
@@ -149,13 +233,61 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     if ("denial" in auth) return auth.denial;
     if (auth.lane !== "operator") return context.json({ error: "lane_forbidden" }, 403);
     const bindings = ctx.dependencies.operatorSeatBindings;
+    const inventory = await ctx.dependencies.operatorSeatInventory?.();
+    if (inventory) {
+      inventory.migrations = ctx.dependencies.operatorSeatMigrations?.pending() ?? [];
+      if (inventory.migrations.length) inventory.ready = false;
+    }
+    if (inventory)
+      for (const seat of inventory.seats) {
+        const migration = seat.conversationId
+          ? ctx.dependencies.operatorSeatMigrations?.forConversation(seat.conversationId)
+          : undefined;
+        if (migration) {
+          seat.migration = { id: migration.id, state: migration.state };
+          inventory.ready = false;
+        }
+        if (
+          !seat.bound &&
+          seat.state !== "bridge-pending" &&
+          seat.conversationId &&
+          ctx.dependencies.captain.operatorSeatRecovery
+        ) {
+          try {
+            const recovery = await ctx.dependencies.captain.operatorSeatRecovery(
+              seat.conversationId,
+              seat.sessionId,
+            );
+            seat.recovery = recovery.recovery;
+            if (recovery.sessionId && recovery.profile) {
+              const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+              seat.recovery = migration
+                ? `Migration ${migration.id} is ${migration.state}. Inspect original receipts with clankie seat migrate status ${migration.id}. After confirmed old-process exit: env CLAUDE_CONFIG_DIR=${quote(recovery.profile)} clankie claude --resume ${recovery.sessionId} --conversation ${quote(seat.conversationId)} --migration ${migration.id}. Never repeat a claimed launch. Once bound and ready: clankie seat migrate complete ${migration.id}.`
+                : `Preserve and reconcile original receipts; never replay. First: clankie seat migrate prepare --conversation ${quote(seat.conversationId)}. Keep the returned migration ID. Exit only this exact native session, then follow clankie doctor for its exact resume command. ${recovery.recovery}`;
+            }
+          } catch {
+            seat.recovery =
+              "Migration held: native session/profile recovery is unavailable. Preserve original receipts and inspect this launcher; do not start a substitute session.";
+          }
+        }
+      }
     return context.json(
-      bindings?.status() ?? {
-        available: false,
-        error: "seat_binding_unavailable",
-        recovery: seatBindingRecovery("seat_binding_unavailable"),
-        bindings: [],
-      },
+      bindings
+        ? {
+            ...bindings.status(),
+            inventory: inventory ?? {
+              complete: false,
+              ready: false,
+              seats: [],
+              error: "operator_seat_inventory_unavailable",
+            },
+          }
+        : {
+            available: false,
+            error: "seat_binding_unavailable",
+            recovery: seatBindingRecovery("seat_binding_unavailable"),
+            bindings: [],
+          },
     );
   });
   ctx.app.put(OPERATOR_SEAT_BINDINGS_PATH, bodyLimit({ maxSize: 4 * 1024 }), async (context) => {

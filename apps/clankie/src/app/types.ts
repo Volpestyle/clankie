@@ -264,6 +264,10 @@ export interface ClankieAppDependencies {
   };
   /** Which process may act as the lead's operator-lane bridge or controller for a conversation (VUH-2816). Absent, the operator lane refuses every bridge. */
   operatorSeatBindings?: import("../operator-seat-bindings.ts").OperatorSeatBindings;
+  operatorSeatInventory?: () => ReturnType<
+    typeof import("../operator-seat-inventory.ts").operatorSeatInventory
+  >;
+  operatorSeatMigrations?: import("../operator-seat-migrations.ts").OperatorSeatMigrations;
   localFleet?: {
     identity(request: Request): import("../local-fleet-link.ts").LocalFleetIdentity | undefined;
   };

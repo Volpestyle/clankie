@@ -2336,6 +2336,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
   };
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.takesInput() === true;
+  conversations.executionHeld = (id) => options.operatorSeatMigrationHeld?.(id) === true;
   // Only an idle native seat gains from waiting: a turn already running hears
   // reports for free, and the service lane is not woken per report.
   conversations.reportRoundMs = (id) => {
@@ -5608,7 +5609,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
   });
   const stopLeadFailbacks = startFleetRounds(
-    () => leadFailover.failBack(),
+    () =>
+      options.operatorSeatMigrationHeld?.(conversations.defaultGlobalConversationId())
+        ? Promise.resolve()
+        : leadFailover.failBack(),
     options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS,
   );
   let leadRestartAskedAt: number | undefined;
@@ -5617,6 +5621,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let leadRestartUnknownCheck: LeadRestartStatus["unknownCheck"];
   const stopLeadRestarts = startFleetRounds(async () => {
     const conversationId = conversations.defaultGlobalConversationId();
+    if (options.operatorSeatMigrationHeld?.(conversationId)) return;
     if (shutdown.signal.aborted) return;
     if ((await settings()).fleet.leadRestarts === "off") return leadSeats.restartSettled(conversationId);
     // A service/app lead has no native session to retire. An offline native
@@ -7596,6 +7601,43 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     createRemoteWorkspaceConversation: (input) => conversations.createRemoteWorkspaceConversation(input),
     seatContext,
+    operatorSeatMigrationHeld: (conversationId) =>
+      options.operatorSeatMigrationHeld?.(conversationId) === true,
+    operatorSeatConversation: (sessionId) => conversations.nativeConversationForSession(sessionId),
+    operatorSeatMigrationIdle: (conversationId) =>
+      conversations.serviceTrackedIdle(conversationId) &&
+      seatOutboxes.get(conversationId)?.responding() === false &&
+      seatOutboxes.get(conversationId)?.unresolvedDeliveries().length === 0,
+    operatorSeatRecovery: async (conversationId, observedSessionId) => {
+      const held =
+        "Migration held: the authoritative local native session/profile could not be proven. Preserve the original receipts; do not replay calls or launch a substitute session.";
+      const source = await operatorNativeSource(conversationId).catch(() => undefined);
+      const sessionId = source ? nativeSessionId(source) : observedSessionId;
+      if (
+        !sessionId ||
+        source?.paneId.includes("/") ||
+        !deps.agentSessions?.resolve ||
+        (!source &&
+          (conversations.nativeSeatSessionState(conversationId, sessionId) !== "current" ||
+            conversations.nativeSeatSessionKey(conversationId) !== `claude:${sessionId}`))
+      )
+        return { recovery: held };
+      const saved = await deps.agentSessions.resolve(`local:${sessionId}`);
+      if (saved.source || saved.host !== "local" || saved.file.harness !== "claude")
+        return { recovery: held };
+      // The resolved transcript owns its profile; a numbered shell alias is not
+      // proof that today's alias still selects the account that launched it.
+      const path = await realpath(saved.file.path);
+      const profile = dirname(dirname(dirname(path)));
+      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      const argv = `env CLAUDE_CONFIG_DIR=${quote(profile)} clankie claude --resume ${sessionId} --conversation ${quote(conversationId)}`;
+      return {
+        sessionId,
+        cwd: saved.workingDirectory,
+        profile,
+        recovery: `Preserve and reconcile original receipts first; never replay a call. Preflight: ${argv} --dry-run. After the exact old launcher and harness have exited, run: ${argv}. Trust/hook prompts or profile, transcript, cwd or occupancy uncertainty hold migration. Confirm this seat is bound in clankie doctor before enforcement.`,
+      };
+    },
     conversationTurnIdle: (conversationId) => conversations.turnIdle(conversationId),
     conversationServiceTrackedIdle: (conversationId) => conversations.serviceTrackedIdle(conversationId),
     conversationHasNativeSeat: (conversationId) => conversations.hasNativeSeat(conversationId),

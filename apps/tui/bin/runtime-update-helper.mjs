@@ -202,6 +202,16 @@ const cli = async (runtime, args) => {
 };
 const result = await executeRuntimeUpdate(plan, {
   run: installCommand,
+  operatorSeatsReady: async (runtime) => {
+    const report = await cli(runtime, ["doctor", "--json"]);
+    const inventory = report.operatorSeatBindings?.inventory;
+    return (
+      inventory?.complete === true &&
+      inventory.ready === true &&
+      Array.isArray(inventory.seats) &&
+      inventory.seats.every((seat) => seat.bound === true)
+    );
+  },
   refreshHarnesses: async (runtime) => {
     let result;
     try {

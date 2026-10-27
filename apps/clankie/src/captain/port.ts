@@ -416,6 +416,14 @@ export interface CaptainPort {
   seatContext(
     conversationId?: string,
   ): { conversationId: string; cwd: string; machineId?: string } | undefined;
+  /** Exact transcript/profile recovery; never substitutes the last seat.json or another session. */
+  operatorSeatRecovery?(
+    conversationId: string,
+    observedSessionId?: string | null,
+  ): Promise<{ sessionId?: string; cwd?: string; profile?: string; recovery: string }>;
+  operatorSeatMigrationHeld?(conversationId: string): boolean;
+  operatorSeatMigrationIdle?(conversationId: string): boolean;
+  operatorSeatConversation?(sessionId: string): string | undefined;
   /** Service-observed turn/driver completion; unavailable evidence must not authorize automatic body stop. */
   conversationTurnIdle(conversationId: string): boolean;
   /** Explicit owner recovery admission only; native display activity does not prove termination. */

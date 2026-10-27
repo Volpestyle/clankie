@@ -185,6 +185,8 @@ import {
   observeNativeProcesses,
 } from "./local-fleet-process.ts";
 import { OperatorSeatBindings } from "./operator-seat-bindings.ts";
+import { operatorSeatInventory, operatorSeatPolicy } from "./operator-seat-inventory.ts";
+import { OperatorSeatMigrations } from "./operator-seat-migrations.ts";
 import { createProjectProcessObserver, HarnessBinaryObservations } from "./project-process-proof.ts";
 import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createPrimeNativeHost } from "./captain/prime-native-host.ts";
@@ -1469,6 +1471,9 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     return delivery;
   },
 });
+const operatorSeatMigrations = new OperatorSeatMigrations(
+  join(stateRoot, "operator-migrations", "migrations.json"),
+);
 const captain = createCaptain(
   {
     inboundReportMigrationReady:
@@ -1745,6 +1750,7 @@ const captain = createCaptain(
       ? {}
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
+    operatorSeatMigrationHeld: (conversationId) => operatorSeatMigrations.held(conversationId),
     ...(process.env.CLANKIE_DURABLE_PI_ROOM === undefined
       ? {}
       : { durablePiRoom: process.env.CLANKIE_DURABLE_PI_ROOM }),
@@ -1944,13 +1950,22 @@ if (nativeFixtureAdmissions.unavailable)
     "Native fixture admission refuses on this host; the service continues",
   );
 // Kernel proof of who is on the other end of an operator-lane socket (VUH-2816).
-const operatorSeatBindings = new OperatorSeatBindings({
-  socket: (socket) => observeSocketProcess(socket, fleetProcessHelper(repoRoot)),
-  birth: (pid) => observeNativeBirth(pid, undefined, fleetProcessHelper(repoRoot)),
-  processes: (controller, harness) =>
-    observeNativeProcesses(controller, harness, fleetProcessHelper(repoRoot)),
-  available: () => existsSync(fleetProcessHelper(repoRoot)) && ["darwin", "linux"].includes(process.platform),
-});
+const operatorSeatBindings = new OperatorSeatBindings(
+  {
+    socket: (socket) => observeSocketProcess(socket, fleetProcessHelper(repoRoot)),
+    birth: (pid) => observeNativeBirth(pid, undefined, fleetProcessHelper(repoRoot)),
+    processes: (controller, harness) =>
+      observeNativeProcesses(controller, harness, fleetProcessHelper(repoRoot)),
+    available: () =>
+      existsSync(fleetProcessHelper(repoRoot)) && ["darwin", "linux"].includes(process.platform),
+  },
+  operatorSeatPolicy(repoRoot),
+  (error, conversationId) =>
+    logger.warn(
+      { event: "operator_seat.binding_observed", error, conversationId },
+      "Binding refusal observed during the preparation release",
+    ),
+);
 const localFleet = new LocalFleetLink({
   fixtureAdmission: (request, proof, socket, current) =>
     nativeFixtureAdmissions.handleOriginal(request, proof, socket, current),
@@ -2457,6 +2472,28 @@ const clankie = await createClankieApp({
   },
   localFleet,
   operatorSeatBindings,
+  operatorSeatMigrations,
+  operatorSeatInventory: async () => {
+    const inventory = await operatorSeatInventory(operatorSeatBindings);
+    // Standalone native sessions are operator discovery only when the service
+    // independently owns that exact transcript. Other local harness work is
+    // outside this migration and never becomes an admission credential.
+    inventory.seats = inventory.seats.filter(
+      (seat) =>
+        !seat.nativeSessionOnly || (seat.sessionId && captain.operatorSeatConversation?.(seat.sessionId)),
+    );
+    inventory.ready = inventory.complete && inventory.seats.every((seat) => seat.bound);
+    for (const seat of inventory.seats) {
+      const owned = seat.sessionId ? captain.operatorSeatConversation?.(seat.sessionId) : undefined;
+      if (!seat.conversationId && owned) seat.conversationId = owned;
+      else if (owned && owned !== seat.conversationId) {
+        seat.bound = false;
+        inventory.ready = false;
+        seat.recovery = "Migration held: native transcript ownership and launcher conversation disagree.";
+      }
+    }
+    return inventory;
+  },
   runtimeProvider,
   ...(runtimeProvider.quota?.composer === undefined
     ? {}

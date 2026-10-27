@@ -28,6 +28,9 @@ import {
   parseServiceReceipt,
   parseUpdateInitiator,
   writeRuntimeUpdate,
+  targetRequiresSeatBindings,
+  operatorSeatsReady,
+  waitForOperatorSeatRecovery,
   type RuntimeServiceReceipt,
   type RuntimeUpdateInitiator,
   type RuntimeUpdateResult,
@@ -168,6 +171,7 @@ function providerApis(value: unknown): readonly number[] {
 }
 
 interface ReleaseUpdatePorts {
+  readonly operatorSeatsReady?: (release: string) => Promise<boolean>;
   readonly fetchImpl?: typeof fetch;
   /** The release's own supervisor, as `runtimeUpdateServices` drives a checkout. */
   readonly services: (release: string, action: "down" | "restart") => Promise<RuntimeServiceReceipt>;
@@ -293,6 +297,14 @@ export async function executeReleaseUpdate(
     rmSync(join(plan.directory, "unpacked"), { recursive: true, force: true });
     if (currentRelease(plan.installRoot) !== plan.oldRelease)
       return persist("refused", { reason: "current-release-changed" });
+    const enforceSeats = targetRequiresSeatBindings(target);
+    if (
+      enforceSeats &&
+      !(await operatorSeatsReady(
+        ports.operatorSeatsReady ? () => ports.operatorSeatsReady!(plan.oldRelease) : undefined,
+      ))
+    )
+      return persist("refused", { reason: "operator-seats-unready" });
     if (plan.initiator?.kind === "schedule") {
       const cutover = (await ports.scheduledCutover?.()) ?? {
         outcome: "waiting",
@@ -313,6 +325,10 @@ export async function executeReleaseUpdate(
     switched = true;
     persist("restarting");
     if (!(await service(target, "restart", plan.newCommit))) throw Error("New services failed health checks");
+    if (enforceSeats)
+      await waitForOperatorSeatRecovery(
+        ports.operatorSeatsReady ? () => ports.operatorSeatsReady!(target) : undefined,
+      );
     app?.activate();
     if (app) await ports.launchApp?.(target, app.path);
     app?.finish();

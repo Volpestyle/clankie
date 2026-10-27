@@ -7,6 +7,7 @@ import ctypes
 import fcntl
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -545,6 +546,164 @@ def group_occupied(pgid):
                for pid, group, status in census)
 
 
+def operator_seats():
+    """Discovery only: live local launcher lifetimes, never argv or environment.
+
+    A second census detects a changing launch set. Unknown command lines hold
+    enforcement; this is never permission to signal or adopt a process.
+    """
+    def executable(pid):
+        if sys.platform.startswith("linux"):
+            return os.readlink("/proc/%s/exe" % pid)
+        if sys.platform == "darwin":
+            library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            library.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+            library.proc_pidpath.restype = ctypes.c_int
+            path = ctypes.create_string_buffer(4096)
+            if library.proc_pidpath(pid, path, len(path)) <= 0:
+                raise RuntimeError("Operator executable unavailable")
+            return path.value.decode("utf-8", "strict")
+        raise RuntimeError("Unsupported operator census platform")
+
+    def arguments(pid):
+        # ps renders a lossy space-joined command line. It cannot distinguish
+        # an entry point from a quoted argument, or enumerate paths with spaces.
+        if sys.platform.startswith("linux"):
+            with open("/proc/%s/cmdline" % pid, "rb") as file:
+                raw = file.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise RuntimeError("Operator arguments too large")
+            return [word.decode("utf-8", "strict") for word in raw.rstrip(b"\0").split(b"\0")]
+        if sys.platform == "darwin":
+            library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+            library.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                                       ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+            library.sysctl.restype = ctypes.c_int
+            mib = (ctypes.c_int * 3)(1, 49, pid)  # CTL_KERN, KERN_PROCARGS2
+            size = ctypes.c_size_t(1024 * 1024)
+            buffer = ctypes.create_string_buffer(size.value)
+            if library.sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) != 0:
+                raise RuntimeError("Operator arguments unavailable")
+            raw = buffer.raw[:size.value]
+            count = ctypes.c_int.from_buffer_copy(raw[:4]).value
+            if not 1 <= count <= 4096:
+                raise RuntimeError("Operator argument count unavailable")
+            start = raw.index(b"\0", 4) + 1
+            while start < len(raw) and raw[start] == 0:
+                start += 1
+            words = raw[start:].split(b"\0")
+            if len(words) < count:
+                raise RuntimeError("Operator arguments incomplete")
+            return [word.decode("utf-8", "strict") for word in words[:count]]
+        raise RuntimeError("Unsupported operator census platform")
+
+    def census():
+        selection = ["-axww"]
+        if os.environ.get("NODE_ENV") == "test" and os.environ.get("CLANKIE_SCRATCH") == "1":
+            path = os.path.realpath(os.environ["CLANKIE_TEST_OPERATOR_PID_FILE"])
+            root = os.path.realpath(os.environ["HOME"])
+            if os.path.commonpath([root, path]) != root:
+                raise RuntimeError("Scratch operator census is not confined")
+            with open(path) as file:
+                selected = json.load(file)
+            if not isinstance(selected, list) or any(type(pid) is not int or pid < 2 for pid in selected):
+                raise RuntimeError("Scratch operator census is invalid")
+            if not selected:
+                return {}, {}, {}
+            selection = ["-ww", "-p", ",".join(str(pid) for pid in selected)]
+        rows = subprocess.run(["/bin/ps", *selection, "-o", "pid=,ppid=,uid=,comm="],
+                              capture_output=True, timeout=3, check=True)
+        if len(rows.stdout) > 16 * 1024 * 1024:
+            raise RuntimeError("Operator launcher census too large")
+        found, parents, sessions = {}, {}, {}
+        for line in rows.stdout.decode("utf-8", "strict").splitlines():
+            fields = line.split(None, 3)
+            if len(fields) != 4 or int(fields[2]) != os.getuid():
+                continue
+            pid = int(fields[0])
+            parents[pid] = int(fields[1])
+            try:
+                name = os.path.basename(executable(pid))
+                if name not in ("node", "nodejs", "clankie", "claude", "codex", "opencode", "grok", "prime", "bun"):
+                    continue
+                words = arguments(pid)
+            except Exception:
+                if identity(pid) is None:
+                    continue
+                raise
+            for flag in ("--session-id", "--resume"):
+                if flag in words and len(words) > words.index(flag) + 1:
+                    value = words[words.index(flag) + 1]
+                    if re.fullmatch(r"[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}", value):
+                        sessions[int(fields[0])] = value.lower()
+            # Only a native executable or Node entry point, never shell text
+            # mentioning a launcher, is a candidate.
+            at = 0
+            if name in ("node", "nodejs", "bun"):
+                candidates = [index for index, word in enumerate(words[:-1])
+                              if os.path.basename(word) in ("clankie", "clankie.ts") and
+                              words[index + 1].rstrip("0123456789") in ("claude", "codex", "opencode", "grok", "prime")]
+                if len(candidates) > 1:
+                    raise RuntimeError("Operator entry point is ambiguous")
+                if not candidates:
+                    continue
+                at = candidates[0]
+            if at >= len(words) or os.path.basename(words[at]) not in ("clankie", "clankie.ts"):
+                continue
+            command = words[at + 1] if len(words) > at + 1 else ""
+            base = command.rstrip("0123456789")
+            if base not in ("claude", "codex", "opencode", "grok", "prime"):
+                continue
+            conversation = None
+            if "--conversation" in words[at + 2:]:
+                index = words.index("--conversation", at + 2)
+                if len(words) > index + 1:
+                    conversation = words[index + 1]
+            found[int(fields[0])] = {"command": command, "conversationId": conversation}
+        # A launcher can die while its native session remains alive. Keep that
+        # lifetime visible to the service's exact transcript-owner lookup; a
+        # missing launcher must never turn a live operator into an empty census.
+        launchers = set(found)
+        for pid in sessions:
+            parent, seen = pid, set()
+            while parent in parents and parent not in seen and parent not in launchers:
+                seen.add(parent)
+                parent = parents[parent]
+            if parent not in launchers:
+                found[pid] = {"command": "native session without launcher", "conversationId": None,
+                              "nativeSessionOnly": True}
+        return found, parents, sessions
+    before, parents, sessions = census()
+    result = []
+    for pid, launch in before.items():
+        current = identity(pid)
+        if current is None:
+            raise RuntimeError("Operator launcher census changed")
+        descendants = {pid}
+        for _ in range(64):
+            following = descendants | {child for child, parent in parents.items() if parent in descendants}
+            if following == descendants:
+                break
+            descendants = following
+        else:
+            raise RuntimeError("Operator child ancestry too deep")
+        processes = []
+        for child in descendants:
+            observed = identity(child)
+            if observed is None:
+                raise RuntimeError("Operator launcher child census changed")
+            processes.append({"pid": child, "startTime": observed["startTime"]})
+        native_sessions = {session for child, session in sessions.items() if child in descendants}
+        result.append({**launch, "pid": pid, "startTime": current["startTime"], "processes": processes,
+                       "sessionId": next(iter(native_sessions)) if len(native_sessions) == 1 else None})
+    after, after_parents, after_sessions = census()
+    if before != after or any(parents.get(row["pid"]) != after_parents.get(row["pid"]) or
+                              sessions.get(row["pid"]) != after_sessions.get(row["pid"])
+                              for seat in result for row in seat["processes"]):
+        raise RuntimeError("Operator launcher census changed")
+    return {"schemaVersion": 1, "seats": result}
+
+
 def harness_processes():
     """Same-user harness census. Arguments stay here; only remote endpoints escape.
 
@@ -917,6 +1076,10 @@ if __name__ == "__main__":
             print(json.dumps(darwin_memory(), separators=(",", ":")))
         elif mode == "snapshot":
             print(json.dumps(snapshot()))
+        elif mode == "operator-seats":
+            if len(sys.argv) != 2:
+                raise RuntimeError("Operator launcher census request unavailable")
+            print(json.dumps(operator_seats(), separators=(",", ":")))
         elif mode == "harness-processes":
             if len(sys.argv) != 2:
                 raise RuntimeError("Harness census request unavailable")

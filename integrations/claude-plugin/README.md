@@ -174,13 +174,18 @@ binding check below uses kernel process facts and a bridge-only nonce. It is a
 guard against strays, not an authority boundary against a hostile same-user
 process that holds the operator bearer and can launch its own child.
 
-An operator bridge acts as the lead only for the process its launcher
+In enforcing releases, an operator bridge acts as the lead only for the process its launcher
 registered ([VUH-2816](https://linear.app/vuhlp/issue/VUH-2816)). The service
 used to answer a request with no conversation from the owner's `global-default`
 lead chat, and the bearer plus a free-text `conversationId` named no caller, so
 a stray with the clankie server in its MCP config (or a `clankie mcp` started in a
 seat's shell, inheriting its environment and ancestry) polled, acknowledged and
-messaged as the lead. Now:
+messaged as the lead. VUH-2888's preparation release runs these checks in
+**observe** mode, preserving admission for old launchers while recording their
+refusals. Doctor inventories live local launchers and gives exact-session
+recovery. The subsequent enforcing update requires every seat to be bound;
+unknown inventory holds it. Follow the [migration commands](../../docs/cli.md)
+before enabling enforcement. The enforcing checks are:
 
 - **The launcher registers.** After spawning the harness, `clankie claude` (and
   the codex, opencode and grok launchers) `PUT /v1/captain/seat-bindings` with

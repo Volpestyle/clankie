@@ -7434,6 +7434,35 @@ joined/relay exclusions and consumed-report recovery are in the
 [seat binding reference](../integrations/claude-plugin/README.md#binding-and-the-known-unbound-bridge-gap).
 No owner MCP files are written.
 
+VUH-2888 uses two releases. This preparation release sets
+`apps/clankie/operator-seat-policy.json` to `observe`: the same native checks
+run and report refusals, while admission keeps the old runtime's behavior.
+`clankie doctor --json` includes the mode and a fresh local launcher inventory,
+with bound/unbound status and exact recovery. Observe mode retains the
+pre-existing stray-process gap. A later enforcing artifact changes the policy
+to `enforce`; the preparation release's updater refuses it before stopping
+services if any live launcher/bridge is unbound or the inventory is incomplete.
+It checks binding recovery again before declaring the update healthy; failure
+rolls back to the preparation release. Do not skip that preparation deployment.
+
+For a legacy Claude seat, reconcile original hire/message receipts by their
+original IDs; never replay them. From another operator shell run
+`clankie seat migrate prepare --conversation ID [--request UUID]`. This records
+the authoritative native session/profile/cwd and old process lifetimes, and
+durably pauses that conversation's execution. Other conversations keep running.
+The response and doctor retain the migration ID.
+`clankie seat migrate status UUID` only inspects the original. An unsettled turn
+or delivery, missing transcript/profile, ambiguous launcher or unresolved receipt
+holds migration. Exit only that original native session. Use doctor's exact
+`CLAUDE_CONFIG_DIR` and
+`clankie claude --resume SESSION --conversation ID --migration UUID` recovery.
+The launcher proves all recorded old processes exited and claims this launch
+once before spawning. A lost or failed claimed launch remains held: inspect it,
+never repeat it or select another session. Trust/hook prompts require the
+owner's ordinary action. After that same session/profile/cwd is bound and ready,
+`clankie seat migrate complete UUID` releases its hold. Other harnesses whose
+exact profile/session recovery cannot be proved remain held for explicit recovery.
+
 Every fresh Claude launch starts a new Claude Code session under a recorded id.
 Without a selection it takes the shared global chat (`global-default`) while no
 live seat holds it: `GET /v1/captain/seat-context` reports `occupied` while a

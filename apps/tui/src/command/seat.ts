@@ -11,7 +11,7 @@ import { bundledSkills, projectSkillPlugin } from "@clankie/settings";
  */
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -36,7 +36,7 @@ import { bindLaunchedHarness, mintBridgeNonce, type SeatBinding } from "./seat-b
 const execFileAsync = promisify(execFileCallback);
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const SEAT_USAGE =
-  "Usage: clankie claude|codex|opencode|grok|prime [--resume [SESSION_ID --conversation ID [--from-config-dir PATH]]] [--conversation ID | --new] [--plugin-dir PATH] [--model PROVIDER/MODEL] [--mcp-servers NAME,...|none] [--dry-run]";
+  "Usage: clankie claude|codex|opencode|grok|prime [--resume [SESSION_ID --conversation ID [--from-config-dir PATH | --migration UUID]]] [--conversation ID | --new] [--plugin-dir PATH] [--model PROVIDER/MODEL] [--mcp-servers NAME,...|none] [--dry-run]";
 /** The plugin's id once installed from the repo's own marketplace. */
 export const SEAT_PLUGIN_ID = "clankie@clankie";
 /** The herdr agent name that binds a pane to his persona rather than a fleet contact. */
@@ -166,6 +166,7 @@ export interface SeatCommandOptions {
 }
 
 interface SeatFlags {
+  readonly migrationId?: string;
   readonly harness?: "claude" | "codex" | "opencode" | "grok" | "prime";
   readonly conversationId?: string;
   /** A fresh workspace chat even when the global chat is free. */
@@ -194,6 +195,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
   let resume = false;
   let resumeSessionId: string | undefined;
   let fromConfigDir: string | undefined;
+  let migrationId: string | undefined;
   let dryRun = false;
   let pluginDir: string | undefined;
   let model: string | undefined;
@@ -219,6 +221,10 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
         resumeSessionId = next.toLowerCase();
         index += 1;
       }
+    } else if (arg === "--migration") {
+      const value = args[++index];
+      if (!value || !SESSION_ID.test(value) || migrationId) throw Error(usage);
+      migrationId = value;
     } else if (arg === "--from-config-dir") {
       const value = args[++index]?.trim();
       if (!value || value.startsWith("--")) throw new Error(usage);
@@ -254,6 +260,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
   )
     throw new Error(usage);
   if (fromConfigDir !== undefined && resumeSessionId === undefined) throw new Error(usage);
+  if (migrationId && (!resumeSessionId || fromConfigDir)) throw Error(usage);
   if (model !== undefined && harness !== "prime") throw new Error(usage);
   if (mcpServers !== undefined && harness !== undefined && harness !== "claude") throw new Error(usage);
   return {
@@ -262,6 +269,7 @@ export function parseSeatArgs(args: readonly string[], command?: string): SeatFl
     resume,
     ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
     ...(fromConfigDir === undefined ? {} : { fromConfigDir }),
+    ...(migrationId === undefined ? {} : { migrationId }),
     dryRun,
     ...(conversationId === undefined ? {} : { conversationId }),
     ...(pluginDir === undefined ? {} : { pluginDir }),
@@ -570,6 +578,10 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const flags = parseSeatArgs(args, options.harnessCommand ?? options.claudeCommand);
+  if (flags.migrationId && (options.harnessCommand ?? options.claudeCommand ?? "claude") !== "claude")
+    throw Error(
+      "Exact migration uses plain clankie claude with the recorded CLAUDE_CONFIG_DIR; numbered shell aliases cannot prove the original profile",
+    );
   if (options.claudeCommand !== undefined && flags.harness !== undefined && flags.harness !== "claude")
     throw new Error(SEAT_USAGE);
   if (flags.harness === "prime") {
@@ -604,6 +616,22 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
         dryRun: false,
       })),
     };
+  }
+  if (flags.migrationId) {
+    if (options.joinedSeat) throw Error("Local migration cannot steer a joined seat");
+    await (
+      await import("./seat-migration.ts")
+    ).seatMigrationRequest(
+      {
+        action: "claim",
+        id: flags.migrationId,
+        sessionId: plan.sessionId,
+        conversationId: plan.conversationId,
+        cwd: plan.cwd,
+        profile: realpathSync(env.CLAUDE_CONFIG_DIR?.trim() || join(env.HOME ?? homedir(), ".claude")),
+      },
+      options,
+    );
   }
   if (!plan.resumed || plan.explicitResume !== undefined) {
     writeSeatRecord(

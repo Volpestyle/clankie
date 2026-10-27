@@ -295,6 +295,8 @@ export class ConversationStore {
   private readonly presenceHeadIncarnations = new Map<string, string>();
   /** Live outbox binding, never inferred from a remembered transcript. */
   public nativeTurnDelivery?: (conversationId: string) => boolean;
+  /** Durable, explicit native handoff hold; independent of live mailbox liveness. */
+  public executionHeld?: (conversationId: string) => boolean;
   /** A bounded explicit continuation declaration in a lead's settled report. */
   public reportBoundary?: (conversationId: string, text: string, at: string) => void;
   /** Roster/inbox observers see progress independently of a worker's pane lifetime. */
@@ -1300,6 +1302,17 @@ export class ConversationStore {
     for (const meta of this.metas.values())
       if (meta.nativeSeatSessions?.[sessionId] !== undefined) return "elsewhere";
     return "unknown";
+  }
+
+  /** Unique current transcript ownership, never a default conversation or a launcher claim. */
+  public nativeConversationForSession(sessionId: string): string | undefined {
+    const matches = [...this.metas.values()].filter(
+      (meta) =>
+        ["global", "workspace", "room"].includes(meta.scope.kind) &&
+        meta.nativeSeatSessions?.[sessionId] === "current" &&
+        this.nativeSeatSessionKey(meta.conversationId) === `claude:${sessionId}`,
+    );
+    return matches.length === 1 ? matches[0]!.conversationId : undefined;
   }
 
   /** A fresh service-session seed after a harness drove this conversation (ADR 0218). */

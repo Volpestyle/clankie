@@ -56,9 +56,26 @@ export type { ExecFileImpl, InstallDoctorReport };
 /** Readiness first; optional rooms never hide the reason a first turn fails. */
 export function formatDoctorSummary(report: InstallDoctorReport): string {
   const summary = doctorSummary(report);
+  const binding = report.operatorSeatBindings;
+  const inventory = binding && "available" in binding ? binding.inventory : undefined;
+  const seats =
+    inventory?.seats.map(
+      (seat) =>
+        `${seat.bound ? "bound" : seat.state === "bridge-pending" ? "UNBOUND bridge pending" : "UNBOUND launcher unregistered"}: ${seat.command} pid ${seat.pid}, ${seat.conversationId ?? "conversation unproven"}${seat.migration ? `; migration ${seat.migration.id} ${seat.migration.state}` : ""}${seat.recovery ? `\n  ${seat.recovery}` : ""}`,
+    ) ?? [];
+  const migrations =
+    inventory?.migrations?.map((row) => {
+      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      return `Migration ${row.id} ${row.state}: ${row.conversationId}, native session ${row.sessionId}. ${
+        row.state === "held"
+          ? `After confirming the old native processes exited: env CLAUDE_CONFIG_DIR=${quote(row.profile)} clankie claude --resume ${row.sessionId} --conversation ${quote(row.conversationId)} --migration ${row.id}.`
+          : `Never repeat this launch. Inspect clankie seat migrate status ${row.id}; once its exact binding is ready, run clankie seat migrate complete ${row.id}.`
+      }`;
+    }) ?? [];
+  const detail = [summary, ...seats, ...migrations].join("\n");
   return report.autonomy?.drift === undefined
-    ? summary
-    : `${summary}\n${formatAutonomyDrift(report.autonomy.drift)}`;
+    ? detail
+    : `${detail}\n${formatAutonomyDrift(report.autonomy.drift)}`;
 }
 
 /** An ended call stays on the card's detail line; only a live or just-ended one is the next step. */
@@ -102,6 +119,11 @@ function doctorSummary(report: InstallDoctorReport): string {
   if (nativeBinding && "available" in nativeBinding) {
     if (!nativeBinding.available)
       return `${nativeBinding.error ?? "seat_binding_unavailable"}: ${nativeBinding.recovery ?? "Repair the native helper and relaunch the seat."}`;
+    if (nativeBinding.inventory?.complete === false)
+      return "Operator seat inventory is unavailable; enforcement activation is held.";
+    const legacy = nativeBinding.inventory?.seats.find((seat) => !seat.bound);
+    if (legacy)
+      return `Operator seat ${legacy.command} pid ${legacy.pid} (${legacy.conversationId ?? "conversation unproven"}) is unbound; ${legacy.recovery ?? "preserve its native session and profile, then resume through the current launcher"}`;
   }
   const refusal =
     report.machineAccessRefusals && "refusals" in report.machineAccessRefusals

@@ -340,6 +340,13 @@ adopted conversation, the default chat receives a tagged fallback reason; the
 roster and doctor name the parent pane lacking a bridge. Parent discovery grants
 no tools, and missing original room authority remains a refusal. Existing inbound
 receipts freeze accepted report IDs across adoption, handover and restart.
+VUH-2888's preparation release observes binding refusals while retaining legacy
+admission. Doctor inventories live local launchers; the updater refuses a later
+enforcing artifact until the complete inventory is bound. Exact-session migration
+keeps a durable per-conversation execution hold while the original native process
+exits and the current launcher resumes its session/profile/cwd. Unknown receipts,
+exit or readiness keep that hold; they never trigger service fallback or replay.
+The [CLI reference](cli.md) describes recovery and the two-release sequence.
 Explicit watches retain
 their arming conversation. See
 [ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md).

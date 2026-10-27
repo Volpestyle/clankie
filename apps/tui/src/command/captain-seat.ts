@@ -12,6 +12,8 @@ import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings
 
 /** The same revision and request-id contract as the desktop app; never retries a launch. */
 export async function runCaptainSeatCommand(args: readonly string[], options: OwnerSettingsApiOptions = {}) {
+  if (args[0] === "migrate")
+    return (await import("./seat-migration.ts")).runSeatMigrationCommand(args.slice(1), options);
   const usage =
     "Usage: clankie seat [show | set app|claude|codex --revision REV | start --revision REV --request UUID | status UUID]";
   if (!args.length || (args.length === 1 && args[0] === "show"))

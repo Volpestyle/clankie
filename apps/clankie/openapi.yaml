@@ -5027,12 +5027,46 @@ paths:
         "401":
           description: Operator authentication required
 
+  /v1/captain/seat-migrations:
+    post:
+      tags: [Captain, Operator]
+      operationId: migrateOperatorSeat
+      summary: Prepare, inspect, claim or complete an exact native session handoff
+      description: Preparation persists a conversation execution hold and original process lifetimes. Claim proves every old process exited and matches the exact session, profile and cwd, then records one launch attempt. Unknown receipts or uncertain launches stay held; no action replays a call or signals a process. Completion requires that same session/profile/cwd to be bound and ready. Other conversations continue normally.
+      security: [{ operatorBearer: [] }, { captainBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, id]
+              properties:
+                action: { type: string, enum: [prepare, status, claim, complete] }
+                id: { type: string, format: uuid }
+                conversationId: { type: string }
+                sessionId: { type: string, format: uuid }
+                cwd: { type: string }
+                profile: { type: string }
+      responses:
+        "200":
+          description: Original migration identity, state and unresolved original call receipt IDs
+        "400":
+          description: Invalid migration request
+        "401":
+          description: Authentication required
+        "403":
+          description: lane_forbidden
+        "409":
+          description: Migration held; exact identity, exit, receipts or readiness is unproven
+        "503":
+          description: Migration service unavailable
   /v1/captain/seat-bindings:
     get:
       tags: [Captain, Operator]
       operationId: getOperatorSeatBindingStatus
-      summary: Inspect native seat binding availability and the last refusal
-      description: Read-only operator-lane diagnostics; contains no process IDs or launch secrets. Normal missing-registration startup retries are not retained. Successful registration or admission clears the last refusal for that conversation; historical refusals do not replace live doctor findings.
+      summary: Inspect binding mode, live operator launcher inventory and recovery
+      description: Read-only operator-lane diagnostics. Includes local launcher PIDs and kernel lifetimes, bound/unbound status and exact migration recovery; never contains launch secrets. Observe admission records the same refusal while preserving preparation-release access. An incomplete census or unbound seat holds an enforcing update.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       responses:
         "200":
@@ -5044,6 +5078,15 @@ paths:
                 required: [available, bindings]
                 properties:
                   available: { type: boolean }
+                  mode: { type: string, enum: [observe, enforce] }
+                  inventory:
+                    type: object
+                    required: [complete, ready, seats]
+                    properties:
+                      complete: { type: boolean }
+                      ready: { type: boolean }
+                      seats: { type: array, items: { type: object } }
+                      migrations: { type: array, items: { type: object } }
                   error: { type: string }
                   recovery: { type: string }
                   lastRefusal:

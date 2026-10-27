@@ -95,3 +95,20 @@ Fixture `read`/`read-status` require the private `--fixture` descriptor and neve
 discover installed links/defaults. Native login account stays unverified under
 host-seat/v1. Follow `docs/native-fixture-admission.md` and the current owner
 scope; an available command never clears held original or UNKNOWN work.
+
+## Operator seat upgrade migration (VUH-2888)
+
+The preparation release observes binding refusals without refusing admission.
+`clankie doctor --json` reports `operatorSeatBindings.mode` and a fresh local
+launcher `inventory`; unbound, incomplete or held migrations block an enforcing
+update. Observe mode preserves the old stray-process gap.
+
+For an old Claude launcher use `clankie seat migrate prepare --conversation ID`
+from another shell. Preserve its printed migration ID. Doctor names the original
+session/profile/cwd and exact `clankie claude --resume SESSION --conversation ID
+--migration UUID` recovery. Reconcile original receipt IDs; never replay calls.
+Exit only the named old native session. The resume claim requires proven old
+exit and is one-shot: an interrupted claimed launch stays held, never retried.
+Trust/hook prompts need the owner's ordinary action. `clankie seat migrate
+status UUID` is read-only; `complete UUID` releases only after the same native
+session/profile/cwd has a live binding and readiness. Missing proof holds.

@@ -132,6 +132,8 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
     // It must not see an empty outbox and fall through into a fresh Pi turn.
     const signal = AbortSignal.any([context.signal, ctx.shutdown.signal]);
     signal.throwIfAborted();
+    if (ctx.options.operatorSeatMigrationHeld?.(conversationId))
+      throw new Error("operator_seat_migration_held: native handoff is intentionally paused");
     const preparation = new ConversationServiceRun(signal);
     let preparedMessage: string | undefined;
     try {

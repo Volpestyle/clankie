@@ -336,6 +336,7 @@ export async function runWithConversationDriver<T>(
     signal?.throwIfAborted();
     if (!ctx["metas"].has(conversationId)) throw new Error(`Unknown conversation ${conversationId}`);
     const selected = driver();
+    if (ctx.executionHeld?.(conversationId)) throw new Error("operator_seat_migration_held");
     if (selected !== undefined) {
       const delivery = await selected.run();
       if (delivery.handled) return delivery.result;

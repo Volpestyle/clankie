@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DeliveryStageSchema } from "./delivery.ts";
+import { OperatorSeatMigrationSchema } from "./operator-seat-migration.ts";
 import {
   OPERATOR_CONVERSATION_REF_MAX,
   OperatorConversationIdSchema,
@@ -44,6 +45,30 @@ export type OperatorSeatBindingRequest = z.infer<typeof OperatorSeatBindingReque
 /** Read-only native binding diagnosis. Never contains a claim, hash, bearer or process argv. */
 export const OperatorSeatBindingStatusSchema = z.object({
   available: z.boolean(),
+  mode: z.enum(["observe", "enforce"]).optional(),
+  inventory: z
+    .object({
+      complete: z.boolean(),
+      ready: z.boolean(),
+      error: z.string().optional(),
+      migrations: z.array(OperatorSeatMigrationSchema).optional(),
+      seats: z.array(
+        z.object({
+          pid: z.number().int().positive(),
+          startTime: z.string(),
+          command: z.string(),
+          nativeSessionOnly: z.boolean().optional(),
+          conversationId: z.string().nullable(),
+          sessionId: z.uuid().nullable(),
+          bound: z.boolean(),
+          state: z.enum(["bound", "bridge-pending", "unregistered"]).optional(),
+          recovery: z.string().optional(),
+          processes: z.array(z.object({ pid: z.number().int().positive(), startTime: z.string() })),
+          migration: z.object({ id: z.uuid(), state: z.enum(["held", "resuming", "ready"]) }).optional(),
+        }),
+      ),
+    })
+    .optional(),
   error: z.string().optional(),
   recovery: z.string().optional(),
   lastRefusal: z

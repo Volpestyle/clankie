@@ -1,6 +1,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Socket } from "node:net";
-import type { NativeBirth, NativeSocketProcess, NativeProcessSnapshot } from "./local-fleet-process.ts";
+import {
+  nativeProcessStart,
+  type NativeBirth,
+  type NativeSocketProcess,
+  type NativeProcessSnapshot,
+} from "./local-fleet-process.ts";
 
 /**
  * Which process may act as the lead's operator-lane bridge or controller for a
@@ -79,7 +84,7 @@ export function seatBindingRecovery(error: string): string {
 }
 
 export type SeatBindingResult =
-  | { readonly ok: true; readonly role: "controller" | "bridge" | "registered" }
+  | { readonly ok: true; readonly role: "controller" | "bridge" | "registered" | "observed" }
   | { readonly ok: false; readonly error: SeatBindingRefusal; readonly status: 400 | 403 | 409 };
 
 interface Entry {
@@ -122,15 +127,27 @@ export class OperatorSeatBindings {
 
   private readonly observers: SeatBindingObservers;
   private lastRefusal: { error: SeatBindingRefusal; recovery: string; conversationId?: string } | undefined;
+  public readonly mode: "observe" | "enforce";
+  private readonly observed = new Set<string>();
+  private readonly onObservation:
+    | ((error: SeatBindingRefusal, conversationId: string | undefined) => void)
+    | undefined;
 
-  public constructor(observers: SeatBindingObservers) {
+  public constructor(
+    observers: SeatBindingObservers,
+    mode: "observe" | "enforce" = "enforce",
+    onObservation?: (error: SeatBindingRefusal, conversationId: string | undefined) => void,
+  ) {
     this.observers = observers;
+    this.mode = mode;
+    this.onObservation = onObservation;
   }
 
   public status() {
     const available = this.observers.available?.() ?? true;
     return {
       available,
+      mode: this.mode,
       ...(!available
         ? {
             error: "seat_binding_helper_missing",
@@ -140,6 +157,23 @@ export class OperatorSeatBindings {
       ...(this.lastRefusal === undefined ? {} : { lastRefusal: this.lastRefusal }),
       bindings: [...this.entries].map(([conversationId]) => ({ conversationId })),
     };
+  }
+
+  /** Census membership must match a current registered kernel lifetime, not a conversation claim. */
+  public async registeredLauncher(pid: number, startTime: string, requireBridge = true): Promise<string | undefined> {
+    for (const [conversationId, entry] of this.entries) {
+      if (
+        entry.controller.pid === pid &&
+        (entry.controller.kernelIdentity
+          ? `${entry.controller.kernelIdentity.split(":")[0]}:${entry.controller.kernelIdentity.split(":").at(-1)}`
+          : nativeProcessStart(entry.controller.birth)) === startTime &&
+        (await this.alive(entry.controller)) &&
+        (await this.alive(entry.harness)) &&
+        (!requireBridge || entry.claimant !== undefined && (await this.alive(entry.claimant)))
+      )
+        return conversationId;
+    }
+    return undefined;
   }
 
   private refusal(
@@ -240,6 +274,30 @@ export class OperatorSeatBindings {
 
   /** Whether this request's process may act for the conversation; a missing proof is a refusal. */
   public async admit(
+    socket: Socket | undefined,
+    input: { readonly conversationId: string | undefined; readonly claim: string | undefined },
+  ): Promise<SeatBindingResult> {
+    const result = await this.verify(socket, input);
+    // Preparation release only. Run exactly the enforcing checks and retain
+    // their diagnostics, but preserve the pre-enforcement admission behavior.
+    if (!result.ok && this.mode === "observe") {
+      const key = `${result.error}:${input.conversationId ?? ""}`;
+      if (!this.observed.has(key)) {
+        if (this.observed.size >= 256) this.observed.delete(this.observed.values().next().value!);
+        this.observed.add(key);
+        this.onObservation?.(result.error, input.conversationId);
+      }
+      this.lastRefusal = {
+        error: result.error,
+        recovery: seatBindingRecovery(result.error),
+        ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
+      };
+      return { ok: true, role: "observed" };
+    }
+    return result;
+  }
+
+  private async verify(
     socket: Socket | undefined,
     input: { readonly conversationId: string | undefined; readonly claim: string | undefined },
   ): Promise<SeatBindingResult> {

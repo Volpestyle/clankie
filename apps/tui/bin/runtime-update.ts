@@ -522,6 +522,8 @@ export interface RuntimeUpdatePorts {
   ) => Promise<RuntimeServiceReceipt>;
   readonly now?: () => Date;
   readonly refreshHarnesses?: (runtime: string) => Promise<{ ok: boolean }>;
+  /** Fresh complete native census + live launcher/bridge bindings; never a cached doctor report. */
+  readonly operatorSeatsReady?: (runtime: string) => Promise<boolean>;
   /** Waits before retrying an unconfirmed stop or restart; defaults to 10 s, then 30 s. */
   readonly retryDelaysMs?: readonly number[];
 }
@@ -531,6 +533,37 @@ export interface RuntimeUpdatePorts {
  * Retry before treating the cutover as failed or leaving services down.
  */
 const SERVICE_RETRY_DELAYS_MS = [10_000, 30_000];
+
+/** Release policy, carried by the target artifact. Unknown enforcing targets fail closed. */
+export function targetRequiresSeatBindings(runtime: string): boolean {
+  const path = join(runtime, "apps/clankie/operator-seat-policy.json");
+  if (!existsSync(path)) return existsSync(join(runtime, "apps/clankie/src/operator-seat-bindings.ts"));
+  const policy = object(JSON.parse(readFileSync(path, "utf8")));
+  if (
+    policy.schemaVersion !== 1 ||
+    !["observe", "enforce"].includes(String(policy.mode)) ||
+    Object.keys(policy).some((key) => !["schemaVersion", "mode"].includes(key))
+  )
+    throw Error("Target operator seat policy is invalid");
+  return policy.mode === "enforce";
+}
+
+export async function operatorSeatsReady(read: (() => Promise<boolean>) | undefined): Promise<boolean> {
+  try {
+    return (await read?.()) === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function waitForOperatorSeatRecovery(read: (() => Promise<boolean>) | undefined): Promise<void> {
+  const until = Date.now() + 30_000;
+  while (!(await operatorSeatsReady(read))) {
+    if (Date.now() >= until)
+      throw Error("Operator seat bindings did not recover; enforcement cutover is not healthy");
+    await sleep(500);
+  }
+}
 
 export function readRuntimeUpdate(directory: string): RuntimeUpdateResult {
   const value = object(readPrivateJson(join(directory, "result.json")));
@@ -887,6 +920,12 @@ export async function executeRuntimeUpdate(
       return persist("refused", { reason: "runtime-changed-during-install" });
     if (existsSync(backup)) throw Error("Previous runtime destination already exists");
     keep = unchangedServices(stage, plan.oldCommit, plan.newCommit, run, plan.checkout);
+    // The preparation release's helper performs this before stopping any
+    // service. An old/missing/incomplete census is never readiness evidence.
+    const enforceSeats = targetRequiresSeatBindings(stage);
+    const readSeats = ports.operatorSeatsReady ? () => ports.operatorSeatsReady!(plan.runtime) : undefined;
+    if (enforceSeats && !(await operatorSeatsReady(readSeats)))
+      return persist("refused", { reason: "operator-seats-unready" });
     persist("stopping");
     stopAttempted = true;
     if (!(await service("down", plan.oldCommit)))
@@ -906,6 +945,7 @@ export async function executeRuntimeUpdate(
     await installPinnedLinks(plan.runtime, plan.home);
     persist("restarting");
     if (!(await service("restart", plan.newCommit))) throw Error("New services failed health checks");
+    if (enforceSeats) await waitForOperatorSeatRecovery(readSeats);
     // Plugin failures do not undo a healthy service cutover or restart any harness.
     let harnessRefresh: RuntimeUpdateResult["harnessRefresh"];
     if (ports.refreshHarnesses) {

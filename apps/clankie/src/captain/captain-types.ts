@@ -27,6 +27,7 @@ import type { ProjectHireProcessProof } from "./project-hires.ts";
 import { type TurnContext } from "./tools.ts";
 
 export interface CaptainOptions {
+  readonly operatorSeatMigrationHeld?: (conversationId: string) => boolean;
   /** Prototype only: one guild:channel (or dm:channel) text lane; absent disables recovery. */
   readonly durablePiRoom?: string;
   /** Rollout only (ADR 0291): `all` or comma-separated guild:channel targets answer in one loop per grant. */

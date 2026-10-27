@@ -66,7 +66,10 @@ export function createLaneMcpEndpoint({
   captain,
   receiptPath,
 }: {
-  captain: Pick<CaptainPort, "laneToolBank" | "reconcileSeatDelivery" | "settleSeatDelivery">;
+  captain: Pick<
+    CaptainPort,
+    "laneToolBank" | "reconcileSeatDelivery" | "settleSeatDelivery" | "operatorSeatMigrationHeld"
+  >;
   receiptPath?: string;
 }): LaneMcpEndpoint {
   const sessions = new Map<string, LaneMcpSession>();
@@ -292,6 +295,10 @@ export function createLaneMcpEndpoint({
       const publicationId = publication?.success ? publication.data.publicationId : undefined;
       const context = publicationId === undefined ? undefined : { callId: publicationId };
       const invoke = async () => {
+        if (lane === "operator" && captain.operatorSeatMigrationHeld?.(conversationId ?? "global-default"))
+          return failure(
+            "operator_seat_migration_held: reconcile original receipts; no new tool was dispatched",
+          );
         const call = () => (context === undefined ? tool.call(args) : tool.call(args, context));
         const result = await (requestPriority === "background"
           ? withLinearRequestPriority("background", call)

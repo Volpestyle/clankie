@@ -40,6 +40,16 @@ const cli = async (release: string, args: readonly string[]): Promise<unknown> =
   return JSON.parse(stdout);
 };
 const result = await executeReleaseUpdate(plan, {
+  operatorSeatsReady: async (release) => {
+    const report = object(await cli(release, ["doctor", "--json"]));
+    const inventory = object(object(report.operatorSeatBindings).inventory);
+    return (
+      inventory.complete === true &&
+      inventory.ready === true &&
+      Array.isArray(inventory.seats) &&
+      inventory.seats.every((seat) => object(seat).bound === true)
+    );
+  },
   scheduledCutover: async () => {
     try {
       const result = ScheduledReleaseCutoverResultSchema.parse(
