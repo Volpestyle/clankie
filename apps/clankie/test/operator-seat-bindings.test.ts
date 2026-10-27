@@ -11,7 +11,7 @@ import { OperatorSeatBindings, seatNonceHash } from "../src/operator-seat-bindin
 const NONCE = "launch-nonce";
 type Fake = { pid: number; ppid: number; birth: [string, string] };
 
-function world(initial: Fake[]) {
+function world(initial: Fake[], mode: "observe" | "enforce" = "enforce", available = () => true) {
   const table = new Map(initial.map((entry) => [entry.pid, entry]));
   const owners = new Map<Socket, number>();
   const socketFor = (pid: number) => {
@@ -23,32 +23,36 @@ function world(initial: Fake[]) {
     const entry = table.get(pid);
     return entry === undefined ? undefined : Object.assign([...entry.birth] as [string, string], {});
   };
-  const bindings = new OperatorSeatBindings({
-    birth: async (pid) => birthOf(pid),
-    processes: async (controller, harness) => {
-      const pair = [table.get(controller), table.get(harness)];
-      if (pair.some((entry) => entry === undefined)) return undefined;
-      return {
-        schemaVersion: 1,
-        processes: pair.map((entry) => ({ ...entry!, uid: 501, executable: "/fixture/node", argv: [] })),
-      };
+  const bindings = new OperatorSeatBindings(
+    {
+      available,
+      birth: async (pid) => birthOf(pid),
+      processes: async (controller, harness) => {
+        const pair = [table.get(controller), table.get(harness)];
+        if (pair.some((entry) => entry === undefined)) return undefined;
+        return {
+          schemaVersion: 1,
+          processes: pair.map((entry) => ({ ...entry!, uid: 501, executable: "/fixture/node", argv: [] })),
+        };
+      },
+      socket: async (socket): Promise<NativeSocketProcess | undefined> => {
+        const owner = owners.get(socket);
+        if (owner === undefined) return undefined;
+        const ancestors: NativeSocketProcess["ancestors"][number][] = [];
+        for (let pid = owner; table.has(pid); pid = table.get(pid)!.ppid) {
+          const entry = table.get(pid)!;
+          ancestors.push({ pid, ppid: entry.ppid, birth: entry.birth });
+        }
+        const first = table.get(owner)!;
+        return {
+          schemaVersion: 1,
+          owner: { pid: owner, uid: 501, birth: first.birth, socket: "s" },
+          ancestors,
+        };
+      },
     },
-    socket: async (socket): Promise<NativeSocketProcess | undefined> => {
-      const owner = owners.get(socket);
-      if (owner === undefined) return undefined;
-      const ancestors: NativeSocketProcess["ancestors"][number][] = [];
-      for (let pid = owner; table.has(pid); pid = table.get(pid)!.ppid) {
-        const entry = table.get(pid)!;
-        ancestors.push({ pid, ppid: entry.ppid, birth: entry.birth });
-      }
-      const first = table.get(owner)!;
-      return {
-        schemaVersion: 1,
-        owner: { pid: owner, uid: 501, birth: first.birth, socket: "s" },
-        ancestors,
-      };
-    },
-  });
+    mode,
+  );
   return { bindings, table, socketFor };
 }
 
@@ -82,6 +86,39 @@ const ask = (
 ) => f.bindings.admit(f.socketFor(pid), { conversationId: id, claim: claim ?? undefined });
 
 describe("operator seat bindings", () => {
+  it.each([
+    "no conversation",
+    "unregistered",
+    "no socket",
+    "unknown socket",
+    "wrong nonce",
+    "stray with nonce",
+    "helper missing",
+  ])("observe admits and records %s while enforce refuses the same kernel evidence", async (condition) => {
+    for (const mode of ["observe", "enforce"] as const) {
+      let available = true;
+      const f = world(base(), mode, () => available);
+      await f.bindings.register(f.socketFor(10), {
+        conversationId: "seat-a",
+        harnessPid: 20,
+        nonceHash: seatNonceHash(NONCE),
+      });
+      if (condition === "helper missing") available = false;
+      const socket =
+        condition === "no socket"
+          ? undefined
+          : condition === "unknown socket"
+            ? ({} as Socket)
+            : f.socketFor(condition === "stray with nonce" ? 31 : 30);
+      const result = await f.bindings.admit(socket, {
+        conversationId:
+          condition === "no conversation" ? undefined : condition === "unregistered" ? "seat-b" : "seat-a",
+        claim: condition === "wrong nonce" ? "wrong" : NONCE,
+      });
+      expect(result.ok).toBe(mode === "observe");
+      if (mode === "observe") expect(f.bindings.status().lastRefusal).toBeDefined();
+    }
+  });
   it("admits the genuine bridge: the registered harness's direct child with the nonce", async () => {
     const f = await registered();
     expect(await ask(f, 30)).toEqual({ ok: true, role: "bridge" });

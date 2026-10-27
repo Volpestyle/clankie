@@ -573,7 +573,7 @@ def operator_seats():
                 raw = file.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise RuntimeError("Operator arguments too large")
-            return [word.decode("utf-8", "strict") for word in raw.rstrip(b"\0").split(b"\0")]
+            return os.readlink("/proc/%s/exe" % pid).removesuffix(" (deleted)"), [word.decode("utf-8", "strict") for word in raw.rstrip(b"\0").split(b"\0")]
         if sys.platform == "darwin":
             library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
             library.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
@@ -588,13 +588,17 @@ def operator_seats():
             count = ctypes.c_int.from_buffer_copy(raw[:4]).value
             if not 1 <= count <= 4096:
                 raise RuntimeError("Operator argument count unavailable")
-            start = raw.index(b"\0", 4) + 1
+            end = raw.index(b"\0", 4)
+            image = raw[4:end].decode("utf-8", "strict")
+            if not os.path.isabs(image):
+                raise RuntimeError("Operator executable arguments unavailable")
+            start = end + 1
             while start < len(raw) and raw[start] == 0:
                 start += 1
             words = raw[start:].split(b"\0")
             if len(words) < count:
                 raise RuntimeError("Operator arguments incomplete")
-            return [word.decode("utf-8", "strict") for word in words[:count]]
+            return image, [word.decode("utf-8", "strict") for word in words[:count]]
         raise RuntimeError("Unsupported operator census platform")
 
     def census():
@@ -623,10 +627,20 @@ def operator_seats():
             pid = int(fields[0])
             parents[pid] = int(fields[1])
             try:
-                name = os.path.basename(executable(pid))
+                words = None
+                try:
+                    image = executable(pid)
+                except Exception:
+                    # A package manager may unlink/replace a running binary.
+                    # Darwin's KERN_PROCARGS2 retains its original exec path
+                    # even when proc_pidpath returns ENOENT. Both are kernel
+                    # observations; ps's lossy comm/args is never authority.
+                    image, words = arguments(pid)
+                name = os.path.basename(image.removesuffix(" (deleted)"))
                 if name not in ("node", "nodejs", "clankie", "claude", "codex", "opencode", "grok", "prime", "bun"):
                     continue
-                words = arguments(pid)
+                if words is None:
+                    _, words = arguments(pid)
             except Exception:
                 if identity(pid) is None:
                     continue

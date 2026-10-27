@@ -73,9 +73,12 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
       }`;
     }) ?? [];
   const detail = [summary, ...seats, ...migrations].join("\n");
+  const observed =
+    binding && "available" in binding && binding.mode === "observe" ? seatBindingSummary(report) : undefined;
+  const withObservation = observed ? `${detail}\nObserve mode: ${observed}` : detail;
   return report.autonomy?.drift === undefined
-    ? detail
-    : `${detail}\n${formatAutonomyDrift(report.autonomy.drift)}`;
+    ? withObservation
+    : `${withObservation}\n${formatAutonomyDrift(report.autonomy.drift)}`;
 }
 
 /** An ended call stays on the card's detail line; only a live or just-ended one is the next step. */
@@ -112,9 +115,7 @@ function brokenVoiceCall(voice: InstallDoctorReport["discordVoice"]): string | u
   return `${stay.endedAt === undefined ? "Clankie's Discord call" : "Clankie's last Discord call"} could not ${legs.map((leg) => leg.verb).join(" or ")}: ${providerCode === undefined ? "the voice provider's session was lost" : `the voice provider ended its session with ${providerCode}`} — run \`clankie discord call\`.`;
 }
 
-function doctorSummary(report: InstallDoctorReport): string {
-  if (report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready")
-    return report.credentialStoreHealth.message ?? "Keychain unavailable";
+function seatBindingSummary(report: InstallDoctorReport): string | undefined {
   const nativeBinding = report.operatorSeatBindings;
   if (nativeBinding && "available" in nativeBinding) {
     if (!nativeBinding.available)
@@ -125,6 +126,18 @@ function doctorSummary(report: InstallDoctorReport): string {
     if (legacy)
       return `Operator seat ${legacy.command} pid ${legacy.pid} (${legacy.conversationId ?? "conversation unproven"}) is unbound; ${legacy.recovery ?? "preserve its native session and profile, then resume through the current launcher"}`;
   }
+  return undefined;
+}
+
+function doctorSummary(report: InstallDoctorReport): string {
+  if (report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready")
+    return report.credentialStoreHealth.message ?? "Keychain unavailable";
+  const binding = report.operatorSeatBindings;
+  // Older enforcing services predate the mode field. Preparation observations
+  // belong below existing readiness reasons; they do not refuse any work.
+  const enforced = binding && "available" in binding && binding.mode !== "observe";
+  const bindingProblem = enforced ? seatBindingSummary(report) : undefined;
+  if (bindingProblem) return bindingProblem;
   const refusal =
     report.machineAccessRefusals && "refusals" in report.machineAccessRefusals
       ? report.machineAccessRefusals.refusals[0]

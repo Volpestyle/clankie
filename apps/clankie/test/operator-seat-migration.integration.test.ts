@@ -100,6 +100,9 @@ test("an HTTP migration retains original receipts and its durable hold until exa
   }
   await mkdir(join(root, "profile"), { mode: 0o700 });
   let present = true;
+  let idle = true;
+  let ready = true;
+  let forceUnbound = false;
   const registry = new OperatorSeatBindings(
     {
       socket: (socket) => observeSocketProcess(socket, helper),
@@ -134,16 +137,17 @@ test("an HTTP migration retains original receipts and its durable hold until exa
                 sessionId,
                 processes,
                 bound:
+                  !forceUnbound &&
                   (await registry.registeredLauncher(native.pid, (await proof()).startTime)) ===
-                  conversationId,
+                    conversationId,
               },
             ]
           : [],
       }),
       captain: {
         operatorSeatRecovery: async () => recovery,
-        operatorSeatMigrationIdle: () => true,
-        operatorSeatReady: () => true,
+        operatorSeatMigrationIdle: () => idle,
+        operatorSeatReady: () => ready,
         seatContext: () => ({ conversationId, cwd: root }),
         pollSeatEvents: async () => [],
       },
@@ -162,19 +166,22 @@ test("an HTTP migration retains original receipts and its durable hold until exa
   };
   const claim = { action: "claim", id, conversationId, sessionId, cwd: root, profile: recovery.profile };
   try {
-    receipts.begin(original, "hire_agent", { task: "original only" }, "operator", conversationId);
+    idle = false;
+    expect((await call({ action: "prepare", id, conversationId })).status).toBe(409);
+    expect(migrations.pending()).toEqual([]); // Every identity condition is valid; idle alone refuses.
+    idle = true;
     const prepared = await call({ action: "prepare", id, conversationId });
     expect(prepared.status).toBe(200);
-    expect(prepared.body.pendingReceiptIds).toEqual([original]);
+    expect(prepared.body.pendingReceiptIds).toEqual([]);
     expect(new OperatorSeatMigrations(join(root, "migrations", "journal.json")).held(conversationId)).toBe(
       true,
     );
     expect((await call(claim)).status).toBe(409);
+    receipts.begin(original, "hire_agent", { task: "original only" }, "operator", conversationId);
+    expect((await call({ action: "status", id })).body.pendingReceiptIds).toEqual([original]);
     receipts.settle(original, { content: [], structuredContent: { outcome: "uncertain" } });
     expect((await call({ action: "status", id })).body.pendingReceiptIds).toEqual([original]);
     expect((await call(claim)).status).toBe(409);
-    receipts.settle(original, { content: [{ type: "text", text: "Original result; no second hire" }] });
-    expect((await call({ ...claim, profile: join(root, "other") })).status).toBe(409);
     expect((await call(claim)).status).toBe(409); // Old native lifetime still live.
     for (const row of [...children].reverse()) await stop(row);
     for (const row of children) await expect.poll(() => observeNativeBirth(row.pid)).toBeUndefined();
@@ -182,9 +189,18 @@ test("an HTTP migration retains original receipts and its durable hold until exa
     const paused = await (await fetch(`${origin}/v1/captain/seat-bindings`)).json();
     expect(paused.inventory.ready).toBe(false); // No launchers does not erase a deliberate pause.
     expect(paused.inventory.migrations).toHaveLength(1);
-    expect((await call(claim)).status).toBe(200);
-    expect((await call(claim)).status).toBe(409); // One launch claim, including after uncertainty.
-    expect((await call({ action: "complete", id })).status).toBe(409);
+    expect((await call(claim)).status).toBe(409); // Exit proven; only the original receipt blocks.
+    expect(migrations.get(id).state).toBe("held");
+    receipts.settle(original, { content: [{ type: "text", text: "Original result; no second hire" }] });
+    for (const changed of [
+      { sessionId: randomUUID() },
+      { conversationId: "another-conversation" },
+      { cwd: join(root, "other") },
+      { profile: join(root, "other") },
+    ]) {
+      expect((await call({ ...claim, ...changed })).status).toBe(409);
+      expect(migrations.get(id).state).toBe("held");
+    }
     native = await launch();
     present = true;
     const nonce = "e".repeat(64),
@@ -198,6 +214,9 @@ test("an HTTP migration retains original receipts and its durable hold until exa
         })
       ).status,
     ).toBe(200);
+    const current = await proof();
+    expect(await registry.registeredLauncher(current.pid, current.startTime, false)).toBe(conversationId);
+    expect(await registry.registeredLauncher(current.pid, current.startTime)).toBeUndefined();
     expect(
       (
         await command(harness.descendants[0]!, {
@@ -206,6 +225,25 @@ test("an HTTP migration retains original receipts and its durable hold until exa
         })
       ).status,
     ).toBe(200);
+    expect(await registry.registeredLauncher(current.pid, current.startTime)).toBe(conversationId);
+    // Exact bound successor and readiness are valid; only the absent claim blocks completion.
+    expect((await call({ action: "complete", id })).status).toBe(409);
+    expect((await call(claim)).status).toBe(200);
+    expect(new OperatorSeatMigrations(join(root, "migrations", "journal.json")).held(conversationId)).toBe(
+      true,
+    );
+    expect((await call(claim)).status).toBe(409); // One launch claim, including after uncertainty.
+    forceUnbound = true;
+    expect((await call({ action: "complete", id })).status).toBe(409);
+    expect(migrations.get(id).state).toBe("resuming");
+    forceUnbound = false;
+    ready = false;
+    expect((await call({ action: "complete", id })).status).toBe(409);
+    ready = true;
+    const late = randomUUID();
+    receipts.begin(late, "message_seat", { message: "late original" }, "operator", conversationId);
+    expect((await call({ action: "complete", id })).status).toBe(409);
+    receipts.settle(late, { content: [{ type: "text", text: "Original settled result" }] });
     expect((await call({ action: "complete", id })).status).toBe(200);
     expect(new OperatorSeatMigrations(join(root, "migrations", "journal.json")).held(conversationId)).toBe(
       false,

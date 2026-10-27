@@ -7462,6 +7462,11 @@ never repeat it or select another session. Trust/hook prompts require the
 owner's ordinary action. After that same session/profile/cwd is bound and ready,
 `clankie seat migrate complete UUID` releases its hold. Other harnesses whose
 exact profile/session recovery cannot be proved remain held for explicit recovery.
+If a claimed launcher definitively failed before spawning, the journal remains
+`resuming`. After proving that no successor exists, start the same doctor's
+session/profile/cwd/conversation command without `--migration`, then run
+`complete UUID` once it is bound and ready. Do not claim again. An uncertain
+spawn or occupied conversation stays held; do not start a second process.
 
 Every fresh Claude launch starts a new Claude Code session under a recorded id.
 Without a selection it takes the shared global chat (`global-default`) while no

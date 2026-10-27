@@ -149,6 +149,47 @@ it("installs completely before old shutdown and persists exact new health", asyn
   });
   expect(readRuntimeUpdate(f.plan.directory)).toEqual(result);
 });
+
+it.each(["enforce", "missing policy"])(
+  "checkout update refuses %s targets before down when seats are unready",
+  async (policy) => {
+    const f = fixture();
+    f.onInstall(() => {
+      const target = join(f.plan.directory, "staged/apps/clankie");
+      writeFileSync(join(target, "src/operator-seat-bindings.ts"), "enforcing legacy source");
+      if (policy === "enforce")
+        writeFileSync(
+          join(target, "operator-seat-policy.json"),
+          JSON.stringify({ schemaVersion: 1, mode: "enforce" }),
+        );
+    });
+    let reads = 0;
+    // Only admission is unready. If the pre-stop guard disappears, post-start
+    // recovery succeeds, so a second refusal cannot mask the missing guard.
+    const result = await executeRuntimeUpdate(f.plan, { ...f, operatorSeatsReady: async () => ++reads > 1 });
+    expect(result).toMatchObject({ phase: "refused", reason: "operator-seats-unready" });
+    expect(f.calls).toEqual(["stage", "install"]);
+    expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
+  },
+);
+
+it("checkout enforcing activation rolls back when post-restart bindings never recover", async () => {
+  const f = fixture();
+  f.onInstall(() =>
+    writeFileSync(
+      join(f.plan.directory, "staged/apps/clankie/operator-seat-policy.json"),
+      JSON.stringify({ schemaVersion: 1, mode: "enforce" }),
+    ),
+  );
+  const result = await executeRuntimeUpdate(f.plan, {
+    ...f,
+    operatorSeatsReady: async () => f.commits.get(f.plan.runtime) === f.plan.oldCommit,
+  });
+  expect(result).toMatchObject({ phase: "rolled-back", rollbackHealthy: true });
+  expect(f.calls).toContain("restart:new");
+  expect(f.calls.at(-1)).toBe("restart:old");
+  expect(f.commits.get(f.plan.runtime)).toBe(f.plan.oldCommit);
+}, 40000);
 it("refreshes plugins after healthy cutover and retains incomplete profile receipts without rollback", async () => {
   const f = fixture();
   const result = await executeRuntimeUpdate(f.plan, {

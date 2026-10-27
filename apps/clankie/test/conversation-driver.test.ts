@@ -98,6 +98,37 @@ it("an attach admitted with a queued worker message gives it to the seat exactly
   await f.store.close();
 });
 
+it("executionHeld prevents a native refusal from falling through to service and leaves other conversations running", async () => {
+  const f = fixture();
+  const native = vi.fn(async () => ({ handled: false as const }));
+  let selectingNative = true;
+  const select = () => (selectingNative ? ((selectingNative = false), { run: native }) : undefined);
+  f.store.executionHeld = (id) => id === "global-default";
+  try {
+    await expect(
+      f.store.runWithConversationDriver("global-default", select, () => f.service("held")),
+    ).rejects.toThrow("operator_seat_migration_held");
+    expect(native).not.toHaveBeenCalled();
+    expect(f.service).not.toHaveBeenCalled();
+    const created = await f.store.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "workspace", workspaceId: f.root },
+      title: "unheld",
+    });
+    if (created.op !== "create") throw Error("Conversation not created");
+    selectingNative = true;
+    await f.store.runWithConversationDriver(created.conversation.conversationId, select, () =>
+      f.service("running"),
+    );
+    expect(native).toHaveBeenCalledTimes(1);
+    expect(f.service.mock.calls).toEqual([["running"]]);
+  } finally {
+    f.outbox().close();
+    await f.store.close();
+  }
+});
+
 it("attachment waits for an admitted service turn, then takes queued work without a second service answer", async () => {
   const f = fixture();
   const entered = deferred();

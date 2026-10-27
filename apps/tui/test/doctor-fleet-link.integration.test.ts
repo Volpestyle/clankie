@@ -113,6 +113,50 @@ it.each(["healthy", "unavailable"] as const)(
       credentialStore: new FileCredentialStore(join(root, "credentials.json")),
     });
     expect(report.remoteHarnesses).toHaveLength(1);
+    for (const complete of [false, true]) {
+      const observed = {
+        ...report,
+        operatorSeatBindings: {
+          available: true,
+          mode: "observe" as const,
+          bindings: [],
+          inventory: {
+            complete,
+            ready: false,
+            seats: [
+              {
+                pid: 42,
+                startTime: "1",
+                command: "claude",
+                conversationId: "legacy",
+                sessionId: null,
+                bound: false,
+                processes: [],
+              },
+            ],
+          },
+        },
+      };
+      const voice = {
+        state: "refused" as const,
+        provider: "openai" as const,
+        checkedProvider: "openai" as const,
+        scope: "transcription" as const,
+        checkedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        cached: true,
+      };
+      const withVoice = { ...observed, voice: { ...observed.voice!, providerReadiness: voice } };
+      const summary = formatDoctorSummary(withVoice);
+      expect(summary.split("\n")[0]).toContain("Voice provider openai refused");
+      expect(summary).toContain("Observe mode:");
+      expect(summary).toContain("UNBOUND launcher unregistered");
+      const enforcing = formatDoctorSummary({
+        ...withVoice,
+        operatorSeatBindings: { ...observed.operatorSeatBindings, mode: "enforce" },
+      });
+      expect(enforcing.split("\n")[0]).toContain(complete ? "is unbound" : "inventory is unavailable");
+    }
     expect(formatDoctorReport(report)).toContain("✗ Seat bridge conv-kh2 · disconnected · KH2:");
     expect(report.operatorSeatBindings).toMatchObject({
       available: true,

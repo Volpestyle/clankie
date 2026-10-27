@@ -19,6 +19,7 @@ import { ConversationStore } from "../src/captain/conversations.ts";
 import { QuestionDraftSchema } from "../src/captain/conversation-questions.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import * as fleetRunner from "../src/captain/herdr-fleet-runner.ts";
+import * as leadFailover from "../src/captain/lead-seat-failover.ts";
 
 const fake = vi.hoisted(() => ({
   prompts: [] as string[],
@@ -110,7 +111,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function fixture(pendingOwnerAction = false, headBoundGraceMs?: number, headLaneHoldMs?: number) {
+async function fixture(
+  pendingOwnerAction = false,
+  headBoundGraceMs?: number,
+  headLaneHoldMs?: number,
+  migrationHeld?: (id: string) => boolean,
+) {
   const root = mkdtempSync(join(tmpdir(), "captain-conversation-driver-"));
   if (pendingOwnerAction) {
     const store = new ConversationStore(join(root, "conversations"), async () => {});
@@ -148,6 +154,7 @@ async function fixture(pendingOwnerAction = false, headBoundGraceMs?: number, he
     workingDirectory: root,
     settings: new SettingsStore(join(root, "settings.json")),
     personaImages: async () => ({ images: [], hash: "fake", files: [] }),
+    ...(migrationHeld ? { operatorSeatMigrationHeld: migrationHeld, leadRestartCheckMs: 25 } : {}),
     ...(headBoundGraceMs === undefined ? {} : { headBoundGraceMs }),
     ...(headLaneHoldMs === undefined ? {} : { headLaneHoldMs }),
     nativeCensusRunner: async (_command, args) => {
@@ -225,6 +232,23 @@ async function fixture(pendingOwnerAction = false, headBoundGraceMs?: number, he
     ).toBe(true);
   return { captain, id, journal, send, agent, autonomous, root, settleSeat };
 }
+
+it("a default-head migration hold suppresses failback; another conversation's hold does not", async () => {
+  vi.useFakeTimers();
+  const original = leadFailover.createLeadSeatFailover;
+  const failBack = vi.fn(async () => {});
+  vi.spyOn(leadFailover, "createLeadSeatFailover").mockImplementation((deps) => ({
+    ...original(deps),
+    failBack,
+  }));
+  let held = "global-default";
+  await fixture(false, undefined, undefined, (id) => id === held);
+  await vi.advanceTimersByTimeAsync(25);
+  expect(failBack).not.toHaveBeenCalled();
+  held = "another-conversation";
+  await vi.advanceTimersByTimeAsync(25);
+  expect(failBack).toHaveBeenCalledTimes(1);
+});
 
 it("a stuck session startup fails loudly and releases an attached seat to handle later turns", async () => {
   const { captain, id, journal, send, agent, settleSeat } = await fixture();

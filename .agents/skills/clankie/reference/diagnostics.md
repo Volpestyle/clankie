@@ -112,3 +112,6 @@ exit and is one-shot: an interrupted claimed launch stays held, never retried.
 Trust/hook prompts need the owner's ordinary action. `clankie seat migrate
 status UUID` is read-only; `complete UUID` releases only after the same native
 session/profile/cwd has a live binding and readiness. Missing proof holds.
+For a definitive failure before spawn, prove that no successor exists, then
+start the same exact resume without `--migration` and complete the original ID
+once ready. Never repeat its claim. An uncertain spawn stays held.
