@@ -42,6 +42,7 @@ raw files into the ignored `.local/evidence/` mirror. Commit only the README and
 details. Existing folders have not been migrated yet, and the viewer does not
 read the `.local/` mirror yet.
 
+- [2026-10-27 Flat built-in tracker write cost at 60 days (LOCAL-VUH-47)](2026-10-27-local-vuh-47-tracker-write-cost/README.md)
 - [2026-10-27 Built-in tracker write cost at fleet volume (LOCAL-VUH-42)](2026-10-27-local-vuh-42-tracker-journal/README.md)
 - [2026-10-08 PC Claude cache delivery](2026-10-08-pc-claude-cache-delivery/README.md)
 - [2026-10-06 Linear native delivery investigation](2026-10-06-linear-native-delivery/README.md)

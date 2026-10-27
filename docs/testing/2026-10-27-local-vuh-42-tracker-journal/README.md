@@ -227,6 +227,11 @@ These are integration tests on the real store, real processes and real `kill -9`
 
 ### What remains
 
+Done in LOCAL-VUH-47, with numbers in
+[its measurement record](../2026-10-27-local-vuh-47-tracker-write-cost/README.md). At
+the same load, 60-day p95 went to 7.0–7.7 ms plain and 6.7–7.1 ms hired, within 1.5×
+of one day.
+
 LOCAL-VUH-47 is in Clankie Work's built-in tracker, P3, blocked by LOCAL-VUH-42. At 60 days the remaining per-write cost is
 spread across passes over whole collections:
 

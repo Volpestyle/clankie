@@ -48,6 +48,7 @@ import {
   JOURNAL_THRESHOLD_BYTES,
   type JournalHeader,
   type JournalRecord,
+  journalLine,
   journalVersion,
   readJournalCommits,
   readJournalRecord,
@@ -1308,7 +1309,7 @@ function syncReleases(
       syncedAt: now,
     };
     if (existing === undefined) releases.push(release);
-    else releases[releases.indexOf(existing)] = release;
+    else replaceRecord(releases, existing, release);
     synced.push(release);
   }
   const delivered: { identifier: string; version: string }[] = [];
@@ -1634,10 +1635,21 @@ function runView(store: Store, run: Run, now: string, options: LocalTrackerOptio
   };
 }
 
+const ownerAskIssueKey = (entry: NonNullable<Store["ownerAsks"]>[number]) => lookupKey(entry.issueId);
+/** An issue's owner asks, in order, by index. */
+function ownerAsksOf(store: Store, issueId: string) {
+  const asks = store.ownerAsks ?? [];
+  const at = positionsOf(asks, ownerAskIssueKey, lookupKey(issueId));
+  return at === undefined ? asks.filter((ref) => ref.issueId === issueId) : at.map((index) => asks[index]!);
+}
 function currentBundle(store: Store, issueId: string, runId: string | null = null) {
-  const bundle = (store.bundles ?? []).findLast(
-    (entry) => entry.issueId === issueId && entry.runId === runId,
-  );
+  const bundles = store.bundles ?? [];
+  // By index: list_issues asks once per issue (LOCAL-VUH-47).
+  const at = positionsOf(bundles, bundleKey, lookupKey(issueId, runId));
+  const bundle =
+    at === undefined
+      ? bundles.findLast((entry) => entry.issueId === issueId && entry.runId === runId)
+      : bundles[at.at(-1)!];
   return bundle && owned(store.bundles!, bundle);
 }
 
@@ -2350,16 +2362,29 @@ function freezeRecords(value: unknown): void {
 /**
  * Freezes every record the draft holds and returns its immutable snapshot; the draft stays
  * writable. Given the committed store the draft came from, a record still at the same place
- * there is frozen already, so only what this write placed is walked.
+ * there is frozen already, so only what this write placed is walked; a collection the write
+ * left alone stays the committed array, and a draft it left alone is the committed store.
  */
 function settle(store: Store, base?: Store): Store {
-  const snapshot = { ...store } as Record<string, unknown>;
   const committed = base as Record<string, unknown> | undefined;
+  if (base !== undefined && untouched(store, base)) return base;
+  const snapshot = { ...store } as Record<string, unknown>;
   for (const [key, value] of Object.entries(snapshot)) {
     if (!Array.isArray(value)) continue;
-    const records = [...value];
     const previous = committed?.[key];
-    if (Array.isArray(previous)) {
+    if (value === previous) continue;
+    const change = Array.isArray(previous) ? draftChange(previous, value) : undefined;
+    if (change !== undefined && change.replaced.length === 0 && change.from === value.length) {
+      snapshot[key] = previous;
+      continue;
+    }
+    const records = [...value];
+    if (change !== undefined) {
+      for (const index of change.replaced) freezeRecords(records[index]);
+      for (let index = change.from; index < records.length; index++) freezeRecords(records[index]);
+      Object.freeze(records);
+      extendKeyIndexes(previous as readonly unknown[], records, change);
+    } else if (Array.isArray(previous)) {
       for (let index = 0; index < records.length; index++)
         if (records[index] !== previous[index]) freezeRecords(records[index]);
       Object.freeze(records);
@@ -2367,13 +2392,197 @@ function settle(store: Store, base?: Store): Store {
     snapshot[key] = records;
   }
   freezeRecords(snapshot);
+  if (process.env.VITEST) assertSettled(snapshot);
   return snapshot as unknown as Store;
+}
+/** Under Vitest, every record a snapshot holds is frozen: no change escaped the draft's tracking. */
+function assertSettled(snapshot: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(snapshot))
+    if (
+      Array.isArray(value) &&
+      value.some((entry) => entry !== null && typeof entry === "object" && !Object.isFrozen(entry))
+    )
+      throw new Error(`Settled tracker collection ${key} holds a record that was never frozen`);
+}
+/** A draft whose fields are all the committed ones, and whose collections it has not changed. */
+function untouched(store: Store, base: Store): boolean {
+  const draft = store as unknown as Record<string, unknown>;
+  const committed = base as unknown as Record<string, unknown>;
+  const keys = Object.keys(draft);
+  if (keys.length !== Object.keys(committed).length) return false;
+  for (const key of keys) {
+    const value = draft[key];
+    const previous = committed[key];
+    if (value === previous) continue;
+    if (!(key in committed) || !Array.isArray(value) || !Array.isArray(previous)) return false;
+    const change = draftChange(previous, value);
+    if (change === undefined || change.replaced.length > 0 || change.from !== value.length) return false;
+  }
+  return true;
+}
+/**
+ * Each draft collection's committed source, and the indices the write replaced in place
+ * (LOCAL-VUH-47). With them, settling, the journal record, the sync candidates and lookups by
+ * key cost what the write changed rather than the whole collection. A draft replaces a record
+ * only through `own` or `replaceRecord`, which record it; under Vitest every commit checks the
+ * journal record, the sync diff and the snapshot against whole-collection comparisons.
+ */
+const draftSources = new WeakMap<
+  readonly unknown[],
+  { readonly base: readonly unknown[]; readonly replaced: Set<number> }
+>();
+interface DraftChange {
+  /** Indices below the committed length holding a different record, ascending. */
+  readonly replaced: readonly number[];
+  /** Records from here on were appended by the write. */
+  readonly from: number;
+}
+/**
+ * How a draft collection differs from the committed array it was copied from. Undefined when it
+ * was not copied from `base`, or changed some other way (it shrank, or a record moved), so the
+ * caller compares the whole collection.
+ */
+function draftChange(base: readonly unknown[], current: readonly unknown[]): DraftChange | undefined {
+  if (base === current) return { replaced: [], from: base.length };
+  const source = draftSources.get(current);
+  if (source?.base !== base || current.length < base.length) return undefined;
+  // An insertion or removal before the end shifts the last committed record.
+  const last = base.length - 1;
+  if (last >= 0 && !source.replaced.has(last) && current[last] !== base[last]) return undefined;
+  return {
+    // A record the write appended and then replaced again is part of the appended tail.
+    replaced: source.replaced.size
+      ? [...source.replaced].filter((at) => at < base.length).sort((a, b) => a - b)
+      : [],
+    from: base.length,
+  };
 }
 function draftOf(store: Store): Store {
   const draft = { ...store } as Record<string, unknown>;
-  // Spread, not slice: V8 slices a frozen array element by element.
-  for (const [key, value] of Object.entries(draft)) if (Array.isArray(value)) draft[key] = [...value];
+  for (const [key, value] of Object.entries(draft)) {
+    if (!Array.isArray(value)) continue;
+    // Spread, not slice: V8 slices a frozen array element by element.
+    const copy = [...value];
+    if (Object.isFrozen(value)) draftSources.set(copy, { base: value, replaced: new Set() });
+    draft[key] = copy;
+  }
   return draft as unknown as Store;
+}
+/** Replaces a record in a draft collection, recording the change. */
+function replaceAt<T>(collection: T[], index: number, next: T): void {
+  if (!(index >= 0 && index < collection.length)) throw new Error("Tracker record is not in this collection");
+  collection[index] = next;
+  draftSources.get(collection)?.replaced.add(index);
+}
+const replaceRecord = <T>(collection: T[], entry: T, next: T) =>
+  replaceAt(collection, collection.indexOf(entry), next);
+
+/**
+ * Lookups by key over committed collections (LOCAL-VUH-47). A committed array is frozen, and
+ * each commit's array extends the previous one: records with the same keys at the same places,
+ * then the appended ones. One index serves that whole line of arrays, and settling a commit
+ * extends it by what the commit changed, so a lookup never walks the collection. A position
+ * answers for an array only below its length.
+ */
+interface KeyIndex {
+  /** Ascending positions of each key, across the line. */
+  readonly positions: Map<string, number[]>;
+  /** The newest array of the line; only it is extended. */
+  tip: readonly unknown[];
+}
+type IndexKey = (entry: never) => string;
+const keyIndexes = new WeakMap<readonly unknown[], Map<IndexKey, KeyIndex>>();
+/** Exact for strings, null and undefined, as `===` compares them. */
+const lookupKey = (...parts: unknown[]) =>
+  parts.map((part) => (part === undefined ? "u" : JSON.stringify(part))).join("\u0000");
+const recordIdKey = (entry: { id?: unknown }) => lookupKey(entry.id);
+const receiptKey = (entry: WriteReceipt) => lookupKey(entry.actorKey, entry.idempotencyKey);
+const bundleKey = (entry: EvidenceBundle) => lookupKey(entry.issueId, entry.runId);
+
+function keyIndex<T>(list: readonly T[], key: (entry: T) => string): KeyIndex {
+  let byKey = keyIndexes.get(list);
+  let index = byKey?.get(key as IndexKey);
+  if (index !== undefined) return index;
+  const positions = new Map<string, number[]>();
+  for (let at = 0; at < list.length; at++) {
+    const found = positions.get(key(list[at]!));
+    if (found === undefined) positions.set(key(list[at]!), [at]);
+    else found.push(at);
+  }
+  index = { positions, tip: list };
+  if (byKey === undefined) keyIndexes.set(list, (byKey = new Map()));
+  byKey.set(key as IndexKey, index);
+  return index;
+}
+/** A settled commit's array joins its committed source's indexes when every replaced record kept its key. */
+function extendKeyIndexes(
+  previous: readonly unknown[],
+  records: readonly unknown[],
+  change: DraftChange,
+): void {
+  const byKey = keyIndexes.get(previous);
+  if (byKey === undefined) return;
+  const next = new Map<IndexKey, KeyIndex>();
+  for (const [key, index] of byKey) {
+    const of = key as (entry: unknown) => string;
+    if (index.tip !== previous || change.replaced.some((at) => of(records[at]) !== of(previous[at])))
+      continue;
+    for (let at = change.from; at < records.length; at++) {
+      const found = index.positions.get(of(records[at]));
+      if (found === undefined) index.positions.set(of(records[at]), [at]);
+      else found.push(at);
+    }
+    index.tip = records;
+    next.set(key, index);
+  }
+  if (next.size) keyIndexes.set(records, next);
+}
+/**
+ * Ascending positions of `wanted` in a committed collection or a draft of one, without walking
+ * it. Undefined for any other list; the caller walks that.
+ */
+function positionsOf<T>(list: readonly T[], key: (entry: T) => string, wanted: string): number[] | undefined {
+  if (Object.isFrozen(list)) {
+    const found = keyIndex(list, key).positions.get(wanted) ?? [];
+    return found.at(-1)! < list.length ? found : found.filter((at) => at < list.length);
+  }
+  const source = draftSources.get(list);
+  if (source === undefined) return undefined;
+  const base = source.base as readonly T[];
+  const change = draftChange(base, list);
+  if (change === undefined) return undefined;
+  const replaced = new Set(change.replaced);
+  const found: number[] = [];
+  for (const at of keyIndex(base, key).positions.get(wanted) ?? []) {
+    if (at >= base.length) break;
+    if (!replaced.has(at)) found.push(at);
+  }
+  for (const at of change.replaced) if (key(list[at]!) === wanted) found.push(at);
+  if (change.replaced.length) found.sort((a, b) => a - b);
+  for (let at = change.from; at < list.length; at++) if (key(list[at]!) === wanted) found.push(at);
+  return found;
+}
+/** The caller's receipt for a key, as `find` would return it. */
+function findReceipt(store: Store, actor: string, key: unknown): WriteReceipt | undefined {
+  const receipts = store.receipts;
+  if (receipts === undefined) return undefined;
+  const at = positionsOf(receipts, receiptKey, lookupKey(actor, key));
+  if (at === undefined)
+    return receipts.find((entry) => entry.actorKey === actor && entry.idempotencyKey === key);
+  return at.length ? receipts[at[0]!] : undefined;
+}
+/** Entries of a collection with the wanted ids, in collection order. */
+function entriesWithIds<T extends { id?: unknown }>(entries: readonly T[], ids: ReadonlySet<string>): T[] {
+  // A walk is cheaper than lookups for a short collection or many ids.
+  if (entries.length < 512 || ids.size * 64 > entries.length)
+    return entries.filter((entry) => ids.has(entry.id as string));
+  const found: number[] = [];
+  for (const id of ids) {
+    const at = positionsOf(entries, recordIdKey, lookupKey(id));
+    if (at === undefined) return entries.filter((entry) => ids.has(entry.id as string));
+    found.push(...at);
+  }
+  return found.sort((a, b) => a - b).map((at) => entries[at]!);
 }
 /** Names the code that changed a committed record in place, so a missed `own` is found. */
 function frozenRecordSite(error: Error): string {
@@ -2391,7 +2600,7 @@ function own<T extends object>(collection: T[], entry: T): T {
   const index = collection.indexOf(entry);
   if (index < 0) throw new Error("Tracker record is not in this collection");
   const copy = structuredClone(entry);
-  collection[index] = copy;
+  replaceAt(collection, index, copy);
   return copy;
 }
 /** Records found in a write's draft are its own; a committed store's stay shared and frozen. */
@@ -2634,7 +2843,7 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
     url: localUrl("issue", issue.id),
     stage: stageOf(issue),
     bundle: currentBundle(store, issue.id) ?? null,
-    ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.issueId === issue.id),
+    ownerAsks: ownerAsksOf(store, issue.id),
   };
   if (relations) {
     const summary = (id: string) => {
@@ -3263,7 +3472,7 @@ async function dispatch(
         retiredByActor: context.actor,
         retirementEventId: randomUUID(),
       };
-      store.guidedReviews![store.guidedReviews!.indexOf(review)] = tombstone;
+      replaceRecord(store.guidedReviews!, review, tombstone);
       return tombstone;
     }
     case "save_issue_view": {
@@ -3302,7 +3511,7 @@ async function dispatch(
         updatedAt: now,
       };
       store.issueViews ??= [];
-      if (existing) store.issueViews[store.issueViews.indexOf(existing)] = view;
+      if (existing) replaceRecord(store.issueViews, existing, view);
       else store.issueViews.push(view);
       return structuredClone(view);
     }
@@ -3567,12 +3776,17 @@ async function dispatch(
           `${entry.identifier}\n${entry.title}\n${entry.description}`.toLowerCase().includes(query)
         );
       });
-      return page(
-        order(result, args, true).map((entry) => projectFields(issueView(store, entry), args)),
+      // Paging reads only ids, so only the page's issues are viewed (LOCAL-VUH-47).
+      const listed = page(
+        order(result, args, true) as unknown as Record<string, unknown>[],
         args,
         "issues",
         name,
       );
+      listed.issues = (listed.issues as unknown as Issue[]).map((entry) =>
+        projectFields(issueView(store, entry), args),
+      );
+      return listed;
     }
     case "get_project":
       return projectView(store, findProject(store, args.query as string));
@@ -3939,9 +4153,7 @@ async function read(
     });
   if (name === "get_write_receipt") {
     // Keys are scoped to the authenticated caller: another actor's key is unknown here.
-    const receipt = store.receipts?.find(
-      (entry) => entry.actorKey === actorKey(actor) && entry.idempotencyKey === args.idempotencyKey,
-    );
+    const receipt = findReceipt(store, actorKey(actor), args.idempotencyKey);
     if (receipt === undefined) return { idempotencyKey: args.idempotencyKey, state: "unknown" };
     return {
       idempotencyKey: receipt.idempotencyKey,
@@ -4004,8 +4216,15 @@ function syncModels(store: Store, wanted?: ReadonlySet<string>): TrackerSyncMode
     const ids = wantedIds.get(key.slice(0, at)) ?? new Set<string>();
     wantedIds.set(key.slice(0, at), ids.add(key.slice(at + 1)));
   }
-  const want = (modelName: TrackerSyncModel["modelName"], id: string) =>
-    wanted === undefined || wantedIds.get(modelName)?.has(id) === true;
+  /** The entries a wanted set names, found by id rather than by walking the collection. */
+  const pick = <T extends { id?: unknown }>(
+    modelName: TrackerSyncModel["modelName"],
+    entries: readonly T[],
+  ) => {
+    if (wanted === undefined) return entries;
+    const ids = wantedIds.get(modelName);
+    return ids === undefined ? [] : entriesWithIds(entries, ids);
+  };
   const projectOfIssue = (id: string | null | undefined): string[] => {
     const project = store.issues.find((issue) => issue.id === id)?.projectId;
     // Unprojected items have an explicit group; empty is reserved for shared metadata.
@@ -4016,21 +4235,17 @@ function syncModels(store: Store, wanted?: ReadonlySet<string>): TrackerSyncMode
     entries: readonly object[],
     groups: (data: Record<string, unknown>) => string[],
   ) => {
-    if (wanted !== undefined && !wantedIds.has(modelName)) return;
-    for (const entry of entries) {
-      if (!want(modelName, (entry as { id: string }).id)) continue;
+    for (const entry of pick(modelName, entries as readonly { id?: unknown }[])) {
       const data = structuredClone(entry) as Record<string, unknown>;
       models.push({ modelName, modelId: data.id as string, projectIds: groups(data), data });
     }
   };
   add(
     "issue",
-    store.issues
-      .filter((issue) => want("issue", issue.id))
-      .map((issue) => ({
-        ...issue,
-        ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.issueId === issue.id),
-      })),
+    pick("issue", store.issues).map((issue) => ({
+      ...issue,
+      ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.issueId === issue.id),
+    })),
     (data) => [(data.projectId as string) ?? "unprojected"],
   );
   add("project", store.projects, (data) => [data.id as string, "workspace"]);
@@ -4065,8 +4280,8 @@ function syncModels(store: Store, wanted?: ReadonlySet<string>): TrackerSyncMode
     add(modelName, entries, (data) => projectOfIssue(data.issueId as string));
   add(
     "lease",
-    store.issues
-      .filter((issue) => issue.lease && want("lease", issue.id))
+    pick("lease", store.issues)
+      .filter((issue) => issue.lease)
       .map((issue) => ({ id: issue.id, issueId: issue.id, ...issue.lease })),
     (data) => projectOfIssue(data.issueId as string),
   );
@@ -4098,9 +4313,21 @@ function lazySyncModel(model: TrackerSyncModel): TrackerSyncModel {
   if (omitted.length) data.unhydratedFields = omitted;
   return { ...model, data };
 }
-/** Records in one list and not the other, by identity; an append compares only its tail. */
+/**
+ * Records in one list and not the other, by identity; an append compares only its tail, and a
+ * draft of the other list only what it replaced and appended.
+ */
 function identityChanges<T extends object>(previous: readonly T[] = [], current: readonly T[] = []): T[] {
   if (previous === current) return [];
+  const change = draftChange(previous, current);
+  if (change !== undefined) {
+    const replaced = change.replaced.filter((at) => current[at] !== previous[at]);
+    return [
+      ...replaced.map((at) => current[at]!),
+      ...current.slice(change.from),
+      ...replaced.map((at) => previous[at]!),
+    ];
+  }
   let start = 0;
   while (start < previous.length && start < current.length && previous[start] === current[start]) start++;
   const before = new Set(previous.slice(start));
@@ -4560,6 +4787,14 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       } catch {
         // Anything but a clean continuation reopens from the checkpoint and proves it all again.
       }
+      const reopened = await openCommitted(bytes, version);
+      // The same checkpoint with fewer commits lost one this process acknowledged; an open may
+      // skip a damaged final line only when nothing here has seen it (LOCAL-VUH-47).
+      if ((reopened.store.syncId ?? 0) < (current.store.syncId ?? 0))
+        throw new Error(
+          `Tracker journal is not intact: acknowledged sync ${String(current.store.syncId)} is gone`,
+        );
+      return reopened;
     }
     return openCommitted(bytes, version);
   };
@@ -4622,8 +4857,15 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     const added = (store.syncLog ?? []).filter((entry) => entry.syncId > (base.syncId ?? 0));
     if (added.length !== 1 || store.syncId !== (base.syncId ?? 0) + 1)
       throw new Error("A journal commit carries exactly one sync commit");
-    const record = { syncId: store.syncId, commit: added[0]!, ...storeChanges(base, store, JOURNAL_SKIP) };
-    const line = `${JSON.stringify(record)}\n`;
+    const changes = storeChanges(base, store, JOURNAL_SKIP, draftChange);
+    // Every test commit proves the tracked record equals the whole-collection one (LOCAL-VUH-47).
+    if (
+      process.env.VITEST &&
+      JSON.stringify(changes) !== JSON.stringify(storeChanges(base, store, JOURNAL_SKIP))
+    )
+      throw new Error("Tracked journal record diverged from the whole-store comparison");
+    const record = { syncId: store.syncId, commit: added[0]!, ...changes };
+    const line = journalLine(record);
     await callOptions.beforeWrite?.();
     const size = await appendJournal(directory, journal.live, line, () => {
       assertHeld();
@@ -4664,7 +4906,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           await writeSegment(
             directory,
             1,
-            history.map((entry) => `${JSON.stringify({ syncId: entry.syncId, commit: entry })}\n`),
+            history.map((entry) => journalLine({ syncId: entry.syncId, commit: entry })),
           ),
         ]
       : [];
@@ -5280,9 +5522,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               ]),
             )
             .digest("hex");
-          const prior = store.receipts?.find(
-            (entry) => entry.actorKey === actorKey(actor) && entry.idempotencyKey === key,
-          );
+          const prior = findReceipt(store, actorKey(actor), key);
           if (prior) {
             if (prior.fingerprint !== fingerprint)
               throw new TrackerWriteRefused(
@@ -5592,7 +5832,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           for (const record of incoming) {
             const index = target.findIndex((r) => r.id === record.id);
             if (index < 0) target.push(record);
-            else target[index] = record;
+            else replaceAt(target, index, record);
           }
         };
         store.storeId ??= store.team.id;
@@ -6051,9 +6291,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             .update(canonical([name, request]))
             .digest("hex");
           // Current actor, store, project and pending target are checked BEFORE receipt replay.
-          const prior = store.receipts?.find(
-            (entry) => entry.actorKey === privateKey && entry.idempotencyKey === mutation.idempotencyKey,
-          );
+          const prior = findReceipt(store, privateKey, mutation.idempotencyKey);
           if (prior) {
             if (prior.fingerprint !== fingerprint)
               throw new TrackerWriteRefused(
@@ -6315,12 +6553,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               issueId: issue.id,
               projectId: issue.projectId,
             },
-            replay:
-              store.receipts?.some(
-                (entry) =>
-                  entry.actorKey === actorKey(callOptions!.actor!) &&
-                  entry.idempotencyKey === args.idempotencyKey,
-              ) ?? false,
+            replay: findReceipt(store, actorKey(callOptions!.actor!), args.idempotencyKey) !== undefined,
           };
         });
         guidedBinding = prepared.binding;
@@ -6434,12 +6667,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         const fingerprint = createHash("sha256")
           .update(canonical([name, request]))
           .digest("hex");
-        const prior =
-          key === undefined
-            ? undefined
-            : store.receipts?.find(
-                (entry) => entry.actorKey === actorKey(actor) && entry.idempotencyKey === key,
-              );
+        const prior = key === undefined ? undefined : findReceipt(store, actorKey(actor), key);
         if (prior !== undefined) {
           if (prior.fingerprint !== fingerprint)
             throw new TrackerWriteRefused(

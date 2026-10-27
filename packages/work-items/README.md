@@ -216,6 +216,46 @@ store itself) and `trackerStoreVersion`. `exportTrackerStore` writes the whole s
 as one legacy file for a rollback. Design and numbers:
 [ADR 0226, writes cost the change](../../docs/adr/0226-one-tracker-tool-surface.md#amendment-writes-cost-the-change-not-the-store-2026-10-27-local-vuh-42).
 
+A write costs what it changed, not the store's size (LOCAL-VUH-47). Its draft remembers
+which committed array each collection was copied from and which records it replaced
+(`own`, `replaceRecord`). Settling the snapshot, the journal record and the sync
+candidates read only those records and the appended tail. Receipts by key, an issue's
+current bundle and owner asks, and records by id are looked up through indexes. One
+index serves each line of committed arrays, and every commit extends it. Under Vitest,
+every commit is also checked against whole-collection comparisons.
+
+**Damaged journal lines.** Each line names the byte length of its record:
+`{"syncId":N,"length":L,…}`. Lines written before this have no length and end at their
+newline. Open reads records in order:
+
+- A final line with no newline is an interrupted append. It is left out.
+- A final line whose bytes are not a whole parseable record at its stated length is also
+  left out. A power cut can persist the line's size and newline but not all of its pages.
+- The next append cuts either kind off.
+- The same damage anywhere else refuses the open, and so does a damaged final line that
+  a whole record follows.
+- A live process refuses to drop a record it already acknowledged.
+- A final line that still parses as a well-formed record but breaks the event, audit or
+  sync chain is refused, not skipped. Its bytes are a record, so it may have been
+  acknowledged.
+
+`exportTrackerStore` validates too, so it cannot export a refused store. Recovery is by
+hand:
+
+1. Stop the service and copy the whole store directory aside.
+2. If the refused line is the live segment's last, truncate the segment to the end of
+   the line before it. That loses only that record. The open then proves everything
+   else.
+3. If the damage is earlier, restore `tracker.pre-journal-<ms>.json` with the journal
+   set aside, as in the rollback below. That loses every write since the move.
+4. Once the store opens, `exportTrackerStore` writes it as one file for the rollback
+   steps below.
+
+**Checkpoint size.** Open still parses `tracker.json` as one string, so V8's maximum
+string length (about 537 MB) bounds it. At fleet volume that is about four months.
+`clankie doctor` reports the checkpoint's size against that limit and warns at half
+(`trackerCheckpointSize`). Retention or a streamed open has to land before the limit.
+
 **Rolling back to a build without the journal.** That build refuses a checkpoint, so
 it needs the store exported as one legacy file. This keeps every write, including
 those made since the move. It was drilled on a migrated copy of the live store: the

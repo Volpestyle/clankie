@@ -4,6 +4,12 @@ export * from "./format.ts";
 export * from "./tracker.ts";
 export * from "./tracker-tools.ts";
 export * from "./tracker-local.ts";
+export {
+  CHECKPOINT_STRING_LIMIT,
+  CHECKPOINT_WARN_RATIO,
+  trackerCheckpointSize,
+  type CheckpointSize,
+} from "./tracker-journal.ts";
 export * from "./linear-import.ts";
 export * from "./linear-mirror.ts";
 export * from "./outcomes.ts";

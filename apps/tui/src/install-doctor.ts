@@ -60,6 +60,7 @@ import {
   type FleetResourceSnapshot,
 } from "@clankie/protocol";
 import { probeHostPower, type HostPowerReport } from "@clankie/protocol/host-power";
+import { trackerCheckpointSize, type CheckpointSize } from "@clankie/work-items";
 
 const execFileAsync = promisify(execFileCallback);
 const PROBE_TIMEOUT_MS = 5_000;
@@ -171,6 +172,11 @@ export interface InstallDoctorReport {
   readonly trackerRequestBudget?:
     | import("@clankie/protocol/tracker-request-budget").TrackerRequestBudgetReport
     | { readonly status: "unavailable"; readonly detail: string };
+  /**
+   * The built-in store's `tracker.json` against the single-string limit its open still parses
+   * under (LOCAL-VUH-47), from file metadata alone; absent without a store.
+   */
+  readonly trackerCheckpoint?: CheckpointSize & { readonly directory: string };
   readonly tracker?: {
     readonly backend: "linear" | "local";
     readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";
@@ -335,15 +341,19 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     linearServer?.enabled !== false &&
     ((linearServer !== undefined && linearServer.credential === undefined) ||
       (await credentialStore.get(trackerCredential).catch(() => undefined)) !== undefined);
+  const builtInTracker = join(
+    env.CLANKIE_STATE?.trim() || join(env.HOME?.trim() || homedir(), ".clankie"),
+    "tracker",
+  );
+  const checkpointSize = trackerCheckpointSize(builtInTracker);
+  const trackerCheckpoint =
+    checkpointSize === undefined ? undefined : { ...checkpointSize, directory: builtInTracker };
   const tracker: NonNullable<InstallDoctorReport["tracker"]> = trackerConnected
     ? { backend: "linear", reason: "owner_connected" }
     : {
         backend: "local",
         reason: linearServer?.enabled === false ? "linear_disabled" : "linear_disconnected",
-        directory: join(
-          env.CLANKIE_STATE?.trim() || join(env.HOME?.trim() || homedir(), ".clankie"),
-          "tracker",
-        ),
+        directory: builtInTracker,
       };
   // Mirrors the service's selection: the registered API app, then a workspace
   // app stored as `linear`. MCP OAuth is audience-restricted and never qualifies.
@@ -467,6 +477,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     doorway,
     power,
     linear,
+    trackerCheckpoint,
   });
 
   return {
@@ -508,6 +519,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       settings.email.fromAddress !== undefined ||
       settings.email.imapHost !== undefined,
     linear,
+    ...(trackerCheckpoint === undefined ? {} : { trackerCheckpoint }),
     tracker,
     linearGraphql,
     mcpServers: settings.mcp.servers.filter((server) => server.enabled).map((server) => server.id),
@@ -714,6 +726,7 @@ function collectRemediations(input: {
   readonly doorway: GatewayDoorwayReport;
   readonly power: HostPowerReport;
   readonly linear: ReturnType<typeof linearFollowStatus>;
+  readonly trackerCheckpoint: InstallDoctorReport["trackerCheckpoint"];
 }): string[] {
   const remediations: string[] = [];
   const operatorRepairProviders = new Set(
@@ -803,6 +816,11 @@ function collectRemediations(input: {
   ) {
     remediations.push(`herdr plugin link ${input.herdrPlugin.bundlePath}`);
   }
+  // Months of headroom at the threshold, so it never outranks setup or reachability.
+  if (input.trackerCheckpoint?.state === "warn")
+    remediations.push(
+      `The built-in tracker's checkpoint is ${String(Math.round(input.trackerCheckpoint.bytes / 1e6))} MB, past half the ${String(Math.round(input.trackerCheckpoint.limitBytes / 1e6))} MB it can be opened at. It needs retention or a streamed open before it reaches that (LOCAL-VUH-47).`,
+    );
   return remediations;
 }
 

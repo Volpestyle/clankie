@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,6 +16,7 @@ import {
   modelCredentialHealthPath,
 } from "../../clankie/src/captain/model-credential-health.ts";
 import { SETTINGS_SCHEMA_VERSION, SettingsStore } from "@clankie/settings";
+import { CHECKPOINT_STRING_LIMIT } from "@clankie/work-items";
 import { afterEach, describe, expect, it } from "vitest";
 import { inspectInstall, inspectInstallKind, type ExecFileImpl } from "../src/install-doctor.ts";
 
@@ -220,6 +221,50 @@ describe("install doctor", () => {
       "Tracker · local · Linear disabled; using durable local store",
     );
     expect(JSON.stringify(disabled)).not.toContain("isolated-doctor-fixture");
+  });
+
+  it("reports the built-in tracker's checkpoint against the single-string limit and warns at half (LOCAL-VUH-47)", async () => {
+    const root = await installRoot();
+    const store = join(root, "state", "tracker");
+    const inspect = () =>
+      inspectInstall({
+        repoRoot: root,
+        env: {
+          HOME: join(root, "home"),
+          XDG_CONFIG_HOME: join(root, "config"),
+          CLANKIE_STATE: join(root, "state"),
+        },
+        settings: new SettingsStore(join(root, "settings.json")),
+        credentialStore: new FileCredentialStore(join(root, "credentials.json")),
+        execFileImpl: missing,
+        fetchImpl: offline,
+      });
+    expect((await inspect()).trackerCheckpoint).toBeUndefined();
+
+    await mkdir(store, { recursive: true });
+    const checkpoint = join(store, "tracker.json");
+    await writeFile(checkpoint, "{}");
+    const small = await inspect();
+    expect(small.trackerCheckpoint).toEqual({
+      directory: store,
+      bytes: 2,
+      limitBytes: CHECKPOINT_STRING_LIMIT,
+      warnAtBytes: Math.floor(CHECKPOINT_STRING_LIMIT / 2),
+      state: "ok",
+    });
+    expect(formatDoctorReport(small)).toContain(
+      "✓ Tracker checkpoint · 0.0 MB of the 537 MB it can be opened at · warns at 268 MB",
+    );
+    expect(small.remediations.join("\n")).not.toContain("checkpoint");
+
+    // Sparse: the size the doctor reads, without writing a quarter gigabyte.
+    await truncate(checkpoint, Math.floor(CHECKPOINT_STRING_LIMIT / 2));
+    const large = await inspect();
+    expect(large.trackerCheckpoint?.state).toBe("warn");
+    expect(formatDoctorReport(large)).toContain(
+      "! Tracker checkpoint · 268 MB of the 537 MB it can be opened at",
+    );
+    expect(large.remediations).toContainEqual(expect.stringContaining("retention or a streamed open"));
   });
 
   it("does not report GraphQL usable from credentials alone when the CLI lane is unavailable", async () => {

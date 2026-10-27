@@ -48,6 +48,8 @@ function formatUnreconciled(worktrees: readonly UnreconciledWorktree[]): string[
 }
 
 /** `/doctor` as a checklist; `/doctor json` keeps the full canonical report. */
+const megabytes = (bytes: number) => `${(bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0)} MB`;
+
 export function formatDoctorReport(report: InstallDoctorReport): string {
   const captain = report.captain.ready
     ? `${mark(true)} Captain · ${report.captain.model} via ${report.captain.auth}`
@@ -197,6 +199,11 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
                 ? "Linear disabled; using durable local store"
                 : "Linear disconnected; using durable local store"
           }${report.tracker.directory ? ` · ${report.tracker.directory}` : ""}`,
+        ]
+      : []),
+    ...(report.trackerCheckpoint
+      ? [
+          `  ${report.trackerCheckpoint.state === "warn" ? "!" : "✓"} Tracker checkpoint · ${megabytes(report.trackerCheckpoint.bytes)} of the ${megabytes(report.trackerCheckpoint.limitBytes)} it can be opened at · warns at ${megabytes(report.trackerCheckpoint.warnAtBytes)}`,
         ]
       : []),
     ...(report.linearGraphql === undefined

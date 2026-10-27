@@ -1018,7 +1018,8 @@ as a journal.
   proven over what they replay. Sealed segments must match their digests, which
   are checked once per process. A torn final line, an interrupted append, is
   left out, and the next append cuts it off. Anything else refuses the open, as a
-  broken chain always has.
+  broken chain always has. (LOCAL-VUH-47 also skips a final line whose bytes are not
+  a whole record at its stated length; see the follow-up below.)
 - Checkpoints run in the background once the live journal reaches 4 MiB or an
   eighth of the checkpoint, in three steps:
   1. Under the lock: seal the live segments and start a new one.
@@ -1110,3 +1111,34 @@ live store's real records (mean 6.6 KB):
 - Without `fullfsync` it took 0.1 ms, but a commit then survives a process crash,
   not a power loss.
 - It would not win at equal durability, so it is not worth a second storage engine.
+
+### Follow-up: flat at 60 days (2026-10-27, LOCAL-VUH-47)
+
+Status: accepted (lead-approved scope, 2026-10-27).
+
+- **A write costs what it changed.** A draft remembers the committed array each
+  collection came from, and the records it replaced through `own` or `replaceRecord`.
+  Settling, the journal record and the sync candidates read only those records and the
+  appended tail. Collections the write left alone stay the committed arrays.
+- **Lookups by key use indexes.** These are receipts, current bundles, owner asks and
+  sync models by id. One index serves a line of committed arrays, and each commit
+  extends it. `list_issues` views only the page it returns.
+- Under Vitest, the tracked journal record and the incremental sync diff are compared
+  with whole-store ones, and settled snapshots must hold only frozen records.
+- **Measured** at the same load (2.3–3.1 on 18 cores), before and after interleaved:
+  - 60-day p95 is 7.0–7.7 ms plain and 6.7–7.1 ms through a fresh hired instance, both
+    within 1.5× of one day. Before, it was 11.5–19.1 and 16.4–20.8 ms.
+  - The service's `list_issues` after a hired write went from about 130 ms to 8 ms.
+  - Details are in
+    [the measurement record](../testing/2026-10-27-local-vuh-47-tracker-write-cost/README.md).
+- **Journal lines name their length.** A final line whose bytes are not a whole record
+  at that length is an unacknowledged tail: a power cut kept its size but not its
+  pages. Open skips it.
+  - The same damage earlier is refused.
+  - A process that acknowledged the record refuses to lose it.
+  - A final line that parses but breaks a chain is refused.
+  - A checksum was rejected because it would make a tampered, well-formed final line
+    skippable.
+- **`clankie doctor` reports the checkpoint against the single-string limit.** Open
+  still parses the checkpoint under that limit (536,870,888 characters). Doctor warns
+  at half. Retention or a streamed open remains open work.

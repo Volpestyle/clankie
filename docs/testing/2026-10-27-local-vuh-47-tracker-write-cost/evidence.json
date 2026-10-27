@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "artifacts/local-vuh-47-bench-runs.jsonl",
+      "size": 21485,
+      "sha256": "1c7dc266fbafa6dd6001ca4a944a4d126f57017eb2451602dbf2ffed1bfb2a1e",
+      "url": "clankie://evidence/sha256/1c7dc266fbafa6dd6001ca4a944a4d126f57017eb2451602dbf2ffed1bfb2a1e"
+    }
+  ]
+}

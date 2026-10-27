@@ -1,3 +1,4 @@
+import { constants as bufferConstants } from "node:buffer";
 import { createHash, type Hash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { type FileHandle, mkdir, open, readdir, readFile, rename } from "node:fs/promises";
@@ -22,6 +23,39 @@ export const CHECKPOINT_MIN_BYTES = 4 * 1024 * 1024;
 
 /** Larger applied results stay only in their journal record; the receipt points at it. */
 export const RECEIPT_RESULT_BYTES = 1024;
+
+/**
+ * Open still parses `tracker.json` as one string, so V8's maximum string length bounds the
+ * checkpoint (LOCAL-VUH-47). A UTF-8 byte decodes to at most one UTF-16 code unit, so bytes on
+ * disk are a safe measure. Doctor warns at half, months ahead at fleet volume (about 4.4 MB a day).
+ */
+export const CHECKPOINT_STRING_LIMIT = bufferConstants.MAX_STRING_LENGTH;
+export const CHECKPOINT_WARN_RATIO = 0.5;
+
+export interface CheckpointSize {
+  readonly bytes: number;
+  readonly limitBytes: number;
+  readonly warnAtBytes: number;
+  readonly state: "ok" | "warn";
+}
+
+/** The size of a store's `tracker.json` against the single-string limit, from its metadata alone; undefined without a store. */
+export function trackerCheckpointSize(directory: string): CheckpointSize | undefined {
+  let bytes: number;
+  try {
+    bytes = statSync(join(directory, "tracker.json")).size;
+  } catch (error) {
+    if (missing(error)) return undefined;
+    throw error;
+  }
+  const warnAtBytes = Math.floor(CHECKPOINT_STRING_LIMIT * CHECKPOINT_WARN_RATIO);
+  return {
+    bytes,
+    limitBytes: CHECKPOINT_STRING_LIMIT,
+    warnAtBytes,
+    state: bytes >= warnAtBytes ? "warn" : "ok",
+  };
+}
 
 export interface SealedSegment {
   readonly name: string;
@@ -71,9 +105,18 @@ const same = (left: unknown, right: unknown) =>
  * What one commit changed. Committed records are frozen, so a changed record is a new object
  * and only those are compared. An append records its tail; an id-keyed collection records
  * upserts and removals when replaying them reproduces its exact order, and is replaced whole
- * otherwise.
+ * otherwise. `changed` may name, for a collection, the first index it could differ from and the
+ * length it appended from (LOCAL-VUH-47); comparison then starts there instead of at the front.
  */
-export function storeChanges(from: object, to: object, skip: ReadonlySet<string>): StoreChanges {
+export function storeChanges(
+  from: object,
+  to: object,
+  skip: ReadonlySet<string>,
+  changed?: (
+    previous: readonly unknown[],
+    current: readonly unknown[],
+  ) => { readonly replaced: readonly number[]; readonly from: number } | undefined,
+): StoreChanges {
   const before = from as Json;
   const after = to as Json;
   const changes: StoreChanges = {};
@@ -90,7 +133,8 @@ export function storeChanges(from: object, to: object, skip: ReadonlySet<string>
       if (!same(previous, current)) (changes.set ??= {})[key] = current;
       continue;
     }
-    let start = 0;
+    const known = changed?.(previous, current);
+    let start = known === undefined ? 0 : Math.min(known.replaced[0] ?? known.from, known.from);
     while (start < previous.length && start < current.length && previous[start] === current[start]) start++;
     while (start < previous.length && start < current.length && same(previous[start], current[start]))
       start++;
@@ -219,12 +263,66 @@ export function journalVersion(directory: string): string {
   return `${String(names.length)}:${last}:${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}`;
 }
 
-/** Complete lines, and the byte length they cover; a torn final line is left out. */
-function segmentLines(bytes: Buffer): { lines: string[]; complete: number } {
-  const complete = bytes.lastIndexOf(0x0a) + 1;
-  const lines = bytes.subarray(0, complete).toString("utf8").split("\n");
-  lines.pop();
-  return { lines, complete };
+/**
+ * One journal line: the record as JSON, framed by the byte length of everything after its
+ * `length` field (LOCAL-VUH-47). A reader then knows where a record must end, so bytes a power
+ * cut left unwritten inside an unacknowledged final line are told apart from a whole record,
+ * even if they happen to hold a newline.
+ */
+export function journalLine(record: JournalRecord): string {
+  const { syncId, ...rest } = record;
+  const body = JSON.stringify(rest).slice(1);
+  return `{"syncId":${String(syncId)},"length":${String(Buffer.byteLength(body))},${body}\n`;
+}
+const FRAMED = /^\{"syncId":\d+,"length":(\d+),/u;
+// Lines written before framing end at their newline.
+const UNFRAMED = /^\{"syncId":\d+,/u;
+/** Where the record starting at `at` ends (its newline), or -1 when it is not a whole record there. */
+function recordEnd(bytes: Buffer, at: number, framedOnly: boolean): number {
+  const head = bytes.toString("latin1", at, Math.min(bytes.length, at + 48));
+  const framed = FRAMED.exec(head);
+  if (framed !== null) {
+    const end = at + framed[0].length + Number(framed[1]);
+    return end < bytes.length && bytes[end] === 0x0a ? end : -1;
+  }
+  // A writer never goes back to unframed lines, so one after a framed line is damage.
+  return framedOnly || !UNFRAMED.test(head) ? -1 : bytes.indexOf(0x0a, at);
+}
+const parses = (line: string) => {
+  try {
+    JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/**
+ * The whole records of a segment and the byte length they cover. What follows them is a torn
+ * tail: an interrupted append, or a final line whose bytes are not a record (a power cut that
+ * persisted the line's length but not all its pages). `later` says a whole record follows that
+ * damage, so it is not a tail at all and the open refuses. A final line that parses is a record:
+ * if it breaks the chain, the open refuses it rather than skip it.
+ */
+function segmentLines(bytes: Buffer): { lines: string[]; complete: number; later: boolean } {
+  const lines: string[] = [];
+  let at = 0;
+  let framed = false;
+  while (at < bytes.length) {
+    const end = recordEnd(bytes, at, framed);
+    if (end < 0) break;
+    framed ||= FRAMED.test(bytes.toString("latin1", at, Math.min(end, at + 48)));
+    lines.push(bytes.toString("utf8", at, end));
+    at = end + 1;
+  }
+  if (at === bytes.length && lines.length && !parses(lines.at(-1)!))
+    at -= Buffer.byteLength(lines.pop()!) + 1;
+  let later = false;
+  for (let next = bytes.indexOf(0x0a, at); !later && next >= 0 && next + 1 < bytes.length;) {
+    const end = recordEnd(bytes, next + 1, false);
+    later = end >= 0 && parses(bytes.toString("utf8", next + 1, end));
+    next = bytes.indexOf(0x0a, next + 1);
+  }
+  return { lines, complete: at, later };
 }
 
 export interface JournalTail {
@@ -276,11 +374,16 @@ export async function readJournalTail(
     if (firstSyncIdOf(name) !== previous.syncId + 1)
       throw new Error(`Tracker journal segment ${name} does not follow sync ${String(previous.syncId)}`);
     const bytes = await readFile(join(root, name));
-    const { lines, complete } = segmentLines(bytes);
-    if (complete !== bytes.length && index !== live.length - 1)
+    const { lines, complete, later } = segmentLines(bytes);
+    if (complete !== bytes.length && (later || index !== live.length - 1))
       throw new Error(`Tracker journal segment ${name} is torn before its end`);
     for (const line of lines) {
-      const record = JSON.parse(line) as JournalRecord;
+      let record: JournalRecord;
+      try {
+        record = JSON.parse(line) as JournalRecord;
+      } catch {
+        throw new Error(`Tracker journal is not intact at sync ${String(previous.syncId + 1)}`);
+      }
       if (
         record.syncId !== previous.syncId + 1 ||
         record.commit?.syncId !== record.syncId ||
@@ -295,6 +398,8 @@ export async function readJournalTail(
     total += complete;
     last = { name, size: complete };
   }
+  if (options.after !== undefined && previous.syncId < options.after.syncId)
+    throw new Error(`Tracker journal no longer holds sync ${String(options.after.syncId)}`);
   return { records, live: last, bytes: total };
 }
 
