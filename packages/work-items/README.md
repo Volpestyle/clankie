@@ -28,7 +28,7 @@ in their original tracker. See [the CLI reference](../../docs/cli.md#work-tracke
 
 The canonical tracker surface is the Linear-shaped subset in `tracker-tools.ts`
 ([ADR 0226](../../docs/adr/0226-one-tracker-tool-surface.md)). `createLocalTracker`
-provides that catalog and `call(name, args)` over a durable `tracker.json`, with
+provides that catalog and `call(name, args)` over a durable store ([storage](#storage)), with
 atomic locked writes, stable UUIDs and human identifiers. The service exposes
 these as `linear_*` through the same MCP host and fleet directory used by
 connected Linear. No connection selects local storage; connected provider
@@ -144,7 +144,7 @@ the decoded tool result; it is not a network transport streaming limit.
 
 `LocalTrackerBackend.sync` adds project-scoped full/partial bootstrap, lazy
 batch hydration, resumable pushed commits and keyed atomic transactions.
-Its journal shares `tracker.json` and the existing write/receipt boundary.
+Its journal shares the store's write/receipt boundary.
 Each `syncId` identifies an entire commit; updates carry field deltas and
 project membership before/after a move. Existing stores bootstrap at cursor zero.
 See the [ADR 0226 sync amendment](../../docs/adr/0226-one-tracker-tool-surface.md#amendment-built-in-tracker-sync-journal-2026-10-09-vuh-1962)
@@ -199,8 +199,53 @@ field selections. A store holding a Linear mirror refuses every built-in write
 store locks. It backs up the live bytes and marks the copy's `linearMirror.cutover`,
 so the copy is writable, refuses further imports, and keeps its Linear records as
 provenance. `restoreTrackerStore` puts the exact pre-cutover bytes back and keeps
-the pilot store. `readTrackerStoreSummary` reads counts, provider record ids with
+the pilot store. Both keep whole stores, sync history included, and set a
+replaced journal aside. `readTrackerStoreSummary` reads counts, provider record ids with
 Linear's `updatedAt`, and non-Linear writes, without seeding a store.
+
+### Storage
+
+A store under 2 MiB is one `tracker.json`, rewritten atomically per commit. A larger
+one keeps `tracker.json` as a checkpoint and appends each commit, with one fsync, to
+JSONL segments in `tracker.journal/`. A background checkpoint folds the journal back
+in, and the host's start-up `checkpoint()` moves an existing large file over, keeping
+its bytes as `tracker.pre-journal-<ms>.json`. Open is the checkpoint plus the
+journal tail, with every chain proven. Host readers use `readTrackerStoreSnapshot`
+(validated), `readTrackerStoreRecords` (for routing; the tracker refuses a broken
+store itself) and `trackerStoreVersion`. `exportTrackerStore` writes the whole store
+as one legacy file for a rollback. Design and numbers:
+[ADR 0226, writes cost the change](../../docs/adr/0226-one-tracker-tool-surface.md#amendment-writes-cost-the-change-not-the-store-2026-10-27-local-vuh-42).
+
+**Rolling back to a build without the journal.** That build refuses a checkpoint, so
+it needs the store exported as one legacy file. This keeps every write, including
+those made since the move. It was drilled on a migrated copy of the live store: the
+older build opened all of it and wrote.
+
+1. Stop the service, so nothing else writes the store.
+2. From a checkout of the journal build, export the whole store (`true` means
+   written):
+
+   ```sh
+   node --input-type=module -e '
+     const { exportTrackerStore } = await import("./packages/work-items/src/index.ts");
+     console.log(await exportTrackerStore(process.argv[1], process.argv[2]));
+   ' ~/.clankie/tracker ~/.clankie/tracker-rollback.json
+   ```
+
+3. Set the journal and checkpoint aside, and put the export in place:
+
+   ```sh
+   stamp=$(date +%s)
+   mv ~/.clankie/tracker/tracker.journal ~/.clankie/tracker/tracker.journal.rollback-$stamp
+   mv ~/.clankie/tracker/tracker.json ~/.clankie/tracker/tracker.checkpoint-$stamp.json
+   mv ~/.clankie/tracker-rollback.json ~/.clankie/tracker/tracker.json
+   ```
+
+4. Install and start the older build.
+
+The faster alternative, `tracker.pre-journal-<ms>.json` restored as `tracker.json`
+with the journal set aside, loses every write since the move. Either single file
+stops working before 60 days of fleet volume, the old format's own limit.
 
 A `builtin` convention routes the canonical tools to the host's built-in store
 through `TrackerDeps.builtIn`. That scope is the bound tracker project UUID and

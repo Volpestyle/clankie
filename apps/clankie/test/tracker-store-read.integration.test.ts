@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -78,7 +78,11 @@ it("answers repeated reads of an unchanged store without loading it again", asyn
         title: `Bulk ${index}`,
         description: "x".repeat(1 << 20),
       });
-    const storeBytes = (await stat(join(directory, "tracker.json"))).size;
+    // A store this size keeps its writes in a journal beside the checkpoint (LOCAL-VUH-42).
+    const journal = join(directory, "tracker.journal");
+    let storeBytes = (await stat(join(directory, "tracker.json"))).size;
+    for (const name of await readdir(journal).catch(() => []))
+      storeBytes += (await stat(join(journal, name))).size;
     expect(storeBytes).toBeGreaterThan(4 << 20);
     await tracker.storeId();
 

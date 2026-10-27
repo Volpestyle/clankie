@@ -29,10 +29,39 @@ import {
   type TrackerSyncResult,
 } from "@clankie/protocol";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, lstatSync, realpathSync, readFileSync, statSync, type BigIntStats } from "node:fs";
-import { open, readFile, rename, rm, stat } from "node:fs/promises";
+import {
+  constants,
+  existsSync,
+  lstatSync,
+  realpathSync,
+  readFileSync,
+  statSync,
+  type BigIntStats,
+} from "node:fs";
+import { copyFile, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { compareVersions, type ReleaseHistory } from "./releases.ts";
+import {
+  appendJournal,
+  CHECKPOINT_MIN_BYTES,
+  JOURNAL_DIRECTORY,
+  JOURNAL_THRESHOLD_BYTES,
+  type JournalHeader,
+  type JournalRecord,
+  journalVersion,
+  readJournalCommits,
+  readJournalRecord,
+  journalRecords,
+  readJournalTail,
+  RECEIPT_RESULT_BYTES,
+  replayJournal,
+  sealSegment,
+  setJournalAside,
+  startSegment,
+  storeChanges,
+  writeCheckpointFile,
+  writeSegment,
+} from "./tracker-journal.ts";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 import {
   linearId,
@@ -132,6 +161,10 @@ interface WriteReceipt {
   result?: unknown;
   reason?: string;
   detail?: string;
+  /** The sync commit that settled it (LOCAL-VUH-42); its journal record holds the full result. */
+  syncId?: number;
+  /** A large applied result lives only in that journal record, not in the checkpoint or memory. */
+  resultInJournal?: true;
 }
 
 /** Append-only: entries are never edited or removed, and each hashes its predecessor. */
@@ -341,7 +374,14 @@ interface Store {
   /** Import keeps the native store identity separate from the provider's team id. */
   storeId?: string;
   syncId?: number;
+  /**
+   * The sync log in memory. A journal-backed store keeps only the commits since its checkpoint;
+   * `syncBase` names the commit before them, and older ones are read from the journal.
+   */
   syncLog?: (TrackerSyncCommit & { prevHash: string; hash: string })[];
+  syncBase?: { syncId: number; hash: string };
+  /** Only in a checkpoint file: the journal segments it covers (LOCAL-VUH-42). */
+  journal?: JournalHeader;
   nextIssue: number;
   nextProject: number;
   team: Team;
@@ -495,6 +535,12 @@ export interface LocalTrackerBackend extends TrackerToolBackend {
   linearMirrorView(projectId: string): Promise<LinearMirrorView | undefined>;
   /** The persisted store identity; it changes when a cutover or switch-back replaces the store. */
   storeId(): Promise<string>;
+  /**
+   * Host-only: checkpoint a journal-backed store now and wait for it. A single-file store above
+   * the journal threshold moves onto the journal; a smaller one is left as it is. Checkpoints
+   * otherwise run in the background as the journal grows.
+   */
+  checkpoint(): Promise<void>;
   /** Host-only: persisted store identity for an exact project UUID; safe inside publication fences. */
   projectStoreId(id: string): Promise<string | undefined>;
   /** Host-only: link the existing mailbox record to its requesting item event. */
@@ -777,12 +823,32 @@ function parseStore(content: string): Store {
       store.ownerAsks.some((ref) => typeof ref?.eventId !== "string" || typeof ref.requestId !== "string"))
   )
     throw new Error("Invalid local tracker owner ask references");
+  if (store.journal !== undefined) {
+    // A checkpoint's sync commits live in the journal it names; the in-memory log starts after it.
+    const header = store.journal;
+    if (
+      header.version !== 1 ||
+      store.syncLog !== undefined ||
+      store.syncBase !== undefined ||
+      store.syncId !== header.syncId ||
+      typeof header.syncHash !== "string" ||
+      !Array.isArray(header.sealed)
+    )
+      throw new Error("Invalid local tracker journal checkpoint");
+    store.syncBase = { syncId: header.syncId, hash: header.syncHash };
+    store.syncLog = [];
+  }
   if (store.syncLog !== undefined) {
-    if (!Array.isArray(store.syncLog) || store.syncId !== store.syncLog.length)
+    const base = store.syncBase ?? { syncId: 0, hash: "" };
+    if (!Array.isArray(store.syncLog) || store.syncId !== base.syncId + store.syncLog.length)
       throw new Error("Invalid local tracker sync log");
-    let previous = "";
+    let previous = base.hash;
     store.syncLog.forEach((commit, index) => {
-      if (commit.syncId !== index + 1 || commit.prevHash !== previous || auditHash(commit) !== commit.hash)
+      if (
+        commit.syncId !== base.syncId + index + 1 ||
+        commit.prevHash !== previous ||
+        auditHash(commit) !== commit.hash
+      )
         throw new Error("Local tracker sync log is not intact");
       previous = commit.hash;
     });
@@ -2279,17 +2345,32 @@ function freezeRecords(value: unknown): void {
   Object.freeze(value);
   for (const child of Array.isArray(value) ? value : Object.values(value)) freezeRecords(child);
 }
-/** Freezes every record the draft holds and returns its immutable snapshot; the draft stays writable. */
-function settle(store: Store): Store {
+/**
+ * Freezes every record the draft holds and returns its immutable snapshot; the draft stays
+ * writable. Given the committed store the draft came from, a record still at the same place
+ * there is frozen already, so only what this write placed is walked.
+ */
+function settle(store: Store, base?: Store): Store {
   const snapshot = { ...store } as Record<string, unknown>;
-  for (const [key, value] of Object.entries(snapshot))
-    if (Array.isArray(value)) snapshot[key] = value.slice();
+  const committed = base as Record<string, unknown> | undefined;
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (!Array.isArray(value)) continue;
+    const records = [...value];
+    const previous = committed?.[key];
+    if (Array.isArray(previous)) {
+      for (let index = 0; index < records.length; index++)
+        if (records[index] !== previous[index]) freezeRecords(records[index]);
+      Object.freeze(records);
+    }
+    snapshot[key] = records;
+  }
   freezeRecords(snapshot);
   return snapshot as unknown as Store;
 }
 function draftOf(store: Store): Store {
   const draft = { ...store } as Record<string, unknown>;
-  for (const [key, value] of Object.entries(draft)) if (Array.isArray(value)) draft[key] = value.slice();
+  // Spread, not slice: V8 slices a frozen array element by element.
+  for (const [key, value] of Object.entries(draft)) if (Array.isArray(value)) draft[key] = [...value];
   return draft as unknown as Store;
 }
 /** Names the code that changed a committed record in place, so a missed `own` is found. */
@@ -2316,7 +2397,122 @@ const owned = <T extends object>(collection: T[], entry: T): T =>
   Object.isFrozen(collection) ? entry : own(collection, entry);
 
 /** Each store file's committed snapshot, frozen and shared by every backend instance in the process. */
-const committedStores = new Map<string, { current?: { version: string; bytes: Buffer; store: Store } }>();
+const committedStores = new Map<string, { current?: Committed }>();
+/** A store as committed by this process, and where its next commit goes. */
+interface Committed {
+  readonly version: string;
+  /** SHA-256 and size of `tracker.json` as committed: the single file, or the checkpoint. */
+  readonly digest: string;
+  readonly bytes: number;
+  /** Frozen; reads share it and writes draft from it. */
+  readonly store: Store;
+  readonly journal?: {
+    readonly header: JournalHeader;
+    readonly live: { readonly name: string; readonly size: number };
+    /** Bytes appended since the checkpoint, against which the next checkpoint is due. */
+    readonly bytes: number;
+    readonly checkpointBytes: number;
+  };
+}
+/** The record carries the sync commit itself; the checkpoint header replaces the rest. */
+const JOURNAL_SKIP: ReadonlySet<string> = new Set(["syncLog", "syncId", "syncBase", "journal"]);
+/** At most one background checkpoint per store file in this process. */
+const checkpoints = new Map<string, Promise<void>>();
+/** Sealed segments this process has already proven, so reopening does not hash them again. */
+const verifiedSegments = new Set<string>();
+
+/** Proves a hash chain from `from` on: consecutive sequence numbers, links and hashes. */
+function assertChained<T extends { prevHash: string; hash: string }>(
+  entries: readonly T[],
+  from: number,
+  sequence: (entry: T) => number,
+  base: { sequence: number; hash: string },
+  label: string,
+): void {
+  let previous = from === 0 ? base.hash : entries[from - 1]!.hash;
+  for (let index = from; index < entries.length; index++) {
+    const entry = entries[index]!;
+    if (
+      sequence(entry) !== base.sequence + index + 1 ||
+      entry.prevHash !== previous ||
+      auditHash(entry) !== entry.hash
+    )
+      throw new Error(`Local tracker ${label} is not intact at ${String(base.sequence + index + 1)}`);
+    previous = entry.hash;
+  }
+}
+const sharedPrefix = (left: readonly unknown[] = [], right: readonly unknown[] = []) => {
+  let index = 0;
+  while (index < left.length && index < right.length && left[index] === right[index]) index++;
+  return index;
+};
+/** Replays journal records, then proves what they added to each chain, as opening a file does. */
+function replayVerified(base: Store, records: readonly JournalRecord[]): Store {
+  const store = replayJournal(base, records);
+  const head = { sequence: 0, hash: "" };
+  assertChained(
+    store.events ?? [],
+    sharedPrefix(base.events, store.events),
+    (event) => event.seq,
+    head,
+    "event stream",
+  );
+  assertChained(
+    store.audit ?? [],
+    sharedPrefix(base.audit, store.audit),
+    (event) => event.seq,
+    head,
+    "audit log",
+  );
+  const syncBase = store.syncBase ?? { syncId: 0, hash: "" };
+  assertChained(
+    store.syncLog ?? [],
+    sharedPrefix(base.syncLog, store.syncLog),
+    (commit) => commit.syncId,
+    { sequence: syncBase.syncId, hash: syncBase.hash },
+    "sync log",
+  );
+  return store;
+}
+/**
+ * A receipt keeps a large applied result only in its journal record once a checkpoint covers
+ * it. Guided review receipts are compact already, and retirement reads them, so they stay.
+ */
+function boundedReceipts(receipts: readonly WriteReceipt[], header: JournalHeader): WriteReceipt[] {
+  return receipts.map((receipt) => {
+    if (
+      receipt.state !== "applied" ||
+      receipt.resultInJournal === true ||
+      receipt.syncId === undefined ||
+      receipt.syncId <= header.since ||
+      receipt.syncId > header.syncId ||
+      GUIDED_REVIEW_TOOLS.has(receipt.tool) ||
+      JSON.stringify(receipt.result ?? null).length <= RECEIPT_RESULT_BYTES
+    )
+      return receipt;
+    const { result: _result, ...bounded } = receipt;
+    return { ...bounded, resultInJournal: true };
+  });
+}
+/** The in-memory store once a checkpoint covers it: only later commits, bounded receipts. */
+function compactedStore(store: Store, header: JournalHeader): Store {
+  return {
+    ...store,
+    syncBase: { syncId: header.syncId, hash: header.syncHash },
+    syncLog: (store.syncLog ?? []).filter((commit) => commit.syncId > header.syncId),
+    ...(store.receipts === undefined ? {} : { receipts: boundedReceipts(store.receipts, header) }),
+  };
+}
+/** What a checkpoint file holds: the store without its sync log, and the journal header. */
+function checkpointContent(store: Store, header: JournalHeader): Record<string, unknown> {
+  return {
+    ...store,
+    syncLog: undefined,
+    syncBase: undefined,
+    ...(store.receipts === undefined ? {} : { receipts: boundedReceipts(store.receipts, header) }),
+    journal: header,
+  };
+}
 
 /** Atomic rename prevents torn reads; fsync preserves completed writes across a process crash. */
 async function persist(
@@ -3722,6 +3918,7 @@ async function read(
   options: LocalTrackerOptions,
   actor: TrackerActor,
   now: string,
+  receiptResult: (receipt: WriteReceipt) => Promise<unknown> = async (receipt) => receipt.result,
 ): Promise<unknown> {
   if (
     (name === "list_issues" || name === "list_ready_issues") &&
@@ -3750,7 +3947,7 @@ async function read(
       tool: receipt.tool,
       at: receipt.at,
       ...(receipt.state === "applied"
-        ? { result: replayGuidedReviewReceipt(store, receipt.result) }
+        ? { result: replayGuidedReviewReceipt(store, await receiptResult(receipt)) }
         : { reason: receipt.reason, detail: receipt.detail }),
     };
   }
@@ -3798,8 +3995,15 @@ const syncListeners = new Map<string, Set<() => void>>();
  */
 function syncModels(store: Store, wanted?: ReadonlySet<string>): TrackerSyncModel[] {
   const models: TrackerSyncModel[] = [];
+  // A wanted set names a few records; by model, so a collection with none is not walked.
+  const wantedIds = new Map<string, Set<string>>();
+  for (const key of wanted ?? []) {
+    const at = key.indexOf(":");
+    const ids = wantedIds.get(key.slice(0, at)) ?? new Set<string>();
+    wantedIds.set(key.slice(0, at), ids.add(key.slice(at + 1)));
+  }
   const want = (modelName: TrackerSyncModel["modelName"], id: string) =>
-    wanted === undefined || wanted.has(`${modelName}:${id}`);
+    wanted === undefined || wantedIds.get(modelName)?.has(id) === true;
   const projectOfIssue = (id: string | null | undefined): string[] => {
     const project = store.issues.find((issue) => issue.id === id)?.projectId;
     // Unprojected items have an explicit group; empty is reserved for shared metadata.
@@ -3810,6 +4014,7 @@ function syncModels(store: Store, wanted?: ReadonlySet<string>): TrackerSyncMode
     entries: readonly object[],
     groups: (data: Record<string, unknown>) => string[],
   ) => {
+    if (wanted !== undefined && !wantedIds.has(modelName)) return;
     for (const entry of entries) {
       if (!want(modelName, (entry as { id: string }).id)) continue;
       const data = structuredClone(entry) as Record<string, unknown>;
@@ -3988,7 +4193,7 @@ function appendSync(
     at,
     ...(key === undefined ? {} : { idempotencyKey: key }),
     deltas,
-    prevHash: store.syncLog?.at(-1)?.hash ?? "",
+    prevHash: store.syncLog?.at(-1)?.hash ?? store.syncBase?.hash ?? "",
   };
   store.syncId = body.syncId;
   (store.syncLog ??= []).push({ ...body, hash: auditHash(body) });
@@ -4095,6 +4300,8 @@ interface LockedReadIdentity {
   readonly directory: BigIntStats;
   readonly file: BigIntStats;
   readonly bytes: Buffer;
+  /** The journal's state beside those bytes; a commit appends there without touching them. */
+  readonly journal: string;
 }
 
 const sameFile = (left: BigIntStats, right: BigIntStats) =>
@@ -4108,6 +4315,7 @@ function assertReadIdentity(directory: string, path: string, identity: LockedRea
     !sameFile(statSync(directory, { bigint: true }), identity.directory) ||
     !sameFile(statSync(path, { bigint: true }), identity.file) ||
     !readFileSync(path).equals(identity.bytes) ||
+    journalVersion(directory) !== identity.journal ||
     !sameFile(statSync(path, { bigint: true }), identity.file) ||
     realpathSync(path) !== join(identity.canonicalDirectory, "tracker.json") ||
     realpathSync(directory) !== identity.canonicalDirectory ||
@@ -4301,6 +4509,8 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     const file = statSync(path, { bigint: true });
     return `${file.dev}:${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}`;
   };
+  /** Both halves of the committed store: any commit, by anyone, changes one of them. */
+  const storeVersion = () => `${fileVersion()}|${journalVersion(directory)}`;
   const listeners = eventListeners.get(path) ?? new Set<TrackerEventListener>();
   eventListeners.set(path, listeners);
   // The committed snapshot is frozen, so reads share it and writes take a draft of it. Every
@@ -4308,31 +4518,265 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   // hire call, and none should re-parse another's commit.
   const shared = committedStores.get(path) ?? {};
   committedStores.set(path, shared);
+  /** `tracker.json` as committed: the single legacy file, or a checkpoint plus its journal tail. */
+  const openCommitted = async (bytes: Buffer, version: string): Promise<Committed> => {
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const parsed = parseStore(bytes.toString("utf8"));
+    const header = parsed.journal;
+    if (header === undefined) return { version, digest, bytes: bytes.length, store: settle(parsed) };
+    delete parsed.journal;
+    const tail = await readJournalTail(directory, header, { verified: verifiedSegments });
+    if (tail.live === undefined) throw new Error("Tracker journal has no segment to append to");
+    return {
+      version,
+      digest,
+      bytes: bytes.length,
+      store: settle(replayVerified(parsed, tail.records)),
+      journal: { header, live: tail.live, bytes: tail.bytes, checkpointBytes: bytes.length },
+    };
+  };
+  /** Another process or backend committed: replay its journal records, or reopen. */
+  const refresh = async (version: string, read?: Buffer): Promise<Committed> => {
+    const bytes = read ?? (await readFile(path));
+    const current = shared.current;
+    // Only byte-identical, already validated content may skip parsing/auditing.
+    if (current !== undefined && createHash("sha256").update(bytes).digest("hex") === current.digest) {
+      if (current.journal === undefined) return { ...current, version };
+      try {
+        const head = current.store.syncLog?.at(-1) ?? current.store.syncBase!;
+        const tail = await readJournalTail(directory, current.journal.header, {
+          verified: false,
+          after: { syncId: current.store.syncId ?? 0, hash: head.hash },
+        });
+        if (tail.live !== undefined)
+          return {
+            ...current,
+            version,
+            store: settle(replayVerified(current.store, tail.records)),
+            journal: { ...current.journal, live: tail.live, bytes: tail.bytes },
+          };
+      } catch {
+        // Anything but a clean continuation reopens from the checkpoint and proves it all again.
+      }
+    }
+    return openCommitted(bytes, version);
+  };
   const readStore = async (mutable = true): Promise<Store> => {
     // A different process can replace or edit the store, so every read checks
-    // the file's version. Its identity, size and timestamps change with any
+    // the store's version. Its identity, size and timestamps change with any
     // write; ctime also catches an in-place edit that restores mtime. Reading
     // the whole store on each call was the service's main allocation churn
     // (VUH-2379). The version is taken before the read, so a racing write
     // leaves a stale version that the next read misses.
-    const stats = await stat(path, { bigint: true });
-    const version = `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
-    if (shared.current?.version !== version) {
-      // Only byte-identical, already validated content may skip parsing/auditing.
-      const bytes = await readFile(path);
-      shared.current =
-        shared.current !== undefined && shared.current.bytes.equals(bytes)
-          ? { ...shared.current, version }
-          : { version, bytes, store: settle(parseStore(bytes.toString("utf8"))) };
-    }
+    const version = storeVersion();
+    if (shared.current?.version !== version) shared.current = await refresh(version);
     return mutable ? draftOf(shared.current.store) : shared.current.store;
   };
-  /** Our own commit becomes the snapshot the next call reuses, without reading it back. */
+  /** Set after each durable commit: the store version that commit left. */
+  let landed: string | undefined;
+  /**
+   * Our own commit becomes the snapshot the next call reuses, without reading it back. A
+   * journal-backed store appends one record; a small one rewrites its single file, and moves
+   * to the journal before the commit that would cost more than the threshold.
+   */
   const commit = async (store: Store, assertHeld: () => void, callOptions?: TrackerToolCallOptions) => {
-    const bytes = await persist(path, store, assertHeld, callOptions);
+    let current = shared.current;
+    if (current !== undefined && current.journal === undefined && current.bytes > JOURNAL_THRESHOLD_BYTES)
+      current = shared.current = await migrateToJournal(current, assertHeld);
+    const confirmed = {
+      ...callOptions,
+      effectConfirmed: () => {
+        landed = storeVersion();
+        callOptions?.effectConfirmed?.();
+      },
+    };
+    if (current?.journal !== undefined) {
+      shared.current = await appendCommit(current, store, assertHeld, confirmed);
+      if (
+        shared.current.journal!.bytes >=
+        Math.max(CHECKPOINT_MIN_BYTES, shared.current.journal!.checkpointBytes / 8)
+      )
+        scheduleCheckpoint();
+      return;
+    }
+    const bytes = await persist(path, store, assertHeld, confirmed);
     // Exactly what reopening these bytes would hold: open binds stage statuses after reading.
     bindStageStatuses(store);
-    shared.current = { version: fileVersion(), bytes, store: settle(store) };
+    shared.current = {
+      version: storeVersion(),
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      bytes: bytes.length,
+      store: settle(store, current?.store),
+    };
+  };
+  const appendCommit = async (
+    current: Committed,
+    store: Store,
+    assertHeld: () => void,
+    callOptions: TrackerToolCallOptions,
+  ): Promise<Committed> => {
+    const journal = current.journal!;
+    const base = current.store;
+    const added = (store.syncLog ?? []).filter((entry) => entry.syncId > (base.syncId ?? 0));
+    if (added.length !== 1 || store.syncId !== (base.syncId ?? 0) + 1)
+      throw new Error("A journal commit carries exactly one sync commit");
+    const record = { syncId: store.syncId, commit: added[0]!, ...storeChanges(base, store, JOURNAL_SKIP) };
+    const line = `${JSON.stringify(record)}\n`;
+    await callOptions.beforeWrite?.();
+    const size = await appendJournal(directory, journal.live, line, () => {
+      assertHeld();
+      callOptions.onDispatch?.();
+    });
+    callOptions.effectConfirmed?.();
+    return {
+      ...current,
+      version: storeVersion(),
+      store: settle(
+        {
+          ...store,
+          ...(base.syncBase === undefined ? {} : { syncBase: base.syncBase }),
+          syncLog: [...(base.syncLog ?? []), added[0]!],
+        },
+        base,
+      ),
+      journal: {
+        ...journal,
+        live: { name: journal.live.name, size },
+        bytes: journal.bytes + size - journal.live.size,
+      },
+    };
+  };
+  /**
+   * One-time move of a large single-file store onto the journal, under the store lock. Its exact
+   * bytes are kept beside it first; its sync history becomes the first sealed segment; the
+   * checkpoint rename is the switch. Until then the single file stays authoritative, and a
+   * journal left by an interrupted attempt is set aside.
+   */
+  const migrateToJournal = async (current: Committed, assertHeld: () => void): Promise<Committed> => {
+    await copyFile(path, join(directory, `tracker.pre-journal-${Date.now()}.json`), constants.COPYFILE_EXCL);
+    await setJournalAside(directory, "unused");
+    const store = current.store;
+    const history = store.syncLog ?? [];
+    const sealed = history.length
+      ? [
+          await writeSegment(
+            directory,
+            1,
+            history.map((entry) => `${JSON.stringify({ syncId: entry.syncId, commit: entry })}\n`),
+          ),
+        ]
+      : [];
+    const header: JournalHeader = {
+      version: 1,
+      syncId: store.syncId ?? 0,
+      syncHash: history.at(-1)?.hash ?? "",
+      since: store.syncId ?? 0,
+      sealed,
+    };
+    const live = await startSegment(directory, header.syncId + 1);
+    const checkpoint = await writeCheckpoint(store, header, assertHeld);
+    return {
+      version: storeVersion(),
+      ...checkpoint,
+      store: settle(compactedStore(store, header)),
+      journal: { header, live: { name: live, size: 0 }, bytes: 0, checkpointBytes: checkpoint.bytes },
+    };
+  };
+  /** Writes a checkpoint to a temp file and renames it in once `ready` passes under the lock. */
+  const writeCheckpoint = async (store: Store, header: JournalHeader, ready: () => void) => {
+    const temp = `${path}.${randomUUID()}.tmp`;
+    try {
+      const written = await writeCheckpointFile(checkpointContent(store, header), temp);
+      ready();
+      await rename(temp, path);
+      return { digest: written.sha256, bytes: written.bytes };
+    } finally {
+      await rm(temp, { force: true });
+    }
+  };
+  /**
+   * Seals the live segments and starts a new one under the lock, writes the checkpoint of that
+   * frozen snapshot with no lock held, then renames it in under the lock if nothing replaced the
+   * store meanwhile. Commits keep appending throughout; a crash at any point reopens from the
+   * previous checkpoint and replays every segment after it.
+   */
+  const checkpointNow = async (): Promise<void> => {
+    const started = await withTrackerStoreLock(path, async (assertHeld) => {
+      try {
+        await readStore(false);
+      } catch (error) {
+        if (codeOf(error) === "ENOENT") return undefined;
+        throw error;
+      }
+      let current = shared.current!;
+      // The host checkpoints at start, so a large single-file store moves then, not in a write.
+      if (current.journal === undefined && current.bytes > JOURNAL_THRESHOLD_BYTES)
+        current = shared.current = await migrateToJournal(current, assertHeld);
+      if (current.journal === undefined || current.journal.bytes === 0) return undefined;
+      const names = (await readdir(join(directory, JOURNAL_DIRECTORY)))
+        .filter((name) => /^\d{12}\.jsonl$/u.test(name))
+        .sort();
+      const unsealed = names.slice(current.journal.header.sealed.length);
+      const sealed = [...current.journal.header.sealed];
+      for (const name of unsealed) sealed.push(await sealSegment(directory, name));
+      const syncId = current.store.syncId ?? 0;
+      const header: JournalHeader = {
+        version: 1,
+        syncId,
+        syncHash: (current.store.syncLog?.at(-1) ?? current.store.syncBase!).hash,
+        since: current.journal.header.since,
+        sealed,
+      };
+      const live = await startSegment(directory, syncId + 1);
+      shared.current = {
+        ...current,
+        version: storeVersion(),
+        journal: { ...current.journal, live: { name: live, size: 0 }, bytes: 0 },
+      };
+      return { store: current.store, header, base: fileVersion() };
+    });
+    if (started === undefined) return;
+    const temp = `${path}.${randomUUID()}.tmp`;
+    try {
+      const written = await writeCheckpointFile(checkpointContent(started.store, started.header), temp);
+      await withTrackerStoreLock(path, async (assertHeld) => {
+        // Only the checkpoint this one extends may be replaced.
+        if (fileVersion() !== started.base) return;
+        assertHeld();
+        await rename(temp, path);
+        const current = shared.current;
+        if (current?.journal === undefined || current.digest === written.sha256) return;
+        shared.current = {
+          ...current,
+          version: storeVersion(),
+          digest: written.sha256,
+          bytes: written.bytes,
+          store: settle(compactedStore(current.store, started.header)),
+          journal: { ...current.journal, header: started.header, checkpointBytes: written.bytes },
+        };
+      });
+    } finally {
+      await rm(temp, { force: true });
+    }
+  };
+  const scheduleCheckpoint = () => {
+    if (checkpoints.has(path)) return;
+    const running = checkpointNow()
+      // allow-swallowed-rejection -- a failed checkpoint loses nothing: commits are already durable, and the next one retries
+      .catch(() => {})
+      .finally(() => checkpoints.delete(path));
+    checkpoints.set(path, running);
+  };
+  /** A receipt's full result, from its journal record when the checkpoint left it there. */
+  const receiptResult = async (receipt: WriteReceipt): Promise<unknown> => {
+    if (receipt.resultInJournal !== true) return receipt.result;
+    const record = await readJournalRecord(directory, receipt.syncId!);
+    const full = ((record?.append?.receipts ?? []) as WriteReceipt[]).find(
+      (entry) => entry.actorKey === receipt.actorKey && entry.idempotencyKey === receipt.idempotencyKey,
+    );
+    if (full === undefined)
+      throw new Error("This write receipt's result is missing from the tracker journal");
+    return full.result;
   };
   const publish = (events: readonly TrackerItemEvent[]) => {
     for (const event of events)
@@ -4359,7 +4803,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     let store = initial;
     const key = keyed?.key;
     const fingerprint = keyed?.fingerprint ?? "";
-    const before = settle(store);
+    const before = settle(store, shared.current?.store);
     const now = nextWriteTime(store, clock);
     const fields = Object.keys(request).sort();
     let result: unknown;
@@ -4425,6 +4869,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           at: now,
           reason: refusal.reason,
           detail,
+          syncId: (store.syncId ?? 0) + 1,
         });
       // Inbox refusals still require live mailbox/project/store authority before bookkeeping.
       appendSync(before, store, actor, name, now, key);
@@ -4475,6 +4920,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         state: "applied",
         at: now,
         result: publicResult,
+        syncId: (store.syncId ?? 0) + 1,
       });
     appendSync(before, store, actor, name, now, key);
     await commit(store, assertHeld, {
@@ -4511,12 +4957,13 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     let readIdentity: LockedReadIdentity | undefined;
     let bytes: Buffer;
     let version: string;
+    const journal = journalVersion(directory);
     const file = await open(path, "r");
     try {
       const before = await file.stat({ bigint: true });
       bytes = await file.readFile();
       const after = await file.stat({ bigint: true });
-      version = `${after.dev}:${after.ino}:${after.size}:${after.mtimeNs}:${after.ctimeNs}`;
+      version = `${after.dev}:${after.ino}:${after.size}:${after.mtimeNs}:${after.ctimeNs}|${journal}`;
       if (
         before.isFile() &&
         before.ino > 0n &&
@@ -4524,16 +4971,14 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         sameFile(before, after) &&
         before.size === after.size &&
         before.mtimeNs === after.mtimeNs &&
-        before.ctimeNs === after.ctimeNs
+        before.ctimeNs === after.ctimeNs &&
+        journalVersion(directory) === journal
       )
-        readIdentity = { ...origin, file: after, bytes };
+        readIdentity = { ...origin, file: after, bytes, journal };
     } finally {
       await file.close();
     }
-    shared.current =
-      shared.current !== undefined && shared.current.bytes.equals(bytes)
-        ? { ...shared.current, version }
-        : { version, bytes, store: settle(parseStore(bytes.toString("utf8"))) };
+    if (shared.current?.version !== version) shared.current = await refresh(version, bytes);
     if (readIdentity !== undefined) {
       try {
         assertReadIdentity(directory, path, readIdentity);
@@ -4655,6 +5100,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             const initial = await file.stat({ bigint: true });
             const bytes = await file.readFile();
             const store = parseStore(bytes.toString("utf8"));
+            // Fixture stores are single files; a checkpoint alone is not the whole store.
+            if (store.journal !== undefined)
+              throw new Error("Strict fixture read requires a single-file store");
             const storeId = store.storeId ?? store.team.id;
             if (!storeId || cyclesDue(store, new Date().toISOString()))
               throw new Error("Strict fixture store identity or rollover refusal");
@@ -4833,7 +5281,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             await callOptions?.beforeWrite?.();
             assertHeld();
             if (prior.state === "refused") throw new TrackerWriteRefused(prior.reason!, prior.detail!);
-            return { outcome: "applied" as const, result: structuredClone(prior.result) };
+            return { outcome: "applied" as const, result: structuredClone(await receiptResult(prior)) };
           }
           const result = await write(
             store,
@@ -4888,10 +5336,110 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       const listener = () => wake?.();
       listeners.add(listener);
       try {
+        // Long-pollers wake on every commit: read the committed store itself, never a copy.
+        const answer = async (store: Store): Promise<TrackerSyncResult> => {
+          const storeId = store.storeId ?? store.team.id;
+          const lastSyncId = store.syncId ?? 0;
+          const wildcard =
+            command.action === "bootstrap" && command.type === "full" && command.projects.includes("*");
+          const requested = wildcard
+            ? [...store.projects.map((project) => project.id), "unprojected", "workspace"]
+            : command.projects;
+          const groupIds = [
+            ...new Set(
+              requested.map((id) => {
+                if (id === "unprojected" || id === "workspace") return id;
+                if (!store.projects.some((project) => project.id === id))
+                  throw new Error(`Sync project UUID not found: ${id}`);
+                return id;
+              }),
+            ),
+          ];
+          // Discovery remains live even when clients only name their current project groups.
+          if (command.action === "subscribe" && !groupIds.includes("workspace")) groupIds.push("workspace");
+          if (command.action === "bootstrap" || command.action === "batch") {
+            let models = syncModels(store).filter((model) => inSyncGroups(model.projectIds, groupIds));
+            if (command.action === "batch") {
+              const wanted = new Set(command.models.map(syncModelKey));
+              models = models.filter((model) => wanted.has(syncModelKey(model)));
+              return { outcome: "batch", storeId, lastSyncId, models };
+            }
+            if (command.lazy) models = models.map(lazySyncModel);
+            const metadata = {
+              kind: "metadata",
+              schemaVersion: 1,
+              type: command.type,
+              storeId,
+              lastSyncId,
+              syncGroups: groupIds,
+              modelCount: models.length,
+            };
+            return {
+              outcome: "bootstrap",
+              ndjson: [...models, metadata].map((line) => JSON.stringify(line)).join("\n") + "\n",
+            };
+          }
+          if (command.storeId !== storeId || command.lastSyncId > lastSyncId)
+            return {
+              outcome: "rebootstrap",
+              storeId,
+              lastSyncId,
+              projects: groupIds,
+              reason: command.storeId !== storeId ? "store_changed" : "cursor_gap",
+            };
+          // Commits before the checkpoint are no longer in memory; the journal retains them all.
+          const page =
+            command.lastSyncId < (store.syncBase?.syncId ?? 0)
+              ? await readJournalCommits(directory, command.lastSyncId, command.limit)
+              : (() => {
+                  const available = (store.syncLog ?? []).filter(
+                    (commit) => commit.syncId > command.lastSyncId,
+                  );
+                  return {
+                    commits: available.slice(0, command.limit),
+                    hasMore: available.length > command.limit,
+                  };
+                })();
+          const commits = (page.commits as NonNullable<Store["syncLog"]>).map(
+            ({ prevHash: _prev, hash: _hash, ...commit }) => ({
+              ...commit,
+              // Older retained commits predate workspace routing; project metadata is
+              // projected into the new group without rewriting the hash-linked journal.
+              deltas: commit.deltas
+                .map((delta) =>
+                  ["project", "milestone", "document", "status_update", "cycle", "release"].includes(
+                    delta.modelName,
+                  )
+                    ? {
+                        ...delta,
+                        projectIds: [...new Set([...delta.projectIds, "workspace"])],
+                        previousProjectIds: delta.previousProjectIds.length
+                          ? [...new Set([...delta.previousProjectIds, "workspace"])]
+                          : [],
+                      }
+                    : delta,
+                )
+                .filter(
+                  (delta) =>
+                    inSyncGroups(delta.projectIds, groupIds) ||
+                    (delta.previousProjectIds.length > 0 && inSyncGroups(delta.previousProjectIds, groupIds)),
+                ),
+            }),
+          );
+          // Register while the replay snapshot is current (under the lock, or in the same
+          // synchronous step), closing the bootstrap/live race.
+          listeners.add(listener);
+          return {
+            outcome: "deltas",
+            storeId,
+            lastSyncId: commits.at(-1)?.syncId ?? command.lastSyncId,
+            commits,
+            hasMore: page.hasMore,
+          };
+        };
         const readSync = () =>
           withTrackerStoreLock(path, async (assertHeld): Promise<TrackerSyncResult> => {
             signal?.throwIfAborted();
-            // Long-pollers wake on every commit: read the committed store itself, never a copy.
             const loaded = await load({ mutable: false });
             const { clock, initialized } = loaded;
             let store = loaded.store;
@@ -4900,94 +5448,34 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               await roll(store, clock, assertHeld);
             }
             if (initialized) await commit(store, assertHeld);
-            const storeId = store.storeId ?? store.team.id;
-            const lastSyncId = store.syncId ?? 0;
-            const wildcard =
-              command.action === "bootstrap" && command.type === "full" && command.projects.includes("*");
-            const requested = wildcard
-              ? [...store.projects.map((project) => project.id), "unprojected", "workspace"]
-              : command.projects;
-            const groupIds = [
-              ...new Set(
-                requested.map((id) => {
-                  if (id === "unprojected" || id === "workspace") return id;
-                  if (!store.projects.some((project) => project.id === id))
-                    throw new Error(`Sync project UUID not found: ${id}`);
-                  return id;
-                }),
-              ),
-            ];
-            // Discovery remains live even when clients only name their current project groups.
-            if (command.action === "subscribe" && !groupIds.includes("workspace")) groupIds.push("workspace");
-            if (command.action === "bootstrap" || command.action === "batch") {
-              let models = syncModels(store).filter((model) => inSyncGroups(model.projectIds, groupIds));
-              if (command.action === "batch") {
-                const wanted = new Set(command.models.map(syncModelKey));
-                models = models.filter((model) => wanted.has(syncModelKey(model)));
-                return { outcome: "batch", storeId, lastSyncId, models };
-              }
-              if (command.lazy) models = models.map(lazySyncModel);
-              const metadata = {
-                kind: "metadata",
-                schemaVersion: 1,
-                type: command.type,
-                storeId,
-                lastSyncId,
-                syncGroups: groupIds,
-                modelCount: models.length,
-              };
-              return {
-                outcome: "bootstrap",
-                ndjson: [...models, metadata].map((line) => JSON.stringify(line)).join("\n") + "\n",
-              };
-            }
-            if (command.storeId !== storeId || command.lastSyncId > lastSyncId)
-              return {
-                outcome: "rebootstrap",
-                storeId,
-                lastSyncId,
-                projects: groupIds,
-                reason: command.storeId !== storeId ? "store_changed" : "cursor_gap",
-              };
-            const available = (store.syncLog ?? []).filter((commit) => commit.syncId > command.lastSyncId);
-            const commits = available
-              .slice(0, command.limit)
-              .map(({ prevHash: _prev, hash: _hash, ...commit }) => ({
-                ...commit,
-                // Older retained commits predate workspace routing; project metadata is
-                // projected into the new group without rewriting the hash-linked journal.
-                deltas: commit.deltas
-                  .map((delta) =>
-                    ["project", "milestone", "document", "status_update", "cycle", "release"].includes(
-                      delta.modelName,
-                    )
-                      ? {
-                          ...delta,
-                          projectIds: [...new Set([...delta.projectIds, "workspace"])],
-                          previousProjectIds: delta.previousProjectIds.length
-                            ? [...new Set([...delta.previousProjectIds, "workspace"])]
-                            : [],
-                        }
-                      : delta,
-                  )
-                  .filter(
-                    (delta) =>
-                      inSyncGroups(delta.projectIds, groupIds) ||
-                      (delta.previousProjectIds.length > 0 &&
-                        inSyncGroups(delta.previousProjectIds, groupIds)),
-                  ),
-              }));
-            // Register under the same lock as the replay snapshot, closing the bootstrap/live race.
-            listeners.add(listener);
-            return {
-              outcome: "deltas",
-              storeId,
-              lastSyncId: commits.at(-1)?.syncId ?? command.lastSyncId,
-              commits,
-              hasMore: available.length > commits.length,
-            };
+            return answer(store);
           });
-        const first = await readSync();
+        /**
+         * A subscriber re-subscribes after every page, so ten long-pollers taking the store lock
+         * after each commit would queue ahead of the next write. A current snapshot whose page is
+         * in memory is read without it: from reading the snapshot to registering the listener
+         * runs in one synchronous step, so no commit in this process lands between them. A
+         * rollover due, a new store or older commits in the journal take the locked path.
+         */
+        const readCurrent = () => {
+          const current = shared.current;
+          const clock = (options.clock ?? (() => new Date()))().toISOString();
+          try {
+            if (
+              command.action !== "subscribe" ||
+              current === undefined ||
+              current.version !== storeVersion() ||
+              command.lastSyncId < (current.store.syncBase?.syncId ?? 0) ||
+              cyclesDue(current.store, clock)
+            )
+              return readSync();
+          } catch {
+            return readSync();
+          }
+          signal?.throwIfAborted();
+          return answer(current.store);
+        };
+        const first = await readCurrent();
         if (
           command.action !== "subscribe" ||
           first.outcome !== "deltas" ||
@@ -4999,7 +5487,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         signal?.addEventListener("abort", listener, { once: true });
         if (signal?.aborted) listener();
         await awakened;
-        return await readSync();
+        return await readCurrent();
       } finally {
         if (timer) clearTimeout(timer);
         signal?.removeEventListener("abort", listener);
@@ -5408,6 +5896,12 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       const { store, clock } = await load({ mutable: false });
       return builtInOutcomes(store, input, clock);
     },
+    async checkpoint() {
+      await checkpoints.get(path);
+      // No store yet: nothing to move or checkpoint, and no directory or lock to create.
+      if (!existsSync(path)) return;
+      await checkpointNow();
+    },
     async storeId() {
       const { store } = await load({ mutable: false });
       return store.storeId ?? store.team.id;
@@ -5445,11 +5939,11 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       return withTrackerStoreLock(
         path,
         async (assertHeld) => {
-          let version = fileVersion();
+          let version = storeVersion();
           const store = await readStore(writing);
           const assertStore = () => {
             assertHeld();
-            if (fileVersion() !== version) throw new Error("Inbox tracker store changed. Read again.");
+            if (storeVersion() !== version) throw new Error("Inbox tracker store changed. Read again.");
           };
           assertStore();
           if (input.storeId !== (store.storeId ?? store.team.id)) throw new Error("store_replaced");
@@ -5557,7 +6051,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               );
             if (prior.state === "refused") throw new TrackerWriteRefused(prior.reason!, prior.detail!);
             assertCurrent();
-            return { value: structuredClone(prior.result), assertCurrent };
+            return { value: structuredClone(await receiptResult(prior)), assertCurrent };
           }
           if (row.expectedRevision !== mutation.expectedRevision) throw new Error("inbox_fence_stale");
           const existing = entryFor(target);
@@ -5605,8 +6099,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
                 assertCurrent();
               },
               effectConfirmed: () => {
-                version = fileVersion();
-                if (!readFileSync(path).equals(Buffer.from(`${JSON.stringify(store, null, 2)}\n`)))
+                // The commit records the version it left; anything else on disk is not this write.
+                version = storeVersion();
+                if (version !== landed)
                   throw new Error("Inbox store changed after dispatch; attention may have committed");
                 callOptions.effectConfirmed?.();
               },
@@ -5915,7 +6410,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         if (SAVED_ISSUE_VIEW_TOOLS.has(name)) issueViewProject(store, args);
         const actor = callOptions?.actor ?? localActor(store);
         if (!writing) {
-          const result = await read(store, name, args, options, actor, clock);
+          const result = await read(store, name, args, options, actor, clock, receiptResult);
           if (initialized) await commit(store, assertHeld);
           // Callers cannot mutate objects subsequently reused by another backend call.
           return structuredClone(result);
@@ -5947,7 +6442,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           assertHeld();
           callOptions?.onDispatch?.();
           callOptions?.effectConfirmed?.();
-          return structuredClone(replayGuidedReviewReceipt(store, prior.result));
+          return structuredClone(replayGuidedReviewReceipt(store, await receiptResult(prior)));
         }
         return write(
           store,
@@ -6056,17 +6551,109 @@ async function readStoreText(path: string): Promise<string | undefined> {
 }
 
 /**
- * Host-only check of a `tracker.json` snapshot with the store's own validation: corrupt or
- * unsupported bytes throw, exactly as they would for the tracker itself. Never seeds or writes.
+ * The committed store in a directory, read without the lock and never written: the single file,
+ * or the checkpoint plus its journal tail. With `history`, every sync commit and every receipt
+ * result comes back from the journal too, and `text` is the whole store as one legacy file.
  */
-export function parseTrackerStoreSnapshot(content: string): Readonly<Record<string, unknown>> {
-  return parseStore(content) as unknown as Readonly<Record<string, unknown>>;
+async function readCommittedStore(
+  directory: string,
+  history = false,
+): Promise<{ store: Store; text: string } | undefined> {
+  const text = await readStoreText(join(directory, "tracker.json"));
+  if (text === undefined) return undefined;
+  const parsed = parseStore(text);
+  const header = parsed.journal;
+  if (header === undefined) return { store: parsed, text };
+  delete parsed.journal;
+  const tail = await readJournalTail(directory, header, { verified: false });
+  const store = replayVerified(parsed, tail.records);
+  if (!history) return { store, text };
+  const commits: NonNullable<Store["syncLog"]> = [];
+  const results = new Map<string, unknown>();
+  for await (const record of journalRecords(directory)) {
+    commits.push(record.commit as NonNullable<Store["syncLog"]>[number]);
+    for (const receipt of (record.append?.receipts ?? []) as WriteReceipt[])
+      results.set(`${receipt.actorKey}\n${receipt.idempotencyKey}`, receipt.result);
+  }
+  const { syncBase: _base, ...rest } = store;
+  const whole: Store = {
+    ...rest,
+    syncLog: commits,
+    ...(store.receipts === undefined
+      ? {}
+      : {
+          receipts: store.receipts.map(({ resultInJournal, ...receipt }) =>
+            resultInJournal
+              ? { ...receipt, result: results.get(`${receipt.actorKey}\n${receipt.idempotencyKey}`) }
+              : receipt,
+          ),
+        }),
+  };
+  return { store: whole, text: `${JSON.stringify(whole, null, 2)}\n` };
+}
+
+/**
+ * Host-only rollback (LOCAL-VUH-42): writes the whole committed store, every sync commit and
+ * receipt result included, to `out` as one legacy `tracker.json`, which a build without the
+ * journal opens. Never changes the store; false when there is none.
+ */
+export async function exportTrackerStore(directory: string, out: string): Promise<boolean> {
+  const path = join(resolve(directory), "tracker.json");
+  if (!existsSync(path)) return false;
+  return withTrackerStoreLock(path, async () => {
+    const committed = await readCommittedStore(resolve(directory), true);
+    if (committed === undefined) return false;
+    await writeExclusive(out, committed.text);
+    return true;
+  });
+}
+
+/**
+ * Host-only: a store's records for routing a call to it, without the store's validation, so a
+ * broken store is still found and the tracker itself refuses the call. The checkpoint plus as
+ * much of its journal tail as reads; a malformed file throws. Never seeds or writes.
+ */
+export async function readTrackerStoreRecords(
+  directory: string,
+): Promise<Readonly<Record<string, unknown>> | undefined> {
+  const text = await readStoreText(join(resolve(directory), "tracker.json"));
+  if (text === undefined) return undefined;
+  const parsed = JSON.parse(text) as unknown;
+  if (parsed === null || typeof parsed !== "object") throw new Error("Not a tracker store");
+  const header = (parsed as Record<string, unknown>).journal as JournalHeader | undefined;
+  if (header === undefined) return parsed as Record<string, unknown>;
+  try {
+    return replayJournal(
+      parsed as Record<string, unknown>,
+      (await readJournalTail(resolve(directory), header, { verified: false })).records,
+    );
+  } catch {
+    return parsed as Record<string, unknown>;
+  }
+}
+
+/**
+ * Host-only: the committed store with its journal tail, read without the lock and checked with
+ * the store's own validation, so corrupt or unsupported bytes throw exactly as they would for the
+ * tracker itself. Never seeds or writes.
+ */
+export async function readTrackerStoreSnapshot(
+  directory: string,
+): Promise<Readonly<Record<string, unknown>> | undefined> {
+  return (await readCommittedStore(resolve(directory)))?.store as unknown as
+    | Readonly<Record<string, unknown>>
+    | undefined;
+}
+
+/** Host-only: changes whenever a commit lands in that store directory, by any process. */
+export function trackerStoreVersion(directory: string): string {
+  const file = statSync(join(resolve(directory), "tracker.json"), { bigint: true });
+  return `${file.dev}:${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}|${journalVersion(resolve(directory))}`;
 }
 
 /** Host-only read of a store directory's `tracker.json`; never seeds or writes one. */
 export async function readTrackerStoreSummary(directory: string): Promise<TrackerStoreSummary> {
-  const text = await readStoreText(join(resolve(directory), "tracker.json"));
-  return summarizeStore(text === undefined ? undefined : parseStore(text));
+  return summarizeStore((await readCommittedStore(resolve(directory)))?.store);
 }
 
 async function writeExclusive(path: string, content: string): Promise<void> {
@@ -6103,13 +6690,15 @@ export async function promoteLinearImport(options: {
   if (targetPath === sourcePath) throw new Error("A store cannot be promoted onto itself");
   return withTrackerStoreLock(targetPath, (targetHeld) =>
     withTrackerStoreLock(sourcePath, async (sourceHeld) => {
-      const [sourceText, targetText] = await Promise.all([
-        readStoreText(sourcePath),
-        readStoreText(targetPath),
+      // Whole stores, sync history included: the promoted copy and the backup are single files.
+      const [source, target] = await Promise.all([
+        readCommittedStore(resolve(options.source), true),
+        readCommittedStore(resolve(options.target), true),
       ]);
-      if (sourceText === undefined) throw new Error("No imported store to promote");
-      const store = parseStore(sourceText);
-      const previous = targetText === undefined ? undefined : parseStore(targetText);
+      if (source === undefined) throw new Error("No imported store to promote");
+      const store = source.store;
+      const previous = target?.store;
+      const targetText = target?.text;
       await options.verify(summarizeStore(store), summarizeStore(previous));
       if (!store.linearMirror) throw new Error("Only a Linear import can be promoted");
       if (store.linearMirror.cutover) throw new Error("That import was already cut over");
@@ -6152,6 +6741,8 @@ export async function promoteLinearImport(options: {
       if (targetText !== undefined) await writeExclusive(options.backup, targetText);
       sourceHeld();
       await persist(targetPath, store, targetHeld);
+      // The replaced store's journal belongs to no checkpoint now; keep it beside the backup.
+      await setJournalAside(resolve(options.target), "replaced");
       return {
         storeId: store.storeId ?? store.team.id,
         previousStoreId: previous === undefined ? undefined : (previous.storeId ?? previous.team.id),
@@ -6173,8 +6764,9 @@ export async function restoreTrackerStore(options: {
 }): Promise<{ storeId: string | undefined; restoredStoreId: string | undefined }> {
   const targetPath = join(resolve(options.target), "tracker.json");
   return withTrackerStoreLock(targetPath, async (assertHeld) => {
-    const currentText = await readStoreText(targetPath);
-    const current = currentText === undefined ? undefined : parseStore(currentText);
+    const committed = await readCommittedStore(resolve(options.target), true);
+    const currentText = committed?.text;
+    const current = committed?.store;
     await options.verify?.(summarizeStore(current));
     const backupText = options.backup === undefined ? undefined : await readFile(options.backup, "utf8");
     const restored = backupText === undefined ? undefined : parseStore(backupText);
@@ -6191,6 +6783,8 @@ export async function restoreTrackerStore(options: {
         await rm(temp, { force: true });
       }
     }
+    // The restored single file owns the directory again; the journal it replaced stays aside.
+    await setJournalAside(resolve(options.target), "replaced");
     return {
       storeId: current === undefined ? undefined : (current.storeId ?? current.team.id),
       restoredStoreId: restored === undefined ? undefined : (restored.storeId ?? restored.team.id),

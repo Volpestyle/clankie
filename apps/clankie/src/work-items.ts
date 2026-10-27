@@ -50,11 +50,13 @@ import {
   SAVED_ISSUE_VIEW_TOOLS,
   INBOX_TOOLS,
   type InboxPendingFence,
-  parseTrackerStoreSnapshot,
+  readTrackerStoreRecords,
+  readTrackerStoreSnapshot,
   refuseBuiltInTrackerFeatures,
   trackerArgumentReferences,
   TRACKER_OWNER,
   TrackerReadRejected,
+  trackerStoreVersion,
   type TrackerActor,
 } from "@clankie/work-items";
 import type { McpHost, TrackerRouteFence } from "./mcp-host.ts";
@@ -315,12 +317,22 @@ function fileVersion(path: string): string {
   }
 }
 
+/** A built-in store's version, `absent` without one: a commit may touch only its journal. */
+function trackerVersion(path: string): string {
+  try {
+    return trackerStoreVersion(dirname(path));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
+    throw error;
+  }
+}
+
 /** Fences one route input. Its version is taken before the read, so a racing write fails the fence. */
-function fenceRouteFile(fence: TrackerRouteFence | undefined, path: string) {
+function fenceRouteFile(fence: TrackerRouteFence | undefined, path: string, version = fileVersion) {
   if (!fence) return;
-  const version = fileVersion(path);
+  const before = version(path);
   fence(() => {
-    if (fileVersion(path) !== version) throw new Error("The tracker route changed");
+    if (version(path) !== before) throw new Error("The tracker route changed");
   });
 }
 
@@ -572,7 +584,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       "tracker.json",
     );
     // Taken before the read, so a racing write leaves a stale version and the next call rereads.
-    const version = fileVersion(path);
+    const version = trackerVersion(path);
     if (recordProjects?.version === version) return recordProjects.index;
     const unusable = () =>
       new WorkRequestError(
@@ -580,12 +592,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         "The built-in tracker that holds cut-over projects cannot be read, so this tracker call has nowhere safe to go.",
       );
     // The tracker's own validation: a snapshot it would refuse never reads as "no cut-over item".
-    let store: Readonly<Record<string, unknown>>;
+    let store: Readonly<Record<string, unknown>> | undefined;
     try {
-      store = parseTrackerStoreSnapshot(await readFile(path, "utf8"));
+      store = await readTrackerStoreSnapshot(dirname(path));
     } catch {
       throw unusable();
     }
+    if (store === undefined) throw unusable();
     const index = new Map<string, Set<string>>();
     const records = (key: string) =>
       (Array.isArray(store[key]) ? store[key] : []) as Record<string, unknown>[];
@@ -1296,18 +1309,18 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
       const matches = new Set<string | undefined>();
       for (const [path, repo] of candidates) {
-        if (repo !== undefined) fenceRouteFile(fence, path);
-        let store: Record<string, unknown>;
+        if (repo !== undefined) fenceRouteFile(fence, path, trackerVersion);
+        let store: Readonly<Record<string, unknown>> | undefined;
         try {
-          store = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+          store = await readTrackerStoreRecords(dirname(path));
+        } catch {
           throw new WorkRequestError(
             "backend_unavailable",
             "An existing local tracker cannot be read. Choose its repo explicitly.",
           );
         }
-        if (store === null || typeof store !== "object" || store.version !== 1)
+        if (store === undefined) continue;
+        if (store.version !== 1)
           throw new WorkRequestError(
             "backend_unavailable",
             "An existing local tracker cannot be read. Choose its repo explicitly.",

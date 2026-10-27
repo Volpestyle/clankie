@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "artifacts/local-vuh-42-journal-bench-runs.txt",
+      "size": 18666,
+      "sha256": "a43e1c9d3590c4986fce7090b37848d930a879bd41031f0f7af052736fee3b99",
+      "url": "clankie://evidence/sha256/a43e1c9d3590c4986fce7090b37848d930a879bd41031f0f7af052736fee3b99"
+    }
+  ]
+}

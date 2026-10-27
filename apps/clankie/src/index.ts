@@ -719,6 +719,13 @@ const builtInTrackerOptions = {
     trackerRunner(actor.id, (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane)),
 };
 const builtInTracker = createLocalTracker(builtInTrackerOptions);
+// A large single-file store moves onto its journal at start, not inside the first write (LOCAL-VUH-42).
+void builtInTracker.checkpoint().catch((error: unknown) => {
+  logger.warn(
+    { event: "tracker.checkpoint_failed", error },
+    "The built-in tracker could not checkpoint at start",
+  );
+});
 let bindLinearBudgetWarning!: (notify: (text: string) => Promise<boolean>) => void;
 const linearBudgetWarningReady = new Promise<(text: string) => Promise<boolean>>((resolve) => {
   bindLinearBudgetWarning = resolve;

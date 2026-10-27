@@ -956,8 +956,8 @@ copies, diffed every sync model and rewrote and fsynced the whole file. On
 generated stores at fleet volume (600 sync commits a day, other records in the
 live store's proportions), a single `save_issue` took 118 ms at one day of
 volume and 1,036 ms at ten. Serializing and fsyncing were only about a fifth of
-that. A single JSON string also stops working at about 45 days, because it
-reaches V8's maximum string length. Method and numbers:
+that. A single JSON string also stops working: at 60 days of that volume the
+first write fails with V8's `Invalid string length`. Method and numbers:
 [the measurement record](../testing/2026-10-27-local-vuh-42-tracker-journal/README.md).
 
 **Copy-on-write.**
@@ -996,7 +996,110 @@ them back.
 - Under Vitest, every commit also computes the full diff and fails on any
   difference. A deliberately dropped dependency fails the suite.
 
-**Not yet changed.** The store is still one atomic `tracker.json` replacement per
-write, holding the full sync log, receipts and audit. Writes now take 33 ms at one
-day and 232 ms at ten days, and those costs are mostly that file. Storing writes
-as a journal is the second half of this amendment.
+**Copy-on-write alone** brought a write to 31 ms at one day and 220 ms at ten.
+What remained was mostly the whole-file rewrite, so the second half stores writes
+as a journal.
+
+**Journal.**
+
+- Format: JSONL segments. `tracker.json` stays the store's file and becomes its
+  checkpoint. A store under 2 MiB keeps the single legacy file, rewritten per
+  commit; at that size the whole-file write costs about as much as an append.
+- Above 2 MiB, writes go to `tracker.journal/NNNNNNNNNNNN.jsonl`, named by first
+  sync id. A commit appends one line and fsyncs once. The line holds the sync
+  commit and the store's record changes: appended tails, id-keyed upserts and
+  removals, or a whole replaced collection when order alone changed.
+- The checkpoint holds every record but no sync log. Its `journal` header names
+  the sync id and hash it covers and seals every earlier segment by size and
+  SHA-256. A build without the journal refuses a checkpoint rather than open a
+  partial store.
+- Open is checkpoint plus tail. The records after the checkpoint must chain from
+  its sync hash with consecutive ids. The events, audit and sync chains are
+  proven over what they replay. Sealed segments must match their digests, which
+  are checked once per process. A torn final line, an interrupted append, is
+  left out, and the next append cuts it off. Anything else refuses the open, as a
+  broken chain always has.
+- Checkpoints run in the background once the live journal reaches 4 MiB or an
+  eighth of the checkpoint, in three steps:
+  1. Under the lock: seal the live segments and start a new one.
+  2. With no lock held: stream the frozen snapshot to a temp file. No single
+     string is built, so a checkpoint is never limited by V8's string length.
+  3. Under the lock: rename it in, if nothing replaced the store meanwhile.
+     Commits keep appending throughout. A crash at any step reopens from the previous
+     checkpoint and replays every segment after it.
+- Segments are never pruned: they are the sync history, and a subscribe cursor
+  older than the checkpoint reads them.
+- The checkpoint does not grow with the sync log. It does grow with events, audit
+  and receipts, by about 4.4 MB a day at fleet volume (267 MB at 60 days,
+  projected 400 MB at 90).
+- Another process's commit changes the checkpoint file or the newest segment, so
+  the next call replays that tail onto its snapshot, or reopens.
+
+**Receipts.** Each receipt records its sync id. Once a checkpoint covers it, an
+applied result over 1 KiB stays only in its journal record. `get_write_receipt`
+and keyed replay read it back from there. Guided-review receipts stay whole,
+because retirement reads them.
+
+**Readers.**
+
+- Host readers (routing, record-project lookup, cutover summaries) read the
+  checkpoint plus its tail.
+- The route fence includes the journal's version, because a commit may touch only
+  the journal.
+- Long-polling subscribers re-subscribe after every page. While the committed
+  snapshot is current and the page is in memory, a subscriber reads it without
+  the store lock: reading it and registering the listener happen in one
+  synchronous step. Ten waiters therefore no longer queue ahead of the next write.
+
+**Migration and rollback.**
+
+- At start the service checkpoints its store, which moves a large single file onto
+  the journal. A commit would move it otherwise.
+- The exact bytes stay beside it as `tracker.pre-journal-<ms>.json`. Its sync log
+  becomes the first sealed segment. The checkpoint rename is the switch: until
+  then the single file is authoritative, and a journal left by an interrupted move
+  is set aside.
+- Cutover and switch-back keep exact whole-store bytes: the backup is the full
+  store as one file, and the replaced journal is set aside, never deleted.
+- To roll back to a build without the journal, stop the service and write
+  `exportTrackerStore(directory, out)`. It writes the whole store, sync history and
+  receipt results included, as one legacy file. Move `tracker.journal/` aside and
+  put that file in place as `tracker.json`.
+- Restoring `tracker.pre-journal-<ms>.json` instead loses every write since the
+  move.
+- Either single file fails before 60 days of fleet volume, the old format's own
+  limit.
+
+**Measured** (generated stores, migrated by the real path; method and every run in
+[the measurement record](../testing/2026-10-27-local-vuh-42-tracker-journal/README.md)):
+
+- Single write, p50/p95, at 1, 10, 30 and 60 days: 5.0–5.3/5.3–11.8, 5.2–8.8/6.1–11.9,
+  10.3–11.2/11.4–14.4 and 11.7–21.7/14.3–39.8 ms. The machine was shared, with load
+  averages of 8 to 22 on 18 cores.
+- Before this amendment: 113, 1,008 and 3,466 ms p50 at 1, 10 and 30 days. At
+  60 days the first write fails with V8's `Invalid string length`.
+- At 60 days: 17 sequential creates take 0.41–1.01 s and a cold open takes 1.1–1.5 s. A
+  hired worker's write, through a fresh scoped instance, takes p95 21.5–33.5 ms.
+- Moving the 60-day store onto the journal took 4.0 s. A copy of the live store
+  (16.7 MB) took 140 ms, and every record, sync commit and receipt was preserved.
+- Ten long-polling subscribers add about 0.5 ms (10 days) to 1.5 ms (60 days) to the
+  write p50. Before they skipped the lock, they added 11 and 21 ms.
+- Not met:
+  - The issue also asked for p95 at 60 days within 2× of one day. It is about 3–4×,
+    and the lead accepted the 25 ms bar instead.
+  - That 25 ms p95 bar holds at 60 days for the reused instance at moderate load, but
+    not for the hired-worker path or the most loaded run.
+  - Both have the same cause: per-write passes over whole collections (37k events,
+    36k audit entries and 25k receipts at 60 days). They are identity diffs for the
+    journal record, settling the snapshot and the sync candidates, plus receipt and
+    bundle lookups by key, plus GC. LOCAL-VUH-47 makes those passes cost the change.
+
+**Rejected: `node:sqlite`.** One WAL row per commit with `synchronous=FULL`, on the
+live store's real records (mean 6.6 KB):
+
+- With `fullfsync`, the same durability as Node's `fsync` on macOS (`F_FULLFSYNC`):
+  p50 5.0 to 6.9 ms per commit, against JSONL's 4.0 to 5.1 ms. Replay took the
+  same time, and the file was 14% larger.
+- Without `fullfsync` it took 0.1 ms, but a commit then survives a process crash,
+  not a power loss.
+- It would not win at equal durability, so it is not worth a second storage engine.
