@@ -349,7 +349,7 @@ including a poll still waiting behind admission. This supersedes the 30 s head
 grace as the point where input may leave the seat: input that arrives inside the
 hold waits for the seat's next poll. Only longer silence lets the service lane
 take over, and that takeover is recorded as a service notice in the
-conversation. An owner Queue held behind the seat's own running turn is never
+conversation. A Queue held behind the seat's own running turn is never
 taken over: when its bridge leaves, it settles "Not sent" once the 30 s grace
 lapses (VUH-2885). An internal `input`, such as a worker question resolved elsewhere,
 reaches a live head as a wake. A poll takes owner turns and escalations ahead of

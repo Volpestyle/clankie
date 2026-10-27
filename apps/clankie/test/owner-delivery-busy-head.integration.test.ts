@@ -462,13 +462,14 @@ it("a native head that stays silent past its lane hold is taken over explicitly"
   );
 });
 
-// VUH-2885: the lane hold and its takeover decide who runs waiting input. An
-// owner's Queue held behind the head's own running turn is never the service
-// lane's to run (VUH-2045), so when its bridge leaves it settles unsent once
-// the bound grace lapses, not after the lane hold and not by takeover.
-it("an owner Queue held behind the head's own turn settles unsent when its bridge leaves", async () => {
-  const f = await fixture({ headBoundGraceMs: 300 });
-  const head = seat(f.captain);
+// VUH-2885: the lane hold and its takeover decide who runs waiting input. A
+// Queue held behind the head's own running turn is never the service lane's to
+// run (VUH-2045), so when its bridge leaves it settles unsent once the bound
+// grace lapses, not after the lane hold and not by takeover.
+async function holdQueueBehindHeadTurn(
+  f: Awaited<ReturnType<typeof fixture>>,
+  head: ReturnType<typeof seat>,
+) {
   await head.bound();
   expect(
     f.captain.syncSeatTranscript("global-default", {
@@ -478,13 +479,16 @@ it("an owner Queue held behind the head's own turn settles unsent when its bridg
       turnStart: true,
     }),
   ).toBe(true);
+}
+
+async function sendHeldQueue(f: Awaited<ReturnType<typeof fixture>>) {
   const got = await f.captain.serveOperatorConversation({
     op: "get",
     schemaVersion: 1,
     conversationId: "global-default",
   });
   if (got.op !== "get" || got.conversation === undefined) throw new Error("conversation missing");
-  const sent = await f.captain.serveOperatorConversation({
+  return f.captain.serveOperatorConversation({
     op: "send",
     schemaVersion: 1,
     turn: SubmitOperatorConversationTurnSchema.parse({
@@ -497,23 +501,53 @@ it("an owner Queue held behind the head's own turn settles unsent when its bridg
       delivery: "queue",
     }),
   });
-  expect(sent).toMatchObject({
+}
+
+const settledUnsent = (f: Awaited<ReturnType<typeof fixture>>) => () =>
+  expect(f.journal.read("global-default")).toContainEqual(
+    expect.objectContaining({ type: "turn", phase: "completed", deliveryStage: "unavailable" }),
+  );
+
+it("a Queue held behind the head's own turn settles unsent when its bridge leaves", async () => {
+  const f = await fixture({ headBoundGraceMs: 300 });
+  const head = seat(f.captain);
+  await holdQueueBehindHeadTurn(f, head);
+  expect(await sendHeldQueue(f)).toMatchObject({
     op: "send",
     result: { status: "accepted", seatDelivery: { state: "queued" } },
   });
 
   await head.halt();
   const leftAt = Date.now();
-  await vi.waitFor(
-    () =>
-      expect(f.journal.read("global-default")).toContainEqual(
-        expect.objectContaining({ type: "turn", phase: "completed", deliveryStage: "unavailable" }),
-      ),
-    { timeout: 5_000 },
-  );
+  await vi.waitFor(settledUnsent(f), { timeout: 5_000 });
   // Settled by the 300ms grace, far inside the default 45s lane hold.
   expect(Date.now() - leftAt).toBeLessThan(5_000);
   expect(head.events()).toEqual([]);
+  expect(fake.prompts).toEqual([]);
+  expect(
+    f.journal
+      .read("global-default")
+      .some((event) => event.type === "message" && event.text.includes("service lane took over")),
+  ).toBe(false);
+});
+
+// A head's aborted poll is its bridge leaving and drops its grace, so a Queue
+// sent after that has no receiver to wait for: it settles unsent at once, not
+// after a fresh grace and not after the (long) lane hold.
+it("a Queue sent after the bridge left settles at once, not after the grace or the lane hold", async () => {
+  const graceMs = 1_500;
+  const f = await fixture({ headBoundGraceMs: graceMs, headLaneHoldMs: 60_000 });
+  const head = seat(f.captain);
+  await holdQueueBehindHeadTurn(f, head);
+  await head.halt();
+  const sentAt = Date.now();
+  expect(await sendHeldQueue(f)).toMatchObject({
+    op: "send",
+    result: { status: "accepted", seatDelivery: { state: "queued" } },
+  });
+
+  await vi.waitFor(settledUnsent(f), { timeout: 5_000 });
+  expect(Date.now() - sentAt).toBeLessThan(graceMs - 500);
   expect(fake.prompts).toEqual([]);
   expect(
     f.journal

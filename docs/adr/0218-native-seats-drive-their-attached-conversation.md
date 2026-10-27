@@ -554,7 +554,7 @@ This amends "Seat live?" in the selection above for the head (`global-default`):
   conversation …") with the seat's last ask and how long it was silent. A
   service run already executing when the head returns still finishes first and
   reaches the head in the usual handoff.
-- **A held Queue is never taken over** (VUH-2885, 2026-10-27). An owner Queue
+- **A held Queue is never taken over** (VUH-2885, 2026-10-27). A Queue
   stored behind the seat's own running turn is that seat's to run, never the
   service lane's (VUH-2045). When its bridge leaves, it keeps the 30 s grace
   boundary: once the grace lapses it settles unbound and is reported "Not sent".
