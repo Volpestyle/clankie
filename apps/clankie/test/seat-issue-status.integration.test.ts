@@ -172,6 +172,12 @@ it("degrades to In Progress or Todo, naming the intended status, until Verifying
   expect(comments("VUH-1383").at(-1)).toBe(
     "Ed left: stopped. Status kept: Verifying (asked Paused; it doesn't move an item back out of review).",
   );
+  // Forward from review still applies: done with evidence finishes it.
+  await keeper.observe([seat("s6", "Flo", "VUH-1383")]);
+  expect(
+    await keeper.closed({ seatId: "s6", reason: "landed", outcome: "done", evidence: "abc1234, gate green" }),
+  ).toMatchObject({ intended: "Done", status: "Done" });
+  expect(status("VUH-1383")).toBe("Done");
   expect(provider.validationErrors).toEqual([]);
 });
 

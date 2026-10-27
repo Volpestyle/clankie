@@ -214,8 +214,10 @@ const retirementIntent = (input: Retirement): SeatIssueStatus | undefined =>
         ? "Paused"
         : undefined;
 const stated = (intended: SeatIssueStatus | undefined) => (intended === undefined ? {} : { intended });
-// Retirement never moves an item back out of review.
+// Retirement never moves an item back out of review; Done and Verifying still move forward.
 const REVIEW_STATUSES = new Set(["in review", "verifying"]);
+const backward = (intended: SeatIssueStatus, current: string | undefined) =>
+  (intended === "Paused" || intended === "In Progress") && REVIEW_STATUSES.has(current?.toLowerCase() ?? "");
 /** Only the built-in tracker's own lookup miss proves a key names no item in that scope. */
 const absentFrom = (scope: SeatIssueTrackerScope, error: unknown) =>
   scope.backend === "builtin" && error instanceof Error && /\bIssue not found: /u.test(error.message);
@@ -630,7 +632,7 @@ export class SeatIssueKeeper {
             ...stated(intended),
             detail: `Already ${current}.`,
           };
-        else if (intended === undefined || REVIEW_STATUSES.has(current?.toLowerCase() ?? "")) {
+        else if (intended === undefined || backward(intended, current)) {
           if (!current) throw new Error("Tracker returned no current status");
           plan = {
             scope: scope.identity,
