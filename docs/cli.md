@@ -2978,6 +2978,16 @@ PROJECT DAYS` sets the project's cycle length (default 7), starting with its
 [--idle-days N]` lists stale leases, runs still active on closed items, and
   items idle for N days
   ([ADR 0226 amendment, VUH-1918](adr/0226-one-tracker-tool-surface.md#amendment-runs-leases-the-ready-queue-and-drift-2026-10-09-vuh-1918)).
+- `clankie work changes [--project P] [--since N --store-id ID] [--wait SECONDS]
+[--limit N]` reads `list_changes`: one project's commits after syncId N,
+  oldest first, as changed fields and ids with comment, event and run bodies
+  omitted. Pass back the returned `syncId` and `storeId`; follow while `hasMore`.
+  `--wait` (up to 20 seconds) holds the call until a change arrives.
+  `outcome: "rebootstrap"` means the store was replaced or the cursor is ahead of
+  it. Without `--since` it starts from now; without `--project` the repo's own
+  built-in binding decides. `linear_list_issues` and `linear_list_ready_issues`
+  take `snapshot: true` to page one moment and return the `syncId` to follow
+  from ([ADR 0226 amendment, LOCAL-VUH-43](adr/0226-one-tracker-tool-surface.md#amendment-agents-follow-changes-by-cursor-2026-10-27-local-vuh-43)).
 - `clankie work bundle set ITEM --json '{"references":[{"recordId":"UUID",
 "sha256":"HASH","url":"clankie://evidence/sha256/HASH","type":"log"}],"gaps":[]}'`
   publishes the current built-in item bundle. Add `runId` to the JSON to attach

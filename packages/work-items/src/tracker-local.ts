@@ -3542,6 +3542,103 @@ async function dispatch(
   }
 }
 
+/**
+ * Snapshot list reads (LOCAL-VUH-43): the first page fixes the whole result in memory and
+ * later pages read it, never the live store. Bounded and process-local, so a restart,
+ * eviction or replaced store reports the snapshot expired.
+ */
+const listSnapshots = new Map<
+  string,
+  { storeId: string; syncId: number; scope: string; issues: unknown[]; size: number; readAt: number }
+>();
+const SNAPSHOT_IDLE_MS = 5 * 60_000;
+const SNAPSHOT_COUNT = 16;
+const SNAPSHOT_CHARACTERS = 32 * 1024 * 1024;
+
+function snapshotCursor(cursor: unknown): { snapshot: string; offset: number; scope: string } | undefined {
+  if (typeof cursor !== "string") return undefined;
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Record<string, unknown>;
+    return typeof decoded.snapshot === "string" &&
+      Number.isSafeInteger(decoded.offset) &&
+      typeof decoded.scope === "string"
+      ? (decoded as { snapshot: string; offset: number; scope: string })
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function snapshotPage(
+  store: Store,
+  name: string,
+  args: Record<string, unknown>,
+  all: (filters: Record<string, unknown>) => Promise<unknown[]>,
+): Promise<Record<string, unknown>> {
+  const { cursor, limit, snapshot: _snapshot, ...filters } = args;
+  const scope = createHash("sha256")
+    .update(
+      JSON.stringify({ tool: name, filters: Object.entries(filters).sort(([a], [b]) => a.localeCompare(b)) }),
+    )
+    .digest("hex");
+  const storeId = store.storeId ?? store.team.id;
+  const now = Date.now();
+  for (const [token, entry] of listSnapshots)
+    if (now - entry.readAt > SNAPSHOT_IDLE_MS) listSnapshots.delete(token);
+  let token: string;
+  let start = 0;
+  if (cursor !== undefined) {
+    const decoded = snapshotCursor(cursor);
+    if (decoded === undefined || decoded.scope !== scope)
+      throw new Error("Tracker cursor belongs to a different query");
+    const entry = listSnapshots.get(decoded.snapshot);
+    if (entry === undefined || entry.storeId !== storeId)
+      throw new Error(
+        "Tracker snapshot expired; list again with snapshot: true, then follow list_changes from its syncId",
+      );
+    token = decoded.snapshot;
+    start = decoded.offset;
+  } else {
+    const issues = await all(filters);
+    token = randomUUID();
+    listSnapshots.set(token, {
+      storeId,
+      syncId: store.syncId ?? 0,
+      scope,
+      issues,
+      size: JSON.stringify(issues).length,
+      readAt: now,
+    });
+    let retained = [...listSnapshots.values()].reduce((total, entry) => total + entry.size, 0);
+    // Oldest read first; the new snapshot itself always stays.
+    for (const [oldest, entry] of listSnapshots) {
+      if (oldest === token || (listSnapshots.size <= SNAPSHOT_COUNT && retained <= SNAPSHOT_CHARACTERS))
+        break;
+      listSnapshots.delete(oldest);
+      retained -= entry.size;
+    }
+  }
+  const entry = listSnapshots.get(token)!;
+  // Re-inserting keeps the map in least-recently-read order.
+  listSnapshots.delete(token);
+  listSnapshots.set(token, { ...entry, readAt: now });
+  const selected = entry.issues.slice(start, start + (typeof limit === "number" ? limit : 50));
+  const hasNextPage = start + selected.length < entry.issues.length;
+  return {
+    issues: selected,
+    hasNextPage,
+    ...(hasNextPage
+      ? {
+          cursor: Buffer.from(
+            JSON.stringify({ snapshot: token, offset: start + selected.length, scope }),
+          ).toString("base64url"),
+        }
+      : {}),
+    syncId: entry.syncId,
+    storeId: entry.storeId,
+  };
+}
+
 /** Reads, including the caller's own write receipts and the audit log. */
 async function read(
   store: Store,
@@ -3551,6 +3648,21 @@ async function read(
   actor: TrackerActor,
   now: string,
 ): Promise<unknown> {
+  if (
+    (name === "list_issues" || name === "list_ready_issues") &&
+    (args.snapshot === true || snapshotCursor(args.cursor) !== undefined)
+  )
+    return snapshotPage(store, name, args, async (filters) => {
+      const result = (await dispatch(
+        store,
+        name,
+        { ...filters, limit: Number.MAX_SAFE_INTEGER },
+        options,
+        now,
+        { actor },
+      )) as { issues: unknown[] };
+      return result.issues;
+    });
   if (name === "get_write_receipt") {
     // Keys are scoped to the authenticated caller: another actor's key is unknown here.
     const receipt = store.receipts?.find(
@@ -3683,16 +3795,15 @@ const syncModelKey = (model: Pick<TrackerSyncModel, "modelName" | "modelId">) =>
   `${model.modelName}:${model.modelId}`;
 const inSyncGroups = (groups: readonly string[], wanted: readonly string[]) =>
   groups.length === 0 || groups.some((id) => wanted.includes(id));
+/** Bodies a lazy reader fetches on demand (get_issue, list_comments or batch), not in bulk. */
+const LAZY_SYNC_FIELDS: Partial<Record<TrackerSyncModel["modelName"], readonly string[]>> = {
+  comment: ["body", "quotedText"],
+  run: ["summary", "worktree", "branch"],
+  event: ["body"],
+};
 function lazySyncModel(model: TrackerSyncModel): TrackerSyncModel {
   const data = { ...model.data };
-  const omitted =
-    model.modelName === "comment"
-      ? ["body", "quotedText"]
-      : model.modelName === "run"
-        ? ["summary", "worktree", "branch"]
-        : model.modelName === "event"
-          ? ["body"]
-          : [];
+  const omitted = [...(LAZY_SYNC_FIELDS[model.modelName] ?? [])];
   for (const field of omitted) delete data[field];
   if (omitted.length) data.unhydratedFields = omitted;
   return { ...model, data };
@@ -3747,6 +3858,44 @@ function appendSync(
   store.syncId = body.syncId;
   (store.syncLog ??= []).push({ ...body, hash: auditHash(body) });
 }
+
+/**
+ * One commit as one project sees it (list_changes): changed fields and ids, lazy bodies left
+ * out. Entering the project reads as an insert and leaving it as a delete. Undefined when
+ * nothing in the commit belongs to the project.
+ */
+function projectChanges(commit: TrackerSyncCommit, projectId: string): Record<string, unknown> | undefined {
+  const changes = commit.deltas.flatMap((delta) => {
+    const inside = delta.projectIds.includes(projectId);
+    const before = delta.previousProjectIds.includes(projectId);
+    if (!inside && !before) return [];
+    const action = !inside ? "delete" : delta.action === "update" && !before ? "insert" : delta.action;
+    const fields = { ...delta.data };
+    const omitted = (LAZY_SYNC_FIELDS[delta.modelName] ?? []).filter((field) => field in fields);
+    for (const field of omitted) delete fields[field];
+    return [
+      {
+        model: delta.modelName,
+        id: delta.modelId,
+        action,
+        ...(action === "delete" ? {} : { fields }),
+        ...(action === "update" && delta.removedFields.length ? { removedFields: delta.removedFields } : {}),
+        ...(action !== "delete" && omitted.length ? { omitted } : {}),
+      },
+    ];
+  });
+  if (!changes.length) return undefined;
+  const actor = commit.actor as Partial<TrackerActor>;
+  return {
+    syncId: commit.syncId,
+    at: commit.at,
+    tool: commit.tool,
+    actor: { type: actor.type, id: actor.id, ...(actor.name === undefined ? {} : { name: actor.name }) },
+    changes,
+  };
+}
+const CHANGES_CHARACTERS = 40_000;
+const CHANGES_SCAN = 2_000;
 
 /**
  * Item-event subscribers per store file, shared by every backend instance in the process:
@@ -4228,7 +4377,74 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       return { store: seed(options, clock), clock, initialized: true, readIdentity: undefined };
     }
   };
-  return {
+  /**
+   * list_changes (LOCAL-VUH-43): one project's view of the sync journal, read through
+   * `sync` subscribe so its cursor, long poll and rebootstrap rules apply unchanged.
+   */
+  const listChanges = async (
+    args: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<Record<string, unknown>> => {
+    if (typeof args.project !== "string")
+      throw new Error("list_changes needs a project (a hired worker's comes from its hire)");
+    if (args.since !== undefined && args.storeId === undefined)
+      throw new Error("list_changes since needs the storeId returned with that syncId");
+    const limit = (args.limit as number | undefined) ?? 50;
+    const deadline = Date.now() + ((args.waitMs as number | undefined) ?? 0);
+    const head = await withTrackerStoreLock(path, async (assertHeld) => {
+      const { store, initialized } = await load({ mutable: false });
+      if (initialized) await persist(path, store, assertHeld);
+      return {
+        storeId: store.storeId ?? store.team.id,
+        syncId: store.syncId ?? 0,
+        projectId: findProject(store, args.project as string).id,
+      };
+    });
+    const storeId = (args.storeId as string | undefined) ?? head.storeId;
+    let cursor = (args.since as number | undefined) ?? head.syncId;
+    const changes: Record<string, unknown>[] = [];
+    let characters = 0;
+    let scanned = 0;
+    for (;;) {
+      const page = await backend.sync(
+        {
+          action: "subscribe",
+          projects: [head.projectId],
+          storeId,
+          lastSyncId: cursor,
+          // Wait only while nothing has matched; skipped commits keep the remaining wait.
+          waitMs: changes.length ? 0 : Math.max(0, deadline - Date.now()),
+          limit: 250,
+        },
+        undefined,
+        signal,
+      );
+      if (page.outcome === "rebootstrap")
+        return {
+          outcome: "rebootstrap",
+          reason: page.reason,
+          storeId: page.storeId,
+          syncId: page.lastSyncId,
+        };
+      if (page.outcome !== "deltas") throw new Error("Unexpected tracker sync result");
+      for (const commit of page.commits) {
+        const seen = projectChanges(commit, head.projectId);
+        if (seen !== undefined) {
+          const size = JSON.stringify(seen).length;
+          if (changes.length && (changes.length >= limit || characters + size > CHANGES_CHARACTERS))
+            return { outcome: "changes", storeId, syncId: cursor, changes, hasMore: true };
+          changes.push(seen);
+          characters += size;
+        }
+        cursor = commit.syncId;
+        scanned += 1;
+      }
+      if (page.hasMore && scanned < CHANGES_SCAN) continue;
+      if (page.hasMore || changes.length || Date.now() >= deadline)
+        return { outcome: "changes", storeId, syncId: cursor, changes, hasMore: page.hasMore };
+    }
+  };
+  const backend: LocalTrackerBackend = {
     catalog: () => TRACKER_TOOLS,
     async strictGetUser(beforeRead) {
       if (
@@ -5368,6 +5584,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     async call(name, args, callOptions) {
       if (name === "save_guided_review") args = structuredClone(args);
       validateTrackerToolArgs(name, args);
+      if (name === "list_changes") return listChanges(args, callOptions?.signal);
       if (GUIDED_REVIEW_TOOLS.has(name)) {
         const actor = callOptions?.actor;
         if (
@@ -5560,6 +5777,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       });
     },
   };
+  return backend;
 }
 
 /** What a cutover plan reads from a store (VUH-1987), without opening it for writes. */

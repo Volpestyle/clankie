@@ -1953,6 +1953,7 @@ export class WorkerMcp {
             const hostInput: Parameters<McpHost["call"]>[0] = {
               ...(background ? { requestPriority: "background" as const } : {}),
               timeoutMs: remaining(),
+              signal,
               ...readProof,
               onDispatch: () => {
                 signal.throwIfAborted();

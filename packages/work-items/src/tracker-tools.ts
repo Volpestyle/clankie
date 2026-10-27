@@ -58,6 +58,8 @@ export interface TrackerToolCallOptions {
   readonly authorizeLeadClosure?: (projectId: string | null) => Promise<() => void>;
   /** Host-stamped origin recorded on resulting item events (e.g. owner_ask); never a tool argument. */
   readonly via?: string;
+  /** The caller went away: a waiting read (list_changes waitMs) stops. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -129,6 +131,7 @@ export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   "save_lease",
   "list_ready_issues",
   "list_drift",
+  "list_changes",
 ]);
 
 /** What a worker reports about an item; the tracker derives the item's state from these. */
@@ -194,7 +197,7 @@ export interface TrackerItemEvent {
   readonly prevHash: string;
   readonly hash: string;
 }
-const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt", "cycleDays"] as const;
+const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt", "cycleDays", "snapshot"] as const;
 
 /** Other backends fail explicitly instead of silently dropping exactly-once or precondition input. */
 export function refuseBuiltInTrackerFeatures(name: string, args: Record<string, unknown>): void {
@@ -285,6 +288,11 @@ const ifUpdatedAt = {
     "Built-in tracker only, updates only. The updatedAt you last read; the write is refused, changing nothing, if the record changed since.",
 };
 const writeControls = { idempotencyKey, ifUpdatedAt };
+const snapshot = {
+  type: "boolean",
+  description:
+    "Built-in tracker only. Read every page from one point in time: the first page returns syncId and storeId, later pages pass its cursor, and list_changes follows on from that syncId.",
+};
 
 const patch = {
   type: "array",
@@ -531,7 +539,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   tool(
     "list_issues",
     "List or search issues. Priority sorts Urgent→Low, unprioritized last, before pagination. Follow cursor while hasNextPage is true.",
-    issueFilters,
+    { ...issueFilters, snapshot },
   ),
   tool(
     "search_issues",
@@ -914,7 +922,18 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   tool(
     "list_ready_issues",
     "Built-in tracker only. The ready queue: open issues not yet landed, unblocked, with no live lease and no active run. The project's current cycle comes first, then priority (urgent to low, none last), then oldest.",
-    { project: string, limit: pagination.limit, cursor: string },
+    { project: string, limit: pagination.limit, cursor: string, snapshot },
+  ),
+  tool(
+    "list_changes",
+    "Built-in tracker only. What changed since a syncId (from a snapshot list read or an earlier list_changes), oldest first: each commit's changed fields and ids, with comment, event and run bodies left for get_issue or list_comments. Other projects' commits are skipped but still advance syncId. Pass the returned syncId and storeId back; follow while hasMore. waitMs holds the call open until a change arrives. rebootstrap means take a new snapshot.",
+    {
+      project: string,
+      since: { type: "integer", minimum: 0, description: "The syncId to follow from; omit to start at now." },
+      storeId: { ...string, minLength: 1, maxLength: 128, description: "Required with since." },
+      waitMs: { type: "integer", minimum: 0, maximum: 20_000, default: 0 },
+      limit: { type: "integer", minimum: 1, maximum: 250, default: 50 },
+    },
   ),
   tool(
     "list_drift",

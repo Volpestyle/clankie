@@ -150,6 +150,9 @@ function builtInToolsFor(convention: WorkConvention, deps: TrackerDeps): Tracker
         )
           throw new WorkItemScopeError();
       }
+      // Changes follow the bound project, like list_issues; a scoped caller cannot name another.
+      if (name === "list_changes")
+        return tracker.call(name, { project: builtIn.projectId, ...args }, { ...deps, ...callbacks });
       const parameters = {
         ...(scoped
           ? {

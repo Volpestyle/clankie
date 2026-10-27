@@ -21,6 +21,8 @@ and source evidence rather than treating a status or recap as proof.
 
 Once context is established, retain the read boundary in the existing brief or
 conversation and refresh changed issues, comments and decisions on the next wake.
+On the built-in tracker that boundary is a `syncId`: orient from a snapshot list
+read and refresh with `list_changes` (work-items' built-in reference).
 Do not repeat a full thread audit for unchanged inputs. If the API cannot filter
 a comment delta, paginate as needed but keep already-read payloads out of model
 context. Missing context or edits to earlier decisions require re-reading that

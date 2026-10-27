@@ -32,6 +32,7 @@ const WORK_USAGE = [
   "  | cycle [--project P] [--type current|previous|next|all] | cycle show ID [--project P]",
   "  | cycle add ITEM [--to current|next|NUMBER] | cycle remove ITEM | cycle length PROJECT DAYS",
   "  | ready [--project P] [--limit N] | drift [--project P] [--idle-days N] | runs [ITEM] [--status S]",
+  "  | changes [--project P] [--since N --store-id ID] [--wait S] [--limit N]   (built-in changes since a syncId; without --project, the repo's)",
   "  | bundle set ITEM --json BUNDLE | bundle show ITEM [--run ID] | bundle check ID [--body TEXT]",
   "  | gate ask ITEM --run ID --kind plan|spend|destructive_action|merge|external_write --body TEXT",
   "  | run steer|pause|resume|stop ID [--body TEXT] | ask ITEM --body TEXT",
@@ -528,6 +529,23 @@ function trackerRequest(
         ...(one(parsed, "--project") === undefined ? {} : { project: one(parsed, "--project") }),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
       });
+    }
+    case "changes": {
+      const [since, wait, limit, project] = ["--since", "--wait", "--limit", "--project"].map((flag) =>
+        one(parsed, flag),
+      );
+      if (rest.length || (since === undefined) !== (one(parsed, "--store-id") === undefined))
+        throw new Error(WORK_USAGE);
+      const toolArgs = {
+        ...(project === undefined ? {} : { project }),
+        ...(since === undefined ? {} : { since: Number(since), storeId: one(parsed, "--store-id") }),
+        ...(wait === undefined ? {} : { waitMs: Math.round(Number(wait) * 1000) }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+      };
+      // Without a project the repo's own built-in binding decides, as a hire's does.
+      return project === undefined
+        ? { path: "/v1/tracker/call", body: { repo, name: "list_changes", arguments: toolArgs } }
+        : call("list_changes", toolArgs);
     }
     case "drift": {
       const days = one(parsed, "--idle-days");

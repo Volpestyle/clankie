@@ -274,6 +274,8 @@ export interface McpHost extends WorkerReadReceiptHost {
     readonly requestPriority?: LinearRequestPriority;
     /** Total caller budget, including setup; never a model tool argument. */
     readonly timeoutMs?: number;
+    /** The caller went away; a waiting tracker read stops with it. */
+    readonly signal?: AbortSignal;
     /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
     readonly bodyAccess?: typeof MINECRAFT_BODY_ACCESS;
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
@@ -1639,6 +1641,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           }
           const publication = {
             actor: trackerActor,
+            signal: input.signal === undefined ? signal : AbortSignal.any([signal, input.signal]),
             ...(readCurrent
               ? {
                   beforeRead: async () => {

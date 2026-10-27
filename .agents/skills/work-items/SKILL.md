@@ -54,8 +54,8 @@ the full summary. Provider and transport request limits still apply.
 
 Backend specifics: [Linear](reference/linear.md) (data-destroying mechanics,
 media, threading, worker posts) and [built-in tracker](reference/builtin-tracker.md)
-(idempotency, events, leases, runs, evidence bundles, cycles, releases, sync,
-import and cutover). Project facts, project settings, narrow owner writes and seat
+(idempotency, events, leases, runs, evidence bundles, cycles, releases, following
+changes by cursor, sync, import and cutover). Project facts, project settings, narrow owner writes and seat
 retirement bookkeeping: [projects and seats](reference/projects.md). To read a
 project or issue before working, load `work-orient`.
 

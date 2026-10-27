@@ -131,6 +131,26 @@ the owner's "It works" is the check. Only the owner's app and his explicit
 and reach any other tool with `clankie work call TOOL --json ARGS`. Other
 tracker backends refuse these additions.
 
+## Following changes
+
+Orient once, then follow; do not re-list to find out what moved. Take
+`linear_list_issues {snapshot: true}` (or `linear_list_ready_issues {project,
+snapshot: true}`): every page reads the same moment, and each returns `syncId`
+and `storeId`. Page with its `cursor`; a snapshot left unread for five minutes,
+or crowded out by newer ones, says it expired: list again. Then call
+`linear_list_changes {since: syncId, storeId}` and keep the returned `syncId` and
+`storeId` for the next call. Each commit lists changed records by model and id,
+with changed `fields` only; comment, event and run bodies are `omitted`, so read
+the ones you need with `get_issue` or `list_comments`. Entering your project
+reads as `insert`, leaving it as `delete`. Follow while `hasMore`. `waitMs` (up
+to 20000) holds the call until a change arrives, instead of a sleep loop.
+`outcome: "rebootstrap"` means the store was replaced or the cursor is ahead of
+it: take a new snapshot. A hire follows its own project by default; other
+projects' commits are skipped but still advance `syncId`. Naming another
+project's id reads that project, as `list_issues` does; it is not a privacy
+boundary. Omit `since` to start from now. Outside a hire, name `project`. CLI: `clankie work changes [--project P]
+[--since N --store-id ID] [--wait SECONDS]`.
+
 ## Sync
 
 `clankie work sync --json COMMAND` reads project-scoped bootstrap/batch data,

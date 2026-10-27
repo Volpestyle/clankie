@@ -1129,6 +1129,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
               local: authority.principal.kind !== "device",
               ...(inbox ? { inbox } : {}),
               actor,
+              signal: context.req.raw.signal,
               beforeWrite: async () => {
                 if (!(await authority.authorize()) || !authority.current())
                   throw new Error("Owner authority expired");
@@ -1146,6 +1147,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         }
         const result = await tracker.call(parsed.data.name, parsed.data.arguments, {
           actor,
+          signal: context.req.raw.signal,
           beforeWrite: async () => {
             if (!(await authority.authorize()) || !authority.current())
               throw new Error("Owner authority expired");

@@ -915,3 +915,28 @@ activity. The host stamps the actor from the forum event, never from tool
 arguments, and the text carries a provenance line that marks it untrusted.
 Owner-only moves stay with `human`. The design and its trust rules are in
 [the forum view proposal](../proposals/2026-10-21-discord-forum-tracker-view.md).
+
+## Amendment: agents follow changes by cursor (2026-10-27, LOCAL-VUH-43)
+
+Agents could re-list or read `list_issue_events`, not the sync journal, so
+"what changed since I looked" meant polling lists. Two built-in additions close
+that, and other backends refuse both:
+
+- `list_changes {project, since, storeId, waitMs?, limit?}` reads the existing
+  `sync` subscribe path for one project, so its cursor, `waitMs` long poll on the
+  in-process commit publication, and `rebootstrap` (store replaced or cursor
+  ahead) apply unchanged. Commits from other projects are skipped but advance the
+  cursor. Payloads are changed fields and ids, with bodies left out by the
+  bootstrap's lazy rules; entering the project reads as insert, leaving it as
+  delete, and shared metadata (labels, users, statuses) is not included. A hire's
+  default project comes from its routing (VUH-2014). This is not a read fence:
+  naming another built-in project's id routes the call to that project for any
+  caller (VUH-2829), as `list_issues` does. Every built-in project here belongs to
+  one owner, so Sync 5 keeps that routing.
+- `list_issues` and `list_ready_issues` take `snapshot: true`. The first page
+  fixes the whole result in service memory and returns its `syncId` and
+  `storeId`; later pages read that result. Snapshots are process-local and
+  bounded (16, 32 MiB, five idle minutes), so a restart, eviction or replaced
+  store reports the snapshot expired instead of mixing states. Reconstructing a
+  past state from the journal was not chosen: it would bind list reads to the
+  journal's storage, which Sync 4 (LOCAL-VUH-42) is changing.
