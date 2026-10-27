@@ -1180,3 +1180,61 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
   },
   120_000,
 );
+
+it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST !== "1")(
+  "seals a host that never reserved only when no pane runs in the hire's directory, and fences a late reserve",
+  async () => {
+    // VUH-2920: a PC start timed out before the host reserve ran; no journal existed to seal.
+    const home = await root();
+    const herdr = await isolatedHerdr(join(home, "logs"));
+    await mkdir(join(herdr.root, "config/herdr"), { recursive: true });
+    await symlink(herdr.socketPath, join(herdr.root, "config/herdr/herdr.sock"));
+    const env = {
+      HERDR_SOCKET_PATH: herdr.socketPath,
+      HERDR_CONFIG_PATH: join(herdr.root, "config/config.toml"),
+      XDG_CONFIG_HOME: join(herdr.root, "config"),
+      XDG_STATE_HOME: join(herdr.root, "state"),
+      XDG_DATA_HOME: join(herdr.root, "data"),
+      XDG_CACHE_HOME: join(herdr.root, "cache"),
+      XDG_RUNTIME_DIR: join(herdr.root, "runtime"),
+    };
+    const forDirectory = (cwd: string): RemoteHireClaim => ({
+      ...claim(),
+      receiptKey: JSON.stringify(["pc", "claude", cwd, "new"]),
+    });
+    try {
+      const listed = JSON.parse(
+        (
+          await exec("herdr", ["--session", "default", "pane", "list"], {
+            env: { ...process.env, ...env },
+            timeout: 5000,
+          })
+        ).stdout,
+      ) as { result: { panes: { cwd?: string }[] } };
+      const occupied = listed.result.panes.find((pane) => typeof pane.cwd === "string")?.cwd;
+      expect(occupied).toBeDefined();
+      // A pane in the hire's directory may be a launch this host never journaled.
+      const busy = forDirectory(occupied!);
+      await expect(host(home, busy, "seal", env)).rejects.toThrow(/runs in the original hire's directory/u);
+      expect(await host(home, busy, "reserve", env)).toEqual({ reserved: true });
+
+      const original = forDirectory(join(home, "never-launched"));
+      const proof = HireNoLaunchEvidenceSchema.parse(await host(home, original, "seal", env));
+      expect(proof).toMatchObject({ receiptId: original.receiptId, journal: "never-reserved" });
+      expect(await host(home, original, "seal", env)).toEqual(proof);
+      await expect(host(home, original, "reserve", env)).rejects.toThrow(/launch-fenced or sealed/u);
+      await expect(host(home, original, "launch", env)).rejects.toThrow(/cannot launch again/u);
+      const fence = new DeliveryFence(join(home, "originals.json"));
+      fence.begin(original.receiptKey, {
+        messageId: original.receiptId,
+        fingerprint: original.fingerprint,
+        remoteAdmission: { target: original.target, nonce: original.nonce },
+      });
+      fence.settleNotLaunched(original.receiptKey, original.receiptId, proof);
+      expect(new DeliveryFence(join(home, "originals.json")).settlement(original.receiptId)).toEqual(proof);
+    } finally {
+      await herdr.close();
+    }
+  },
+  60_000,
+);

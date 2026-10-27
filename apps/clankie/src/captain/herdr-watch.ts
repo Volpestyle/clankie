@@ -900,6 +900,14 @@ export interface ProjectHirePolicy {
   tools?(projectId: string): Promise<readonly string[]>;
 }
 
+/** Names the exact receipt a lead settles before retiring an unconfirmed hire (VUH-2920). */
+function settleOriginalFirst(receiptIds: readonly string[]): string {
+  const id = receiptIds.length === 1 ? receiptIds[0] : undefined;
+  return id === undefined
+    ? `Settle the original native hire receipt before retiring its unconfirmed pane${receiptIds.length ? ` (candidates: ${receiptIds.join(", ")})` : "; no unique original was found"}.`
+    : `Settle original native hire receipt ${id} before retiring its unconfirmed pane: settle_hire_receipt ${id} adopt when a local pane still runs its harness, otherwise abandoned.`;
+}
+
 export class HerdrWatchStore implements HerdrWatchPort {
   public efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
   public workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
@@ -3426,7 +3434,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (disposition !== "not-launched") return this.recoverHireReceipt(receiptId, guard, disposition);
     const settled = this.hireReceipts.settlement(receiptId);
     if (settled)
-      return settled.journal === "reserved-to-sealed-without-launch"
+      return settled.journal === "reserved-to-sealed-without-launch" || settled.journal === "never-reserved"
         ? { state: "settled-not-launched", receiptId, evidence: settled }
         : refused("Original receipt already has a different retained disposition.");
     const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
@@ -5464,19 +5472,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
         throw new Error("Original project allocation changed");
       // Independent of confirmation: an unsettled original for this occupant (or an unreadable
       // journal) always holds retirement until it is settled, e.g. by settle_hire_receipt adopt.
-      if (
-        this.hireReceipts
-          .all()
-          .some(
-            ([, receipt]) =>
-              receipt.paneId === agent.paneId &&
-              receipt.occupantId === candidate.occupantId &&
-              !receipt.completed &&
-              !receipt.settlement &&
-              !receipt.abandoned,
-          )
-      )
-        throw new Error("Settle the original native hire receipt before retiring its unconfirmed pane");
+      const unsettled = this.hireReceipts
+        .all()
+        .filter(
+          ([, receipt]) =>
+            receipt.paneId === agent.paneId &&
+            receipt.occupantId === candidate.occupantId &&
+            !receipt.completed &&
+            !receipt.settlement &&
+            !receipt.abandoned,
+        );
+      if (unsettled.length)
+        throw new Error(settleOriginalFirst(unsettled.map(([, receipt]) => receipt.messageId)));
       const proof = await this.projectPolicy?.proof?.(fleet, agent.paneId);
       if (this.projectHires.assignment(fleet, agent.paneId, proof).state !== "assigned")
         throw new Error("Original native process or connection changed");
@@ -5489,7 +5496,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               : receipt.paneId === agent.paneId && receipt.occupantId === candidate.occupantId,
           );
         if (original.length !== 1 || !original[0]![1].settlement)
-          throw new Error("Settle the original native hire receipt before retiring its unconfirmed pane");
+          throw new Error(settleOriginalFirst(original.map(([, receipt]) => receipt.messageId)));
       }
     };
     await check();

@@ -27,7 +27,8 @@ export const HireNoLaunchEvidenceSchema = z
         sha256: z.string().regex(/^[a-f0-9]{64}$/u),
       })
       .strict(),
-    journal: z.literal("reserved-to-sealed-without-launch"),
+    /** never-reserved: the host has no journal for the claim and no pane in its directory (VUH-2920). */
+    journal: z.enum(["reserved-to-sealed-without-launch", "never-reserved"]),
   })
   .strict();
 export type HireNoLaunchEvidence = z.infer<typeof HireNoLaunchEvidenceSchema>;

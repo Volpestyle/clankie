@@ -212,6 +212,10 @@ it("a confirmed allocation whose original is still unsettled stays fenced until 
   const f = await fixture(true);
   const store = f.open();
   expect(await f.retires(store)).toBe(false);
+  // The refusal names the exact original to settle (VUH-2920), not just that one exists.
+  await expect(store.retirementGuard(f.agent)).rejects.toThrow(
+    `Settle original native hire receipt ${f.receiptId} before retiring its unconfirmed pane: settle_hire_receipt ${f.receiptId} adopt`,
+  );
   // Auto-tidy leaves it to the operator; it adopts only an unconfirmed allocation.
   expect(await store.adoptUnconfirmedForTidy(f.agent, f.owner, async () => {})).toBeUndefined();
   expect(await store.settleHireReceipt(f.receiptId, async () => {}, "adopt")).toMatchObject({

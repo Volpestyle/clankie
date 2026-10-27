@@ -71,8 +71,11 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
         if (unknownRecovery && !uncommitted && !fs.existsSync(file))
             throw new Error("Unknown abandonment requires the existing original launch journal");
         const existing = fs.existsSync(file);
+        // A seal with no journal: reserve never ran here, so launch (which needs it) never could.
+        const neverReserved = request.op === "seal" && !existing;
         const record = request.op === "recover" && !existing
-            ? { claim, hostIdentity: identity, openedAt: Date.now(), state: "recovered" } : read();
+            ? { claim, hostIdentity: identity, openedAt: Date.now(), state: "recovered" }
+            : neverReserved ? { claim, hostIdentity: identity, openedAt: Date.now(), state: "reserved" } : read();
         if (request.op === "launch") {
             if (record.state !== "reserved")
                 throw new Error("Original host receipt cannot launch again");
@@ -262,6 +265,12 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
         }
         // The reserved journal covers the entire interval: every authorized effect needs launch CAS.
         // Absence from a live listing alone is never sufficient and cannot recover legacy records.
+        if (neverReserved) {
+            const cwd = JSON.parse(claim.receiptKey)[2];
+            const normalize = value => typeof value !== "string" ? value : process.platform === "win32" ? path.win32.normalize(value).toLowerCase() : path.resolve(value);
+            if (typeof cwd !== "string" || panes.some(pane => normalize(pane.cwd) === normalize(cwd)))
+                throw new Error("A pane runs in the original hire's directory; it may have launched without this host's journal");
+        }
         const observedAt = Date.now();
         const evidence = {
             receiptId: claim.receiptId,
@@ -278,9 +287,10 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
                     .length,
                 sha256: digest([panes, agents, processes]),
             },
-            journal: "reserved-to-sealed-without-launch",
+            journal: neverReserved ? "never-reserved" : "reserved-to-sealed-without-launch",
         };
-        write({ ...record, state: "sealed", evidence });
+        // Created exclusively, so a reserve arriving later finds it sealed and refuses.
+        write({ ...record, state: "sealed", evidence }, neverReserved);
         return evidence;
     }
     finally {
