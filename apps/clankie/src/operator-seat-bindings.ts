@@ -160,7 +160,11 @@ export class OperatorSeatBindings {
   }
 
   /** Census membership must match a current registered kernel lifetime, not a conversation claim. */
-  public async registeredLauncher(pid: number, startTime: string, requireBridge = true): Promise<string | undefined> {
+  public async registeredLauncher(
+    pid: number,
+    startTime: string,
+    requireBridge = true,
+  ): Promise<string | undefined> {
     for (const [conversationId, entry] of this.entries) {
       if (
         entry.controller.pid === pid &&
@@ -169,7 +173,7 @@ export class OperatorSeatBindings {
           : nativeProcessStart(entry.controller.birth)) === startTime &&
         (await this.alive(entry.controller)) &&
         (await this.alive(entry.harness)) &&
-        (!requireBridge || entry.claimant !== undefined && (await this.alive(entry.claimant)))
+        (!requireBridge || (entry.claimant !== undefined && (await this.alive(entry.claimant))))
       )
         return conversationId;
     }
