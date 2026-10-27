@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { FLEET_AUTO_TIDY_MS, type FleetAutoTidy } from "@clankie/protocol/fleet-settings";
 import { checkoutGit, projectPathContains } from "@clankie/settings";
+import type { ProjectsSettings } from "@clankie/protocol/projects";
 import type { ConversationOwner } from "./conversation-owner.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import {
@@ -41,6 +42,8 @@ export interface AutoTidyPorts {
   readonly setting: () => Promise<FleetAutoTidy>;
   readonly runner: Pick<HerdrWatchRunner, "list">;
   readonly tidy: Pick<PaneTidy, "close" | "keptPane" | "keepVersion" | "hasKeptReport">;
+  /** Seats a project names as its standing reviewer; they stay open like kept panes. */
+  readonly reviewerSeats?: () => Promise<ReadonlySet<string>>;
   readonly provenance: (agent: HerdrAgentSnapshot) => ConversationOwner | "unknown" | "owner_interactive";
   /** Reports from this exact seat that no lead has acknowledged yet. */
   readonly unreadReports: (agent: HerdrAgentSnapshot) => number;
@@ -63,6 +66,15 @@ export interface AutoTidyPorts {
   readonly prune: (repository: string, path: string) => Promise<PruneWorktreeResult>;
   readonly stopped: () => boolean;
   readonly now?: () => number;
+}
+
+/** Every seat a project names as `review.seat` (ADR 0287); a role reviewer is hired per need. */
+export function reviewerSeatIds(projects: ProjectsSettings): ReadonlySet<string> {
+  return new Set(
+    projects.projects.flatMap((project) =>
+      project.review !== undefined && "seat" in project.review ? [project.review.seat] : [],
+    ),
+  );
 }
 
 /** A registered repository the last worktree round could not tidy, and why. */
@@ -121,6 +133,7 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       string,
       { owner: ConversationOwner; entries: ClosedWorkerPaneHistory[]; adopted: string[] }
     >();
+    const reviewers = (await ports.reviewerSeats?.()) ?? new Set<string>();
     for (const agent of await ports.runner.list()) {
       if (ports.stopped()) break;
       if (!SETTLED.has(agent.status) || !["claude", "codex"].includes(agent.agent)) continue;
@@ -128,7 +141,8 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       const sessionKey = tidySessionKey(agent);
       const key = JSON.stringify([agent.terminalId, sessionKey, ports.tidy.keepVersion(agent)]);
       seen.add(key);
-      if (ports.tidy.keptPane(agent)) {
+      // A standing reviewer idles between candidates; closing it stalls every landing (VUH-2920).
+      if (ports.tidy.keptPane(agent) || reviewers.has(agent.terminalId)) {
         settledSince.delete(key);
         retryAt.delete(key);
         held.delete(key);

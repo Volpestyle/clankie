@@ -303,7 +303,12 @@ import { fleetRosterWork } from "./fleet-roster-work.ts";
 import { FleetRoster } from "./fleet-roster.ts";
 import { fleetRosterAction } from "./fleet-roster-actions.ts";
 import { PaneTidy, parkedRefs } from "./pane-tidy.ts";
-import { AUTO_TIDY_PANE_CHECK_MS, AUTO_TIDY_WORKTREE_CHECK_MS, createAutoTidy } from "./auto-tidy.ts";
+import {
+  AUTO_TIDY_PANE_CHECK_MS,
+  AUTO_TIDY_WORKTREE_CHECK_MS,
+  createAutoTidy,
+  reviewerSeatIds,
+} from "./auto-tidy.ts";
 import {
   SeatIssueKeeper,
   liveSeatIssue,
@@ -5943,6 +5948,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     setting: async () => (await settings()).fleet.autoTidy,
     runner: herdrRunner,
     tidy: paneTidy,
+    reviewerSeats: async () => reviewerSeatIds((await settings()).projects),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     unreadReports: (agent) => reportSummaries(undefined, agent).length,
     ownerValid: validateConversationOwner,
