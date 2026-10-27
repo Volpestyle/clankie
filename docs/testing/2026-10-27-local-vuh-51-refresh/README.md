@@ -126,7 +126,7 @@ reported 1981.6 (2046.1) MB → 1443.4 (1519.6) MB; old-space was requested at 8
 MiB. The host remained healthy with ~92 GB available. No product serialization or
 sealing fix is claimed here.
 
-Posted on [LOCAL-VUH-49](clankie-work://local/comment/f5f0cfe0-b2c3-4b2a-b303-5339e7baf2dd)
+Posted on `LOCAL-VUH-49` (comment `f5f0cfe0-b2c3-4b2a-b303-5339e7baf2dd`)
 with [fatal output, retained sizes, source hashes and executed runner](clankie://evidence/sha256/75bc009ab505a91d74d172c9734205aafa980c5d7afd8d71d6e9e6124b2072c0).
 That investigation must account for serialization/Zone allocation before
 relying on the string-length limit; it should consider streamed sealing as well
@@ -160,7 +160,7 @@ A separate real-browser diagnostic observed the exact failure:
 remained empty, and requested bootstrap again. The current app avoids that
 trigger with Sync 7, but its generic catch still calls `publish(); schedule()`
 without showing the error. That separate behavior is filed as
-[LOCAL-VUH-53](clankie-work://local/issue/b06697ca-fdd4-4f07-85f3-ea819bf531d7).
+`LOCAL-VUH-53`.
 [Actual error, retry requests and current source inspection](clankie://evidence/sha256/859881e8e845b44a9b4487045e4de1106b1e6883900de857a4621d3218acaeab).
 No app fix or current-app injected storage failure is claimed here.
 
