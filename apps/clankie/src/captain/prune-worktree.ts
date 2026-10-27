@@ -20,15 +20,18 @@ export interface PruneWorktreeResult {
   keptRef?: string;
 }
 
-/** True only for git's own refusal to treat a directory as a repository (or a directory that is gone). */
+/**
+ * True only for git's own refusal to treat a path as a repository: a plain directory, or a
+ * registered workspace whose folder was removed (`git -C` reports it as a failed chdir, never ENOENT).
+ */
 export function isNotGitRepository(error: unknown): boolean {
   const text = `${(error as { stderr?: unknown })?.stderr ?? ""}${error instanceof Error ? error.message : ""}`;
-  return /not a git repository/iu.test(text) || (error as { code?: unknown })?.code === "ENOENT";
+  return /not a git repository|cannot change to .*No such file or directory/iu.test(text);
 }
 
 /**
  * Whether any registered owner checkout lists a worktree nested under `path`. A registered
- * workspace that is not a git repository has no worktrees to nest, so it is skipped; any other
+ * workspace that is not a git repository, or whose folder is gone, has no worktrees to nest, so it is skipped; any other
  * failure still refuses the removal (VUH-2850).
  */
 export async function hasNestedRegisteredWorktree(owners: readonly string[], path: string): Promise<boolean> {

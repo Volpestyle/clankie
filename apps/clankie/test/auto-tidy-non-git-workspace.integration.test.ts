@@ -9,7 +9,11 @@ import { promisify } from "node:util";
 import { afterEach, expect, it, vi } from "vitest";
 import { createAutoTidy } from "../src/captain/auto-tidy.ts";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
-import { hasNestedRegisteredWorktree, pruneTidyWorktree } from "../src/captain/prune-worktree.ts";
+import {
+  hasNestedRegisteredWorktree,
+  isNotGitRepository,
+  pruneTidyWorktree,
+} from "../src/captain/prune-worktree.ts";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -106,4 +110,119 @@ it("skips a non-git workspace, reports it, and still tidies every other reposito
   expect(tidy.skipped()).toEqual([{ repository: plain, reason: "not_a_git_repository" }]);
   expect(warn).toHaveBeenCalledTimes(1);
   expect(warn.mock.calls[0]?.[0]).toBe(`Auto-tidy skipped ${plain}: not_a_git_repository`);
+});
+
+async function base() {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "clankie-auto-tidy-non-git-")));
+  roots.push(dir);
+  return dir;
+}
+const idleRunner = () =>
+  createHerdrWatchRunner(
+    undefined,
+    async (args) => {
+      if (args[0] === "pane" && args[1] === "list") return JSON.stringify({ result: { panes: [] } });
+      throw new Error(`Unexpected native call: ${args.join(" ")}`);
+    },
+    undefined,
+    { localCodexRecovery: false },
+  );
+const baseTidy = (checkouts: () => Promise<{ repository: string; roots: string[] }[]>, prune: never) => ({
+  setting: async () => "1h" as const,
+  runner: idleRunner(),
+  tidy: {} as never,
+  provenance: () => "unknown" as const,
+  unreadReports: () => 0,
+  ownerValid: async () => true,
+  closed: async () => {},
+  checkouts,
+  prune,
+  stopped: () => false,
+  now: () => Date.now() + 2 * 24 * 60 * 60_000,
+});
+
+it("keeps tidying after a prune throws, reports prune_failed, and replaces the report each round", async () => {
+  const dir = await base();
+  const first = await landedRepository(dir, "first");
+  const second = await landedRepository(dir, "second");
+  // A second candidate in the throwing repository: the round stops there rather than retrying.
+  await git(first.repo, [
+    "worktree",
+    "add",
+    "--quiet",
+    "-b",
+    "first-again",
+    join(dir, "first-again"),
+    "main",
+  ]);
+  const runner = idleRunner();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  let attempts = 0;
+  let repositories = [first.repo, second.repo];
+  const tidy = createAutoTidy(
+    baseTidy(async () => repositories.map((repository) => ({ repository, roots: [dir] })), (async (
+      repository: string,
+      path: string,
+    ) => {
+      if (repository === first.repo) {
+        attempts++;
+        throw new Error("prune exploded");
+      }
+      return pruneTidyWorktree(repository, path, join(dir, "archive"), runner, async () => {}, {
+        runtimeRoot: join(dir, "runtime"),
+        home: join(dir, "home"),
+        runtimePath: join(dir, "runtime"),
+      });
+    }) as never),
+  );
+
+  const removed = await tidy.worktrees();
+
+  expect(removed.map((result) => result.path)).toEqual([second.tree]);
+  expect(tidy.skipped()).toEqual([
+    { repository: first.repo, reason: "prune_failed", detail: "Error: prune exploded" },
+  ]);
+  expect(attempts).toBe(1);
+  repositories = [second.repo];
+  await tidy.worktrees();
+  expect(tidy.skipped()).toEqual([]);
+});
+
+it("labels an unreadable inventory as inventory_unavailable, not a non-git workspace", async () => {
+  const dir = await base();
+  const repo = await landedRepository(dir, "no-main");
+  await git(repo.repo, ["update-ref", "-d", "refs/remotes/origin/main"]);
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const tidy = createAutoTidy(
+    baseTidy(async () => [{ repository: repo.repo, roots: [dir] }], (async () => {
+      throw new Error("must not prune");
+    }) as never),
+  );
+  await tidy.worktrees();
+  expect(tidy.skipped()).toMatchObject([{ repository: repo.repo, reason: "inventory_unavailable" }]);
+});
+
+it("refuses a prune whose path holds a nested registered worktree, and fails closed on other errors", async () => {
+  const dir = await base();
+  const { repo, tree } = await landedRepository(dir, "nest");
+  const nested = join(tree, "nested");
+  await git(repo, ["worktree", "add", "--quiet", "-b", "nested-branch", nested, "main"]);
+  const plain = join(dir, "plain");
+  await mkdir(plain);
+  expect(await hasNestedRegisteredWorktree([plain, repo], tree)).toBe(true);
+  expect(await hasNestedRegisteredWorktree([plain, repo], join(dir, "elsewhere"))).toBe(false);
+  // An owner that fails for any reason other than "not a repository" must refuse, never pass.
+  const broken = await landedRepository(dir, "broken");
+  await writeFile(join(broken.repo, ".git", "config"), "[core\n");
+  await expect(hasNestedRegisteredWorktree([broken.repo, repo], join(dir, "elsewhere"))).rejects.toThrow();
+  expect(isNotGitRepository(new Error("fatal: bad config line 1"))).toBe(false);
+});
+
+it("skips a registered workspace whose folder was removed", async () => {
+  const dir = await base();
+  const { repo, tree } = await landedRepository(dir, "alive");
+  const gone = join(dir, "gone");
+  await mkdir(gone);
+  await rm(gone, { recursive: true });
+  expect(await hasNestedRegisteredWorktree([gone, repo], tree)).toBe(false);
 });
