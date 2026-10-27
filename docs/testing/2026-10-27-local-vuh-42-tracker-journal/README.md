@@ -44,6 +44,19 @@ node flows/bench-writes.ts --store STORE_DIR --scratch EMPTY_DIR --writes 20
 | 10 days | before (`f7845f6d9`)           |    307 ms | 1,036 / 1,164 ms |     17.7 s |  5.5 GB |
 | 10 days | copy-on-write, in-memory reuse |    352 ms |     232 / 239 ms |      3.9 s |  1.2 GB |
 
+**Hired-worker path.** Production opens a fresh scoped backend for each hired worker's tool
+call (`assertIssueWrite`), so each timed write below goes through a new instance (`--hire`). The
+last column times the long-lived service instance's next read, which before re-parsed the store
+after every foreign commit. Every instance in the process now shares one frozen committed
+snapshot.
+
+| Store   | Build                  | Hire write p50 / p95 | 17 creates | Service read after |
+| ------- | ---------------------- | -------------------: | ---------: | -----------------: |
+| 1 day   | before (`fcd07f990`)   |         129 / 142 ms |      2.3 s |              46 ms |
+| 1 day   | shared committed store |           34 / 37 ms |     0.56 s |             0.7 ms |
+| 10 days | before (`fcd07f990`)   |     1,060 / 1,125 ms |     18.4 s |             309 ms |
+| 10 days | shared committed store |         281 / 309 ms |      4.4 s |             8.7 ms |
+
 **Where the old write went** (CPU profile of 40 writes, 1-day store):
 
 - re-reading, parsing and chain-checking the store after the previous write: 37%

@@ -962,7 +962,7 @@ reaches V8's maximum string length. Method and numbers:
 
 **Copy-on-write.**
 
-- A backend keeps the store it last committed, deep-frozen, and shares it with reads.
+- Every backend instance on a store file in the process shares the last committed store, deep-frozen; reads use it directly. Production opens a fresh scoped instance per hired worker call, and none re-parses another instance's commit.
 - A write works on a draft. The draft copies only the top level and each collection
   array. A record is cloned only when the write changes it (`own`); finding an issue
   or project inside a write does this.

@@ -2315,6 +2315,9 @@ function own<T extends object>(collection: T[], entry: T): T {
 const owned = <T extends object>(collection: T[], entry: T): T =>
   Object.isFrozen(collection) ? entry : own(collection, entry);
 
+/** Each store file's committed snapshot, frozen and shared by every backend instance in the process. */
+const committedStores = new Map<string, { current?: { version: string; bytes: Buffer; store: Store } }>();
+
 /** Atomic rename prevents torn reads; fsync preserves completed writes across a process crash. */
 async function persist(
   path: string,
@@ -3789,7 +3792,10 @@ async function read(
 /** Shared by backend instances pointing at the same journal; publication follows rename. */
 const syncListeners = new Map<string, Set<() => void>>();
 
-/** Stable normalized objects: the app owns projections, the server owns fields and references. */
+/**
+ * Stable normalized objects: the app owns projections, the server owns fields and references.
+ * A model whose data or groups derive from another record must be named in syncCandidates too.
+ */
 function syncModels(store: Store, wanted?: ReadonlySet<string>): TrackerSyncModel[] {
   const models: TrackerSyncModel[] = [];
   const want = (modelName: TrackerSyncModel["modelName"], id: string) =>
@@ -4297,8 +4303,11 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   };
   const listeners = eventListeners.get(path) ?? new Set<TrackerEventListener>();
   eventListeners.set(path, listeners);
-  // The committed snapshot is frozen, so reads share it and writes take a draft of it.
-  let validated: { version: string; bytes: Buffer; store: Store } | undefined;
+  // The committed snapshot is frozen, so reads share it and writes take a draft of it. Every
+  // backend for this file in the process shares it too: production opens a scoped instance per
+  // hire call, and none should re-parse another's commit.
+  const shared = committedStores.get(path) ?? {};
+  committedStores.set(path, shared);
   const readStore = async (mutable = true): Promise<Store> => {
     // A different process can replace or edit the store, so every read checks
     // the file's version. Its identity, size and timestamps change with any
@@ -4308,22 +4317,22 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     // leaves a stale version that the next read misses.
     const stats = await stat(path, { bigint: true });
     const version = `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
-    if (validated?.version !== version) {
+    if (shared.current?.version !== version) {
       // Only byte-identical, already validated content may skip parsing/auditing.
       const bytes = await readFile(path);
-      validated =
-        validated !== undefined && validated.bytes.equals(bytes)
-          ? { ...validated, version }
+      shared.current =
+        shared.current !== undefined && shared.current.bytes.equals(bytes)
+          ? { ...shared.current, version }
           : { version, bytes, store: settle(parseStore(bytes.toString("utf8"))) };
     }
-    return mutable ? draftOf(validated.store) : validated.store;
+    return mutable ? draftOf(shared.current.store) : shared.current.store;
   };
   /** Our own commit becomes the snapshot the next call reuses, without reading it back. */
   const commit = async (store: Store, assertHeld: () => void, callOptions?: TrackerToolCallOptions) => {
     const bytes = await persist(path, store, assertHeld, callOptions);
     // Exactly what reopening these bytes would hold: open binds stage statuses after reading.
     bindStageStatuses(store);
-    validated = { version: fileVersion(), bytes, store: settle(store) };
+    shared.current = { version: fileVersion(), bytes, store: settle(store) };
   };
   const publish = (events: readonly TrackerItemEvent[]) => {
     for (const event of events)
@@ -4521,9 +4530,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     } finally {
       await file.close();
     }
-    validated =
-      validated !== undefined && validated.bytes.equals(bytes)
-        ? { ...validated, version }
+    shared.current =
+      shared.current !== undefined && shared.current.bytes.equals(bytes)
+        ? { ...shared.current, version }
         : { version, bytes, store: settle(parseStore(bytes.toString("utf8"))) };
     if (readIdentity !== undefined) {
       try {
@@ -4532,7 +4541,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         readIdentity = undefined;
       }
     }
-    return { store: mutable ? draftOf(validated.store) : validated.store, readIdentity };
+    return { store: mutable ? draftOf(shared.current.store) : shared.current.store, readIdentity };
   };
   const load = async ({
     mutable = true,
@@ -4882,8 +4891,14 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         const readSync = () =>
           withTrackerStoreLock(path, async (assertHeld): Promise<TrackerSyncResult> => {
             signal?.throwIfAborted();
-            const { store, clock, initialized } = await load();
-            await roll(store, clock, assertHeld);
+            // Long-pollers wake on every commit: read the committed store itself, never a copy.
+            const loaded = await load({ mutable: false });
+            const { clock, initialized } = loaded;
+            let store = loaded.store;
+            if (cyclesDue(store, clock)) {
+              store = draftOf(store);
+              await roll(store, clock, assertHeld);
+            }
             if (initialized) await commit(store, assertHeld);
             const storeId = store.storeId ?? store.team.id;
             const lastSyncId = store.syncId ?? 0;
