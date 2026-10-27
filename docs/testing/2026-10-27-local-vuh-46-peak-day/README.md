@@ -7,7 +7,7 @@ The corrected full-size run passes all five acceptance checks within the stated
 web-data-client scope: **594 writes, 75 issues, 840 events; p95 184 ms; zero
 periodic reads through a 10-minute idle window.** The initial 765-event run and
 its generator sizing gap are retained. **Headroom: withheld pending
-[LOCAL-VUH-50](clankie-work://local/issue/973f5c52-f252-48ff-8fc5-f91a2fb7ec8e).**
+`LOCAL-VUH-50`.**
 Worker request-to-commit latency is much higher: p95 **3,934 ms**, reported below.
 
 ## Method and boundaries
@@ -183,7 +183,7 @@ it remains a per-call cost; this compressed replay additionally queued calls to
 six seconds. The author's original report omitted this material finding.
 
 **Headroom: withheld pending
-[LOCAL-VUH-50](clankie-work://local/issue/973f5c52-f252-48ff-8fc5-f91a2fb7ec8e).**
+`LOCAL-VUH-50`.**
 The lead filed that High-priority product follow-up and decided that VUH-1920
 does not close with headroom until it is fixed. Its acceptance requires worker
 calls within 2× of lead calls, then a peak-day rerun with worker request→commit
