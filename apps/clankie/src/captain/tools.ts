@@ -1526,7 +1526,7 @@ function herdrWatchTools(
               issueStatus: Type.Optional(
                 Type.Union([Type.Literal("done"), Type.Literal("verifying"), Type.Literal("paused")], {
                   description:
-                    "Where the seat's issue goes: done (landed, with evidence), verifying (on main, proof pending) or paused (default). A live seat on the same issue keeps it In Progress as successor.",
+                    "Where the seat's issue goes: done (landed, with evidence), verifying (on main, proof pending) or paused. Omitted, its status stays and the reason is commented. An item in review or verifying never moves back. A live seat on the same issue keeps it In Progress as successor.",
                 }),
               ),
               evidence: Type.Optional(

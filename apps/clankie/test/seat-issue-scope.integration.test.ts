@@ -187,7 +187,11 @@ it("settles only the current verified hire scope across close, exit, collisions 
     const aSeat = await a.seat("Iris fixture");
     const bSeat = await b.seat("Other scope same display key");
     await keeper.observe([aSeat, bSeat]);
-    const close = await keeper.closed({ seatId: aSeat.seatId, reason: "fixture retirement" });
+    const close = await keeper.closed({
+      seatId: aSeat.seatId,
+      reason: "fixture retirement",
+      outcome: "paused",
+    });
     expect(close).toMatchObject({
       outcome: "updated",
       issue: "LOCAL-VUH-4",
@@ -285,7 +289,9 @@ it("settles only the current verified hire scope across close, exit, collisions 
       status: "In Progress",
     });
     expect((await keeper.dailyCheck(true)) ?? "").not.toContain("LOCAL-VUH-4:");
-    expect(await keeper.closed({ seatId: byUuid.seatId, reason: "pause UUID assignment" })).toMatchObject({
+    expect(
+      await keeper.closed({ seatId: byUuid.seatId, reason: "pause UUID assignment", outcome: "paused" }),
+    ).toMatchObject({
       intended: "Paused",
       status: "Todo",
     });
@@ -350,7 +356,7 @@ it("settles only the current verified hire scope across close, exit, collisions 
       const comment = comments.comments.find((entry) => entry.id === commentId)!.body;
       expect(comment).toContain(`Delivery preserved: ${stage}`);
       expect(comment).toContain(
-        `Retirement activity: ${successor ? "In Progress" : outcome ? (outcome === "done" ? "Done" : "Verifying") : "Paused"}`,
+        `Retirement activity: ${successor ? "In Progress" : outcome ? (outcome === "done" ? "Done" : "Verifying") : exit ? "Paused" : "no outcome stated"}`,
       );
       expect(comment).toContain(
         exit ? "its seat exited without a close" : "remaining device proof is pending",
@@ -683,7 +689,13 @@ it("retains saved Linear retirement for bound and legacy projects through a disp
         expect(await keeper.observe(seats)).toMatchObject([{ outcome: "failed" }]);
         await writeConvention(secondPath, secondConvention);
       }
-      expect(await keeper.closed({ seatId: `s-${index}`, reason: "saved Linear retirement" })).toMatchObject({
+      expect(
+        await keeper.closed({
+          seatId: `s-${index}`,
+          reason: "saved Linear retirement",
+          outcome: "paused",
+        }),
+      ).toMatchObject({
         outcome: "updated",
         issue: key,
         status: "Todo",

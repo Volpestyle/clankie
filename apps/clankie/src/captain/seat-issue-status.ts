@@ -203,13 +203,22 @@ interface PendingRetirement {
   running?: boolean;
 }
 
-// Done needs evidence; a stated Done without it is proof pending.
-const retirementIntent = (input: Retirement): SeatIssueStatus =>
+// Done needs evidence; a stated Done without it is proof pending. No stated
+// outcome (auto-tidy, an owner close) changes no status: the comment records it.
+const retirementIntent = (input: Retirement): SeatIssueStatus | undefined =>
   input.outcome === "done" && input.evidence
     ? "Done"
     : input.outcome === "done" || input.outcome === "verifying"
       ? "Verifying"
-      : "Paused";
+      : input.outcome === "paused"
+        ? "Paused"
+        : undefined;
+const stated = (intended: SeatIssueStatus | undefined) => (intended === undefined ? {} : { intended });
+// Retirement never moves an item back out of review.
+const REVIEW_STATUSES = new Set(["in review", "verifying"]);
+/** Only the built-in tracker's own lookup miss proves a key names no item in that scope. */
+const absentFrom = (scope: SeatIssueTrackerScope, error: unknown) =>
+  scope.backend === "builtin" && error instanceof Error && /\bIssue not found: /u.test(error.message);
 type Row = Record<string, unknown>;
 const text = (value: unknown) => (typeof value === "string" ? value : undefined);
 const oneLine = (value: string) => value.replace(/\s+/gu, " ").trim().slice(0, 400);
@@ -369,6 +378,8 @@ export class SeatIssueKeeper {
           attribution: seat.attribution,
           seat: seat.title,
           why: "its seat exited without a close",
+          // A crash leaves work mid-flight; resume() restores it when a seat returns.
+          outcome: "paused",
         }),
       );
     }
@@ -533,7 +544,7 @@ export class SeatIssueKeeper {
     priority: LinearRequestPriority,
   ): Promise<SeatIssueSettlement> {
     const input = pending.retirement;
-    let intended = pending.plan?.result.intended ?? retirementIntent(input);
+    let intended = pending.plan ? pending.plan.result.intended : retirementIntent(input);
     try {
       const scope = await input.attribution.resolve();
       const call = async (tool: string, args: Row) => (await scope.call(tool, args, priority)) as Row;
@@ -559,7 +570,9 @@ export class SeatIssueKeeper {
               try {
                 if ((await this.canonicalId(scope, key)) !== targetId) continue;
                 names = true;
-              } catch {
+              } catch (error) {
+                // A key with no item in this scope names other work, e.g. another tracker's key.
+                if (absentFrom(scope, error)) continue;
                 names = undefined;
               }
               break;
@@ -600,39 +613,60 @@ export class SeatIssueKeeper {
           plan = {
             scope: scope.identity,
             identity,
-            comment: `${retirement} Retirement activity: ${intended}. Delivery preserved: ${stage}. Status: ${current}.`,
+            comment: `${retirement} Retirement activity: ${intended ?? "no outcome stated"}. Delivery preserved: ${stage}. Status: ${current}.`,
             pause: false,
             result: {
               outcome: "updated",
               issue: input.issue,
-              intended,
+              ...stated(intended),
               status: current,
               detail: `Delivery preserved: ${stage}; retirement activity recorded in comment.`,
             },
           };
+        } else if (CLOSED_TYPES.has(text(issue.statusType) ?? ""))
+          return {
+            outcome: "skipped",
+            issue: input.issue,
+            ...stated(intended),
+            detail: `Already ${current}.`,
+          };
+        else if (intended === undefined || REVIEW_STATUSES.has(current?.toLowerCase() ?? "")) {
+          if (!current) throw new Error("Tracker returned no current status");
+          plan = {
+            scope: scope.identity,
+            identity,
+            comment: `${retirement} Status kept: ${current}${intended === undefined ? " (no outcome stated)" : ` (asked ${intended}; it doesn't move an item back out of review)`}.`,
+            pause: false,
+            result: {
+              outcome: "updated",
+              issue: input.issue,
+              ...stated(intended),
+              status: current,
+              detail: `Status kept: ${current}.`,
+            },
+          };
         } else {
-          if (CLOSED_TYPES.has(text(issue.statusType) ?? ""))
-            return { outcome: "skipped", issue: input.issue, intended, detail: `Already ${current}.` };
+          const goal = intended;
           const team = text(issue.teamId) ?? text(issue.team);
           const statuses = await call("list_issue_statuses", { team });
           const rows = (Array.isArray(statuses) ? statuses : (statuses.statuses ?? [])) as Row[];
           const named = (name: string) =>
             rows.find((row) => text(row.name)?.toLowerCase() === name.toLowerCase());
-          const fallback = intended === "Verifying" || intended === "Paused" ? FALLBACK[intended] : undefined;
+          const fallback = goal === "Verifying" || goal === "Paused" ? FALLBACK[goal] : undefined;
           const target =
-            named(intended) ??
+            named(goal) ??
             (fallback && (named(fallback.name) ?? rows.find((row) => row.type === fallback.type))) ??
-            (intended === "Done" ? rows.find((row) => row.type === "completed") : undefined);
+            (goal === "Done" ? rows.find((row) => row.type === "completed") : undefined);
           const status = text(target?.name);
-          if (status === undefined) throw new Error(`No ${intended} status`);
-          const missing = status.toLowerCase() !== intended.toLowerCase();
+          if (status === undefined) throw new Error(`No ${goal} status`);
+          const missing = status.toLowerCase() !== goal.toLowerCase();
           plan = {
             scope: scope.identity,
             identity,
             status,
-            comment: `${retirement} Status: ${status}${missing ? ` (intended ${intended}; that status does not exist yet)` : ""}.`,
-            pause: intended === "Paused",
-            result: { outcome: "updated", issue: input.issue, intended, status },
+            comment: `${retirement} Status: ${status}${missing ? ` (intended ${goal}; that status does not exist yet)` : ""}.`,
+            pause: goal === "Paused",
+            result: { outcome: "updated", issue: input.issue, intended: goal, status },
           };
         }
       }
@@ -646,7 +680,12 @@ export class SeatIssueKeeper {
           current = text(issue.status) ?? text(issue.state);
           // Settled by someone else between attempts.
           if (current !== plan.status && CLOSED_TYPES.has(text(issue.statusType) ?? ""))
-            return { outcome: "skipped", issue: input.issue, intended, detail: `Already ${current}.` };
+            return {
+              outcome: "skipped",
+              issue: input.issue,
+              ...stated(intended),
+              detail: `Already ${current}.`,
+            };
         }
         if (plan.status !== current) await call("save_issue", { id: targetId, state: plan.status });
         plan.statusSet = true;
@@ -667,7 +706,7 @@ export class SeatIssueKeeper {
       return {
         outcome: "failed",
         issue: input.issue,
-        intended,
+        ...stated(intended),
         detail: error instanceof Error ? error.message : String(error),
       };
     }

@@ -226,9 +226,11 @@ owner checkout sync. A refusal never authorizes a raw close. Only a hire's own
 lead closes it: on another lead's hire `close_worker_pane` returns `not_owner`.
 
 After a close, the seat's `deliverable` issue moves to `issueStatus` (`done`
-needs `evidence`, else it becomes `verifying`; default `paused`), or stays In
-Progress when another live seat holds the same key. Hire a successor on the same
-`deliverable` first to keep it In Progress. A seat that exits without a close is
+needs `evidence`, else it becomes `verifying`), or stays In Progress when
+another live seat holds the same key. Without `issueStatus`, as in auto-tidy
+and owner closes, its status stays and the reason is commented. An item in
+review or verifying never moves back, and built-in delivery stages are kept.
+Hire a successor on the same `deliverable` first to keep it In Progress. A seat that exits without a close is
 paused after ten minutes, and a daily check wakes you with every In Progress
 issue no live seat owns. Doctor lists unreconciled worktrees by owner and age;
 mail the owner about one over a day old whose owner is gone and that you cannot

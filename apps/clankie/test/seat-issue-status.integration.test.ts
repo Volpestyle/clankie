@@ -139,7 +139,9 @@ it("degrades to In Progress or Todo, naming the intended status, until Verifying
     "Ada left: core change landed. Status: In Progress (intended Verifying; that status does not exist yet).",
   ]);
 
-  expect(await keeper.closed({ seatId: "s2", reason: "hit its context limit" })).toMatchObject({
+  expect(
+    await keeper.closed({ seatId: "s2", reason: "hit its context limit", outcome: "paused" }),
+  ).toMatchObject({
     intended: "Paused",
     status: "Todo",
   });
@@ -149,7 +151,9 @@ it("degrades to In Progress or Todo, naming the intended status, until Verifying
   // Once the owner adds the statuses, they are used by name.
   addStates();
   await keeper.observe([seat("s3", "Cy", "VUH-1385"), seat("s4", "Di", "VUH-1383")]);
-  expect(await keeper.closed({ seatId: "s3", reason: "waiting on a device capture" })).toMatchObject({
+  expect(
+    await keeper.closed({ seatId: "s3", reason: "waiting on a device capture", outcome: "paused" }),
+  ).toMatchObject({
     status: "Paused",
   });
   expect(status("VUH-1385")).toBe("Paused");
@@ -158,6 +162,16 @@ it("degrades to In Progress or Todo, naming the intended status, until Verifying
   });
   expect(status("VUH-1383")).toBe("Verifying");
   expect(comments("VUH-1383").at(-1)).toBe("Di left: proof pending. Status: Verifying.");
+  // A later pause never pulls an item back out of review (VUH-2920).
+  await keeper.observe([seat("s5", "Ed", "VUH-1383")]);
+  expect(await keeper.closed({ seatId: "s5", reason: "stopped", outcome: "paused" })).toMatchObject({
+    intended: "Paused",
+    status: "Verifying",
+  });
+  expect(status("VUH-1383")).toBe("Verifying");
+  expect(comments("VUH-1383").at(-1)).toBe(
+    "Ed left: stopped. Status kept: Verifying (asked Paused; it doesn't move an item back out of review).",
+  );
   expect(provider.validationErrors).toEqual([]);
 });
 

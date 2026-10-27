@@ -202,9 +202,9 @@ it("defers for a relevant or unprovable unknown owner, then hands off once it re
   const a = await project("a");
   const closing = await a.hire("Soren", "LOCAL-VUH-4");
   const peer = await a.hire("Peer on the same issue", "LOCAL-VUH-4");
-  const unprovable = { seatId: "head", title: "Clankie", keys: [], ownedKeys: ["NOPE-9"] };
+  const unprovable = { seatId: "head", title: "Clankie", keys: [], ownedKeys: ["LOCAL-VUH-4"] };
   await keeper.observe([closing.live, peer.live]);
-  // Unprovable: a key with no item in the closing scope and no attribution.
+  // Unprovable: no attribution, and its key names the closing item in this scope.
   await keeper.observe([closing.live, unprovable]);
   const untouched = await a.bytes();
   const deferred = await keeper.closed({
@@ -332,7 +332,12 @@ it("ends retries at the bound and never settles an issue its seat came back to",
   const a = await project("a");
   const closing = await a.hire("Soren", "LOCAL-VUH-4");
   const returning = await a.hire("Undo returns", "LOCAL-VUH-3");
-  const unprovable = { seatId: "head", title: "Clankie", keys: [], ownedKeys: ["NOPE-9"] };
+  const unprovable = {
+    seatId: "head",
+    title: "Clankie",
+    keys: [],
+    ownedKeys: ["LOCAL-VUH-4", "LOCAL-VUH-3"],
+  };
   await keeper.observe([closing.live, returning.live, unprovable]);
   const untouched = await a.bytes();
   expect(await keeper.closed({ seatId: closing.live.seatId, reason: "stuck" })).toMatchObject({
@@ -366,4 +371,30 @@ it("ends retries at the bound and never settles an issue its seat came back to",
   advance(300_000);
   expect(await keeper.observe([returning.live, unprovable])).toEqual([]);
   expect(await a.bytes()).toBe(untouched);
+});
+
+it("settles past an unattributed seat on another tracker's key, and keeps status when no outcome is stated", async () => {
+  const { keeper, project } = await setup();
+  const a = await project("a");
+  const stated = await a.hire("Odile", "LOCAL-VUH-4");
+  const tidied = await a.hire("Tidied", "LOCAL-VUH-3");
+  // VUH-2920: the head seat and a seat on a Linear item never resolve hire attribution here.
+  const head = { seatId: "head", title: "Clankie", keys: [], ownedKeys: ["VUH-2868", "VUH-2920"] };
+  const linear = await a.hire("Linear worker", "VUH-2868");
+  await keeper.observe([stated.live, tidied.live, head, linear.refused]);
+  expect(
+    await keeper.closed({ seatId: stated.live.seatId, reason: "paused at a handoff", outcome: "paused" }),
+  ).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", intended: "Paused", status: "Todo" });
+  expect(await a.issue(4)).toMatchObject({ status: "Todo" });
+  // Auto-tidy and owner closes state no outcome: the status stays and the reason is recorded.
+  const kept = await keeper.closed({ seatId: tidied.live.seatId, reason: "auto-tidy: idle and landed" });
+  expect(kept).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-3", status: "In Progress" });
+  expect(kept).not.toHaveProperty("intended");
+  expect(kept).not.toHaveProperty("retryUntil");
+  expect(await a.issue(3)).toMatchObject({ status: "In Progress" });
+  expect(await a.comments(3)).toEqual([
+    expect.stringContaining(
+      "Tidied left: auto-tidy: idle and landed. Status kept: In Progress (no outcome stated).",
+    ),
+  ]);
 });
