@@ -1,0 +1,214 @@
+diff --git a/apps/clankie/src/captain/captain.ts b/apps/clankie/src/captain/captain.ts
+index 6247bac6c..e407526da 100644
+--- a/apps/clankie/src/captain/captain.ts
++++ b/apps/clankie/src/captain/captain.ts
+@@ -7611,7 +7611,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
+     operatorSeatRecovery: async (conversationId, observedSessionId) => {
+       const held =
+         "Migration held: the authoritative local native session/profile could not be proven. Preserve the original receipts; do not replay calls or launch a substitute session.";
+-      const source = await operatorNativeSource(conversationId).catch(() => undefined);
++      // An observation error is not an absent source. Let the routes hold with
++      // its reason; stored metadata must not replace a failed live source proof.
++      const source = await operatorNativeSource(conversationId);
+       const sessionId = source ? nativeSessionId(source) : observedSessionId;
+       if (
+         !sessionId ||
+diff --git a/apps/clankie/src/captain/checkout-observation-cache.ts b/apps/clankie/src/captain/checkout-observation-cache.ts
+index 26cb59732..d54eb42a3 100644
+--- a/apps/clankie/src/captain/checkout-observation-cache.ts
++++ b/apps/clankie/src/captain/checkout-observation-cache.ts
+@@ -1,7 +1,8 @@
+ import type { CheckoutStatus } from "@clankie/protocol";
+-import { inspectCheckout, ownerCheckout } from "@clankie/settings";
++import { realpath } from "node:fs/promises";
++import { checkoutGit, inspectCheckout } from "@clankie/settings";
+ 
+-/** Opted-in reads share the complete Git observation, including owner discovery. */
++/** Opted-in reads share the complete Git observation, including checkout-root discovery. */
+ export class CheckoutObservationCache {
+   private readonly capacity: number;
+   private readonly ttlMs: number;
+@@ -23,7 +24,8 @@ export class CheckoutObservationCache {
+     const cached = this.entries.get(path);
+     if (cached) return cached.pending;
+     while (this.entries.size >= this.capacity) this.entries.delete(this.entries.keys().next().value!);
+-    const pending = ownerCheckout(path)
++    const pending = checkoutGit(path, ["rev-parse", "--show-toplevel"])
++      .then((root) => realpath(root.trim()))
+       .then(inspectCheckout)
+       .catch(() => undefined);
+     this.entries.set(path, { expires: now + this.ttlMs, pending });
+diff --git a/apps/clankie/test/captain-conversation-driver.test.ts b/apps/clankie/test/captain-conversation-driver.test.ts
+index 1cfb24894..7a46d512b 100644
+--- a/apps/clankie/test/captain-conversation-driver.test.ts
++++ b/apps/clankie/test/captain-conversation-driver.test.ts
+@@ -1,5 +1,5 @@
+ import { randomUUID } from "node:crypto";
+-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
++import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { afterEach, expect, it, vi } from "vitest";
+@@ -12,6 +12,7 @@ import {
+   createCaptainRouteClient,
+ } from "../../tui/src/session/operator-conversations.ts";
+ import type { CaptainDeps } from "../src/captain/deps.ts";
++import type { AgentSessions } from "../src/agent-sessions.ts";
+ import { AutonomyStore } from "../src/captain/autonomy.ts";
+ import { ConversationJournal } from "../src/captain/conversation-journal.ts";
+ import { CONVERSATION_RUN_STALL_MS } from "../src/captain/conversation-run.ts";
+@@ -116,6 +117,7 @@ async function fixture(
+   headBoundGraceMs?: number,
+   headLaneHoldMs?: number,
+   migrationHeld?: (id: string) => boolean,
++  agentSessions?: CaptainDeps["agentSessions"],
+ ) {
+   const root = mkdtempSync(join(tmpdir(), "captain-conversation-driver-"));
+   if (pendingOwnerAction) {
+@@ -148,7 +150,7 @@ async function fixture(
+   vi.spyOn(AutonomyStore.prototype, "start").mockImplementation((run) => {
+     autonomous = run;
+   });
+-  const captain = createCaptain({ memory: {} } as CaptainDeps, {
++  const captain = createCaptain({ memory: {}, agentSessions } as CaptainDeps, {
+     repoRoot: root,
+     stateDir: root,
+     workingDirectory: root,
+@@ -250,6 +252,43 @@ it("a default-head migration hold suppresses failback; another conversation's ho
+   expect(failBack).toHaveBeenCalledTimes(1);
+ });
+ 
++it("failed native source observation cannot use a stored session as migration proof", async () => {
++  const resolve = vi.fn<AgentSessions["resolve"]>();
++  const { captain, id, root } = await fixture(false, undefined, undefined, undefined, {
++    list: async () => ({ sessions: [], errors: [] }),
++    read: async () => {
++      throw new Error("Unexpected transcript read");
++    },
++    resolve,
++  });
++  const sessionId = randomUUID();
++  const profile = join(root, "claude-profile");
++  const project = join(profile, "projects", "fixture");
++  mkdirSync(project, { recursive: true });
++  const path = join(project, `${sessionId}.jsonl`);
++  writeFileSync(path, "");
++  resolve.mockResolvedValue({
++    ref: `local:${sessionId}`,
++    host: "local",
++    sessionId,
++    workingDirectory: root,
++    file: { harness: "claude", path, size: 0, mtimeMs: 0 },
++  });
++  expect(captain.syncSeatTranscript(id, { sessionId, entries: [] })).toBe(true);
++  // With a successful observation of no source, the current stored association
++  // can locate the transcript; the separate kernel census still proves liveness.
++  expect(await captain.operatorSeatRecovery!(id, sessionId)).toMatchObject({ sessionId, cwd: root, profile });
++  resolve.mockClear();
++  vi.spyOn(ConversationStore.prototype, "attachedConversationForNative").mockImplementation(() => {
++    throw new Error("Native source observation failed");
++  });
++  await expect(captain.operatorSeatRecovery!(id, sessionId)).rejects.toThrow(
++    "Native source observation failed",
++  );
++  expect(resolve).not.toHaveBeenCalled();
++  expect(fake.prompts).toEqual([]);
++});
++
+ it("a stuck session startup fails loudly and releases an attached seat to handle later turns", async () => {
+   const { captain, id, journal, send, agent, settleSeat } = await fixture();
+   let entered!: () => void;
+diff --git a/apps/clankie/test/checkout-freshness.integration.test.ts b/apps/clankie/test/checkout-freshness.integration.test.ts
+index 3679d5a50..432a26c36 100644
+--- a/apps/clankie/test/checkout-freshness.integration.test.ts
++++ b/apps/clankie/test/checkout-freshness.integration.test.ts
+@@ -115,6 +115,21 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
+       expect(seats.every((seat) => !("checkout" in seat))).toBe(true);
+     }
+     expect(await readFile(trace, "utf8")).toBe("");
++    await checkoutGit(linked, ["switch", "-c", "worker-changes"]);
++    await writeFile(join(linked, "worker.txt"), "worker commit\n");
++    await checkoutGit(linked, ["add", "worker.txt"]);
++    await checkoutGit(linked, [
++      "-c",
++      "core.hooksPath=/dev/null",
++      "-c",
++      "commit.gpgsign=false",
++      "commit",
++      "-m",
++      "worker",
++    ]);
++    const workerHead = (await checkoutGit(linked, ["rev-parse", "HEAD"])).trim();
++    await writeFile(join(linked, "draft.txt"), "worker draft\n");
++    await writeFile(trace, "");
+     const enriched = await captain.serveOperatorConversation({
+       schemaVersion: 1,
+       op: "roster",
+@@ -125,7 +140,15 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
+       seats: expect.arrayContaining([
+         expect.objectContaining({
+           workingDirectory: linked,
+-          checkout: expect.objectContaining({ path: owner, outcome: "observed", dirty: false }),
++          checkout: expect.objectContaining({
++            path: linked,
++            outcome: "observed",
++            branch: "worker-changes",
++            head: workerHead,
++            ahead: 1,
++            behind: 0,
++            dirty: true,
++          }),
+         }),
+       ]),
+     });
+@@ -133,6 +156,7 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
+     expect(firstTrace).toContain('"worktree","list"');
+     const precedingCensus = censusReads;
+     await new Promise((resolve) => setTimeout(resolve, 1100));
++    await rm(join(linked, "draft.txt"));
+     await writeFile(join(owner, "draft.txt"), "draft\n");
+     const repeated = await captain.serveOperatorConversation({
+       schemaVersion: 1,
+@@ -143,7 +167,7 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
+       op: "fleet",
+       snapshot: {
+         seats: expect.arrayContaining([
+-          expect.objectContaining({ checkout: expect.objectContaining({ dirty: false }) }),
++          expect.objectContaining({ checkout: expect.objectContaining({ path: linked, dirty: true }) }),
+         ]),
+       },
+     });
+@@ -154,8 +178,14 @@ it("default fleet reads skip Git checkout work and opted-in reads reuse the comp
+     expect(await readFile(trace, "utf8")).toBe(firstTrace);
+     const bounded = new CheckoutObservationCache(2);
+     await bounded.observe(owner);
+-    await bounded.observe(linked);
+-    await bounded.observe(second);
++    await mkdir(join(linked, "src"));
++    expect(await bounded.observe(join(linked, "src"))).toMatchObject({
++      path: linked,
++      branch: "worker-changes",
++      dirty: false,
++      ahead: 1,
++    });
++    expect(await bounded.observe(second)).toMatchObject({ path: second, branch: "", dirty: false, ahead: 0 });
+     await writeFile(trace, "");
+     expect(await bounded.observe(owner)).toMatchObject({ path: owner, dirty: true });
+     expect(await readFile(trace, "utf8")).toContain('"worktree","list"');
+diff --git a/docs/cli.md b/docs/cli.md
+index 97027f3b8..fffd38daf 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -9854,8 +9854,11 @@ since last commit or edit, and any recorded decision, oldest first. Managed
+ runtime trees are skipped. Doctor and local roster cards include these observations.
+ Cached refs are explicitly identified; status never fetches or edits a checkout.
+ Roster/fleet requests opt into checkout cards with `includeCheckouts: true`;
++these describe each local worker’s actual Git root, including a linked worktree
++or a session started below that root, rather than the primary checkout. Different
++worktrees retain their own branch, HEAD, ahead/behind counts and dirty state.
+ older callers keep their original response shape and perform no checkout Git
+-observation. Opted-in reads cache owner discovery and inspection together for
++observation. Opted-in reads cache root discovery and inspection together for
+ 30 seconds, retaining at most 128 cwd observations.
+ 
+ `clankie checkouts sync [--repository OWNER_CHECKOUT]` fetches `origin/main`

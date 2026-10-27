@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -12,6 +12,7 @@ import {
   createCaptainRouteClient,
 } from "../../tui/src/session/operator-conversations.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
+import type { AgentSessions } from "../src/agent-sessions.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { CONVERSATION_RUN_STALL_MS } from "../src/captain/conversation-run.ts";
@@ -116,6 +117,7 @@ async function fixture(
   headBoundGraceMs?: number,
   headLaneHoldMs?: number,
   migrationHeld?: (id: string) => boolean,
+  agentSessions?: CaptainDeps["agentSessions"],
 ) {
   const root = mkdtempSync(join(tmpdir(), "captain-conversation-driver-"));
   if (pendingOwnerAction) {
@@ -148,7 +150,7 @@ async function fixture(
   vi.spyOn(AutonomyStore.prototype, "start").mockImplementation((run) => {
     autonomous = run;
   });
-  const captain = createCaptain({ memory: {} } as CaptainDeps, {
+  const captain = createCaptain({ memory: {}, agentSessions } as CaptainDeps, {
     repoRoot: root,
     stateDir: root,
     workingDirectory: root,
@@ -248,6 +250,43 @@ it("a default-head migration hold suppresses failback; another conversation's ho
   held = "another-conversation";
   await vi.advanceTimersByTimeAsync(25);
   expect(failBack).toHaveBeenCalledTimes(1);
+});
+
+it("failed native source observation cannot use a stored session as migration proof", async () => {
+  const resolve = vi.fn<AgentSessions["resolve"]>();
+  const { captain, id, root } = await fixture(false, undefined, undefined, undefined, {
+    list: async () => ({ sessions: [], errors: [] }),
+    read: async () => {
+      throw new Error("Unexpected transcript read");
+    },
+    resolve,
+  });
+  const sessionId = randomUUID();
+  const profile = join(root, "claude-profile");
+  const project = join(profile, "projects", "fixture");
+  mkdirSync(project, { recursive: true });
+  const path = join(project, `${sessionId}.jsonl`);
+  writeFileSync(path, "");
+  resolve.mockResolvedValue({
+    ref: `local:${sessionId}`,
+    host: "local",
+    sessionId,
+    workingDirectory: root,
+    file: { harness: "claude", path, size: 0, mtimeMs: 0 },
+  });
+  expect(captain.syncSeatTranscript(id, { sessionId, entries: [] })).toBe(true);
+  // With a successful observation of no source, the current stored association
+  // can locate the transcript; the separate kernel census still proves liveness.
+  expect(await captain.operatorSeatRecovery!(id, sessionId)).toMatchObject({ sessionId, cwd: root, profile });
+  resolve.mockClear();
+  vi.spyOn(ConversationStore.prototype, "attachedConversationForNative").mockImplementation(() => {
+    throw new Error("Native source observation failed");
+  });
+  await expect(captain.operatorSeatRecovery!(id, sessionId)).rejects.toThrow(
+    "Native source observation failed",
+  );
+  expect(resolve).not.toHaveBeenCalled();
+  expect(fake.prompts).toEqual([]);
 });
 
 it("a stuck session startup fails loudly and releases an attached seat to handle later turns", async () => {

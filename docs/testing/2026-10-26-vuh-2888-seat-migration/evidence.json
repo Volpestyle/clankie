@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "vuh2888-proof-run10-17c1f68df.tar.gz",
+      "size": 350465,
+      "sha256": "9ce28248db7b388df01d4b99d6835fff55314dfe3f5a15c957f856bfee881e03",
+      "url": "clankie://evidence/sha256/9ce28248db7b388df01d4b99d6835fff55314dfe3f5a15c957f856bfee881e03"
+    }
+  ]
+}

@@ -54,10 +54,16 @@ An uncertain spawn remains held. The claim is never repeated.
 
 ## Source and evidence binding
 
-[proof.tar.gz](proof.tar.gz), with [archive.sha256](archive.sha256), holds sanitized
-drivers, JSON receipts, owned runtime logs, check output and mutation logs.
+The [published run-10 archive](clankie://evidence/sha256/9ce28248db7b388df01d4b99d6835fff55314dfe3f5a15c957f856bfee881e03)
+holds sanitized drivers, JSON receipts, owned runtime logs, check output and
+mutation logs. Its SHA256 is
+`9ce28248db7b388df01d4b99d6835fff55314dfe3f5a15c957f856bfee881e03` and its size
+is **350,465 bytes**. [evidence.json](evidence.json) retains the publication
+manifest and [archive.sha256](archive.sha256) retains the digest. The exact
+archive remains in ignored `artifacts/vuh2888-proof/`; it is no longer tracked,
+following the lead's replacement instruction and the unchanged evidence guard.
 The final proof is **run 10**. Preparation ran directly from commit
-`bd10a28e4bef850e20b5bc2cf64985a6c00f40e3`, an ancestor of this candidate, rebased
+`bd10a28e4bef850e20b5bc2cf64985a6c00f40e3`, an ancestor of approved candidate `17c1f68df`, rebased
 onto `origin/main` at `3ae2db858a33751f8b38f931713d8ea47bfcdd6b`.
 The driver requires a clean source tree and asserts that its preparation commit
 equals that committed HEAD. The recorded tree is
@@ -66,13 +72,40 @@ equals that committed HEAD. The recorded tree is
 The scratch enforcing commit `4bd38d58c99730fc53dc4b6e639d9856f42bc2e7` differs
 only in `apps/clankie/operator-seat-policy.json`. Its complete diff is archived
 as `proof/enforcing-artifact.patch` and in `run-10/source-bindings.json`.
-`proof/proven-to-candidate-source.diff` is empty: after the proven commit, only
-this README, the archive and its digest changed. `proof.json` records matching
+`proof/proven-to-candidate-source.diff` is empty for `17c1f68df`: after the proven commit, only
+this README, the archive and its digest changed. For that approved candidate, `proof.json` records matching
 source hashes, checks that the proven commit is reachable from the candidate,
 and checks that every mutation's original guard bytes match the proven source.
 Earlier scratch snapshots in runs 1–9 are retained as history, not candidate
-source evidence. The lead publishes the replacement archive to the evidence
-store; the previous archive remains at its previous content-addressed link.
+source evidence. The lead published the run-10 archive at the link above;
+previous archives retain their previous content-addressed links.
+
+## Landing correction after the archived proof
+
+The landing rebase onto `cdb2e1284` includes VUH-2900's worker-worktree observation
+fix. The VUH-2888 diff hunks stayed identical; only the `docs/cli.md` index line
+changed. The first root gate then refused a new silently swallowed rejection in
+`operatorSeatRecovery`, before reaching tests or review.
+
+That catch came from VUH-2888, not main. It converted a native-source observation
+exception into an absent source, allowing the stored-session/transcript fallback
+to return a migration tuple. The one-line correction removes the catch: the
+original error now reaches the existing routes, which hold migration with its
+reason. A comment forbids replacing failed live proof with stored metadata.
+The focused regression supplies a valid stored session and transcript, proves
+the normal absent-source fallback, then makes source observation fail. The old
+code returned a tuple (recorded red); the correction rejects before transcript
+resolution or dispatch (green). No model/provider is called.
+
+[landing-source-delta.patch](landing-source-delta.patch) records the complete
+source difference from the proven `bd10a28e4` to this landing correction,
+excluding this evidence folder. The run-10 archive is unchanged and proves the
+previous approved source; it was not rerun for this exception-path correction.
+The focused test and the subsequent root landing gate cover the new branch.
+Thea must approve this fail-closed correction, regression test and evidence-reference
+swap together before it lands. The first corrected suites passed **13/13**,
+the old code failed the new regression, and the swallowed-rejections check,
+relevant source/test types and scoped lint passed. The full gate remains pending.
 
 ## Actual upgrade
 
@@ -141,8 +174,8 @@ The first corrected-fixture attempt exposed a selector that kept returning its
 refused driver and a copied Homebrew Node missing its library path; both fixture
 bugs are fixed and their failed logs retained. The original evidence's failed
 attempts and ineffective first mutation configuration are retained and excluded
-from successful proof. Root landing gate, Thea's replacement-patch approval and
-the lead's landing window remain pending. No full check or eval was run.
+from successful proof. The core landing window is granted; the corrected full
+landing gate and Thea's new patch approval remain pending. No full check or eval was run.
 
 A true-crash outer hire receipt still lacks a durable native-ID mapping, and
 successful local native hire records may have been pruned. Unknown outcomes and

@@ -7611,7 +7611,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     operatorSeatRecovery: async (conversationId, observedSessionId) => {
       const held =
         "Migration held: the authoritative local native session/profile could not be proven. Preserve the original receipts; do not replay calls or launch a substitute session.";
-      const source = await operatorNativeSource(conversationId).catch(() => undefined);
+      // An observation error is not an absent source. Let the routes hold with
+      // its reason; stored metadata must not replace a failed live source proof.
+      const source = await operatorNativeSource(conversationId);
       const sessionId = source ? nativeSessionId(source) : observedSessionId;
       if (
         !sessionId ||
