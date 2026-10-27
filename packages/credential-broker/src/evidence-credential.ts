@@ -56,7 +56,7 @@ const Envelope = z
     signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/u),
   })
   .strict();
-export const EVIDENCE_SEAL_DOMAIN = "clankie-evidence-session-v1";
+const EVIDENCE_SEAL_DOMAIN = "clankie-evidence-session-v1";
 /** All failures are bounded: upstream JSON, ciphertext and validation details are never logged. */
 export function decodeEvidenceLease(
   input: unknown,

@@ -22,7 +22,7 @@ import {
 import { join } from "node:path";
 
 /** Signed, encrypted local fleet fixture. No cloud or installed broker access. */
-export function sealFixtureLease(
+function sealFixtureLease(
   lease: unknown,
   publicKey: string,
   signer: ReturnType<typeof generateKeyPairSync>,

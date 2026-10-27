@@ -27,7 +27,7 @@ export interface EvidenceCredentialProvider {
     purpose: "read" | "write",
   ): () => Promise<EvidenceSdkCredential>;
 }
-export class EvidenceSessionUnavailable extends EvidenceRefusal {
+class EvidenceSessionUnavailable extends EvidenceRefusal {
   constructor() {
     super(503, "evidence_session_unavailable");
   }
