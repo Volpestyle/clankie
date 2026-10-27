@@ -6,7 +6,9 @@ clankie-app worktree at `ddb7b79dd67861c7b1dc66ede561ad84043af4f8`.
 The corrected full-size run passes all five acceptance checks within the stated
 web-data-client scope: **594 writes, 75 issues, 840 events; p95 184 ms; zero
 periodic reads through a 10-minute idle window.** The initial 765-event run and
-its generator sizing gap are retained.
+its generator sizing gap are retained. **Headroom: withheld pending
+[LOCAL-VUH-50](clankie-work://local/issue/973f5c52-f252-48ff-8fc5-f91a2fb7ec8e).**
+Worker request-to-commit latency is much higher: p95 **3,934 ms**, reported below.
 
 ## Method and boundaries
 
@@ -42,7 +44,10 @@ its generator sizing gap are retained.
 - Every 29th write response is discarded at the client boundary. Its original
   is reconciled using that actor's `get_write_receipt`, with no mutation replay.
   This injects an application-level lost response, not a TCP fault or an MCP
-  transport-receipt timeout.
+  transport-receipt timeout. The harness's `ac1.resends` field is a literal zero;
+  independently counting the published request log confirms exactly 594 write
+  requests for 594 unique keys. That request-log check, rather than the literal,
+  establishes zero mutation resends for these captures.
 - The agent reader begins with one snapshot `list_issues` and an initial lazy
   model bootstrap from the service backend to establish its complete baseline,
   then follows `list_changes` through the lead HTTP API with
@@ -54,7 +59,13 @@ its generator sizing gap are retained.
   the lazy wire projection**, including unchanged seeded models. Lazy comment/
   event/run bodies and `unhydratedFields` are normalized consistently for all
   three readers. This does not prove hydrated body convergence. Per-model
-  digests retain the comparison without publishing template content.
+  digests retain the comparison without publishing template content. The app
+  and store supply observed `projectIds`. The agent's `list_changes` entries do
+  not include them (`tracker-local.ts`, `projectChanges`): for inserts first seen
+  during traffic the harness fills `[f.project.id]`. Those memberships are
+  **assumed, not independently observed**; initial agent memberships come from
+  its bootstrap. The agent claim therefore covers model data fields with that
+  membership assumption, not an independent check of every membership field.
 - Commit time is observed in the backend's durable `effectConfirmed` callback,
   after journal append/fsync. App time is the first pool publication at or past
   that syncId, using wall clocks on the same Mac. This includes app pool and
@@ -70,6 +81,8 @@ the web-plus-agent fallback without attempting native launch.
 Install this checkout first with `clankie heavy -- pnpm install --frozen-lockfile`.
 The app source checkout needs no install for this narrow browser bundle; the
 server's existing esbuild and Playwright dependencies build and drive it.
+The runner requires Google Chrome at the hardcoded macOS path
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`.
 The manual runner imports Playwright and Hono from `apps/clankie`'s declared
 dependencies; browser aliases resolve to the app checkout supplied at runtime.
 Knip registers these entry points and excludes only their `unlisted` diagnostic
@@ -95,7 +108,7 @@ inspection. It does not create native agents or acquire simulators.
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Workload                 | 594 writes; 75 creates; **765 events**, below the 840-event scope; 17-create burst in 12,633 ms; traffic 390,523 ms                                                                                |
 | AC1, exactly once        | 594 applied receipts and 594 audit entries; zero duplicate keys; 20 discarded replies reconciled through receipt reads; zero mutation resends                                                      |
-| AC2, convergence         | Store, web pool and agent all contain 56,437 models; zero digest mismatches; all cursors 36,595                                                                                                    |
+| AC2, convergence         | Store, web pool and agent all contain 56,437 models; zero digest mismatches (agent insert `projectIds` assumed); all cursors 36,595                                                                |
 | AC3, latency and budgets | 594 measured commits; no missing samples; p95 **147 ms**; maximum **1,622 ms**; zero role or budget refusals                                                                                       |
 | AC4, requests            | One app bootstrap, then 539 held subscriptions; one lead snapshot list, then 566 held changes requests (565 settled); zero periodic snapshot/evidence reads in this client; initial idle hold 45 s |
 | Machine                  | Node 26.12.0; 18 cores; sampled load1 3.02–9.00                                                                                                                                                    |
@@ -114,7 +127,10 @@ Both measured runs and the aborted/setup attempts are retained.
 `36282`: durable commit at `2026-10-27T14:23:30.948Z`, first app publication
 at `14:23:32.570Z`. The write response arrived 1 ms after commit. The delay is
 after commit; the capture cannot distinguish transport, pool/IndexedDB work or
-GC. No cause is asserted. The next largest samples were 1,422 and 1,134 ms.
+GC for that individual sample. Corvin's later reproduction found service-wide
+~650 ms event-loop stalls from worker routing-index rebuilds (below). They are
+**a likely contributor**, not a proven cause of this individual maximum. The
+next largest samples were 1,422 and 1,134 ms.
 
 **Setup attempt.** `artifacts/run-1` stopped before traffic because the harness
 used unsupported pairing platform `web`. The protocol permits `unknown`, which
@@ -127,11 +143,53 @@ write. The corrected run is `artifacts/run-4`.
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Scope   | **594 writes, 75 new issues, 840 new events**; 17 creates in 12,902 ms; traffic 400,422 ms                                                                                                                         |
 | AC1     | **Pass:** 594 applied receipts, 594 audit entries, zero duplicate keys; 20 discarded replies reconciled by receipt; zero mutation resends                                                                          |
-| AC2     | **Pass:** all **56,512 models** match between store, app pool and agent reader; zero field-digest mismatches; all cursors **36,595**; no reader/browser errors                                                     |
+| AC2     | **Pass:** all **56,512 models** match between store, app pool and agent reader; zero computed field-digest mismatches (agent insert `projectIds` assumed); all cursors **36,595**; no reader/browser errors        |
 | AC3     | **Pass:** 594 latency samples, none missing; p95 **184 ms**, maximum **1,094 ms**; zero budget/role refusals                                                                                                       |
 | AC4     | **Pass within exercised client:** one app bootstrap, then 555 held subscriptions; one agent snapshot list, then 589 held changes requests (588 settled); **zero periodic tracker/evidence reads**; 600 s idle wait |
 | AC5     | **Pass:** raw captures published through `clankie evidence push`; manifest and this README committed with the harness                                                                                              |
 | Machine | Node 26.12.0, 18 cores; load1 **1.53–4.38**, sampled throughout traffic and idle (202 samples)                                                                                                                     |
+
+### Worker request latency and the routing-index stall
+
+Joining the published `writes.json` request timestamps to `latencies.json`'s
+**durable commit** timestamps by key, excluding lost responses:
+
+| Actor   |   n | Request→commit p50 |          p95 |      Maximum |
+| ------- | --: | -----------------: | -----------: | -----------: |
+| Workers | 460 |       **1,785 ms** | **3,934 ms** | **6,081 ms** |
+| Lead    | 114 |          **31 ms** | **1,128 ms** | **1,436 ms** |
+
+Worker creates are slowest, p50 **3,051 ms**. Commit→response is fast, p50
+**21 ms** across non-lost writes; the large delay is **before commit**, outside
+the commit→app AC3 clock. Those AC3 results do not establish fast worker calls.
+
+Corvin reproduced the cause independently on a scratch copy of the run-4
+60-day store, with this patch's `fixture.ts` on base `df753f643`:
+
+- Worker `linear_*` reference calls go through `mcp-host.ts:1395` →
+  `cutoverRepoForReferences` → `builtInRecordProjects` (`work-items.ts:580-622`).
+- That routing cache is keyed on the **store version**. Every commit invalidates
+  it. The next worker reference call rereads and reparses the complete 266 MB
+  checkpoint and journal through `readTrackerStoreSnapshot`: approximately
+  **720 ms**, including **650 ms blocking the service event loop**.
+- Without contention, serial worker `save_comment` was ~830 ms versus ~8 ms
+  for the lead. Worker `get_issue` was 836 ms immediately after a commit and
+  36 ms without an intervening commit. **Reads pay this cost too.**
+
+These service-wide stalls likely contribute to the 1,094/1,622 ms commit→app
+maxima and the lead's 1,128 ms request→commit p95. That is an inference from the
+reproduced stall, not attribution of a particular sample. At a real day's pace
+it remains a per-call cost; this compressed replay additionally queued calls to
+six seconds. The author's original report omitted this material finding.
+
+**Headroom: withheld pending
+[LOCAL-VUH-50](clankie-work://local/issue/973f5c52-f252-48ff-8fc5-f91a2fb7ec8e).**
+The lead filed that High-priority product follow-up and decided that VUH-1920
+does not close with headroom until it is fixed. Its acceptance requires worker
+calls within 2× of lead calls, then a peak-day rerun with worker request→commit
+p95 below 250 ms and no event-loop stall above 100 ms. This patch records the
+finding; it changes no product routing code. No rerun was needed for these
+review-requested reporting corrections.
 
 The idle wait ran from `14:39:56.805Z` to at least `14:49:56.805Z` on
 2026-10-27. The reported `idleMs=610059` also includes final digest processing.
@@ -140,7 +198,9 @@ show at most 20–21 writes in any rolling minute against 60/minute. The final
 budget snapshot's write counts are zero because the ten idle minutes aged them
 out. The lead is exempt under the existing policy; no budget was raised or
 clock changed. The largest latency, 1,094 ms, occurred in the initial create
-burst (`peak-0012`, syncId `36013`); this capture does not isolate its cause.
+burst (`peak-0012`, syncId `36013`). The reproduced routing stalls below are
+also a likely contributor to this maximum and the lead's request-to-commit p95,
+not proof of the cause of any individual sample.
 
 The browser screenshot is the proof page showing the app pool's last model
 publication, **not the full World UI**. Its displayed request count stays at
@@ -165,5 +225,13 @@ code or protocol changed.
 - [Initial latency samples](clankie://evidence/sha256/75694c9c7b82862e4f4efc5fc2e5640abacee288663761438975ef3569f73789)
 - [Initial per-model comparison](clankie://evidence/sha256/4a1a272a5287ca5321acab7bb0a87e2b85b7ff031fabdead4943b01171f69349)
 - [Initial captures, load and generator diagnosis](clankie://evidence/sha256/7d2eee1faa8717e5dababa0cba557304bf561e16b4598b9d3629cd5b5815cf03)
+
+The executed replay module was `flows/replay.ts`, later relocated to
+`scripts/manual/tracker-peak-day.ts` with adjusted relative imports. Captured
+`sourceSha256` values identify the relocated files at first submission
+`3e3a3755f`, **not the exact bytes that ran**; no post-relocation rerun is
+claimed. The subsequent fixture edit only corrects its validator comment.
+That validator is a no-op; evidence-bundle validation is not exercised by this
+issue/comment-only traffic.
 
 All objects are indexed in [evidence.json](evidence.json).

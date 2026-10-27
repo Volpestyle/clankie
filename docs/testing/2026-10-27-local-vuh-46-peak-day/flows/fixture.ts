@@ -19,7 +19,7 @@ import { WorkerMcp } from "../../../../apps/clankie/src/worker-mcp.ts";
 import { createWorkItemsService } from "../../../../apps/clankie/src/work-items.ts";
 export async function fixture(root: string, trackerDirectory: string, observe: (backend: any) => any) {
   const budget = new TrackerRequestBudget();
-  // The service checks evidence references against its evidence store; this fixture holds one record.
+  // No evidence-bundle writes in this traffic; the fixture validator is a no-op.
   const validateEvidence = async () => {};
   const tracker = observe(createLocalTracker({ directory: trackerDirectory, validateEvidence }));
   const settings = new SettingsStore(join(root, "settings.json"));
