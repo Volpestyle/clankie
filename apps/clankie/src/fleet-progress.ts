@@ -31,6 +31,7 @@ export class FleetProgressObserver {
   private round: Promise<void> | undefined;
   private writes: Promise<void> = Promise.resolve();
   private readonly reads = new Map<string, Promise<readonly FleetProgressObservation[]>>();
+  private readonly unknown = new Map<string, string>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private stopped = false;
   private readonly options: {
@@ -109,8 +110,14 @@ export class FleetProgressObserver {
         continue; // Unknown does not resolve an incident.
       }
       const unknown = observations.filter((o) => o.unavailable);
-      for (const o of unknown)
+      // Name an unknown id once per state: on becoming unknown or a new reason.
+      for (const id of this.unknown.keys())
+        if (id.startsWith(`${source.prefix}:`) && !unknown.some((o) => o.id === id)) this.unknown.delete(id);
+      for (const o of unknown) {
+        if (this.unknown.get(o.id) === o.message) continue;
+        this.unknown.set(o.id, o.message);
         this.options.onError(new Error(`Fleet progress ${o.id} unavailable`, { cause: Error(o.message) }));
+      }
       for (const observation of observations) {
         if (!observation.stalled || this.incidents.some((i) => i.id === observation.id)) continue;
         // Retain open incidents; prune oldest completed episodes only.

@@ -19,7 +19,8 @@ test("resolves the default lead from its head pane and names an unresolvable lea
     terminal_id: "head-seat",
     name: "clankie",
     agent: "claude",
-    agent_status: "idle",
+    // Herdr's finished-but-unread state, where a live head usually rests.
+    agent_status: "done",
     agent_session: {
       source: "herdr:claude",
       kind: "id",
@@ -73,11 +74,14 @@ test("resolves the default lead from its head pane and names an unresolvable lea
     });
     // The census observes the head, which makes the default lead native.
     await captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+    const epoch = async () =>
+      (await captain.leadProgress()).find((o) => o.id.startsWith(`lead:${lead}:`))?.id;
     const resolved = await captain.leadProgress();
     expect(resolved.map((o) => o.id.split(":").slice(0, 2).join(":")).sort()).toEqual(
       [`lead:${lead}`, `lead:${other}`].sort(),
     );
     expect(resolved.every((o) => !o.unavailable && !o.stalled)).toBe(true);
+    const idle = await epoch();
 
     // The head pane closes: the default lead stays native and its idle state is unknown.
     agents = [];
@@ -91,15 +95,16 @@ test("resolves the default lead from its head pane and names an unresolvable lea
     });
     expect(unresolved.some((o) => o.id.startsWith(`lead:${other}:`) && !o.unavailable)).toBe(true);
 
-    // Unknown neither resolves the unresolvable lead's open incident nor fails the source.
+    // Unknown keeps only its own lead's incident open, and is named once per absence.
     const path = join(root, "progress-incidents.json");
-    const open = {
-      id: `lead:${lead}:fixture`,
+    const incident = (id: string) => ({
+      id,
       message: "Lead continuation stalled",
       openedAt: new Date().toISOString(),
       alert: "submitted",
-    };
-    await writeFile(path, JSON.stringify([open]));
+    });
+    const open = incident(`lead:${lead}:fixture`);
+    await writeFile(path, JSON.stringify([open, incident(`lead:${other}:fixture`)]));
     const errors: Error[] = [];
     const observer = new FleetProgressObserver({
       path,
@@ -108,9 +113,23 @@ test("resolves the default lead from its head pane and names an unresolvable lea
       onError: (error) => errors.push(error as Error),
     });
     await observer.observe();
+    await observer.observe();
+    const named = `Fleet progress lead:${lead} unavailable`;
+    expect(errors.map((error) => error.message)).toEqual([named]);
+    const journal = JSON.parse(await readFile(path, "utf8"));
+    expect(journal[0]).toEqual(open);
+    expect(journal[1].recoveredAt).toBeDefined();
+
+    // Recovery keeps the lead's idle epoch and resets the warning for a new absence.
+    agents = [head];
+    await delay(1_100);
+    await observer.observe();
+    expect(await epoch()).toBe(idle);
+    agents = [];
+    await delay(1_100);
+    await observer.observe();
     observer.stop();
-    expect(errors.map((error) => error.message)).toEqual([`Fleet progress lead:${lead} unavailable`]);
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual([open]);
+    expect(errors.map((error) => error.message)).toEqual([named, named]);
   } finally {
     await captain.close();
     vi.restoreAllMocks();

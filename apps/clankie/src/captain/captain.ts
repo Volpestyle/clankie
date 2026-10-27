@@ -7827,7 +7827,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               idle:
                 conversations.activeInvocationCount(id) === 0 &&
                 (native
-                  ? observed?.status === "idle" || observed?.status === "blocked"
+                  ? // `done` is finished work nobody has read yet: idle, not absent.
+                    ["idle", "blocked", "done"].includes(observed?.status ?? "")
                   : conversations.turnIdle(id)),
               liveWorkers: fleet.some(
                 (worker) => worker.owner?.conversationId === id && worker.status === "working",
