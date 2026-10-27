@@ -195,14 +195,15 @@ it("moves an item through every stage, asks the owner to check it, verifies on a
     expect(progressed).toMatchObject({ blocked: false, stage: "accepted", status: "In Progress" });
 
     // Agents cannot close or verify work; only the owner can.
+    // A worker's host profile refuses both before the tracker sees them (LOCAL-VUH-45).
     const closing = await raw("linear_save_issue", { id: issue.id, state: "Done" });
-    expect(closing.detail).toContain("owner_verification_required");
+    expect(closing).toMatchObject({ outcome: "refused", reason: "role_not_allowed", role: "worker" });
     const verifying = await raw("linear_post_issue_event", {
       issueId: issue.id,
       type: "result",
       stage: "owner-verified",
     });
-    expect(verifying.detail).toContain("owner_verification_required");
+    expect(verifying).toMatchObject({ outcome: "refused", reason: "role_not_allowed", role: "worker" });
 
     // Landed raises one "check it works" ask (ADR 0245) in the project's lead chat.
     const landed = await call("linear_post_issue_event", {

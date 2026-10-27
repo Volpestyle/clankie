@@ -115,7 +115,8 @@ retrying. Reply to a relayed comment in its thread with its comment ID as
 operator tools and admitted workers, are sent once, and a destructive one needs
 `confirm` listing exactly the target ids the owner asked to remove. Mark automated
 polling `clankie_call({name, arguments, background: true})` and honor a
-`linear_request_budget` retry time.
+`linear_request_budget` or `tracker_request_budget` retry time. A hired seat's
+tracker tools follow its role; `role_not_allowed` wrote nothing, so ask your lead.
 
 Ordinary updates speak as the connected Clankie account. Granted
 `linear_create_worker_comment` or `linear_create_worker_issue` posts under an

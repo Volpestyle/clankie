@@ -1,3 +1,5 @@
+import { operatorAgentRoleKey } from "@clankie/protocol";
+import type { ProjectReview } from "@clankie/protocol/reviews";
 import type { CaptainPort } from "./captain/port.ts";
 import type { TrackerRouteFence } from "./mcp-host.ts";
 
@@ -51,4 +53,27 @@ export async function trackerRepoForPrincipal(
     if (hired() !== projectId) throw new Error("The worker's project hire changed");
   });
   return projectId === undefined ? undefined : repoForProject(projectId, fence);
+}
+
+/**
+ * A delegated principal's tracker role (LOCAL-VUH-45): reviewer when its confirmed hire
+ * holds its project's review seat or role (ADR 0287), or was hired as a reviewer; any
+ * other principal is a worker. Both inputs are host records, never the caller's claim.
+ */
+export async function trackerRoleForPrincipal(
+  principalId: string,
+  candidate: (fleet: string, pane: string) => ReturnType<CaptainPort["projectHireMembershipCandidate"]>,
+  review: (projectId: string) => Promise<ProjectReview | undefined>,
+): Promise<"worker" | "reviewer"> {
+  const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
+  if (!match || match[2] === "unverified") return "worker";
+  const hire = candidate(match[1]!, match[2]!);
+  if (hire.state !== "confirmed") return "worker";
+  const role = operatorAgentRoleKey(hire.role ?? "");
+  if (role === operatorAgentRoleKey("reviewer")) return "reviewer";
+  const policy = await review(hire.projectId);
+  return policy !== undefined &&
+    ("seat" in policy ? policy.seat === hire.seat : role !== "" && operatorAgentRoleKey(policy.role) === role)
+    ? "reviewer"
+    : "worker";
 }

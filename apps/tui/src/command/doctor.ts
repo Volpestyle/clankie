@@ -50,6 +50,10 @@ import {
   LINEAR_REQUEST_BUDGET_PATH,
   LinearRequestBudgetReportSchema,
 } from "@clankie/protocol/linear-request-budget";
+import {
+  TRACKER_REQUEST_BUDGET_PATH,
+  TrackerRequestBudgetReportSchema,
+} from "@clankie/protocol/tracker-request-budget";
 
 export type { ExecFileImpl, InstallDoctorReport };
 
@@ -462,6 +466,28 @@ export async function doctorCommand(
       detail: error instanceof Error ? error.message : String(error),
     };
   }
+  let trackerRequestBudget: NonNullable<InstallDoctorReport["trackerRequestBudget"]>;
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("Tracker request budget needs the operator credential");
+    const response = await (options.fetchImpl ?? fetch)(
+      `${commandHost(options)}${TRACKER_REQUEST_BUDGET_PATH}`,
+      {
+        headers: { authorization: `Bearer ${credential.token}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) throw new Error(`Tracker request budget unavailable (HTTP ${response.status})`);
+    trackerRequestBudget = TrackerRequestBudgetReportSchema.parse(await response.json());
+  } catch (error) {
+    trackerRequestBudget = {
+      status: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
   try {
     const inventory = await runRuntimeCommand(["list"], options);
     const fleets = Array.isArray(inventory.connections)
@@ -516,6 +542,7 @@ export async function doctorCommand(
     checkouts,
     ...(fleetHealthMetrics === undefined ? {} : { fleetHealthMetrics }),
     linearRequestBudget,
+    trackerRequestBudget,
     evidenceStore,
     ...(serviceRecovery.length === 0 ? {} : { serviceRecovery }),
     ...(autostart === undefined ? {} : { autostart }),

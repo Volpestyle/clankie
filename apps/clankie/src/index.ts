@@ -219,6 +219,7 @@ import { createMcpHost } from "./mcp-host.ts";
 import { linearProjectExists } from "./linear-project-binding.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
 import { LinearRequestBudget } from "./linear-request-budget.ts";
+import { TrackerRequestBudget } from "./tracker-request-budget.ts";
 import { linearWorkerAuthor } from "./linear-publishing.ts";
 import { createDiscordAttachmentResolver } from "./discord-attachment-fetch.ts";
 import { DeliveredFileStore } from "./delivered-files.ts";
@@ -254,7 +255,7 @@ import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { EvidenceStore } from "./evidence-store.ts";
 import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
-import { trackerRepoForPrincipal, trackerRunner } from "./tracker-runner.ts";
+import { trackerRepoForPrincipal, trackerRoleForPrincipal, trackerRunner } from "./tracker-runner.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import {
   collectLinearImport,
@@ -731,6 +732,7 @@ const linearRequestBudget = new LinearRequestBudget({
     return linearBudgetWarningReady.then((notify) => notify(text));
   },
 });
+const trackerRequestBudget = new TrackerRequestBudget();
 const linearApiTracker = createLinearApiTracker({
   credentials: operatorCredentialStore,
   requestBudget: linearRequestBudget,
@@ -774,6 +776,15 @@ const mcpHost = createMcpHost({
     ),
   // Any caller's call naming a cut-over project's item goes to its built-in tracker (VUH-2829).
   trackerRepoForItem: (references, fence) => workItems.cutoverRepoForReferences(references, fence),
+  // A hired seat's tracker role comes from its hire and its project's review policy.
+  trackerRoleForWorker: (principalId) =>
+    trackerRoleForPrincipal(
+      principalId,
+      (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane),
+      async (projectId) =>
+        (await settingsStore.read()).projects.projects.find((project) => project.id === projectId)?.review,
+    ),
+  trackerRequestBudget,
   // A fleet worker is named by the seat it was hired into, as the host recorded it.
   trackerWorkerName: (principalId) => {
     const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
@@ -2315,6 +2326,7 @@ const clankie = await createClankieApp({
   runtimeHealth: () => runtimeHealth.snapshot(),
   fleetHealthMetrics,
   linearRequestBudget,
+  trackerRequestBudget,
   // The captain writes this record under its stateDir; the route only reads it.
   autoRounds: new AutoRoundRecord(join(stateRoot, "captain", "auto-rounds")),
   discordPermissions: (query, body) =>

@@ -134,6 +134,75 @@ export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   "list_changes",
 ]);
 
+/**
+ * What a caller is to the project, resolved by the host from the hire and the project's
+ * policy (ADR 0208/0216), never from arguments. Lead is Clankie's own call; owner is the
+ * owner's route. Neither is limited (LOCAL-VUH-45).
+ */
+export type TrackerRole = "worker" | "reviewer" | "lead" | "owner";
+
+/**
+ * Lead and owner verbs a worker or reviewer neither sees nor may call: run control,
+ * status and project (cycle length) administration, owner-only review retirement and the
+ * owner's mailbox. No hired seat had written any of them in the live audit log.
+ */
+const LEAD_TRACKER_TOOLS: ReadonlySet<string> = new Set([
+  "post_run_control",
+  "save_issue_status",
+  "save_project",
+  "post_retire_guided_review",
+  ...INBOX_TOOLS,
+]);
+const restricted = (role: TrackerRole) => role === "worker" || role === "reviewer";
+
+/** Why a role may not make this call, or undefined. Closure needs the status category, which only the backend knows. */
+export function trackerRoleRefusal(
+  role: TrackerRole,
+  name: string,
+  args: Record<string, unknown>,
+): string | undefined {
+  if (!restricted(role)) return undefined;
+  if (LEAD_TRACKER_TOOLS.has(name)) return `${name} is a lead or owner verb`;
+  if (name === "save_issue" && args.cycle !== undefined)
+    return "cycle planning belongs to the owner or the lead";
+  if (name === "post_issue_event" && args.stage === "owner-verified")
+    return "only the owner verifies an item";
+  return undefined;
+}
+
+/** The catalog a role sees: lead and owner verbs removed, and their arguments with them. */
+export function trackerCatalogForRole(
+  role: TrackerRole,
+  catalog: readonly TrackerToolDescriptor[],
+): TrackerToolDescriptor[] {
+  if (!restricted(role)) return [...catalog];
+  return catalog
+    .filter((tool) => !LEAD_TRACKER_TOOLS.has(tool.name))
+    .map((tool) => {
+      const schema = tool.inputSchema as { properties?: Record<string, Record<string, unknown>> };
+      if (tool.name === "save_issue") {
+        const { cycle: _cycle, ...properties } = schema.properties ?? {};
+        return { ...tool, inputSchema: { ...tool.inputSchema, properties } };
+      }
+      if (tool.name === "post_issue_event")
+        return {
+          ...tool,
+          description: tool.description.replace(/ Under effective lead closure.*$/u, ""),
+          inputSchema: {
+            ...tool.inputSchema,
+            properties: {
+              ...schema.properties,
+              stage: {
+                ...schema.properties?.stage,
+                enum: DELIVERY_STAGES.filter((stage) => stage !== "owner-verified"),
+              },
+            },
+          },
+        };
+      return tool;
+    });
+}
+
 /** What a worker reports about an item; the tracker derives the item's state from these. */
 export const ISSUE_EVENT_TYPES = ["ack", "plan", "action", "blocked", "ask", "result", "error"] as const;
 export type IssueEventType = (typeof ISSUE_EVENT_TYPES)[number];

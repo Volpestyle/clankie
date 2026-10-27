@@ -279,9 +279,11 @@ it("requires independently checked real evidence, blocks a run on an owner gate 
       }),
     });
     expect(unauthorized.status).not.toBe(200);
-    expect((await raw("linear_post_run_control", { runId: run.id, action: "stop" })).detail).toContain(
-      "run_control_reserved",
-    );
+    expect(await raw("linear_post_run_control", { runId: run.id, action: "stop" })).toMatchObject({
+      outcome: "refused",
+      reason: "role_not_allowed",
+      role: "worker",
+    });
     // A caller-selected public receipt key cannot shadow the host's resolution.
     await call("linear_create_comment", {
       issueId: issue.id,

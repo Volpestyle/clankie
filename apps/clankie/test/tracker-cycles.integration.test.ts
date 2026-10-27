@@ -131,7 +131,7 @@ it("plans a project cycle, reads its summary from the event stream and rolls unf
 
   // Workers report work; the owner or the lead plans the cycle.
   const refused = await raw("linear_save_issue", { id: "LOCAL-1", cycle: "current" });
-  expect(refused.detail).toContain("cycle_planning_reserved");
+  expect(refused).toMatchObject({ outcome: "refused", reason: "role_not_allowed", role: "worker" });
   for (const id of ["LOCAL-1", "LOCAL-2", "LOCAL-3"]) await owner("save_issue", { id, cycle: "current" });
   const next = await owner("save_issue", { id: "LOCAL-4", cycle: "next" });
   const unscoped = await app.app.request("/v1/tracker/owner/call", {

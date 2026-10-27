@@ -2923,6 +2923,12 @@ Under owner closure, work stays In Review for the owner's ordinary verification.
 - `clankie work` (or `work status`, `work discover`) reports the repo's signals,
   its recorded convention if any, and a `question` when discovery found more
   than one tracker or only a single `TODO.md`. Answer it once with `work init`.
+  Its `trackerRequestBudget` is `GET /v1/tracker/request-budget`. For each hired
+  seat that called a tracker tool in the last hour, it lists the role, the
+  interactive and background requests (600 an hour) and writes (60 a minute)
+  used, any `retryAt`, and the `role_not_allowed` and `tracker_request_budget`
+  refusals. The owner and Clankie are never limited. `doctor --json` includes the
+  same report as `trackerRequestBudget`.
 - `clankie work init` records what discovery found; `work init --backend
 default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
 [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL]

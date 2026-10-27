@@ -151,6 +151,22 @@ project's id reads that project, as `list_issues` does; it is not a privacy
 boundary. Omit `since` to start from now. Outside a hire, name `project`. CLI: `clankie work changes [--project P]
 [--since N --store-id ID] [--wait SECONDS]`.
 
+## Roles and budgets
+
+The service gives a hired seat its role's tracker tools. The role comes from its
+hire and its project's review policy, never from what it says. A reviewer and a
+worker keep comments, issue events, issue creation and updates, evidence bundles
+and checks, leases, runs, every read and `list_changes`. Run control, status and
+project administration, owner-only review retirement and the inbox belong to
+the lead and the owner, so `save_issue` `cycle`, closing an issue (a completed
+`state`) and `stage: owner-verified` are refused too. A refusal is
+`role_not_allowed` with your `role`, and nothing was written. Ask your lead
+instead of retrying. Each hired seat has 600 requests an hour and 60 writes a
+minute, counted separately for interactive calls and for `background: true`
+polling. `tracker_request_budget` gives `retryAt` and `retryAfterMs`: wait until
+then. `clankie doctor` and `clankie work status` show what each seat has left
+and its refusals in the last hour.
+
 ## Sync
 
 `clankie work sync --json COMMAND` reads project-scoped bootstrap/batch data,

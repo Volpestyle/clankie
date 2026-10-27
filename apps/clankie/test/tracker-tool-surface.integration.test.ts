@@ -177,7 +177,24 @@ it("runs unchanged Linear issue/project/comment shapes through the offline fleet
     expect(await f.host.trackerStatus!()).toMatchObject({ backend: "local", reason: "linear_disconnected" });
     const team = await f.call("linear_get_team", { query: "LOCAL" });
     await f.call("linear_create_issue_label", { name: "builder", teamId: team.id });
-    const project = await f.call("linear_save_project", { name: "Offline delivery", addTeams: ["LOCAL"] });
+    // Projects are lead structure (LOCAL-VUH-45): the fleet worker is refused and Clankie saves it.
+    const refused = await f.tool("clankie_call", {
+      name: "linear_save_project",
+      arguments: { name: "Offline delivery", addTeams: ["LOCAL"] },
+    });
+    expect(JSON.parse(refused.content[0]!.text)).toMatchObject({
+      reason: "role_not_allowed",
+      role: "worker",
+    });
+    const saved = await f.host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "save_project",
+      arguments: { name: "Offline delivery", addTeams: ["LOCAL"] },
+      resultMode: "data",
+    });
+    if (saved.outcome !== "ok") throw new Error(saved.detail);
+    const project = JSON.parse(saved.content);
     const parent = await f.call("linear_save_issue", {
       team: "LOCAL",
       title: "Parent",
@@ -356,11 +373,15 @@ it("keeps a saved Linear repo convention usable offline without impersonating re
       (await f.call("linear_list_issues", { team: "VUH", project: "Clankie", state: "unstarted" })).issues[0]
         .id,
     ).toBe(read.id);
-    const foreignProject = await f.call("linear_save_project", {
-      repo: "workspace",
-      name: "Other project",
-      addTeams: ["VUH"],
+    const savedProject = await f.host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "save_project",
+      arguments: { repo: "workspace", name: "Other project", addTeams: ["VUH"] },
+      resultMode: "data",
     });
+    if (savedProject.outcome !== "ok") throw new Error(savedProject.detail);
+    const foreignProject = JSON.parse(savedProject.content);
     const ownerCreated = await f.host.call({
       lane: "operator",
       server: "linear",

@@ -167,6 +167,10 @@ export interface InstallDoctorReport {
   readonly linearRequestBudget?:
     | import("@clankie/protocol/linear-request-budget").LinearRequestBudgetReport
     | { readonly status: "unavailable"; readonly detail: string };
+  /** Hired seats' budgets and role refusals on Clankie's own trackers (LOCAL-VUH-45). */
+  readonly trackerRequestBudget?:
+    | import("@clankie/protocol/tracker-request-budget").TrackerRequestBudgetReport
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly tracker?: {
     readonly backend: "linear" | "local";
     readonly reason: "owner_connected" | "linear_disconnected" | "linear_disabled";

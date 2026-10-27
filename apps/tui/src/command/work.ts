@@ -17,6 +17,11 @@ import {
   WorkInboxSnoozeSchema,
   WorkInboxUnsnoozeSchema,
 } from "@clankie/protocol/work-items";
+import {
+  TRACKER_REQUEST_BUDGET_PATH,
+  TrackerRequestBudgetReportSchema,
+  type TrackerRequestBudgetReport,
+} from "@clankie/protocol/tracker-request-budget";
 import { commandHost } from "./io.ts";
 
 const WORK_USAGE = [
@@ -750,6 +755,12 @@ export async function runWorkCommand(
       signal: AbortSignal.timeout(60_000),
     });
     const body = (await response.json()) as unknown;
+    // Status also shows hired seats' tracker budgets and role refusals (LOCAL-VUH-45).
+    if (request.action === "discover" && response.ok && body !== null && typeof body === "object")
+      return {
+        ok: true,
+        body: { ...body, trackerRequestBudget: await trackerRequestBudget(fetcher, env, headers) },
+      };
     if (writing && input) {
       const parsedReceipt = WorkItemWriteReceiptSchema.safeParse(body);
       if (parsedReceipt.success)
@@ -777,5 +788,22 @@ export async function runWorkCommand(
         message: "The write may have happened. Read this receipt and the tracker; never resend this request.",
       },
     };
+  }
+}
+
+async function trackerRequestBudget(
+  fetcher: typeof fetch,
+  env: NodeJS.ProcessEnv,
+  headers: Record<string, string>,
+): Promise<TrackerRequestBudgetReport | { readonly status: "unavailable"; readonly detail: string }> {
+  try {
+    const response = await fetcher(`${commandHost({ env })}${TRACKER_REQUEST_BUDGET_PATH}`, {
+      headers,
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`Tracker request budget unavailable (HTTP ${response.status})`);
+    return TrackerRequestBudgetReportSchema.parse(await response.json());
+  } catch (error) {
+    return { status: "unavailable", detail: error instanceof Error ? error.message : String(error) };
   }
 }

@@ -1100,6 +1100,11 @@ priority; owner/lead reads, writes and webhook context remain interactive. One
 logical read retains admission across provider pagination while every HTTP attempt
 obeys the hard cap. `clankie linear budget` and `/doctor` expose
 the observation; the 50% warning uses native alerts without starting a model turn.
+Clankie's own trackers have a separate per-actor
+[budget](../apps/clankie/src/tracker-request-budget.ts) for hired seats, with
+interactive and background classes, and a host-resolved role profile that keeps lead
+and owner verbs from workers and reviewers
+([ADR 0217 amendment](adr/0217-fleet-membership-gets-connected-tools.md#amendment-role-tool-profiles-and-per-actor-budgets-on-clankies-trackers-2026-10-27)).
 Herdr contains the native
 interactive workers; Clankie uses their supported channels or session APIs for
 delivery. Linked independent agents can write first with `message_clankie`. Untrusted input stays fenced, secrets stay in the credential

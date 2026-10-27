@@ -166,6 +166,20 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
               `  ${account.status === "normal" ? "✓" : "!"} Linear requests · ${account.accountId} · ${account.requests} observed/hour · ${Math.round(account.utilization * 100)}% of ${account.limit} · ${account.status}${account.backgroundMinIntervalMs ? " · background reads at most once/minute" : ""}`,
           )
         : [`  ○ Linear requests · unknown · ${clean(report.linearRequestBudget.detail)}`]),
+    ...(report.trackerRequestBudget === undefined
+      ? []
+      : "actors" in report.trackerRequestBudget
+        ? report.trackerRequestBudget.actors.length === 0
+          ? ["  ✓ Tracker budgets · no hired-seat tracker calls in the last hour"]
+          : report.trackerRequestBudget.actors.map((actor) => {
+              const spent = [actor.interactive, actor.background].some(
+                (entry) => entry.retryAt !== undefined,
+              );
+              const left = (entry: typeof actor.interactive) =>
+                `${entry.requestLimit - entry.requests}/${entry.requestLimit} requests/hour, ${entry.writeLimit - entry.writes}/${entry.writeLimit} writes/minute left`;
+              return `  ${spent || actor.refusals.role_not_allowed ? "!" : "✓"} Tracker budget · ${clean(actor.name ?? actor.actorId)}${actor.role ? ` (${actor.role})` : ""} · interactive ${left(actor.interactive)} · background ${left(actor.background)}${actor.refusals.role_not_allowed + actor.refusals.tracker_request_budget ? ` · refused ${actor.refusals.role_not_allowed} role, ${actor.refusals.tracker_request_budget} budget in the last hour` : ""}`;
+            })
+        : [`  ○ Tracker budgets · unknown · ${clean(report.trackerRequestBudget.detail)}`]),
     ...(report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready"
       ? [`  ! Credentials · ${clean(report.credentialStoreHealth.message ?? "Keychain unavailable")}`]
       : []),

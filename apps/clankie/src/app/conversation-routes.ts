@@ -1,4 +1,8 @@
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
+import {
+  TRACKER_REQUEST_BUDGET_PATH,
+  TrackerRequestBudgetReportSchema,
+} from "@clankie/protocol/tracker-request-budget";
 import { INBOX_TOOLS } from "@clankie/work-items";
 import { createWorktreeCacheRoutes } from "../worktree-cache-routes.ts";
 import { legacyWorkItem } from "@clankie/protocol/work-items";
@@ -1178,6 +1182,18 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     });
   trackerCall(TRACKER_CALL_PATH, CLANKIE_FOR_OWNER);
   trackerCall(TRACKER_OWNER_CALL_PATH, { ...TRACKER_OWNER, onBehalfOf: [] });
+  // Hired seats' tracker budgets and role refusals (LOCAL-VUH-45), for doctor and work status.
+  ctx.app.get(TRACKER_REQUEST_BUDGET_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!ctx.dependencies.trackerRequestBudget)
+      return context.json({ error: "tracker_request_budget_unavailable" }, 503);
+    return context.json(
+      TrackerRequestBudgetReportSchema.parse(ctx.dependencies.trackerRequestBudget.report()),
+    );
+  });
   ctx.app.post("/v1/tracker/import/linear", async (context) => {
     const identity = await authenticateOperator(context.req.raw, ctx.dependencies);
     if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);

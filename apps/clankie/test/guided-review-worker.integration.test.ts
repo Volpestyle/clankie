@@ -266,8 +266,8 @@ it("attributes guided review edits to the authenticated worker and preserves own
       type: "result",
       stage: "owner-verified",
     });
-    expect(verifying.outcome).not.toBe("ok");
-    expect(verifying.detail).toContain("owner_verification_required");
+    // Only the owner verifies: a worker's host profile refuses it before the tracker (LOCAL-VUH-45).
+    expect(verifying).toMatchObject({ outcome: "refused", reason: "role_not_allowed", role: "worker" });
     for (const options of [
       undefined,
       { actor: { type: "external" as const, id: "untrusted", onBehalfOf: [] } },

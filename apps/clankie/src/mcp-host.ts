@@ -85,7 +85,9 @@ import {
   TRACKER_OWNER,
   TRACKER_TOOLS,
   TrackerReadRejected,
+  trackerRoleRefusal,
   type TrackerActor,
+  type TrackerRole,
   type TrackerToolBackend,
   type TrackerToolCallOptions,
   type LocalTrackerBackend,
@@ -100,6 +102,7 @@ import {
   type LinearRequestBudget,
   type LinearRequestPriority,
 } from "./linear-request-budget.ts";
+import { TrackerRequestBudgetRefused, type TrackerRequestBudget } from "./tracker-request-budget.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -214,6 +217,8 @@ type McpRefusalReason =
   | "server_unavailable"
   | "result_too_large"
   | "linear_request_budget"
+  | "tracker_request_budget"
+  | "role_not_allowed"
   | "body_owned"
   | "invalid_arguments"
   | "confirmation_required";
@@ -229,6 +234,9 @@ type McpCallResult =
       readonly detail: string;
       readonly possiblyDispatched?: boolean;
       readonly retryAt?: number;
+      readonly retryAfterMs?: number;
+      /** The caller's host-resolved tracker role, on a role_not_allowed refusal. */
+      readonly role?: TrackerRole;
     };
 
 export interface McpHost extends WorkerReadReceiptHost {
@@ -243,6 +251,8 @@ export interface McpHost extends WorkerReadReceiptHost {
     backend?: "local";
   }>;
   trackerStatus?(): Promise<TrackerBackendStatus>;
+  /** A hired seat's tracker role from its hire and project policy (LOCAL-VUH-45). */
+  trackerRole?(principalId: string): Promise<"worker" | "reviewer">;
   /** A verified provider change retires cached lists, including self-echo webhooks. */
   invalidateTrackerReads?(): void;
   /**
@@ -423,6 +433,13 @@ export interface McpHostOptions {
   }) => Promise<unknown>;
   /** Display name for a delegated worker principal (its hired seat); never from tool arguments. */
   readonly trackerWorkerName?: (principalId: string) => string | undefined;
+  /**
+   * A delegated principal's tracker role from its hire and project policy (ADR 0216),
+   * never its own claim. Absent or failing resolution is the narrowest role, worker.
+   */
+  readonly trackerRoleForWorker?: (principalId: string) => Promise<"worker" | "reviewer">;
+  /** Per-worker budget on Clankie's own trackers (LOCAL-VUH-45); the owner and Clankie are unlimited. */
+  readonly trackerRequestBudget?: TrackerRequestBudget;
   /** Shipped lazy motor, reserved for the service's MinecraftPort rather than raw catalogs. */
   readonly minecraftMotor?: {
     readonly command: string;
@@ -499,6 +516,37 @@ function credentialDigest(credential: ProviderCredential): string {
 const trackerReadTool = (tool: string) =>
   /^(?:get|list|search)_/u.test(tool) && TRACKER_TOOLS.some((entry) => entry.name === tool);
 
+/**
+ * Whether save_issue's state names a completed status, matched as the tracker matches it.
+ * An unreadable status list leaves closure to the tracker, which refuses it without the
+ * lead's closure capability.
+ */
+async function closesIssue(
+  read: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+  args: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    const team =
+      typeof args.team === "string"
+        ? args.team
+        : ((await read("list_teams", {})) as { teams?: { id: string }[] }).teams?.[0]?.id;
+    if (team === undefined) return false;
+    const statuses = (await read("list_issue_statuses", { team })) as {
+      id: string;
+      name: string;
+      type: string;
+    }[];
+    const norm = (value: string) => value.trim().toLowerCase();
+    const reference = norm(args.state as string);
+    const status =
+      statuses.find((entry) => norm(entry.id) === reference || norm(entry.name) === reference) ??
+      statuses.find((entry) => norm(entry.type) === reference);
+    return status?.type === "completed";
+  } catch {
+    return false;
+  }
+}
+
 export function createMcpHost(options: McpHostOptions): McpHost {
   const googleApps =
     options.googleApps ?? (async () => (await options.settings.load()).oauthApps?.google ?? {});
@@ -523,6 +571,11 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     server.id === "linear" && server.command === API_TRACKER_COMMAND;
   const trackerCatalog = (options.localTracker ?? options.linearApiTracker)?.catalog() ?? [];
   const trackerNames = new Set(trackerCatalog.map((tool) => tool.name));
+  const trackerRole = async (principalId: string): Promise<"worker" | "reviewer"> =>
+    // An unresolvable role gets the narrowest profile.
+    options.trackerRoleForWorker
+      ? await options.trackerRoleForWorker(principalId).catch(() => "worker" as const)
+      : "worker";
   const localBinding = createHash("sha256")
     .update(JSON.stringify(["local-tracker", options.trackerIdentity ?? "service-tracker"]))
     .digest("hex");
@@ -1076,6 +1129,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
         throw new Error("Tool resource unavailable in this lane");
       return account(server);
     },
+    trackerRole,
     async trackerStatus() {
       const server = (await activeServers()).find((entry) => entry.id === "linear");
       if (!server) throw new Error("Tracker is unavailable");
@@ -1471,6 +1525,95 @@ export function createMcpHost(options: McpHostOptions): McpHost {
               // Operator tools act for the owner; a social room is Clankie's own act.
               onBehalfOf: input.lane === "operator" ? [TRACKER_OWNER] : [],
             };
+        // A hired seat's role profile and budget on the tracker vocabulary (LOCAL-VUH-45).
+        // Refusals write nothing and are recorded here, not in the tracker's audit log, so a
+        // runaway loop cannot add store writes.
+        if (input.delegation !== undefined && server.id === "linear" && trackerNames.has(input.tool)) {
+          const principalId = input.delegation.principalId;
+          const role = await trackerRole(principalId);
+          const owned = repositoryCall || isLocalTracker(server);
+          const ownedRead = (name: string, args: Record<string, unknown>) =>
+            repositoryCall
+              ? options.trackerForRepo!({
+                  name,
+                  args,
+                  repo: trackerRepo as string,
+                  lane: input.lane,
+                  local: false,
+                  actor: trackerActor,
+                  beforeWrite: async () => {},
+                  onDispatch() {},
+                  effectConfirmed() {},
+                })
+              : options.localTracker!.call(name, args, { actor: trackerActor });
+          let refusal = trackerRoleRefusal(role, input.tool, input.arguments);
+          if (
+            refusal === undefined &&
+            owned &&
+            input.tool === "save_issue" &&
+            typeof input.arguments.state === "string"
+          )
+            refusal = (await closesIssue(ownedRead, input.arguments))
+              ? "closing an issue belongs to the lead or the owner"
+              : undefined;
+          const actor = {
+            id: principalId,
+            ...(trackerActor.name === undefined ? {} : { name: trackerActor.name }),
+            role,
+          };
+          if (refusal !== undefined) {
+            options.trackerRequestBudget?.refused(actor);
+            options.logger.warn(
+              {
+                event: "tracker.policy.refused",
+                reason: "role_not_allowed",
+                role,
+                tool: input.tool,
+                principalId,
+              },
+              `Tracker ${input.tool} refused for ${role} ${principalId}`,
+            );
+            return {
+              outcome: "refused",
+              reason: "role_not_allowed",
+              role,
+              possiblyDispatched: false,
+              detail: `A ${role} may not call ${input.tool}: ${refusal}. Nothing was written. Ask your lead.`,
+            };
+          }
+          if (owned && options.trackerRequestBudget) {
+            try {
+              options.trackerRequestBudget.admit(
+                actor,
+                input.requestPriority ?? "interactive",
+                !isReadTool(input.tool),
+              );
+            } catch (error) {
+              if (!(error instanceof TrackerRequestBudgetRefused)) throw error;
+              options.logger.warn(
+                {
+                  event: "tracker.policy.refused",
+                  reason: "tracker_request_budget",
+                  budget: error.reason,
+                  priority: input.requestPriority ?? "interactive",
+                  role,
+                  tool: input.tool,
+                  principalId,
+                  retryAt: error.retryAt,
+                },
+                error.message,
+              );
+              return {
+                outcome: "refused",
+                reason: "tracker_request_budget",
+                possiblyDispatched: false,
+                retryAt: error.retryAt,
+                retryAfterMs: Math.max(0, error.retryAt - Date.now()),
+                detail: error.message,
+              };
+            }
+          }
+        }
         let state: ServerState | undefined;
         let confirmed = false;
 

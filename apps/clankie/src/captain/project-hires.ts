@@ -108,6 +108,8 @@ export type ProjectHireMembershipCandidate =
       nativeOccupantId: string;
       harness: string;
       generic: boolean;
+      /** The project role it was hired into, when the hire named one. */
+      role?: string;
     };
 
 /** Controller state: semantic persona assignments cannot create, finish or release these claims. */
@@ -530,6 +532,7 @@ export class ProjectHires {
       nativeOccupantId: entry.occupantId,
       harness: entry.request.harness ?? "codex",
       generic: entry.proof.shell.pid !== entry.proof.processes[0]!.pid,
+      ...(entry.role === undefined ? {} : { role: entry.role }),
     };
   }
   /**

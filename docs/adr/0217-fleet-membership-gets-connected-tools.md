@@ -189,3 +189,63 @@ The owner is already a member, so this equals that member proxying for another
 process, which the boundary above already accepts. A full proof that sees a
 second holder still refuses. The rechecks, the residual and the test evidence
 are in the [native helper README](../../integrations/fleet-proof/README.md#proof-once-per-connection).
+
+## Amendment: role tool profiles and per-actor budgets on Clankie's trackers (2026-10-27)
+
+LOCAL-VUH-45 (Clankie Work Sync 6, in the built-in tracker)
+narrows the "every connected tool" grant for the tracker vocabulary only. Other
+connected accounts, and Linear-native tools outside that vocabulary, are unchanged.
+
+**Role.** The host resolves a tracker role for every call, never from arguments.
+Clankie's own calls are the **lead**, and the owner's route is the **owner**. Neither
+is limited. A delegated fleet principal is a **reviewer** when its confirmed hire
+holds its project's review seat or role (ADR 0287), or was hired as `reviewer`.
+Any other principal is a **worker**, including an unconfirmed hire, an unverified
+pane and a `project:` grant. The hire ledger and owner settings decide the role,
+as in [ADR 0216](0216-projects-own-agent-roles-and-tool-policy.md).
+
+**Profile.** Workers and reviewers keep everything hired seats wrote in the live
+audit log on 2026-10-27: comments, issue events, issue creation and updates,
+evidence bundles and checks, leases and runs. They also keep every read,
+`list_changes`, project status updates, labels and guided reviews. They do not
+see or call `post_run_control`, `save_issue_status`, `save_project`,
+`post_retire_guided_review` or the inbox tools. In `save_issue`, `cycle` and a
+completed-category `state` are refused. In `post_issue_event`, `stage:
+owner-verified` is refused. The catalog drops those tools and arguments: on a
+built-in-only service, the tracker schemas a worker can read fall from 61 tools
+to 53, about 16.7k to 13.7k tokens (legacy Claude tokenizer, an estimate). Hidden
+verbs stay callable by name, so the host can refuse them with `role_not_allowed`
+and the caller's `role`. The store's own owner/lead checks are unchanged and
+still back this up.
+
+**Budget.** Each worker or reviewer principal has an interactive and a
+background class (`clankie_call` `background: true`), each with 600 requests an
+hour and 60 writes a minute. Owner and lead calls are not counted. A refusal is
+`tracker_request_budget` with `retryAt`, like `linear_request_budget`, plus
+`retryAfterMs`. Refused calls are not counted. The budget covers built-in and
+repository-convention tracker calls; Linear HTTP keeps its own account budget.
+These defaults are well above the observed fleet-wide peaks of 111 events an
+hour and 17 creates in 45 seconds. A `list_changes` long poll (`waitMs` up to
+20 s) costs at most 180 requests an hour plus one per commit it returns.
+
+**Recording.** A refusal writes nothing to the tracker. A store write for each
+refusal would let a runaway loop amplify the lock contention that budgets exist
+to prevent. The host instead logs `tracker.policy.refused` with the reason,
+role, tool and principal, and counts refusals per actor for the request window.
+`GET /v1/tracker/request-budget` serves the budgets and those counts, and
+`clankie doctor` and `clankie work status` show them.
+
+```mermaid
+flowchart LR
+  C[clankie_call from a hired seat] --> R{Host role from hire and project review policy}
+  R -->|lead or owner| B[Tracker backend]
+  R -->|worker or reviewer| P{Verb in role profile?}
+  P -->|no| X[role_not_allowed: nothing written, logged and counted]
+  P -->|yes| U{Class budget left?}
+  U -->|no| Y[tracker_request_budget with retryAt]
+  U -->|yes| B
+```
+
+Separating the owner's route from Clankie's (LOCAL-VUH-4) stays outside this
+amendment. Today a hire that uses the operator credential through `clankie work`
+still writes as Clankie for the owner.

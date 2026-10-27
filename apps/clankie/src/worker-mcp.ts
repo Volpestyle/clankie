@@ -32,6 +32,7 @@ import {
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
 import { isLinearWorkerTool } from "./linear-publishing.ts";
+import { trackerCatalogForRole } from "@clankie/work-items";
 import {
   MinecraftActionSchema,
   WorkerReportBridgeStatusSchema,
@@ -1724,12 +1725,31 @@ export class WorkerMcp {
               if (name === "clankie_tools") {
                 const search = FleetSearchSchema.parse(args);
                 authorityNow.records = await this.connectedFleetRecords(authorityNow);
-                const connected = (await this.options.host.catalog("operator")).filter((tool) =>
+                const granted = (await this.options.host.catalog("operator")).filter((tool) =>
                   authorityNow.records.some(
                     (record) =>
                       record.server === tool.server && record.tools.some((rule) => rule.name === tool.name),
                   ),
                 );
+                // A hired seat sees its role's tracker profile (LOCAL-VUH-45). Hidden verbs stay
+                // callable by name so the host refuses them with role_not_allowed.
+                const role = await this.options.host.trackerRole?.(authorityNow.principalId);
+                const profiled =
+                  role === undefined
+                    ? undefined
+                    : new Map(
+                        trackerCatalogForRole(
+                          role,
+                          granted.filter((tool) => tool.server === "linear"),
+                        ).map((tool) => [tool.name, tool]),
+                      );
+                const connected = granted.flatMap((tool) => {
+                  if (profiled === undefined || tool.server !== "linear") return [tool];
+                  const profile = profiled.get(tool.name);
+                  return profile === undefined
+                    ? []
+                    : [{ ...tool, description: profile.description, inputSchema: profile.inputSchema }];
+                });
                 const catalog = [
                   ...connected,
                   ...(this.options.minecraft === undefined ? [] : minecraftWorkerCatalog),

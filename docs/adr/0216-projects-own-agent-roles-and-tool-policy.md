@@ -3,7 +3,10 @@
 Status: accepted for engineering (2026-10-03; VUH-1535 root source review).
 Fleet tool gating is superseded by [ADR 0217](0217-fleet-membership-gets-connected-tools.md)
 (2026-10-04); the membership/tool-cutover text below preserves the historical decision.
-Project roles, caps, hiring and tracker binding remain current.
+Project roles, caps, hiring and tracker binding remain current. The tracker role
+profiles and per-actor budgets that read these roles are an
+[ADR 0217 amendment](0217-fleet-membership-gets-connected-tools.md#amendment-role-tool-profiles-and-per-actor-budgets-on-clankies-trackers-2026-10-27)
+(LOCAL-VUH-45).
 Deterministic foundation evidence covers schema, migration and compatibility; live
 project hiring and grant enforcement remain the subsequent issue boundaries below.
 

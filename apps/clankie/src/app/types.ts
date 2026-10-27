@@ -232,6 +232,7 @@ export interface ClankieAppDependencies {
   workerMcp?: WorkerMcp;
   fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
   linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
+  trackerRequestBudget?: Pick<import("../tracker-request-budget.ts").TrackerRequestBudget, "report">;
   /** The Auto round record (ADR 0270), read by `clankie auto rounds`. */
   autoRounds?: Pick<import("../captain/auto-rounds.ts").AutoRoundRecord, "read">;
   runtimes?: ExecutionConnections;
