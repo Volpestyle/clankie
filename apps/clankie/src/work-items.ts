@@ -574,7 +574,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ...(assertIssueWrite === undefined ? {} : { assertIssueWrite }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       }));
-  const routingTracker = openBuiltIn();
+  const routingTracker = openBuiltIn() as Pick<LocalTrackerBackend, "referenceProjects">;
   const builtInRecordProjects = async (references: readonly string[]) => {
     try {
       return await routingTracker.referenceProjects(references);

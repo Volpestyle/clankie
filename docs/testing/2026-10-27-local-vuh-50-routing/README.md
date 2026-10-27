@@ -260,7 +260,12 @@ are labelled separately; `serial-fenced-*`, `race-final` and `peak-final` hash t
 sources. Historical `peak-after` matches commit `ee61d5d69`; `peak-profile` and
 `peak-full` match `ed18686e9`. Later diagnostic `race` mode and the launcher
 comment did not change their workload. The final product files are byte-identical
-across the final serial, race and peak captures. Node 26.12.0, 18 logical cores; load is sampled in every run. Periodic load1
+across the final serial, race and peak captures. After capture, the landing
+typecheck required a type-only `Pick<LocalTrackerBackend, "referenceProjects">`
+assertion at the host factory seam. Its emitted JavaScript is byte-identical
+to the captured source (esbuild 0.28.1); the [source and comparison proof](clankie://evidence/sha256/f4afa19f9ddda9fcfb1b88e477656dc551d6963acc0a2517756be5d1cdb4f591)
+retains both source hashes. The other five captured files are unchanged.
+Node 26.12.0, 18 logical cores; load is sampled in every run. Periodic load1
 ranges: original serial 2.58–2.92, snapshot-scan serial 2.79–2.94,
 pre-fence incremental 60d serial 2.37–2.71 and 1d 2.37–2.42;
 final fenced 60d 4.88–5.13 and 1d 4.81; first full-lane peak 2.35–7.21. Serial samples also
@@ -299,6 +304,6 @@ The first screenshot shows request counter 564; its completed log has 595 app
 calls. The final screenshot shows 566; its completed log has 597 app calls.
 Idle heartbeats do not rerender the last pool publication.
 The original serial/peak and diagnostic packets are immutable; the final
-packet is separate. The committed evidence manifest links all 70 objects. All owned processes stopped after each completed run. The final resource
+packet is separate. The committed evidence manifest links all 71 objects. All owned processes stopped after each completed run. The final resource
 snapshot records zero permits held. After landing, the worker will remove its
 scratch stores/profiles and local capture copies; the published evidence remains.
