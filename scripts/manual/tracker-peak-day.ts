@@ -1,5 +1,7 @@
 // Manual composition proof, not CI. Invoked by run.mjs under clankie heavy.
 import { Session } from "node:inspector";
+import { statSync } from "node:fs";
+import { PerformanceObserver } from "node:perf_hooks";
 import { cp, writeFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -27,7 +29,16 @@ const loads: unknown[] = [];
 const commits: { key: string; at: number }[] = [];
 const requests: Record<string, any>[] = [];
 const started = Date.now();
-const sample = () => loads.push({ at: Date.now(), load: loadavg(), rss: process.memoryUsage().rss });
+const sample = () => {
+  let checkpoint;
+  try {
+    const file = statSync(join(root, "tracker/tracker.json"));
+    checkpoint = { inode: file.ino, bytes: file.size, mtimeMs: file.mtimeMs, ctimeMs: file.ctimeMs };
+  } catch {
+    /* The seed has not been copied yet. */
+  }
+  loads.push({ at: Date.now(), load: loadavg(), rss: process.memoryUsage().rss, checkpoint });
+};
 sample();
 const loadTimer = setInterval(sample, 5_000);
 const directory = join(root, "tracker");
@@ -106,6 +117,12 @@ let running = true;
 const readerAbort = new AbortController();
 let readerTask: Promise<void> | undefined;
 let loopTimer: ReturnType<typeof setInterval> | undefined;
+let peakProfiler: Session | undefined;
+let gcObserver: PerformanceObserver | undefined;
+const profileCommand = (session: Session, method: string, params = {}) =>
+  new Promise<any>((resolve, reject) =>
+    session.post(method as any, params, (error, result) => (error ? reject(error) : resolve(result))),
+  );
 const active = new Set<Promise<unknown>>();
 const track = <T>(promise: Promise<T>) => {
   active.add(promise);
@@ -443,17 +460,45 @@ async function run() {
     });
     // Measure the service event loop during traffic and the full idle interval. Cold bootstrap
     // and the proof's posthoc full-store/digest reads are outside this window.
+    const profileAnchors: Record<string, any>[] = [];
+    const gcEntries: Record<string, any>[] = [];
+    const anchor = (phase: string) =>
+      profileAnchors.push({
+        phase,
+        at: Date.now(),
+        perfAt: performance.now(),
+        hrtimeUs: Number(process.hrtime.bigint() / 1000n),
+      });
+    if (mode === "profile") {
+      gcObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries())
+          gcEntries.push({
+            startTime: entry.startTime,
+            duration: entry.duration,
+            detail: (entry as any).detail,
+          });
+      });
+      gcObserver.observe({ entryTypes: ["gc"] });
+      peakProfiler = new Session();
+      peakProfiler.connect();
+      await profileCommand(peakProfiler, "Profiler.enable");
+      await profileCommand(peakProfiler, "Profiler.setSamplingInterval", { interval: 1000 });
+      anchor("before-start");
+      await profileCommand(peakProfiler, "Profiler.start");
+      anchor("after-start");
+    }
     let loopSamples = 0,
       loopMax = 0;
-    const loopDelays: { at: number; delayMs: number }[] = [];
+    const loopDelays: { at: number; delayMs: number; perfAt: number; previousPerfAt: number }[] = [];
     let loopPrevious = performance.now();
     loopTimer = setInterval(() => {
       const now = performance.now(),
         delayMs = Math.max(0, now - loopPrevious - 10);
+      const previousPerfAt = loopPrevious;
       loopPrevious = now;
       loopSamples++;
       loopMax = Math.max(loopMax, delayMs);
-      if (delayMs > 5) loopDelays.push({ at: Date.now(), delayMs });
+      if (delayMs > 5) loopDelays.push({ at: Date.now(), delayMs, perfAt: now, previousPerfAt });
     }, 10);
     const trafficStarted = Date.now();
     // 75 create + 273 comment + 246 priority/state updates = 594 writes / 840 events.
@@ -550,6 +595,23 @@ async function run() {
     await new Promise((resolve) => setTimeout(resolve, 20));
     clearInterval(loopTimer);
     const loopEnded = Date.now();
+    if (peakProfiler) {
+      anchor("before-stop");
+      const { profile } = await profileCommand(peakProfiler, "Profiler.stop");
+      anchor("after-stop");
+      peakProfiler.disconnect();
+      peakProfiler = undefined;
+      await save("cpu-profile.json", profile);
+      gcObserver?.disconnect();
+      gcObserver = undefined;
+      await save("profile-meta.json", {
+        anchors: profileAnchors,
+        gcEntries,
+        sampleIntervalUs: 1000,
+        scope:
+          "Traffic, convergence and complete ten-minute idle; excludes cold bootstrap and posthoc snapshot/digest reads. No serial receipt wrappers in this mode.",
+      });
+    }
     await save("event-loop.json", {
       start: trafficStarted,
       end: loopEnded,
@@ -731,6 +793,8 @@ async function run() {
     for (const restore of restoreReceiptTimers) restore();
     clearInterval(loadTimer);
     clearInterval(loopTimer);
+    peakProfiler?.disconnect();
+    gcObserver?.disconnect();
     sample();
     await save("load.json", loads);
   }
