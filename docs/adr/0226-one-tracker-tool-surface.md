@@ -28,6 +28,8 @@ per-project cycles with automatic rollover, and a fifth
 (VUH-1987) moves one World project from Linear onto the built-in tracker and back;
 its VUH-2829 [item routing](#proposed-amendment-cutover-and-switch-back-2026-10-09-vuh-1987)
 sends any caller's call for a cut-over project's item to the built-in tracker.
+The [LOCAL-VUH-42 amendment](#amendment-writes-cost-the-change-not-the-store-2026-10-27-local-vuh-42)
+makes a built-in write cost its change rather than the whole store.
 
 ## Context
 
@@ -940,3 +942,61 @@ that, and other backends refuse both:
   store reports the snapshot expired instead of mixing states. Reconstructing a
   past state from the journal was not chosen: it would bind list reads to the
   journal's storage, which Sync 4 (LOCAL-VUH-42) is changing.
+
+## Amendment: writes cost the change, not the store (2026-10-27, LOCAL-VUH-42)
+
+Status: accepted (lead-approved scope, 2026-10-27). Tracks LOCAL-VUH-42 in Clankie
+Work, under VUH-1920 (milestone 3). Built-in tracker only. Tools, receipts, the
+audit and event streams, the sync journal and the store fence keep their
+contracts.
+
+**Why.** Each write cost the whole store, several times over: it re-parsed and
+re-verified every hash chain after the previous write, made two whole-store
+copies, diffed every sync model and rewrote and fsynced the whole file. On
+generated stores at fleet volume (600 sync commits a day, other records in the
+live store's proportions), a single `save_issue` took 118 ms at one day of
+volume and 1,036 ms at ten. Serializing and fsyncing were only about a fifth of
+that. A single JSON string also stops working at about 45 days, because it
+reaches V8's maximum string length. Method and numbers:
+[the measurement record](../testing/2026-10-27-local-vuh-42-tracker-journal/README.md).
+
+**Copy-on-write.**
+
+- A backend keeps the store it last committed, deep-frozen, and shares it with reads.
+- A write works on a draft. The draft copies only the top level and each collection
+  array. A record is cloned only when the write changes it (`own`); finding an issue
+  or project inside a write does this.
+- A refused write discards its draft. The committed store is the before-image the
+  audit, receipts and sync diff compare against.
+- A missed `own` cannot corrupt committed state. The frozen record throws, and the
+  write is refused with `invalid_request`, naming the code site.
+- An integration test drives every write tool, an update of each and a sync
+  transaction through the frozen store.
+- Values a caller passes in (tool arguments, transaction operations, a Linear
+  snapshot) are cloned before they can become committed records.
+
+**Other writers.** Before reusing its snapshot, each backend checks the store
+file's identity, size and timestamps under the store lock. Any commit by another
+process or another backend instance changes them, and the next call reads the
+store again. Today the service is the only process that writes
+`~/.clankie/tracker`, through several backend instances: the CLI and the relay
+reach it through the service API. A two-process integration test proves no
+write is lost either way. After its own commit, a backend applies exactly what
+opening those bytes would apply (stage status binding), so it never has to read
+them back.
+
+**Incremental sync diff.**
+
+- A sync commit's deltas come only from the records whose identity changed.
+- It also covers what derives from them: an issue's lease and owner asks, and
+  the groups of comments, events, runs, bundles, documents and releases that
+  follow a moved issue, document or status update.
+- This is a superset of the real changes, and each candidate is still compared
+  as before, so the deltas are the same.
+- Under Vitest, every commit also computes the full diff and fails on any
+  difference. A deliberately dropped dependency fails the suite.
+
+**Not yet changed.** The store is still one atomic `tracker.json` replacement per
+write, holding the full sync log, receipts and audit. Writes now take 33 ms at one
+day and 232 ms at ten days, and those costs are mostly that file. Storing writes
+as a journal is the second half of this amendment.

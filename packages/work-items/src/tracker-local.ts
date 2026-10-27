@@ -877,8 +877,10 @@ const ENTITY_TYPES = [
 function stampActor(store: Store, actor: TrackerActor, now: string): AuditEvent["entities"] {
   const touched: AuditEvent["entities"] = [];
   for (const [collection, type] of ENTITY_TYPES)
-    for (const entry of (store[collection] ?? []) as (Entity & { identifier?: string })[]) {
-      if (entry.updatedAt < now) continue;
+    for (const found of (store[collection] ?? []) as (Entity & { identifier?: string })[]) {
+      if (found.updatedAt < now) continue;
+      // A transaction settles each operation, so an earlier operation's records are frozen again.
+      const entry = owned(store[collection] as (Entity & { identifier?: string })[], found);
       if (entry.createdAt >= now) entry.createdByActor = actor;
       entry.updatedByActor = actor;
       touched.push({
@@ -917,7 +919,7 @@ function bindStageStatuses(store: Store): void {
     ["Done", "completed", "owner-verified"],
   ] as const) {
     const status = store.issueStatuses.find((entry) => entry.name === name && entry.type === type);
-    if (status !== undefined) status.stage = stage;
+    if (status !== undefined) owned(store.issueStatuses, status).stage = stage;
   }
 }
 const stageOf = (issue: Issue): DeliveryStage => issue.stage ?? "reported";
@@ -1186,11 +1188,14 @@ function saveIssueStatus(store: Store, args: Record<string, unknown>): Status {
   if (name === "") throw new Error("Status name cannot be blank");
   if (store.issueStatuses.some((status) => status !== existing && norm(status.name) === norm(name)))
     throw new Error(`Status already exists: ${name}`);
-  const status: Status = existing ?? { id: randomUUID(), name, type: args.type as string };
+  const status: Status = existing
+    ? owned(store.issueStatuses, existing)
+    : { id: randomUUID(), name, type: args.type as string };
   status.name = name;
   if (args.type !== undefined) status.type = args.type as string;
   if (args.stage !== undefined) {
-    for (const entry of store.issueStatuses) if (entry.stage === args.stage) delete entry.stage;
+    for (const entry of store.issueStatuses)
+      if (entry.stage === args.stage) delete owned(store.issueStatuses, entry).stage;
     status.stage = args.stage as DeliveryStage;
   }
   if (existing === undefined) store.issueStatuses.push(status);
@@ -1243,8 +1248,9 @@ function syncReleases(
   // The history is oldest version first.
   for (const release of synced)
     for (const item of release.items) {
-      const issue = store.issues.find((entry) => entry.id === item.issueId);
-      if (issue === undefined) continue;
+      const found = store.issues.find((entry) => entry.id === item.issueId);
+      if (found === undefined) continue;
+      const issue = owned(store.issues, found);
       const skip = (reason: string, detail: string) =>
         skipped.push({ identifier: issue.identifier, version: release.version, reason, detail });
       if (issue.stage === undefined) {
@@ -1415,7 +1421,7 @@ function rolloverCycles(
     );
     for (const issue of store.issues)
       if (issue.cycleId != null && ended.has(issue.cycleId) && isOpen(store, issue)) {
-        moveCycle(store, issue, target, context, now);
+        moveCycle(store, owned(store.issues, issue), target, context, now);
         rolled.push(issue.identifier);
       }
   }
@@ -1560,8 +1566,12 @@ function runView(store: Store, run: Run, now: string, options: LocalTrackerOptio
   };
 }
 
-const currentBundle = (store: Store, issueId: string, runId: string | null = null) =>
-  (store.bundles ?? []).findLast((bundle) => bundle.issueId === issueId && bundle.runId === runId);
+function currentBundle(store: Store, issueId: string, runId: string | null = null) {
+  const bundle = (store.bundles ?? []).findLast(
+    (entry) => entry.issueId === issueId && entry.runId === runId,
+  );
+  return bundle && owned(store.bundles!, bundle);
+}
 
 function checkBundle(
   store: Store,
@@ -1886,7 +1896,7 @@ function guidedReviewForIssue(store: Store, args: Record<string, unknown>, optio
   );
   if (!review || review.storeId !== (store.storeId ?? store.team.id))
     throw new Error("Guided review not found on this issue");
-  return review;
+  return owned(store.guidedReviews!, review);
 }
 
 async function saveBundle(
@@ -1948,11 +1958,12 @@ function postAsk(
 ) {
   const issue = findIssue(store, args.issueId as string);
   options.assertIssueWrite?.(issueView(store, issue));
-  const run =
+  const found =
     args.runId === undefined
       ? undefined
       : (store.runs ?? []).find((entry) => entry.id === args.runId && entry.issueId === issue.id);
-  if (args.runId !== undefined && run === undefined) throw new Error("runId must name a run on this issue");
+  if (args.runId !== undefined && found === undefined) throw new Error("runId must name a run on this issue");
+  const run = found && owned(store.runs!, found);
   if (run && actorKey(run.actor) !== actorKey(context.actor) && !ownerOrLead(context.actor))
     throw new TrackerWriteRefused(
       "run_owner_required",
@@ -1986,8 +1997,9 @@ function controlRun(
       "run_control_reserved",
       "only the owner or lead steers, pauses or stops a run",
     );
-  const run = (store.runs ?? []).find((entry) => entry.id === args.runId);
-  if (!run) throw new Error("Run not found");
+  const found = (store.runs ?? []).find((entry) => entry.id === args.runId);
+  if (!found) throw new Error("Run not found");
+  const run = owned(store.runs!, found);
   if (run.status !== "active") throw new Error("Run already finished");
   const issue = findIssue(store, run.issueId);
   options.assertIssueWrite?.(issueView(store, issue));
@@ -2063,7 +2075,7 @@ function saveRun(
   } else {
     const found = (store.runs ?? []).find((entry) => entry.id === args.id);
     if (found === undefined) throw new Error(`Run not found: ${String(args.id)}`);
-    run = found;
+    run = owned(store.runs!, found);
     issue = findIssue(store, run.issueId);
     if (actorKey(run.actor) !== actorKey(context.actor) && !ownerOrLead(context.actor))
       throw new TrackerWriteRefused(
@@ -2255,18 +2267,67 @@ function assertUnchangedSince(entity: Entity, args: Record<string, unknown>): vo
     );
 }
 
+/**
+ * Copy-on-write (LOCAL-VUH-42). A committed store is deep-frozen and shared by reads and by
+ * the next write. A write's draft copies only the top level and each collection array, so
+ * adding, removing or reordering records leaves the committed store untouched; a record is
+ * cloned only when the write changes it (`own`). A mutation that skips `own` throws, so a
+ * missed site refuses its write instead of corrupting committed state.
+ */
+function freezeRecords(value: unknown): void {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) return;
+  Object.freeze(value);
+  for (const child of Array.isArray(value) ? value : Object.values(value)) freezeRecords(child);
+}
+/** Freezes every record the draft holds and returns its immutable snapshot; the draft stays writable. */
+function settle(store: Store): Store {
+  const snapshot = { ...store } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(snapshot))
+    if (Array.isArray(value)) snapshot[key] = value.slice();
+  freezeRecords(snapshot);
+  return snapshot as unknown as Store;
+}
+function draftOf(store: Store): Store {
+  const draft = { ...store } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(draft)) if (Array.isArray(value)) draft[key] = value.slice();
+  return draft as unknown as Store;
+}
+/** Names the code that changed a committed record in place, so a missed `own` is found. */
+function frozenRecordSite(error: Error): string {
+  if (
+    !(error instanceof TypeError) ||
+    !/read only|not extensible|Cannot (?:add|delete|assign)/u.test(error.message)
+  )
+    return "";
+  const site = error.stack?.split("\n").find((line) => /tracker-local\.ts:\d+/u.test(line));
+  return ` (committed tracker record changed in place${site === undefined ? "" : ` ${site.trim()}`})`;
+}
+/** The draft's own writable copy of a committed record, replacing it in its collection. */
+function own<T extends object>(collection: T[], entry: T): T {
+  if (!Object.isFrozen(entry)) return entry;
+  const index = collection.indexOf(entry);
+  if (index < 0) throw new Error("Tracker record is not in this collection");
+  const copy = structuredClone(entry);
+  collection[index] = copy;
+  return copy;
+}
+/** Records found in a write's draft are its own; a committed store's stay shared and frozen. */
+const owned = <T extends object>(collection: T[], entry: T): T =>
+  Object.isFrozen(collection) ? entry : own(collection, entry);
+
 /** Atomic rename prevents torn reads; fsync preserves completed writes across a process crash. */
 async function persist(
   path: string,
   store: Store,
   assertHeld: () => void,
   options?: TrackerToolCallOptions,
-): Promise<void> {
+): Promise<Buffer> {
   const temp = `${path}.${randomUUID()}.tmp`;
+  const bytes = Buffer.from(`${JSON.stringify(store, null, 2)}\n`);
   try {
     const handle = await open(temp, "wx", 0o600);
     try {
-      await handle.writeFile(`${JSON.stringify(store, null, 2)}\n`);
+      await handle.writeFile(bytes);
       await handle.sync();
     } finally {
       await handle.close();
@@ -2276,6 +2337,7 @@ async function persist(
     options?.onDispatch?.();
     await rename(temp, path);
     options?.effectConfirmed?.();
+    return bytes;
   } finally {
     await rm(temp, { force: true });
   }
@@ -2286,7 +2348,7 @@ function findIssue(store: Store, reference: string): Issue {
     (entry) => norm(entry.id) === norm(reference) || norm(entry.identifier) === norm(reference),
   );
   if (result === undefined) throw new Error(`Issue not found: ${reference}`);
-  return result;
+  return owned(store.issues, result);
 }
 function findProject(store: Store, reference: string): Project {
   const matches = store.projects.filter((entry) =>
@@ -2298,7 +2360,7 @@ function findProject(store: Store, reference: string): Project {
         ? `Project not found: ${reference}`
         : `Project name is ambiguous: ${reference}; use its UUID`,
     );
-  return matches[0]!;
+  return owned(store.projects, matches[0]!);
 }
 function findTeam(store: Store, reference: string): Team {
   if (![store.team.id, store.team.name, store.team.key].some((value) => norm(value) === norm(reference)))
@@ -2749,20 +2811,26 @@ function saveLabel(store: Store, args: Record<string, unknown>, now: string): La
       : store.labels.find((entry) => entry.id === args.parent || entry.name === args.parent);
   if (args.parent !== undefined && (parent === undefined || !parent.isGroup || parent.id === existing?.id))
     throw new Error("A label parent must be a different existing label group");
-  const label: Label = existing ?? {
-    id: randomUUID(),
-    name,
-    description: "",
-    color: "#808080",
-    teamId,
-    parentId: null,
-    isGroup: false,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const label: Label = existing
+    ? owned(store.labels, existing)
+    : {
+        id: randomUUID(),
+        name,
+        description: "",
+        color: "#808080",
+        teamId,
+        parentId: null,
+        isGroup: false,
+        createdAt: now,
+        updatedAt: now,
+      };
   if (existing !== undefined && existing.name !== name) {
-    for (const entry of [...store.issues, ...store.projects])
-      entry.labels = entry.labels.map((value) => (value === existing.name ? name : value));
+    for (const collection of [store.issues, store.projects] as (Issue | Project)[][])
+      for (const entry of collection)
+        if (entry.labels.includes(existing.name))
+          owned(collection, entry).labels = entry.labels.map((value) =>
+            value === existing.name ? name : value,
+          );
   }
   label.name = name;
   label.teamId = teamId;
@@ -3166,8 +3234,9 @@ async function dispatch(
       return currentBundle(store, issue.id, (args.runId as string | undefined) ?? null) ?? null;
     }
     case "post_bundle_check": {
-      const bundle = (store.bundles ?? []).find((entry) => entry.id === args.bundleId);
-      if (!bundle) throw new Error("Bundle not found");
+      const found = (store.bundles ?? []).find((entry) => entry.id === args.bundleId);
+      if (!found) throw new Error("Bundle not found");
+      const bundle = owned(store.bundles!, found);
       options.assertIssueWrite?.(issueView(store, findIssue(store, bundle.issueId)));
       checkBundle(store, bundle, context, now, args.body as string | undefined);
       return bundle;
@@ -3339,8 +3408,9 @@ async function dispatch(
       if (args.id !== undefined) {
         if (args.statusUpdateType !== undefined)
           throw new Error("statusUpdateType cannot be combined with comment id");
-        const comment = store.comments.find((entry) => entry.id === args.id);
-        if (comment === undefined) throw new Error(`Comment not found: ${String(args.id)}`);
+        const found = store.comments.find((entry) => entry.id === args.id);
+        if (found === undefined) throw new Error(`Comment not found: ${String(args.id)}`);
+        const comment = owned(store.comments, found);
         assertUnchangedSince(comment, args);
         if (comment.issueId !== null)
           options.assertIssueWrite?.(issueView(store, findIssue(store, comment.issueId)));
@@ -3434,16 +3504,18 @@ async function dispatch(
         args.project === undefined ? existing!.projectId : findProject(store, args.project as string).id;
       if (existing !== undefined && existing.projectId !== projectId)
         throw new Error("A status update cannot move to a different project");
-      const update: StatusUpdate = existing ?? {
-        id: randomUUID(),
-        type: "project",
-        projectId,
-        body: "",
-        health: "onTrack",
-        userId: store.user.id,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const update: StatusUpdate = existing
+        ? owned(store.statusUpdates, existing)
+        : {
+            id: randomUUID(),
+            type: "project",
+            projectId,
+            body: "",
+            health: "onTrack",
+            userId: store.user.id,
+            createdAt: now,
+            updatedAt: now,
+          };
       if (args.body !== undefined) update.body = args.body as string;
       if (args.health !== undefined) update.health = args.health as string;
       update.updatedAt = now;
@@ -3718,8 +3790,10 @@ async function read(
 const syncListeners = new Map<string, Set<() => void>>();
 
 /** Stable normalized objects: the app owns projections, the server owns fields and references. */
-function syncModels(store: Store): TrackerSyncModel[] {
+function syncModels(store: Store, wanted?: ReadonlySet<string>): TrackerSyncModel[] {
   const models: TrackerSyncModel[] = [];
+  const want = (modelName: TrackerSyncModel["modelName"], id: string) =>
+    wanted === undefined || wanted.has(`${modelName}:${id}`);
   const projectOfIssue = (id: string | null | undefined): string[] => {
     const project = store.issues.find((issue) => issue.id === id)?.projectId;
     // Unprojected items have an explicit group; empty is reserved for shared metadata.
@@ -3731,16 +3805,19 @@ function syncModels(store: Store): TrackerSyncModel[] {
     groups: (data: Record<string, unknown>) => string[],
   ) => {
     for (const entry of entries) {
+      if (!want(modelName, (entry as { id: string }).id)) continue;
       const data = structuredClone(entry) as Record<string, unknown>;
       models.push({ modelName, modelId: data.id as string, projectIds: groups(data), data });
     }
   };
   add(
     "issue",
-    store.issues.map((issue) => ({
-      ...issue,
-      ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.issueId === issue.id),
-    })),
+    store.issues
+      .filter((issue) => want("issue", issue.id))
+      .map((issue) => ({
+        ...issue,
+        ownerAsks: (store.ownerAsks ?? []).filter((ref) => ref.issueId === issue.id),
+      })),
     (data) => [(data.projectId as string) ?? "unprojected"],
   );
   add("project", store.projects, (data) => [data.id as string, "workspace"]);
@@ -3776,7 +3853,7 @@ function syncModels(store: Store): TrackerSyncModel[] {
   add(
     "lease",
     store.issues
-      .filter((issue) => issue.lease)
+      .filter((issue) => issue.lease && want("lease", issue.id))
       .map((issue) => ({ id: issue.id, issueId: issue.id, ...issue.lease })),
     (data) => projectOfIssue(data.issueId as string),
   );
@@ -3808,6 +3885,84 @@ function lazySyncModel(model: TrackerSyncModel): TrackerSyncModel {
   if (omitted.length) data.unhydratedFields = omitted;
   return { ...model, data };
 }
+/** Records in one list and not the other, by identity; an append compares only its tail. */
+function identityChanges<T extends object>(previous: readonly T[] = [], current: readonly T[] = []): T[] {
+  if (previous === current) return [];
+  let start = 0;
+  while (start < previous.length && start < current.length && previous[start] === current[start]) start++;
+  const before = new Set(previous.slice(start));
+  const after = new Set(current.slice(start));
+  return [
+    ...[...after].filter((entry) => !before.has(entry)),
+    ...[...before].filter((entry) => !after.has(entry)),
+  ];
+}
+type SyncSource = [TrackerSyncModel["modelName"], (store: Store) => readonly { id: string }[] | undefined];
+const SYNC_SOURCES: SyncSource[] = [
+  ["issue", (store) => store.issues],
+  ["project", (store) => store.projects],
+  ["milestone", (store) => store.milestones],
+  ["document", (store) => store.documents],
+  ["comment", (store) => store.comments],
+  ["cycle", (store) => store.cycles],
+  ["status_update", (store) => store.statusUpdates],
+  ["run", (store) => store.runs],
+  ["bundle", (store) => store.bundles],
+  ["event", (store) => store.events],
+  ["release", (store) => store.releases],
+  ["label", (store) => store.labels],
+  ["issue_status", (store) => store.issueStatuses],
+  ["project_status", (store) => store.projectStatuses],
+  ["team", (store) => [store.team]],
+  ["user", (store) => [store.user, ...(store.actors ?? [])]],
+];
+/**
+ * The sync models a write may have changed (LOCAL-VUH-42). Committed records are frozen, so a
+ * changed record is a new object; add what derives from one: an issue's lease and owner asks,
+ * and the groups of everything that follows a moved issue, document or status update. A
+ * superset of the real changes, so appendSync's comparison still decides each delta.
+ */
+function syncCandidates(before: Store, store: Store): Set<string> {
+  const wanted = new Set<string>();
+  const changed = new Map<string, { id: string }[]>();
+  for (const [modelName, source] of SYNC_SOURCES) {
+    const entries = identityChanges(source(before), source(store));
+    changed.set(modelName, entries);
+    for (const entry of entries) wanted.add(`${modelName}:${entry.id}`);
+  }
+  for (const ref of identityChanges(before.ownerAsks, store.ownerAsks)) wanted.add(`issue:${ref.issueId}`);
+  const issues = new Set<string>();
+  for (const key of wanted) if (key.startsWith("issue:")) issues.add(key.slice("issue:".length));
+  const projectOf = (target: Store, id: string) => target.issues.find((issue) => issue.id === id)?.projectId;
+  const moved = new Set([...issues].filter((id) => projectOf(before, id) !== projectOf(store, id)));
+  const documents = new Set((changed.get("document") ?? []).map((entry) => entry.id));
+  const updates = new Set((changed.get("status_update") ?? []).map((entry) => entry.id));
+  for (const id of issues) wanted.add(`lease:${id}`);
+  if (moved.size + documents.size + updates.size === 0) return wanted;
+  for (const target of [before, store]) {
+    for (const document of target.documents ?? [])
+      if (moved.has(document.issueId as string)) documents.add(document.id);
+    for (const comment of target.comments)
+      if (
+        moved.has(comment.issueId as string) ||
+        documents.has(comment.documentId as string) ||
+        updates.has(comment.statusUpdateId as string)
+      )
+        wanted.add(`comment:${comment.id}`);
+    for (const [modelName, entries] of [
+      ["document", target.documents ?? []],
+      ["run", target.runs ?? []],
+      ["bundle", target.bundles ?? []],
+      ["event", target.events ?? []],
+    ] as const)
+      for (const entry of entries)
+        if (moved.has(entry.issueId as string)) wanted.add(`${modelName}:${entry.id}`);
+    for (const release of target.releases ?? [])
+      if (release.items.some((item) => item.issueId !== undefined && moved.has(item.issueId)))
+        wanted.add(`release:${release.id}`);
+  }
+  return wanted;
+}
 function appendSync(
   before: Store,
   store: Store,
@@ -3816,9 +3971,26 @@ function appendSync(
   at: string,
   key?: string,
 ): void {
-  const prior = new Map(syncModels(before).map((model) => [syncModelKey(model), model]));
+  const deltas = syncDeltas(before, store, syncCandidates(before, store));
+  // Every test write proves the incremental diff equals the full one (LOCAL-VUH-42).
+  if (process.env.VITEST && canonical(deltas) !== canonical(syncDeltas(before, store)))
+    throw new Error(`Incremental sync diff diverged from the full diff for ${tool}`);
+  const body = {
+    syncId: (store.syncId ?? 0) + 1,
+    actor: { ...actor },
+    tool,
+    at,
+    ...(key === undefined ? {} : { idempotencyKey: key }),
+    deltas,
+    prevHash: store.syncLog?.at(-1)?.hash ?? "",
+  };
+  store.syncId = body.syncId;
+  (store.syncLog ??= []).push({ ...body, hash: auditHash(body) });
+}
+function syncDeltas(before: Store, store: Store, wanted?: ReadonlySet<string>): TrackerSyncCommit["deltas"] {
+  const prior = new Map(syncModels(before, wanted).map((model) => [syncModelKey(model), model]));
   const deltas: TrackerSyncCommit["deltas"] = [];
-  for (const model of syncModels(store)) {
+  for (const model of syncModels(store, wanted)) {
     const previous = prior.get(syncModelKey(model));
     prior.delete(syncModelKey(model));
     if (previous && canonical(previous) === canonical(model)) continue;
@@ -3846,17 +4018,7 @@ function appendSync(
       previousProjectIds: model.projectIds,
       removedFields: [],
     });
-  const body = {
-    syncId: (store.syncId ?? 0) + 1,
-    actor: { ...actor },
-    tool,
-    at,
-    ...(key === undefined ? {} : { idempotencyKey: key }),
-    deltas,
-    prevHash: store.syncLog?.at(-1)?.hash ?? "",
-  };
-  store.syncId = body.syncId;
-  (store.syncLog ??= []).push({ ...body, hash: auditHash(body) });
+  return deltas;
 }
 
 /**
@@ -4135,6 +4297,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   };
   const listeners = eventListeners.get(path) ?? new Set<TrackerEventListener>();
   eventListeners.set(path, listeners);
+  // The committed snapshot is frozen, so reads share it and writes take a draft of it.
   let validated: { version: string; bytes: Buffer; store: Store } | undefined;
   const readStore = async (mutable = true): Promise<Store> => {
     // A different process can replace or edit the store, so every read checks
@@ -4151,10 +4314,16 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       validated =
         validated !== undefined && validated.bytes.equals(bytes)
           ? { ...validated, version }
-          : { version, bytes, store: parseStore(bytes.toString("utf8")) };
+          : { version, bytes, store: settle(parseStore(bytes.toString("utf8"))) };
     }
-    // Writes and returned views must never mutate the validated snapshot.
-    return mutable ? structuredClone(validated.store) : validated.store;
+    return mutable ? draftOf(validated.store) : validated.store;
+  };
+  /** Our own commit becomes the snapshot the next call reuses, without reading it back. */
+  const commit = async (store: Store, assertHeld: () => void, callOptions?: TrackerToolCallOptions) => {
+    const bytes = await persist(path, store, assertHeld, callOptions);
+    // Exactly what reopening these bytes would hold: open binds stage statuses after reading.
+    bindStageStatuses(store);
+    validated = { version: fileVersion(), bytes, store: settle(store) };
   };
   const publish = (events: readonly TrackerItemEvent[]) => {
     for (const event of events)
@@ -4181,7 +4350,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     let store = initial;
     const key = keyed?.key;
     const fingerprint = keyed?.fingerprint ?? "";
-    const before = structuredClone(store);
+    const before = settle(store);
     const now = nextWriteTime(store, clock);
     const fields = Object.keys(request).sort();
     let result: unknown;
@@ -4219,10 +4388,10 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           ? error
           : new TrackerWriteRefused(
               "invalid_request",
-              error instanceof Error ? error.message : String(error),
+              error instanceof Error ? `${error.message}${frozenRecordSite(error)}` : String(error),
             );
       const detail = refusal.message.replace(/^Write refused \([^)]*\): /u, "");
-      store = before;
+      store = draftOf(before);
       store.lastWriteAt = now;
       const target = auditTarget(request);
       appendAudit(store, {
@@ -4250,7 +4419,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         });
       // Inbox refusals still require live mailbox/project/store authority before bookkeeping.
       appendSync(before, store, actor, name, now, key);
-      await persist(path, store, assertHeld, INBOX_TOOLS.has(name) ? callOptions : undefined);
+      await commit(store, assertHeld, INBOX_TOOLS.has(name) ? callOptions : undefined);
       for (const listener of syncListeners.get(path) ?? []) listener();
       throw refusal;
     }
@@ -4299,7 +4468,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         result: publicResult,
       });
     appendSync(before, store, actor, name, now, key);
-    await persist(path, store, assertHeld, {
+    await commit(store, assertHeld, {
       ...callOptions,
       onDispatch: () => {
         for (const fence of context.closureFences ?? []) fence();
@@ -4355,7 +4524,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     validated =
       validated !== undefined && validated.bytes.equals(bytes)
         ? { ...validated, version }
-        : { version, bytes, store: parseStore(bytes.toString("utf8")) };
+        : { version, bytes, store: settle(parseStore(bytes.toString("utf8"))) };
     if (readIdentity !== undefined) {
       try {
         assertReadIdentity(directory, path, readIdentity);
@@ -4363,7 +4532,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         readIdentity = undefined;
       }
     }
-    return { store: mutable ? structuredClone(validated.store) : validated.store, readIdentity };
+    return { store: mutable ? draftOf(validated.store) : validated.store, readIdentity };
   };
   const load = async ({
     mutable = true,
@@ -4563,7 +4732,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       );
     },
     async sync(input, callOptions, signal) {
-      const command = TrackerSyncCommandSchema.parse(input);
+      const command = structuredClone(TrackerSyncCommandSchema.parse(input));
       signal?.throwIfAborted();
       const roll = async (store: Store, clock: string, assertHeld: () => void) => {
         if (cyclesDue(store, clock))
@@ -4681,7 +4850,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
               for (const [index, operation] of command.operations.entries()) {
                 // Distinct operation versions also preserve temporal independent-check fences.
                 const operationNow = index === 0 ? now : nextWriteTime(target, now);
-                const beforeOperation = structuredClone(target);
+                const beforeOperation = settle(target);
                 const result = await dispatch(
                   target,
                   operation.name,
@@ -4715,7 +4884,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             signal?.throwIfAborted();
             const { store, clock, initialized } = await load();
             await roll(store, clock, assertHeld);
-            if (initialized) await persist(path, store, assertHeld);
+            if (initialized) await commit(store, assertHeld);
             const storeId = store.storeId ?? store.team.id;
             const lastSyncId = store.syncId ?? 0;
             const wildcard =
@@ -4823,10 +4992,16 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         if (!listeners.size) syncListeners.delete(path);
       }
     },
-    async importLinear(snapshot, actorMap, callOptions) {
+    async importLinear(source, sourceActors, callOptions) {
+      // The committed store is frozen and shared, so it never holds the caller's own objects.
+      const snapshot = structuredClone(source);
+      const actorMap = structuredClone(sourceActors);
       return withTrackerStoreLock(path, async (assertHeld) => {
-        const { store, clock } = await load();
-        const before = structuredClone(store);
+        const loaded = await load();
+        const { clock } = loaded;
+        // A mirror import rewrites records wholesale, so it works on a full copy, not a draft.
+        const before = settle(loaded.store);
+        const store = structuredClone(before);
         if (store.linearMirror?.cutover)
           throw new Error("This store was cut over from Linear; import into a scratch store instead");
         if (store.linearMirror && store.linearMirror.workspaceId !== snapshot.workspaceId)
@@ -5175,7 +5350,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         });
         parseStore(JSON.stringify(store));
         appendSync(before, store, mirrorEvent?.actor ?? actor, tool, clock);
-        await persist(path, store, assertHeld, callOptions);
+        await commit(store, assertHeld, callOptions);
         for (const listener of syncListeners.get(path) ?? []) listener();
         publish(store.events?.slice(firstEvent - 1) ?? []);
         return report;
@@ -5524,8 +5699,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
             const event = target.events!.find((entry) => entry.id === eventId)!;
             const issue = findIssue(target, event.issueId);
             if (event.purpose === "gate") {
-              const run = target.runs?.find((entry) => entry.id === event.runId);
-              if (!run) throw new Error("Gate run not found");
+              const found = target.runs?.find((entry) => entry.id === event.runId);
+              if (!found) throw new Error("Gate run not found");
+              const run = owned(target.runs!, found);
               if (approved) run.pendingGates = (run.pendingGates ?? []).filter((id) => id !== eventId);
               appendEvent(target, context, now, issue, {
                 type: "gate",
@@ -5707,7 +5883,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         }
         // Cycles roll over on the first access after one ends, as Clankie's own write.
         if (rolloverDue) {
-          if (!writing) store = structuredClone(store);
+          if (!writing) store = draftOf(store);
           await write(
             store,
             clock,
@@ -5725,13 +5901,14 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         const actor = callOptions?.actor ?? localActor(store);
         if (!writing) {
           const result = await read(store, name, args, options, actor, clock);
-          if (initialized) await persist(path, store, assertHeld);
+          if (initialized) await commit(store, assertHeld);
           // Callers cannot mutate objects subsequently reused by another backend call.
           return structuredClone(result);
         }
         const key = args.idempotencyKey as string | undefined;
-        const request = Object.fromEntries(
-          Object.entries(args).filter(([field]) => field !== "idempotencyKey"),
+        // Cloned: committed records are frozen and shared, never the caller's own objects.
+        const request = structuredClone(
+          Object.fromEntries(Object.entries(args).filter(([field]) => field !== "idempotencyKey")),
         );
         const fingerprint = createHash("sha256")
           .update(canonical([name, request]))

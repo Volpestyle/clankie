@@ -44,6 +44,8 @@
         "docs/testing/2026-09-30-claude-worker-seat/live-hire.mts",
         "docs/testing/2026-10-19-native-proof-startup/latency.mjs",
         "docs/testing/2026-10-19-native-proof-startup/probe.mts",
+        "docs/testing/2026-10-27-local-vuh-42-tracker-journal/flows/generate-store.ts",
+        "docs/testing/2026-10-27-local-vuh-42-tracker-journal/flows/bench-writes.ts",
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
         "integrations/claude-plugin/worker/bin/inbound-receipt.d.mts",
