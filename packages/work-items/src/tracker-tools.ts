@@ -50,7 +50,7 @@ export interface TrackerToolCallOptions {
    */
   readonly actor?: TrackerActor;
   /**
-   * Host-only capability for the item's current scoped lead and owner-authored
+   * Host-only capability for the item's current scoped lead and effective
    * lead-closure policy. Returns a publication fence; absent authority refuses.
    * Actor labels, tool arguments and a worker's inherited lead attribution do
    * not supply this capability.

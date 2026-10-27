@@ -41,7 +41,11 @@ Under the owner's effective `closure: lead` policy, the host-authorized lead
 may set Done after landing, relevant acceptance checks, and a checked evidence
 bundle. Lead completion records its actor and bundle separately; it never sets
 `owner-verified`. Workers report to the lead. Actor names, titles, project IDs,
-and the ordinary CLI's operator credential do not establish lead scope.
+and the ordinary CLI's operator credential do not establish lead scope: close
+with the tracker tool from the project's lead conversation, never
+`clankie work update --status done` from a shell. That refusal
+(`owner_verification_required`) is about the route, not the policy, so changing
+closure settings never clears it.
 Only the owner verifies or reopens work. Under `closure: owner`, landing raises
 a "check it works" ask; its answer verifies the item or sends it back to accepted.
 Lead closure creates no automatic verification ask. Existing pending and

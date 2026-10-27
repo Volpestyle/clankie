@@ -171,6 +171,10 @@ it("refuses closure without the host capability despite worker lead labels and i
       "owner_verification_required",
     );
   }
+  // The refusal names the route, so a lead doesn't misread it as a settings problem (VUH-2919).
+  await expect(f.call("save_issue", { id: f.issue.id, state: "Done" }, lead)).rejects.toThrow(
+    /own tracker tool in its lead conversation; the CLI's operator credential is not lead scope/u,
+  );
   expect(await f.read()).toMatchObject({ stage: "landed", statusType: "started" });
   expect(await f.read()).not.toHaveProperty("leadCompletion");
 });

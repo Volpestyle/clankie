@@ -601,7 +601,7 @@ export interface CaptainPort {
   ): Promise<WorkerWriteAuthority | undefined>;
   /** True for an existing ordinary global or workspace chat that may receive Linear wakes. */
   linearWakeTargetAllowed(conversationId: string): boolean;
-  /** Host-only current scoped lead and effective owner-authored closure policy. */
+  /** Host-only current scoped lead and effective closure policy. */
   prepareTrackerLeadClosure?(
     source: ConversationAuthority,
     trackerProjectId: string | null,

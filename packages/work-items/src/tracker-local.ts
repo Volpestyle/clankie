@@ -1183,7 +1183,7 @@ async function recordIssueChanges(
           if (!context.authorizeLeadClosure)
             throw new TrackerWriteRefused(
               "owner_verification_required",
-              "completion requires the current scoped lead and owner-authored lead closure policy",
+              "completion needs the project's current lead closing through its own tracker tool in its lead conversation; the CLI's operator credential is not lead scope, and closure settings don't change that. Under owner closure, the owner verifies from the app Mailbox",
             );
           const fence = await context.authorizeLeadClosure(issue.projectId);
           fence();
