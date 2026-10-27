@@ -2855,7 +2855,14 @@ A project cut over to the built-in tracker keeps only a frozen copy in Linear.
 A call that names one of its items goes to the built-in tracker, from any repo
 and any caller ([VUH-2829](adr/0226-one-tracker-tool-surface.md#proposed-amendment-cutover-and-switch-back-2026-10-09-vuh-1987)).
 An item is named by its imported `VUH-n`, its `LOCAL-VUH-n`, its UUID, or the
-project's UUID or name:
+project's UUID or name. Evidence bundle and run IDs also identify their owning
+issue's project (`bundleId`, `runId`, run update `id`, and `parentRunId`). Saved
+view, guided-review and cycle IDs are indexed too; views still require exact
+`project`/`storeId`, and guided reviews still require `issueId`. Routing does
+not change role permissions or request budgets. An unknown ID cannot select a
+project. A built-in-only call without a usable reference uses the hire's project
+or explicit `repo`; with a Linear destination it refuses before provider dispatch.
+Receipt keys, cursors and store IDs do not select projects. Examples:
 
 - `clankie work show|activity|update|close|attach ID` behaves as if
   `--project` named the item's project, even with `--repo` on a Linear repo,

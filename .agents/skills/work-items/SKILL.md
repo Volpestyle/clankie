@@ -47,7 +47,12 @@ For an item `clankie work ready --project P` lists, pass that same `--project P`
 to `show`, `activity`, `update`, `close` or `attach`. Without it they use the repo
 you run from, which may be Linear. An item of a project cut over to the built-in
 tracker always goes there, from any repo or tool. Linear holds only its frozen
-copy; read that copy only with `linearHistory: true`.
+copy; read that copy only with `linearHistory: true`. Evidence `bundleId` and
+run `id`/`runId`/`parentRunId` also route to their issue's project. Unknown ids
+never choose a project; built-in-only calls without a usable reference need the
+hire's built-in project or an explicit `repo`, otherwise they refuse. Saved
+views still require `project`/`storeId`; guided reviews still require `issueId`.
+Routing never raises a worker's role or request budget.
 Issue summaries have no separate 20,000-character limit: `work create --summary`
 matches canonical `save_issue` descriptions, and `work show`/API reads return
 the full summary. Provider and transport request limits still apply.

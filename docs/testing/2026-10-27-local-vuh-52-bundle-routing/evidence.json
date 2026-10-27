@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "artifacts/packet.json",
+      "size": 27847,
+      "sha256": "0e3300f4fec3a02b3dc3a325e097ae6189d9211467a7004dd57766ae1474dd9a",
+      "url": "clankie://evidence/sha256/0e3300f4fec3a02b3dc3a325e097ae6189d9211467a7004dd57766ae1474dd9a"
+    }
+  ]
+}

@@ -6240,7 +6240,19 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           add(reference, store.projects[at]!.id);
         for (const at of positionsOf(store.issues, routingIssueKeys, reference) ?? [])
           add(reference, store.issues[at]!.projectId);
-        for (const records of [store.comments, store.statusUpdates, store.documents, store.milestones])
+        // Opaque Work ids use the same committed-array indexes as provider records.
+        // Runs/bundles inherit ownership from their issue; views/reviews/cycles carry it.
+        for (const records of [
+          store.comments,
+          store.statusUpdates,
+          store.documents,
+          store.milestones,
+          store.bundles,
+          store.runs,
+          store.issueViews,
+          store.guidedReviews,
+          store.cycles,
+        ])
           for (const at of positionsOf(records ?? [], routingIdKeys, reference) ?? []) {
             const record = records![at]! as unknown as Record<string, unknown>;
             const issueAt = positionsOf(store.issues, recordIdKey, lookupKey(record.issueId))?.[0];
