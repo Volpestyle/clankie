@@ -187,6 +187,11 @@ interface Pending {
   /** The original content's fingerprint; the wire event may carry a clipped copy. */
   readonly fingerprint: string;
   readonly holdUntilTurnEnd: boolean;
+  /**
+   * Queued behind the seat's own running turn: only that seat may run it, so
+   * a detach settles it unsent, never by lane takeover (VUH-2045, VUH-2885).
+   */
+  readonly heldForTurn: boolean;
   readonly exactRecipient: boolean;
   readonly coalesce?: string;
   /** Older escalations this event carried to the seat; its ack and reply settle them too. */
@@ -869,6 +874,7 @@ export class SeatOutbox {
       const pending: Pending = {
         fingerprint,
         holdUntilTurnEnd: input.delivery === "queue",
+        heldForTurn: input.delivery === "queue" && this.turnHolds(),
         exactRecipient: input.original !== undefined,
         ...(input.coalesce === undefined || input.kind !== "escalation" ? {} : { coalesce: input.coalesce }),
         ...(input.onAdmitted === undefined ? {} : { onAdmitted: input.onAdmitted }),
@@ -926,7 +932,9 @@ export class SeatOutbox {
         const waitMs =
           this.pollers.size > 0 || this.arriving > 0
             ? this.boundGraceMs
-            : Math.max(this.remainingGraceMs(), Math.min(this.boundGraceMs, this.remainingLaneHoldMs()));
+            : pending.heldForTurn
+              ? this.remainingGraceMs()
+              : Math.max(this.remainingGraceMs(), Math.min(this.boundGraceMs, this.remainingLaneHoldMs()));
         pending.timer = setTimeout(() => {
           if (pending.taken || pending.settled) return;
           // An arriving poll takes it once its source proof parks it.
@@ -937,7 +945,8 @@ export class SeatOutbox {
             // A turn that went quiet releases its hold on the next check.
             this.wakePoller();
             if (!pending.taken && !pending.settled) waitForReceiver();
-          } else if (this.holdsLane()) waitForReceiver();
+          } else if (pending.heldForTurn) pending.settle({ outcome: "unbound" });
+          else if (this.holdsLane()) waitForReceiver();
           else if (this.takeover()) pending.settle({ outcome: "unbound", takeover: true });
           else pending.settle({ outcome: "unbound" });
         }, waitMs);
@@ -947,10 +956,7 @@ export class SeatOutbox {
       this.queued.push(pending);
       // Waiting for a turn to end, or for a seat that holds its lane between
       // polls, is storage at the seat; a parked or arriving poll takes it now.
-      if (
-        (pending.holdUntilTurnEnd && this.turnHolds()) ||
-        (this.pollers.size === 0 && this.arriving === 0 && !this.bound())
-      )
+      if (pending.heldForTurn || (this.pollers.size === 0 && this.arriving === 0 && !this.bound()))
         pending.onAdmitted?.("queued");
       this.wakePoller();
     });

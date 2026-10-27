@@ -554,6 +554,13 @@ This amends "Seat live?" in the selection above for the head (`global-default`):
   conversation …") with the seat's last ask and how long it was silent. A
   service run already executing when the head returns still finishes first and
   reaches the head in the usual handoff.
+- **A held Queue is never taken over** (VUH-2885, 2026-10-27). An owner Queue
+  stored behind the seat's own running turn is that seat's to run, never the
+  service lane's (VUH-2045). When its bridge leaves, it keeps the 30 s grace
+  boundary: once the grace lapses it settles unbound and is reported "Not sent".
+  It does not wait out the lane hold and is never taken over. The first VUH-2874
+  landing let it wait out the hold and then run on the service lane, so the app
+  showed a detached Queue as "Queued · Sent".
 - **Internal input is a wake.** An internal `input` on a head conversation
   reaches a live seat as a `wake`, like a hook.
 - **Owner first.** A poll takes owner turns and escalations ahead of wakes,
@@ -594,5 +601,6 @@ a scripted model in which any service-lane turn shows up as a prompt. It covers
 the owner heard mid-turn, the batch answered once, an earlier separately
 delivered message keeping its own answer, an owner message taken ahead of a
 watch queued before it, a resolved worker question reaching a bound head as a
-wake, and an explicit takeover after the hold. No live harness or production
+wake, an explicit takeover after the hold, and a held Queue settling unsent at
+the grace when its bridge leaves. No live harness or production
 state was exercised.

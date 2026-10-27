@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import {
   OperatorSeatEventKindSchema,
+  SubmitOperatorConversationTurnSchema,
   type DiscordPresenceChannelTurnRequest,
   type OperatorSeatEvent,
 } from "@clankie/protocol";
@@ -459,4 +460,64 @@ it("a native head that stays silent past its lane hold is taken over explicitly"
       text: expect.stringContaining("Clankie's service lane took over this conversation"),
     }),
   );
+});
+
+// VUH-2885: the lane hold and its takeover decide who runs waiting input. An
+// owner's Queue held behind the head's own running turn is never the service
+// lane's to run (VUH-2045), so when its bridge leaves it settles unsent once
+// the bound grace lapses, not after the lane hold and not by takeover.
+it("an owner Queue held behind the head's own turn settles unsent when its bridge leaves", async () => {
+  const f = await fixture({ headBoundGraceMs: 300 });
+  const head = seat(f.captain);
+  await head.bound();
+  expect(
+    f.captain.syncSeatTranscript("global-default", {
+      sessionId: "head-session",
+      entries: [],
+      activity: "responding",
+      turnStart: true,
+    }),
+  ).toBe(true);
+  const got = await f.captain.serveOperatorConversation({
+    op: "get",
+    schemaVersion: 1,
+    conversationId: "global-default",
+  });
+  if (got.op !== "get" || got.conversation === undefined) throw new Error("conversation missing");
+  const sent = await f.captain.serveOperatorConversation({
+    op: "send",
+    schemaVersion: 1,
+    turn: SubmitOperatorConversationTurnSchema.parse({
+      schemaVersion: 1,
+      kind: "message",
+      conversationId: "global-default",
+      surfaceClientId: "app",
+      expectedRevision: got.conversation.revision,
+      message: "After this turn, check the heap files.",
+      delivery: "queue",
+    }),
+  });
+  expect(sent).toMatchObject({
+    op: "send",
+    result: { status: "accepted", seatDelivery: { state: "queued" } },
+  });
+
+  await head.halt();
+  const leftAt = Date.now();
+  await vi.waitFor(
+    () =>
+      expect(f.journal.read("global-default")).toContainEqual(
+        expect.objectContaining({ type: "turn", phase: "completed", deliveryStage: "unavailable" }),
+      ),
+    { timeout: 5_000 },
+  );
+  // Settled by the 300ms grace, far inside the default 45s lane hold.
+  expect(Date.now() - leftAt).toBeLessThan(5_000);
+  expect(head.events()).toEqual([]);
+  expect(fake.prompts).toEqual([]);
+  expect(
+    f.journal
+      .read("global-default")
+      .some((event) => event.type === "message" && event.text.includes("service lane took over")),
+  ).toBe(false);
 });
