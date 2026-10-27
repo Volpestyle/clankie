@@ -108,7 +108,11 @@ test("resolves the default lead from its head pane and names an unresolvable lea
     const errors: Error[] = [];
     const observer = new FleetProgressObserver({
       path,
-      sources: [{ prefix: "lead", read: () => captain.leadProgress() }],
+      // Production runs other sources first; their rounds must not reset the lead's warning.
+      sources: [
+        { prefix: "heavy", read: async () => [] },
+        { prefix: "lead", read: () => captain.leadProgress() },
+      ],
       notify: async () => true,
       onError: (error) => errors.push(error as Error),
     });
