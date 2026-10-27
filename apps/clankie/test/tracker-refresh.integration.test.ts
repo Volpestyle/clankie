@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
 
-it("retains a newer local commit when an external refresh finishes late in a fresh process", async () => {
+async function runProof(flow: URL) {
   const root = await mkdtemp(join(tmpdir(), "tracker-refresh-"));
   const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, NODE_ENV: "test", HOME: join(root, "home") };
   for (const kind of ["CONFIG", "STATE", "DATA", "CACHE"])
@@ -17,23 +17,42 @@ it("retains a newer local commit when an external refresh finishes late in a fre
   try {
     const { stdout } = await promisify(execFile)(
       fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url)),
-      [
-        fileURLToPath(
-          new URL("../../../docs/testing/2026-10-27-local-vuh-51-refresh/flows/race.ts", import.meta.url),
-        ),
-        root,
-      ],
+      [fileURLToPath(flow), root],
       { env, timeout: 25_000, maxBuffer: 1024 * 1024 },
-    );
-    const result = JSON.parse(stdout.trim().split("\n").at(-1)!);
-    expect(result).toEqual({
-      externalValidated: true,
-      localSnapshotRetained: true,
-      spuriousRefusal: null,
-      rereads: 0,
+    ).catch((error) => {
+      if (error.stdout) process.stdout.write(error.stdout);
+      throw error;
     });
+    const result = JSON.parse(stdout.trim().split("\n").at(-1)!);
     process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result;
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+it("retains a newer local commit when an external refresh finishes late in a fresh process", async () => {
+  expect(
+    await runProof(
+      new URL("../../../docs/testing/2026-10-27-local-vuh-51-refresh/flows/race.ts", import.meta.url),
+    ),
+  ).toEqual({
+    externalValidated: true,
+    localSnapshotRetained: true,
+    spuriousRefusal: null,
+    rereads: 0,
+  });
+});
+
+it("rechecks disk when an older metadata reader publishes during a locked refresh, preserving both external and local commits", async () => {
+  expect(
+    await runProof(
+      new URL("../../../docs/testing/2026-10-27-local-vuh-51-refresh/flows/stale-base.ts", import.meta.url),
+    ),
+  ).toMatchObject({
+    writeError: null,
+    externalXSurvived: true,
+    freshProcessProjects: expect.arrayContaining(["Local", "ExternalX"]),
+    guard: { refused: true, appendedBytes: 0, dispatched: false, externalXSurvived: true },
+  });
 });

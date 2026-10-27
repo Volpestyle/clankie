@@ -5,13 +5,44 @@
 All 594 writes committed and all three readers agree on 57,000 models at cursor
 36,839. The earlier A/B and stale-app failures remain below.
 
-The delayed external refresh now publishes only when the shared snapshot is still
-its starting snapshot. A concurrent local commit keeps its snapshot and version.
+A refresh publishes only while its starting snapshot is still current. If
+another snapshot publishes during IO, `readStore` restarts its disk-generation
+check: it uses that snapshot only when it matches disk, otherwise refreshes again.
+A concurrent local commit keeps its matching snapshot/version without a reread;
+an older metadata reader cannot hand a locked writer a stale base.
 The fresh-process regression reproduces a spurious journal refusal on `e32f05e3`
 and passes with the guard: external bytes validated, newer local state retained,
 concurrent local write committed, zero rereads. The LOCAL-VUH-50 publication fence
 is unchanged. Its regression retains the real checkpoint-read assertion; the
 non-discriminating microtask-only `settledBeforeRelease` assertion was dropped.
+
+## Review correction: stale reader versus refreshed writer
+
+Corvin rejected the one-shot guard at `92019d8df`: it could discard a newer
+refresh when an older metadata reader published first, then append from that
+stale base and truncate an acknowledged external commit. `stale-base.ts`
+reproduces this with real processes and two held real journal reads. External W
+is read by A, external X is acknowledged, a locked writer reads W+X, A publishes
+W, then the writer resumes. The rejected head reports successful Local but a
+fresh process sees only Local (ExternalX lost). The disk-recheck loop preserves
+both ExternalX and Local, with no write refusal. The original `race.ts` still
+reports zero rereads and no refusal.
+
+The under-lock commit guard checks snapshot versus disk generation before
+append preparation and at actual disk dispatch, after authorization callbacks.
+The regression changes the checkpoint generation from a real external process
+inside that callback: the write refuses before dispatch, appends zero bytes,
+and retains both committed projects. The low-level `appendJournal` tail parser
+is unchanged; independent complete-record refusal is tracked as `LOCAL-VUH-54`.
+
+The seal replays below precede this final correctness correction. Sealing and
+its publication fence are unchanged. By explicit lead direction, the final
+loop/guard is validated with the two fresh-process regressions, tracker suites
+and the landing gate; no additional peak replay was run. The rejected guard's
+peak metrics are retained solely as the sealing measurement, not proof of that
+rejected guard's safety.
+
+[Correction red/green logs and exact source](clankie://evidence/sha256/4ffa6229a45c7b23a401aa245ae51235b47d5cc5355c73c0c7238474a04895bf).
 
 ## Current-app A/B result
 

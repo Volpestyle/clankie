@@ -216,8 +216,11 @@ host-only `referenceProjects` against its shared validated committed snapshot
 metadata readers wait for disk publication and the shared snapshot update, including
 failed appends; the fence starts after authorization callbacks to avoid deadlock.
 External changes still trigger validation, and missing or damaged stores refuse.
-A refresh publishes only if its starting snapshot is still current; a concurrent
-local commit keeps its newer snapshot, without a reread or a refused write.
+If another snapshot publishes during a refresh, the reader restarts the disk
+generation check before choosing a snapshot. It reuses a publication that matches
+disk or refreshes again, so a writer never drafts from an older reader's base.
+Commits also check the snapshot's generation under the lock before appending,
+including after authorization callbacks; a stale base refuses before dispatch.
 Reference lookups reuse the committed-array indexes, extended by changed records
 and appended tails. A reference rename or external replacement rebuilds the affected
 metadata index; ordinary commits never reparse the checkpoint for routing. Other

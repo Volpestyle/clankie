@@ -4853,13 +4853,17 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     // the whole store on each call was the service's main allocation churn
     // (VUH-2379). The version is taken before the read, so a racing write
     // leaves a stale version that the next read misses.
-    const version = storeVersion();
-    const current = shared.current;
-    if (current?.version !== version) {
+    for (;;) {
+      const version = storeVersion();
+      const current = shared.current;
+      if (current?.version === version) break;
       const refreshed = await refresh(version);
-      // A local commit or another reader may have published while refresh awaited disk IO.
-      // Keep that snapshot, including its version, instead of publishing our older read.
-      if (shared.current === current) shared.current = refreshed;
+      if (shared.current === current) {
+        shared.current = refreshed;
+        break;
+      }
+      // Another reader may have published an older external generation, or a local writer a
+      // newer one. Recheck disk before choosing either snapshot; never return a stale base.
     }
     const snapshot = shared.current!;
     return mutable ? draftOf(snapshot.store) : snapshot.store;
@@ -4873,6 +4877,9 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
    */
   const commit = async (store: Store, assertHeld: () => void, callOptions?: TrackerToolCallOptions) => {
     let current = shared.current;
+    assertHeld();
+    if (current !== undefined && current.version !== storeVersion())
+      throw new Error("Tracker store changed before commit");
     if (current !== undefined && current.journal === undefined && current.bytes > JOURNAL_THRESHOLD_BYTES) {
       const finish = beginPublication();
       try {
@@ -4895,7 +4902,16 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     };
     try {
       if (current?.journal !== undefined) {
-        shared.current = await appendCommit(current, store, assertHeld, confirmed);
+        const base = current;
+        const assertCurrent = () => {
+          assertHeld();
+          if (shared.current?.version !== base.version || base.version !== storeVersion())
+            throw new Error("Tracker store changed before commit");
+        };
+        // Check before preparing the append and again at its actual disk dispatch, after
+        // authorization callbacks. Extra journal bytes must never be cut from a stale base.
+        assertCurrent();
+        shared.current = await appendCommit(base, store, assertCurrent, confirmed);
         if (
           shared.current.journal!.bytes >=
           Math.max(CHECKPOINT_MIN_BYTES, shared.current.journal!.checkpointBytes / 8)
