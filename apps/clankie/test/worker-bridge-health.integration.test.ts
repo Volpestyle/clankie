@@ -22,6 +22,8 @@ import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { ToolCatalogHealthStore } from "../src/captain/tool-catalog-health.ts";
+import { FleetSeatToolCatalogSchema } from "@clankie/protocol/tool-catalog";
 
 const decoded = (result: unknown) =>
   decodeMcpResult(result) as Record<string, unknown> & { deliveryId: string };
@@ -75,7 +77,14 @@ class HeldSettings extends SettingsStore {
   }
 }
 
-const wrappers = ["clankie_tools", "clankie_call"];
+// A real bridge reports the review gate's tools beside the wrappers (VUH-2904).
+const reportedTools = [
+  "clankie_tools",
+  "clankie_call",
+  "submit_for_review",
+  "review_candidate",
+  "review_verdict",
+];
 const requestTimeoutMs = 250;
 // The bridge's request budget. A slow binding lookup is held until the case
 // recovers it, so that lookup exceeds any budget without racing a timed stall.
@@ -271,7 +280,7 @@ async function fixture(
     session: string,
     status: "ready" | "missing" | "stalled",
     reason: string,
-    tools = wrappers,
+    tools = reportedTools,
     reportHealth?: WorkerReportBridgeStatus,
   ) =>
     post(bridgeId, session, {
@@ -438,6 +447,56 @@ it("reattaches the same Claude bridge and accepts its report after a runtime res
   expect(first.messagePosts()).toBe(0);
   expect(second.conversations.inboundAcceptance(report.deliveryId)?.text).toBe("Report after deployment");
 }, 20_000);
+
+it.each([
+  ["claude", "claude --channels plugin:clankie-worker@clankie"],
+  ["codex", "codex app-server"],
+] as const)(
+  "matches the %s worker catalog the real bridge serves, review tools included, and still names a missing one",
+  async (harness, parentArgv) => {
+    const f = await fixture(false, "w1:p1", undefined, undefined, true);
+    const call = await startBridge(f, harness === "claude", parentArgv, undefined, true);
+    const listed = (await call("tools/list", {})) as { result?: { tools?: { name: string }[] } };
+    const served = listed.result?.tools?.map((tool) => tool.name) ?? [];
+    expect(served).toEqual(
+      expect.arrayContaining(["submit_for_review", "review_candidate", "review_verdict"]),
+    );
+    // The captain's worker expectation: the bridge's own tools plus the service's (captain.ts).
+    const expected = [
+      "message_clankie",
+      "message_clankie_status",
+      ...(await f.worker.expectedProjectToolNames("default")),
+    ];
+    const identity = {
+      paneId: f.pane,
+      occupantId: "native-session",
+      harness,
+      sessionId: "native-session",
+      bridge: "worker" as const,
+    };
+    const report = (tools: string[]) =>
+      FleetSeatToolCatalogSchema.parse({
+        schemaVersion: 1,
+        harness,
+        sessionId: "native-session",
+        bridge: "worker",
+        tools,
+        checkedAt: new Date().toISOString(),
+      });
+    const store = new ToolCatalogHealthStore();
+    expect(store.record(identity, report(served), expected)).toMatchObject({
+      status: "matched",
+      missing: [],
+    });
+    const stale = store.record(
+      identity,
+      report(served.filter((name) => name !== "review_verdict")),
+      expected,
+    );
+    expect(stale).toMatchObject({ status: "mismatch", missing: ["review_verdict"] });
+  },
+  20_000,
+);
 
 it("lists an idle channel bridge's catalog only when the seat long poll pushes a new revision", async () => {
   const f = await fixture(false, "w1:p1", undefined, undefined, true);
@@ -660,15 +719,15 @@ it("preserves stored report time across failures and fences old bridge generatio
     reason: "stored" as const,
     observedAt: "2026-10-05T12:00:00.000Z",
   };
-  await f.report(first, session, "ready", "Ready catalog", wrappers, stored);
-  await f.report(first, session, "stalled", "Tools have stalled", wrappers);
+  await f.report(first, session, "ready", "Ready catalog", reportedTools, stored);
+  await f.report(first, session, "stalled", "Tools have stalled", reportedTools);
   const failed = {
     outcome: "unavailable" as const,
     reason: "binding_timeout" as const,
     observedAt: "2026-10-05T12:01:00.000Z",
   };
-  await f.report(first, session, "ready", "Ready catalog", wrappers, failed);
-  await f.report(first, session, "ready", "Repeated unchanged report heartbeat", wrappers, failed);
+  await f.report(first, session, "ready", "Ready catalog", reportedTools, failed);
+  await f.report(first, session, "ready", "Repeated unchanged report heartbeat", reportedTools, failed);
   expect(f.reportStatus()).toEqual({ ...failed, lastStoredAt: stored.observedAt });
   expect(f.status().status).toBe("stalled");
   expect(f.metrics.snapshot().totals.reports).toEqual({
@@ -679,7 +738,7 @@ it("preserves stored report time across failures and fences old bridge generatio
   const replacement = randomUUID();
   await f.initialize(replacement);
   expect(f.reportStatus()).toBeUndefined();
-  await f.report(first, session, "ready", "Late previous process", wrappers, failed);
+  await f.report(first, session, "ready", "Late previous process", reportedTools, failed);
   expect(f.reportStatus()).toBeUndefined();
   expect(f.metrics.snapshot().totals.reports.attempts).toBe(2);
 });
@@ -718,7 +777,7 @@ it.each(["stalled", "missing"] as const)(
     expect(current).toMatchObject({
       status: "ready",
       reason: "Native bridge reported: Replacement catalog acknowledged",
-      tools: wrappers,
+      tools: reportedTools,
     });
     await f.report(firstId, firstSession, "stalled", "Late stalled result from the previous process");
     expect(f.status()).toEqual(current);
@@ -824,7 +883,7 @@ it("bounds an unfinished notification body and fences its late JSON completion",
         JSON.stringify({
           status: "ready",
           reason: "Late body observation must not become healthy",
-          tools: wrappers,
+          tools: reportedTools,
         }) + "}",
       ),
     );

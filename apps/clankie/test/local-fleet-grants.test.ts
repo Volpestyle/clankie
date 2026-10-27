@@ -13,6 +13,8 @@ import { WorkerMcp } from "../src/worker-mcp.ts";
 import type { HttpBindings } from "@hono/node-server";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 
+const reviewTools = ["submit_for_review", "review_candidate", "review_verdict"];
+
 it("gives proven local panes the two-tool bridge without project proof and rechecks admission and the kill switch", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-fleet-tools-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
@@ -131,7 +133,11 @@ it("gives proven local panes the two-tool bridge without project proof and reche
     expect(projectGrant.token).toBeUndefined();
     expect(projectGrant.project).toBe("test");
     await worker.revoke(projectGrant.grant.grantId);
-    expect(await worker.expectedProjectToolNames("ungranted")).toEqual(["clankie_tools", "clankie_call"]);
+    expect(await worker.expectedProjectToolNames("ungranted")).toEqual([
+      "clankie_tools",
+      "clankie_call",
+      ...reviewTools,
+    ]);
     const initialized = await rpc("w1:p1", "initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
@@ -165,7 +171,8 @@ it("gives proven local panes the two-tool bridge without project proof and reche
     expect((await call("linear_get_issue")).isError).toBe(true);
     tools = "off";
     expect(await list()).toEqual([]);
-    expect(await worker.expectedProjectToolNames("anything")).toEqual([]);
+    // The bridge still serves the review gate's tools (VUH-2904).
+    expect(await worker.expectedProjectToolNames("anything")).toEqual(reviewTools);
     expect((await call()).isError).toBe(true);
     expect(calls).toHaveBeenCalledOnce();
     tools = "connected";

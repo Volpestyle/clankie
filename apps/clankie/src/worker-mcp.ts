@@ -47,6 +47,7 @@ import {
   type WorkerVideoPort,
 } from "./worker-video.ts";
 import { DurableReceiptStore } from "./durable-receipt-store.ts";
+import { REVIEW_TOOLS } from "../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
 import { canonicalJson } from "@clankie/play";
 
 const minecraftWorkerSchemas = {
@@ -256,6 +257,10 @@ const workerCallResponse = <T extends { outcome: string; isError?: boolean }>(re
       ? false
       : !["ok", "inspected", "abandoned-read"].includes(result.outcome) || result.isError === true,
 });
+// The standing review gate's seat tools (ADR 0287). Discovery tells the worker
+// bridge to serve them; its expected catalog names the same ones (VUH-2904).
+const WORKER_REVIEWS = "on" as const;
+const WORKER_REVIEW_TOOL_NAMES = WORKER_REVIEWS === "on" ? REVIEW_TOOLS.map((tool) => tool.name) : [];
 const FLEET_TOOLS = [
   {
     name: "clankie_tools",
@@ -1418,6 +1423,7 @@ export class WorkerMcp {
     return [
       ...((await this.fleetToolsEnabled()) ? FLEET_TOOLS.map((tool) => tool.name) : []),
       ...((await this.options.fleetPeerMessages?.()) === "on" ? ["list_fleet_seats", "message_peer"] : []),
+      ...WORKER_REVIEW_TOOL_NAMES,
     ];
   }
 
@@ -1630,8 +1636,7 @@ export class WorkerMcp {
                 clankie: {
                   tools: connected ? "connected" : "off",
                   peerMessages,
-                  // The standing review gate's seat tools (ADR 0287).
-                  reviews: "on",
+                  reviews: WORKER_REVIEWS,
                   refreshPending,
                   catalogRevision: this.catalogRevisionOf(
                     authority.fleet,

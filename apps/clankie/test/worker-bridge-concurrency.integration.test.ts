@@ -37,7 +37,8 @@ const bridgeModule = fileURLToPath(
 );
 const fleetTools = ["clankie_tools", "clankie_call"];
 const peerTools = ["list_fleet_seats", "message_peer"];
-const expectedHireTools = [...fleetTools, ...peerTools].sort();
+const reviewTools = ["submit_for_review", "review_candidate", "review_verdict"];
+const expectedHireTools = [...fleetTools, ...peerTools, ...reviewTools].sort();
 const nativeCatalogTools = ["message_clankie", ...expectedHireTools];
 
 function gate() {
