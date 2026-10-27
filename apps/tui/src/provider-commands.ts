@@ -644,6 +644,7 @@ function alignStatusRows(rows: ReadonlyArray<{ id: string; detail: string }>): s
 }
 
 function describeCredentialKind(id: string, redacted: RedactedCredential, now: number = Date.now()): string {
+  if (redacted.type === "evidence-storage") return "internal evidence storage";
   if (redacted.type === "wellknown") return "well-known";
   if (redacted.type === "api") {
     if (id === DISCORD_BOT_PROVIDER_ID) return "bot token";

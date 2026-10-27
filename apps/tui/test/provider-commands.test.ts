@@ -334,6 +334,19 @@ describe("auth command", () => {
     expect(text).not.toContain(oauthCredential.refresh);
   });
 
+  it("renders an evidence-storage summary without OAuth account or expiry fields", async () => {
+    const { services } = await testServices();
+    // Exercise the summary consumer even though the real broker hides internal entries.
+    services.store.list = async () => ({ evidence_fixture: { type: "evidence-storage", enabled: true } });
+    const view = testShell([]);
+
+    await command(buildProviderCommands(services), "auth").run("status", view.shell);
+
+    const text = rendered(view);
+    expect(text).toMatch(/evidence_fixture\s+internal evidence storage/u);
+    expect(text).not.toContain("OAuth");
+  });
+
   it("groups owner credentials and omits auto-minted local identities", () => {
     const now = Date.UTC(2026, 7, 15, 12, 0, 0);
     const text = formatAuthStatus(
