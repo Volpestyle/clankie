@@ -92,14 +92,14 @@ async function processIn(cwd: string): Promise<ChildProcess> {
 }
 
 /** A scratch HOME laid out like the owner's: ~/dev/repo, ~/dev/repo-wt/*, ~/research/*. */
-async function scratchHome() {
+async function scratchHome(mainOutsideHome = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-tidy-home-")));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "home");
-  const repo = join(home, "dev", "repo");
+  const repo = mainOutsideHome ? join(root, "srv", "repo") : join(home, "dev", "repo");
   const trees = join(home, "dev", "repo-wt");
   await mkdir(repo, { recursive: true });
-  await mkdir(trees);
+  await mkdir(trees, { recursive: true });
   await git(repo, ["init", "--quiet", "--initial-branch", "main"]);
   await git(repo, ["config", "user.name", "Local fixture"]);
   await git(repo, ["config", "user.email", "fixture@example.invalid"]);
@@ -177,6 +177,48 @@ it.runIf(process.platform === "darwin")(
       }),
     ).toMatchObject({ outcome: "kept", reason: "live_pane" });
     expect(existsSync(paneInside)).toBe(true);
+  },
+  60_000,
+);
+
+it.runIf(process.platform === "darwin")(
+  "a pane at $HOME protects nothing below it even when the main checkout lives outside $HOME",
+  async () => {
+    const { home, repo, trees, worktree } = await scratchHome(true);
+    const landed = await worktree(join(trees, "landed"));
+    const herdr = await isolatedHerdr();
+    await herdr.paneIn(home);
+    const listed = await listTidyWorktrees(repo, "origin/main", herdr.runner, { home });
+    expect(
+      listed.candidates.map((entry) => entry.path),
+      JSON.stringify(listed),
+    ).toEqual([landed]);
+  },
+  60_000,
+);
+
+it.runIf(process.platform === "darwin")(
+  "a process that starts working in a candidate during the listing holds only that tree",
+  async () => {
+    const { home, repo, trees, worktree } = await scratchHome();
+    const quiet = await worktree(join(trees, "quiet"));
+    const busy = await worktree(join(trees, "busy"));
+    const herdr = await isolatedHerdr();
+    await herdr.paneIn(home);
+    let reads = 0;
+    // The second pane read is the final refresh, after every tree was judged.
+    const runner = {
+      list: async (...args: Parameters<NonNullable<typeof herdr.runner.list>>) => {
+        const panes = await herdr.runner.list!(...args);
+        if (++reads === 2) await processIn(busy);
+        return panes;
+      },
+    };
+    const listed = await listTidyWorktrees(repo, "origin/main", runner, { home });
+    expect(reads).toBe(2);
+    expect(listed.outcome, JSON.stringify(listed)).toBe("listed");
+    expect(listed.candidates.map((entry) => entry.path)).toEqual([quiet]);
+    expect(listed.excluded).toContainEqual({ path: busy, reason: "live_process" });
   },
   60_000,
 );

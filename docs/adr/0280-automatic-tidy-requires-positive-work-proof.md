@@ -64,8 +64,25 @@ Listing and pruning now also read the account's native process cwd census
 (the one cache reclaim already uses) under the same rule. A process working in
 a tree holds it as `live_process` even when no pane is there, and an
 unavailable census returns `process_inventory_unavailable` with no candidates.
-The final check before returning re-reads the census and withholds the listing
-if a process has started working in a candidate.
+The final check before returning re-reads the census. If a process has started
+working in a candidate, only that tree is held, as `live_process`; a busy tree
+never withholds the whole listing.
+
+On Linux the census reads `/proc/<pid>/cwd`, and the kernel's ptrace check
+(proc(5)) withholds the cwd of every other account's process and of our own
+non-dumpable ones. On an ordinary systemd host those include `systemd --user`
+and `(sd-pam)` for every login session, and `ssh-agent` or `gpg-agent` where
+they run. Failing closed on them would leave Linux listing, pruning and cache
+reclaim unavailable on every such host (shown on WSL2 Ubuntu as uid 1000;
+evidence in `docs/testing/2026-10-27-vuh-2926-tidy-home-pane`). So the Linux
+census skips any process whose cwd the kernel withholds (EACCES or EPERM),
+whatever its uid. Every dumpable process, which covers shells, editors, builds
+and agents, stays in the census. The residual risk is a non-dumpable process of
+our own uid working in a worktree that no pane and no dumpable process occupies.
+Even then, prune still requires a clean tree landed on `origin/main` (or a
+recorded decision), removes it unforced, and keeps its HEAD under the retained
+refs above. Darwin's helper reads every process of this account and is
+unchanged.
 
 A cwd at an enrolled worktree root, such as `~/dev/clankie-wt`, still protects
 every tree below it, the same as a research parent. It doesn't contain the main

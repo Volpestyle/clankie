@@ -295,11 +295,16 @@ export async function listTidyWorktrees(
       JSON.stringify(await tidyPaneDirectories(runner)) !== JSON.stringify(panePaths)
     )
       return unavailable("inventory_changed");
-    // Processes come and go all the time; only one now working in a candidate changes the answer.
+    // Processes come and go all the time, so a busy tree must not withhold the whole listing:
+    // a process now working in a candidate holds only that tree.
     const freshProcesses = await processWorkingDirectories();
-    if (result.candidates.some((candidate) => protects(freshProcesses, candidate.path)))
-      return unavailable("inventory_changed");
-    return result;
+    const busy = result.candidates.filter((candidate) => protects(freshProcesses, candidate.path));
+    if (!busy.length) return result;
+    return {
+      ...result,
+      candidates: result.candidates.filter((candidate) => !busy.includes(candidate)),
+      excluded: [...result.excluded, ...busy.map(({ path }) => ({ path, reason: "live_process" }))],
+    };
   } catch {
     return unavailable("inventory_unavailable");
   }

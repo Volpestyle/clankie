@@ -6090,7 +6090,9 @@ repository's main checkout. Those protect nothing below them on their own
 ([ADR 0280](adr/0280-automatic-tidy-requires-positive-work-proof.md), VUH-2926).
 Unknown or changing pane inventory, or an unavailable process census
 (`process_inventory_unavailable`), returns `outcome: "unavailable"` with no
-candidates. The command does not fetch refs or
+candidates. A process that starts in a candidate during the listing holds only
+that tree. On Linux the census skips processes whose cwd the kernel withholds:
+other accounts' processes and our own non-dumpable ones, such as `systemd --user`. The command does not fetch refs or
 prove ownership. Use the `tidy` skill to harvest results, verify ownership and
 fresh merge/clean evidence, then remove finished owned worktrees after landing.
 

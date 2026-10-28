@@ -1,0 +1,64 @@
+--- leftovers before:
+{
+  "uid": 1000,
+  "kernel": "5.15.167.4-microsoft-standard-WSL2",
+  "pid1": {
+    "uid": 0,
+    "cwdRead": "EACCES"
+  },
+  "hiddenOwnProcesses": [
+    "586 systemd",
+    "587 (sd-pam)"
+  ],
+  "otherAccountAndSessionPresent": {
+    "census": {
+      "ok": true,
+      "count": 12,
+      "hasOwnCwd": true
+    },
+    "list": {
+      "outcome": "listed",
+      "candidates": [
+        "/home/dev/repo-wt/busy",
+        "/home/dev/repo-wt/landed"
+      ],
+      "excluded": [
+        "/home/dev/repo=main_worktree"
+      ]
+    }
+  },
+  "dumpableOwnInTree": {
+    "cwdRead": "readable",
+    "list": {
+      "outcome": "listed",
+      "candidates": [
+        "/home/dev/repo-wt/landed"
+      ],
+      "excluded": [
+        "/home/dev/repo=main_worktree",
+        "/home/dev/repo-wt/busy=live_process"
+      ]
+    }
+  },
+  "nonDumpableOwnInTree": {
+    "cwdRead": "EACCES",
+    "census": {
+      "ok": true,
+      "count": 9,
+      "hasOwnCwd": true
+    },
+    "list": {
+      "outcome": "listed",
+      "candidates": [
+        "/home/dev/repo-wt/busy",
+        "/home/dev/repo-wt/landed"
+      ],
+      "excluded": [
+        "/home/dev/repo=main_worktree"
+      ]
+    }
+  }
+}
+exit=0
+--- leftovers after:
+--- my processes:

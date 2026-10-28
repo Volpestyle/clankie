@@ -1,0 +1,78 @@
+=== origin-main
+{
+  "uid": 1000,
+  "kernel": "5.15.167.4-microsoft-standard-WSL2",
+  "pid1": {
+    "uid": 0,
+    "cwdRead": "EACCES"
+  },
+  "otherAccountPresent": {
+    "census": {
+      "ok": false,
+      "error": "Error: EACCES: permission denied, readlink '/proc/1/cwd'"
+    },
+    "list": {
+      "outcome": "unavailable",
+      "candidates": [],
+      "excludedReasons": [
+        "process_inventory_unavailable"
+      ]
+    }
+  },
+  "nonDumpableOwn": {
+    "pid": 988,
+    "procOwnerUid": 1000,
+    "cwdRead": "EACCES",
+    "census": {
+      "ok": false,
+      "error": "Error: EACCES: permission denied, readlink '/proc/1/cwd'"
+    },
+    "list": {
+      "outcome": "unavailable",
+      "candidates": [],
+      "excludedReasons": [
+        "process_inventory_unavailable"
+      ]
+    }
+  }
+}
+exit=0
+=== fixed
+{
+  "uid": 1000,
+  "kernel": "5.15.167.4-microsoft-standard-WSL2",
+  "pid1": {
+    "uid": 0,
+    "cwdRead": "EACCES"
+  },
+  "otherAccountPresent": {
+    "census": {
+      "ok": false,
+      "error": "Error: EACCES: permission denied, readlink '/proc/574/cwd'"
+    },
+    "list": {
+      "outcome": "unavailable",
+      "candidates": [],
+      "excludedReasons": [
+        "process_inventory_unavailable"
+      ]
+    }
+  },
+  "nonDumpableOwn": {
+    "pid": 1014,
+    "procOwnerUid": 1000,
+    "cwdRead": "EACCES",
+    "census": {
+      "ok": false,
+      "error": "Error: EACCES: permission denied, readlink '/proc/1014/cwd'"
+    },
+    "list": {
+      "outcome": "unavailable",
+      "candidates": [],
+      "excludedReasons": [
+        "process_inventory_unavailable"
+      ]
+    }
+  }
+}
+exit=0

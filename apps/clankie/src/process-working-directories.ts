@@ -22,7 +22,12 @@ export async function processWorkingDirectories(): Promise<string[]> {
       try {
         paths.push(await readlink(`/proc/${pid}/cwd`));
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        const code = (error as NodeJS.ErrnoException).code;
+        // The kernel withholds a cwd behind its ptrace check (proc(5)): every other account's
+        // process, and our own non-dumpable ones such as systemd --user, sd-pam, ssh-agent and
+        // gpg-agent. Every dumpable process stays in the census (ADR 0280, VUH-2926).
+        if (code === "ENOENT" || code === "EACCES" || code === "EPERM") continue;
+        throw error;
       }
     }
     return paths;
