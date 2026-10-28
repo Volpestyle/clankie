@@ -55,6 +55,9 @@ async function fakeUploads() {
         .end('<svg xmlns="http://www.w3.org/2000/svg"/>');
     if (path === "/ws/notes.pdf")
       return response.writeHead(200, { "content-type": "application/pdf" }).end("%PDF-1.7\n");
+    // Distinct small files for many downloads finishing together.
+    if (/^\/ws\/note-\d+\.pdf$/u.test(path))
+      return response.writeHead(200, { "content-type": "application/pdf" }).end(`%PDF-1.7\n${path}\n`);
     if (path === "/ws/moved.png")
       return response.writeHead(302, { location: "https://elsewhere.example/shot.png" }).end();
     if (path === "/ws/huge.mp4") {
@@ -305,4 +308,25 @@ it("refuses an upload without the app bearer instead of serving it", async () =>
     }),
   ).rejects.toThrow("Unsafe Linear upload URL");
   expect(uploads.requests).toEqual([{ path: "/ws/shot.png", authorization: "Bearer wrong" }]);
+});
+
+it("records a download on disk before calling it ready, and keeps every entry when downloads finish together (VUH-2922)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "work-media-"));
+  const store = EvidenceStore.local(join(root, "evidence"));
+  cleanup.push(() => store.close());
+  const media = await harness(join(root, "media"), await fakeUploads(), store);
+  const urls = Array.from({ length: 12 }, (_, index) => `https://uploads.linear.app/ws/note-${index}.pdf`);
+  media.observe({ body: urls.join("\n") });
+  const onDisk = async () =>
+    Object.keys(JSON.parse(await readFile(join(root, "media", "work-media.json"), "utf8").catch(() => "{}")));
+  let entries = await media.resolve(urls);
+  for (let attempt = 0; attempt < 400 && entries.some((entry) => entry.state === "pending"); attempt++) {
+    // Whatever reads as ready is already in the cache file, at every poll.
+    const stored = await onDisk();
+    for (const entry of entries) if (entry.state === "ready") expect(stored).toContain(entry.url);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    entries = await media.resolve(urls);
+  }
+  expect(entries.map((entry) => entry.state)).toEqual(urls.map(() => "ready"));
+  expect((await onDisk()).toSorted()).toEqual(urls.toSorted());
 });

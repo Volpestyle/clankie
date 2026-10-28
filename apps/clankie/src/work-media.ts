@@ -37,6 +37,8 @@ export class WorkMedia {
   readonly #queue: (() => void)[] = [];
   #active = 0;
   #cache: Promise<Record<string, Cached>> | undefined;
+  /** Cache writes, one after another, so the newest file is the one left on disk (VUH-2922). */
+  #writing: Promise<void> = Promise.resolve();
   readonly #clock: () => number;
   private readonly options: WorkMediaOptions;
 
@@ -123,10 +125,8 @@ export class WorkMedia {
         fileName: fileName(key, sha256),
         caption: "Media from a Linear item",
       });
-      const cache = await this.#readCache();
-      cache[key] = { sha256, size: bytes.byteLength, contentType: type };
+      await this.#record(key, { sha256, size: bytes.byteLength, contentType: type });
       this.#failed.delete(key);
-      await this.#writeCache(cache);
     } catch (error) {
       const reason = error instanceof LinearUploadRefused ? error.reason : "unavailable";
       this.#failed.set(key, { reason, at: this.#clock() });
@@ -166,12 +166,24 @@ export class WorkMedia {
     return this.#cache;
   }
 
-  async #writeCache(cache: Record<string, Cached>) {
-    await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
-    const path = join(this.options.directory, "work-media.json");
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(cache, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporary, path);
+  /**
+   * Writes one finished download into the cache file, after any write already under way, and
+   * only then serves it as ready. Each write takes its snapshot in turn, so it holds every entry
+   * before it and a slower, older snapshot can never rename over a newer one (VUH-2922).
+   */
+  #record(key: string, entry: Cached): Promise<void> {
+    const write = this.#writing.then(async () => {
+      const cache = await this.#readCache();
+      await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
+      const path = join(this.options.directory, "work-media.json");
+      const temporary = `${path}.${randomUUID()}.tmp`;
+      await writeFile(temporary, `${JSON.stringify({ ...cache, [key]: entry }, null, 2)}\n`, { mode: 0o600 });
+      await rename(temporary, path);
+      cache[key] = entry;
+    });
+    // allow-swallowed-rejection -- the download awaiting `write` gets this failure; the chain only keeps going.
+    this.#writing = write.catch(() => undefined);
+    return write;
   }
 }
 
