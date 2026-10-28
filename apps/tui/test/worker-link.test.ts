@@ -1150,11 +1150,13 @@ it.each([
   { label: "missing ID", dropAck: false, eventId: null },
   { label: "wrong ID", dropAck: false, eventId: "different-event" },
 ])(
-  "installed linked channel acknowledges its exact written event and stops on $label ack",
+  "installed linked channel handles $label ack without replaying its written event",
   async ({ dropAck, eventId }) => {
-    const service = await fakeService(dropAck, undefined, eventId);
+    // Three failed attempts back off for 250 + 500 + 1000 ms: recovery must cross
+    // the old 1500 ms whole-ACK deadline, without replaying the written notification.
+    const service = await fakeService(dropAck ? 3 : false, undefined, eventId);
     const home = await linkedHome(service.url, true);
-    // A lost ack is retried within the request budget (VUH-2034); keep it short here.
+    // Cap each request at 1500 ms; pending ACK recovery must outlive that budget (VUH-2944).
     const bridge = rawReceiptBridge("fleet", home, service.url, true, dropAck ? 1500 : undefined);
     await bridge.init();
     bridge.initialized();
@@ -1170,23 +1172,27 @@ it.each([
       pane: "w8:p3",
       authorization: undefined,
     });
-    // Only a transport failure is retried, and only as the same exact receipt.
-    if (dropAck) {
-      await expect.poll(() => bridge.stderr(), { timeout: 5000 }).toContain("stopped polling without replay");
-      const acks = service.seen.filter((r) => r.path.endsWith("/ack"));
-      expect(acks.length).toBeGreaterThan(1);
-      expect(new Set(acks.map((r) => r.path))).toEqual(
-        new Set(["/v1/fleet/seats/w8%3Ap3/events/event-1/ack"]),
-      );
-    } else expect(service.seen.filter((r) => r.path.endsWith("/ack"))).toHaveLength(1);
-    if (dropAck || eventId !== "event-1") {
-      await expect.poll(() => bridge.stderr(), { timeout: 5000 }).toContain("stopped polling without replay");
+    if (eventId !== "event-1") {
+      // A successful HTTP response for a different/missing event is a permanent
+      // protocol fault, not a transient outage or a 404 unknown_event grace.
+      await expect
+        .poll(() => bridge.stderr(), { timeout: 5000 })
+        .toContain("Channel receive loop stopped: Exact channel acknowledgment is unresolved");
+      expect(bridge.stderr()).toContain("/reload-plugins");
+      expect(service.seen.filter((r) => r.path.endsWith("/ack"))).toHaveLength(1);
       expect(service.seen.filter((r) => r.path.endsWith("/events"))).toHaveLength(1);
-      expect(bridge.notifications).toHaveLength(1);
-    } else
+    } else {
       await expect
         .poll(() => service.seen.filter((r) => r.path.endsWith("/events")).length, { timeout: 5000 })
         .toBeGreaterThan(1);
+      const acks = service.seen.filter((r) => r.path.endsWith("/ack"));
+      expect(acks).toHaveLength(dropAck ? 4 : 1);
+      expect(new Set(acks.map((r) => r.path))).toEqual(
+        new Set(["/v1/fleet/seats/w8%3Ap3/events/event-1/ack"]),
+      );
+      expect(bridge.stderr()).not.toContain("Channel receive loop stopped");
+    }
+    expect(bridge.notifications).toHaveLength(1);
   },
 );
 

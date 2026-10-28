@@ -114,3 +114,21 @@ Old bridge recovery is intentionally owner-facing: the roster says to reload the
 plugin in that pane (`/reload-plugins`). Updated files and another service restart
 cannot replace already-loaded old code. No automated relaunch or terminal typing
 is added. The live proof and issue closure remain with the lead.
+
+## Installed-script test follow-up
+
+LOCAL-VUH-49's root gate selected `apps/tui/test/worker-link.test.ts`, which
+VUH-2944's import-based selection missed because it launches the bridge by path
+(VUH-2945). Clean origin/main `450b7f16d` reproduces three stale expectations.
+The bridge matches the approved contract: network loss retries; a 2xx missing or
+wrong event ID stops immediately with the sticky reload diagnostic. These are
+not `404 unknown_event` cases and need no shortened grace.
+
+The repaired lost-ACK case drops three attempts, crossing the old 1500 ms total
+ACK deadline through 250/500/1000 ms backoffs, then proves the exact receipt lands,
+polling resumes and the notification appears once. Missing/wrong IDs prove one
+ACK, stopped polling within the existing five-second bound, and the current reload
+diagnostic. Production code/defaults and all test deadlines are unchanged.
+The complete worker-link and restart files pass 52/52.
+
+[Clean-main failure and repaired-test evidence](clankie://evidence/sha256/cbd944b1dc5540c3ef64be7984d300230b3b604a1f568e8ecfc959fd16bef874).

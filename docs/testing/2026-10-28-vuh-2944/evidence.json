@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/2b0b35b97cfbf30e97788eb85d85901762c28a16229bb9bde31efe6acb8f0888"
     },
     {
+      "path": "installed-script-tests.tar",
+      "size": 293888,
+      "sha256": "cbd944b1dc5540c3ef64be7984d300230b3b604a1f568e8ecfc959fd16bef874",
+      "url": "clankie://evidence/sha256/cbd944b1dc5540c3ef64be7984d300230b3b604a1f568e8ecfc959fd16bef874"
+    },
+    {
       "path": "review-r2.tar",
       "size": 36352,
       "sha256": "99046a70f178e59e8537d95cb727f4b2746060ff9fc5d805d4b7445a6985a769",
