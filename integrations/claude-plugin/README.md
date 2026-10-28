@@ -696,8 +696,15 @@ quiet thinking past that window still require a positive current-root-turn API.
 New hook registrations apply after `/reload-plugins` or a new session, never by
 silently reloading a running worker. A strict older service receives the legacy
 body after a definite HTTP400 rejection and gains no renewal behavior.
-Ordinary Pre/Post hooks have a two-second HTTP timeout and five-second native
-command limit; only PermissionRequest and AskUserQuestion retain the long wait.
+Ordinary Pre/Post renewal hooks are async. Their shell-only lease-hint check
+exits before Node or HTTP when this socket/pane has no Claude root lease hint.
+The journal writes that exact holder's hint on grant/update, and removes it on
+release/expiry. The shell atomically consumes a hint before running the helper;
+a lease update re-arms it, while a stale hint costs one helper call. A missing
+hint only loses renewal; it never extends a deadline. Child events re-arm an
+existing root hint without renewing that root. The hint grants no authority.
+The helper keeps a two-second HTTP timeout and five-second native command limit;
+PermissionRequest and AskUserQuestion stay synchronous with their long wait.
 The timestamp is the helper wall clock at invocation, not a native event emission
 time; a linked clock ahead of the service fails closed. Sessions with no matching
 simulator reservation skip resource ownership proof, and admitted ordinary tool

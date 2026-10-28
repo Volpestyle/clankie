@@ -114,9 +114,16 @@ the clock mismatch is resolved; future observations fail closed.
 Stop, StopFailure and SessionEnd renew nothing. There is no permanent
 open-until-Stop state: Esc and a blocked prompt can omit Stop.
 
-The worker plugin registers all-tool PreToolUse and PostToolUse reporting. Its
-ordinary tool hooks are best-effort: two-second HTTP timeouts and five-second
-native command limits. Only PermissionRequest and AskUserQuestion retain the long
+The worker plugin registers ordinary PreToolUse and PostToolUse renewal as async
+hooks, so they carry no tool decision. A shell-only check skips Node and HTTP when
+the pane has no root-lease hint. The journal writes a hint for the exact Claude
+root holder, indexed by native socket and pane, on grant/update, and removes it
+on release/expiry. The hint is not authority: session/process proof still applies.
+The shell atomically consumes it before reporting; a lease update re-arms it, so
+an orphaned hint costs one helper. Missing hints or failed reports confer no time;
+the normal finite deadline still applies. Child events can re-arm an existing
+root hint without moving that root's deadline. Ordinary hooks remain best-effort:
+two-second HTTP timeouts and five-second native command limits. Only PermissionRequest and AskUserQuestion retain the long
 question wait. Sessions without simulator reservations skip resource owner proofs.
 New registrations take effect after `/reload-plugins` or a new session; shipping the
 service does not change an existing seat's loaded hooks. Do not reload or restart

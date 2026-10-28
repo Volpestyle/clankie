@@ -160,6 +160,8 @@ Unknown/stale activity never renews time. Explicit touch remains available.
 Codex roots/children use read-only native ancestry; Claude children use finite
 original-native renewals. Claude root UserPromptSubmit, PreToolUse and PostToolUse
 hooks extend only that exact session's leases to one idle window from the event.
+Ordinary tool renewal runs asynchronously behind a local lease-hint check; no
+hint means no Node/HTTP work and no renewal. Hints grant no lease authority.
 Stop, StopFailure and SessionEnd add no time; an interrupted root expires without
 a matching Stop. New hook registrations apply only after a plugin reload or new
 session; workers must not reload existing seats to obtain them.

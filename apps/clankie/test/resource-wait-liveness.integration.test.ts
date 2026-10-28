@@ -1,5 +1,6 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -64,7 +65,7 @@ async function fixture() {
     log = join(root, "simctl.jsonl");
   await writeFile(statePath, JSON.stringify({ devices: {} }));
   await writeFile(log, "");
-  const directory = join(root, "registry");
+  const directory = join(root, "state", "fleet-resources");
   const governor = createResourceGovernor({
     directory,
     probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 32768 }),
@@ -134,25 +135,31 @@ async function fixture() {
   // Real TCP kernel ownership and native birth/ancestry. Only harness discovery
   // is a surrogate: the server pins this fixture process as its native seat.
   const socketOwners = new WeakMap<Socket, number>();
+  let measureAdmissionCpu = false,
+    admissionCpuMs = 0;
   const prove = async (socket: Socket, pane: string) => {
     if (!admitted || pane !== "w1:p1" || socket.destroyed) return false;
     let pid = socketOwners.get(socket);
     if (!pid) {
-      const output = await execute("/usr/sbin/lsof", ["-nP", "-iTCP", "-Fpn"]);
+      const args = ["-nP", "-iTCP", "-Fpn"];
+      const output = measureAdmissionCpu
+        ? await execute("/usr/bin/time", ["-p", "/usr/sbin/lsof", ...args])
+        : await execute("/usr/sbin/lsof", args);
+      if (measureAdmissionCpu)
+        for (const match of output.stderr.matchAll(/^(?:user|sys) ([0-9.]+)$/gm))
+          admissionCpuMs += Number(match[1]) * 1000;
       pid = clientPid(output.stdout, socket.remotePort!, socket.localPort!);
       if (!pid) return false;
       socketOwners.set(socket, pid);
     }
-    const caller = await processIdentity(pid),
-      parent = caller && (await processIdentity(caller.ppid));
     const holder = await native().catch(() => undefined);
-    return (
-      !!caller &&
-      !!parent &&
-      !!holder &&
-      parent.pid === child.pid &&
-      parent.startTime === holder.processes[0]!.startTime
-    );
+    // time(1) is an optional measurement parent; admission still requires exact
+    // live ancestry to this fixture's pinned native process and birth.
+    for (let current = await processIdentity(pid), depth = 0; current && depth < 5; depth += 1) {
+      if (current.pid === child.pid) return current.startTime === holder?.processes[0]!.startTime;
+      current = await processIdentity(current.ppid);
+    }
+    return false;
   };
   const link = new LocalFleetLink({
     directory: join(root, "links"),
@@ -226,7 +233,7 @@ async function fixture() {
       schemaVersion: 2,
       authentication: "local-process",
       fleet: "default",
-      socket: "fixture",
+      socket: join(root, "fixture.sock"),
       url: host,
     }),
   );
@@ -236,9 +243,10 @@ async function fixture() {
       CLANKIE_STATE: join(root, "state"),
       ACTIVITY_FIXTURE_ROOT: root,
       ACTIVITY_PLUGIN_ROOT: resolve("integrations/claude-plugin/worker"),
+      CLAUDE_PLUGIN_ROOT: resolve("integrations/claude-plugin/worker"),
       ACTIVITY_MOD_PATH: resolve("integrations/claude-plugin/worker/mods/tool-catalog.mjs"),
       HERDR_PANE_ID: "w1:p1",
-      HERDR_SOCKET_PATH: "fixture",
+      HERDR_SOCKET_PATH: join(root, "fixture.sock"),
     },
     stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
@@ -287,6 +295,13 @@ async function fixture() {
     },
     hooks: () => hooks,
     resolutions: () => resolutions,
+    admissionCpu: (enabled: boolean) => {
+      measureAdmissionCpu = enabled;
+      const total = admissionCpuMs;
+      admissionCpuMs = 0;
+      return total;
+    },
+    hint: join(directory, "root-hook-leases", join(root, "fixture.sock"), "w1:p1"),
     host,
     directory,
     resources,
@@ -542,6 +557,7 @@ it.skipIf(process.platform !== "darwin")(
     const lease = await f.acquire();
     f.advance(590_000);
     const eventAt = f.now();
+    expect(existsSync(f.hint)).toBe(true);
     const held = f.holdHooks();
     const pending = hook("UserPromptSubmit");
     await held.entered;
@@ -567,6 +583,7 @@ it.skipIf(process.platform !== "darwin")(
     f.advance(1);
     await f.resources.simulators.tick();
     expect(await f.governor.simulatorReservations()).toHaveLength(0);
+    expect(existsSync(f.hint)).toBe(false);
     // Esc has no Stop: the finite event alone must still expire.
     for (const event of ["PreToolUse", "PostToolUse"]) {
       const next = await f.acquire();
@@ -680,7 +697,9 @@ it.skipIf(process.platform !== "darwin")(
   "stalled ordinary tool hooks release promptly while question hooks retain their long wait",
   async () => {
     const f = await fixture();
+    const lease = await f.acquire();
     for (const event of ["PreToolUse", "PostToolUse"]) {
+      await f.cli("touch", { ...f.owner, id: lease.id });
       const held = f.holdRequests();
       const start = performance.now();
       try {
@@ -752,19 +771,92 @@ it.skipIf(process.platform !== "darwin")(
         perToolP95Ms: Math.round(times[4]!),
       };
     };
-    const withLease = await samples();
+    const observerCpu = async () => {
+      const rows = (await execute("/bin/ps", ["-axo", "pid=,ppid=,time=,command="])).stdout;
+      const row = rows
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/u))
+        .find(
+          (fields) =>
+            fields[1] === String(process.pid) &&
+            fields.slice(3).join(" ").includes("/fleet-resources/src/native.py serve"),
+        );
+      expect(row).toBeDefined();
+      return row![2]!.split(":").reduce((seconds, part) => seconds * 60 + Number(part), 0) * 1000;
+    };
+    const cpu = async (ungated = false) => {
+      const nativeStart = await observerCpu();
+      f.admissionCpu(true);
+      const start = process.cpuUsage();
+      let childMs = 0;
+      for (const event of ["PreToolUse", "PostToolUse"]) {
+        const result = await f.send({
+          workerHook: { hook_event_name: event, session_id: "fixture-original-session", tool_name: "Read" },
+          measureCpu: true,
+          ungated,
+          allowHookFailure: true,
+        });
+        expect(result.workerHookResult.exitCode).toBe(0);
+        const output = result.workerHookResult.stderr as string;
+        for (const field of ["user", "sys"]) {
+          const match = output.match(new RegExp(`^${field} ([0-9.]+)$`, "m"));
+          expect(match).not.toBeNull();
+          childMs += Number(match![1]) * 1000;
+        }
+      }
+      const parent = process.cpuUsage(start);
+      const admissionSubprocessCpuMs = Math.round(f.admissionCpu(false));
+      const nativeObserverCpuMs = Math.round((await observerCpu()) - nativeStart);
+      const serviceAndDriverCpuMs = Math.round((parent.user + parent.system) / 1000);
+      return {
+        helperSubtreesCpuMs: Math.round(childMs),
+        serviceAndDriverCpuMs,
+        admissionSubprocessCpuMs,
+        nativeObserverCpuMs,
+        totalCpuMs:
+          Math.round(childMs) + serviceAndDriverCpuMs + admissionSubprocessCpuMs + nativeObserverCpuMs,
+        childRoundingMs: 10,
+      };
+    };
+    expect(existsSync(f.hint)).toBe(true);
+    const withLease = { ...(await samples()), cpu: await cpu() };
+    expect(existsSync(f.hint)).toBe(true);
     await f.cli("release", { ...f.owner, id: lease.id });
+    expect(existsSync(f.hint)).toBe(false);
     expect(await f.governor.simulatorReservations()).toHaveLength(0);
     const before = f.resolutions();
-    const withoutLease = await samples();
+    const requestCount = f.hooks().length;
+    const withoutLease = { ...(await samples()), cpu: await cpu() };
+    expect(f.hooks()).toHaveLength(requestCount);
     expect(f.resolutions() - before).toBe(0);
+    // A stale hint costs at most one helper and cannot renew a missing lease.
+    await writeFile(f.hint, "claude:stale-session");
+    await f.send({
+      workerHook: {
+        hook_event_name: "PreToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+      },
+    });
+    expect(existsSync(f.hint)).toBe(false);
+    const afterStale = f.hooks().length;
+    await f.send({
+      workerHook: {
+        hook_event_name: "PostToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+      },
+    });
+    expect(f.hooks()).toHaveLength(afterStale);
+    const ungatedWithoutLeaseCpu = await cpu(true);
     process.stdout.write(
       JSON.stringify({
         rootHookLatency: {
           withLease,
           withoutLease,
+          ungatedWithoutLeaseCpu,
           scope:
-            "Each sample includes both cold worker hook helpers, kernel-authenticated TCP, real route/resource manager/governor. Native discovery and simulator adapter are surrogates; ordinary hooks bypass captain recording; question/lifecycle recording is a stub. Baseline without hooks has no added calls.",
+            "Each sample includes both registered shell prechecks and any Node helpers plus kernel-authenticated TCP, real route/resource manager/governor. No-lease shells finish completely (a conservative bound on async blocking launch); CPU is a separate one-pair sample, time -p child/helper/admission CPU and ps native-observer CPU rounded to 10ms, plus service/driver process CPU. Ungated no-lease CPU invokes the previous Node command for comparison. Native discovery and simulator adapter are surrogates; ordinary hooks bypass captain recording; question/lifecycle recording is a stub. Baseline without hooks has no added calls.",
         },
       }) + "\n",
     );

@@ -86,3 +86,44 @@ PreToolUse HTTP timeout fails the stalled-host case: the fixture's six-second
 process cap kills the helper instead of its own two-second best-effort release.
 Both sources were restored after each negative run. Service and TUI typechecks
 pass (176.84s and 55.63s), as do scoped lint and plugin generation.
+
+Revision 4 supersedes the revision-3 candidate: the lead rejected paying about
+361 ms on every no-lease tool call. Ordinary Pre/Post hooks are now async; question
+and permission hooks remain synchronous. A shell-only, socket/pane-indexed hint
+holds the exact root holder ID. The lease journal writes it on grant/update and
+removes it on release/expiry. The shell atomically consumes it before Node/HTTP;
+a valid update re-arms it. A stale hint costs one helper; missing hints fail closed
+and leave the ordinary finite expiry unchanged. A child event may re-arm a known
+root reservation without changing its deadline. The hint never grants authority.
+
+Before/after added wall latency per tool (both Pre and Post commands, five samples
+per condition): no lease, 361 ms median / 365 ms max before, 7 ms / 8 ms after;
+with a lease, 370 ms / 389 ms before, 373 ms / 395 ms after. The after no-lease
+measurement waits for both shell commands to finish, a conservative bound on
+async command launch, and meets the lead's ~20 ms median bar. No no-lease request
+reaches HTTP, resource resolution or Node. The registered async behavior is checked
+in the plugin contract; this is not a live Claude scheduler/reload measurement.
+
+Background CPU per tool is measured separately over one Pre/Post pair. With a
+lease: 200 ms helper process trees, 11 ms service/driver, 140 ms native admission
+subprocesses, 0 ms rounded in the persistent native observer: 351 ms total. No
+lease: all components round to 0 ms, not a claim of literal zero work; the shell
+pair completes in 7 ms median wall time. Re-running the former ungated Node path
+without a lease costs 315 ms CPU (190 helper, 5 service/driver, 120 admission).
+Helper/admission CPU uses time(1), native observer CPU uses ps, at 10 ms precision;
+service/driver uses process.cpuUsage. Native discovery and CoreSimulator remain
+explicit surrogates. These are local boundary measurements, not installed-fleet
+CPU or token-saving claims.
+
+The final functional run passes 24/24 in four files (57.52s). A separate final
+latency/CPU probe passes (7.12s). The initial R4 fixture used a link selector rather
+than its proof's real socket for the hint path, then a child event consumed the
+root hint without re-arming it; both failed checks were fixed before this pass.
+The test verifies hint grant, release, expiry, child non-renewal, stale consumption,
+and no-lease zero-request behavior. All reports retain the two-second/five-second
+limits. No running session has been reloaded.
+
+Removing the shell hint gate fails the zero-request assertion (24 requests instead
+of the prior 12); restoring the exact shell source preserves the passing probe.
+Service typecheck passes in 181.13s, fleet-resources in 0.75s; scoped lint and
+plugin generation pass. Root gate and new independent review remain pending.

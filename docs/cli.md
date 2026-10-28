@@ -4548,7 +4548,10 @@ expiry counts from returning to the prompt; repeated idle readings do not renew
 it. Explicit touch still works. Unknown/stale observations cannot preserve a
 cached working state. Native turn coverage is Codex roots/children and Claude
 local children with the original-native activity mod. Worker 0.6.22 also reports
-Claude root UserPromptSubmit, PreToolUse and PostToolUse events: each extends only
+Claude root UserPromptSubmit, PreToolUse and PostToolUse events: ordinary tool
+renewal runs asynchronously, with a shell-only lease-hint check that skips Node
+and HTTP when no root lease is hinted. A hint grants no authority; missing hints
+lose renewal and leave the normal finite deadline intact. Each event extends only
 its session's leases to one idle window from the event, without an ongoing
 working bit. Stop, StopFailure and SessionEnd renew nothing. New registrations
 require a plugin reload or new session; shipping does not reload existing seats.

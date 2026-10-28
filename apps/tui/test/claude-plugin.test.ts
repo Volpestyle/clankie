@@ -151,13 +151,16 @@ describe("clankie-worker claude plugin", () => {
           hooks: [
             {
               type: "command",
-              command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"',
+              command:
+                event === "PostToolUse"
+                  ? '. "${CLAUDE_PLUGIN_ROOT}/bin/root-lease-hook.sh"'
+                  : 'node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"',
               timeout: ["PermissionRequest", "PreToolUse"].includes(event)
                 ? 600
                 : event === "PostToolUse"
                   ? 5
                   : 30,
-              ...(["Stop", "StopFailure"].includes(event) ? { async: true } : {}),
+              ...(["Stop", "StopFailure", "PostToolUse"].includes(event) ? { async: true } : {}),
             },
           ],
           ...(event === "PreToolUse" ? { matcher: "AskUserQuestion" } : {}),
@@ -167,7 +170,12 @@ describe("clankie-worker claude plugin", () => {
               {
                 matcher: "^(?!AskUserQuestion$).*",
                 hooks: [
-                  { type: "command", command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"', timeout: 5 },
+                  {
+                    type: "command",
+                    command: '. "${CLAUDE_PLUGIN_ROOT}/bin/root-lease-hook.sh"',
+                    timeout: 5,
+                    async: true,
+                  },
                 ],
               },
               {

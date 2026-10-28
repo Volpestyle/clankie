@@ -46,7 +46,7 @@ const api = {
   process: {
     run: async (args, options) =>
       new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, args.slice(1), {
+        const child = spawn(args[0], args.slice(1), {
           env: process.env,
           stdio: ["pipe", "pipe", "pipe"],
           timeout: options.timeoutMs,
@@ -131,8 +131,16 @@ process.on("message", (message) => {
         await heavyGovernor.close();
       }
       if (message.workerHook) {
+        const event = message.workerHook.hook_event_name;
+        const ordinary =
+          event === "PostToolUse" ||
+          (event === "PreToolUse" && message.workerHook.tool_name !== "AskUserQuestion");
+        const command =
+          ordinary && !message.ungated
+            ? ["/bin/sh", resolve(process.env.ACTIVITY_PLUGIN_ROOT, "bin/root-lease-hook.sh")]
+            : [process.execPath, resolve(process.env.ACTIVITY_PLUGIN_ROOT, "bin/seat-hook.mjs")];
         const result = await api.process.run(
-          [process.execPath, resolve(process.env.ACTIVITY_PLUGIN_ROOT, "bin/seat-hook.mjs")],
+          message.measureCpu ? ["/usr/bin/time", "-p", ...command] : command,
           { stdin: JSON.stringify(message.workerHook), timeoutMs: 6000 },
         );
         workerHookResult = result;

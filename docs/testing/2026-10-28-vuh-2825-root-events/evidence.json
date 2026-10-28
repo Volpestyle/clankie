@@ -18,6 +18,12 @@
       "size": 158910,
       "sha256": "9444e2bb29f5716a996dbb5b87a72b4e9523dbddc7a74263281fa1aa141279c9",
       "url": "clankie://evidence/sha256/9444e2bb29f5716a996dbb5b87a72b4e9523dbddc7a74263281fa1aa141279c9"
+    },
+    {
+      "path": "review-r4-evidence.json",
+      "size": 178216,
+      "sha256": "9e6487c31fc5029a1ea342436735f04eed636cef2f6190541c0536aa0ada2172",
+      "url": "clankie://evidence/sha256/9e6487c31fc5029a1ea342436735f04eed636cef2f6190541c0536aa0ada2172"
     }
   ]
 }

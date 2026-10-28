@@ -239,6 +239,28 @@ export function createResourceGovernor(
   const bootSettleMs = options.simulatorBootSettleMs ?? simulatorBootSettleMs;
   const jobSettleMs = options.heavyJobSettleMs ?? heavyJobSettleMs;
   const directory = options.directory ?? join(userInfo().homedir, ".clankie/fleet-resources");
+  // A disposable local hint, never lease authority. Ordinary Claude hooks can
+  // skip Node and HTTP entirely when their pane has no root lease.
+  const rootHookHint = (lease: SimulatorReservation, clear = false) => {
+    if (
+      !lease.holderId?.match(/^claude:[A-Za-z0-9_-]+$/u) ||
+      !lease.pane?.match(/^[A-Za-z0-9:_-]+$/u) ||
+      !lease.binding?.socketPath ||
+      lease.binding.socketPath.split(/[\\/]/u).includes("..")
+    )
+      return;
+    const path = join(directory, "root-hook-leases", lease.binding.socketPath, lease.pane);
+    try {
+      if (clear) {
+        if (readFileSync(path, "utf8") === lease.holderId) rmSync(path, { force: true });
+      } else {
+        mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+        writeFileSync(path, lease.holderId, { mode: 0o600 });
+      }
+    } catch {
+      // A missing hint loses renewal only; the normal lease deadline still applies.
+    }
+  };
   const retrying = {
     // Bounded causes only (stage and errno); never journal contents or paths.
     onRetry: (error: Error, attempt: number) =>
@@ -1460,7 +1482,10 @@ export function createResourceGovernor(
         if (options.ticketId) state.queue = state.queue.filter((entry) => entry.id !== options.ticketId);
         return structuredClone(next);
       });
-      if (lease) return { admitted: true as const, lease };
+      if (lease) {
+        rootHookHint(lease);
+        return { admitted: true as const, lease };
+      }
       if (!refusal) throw new Error("Simulator admission unavailable");
       return { admitted: false as const, reason: refusal.reason, snapshot: await project(refusal.state) };
     },
@@ -1530,7 +1555,7 @@ export function createResourceGovernor(
           (key === "lastUsedAtMs" && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0))
         )
           throw new Error("Invalid simulator journal update");
-      return store.transaction((state) => {
+      const updated = await store.transaction((state) => {
         const lease = state.leases.find(
           (entry): entry is SimulatorReservation =>
             entry.kind === "simulator" && entry.id === id && entry.token === token,
@@ -1539,13 +1564,21 @@ export function createResourceGovernor(
         Object.assign(lease, update);
         return structuredClone(lease);
       });
+      rootHookHint(updated);
+      return updated;
     },
     async releaseSimulator(id: string, token: string) {
-      await store.transaction((state) => {
+      const removed = await store.transaction((state) => {
+        const prior = state.leases.find(
+          (lease): lease is SimulatorReservation =>
+            lease.kind === "simulator" && lease.id === id && lease.token === token,
+        );
         state.leases = state.leases.filter(
           (lease) => !(lease.kind === "simulator" && lease.id === id && lease.token === token),
         );
+        return prior;
       });
+      if (removed) rootHookHint(removed, true);
     },
     async recordSimulatorSettled(receipt: SimulatorSettledReceipt) {
       await recordReaped([receipt], directory, "simulator-settled.jsonl");

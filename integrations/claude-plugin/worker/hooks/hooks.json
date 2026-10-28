@@ -84,8 +84,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
-            "timeout": 5
+            "command": ". \"${CLAUDE_PLUGIN_ROOT}/bin/root-lease-hook.sh\"",
+            "timeout": 5,
+            "async": true
           }
         ]
       },
@@ -127,8 +128,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
-            "timeout": 5
+            "command": ". \"${CLAUDE_PLUGIN_ROOT}/bin/root-lease-hook.sh\"",
+            "timeout": 5,
+            "async": true
           }
         ]
       }

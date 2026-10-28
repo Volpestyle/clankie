@@ -483,7 +483,6 @@ export async function createFleetResourceRuntime(input: {
       if (
         closed ||
         proof.nativeSessionPending ||
-        hook.agentId !== undefined ||
         hook.occurredAt === undefined ||
         !["UserPromptSubmit", "PreToolUse", "PostToolUse"].includes(hook.event)
       )
@@ -500,6 +499,19 @@ export async function createFleetResourceRuntime(input: {
         )
       )
         return false;
+      if (hook.agentId !== undefined) {
+        // A child may consume its pane's hint, but grants the root no event time.
+        // Re-arm the existing reservation without changing its idle deadline.
+        const lease = held.find(
+          (lease) =>
+            lease.holderId === `claude:${hook.sessionId}` &&
+            lease.pane === proof.pane &&
+            lease.occupantId === proof.nativeOccupantId &&
+            (lease.fleet ?? "default") === proof.fleet,
+        )!;
+        await governor.updateSimulator(lease.id, lease.token, {});
+        return false;
+      }
       const agent = await resolver?.resolve(pane);
       const session = agent?.session;
       if (
