@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createResourceGovernor, defaultResourcePolicy } from "@clankie/fleet-resources";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
@@ -83,20 +83,25 @@ it("the service's cache reclaim takes a light permit under low disk, where a wor
   try {
     expect((await governor.snapshot()).pressure.reason).toBe("disk");
 
-    // A worker's focused check still waits on the disk floor.
+    // A worker's focused check still waits on the disk floor, queued ahead of the reclaim.
     const stop = new AbortController();
-    let queued = 0;
-    const focused = await governor.runHeavy(process.execPath, ["-e", "0", "vitest", "run", "a.test.ts"], {
+    let waiting!: () => void;
+    const queued = new Promise<void>((resolve) => (waiting = resolve));
+    const focused = governor.runHeavy(process.execPath, ["-e", "0", "vitest", "run", "a.test.ts"], {
       signal: stop.signal,
       onWait: (snapshot) => {
-        queued = snapshot.lightQueue.length;
-        stop.abort();
+        if (snapshot.lightQueue.length) waiting();
       },
     });
-    expect(focused).toBe(130);
-    expect(queued).toBe(1);
+    await queued;
 
+    // The reclaim passes it: that check would wait on the floor anyway.
     expect(await captain.reclaimWorktreeCaches!(repo)).toMatchObject({ reclaimed: [] });
+    expect((await governor.snapshot()).lightQueue.map((entry) => entry.executable)).toEqual([
+      basename(process.execPath),
+    ]);
+    stop.abort();
+    expect(await focused).toBe(130);
     const leases = (await readFile(join(registry, "leases.jsonl"), "utf8"))
       .trim()
       .split("\n")

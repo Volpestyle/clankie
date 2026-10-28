@@ -674,9 +674,22 @@ export function createResourceGovernor(
    * Light requests this process queued for its own bulk removal (`holdLight`),
    * the work that frees disk, so the disk floor must not hold it. Only this
    * process's waiter and arbiter consult the set; nothing in the journal or a
-   * caller's label claims it, and slots and the memory floor still bind.
+   * caller's label claims it, and slots and the memory floor still bind. Another
+   * process arbitrating the light lane would not know it; the service arbitrates.
    */
   const freesDisk = new Set<string>();
+  /**
+   * The ticket that leads this lane under one sample. Below the disk floor every
+   * light entry waits except one that frees disk, so the first of those leads
+   * instead of queueing behind checks the floor holds anyway.
+   */
+  function laneHead(lane: HeavyJobLane, state: ResourceState, sampled: ResourcePressure) {
+    if (lane === "light" && sampled.reason === "disk") {
+      const freeing = state.queue.find((entry) => entry.kind === "heavy" && freesDisk.has(entry.id));
+      if (freeing) return freeing;
+    }
+    return heavyHead(state);
+  }
   /** Whether the head of this lane's queue may start, under one sample. */
   function headAdmits(
     lane: HeavyJobLane,
@@ -692,7 +705,7 @@ export function createResourceGovernor(
     // job above the base slots needs measured room (VUH-2054).
     return lane === "light"
       ? sampled.reason !== "probe-unavailable" &&
-          (sampled.reason !== "disk" || freesDisk.has(heavyHead(state)?.id ?? "")) &&
+          (sampled.reason !== "disk" || freesDisk.has(laneHead(lane, state, sampled)?.id ?? "")) &&
           sampled.availableMemoryMb >= policy.minAvailableMemoryMb
       : heavyAdmission(policy, sampled, held, Date.now(), jobSettleMs) === "admit";
   }
@@ -744,7 +757,7 @@ export function createResourceGovernor(
     let granted = 0;
     const heads: HeavyArbitration["heads"] = [];
     const recordHead = (lane: HeavyJobLane, state: ResourceState) => {
-      const head = heavyHead(state);
+      const head = laneHead(lane, state, sampled);
       if (!head) return;
       heads.push({
         lane,
@@ -769,7 +782,7 @@ export function createResourceGovernor(
         await reconcile(state, seen, from.directory);
         let count = 0;
         for (;;) {
-          const head = heavyHead(state);
+          const head = laneHead(lane, state, sampled);
           // An older waiter at the head judges for itself; FIFO waits on it.
           if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled)) {
             recordHead(lane, state);
@@ -858,8 +871,9 @@ export function createResourceGovernor(
     const policyFor = async (state: ResourceState) =>
       options.lane !== "full" ? (await mainStore.read()).policy : state.policy;
     const admits = (state: ResourceState, policy: FleetResourcePolicy, sampled: ResourcePressure) =>
-      heavyHead(state)?.id === id && headAdmits(options.lane, state, policy, sampled);
-    const isHead = (state: ResourceState) => heavyHead(state)?.id === id;
+      laneHead(options.lane, state, sampled)?.id === id && headAdmits(options.lane, state, policy, sampled);
+    // A disk-freeing ticket may lead under the disk floor, which only a sample shows.
+    const isHead = (state: ResourceState) => heavyHead(state)?.id === id || freesDisk.has(id);
     /** A lease granted to this request, by an arbiter or by this waiter. */
     const mine = (state: ResourceState) =>
       state.leases.find(
