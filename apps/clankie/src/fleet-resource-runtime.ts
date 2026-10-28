@@ -96,6 +96,7 @@ export interface FleetResourceRuntime {
   ): Promise<SimulatorOwner>;
   /** Original-native renewal; a caller cannot supply lease/process ownership. */
   recordNativeActivity(pane: string, hook: FleetSeatHook, proof: ProjectProcessProof): Promise<boolean>;
+  recordRootHook(pane: string, hook: FleetSeatHook, proof: ProjectProcessProof): Promise<boolean>;
   observeSeats(seats: readonly ObservedSeat[]): Promise<void>;
   /** Notice seats whose panes use simulators booted outside leases. */
   noticeExternalSimulators(): Promise<void>;
@@ -478,6 +479,38 @@ export async function createFleetResourceRuntime(input: {
     },
     proveSimulatorSeat: async (request, options) =>
       (await (options?.retryUnproven ? proveFirst(request) : observe(request))).identity,
+    async recordRootHook(pane, hook, proof) {
+      if (
+        closed ||
+        proof.nativeSessionPending ||
+        hook.agentId !== undefined ||
+        hook.occurredAt === undefined ||
+        !["UserPromptSubmit", "PreToolUse", "PostToolUse"].includes(hook.event)
+      )
+        return false;
+      const agent = await resolver?.resolve(pane);
+      const session = agent?.session;
+      if (
+        agent?.agent !== "claude" ||
+        !session ||
+        (session.kind === "id" ? session.value : basename(session.value, ".jsonl")) !== hook.sessionId
+      )
+        return false;
+      const owner = await runtime
+        .proveSimulatorSeat({ seatId: pane, holderId: `claude:${hook.sessionId}` })
+        // allow-swallowed-rejection -- Lost native ownership cannot grant event time.
+        .catch(() => undefined);
+      if (!owner) return false;
+      if (
+        owner.occupantId !== proof.nativeOccupantId ||
+        (owner.fleet ?? "default") !== proof.fleet ||
+        owner.pane !== proof.pane ||
+        !isDeepStrictEqual(owner.binding, proof.binding) ||
+        !isDeepStrictEqual(owner.processes, proof.processes)
+      )
+        return false;
+      return simulators.recordActivity(owner, Date.parse(hook.occurredAt));
+    },
     async recordNativeActivity(pane, hook, proof) {
       const report = hook.activity;
       if (closed || hook.event !== "NativeActivity" || !report || proof.nativeSessionPending) return false;

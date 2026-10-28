@@ -935,6 +935,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       proof,
       context.req.raw.signal,
     );
+    if (recorded && identity && proof && (await identity.validate()))
+      await ctx.dependencies.fleetResources?.recordRootHook(pane.paneId, parsed.data, proof);
     return recorded
       ? context.json({
           schemaVersion: 1 as const,

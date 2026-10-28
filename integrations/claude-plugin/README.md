@@ -686,8 +686,19 @@ Shipping or loading the skill grants no tools and is not a live delivery check.
 
 ### Structured worker questions
 
+Worker 0.6.22 reports every `PreToolUse` and `PostToolUse` event for finite
+Claude root simulator renewal; only `AskUserQuestion` opens a question. The
+helper includes its observation timestamp and any native `agent_id`, so child
+activity cannot renew root leases. `UserPromptSubmit` is the other renewal event;
+Stop, StopFailure and SessionEnd grant no time. An event extends only one idle
+window and does not create an open-until-Stop state. Long non-heavy calls and
+quiet thinking past that window still require a positive current-root-turn API.
+New hook registrations apply after `/reload-plugins` or a new session, never by
+silently reloading a running worker. A strict older service receives the legacy
+body after a definite HTTP400 rejection and gains no renewal behavior.
+
 The worker plugin forwards synchronous `PermissionRequest` hooks and
-`PreToolUse` hooks matching `AskUserQuestion`. The service binds each request to
+`PreToolUse` questions matching `AskUserQuestion`. The service binds each request to
 the observed worker pane, native session, tool invocation and hook event, then
 projects its options into the hiring conversation. The lead answers through
 `message_seat.questionAnswer` with the exact request and question IDs. An

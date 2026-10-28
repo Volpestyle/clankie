@@ -175,6 +175,7 @@ export const FleetSeatHookSchema = z
       "Stop",
       "StopFailure",
       "PreToolUse",
+      "PostToolUse",
       "PermissionRequest",
       "SessionEnd",
     ]),
@@ -198,6 +199,9 @@ export const FleetSeatHookSchema = z
       })
       .strict()
       .optional(),
+    /** Native hook observation time; older hooks without it do not renew leases. */
+    occurredAt: z.iso.datetime().optional(),
+    agentId: z.string().min(1).max(200).optional(),
     toolName: z.string().min(1).max(200).optional(),
     permissionTransport: z.literal("channel").optional(),
     toolUseId: z.string().min(1).max(256).optional(),

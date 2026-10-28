@@ -19,6 +19,7 @@ import { createFleetResourceRuntime } from "../src/fleet-resource-runtime.ts";
 import { createFleetResourceRoutes } from "../src/fleet-resource-routes.ts";
 import { registerSeatRoutes } from "../src/app/seat-routes.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
+import type { FleetSeatHook } from "@clankie/protocol";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { clientPid } from "../src/local-fleet-proof.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
@@ -156,9 +157,29 @@ async function fixture() {
     projectProof: async (socket, pane) => ((await prove(socket, pane)) ? native() : undefined),
   });
   const app = new Hono();
+  let legacy = false;
+  const hooks: FleetSeatHook[] = [];
+  app.use("/v1/fleet/seats/:paneId/hook", async (context, next) => {
+    if (legacy) {
+      const body = await context.req.json();
+      if (body.occurredAt !== undefined || body.agentId !== undefined || body.event === "PostToolUse")
+        return context.json({ error: "invalid_request" }, 400);
+    }
+    await next();
+  });
   registerSeatRoutes({
     app,
-    dependencies: { captain: createStubCaptain(), fleetResources: resources, localFleet: link },
+    dependencies: {
+      captain: {
+        ...createStubCaptain(),
+        recordSeatHook: async (_pane, hook) => {
+          hooks.push(hook);
+          return true;
+        },
+      },
+      fleetResources: resources,
+      localFleet: link,
+    },
     authenticateLane: async () => ({
       denial: Response.json({ error: "operator_required" }, { status: 403 }),
     }),
@@ -237,6 +258,8 @@ async function fixture() {
   };
   return {
     root,
+    legacy: () => (legacy = true),
+    hooks: () => hooks,
     host,
     directory,
     resources,
@@ -459,5 +482,146 @@ it.skipIf(process.platform !== "darwin").each(["root", "child"])(
     // End only the governed command allocated by this proof.
     await f.governor.close();
     await copied;
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "root hook events renew only their exact session for one finite event-time idle window",
+  async () => {
+    const f = await fixture();
+    const hook = async (event: string, occurredAt = f.now(), extra = {}) =>
+      f.send({
+        hook: {
+          schemaVersion: 1,
+          event,
+          sessionId: "fixture-original-session",
+          occurredAt: new Date(occurredAt).toISOString(),
+          ...extra,
+        },
+      });
+    const lease = await f.acquire();
+    f.advance(590_000);
+    const eventAt = f.now();
+    await hook("UserPromptSubmit");
+    f.advance(20_000);
+    await f.resources.simulators.tick();
+    expect((await f.governor.simulatorReservations()).map((row) => row.id)).toEqual([lease.id]);
+    // A replay keeps the original event deadline, not receipt time.
+    await hook("UserPromptSubmit", eventAt);
+    await hook("Stop");
+    await hook("StopFailure");
+    await hook("SessionEnd");
+    f.advance(579_999);
+    await f.resources.simulators.tick();
+    expect(await f.governor.simulatorReservations()).toHaveLength(1);
+    f.advance(1);
+    await f.resources.simulators.tick();
+    expect(await f.governor.simulatorReservations()).toHaveLength(0);
+    // Esc has no Stop: the finite event alone must still expire.
+    for (const event of ["PreToolUse", "PostToolUse"]) {
+      const next = await f.acquire();
+      f.advance(590_000);
+      await hook(event);
+      f.advance(20_000);
+      await f.resources.simulators.tick();
+      expect((await f.governor.simulatorReservations()).map((row) => row.id)).toEqual([next.id]);
+      f.advance(580_000);
+      await f.resources.simulators.tick();
+      expect(await f.governor.simulatorReservations()).toHaveLength(0);
+    }
+    await f.acquire();
+    f.advance(590_000);
+    await hook("PreToolUse", f.now(), { sessionId: "another-session" });
+    await hook("PreToolUse", f.now(), { agentId: "child" });
+    await hook("PreToolUse", f.now() + 1);
+    await hook("PreToolUse", f.now() - 600_001);
+    f.advance(10_001);
+    await f.resources.simulators.tick();
+    expect(await f.governor.simulatorReservations()).toHaveLength(0);
+    // Root activity cannot borrow a native child's separately owned lease.
+    await f.acquire(`${f.owner.holderId}:agent:child`);
+    f.advance(590_000);
+    await hook("UserPromptSubmit");
+    f.advance(10_001);
+    await f.resources.simulators.tick();
+    expect(await f.governor.simulatorReservations()).toHaveLength(0);
+    await f.acquire();
+    f.advance(590_000);
+    f.deny();
+    await f.send({
+      hook: {
+        schemaVersion: 1,
+        event: "PreToolUse",
+        sessionId: "fixture-original-session",
+        occurredAt: new Date(f.now()).toISOString(),
+      },
+      hookExitCode: 1,
+    });
+    f.advance(10_001);
+    await f.resources.simulators.tick();
+    expect(await f.governor.simulatorReservations()).toHaveLength(0);
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "the shipped worker hook reports root event time, fences child events and falls back on a strict older host",
+  async () => {
+    const f = await fixture();
+    const lease = await f.acquire();
+    // Helper runs on the real wall clock; service fixture time is safely later.
+    f.advance(120_000);
+    await f.send({
+      workerHook: {
+        hook_event_name: "PreToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+        tool_input: { file_path: "PRIVATE_PATH" },
+      },
+    });
+    const pre = f.hooks().at(-1)!;
+    expect(pre).toMatchObject({
+      event: "PreToolUse",
+      sessionId: "fixture-original-session",
+      toolName: "Read",
+    });
+    expect(pre.occurredAt).toBeDefined();
+    expect(pre.toolInput).toBeUndefined();
+    expect((await f.governor.simulatorReservations())[0]).toMatchObject({
+      id: lease.id,
+      lastUsedAtMs: Date.parse(pre.occurredAt!),
+    });
+    await f.send({
+      workerHook: {
+        hook_event_name: "PostToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+        agent_id: "child",
+      },
+    });
+    expect(f.hooks().at(-1)).toMatchObject({ event: "PostToolUse", agentId: "child" });
+    expect((await f.governor.simulatorReservations())[0]?.lastUsedAtMs).toBe(Date.parse(pre.occurredAt!));
+    f.legacy();
+    await f.send({
+      workerHook: {
+        hook_event_name: "PreToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+      },
+    });
+    expect(f.hooks().at(-1)).toEqual({
+      schemaVersion: 1,
+      event: "PreToolUse",
+      sessionId: "fixture-original-session",
+      toolName: "Read",
+    });
+    const count = f.hooks().length;
+    await f.send({
+      workerHook: {
+        hook_event_name: "PostToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+      },
+    });
+    expect(f.hooks()).toHaveLength(count);
   },
 );

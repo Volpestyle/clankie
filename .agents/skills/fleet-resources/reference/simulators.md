@@ -104,16 +104,32 @@ original-native mod's five-second timer and exact `agent.list()` IDs/states.
 Reports expire after fifteen seconds, keep original state-change timestamps,
 and reject stale/future timestamps, replayed sequences, changed sessions and
 wrong producer processes. Waiting/idle children do not borrow a working sibling's
-activity. Root Claude turn IDs have no verified root discriminator in the inspected
-2.1.310 API, so root turn-only renewal remains unsupported; heavy work still retains
-those leases. Other unsupported/unavailable native activity fails closed.
+activity. Claude root UserPromptSubmit, PreToolUse and PostToolUse events with a native
+observation timestamp extend only that session's leases to one idle window from
+the event. Child hooks do not extend the root. Replay or delayed delivery does
+not move the original deadline; future/stale events and changed ownership confer
+no time. Stop, StopFailure and SessionEnd renew nothing. There is no permanent
+open-until-Stop state: Esc and a blocked prompt can omit Stop.
+
+The worker plugin registers all-tool PreToolUse and PostToolUse reporting. New
+registrations take effect after `/reload-plugins` or a new session; shipping the
+service does not change an existing seat's loaded hooks. Do not reload or restart
+someone's seat to obtain coverage. Older hosts receive the legacy hook body after
+a definite HTTP400 rejection; they do not gain event renewal.
+
+A single non-heavy tool call or quiet thinking beyond one idle window remains
+uncovered for Claude roots. The required native API must positively report the
+current root turn for the exact session/process and become idle on interrupt.
+Exact-holder queued/held heavy work already covers long heavy commands. A plain
+background process does not hold a simulator lease; a general process-holder path
+is a separate slice. Other unsupported/unavailable native activity fails closed.
 
 After verified work ends, the normal idle deadline starts at the prompt's native
 state-change time (or its first verified idle observation). Repeated idle reports
 cannot move that deadline. Lost observation starts expiry from the last proven
 activity; it never freezes a cached working state. Explicit touch still extends
-the normal idle deadline and is the fallback for unsupported native activity.
-Run any necessary fallback outside model turns. Release when finished.
+the normal idle deadline. Run long waits as blocking, process-owned jobs in the
+harness background; never run model sleep/touch loops. Release when finished.
 
 Activity observations are deliberately not durable authority: an observer restart
 must re-prove activity and otherwise falls back to the lease's explicit-use

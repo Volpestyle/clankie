@@ -157,14 +157,21 @@ lease without model-driven touches. Heavy association requires both the task
 holder and native process ancestry; a sibling or copied label cannot renew it.
 Unknown/stale activity never renews time. Explicit touch remains available.
 
-Native turn coverage currently supports Codex roots/children through read-only
-thread ancestry, and Claude local children through the original-native mod's
-finite renewals. Claude root turn identity is not yet proven by that API; a root
-lease needs exact-holder heavy work or explicit touch until that boundary is
-implemented. Missing/older native support also needs explicit touch. Never run a
-foreground touch loop; keep any necessary fallback outside the model turn.
-Release when finished. Details and source-proof limits are in the simulator
-reference.
+Codex roots/children use read-only native ancestry; Claude children use finite
+original-native renewals. Claude root UserPromptSubmit, PreToolUse and PostToolUse
+hooks extend only that exact session's leases to one idle window from the event.
+Stop, StopFailure and SessionEnd add no time; an interrupted root expires without
+a matching Stop. New hook registrations apply only after a plugin reload or new
+session; workers must not reload existing seats to obtain them.
+
+A long wait must retain its lease through an owned process: use exact-holder
+`clankie heavy --` for heavy work, and run that blocking command as a harness
+background task. A background process alone does not retain a simulator lease;
+there is no general simulator process-holder command yet. A non-heavy tool or
+quiet thinking beyond one window still needs a positive native root-turn API.
+Keep that gap explicit; never replace it with model sleep/touch loops. Explicit
+touch remains available for a deliberate extension. Release when finished.
+Details and source-proof limits are in the simulator reference.
 
 Release, idle expiry or a verified seat exit shuts the device down and keeps it
 for reuse; nothing deletes devices except an explicit owner tidy naming exact

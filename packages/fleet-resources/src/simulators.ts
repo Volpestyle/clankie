@@ -1306,6 +1306,26 @@ export function createSimulatorManager(input: {
         return rejected("lease_unavailable", "This holder's device is not confirmed booted.");
       return { outcome: "acquired", lease: view(lease) };
     },
+    /** A finite native event advances explicit use, never an ongoing working bit. */
+    async recordActivity(owner: SimulatorOwner, occurredAtMs: number): Promise<boolean> {
+      return serial(async () => {
+        const current = await prove(owner);
+        const { policy } = await input.governor.snapshot();
+        if (
+          !current ||
+          !sameSeat(current, owner) ||
+          !Number.isSafeInteger(occurredAtMs) ||
+          occurredAtMs > now() ||
+          occurredAtMs <= now() - policy.simulatorIdleMs
+        )
+          return false;
+        for (const lease of await reservations()) {
+          if (matchesOwner(lease, owner) && matchesOwner(lease, current) && occurredAtMs > lease.lastUsedAtMs)
+            await update(lease, { lastUsedAtMs: occurredAtMs });
+        }
+        return true;
+      });
+    },
     async touch(
       id: string,
       owner: SimulatorOwner,

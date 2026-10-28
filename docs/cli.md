@@ -4547,10 +4547,17 @@ same-holder queued/held heavy work with proven native process ancestry. Idle
 expiry counts from returning to the prompt; repeated idle readings do not renew
 it. Explicit touch still works. Unknown/stale observations cannot preserve a
 cached working state. Native turn coverage is Codex roots/children and Claude
-local children with the original-native activity mod; Claude root turn-only
-renewal remains unproven/unsupported because its API does not identify root turns.
-Those roots and other unsupported native paths need exact-holder heavy work or
-explicit touch. Run waits/fallbacks outside model turns and release on completion.
+local children with the original-native activity mod. Worker 0.6.22 also reports
+Claude root UserPromptSubmit, PreToolUse and PostToolUse events: each extends only
+its session's leases to one idle window from the event, without an ongoing
+working bit. Stop, StopFailure and SessionEnd renew nothing. New registrations
+require a plugin reload or new session; shipping does not reload existing seats.
+A single non-heavy tool call or quiet thinking past one window still lacks a
+positive current-root-turn API. Use exact-holder heavy retention for long heavy
+work and run waits as blocking harness background tasks. A plain background
+process does not retain a simulator lease; a general process-held simulator path
+is a separate follow-up. Never use model sleep/touch loops. Explicit touch remains
+available for deliberate extensions; release on completion.
 See the [simulator reference](../.agents/skills/fleet-resources/reference/simulators.md)
 for finite native evidence and cleanup guards.
 

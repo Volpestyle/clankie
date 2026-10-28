@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "boundary-evidence.json",
+      "size": 44962,
+      "sha256": "9754d4392927f9e3ba84d93cc793aec5aa6bd09ff1d77b914e7be3f13f15dae6",
+      "url": "clankie://evidence/sha256/9754d4392927f9e3ba84d93cc793aec5aa6bd09ff1d77b914e7be3f13f15dae6"
+    }
+  ]
+}

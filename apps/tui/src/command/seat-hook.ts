@@ -17,6 +17,7 @@ const EVENTS = new Set<FleetSeatHook["event"]>([
   "Stop",
   "StopFailure",
   "PreToolUse",
+  "PostToolUse",
   "PermissionRequest",
   "SessionEnd",
 ]);
@@ -49,6 +50,7 @@ export async function runSeatHookCommand(
   const hook = JSON.parse(input) as {
     hook_event_name?: unknown;
     session_id?: unknown;
+    agent_id?: unknown;
     transcript_path?: unknown;
     last_assistant_message?: unknown;
     error?: unknown;
@@ -77,13 +79,23 @@ export async function runSeatHookCommand(
     schemaVersion: 1,
     event,
     sessionId: hook.session_id,
+    ...(["UserPromptSubmit", "PreToolUse", "PostToolUse"].includes(event)
+      ? {
+          occurredAt: new Date().toISOString(),
+          ...(typeof hook.agent_id === "string" ? { agentId: hook.agent_id } : {}),
+        }
+      : {}),
     ...(typeof hook.tool_name === "string" ? { toolName: hook.tool_name } : {}),
     ...(event === "PermissionRequest"
       ? { toolUseId: randomUUID() }
       : typeof hook.tool_use_id === "string"
         ? { toolUseId: hook.tool_use_id }
         : {}),
-    ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
+    ...((event === "PermissionRequest" || (event === "PreToolUse" && hook.tool_name === "AskUserQuestion")) &&
+    hook.tool_input &&
+    typeof hook.tool_input === "object"
+      ? { toolInput: hook.tool_input }
+      : {}),
     ...(lastMessage === undefined || lastMessage.trim() === ""
       ? {}
       : { lastMessage: lastMessage.slice(0, OPERATOR_CONVERSATION_TEXT_MAX) }),
@@ -101,15 +113,30 @@ export async function runSeatHookCommand(
     ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),
   });
   if (!credential) throw new Error("Seat hook needs the operator credential");
-  const response = await (options.fetchImpl ?? fetch)(
-    new URL(fleetSeatHookPath(paneId), commandHost({ ...options, env })),
-    {
+  const sendHook = (value: FleetSeatHook) =>
+    (options.fetchImpl ?? fetch)(new URL(fleetSeatHookPath(paneId), commandHost({ ...options, env })), {
       method: "POST",
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(value),
       signal: AbortSignal.timeout(event === "PermissionRequest" || event === "PreToolUse" ? 570_000 : 10_000),
-    },
-  );
+    });
+  let response = await sendHook(body);
+  // A strict older host rejected this body without recording it.
+  if (
+    response.status === 400 &&
+    body.occurredAt !== undefined &&
+    // allow-swallowed-rejection -- Only a decoded schema refusal permits the legacy retry.
+    (
+      await response
+        .clone()
+        .json()
+        .catch(() => undefined)
+    )?.error === "invalid_request"
+  ) {
+    if (event === "PostToolUse") return 0;
+    const { occurredAt: _at, agentId: _agent, ...legacy } = body;
+    response = await sendHook(legacy);
+  }
   // An unknown seat is a pane Clankie is not driving; nothing to report.
   if (response.status === 404) return 0;
   if (!response.ok) throw new Error(`Seat hook was refused (${response.status})`);

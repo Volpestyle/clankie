@@ -58,6 +58,7 @@ async function reportOverLink(link, pane) {
       "Stop",
       "StopFailure",
       "PreToolUse",
+      "PostToolUse",
       "PermissionRequest",
       "SessionEnd",
     ].includes(event)
@@ -85,25 +86,55 @@ async function reportOverLink(link, pane) {
     schemaVersion: 1,
     event,
     sessionId: hook.session_id,
+    ...(["UserPromptSubmit", "PreToolUse", "PostToolUse"].includes(event)
+      ? {
+          occurredAt: new Date().toISOString(),
+          ...(typeof hook.agent_id === "string" ? { agentId: hook.agent_id } : {}),
+        }
+      : {}),
     ...(typeof hook.tool_name === "string" ? { toolName: hook.tool_name } : {}),
     ...(event === "PermissionRequest"
       ? { toolUseId: randomUUID() }
       : typeof hook.tool_use_id === "string"
         ? { toolUseId: hook.tool_use_id }
         : {}),
-    ...(hook.tool_input && typeof hook.tool_input === "object" ? { toolInput: hook.tool_input } : {}),
+    ...((event === "PermissionRequest" || (event === "PreToolUse" && hook.tool_name === "AskUserQuestion")) &&
+    hook.tool_input &&
+    typeof hook.tool_input === "object"
+      ? { toolInput: hook.tool_input }
+      : {}),
     ...(lastMessage ? { lastMessage: lastMessage.slice(0, TEXT_MAX) } : {}),
     ...(event === "StopFailure"
       ? { error: (typeof hook.error === "string" ? hook.error : "error").slice(0, SUMMARY_MAX) }
       : {}),
   };
   try {
-    const response = await fetch(seatRoute(link, pane, "hook"), {
-      method: "POST",
-      headers: { ...authorization(link), "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(event === "PermissionRequest" || event === "PreToolUse" ? 570_000 : 20_000),
-    });
+    const sendHook = (value) =>
+      fetch(seatRoute(link, pane, "hook"), {
+        method: "POST",
+        headers: { ...authorization(link), "content-type": "application/json" },
+        body: JSON.stringify(value),
+        signal: AbortSignal.timeout(
+          event === "PermissionRequest" || event === "PreToolUse" ? 570_000 : 20_000,
+        ),
+      });
+    let response = await sendHook(body);
+    // A strict older host rejects the new metadata before applying anything.
+    if (
+      response.status === 400 &&
+      body.occurredAt !== undefined &&
+      // allow-swallowed-rejection -- Only a decoded schema refusal permits the legacy retry.
+      (
+        await response
+          .clone()
+          .json()
+          .catch(() => undefined)
+      )?.error === "invalid_request"
+    ) {
+      if (event === "PostToolUse") return;
+      const { occurredAt: _at, agentId: _agent, ...legacy } = body;
+      response = await sendHook(legacy);
+    }
     if (response.ok && (event === "PermissionRequest" || event === "PreToolUse")) {
       const result = await response.json();
       if (result.hookOutput) {

@@ -129,6 +129,30 @@ process.on("message", (message) => {
         await heavy.catch(() => {});
         await heavyGovernor.close();
       }
+      if (message.workerHook) {
+        const result = await api.process.run(
+          [process.execPath, resolve(process.env.ACTIVITY_PLUGIN_ROOT, "bin/seat-hook.mjs")],
+          {
+            stdin: JSON.stringify(message.workerHook),
+            timeoutMs: 4500,
+          },
+        );
+        if (result.exitCode !== 0 || result.stderr) throw Error(result.stderr);
+      }
+      if (message.hook) {
+        const helper = new URL("../../../../integrations/claude-plugin/worker/bin/link.mjs", import.meta.url)
+          .href;
+        const code = `import { authorization, readLink, seatRoute } from ${JSON.stringify(helper)};
+          let input = ""; for await (const chunk of process.stdin) input += chunk;
+          const link = readLink(); const response = await fetch(seatRoute(link, process.env.HERDR_PANE_ID, "hook"), {
+            method: "POST", headers: { ...authorization(link), "content-type": "application/json" }, body: input
+          }); if (!response.ok) { process.stderr.write(await response.text()); process.exitCode = 1; }`;
+        const result = await api.process.run([process.execPath, "-e", code], {
+          stdin: JSON.stringify(message.hook),
+          timeoutMs: 4500,
+        });
+        if (result.exitCode !== (message.hookExitCode ?? 0)) throw Error(result.stderr);
+      }
       if (message.event) await emit(message.event, message.input);
       if (message.tick) for (const entry of timers) if (!entry.cancelled) await entry.callback();
       await drain();

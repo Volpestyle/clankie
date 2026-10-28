@@ -296,7 +296,10 @@ The task label alone cannot renew time. Native prompt idle starts the timeout;
 repeated idle observations do not extend it. Unknown evidence expires from the
 last proven activity. Explicit touch remains independent, as do reservation and
 runaway cleanup. The manager does not persist activity as authority across its
-restart. Supported native turn coverage and the open Claude root discriminator
+restart. Finite Claude root hook events instead advance the exact holder's durable
+explicit-use clock to their event time, giving one idle window with no permanent
+working state. Long quiet root turns and a general non-heavy process-held simulator
+path remain open. Supported native activity and the remaining root API requirement
 are documented in the [simulator reference](../../.agents/skills/fleet-resources/reference/simulators.md).
 
 Simulator reservations remain durable when request processes die. Only the

@@ -76,8 +76,7 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
             "timeout": 600
           }
-        ],
-        "matcher": "AskUserQuestion"
+        ]
       },
       {
         "matcher": "Bash",
@@ -102,6 +101,17 @@
       }
     ],
     "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
       {
         "hooks": [
           {
