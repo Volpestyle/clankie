@@ -3023,6 +3023,9 @@ PROJECT DAYS` sets the project's cycle length (default 7), starting with its
   bundles need a fresh check; the owner must reopen an item past landed before
   replacing its completion bundle. Completion past landed needs the item's bundle
   and a check; the owner's existing "It works" answer counts as a check.
+  The owner's paired app can also give a verdict with `post_owner_verdict`
+  ([ADR 0299](adr/0299-the-owners-app-gives-the-verdict-on-finished-work.md)). It has no
+  CLI form, because the operator credential is refused on purpose.
   For native-first work, an already-hired genuinely independent peer in the same
   project inspects the current ISSUE bundle and uses `linear_post_bundle_check`
   through its own authenticated `clankie_call`. Read back the same current bundle's

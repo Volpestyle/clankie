@@ -316,6 +316,25 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   });
 
   /** Owner domain matches project/account writes; exact presented principal is revalidated each time. */
+  /**
+   * The owner's own app (ADR 0299): an active Take Control device that no hosted account,
+   * support grant or automation run minted. Rechecked before every write it authorizes.
+   */
+  const ownerAppDevice = (deviceId: string): boolean => {
+    const record = ctx.devices.get(deviceId);
+    return (
+      record !== undefined &&
+      record.status === "active" &&
+      record.grants.terminalControl &&
+      record.supportGrantId === undefined &&
+      record.run === undefined &&
+      record.mintedBy !== "hosted-account" &&
+      !record.mintedBy.startsWith("support:")
+    );
+  };
+  /** Host-only ownerApp for a device principal that is the owner's own app; never for the operator bearer. */
+  const ownerAppFor = (principal: { readonly kind: string; readonly id: string }) =>
+    principal.kind === "device" && ownerAppDevice(principal.id) ? { deviceId: principal.id } : undefined;
   const questionOwnerAuthority = async (request: Request): Promise<QuestionAuthority | undefined> => {
     const original = ctx.hostedOriginalRequests.get(request);
     const deviceRequest = original ?? request;
@@ -612,12 +631,16 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             ? appActor(authority.principal.id)
             : CLANKIE_FOR_OWNER
           : undefined;
+        const ownerApp = authority ? ownerAppFor(authority.principal) : undefined;
         const result = await tracker.sync(
           command,
           {
             ...(actor ? { actor } : {}),
+            ...(ownerApp ? { ownerApp } : {}),
             beforeWrite: async () => {
               if (!(await allowed())) throw new Error("Owner authority expired");
+              if (ownerApp && !ownerAppDevice(ownerApp.deviceId))
+                throw new Error("Owner app authority expired");
             },
           },
           context.req.raw.signal,
@@ -1161,12 +1184,16 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           }
           return context.json({ result });
         }
+        const ownerApp = ownerAppFor(authority.principal);
         const result = await tracker.call(parsed.data.name, parsed.data.arguments, {
           actor,
+          ...(ownerApp ? { ownerApp } : {}),
           signal: context.req.raw.signal,
           beforeWrite: async () => {
             if (!(await authority.authorize()) || !authority.current())
               throw new Error("Owner authority expired");
+            if (ownerApp && !ownerAppDevice(ownerApp.deviceId))
+              throw new Error("Owner app authority expired");
           },
         });
         return context.json({ result });

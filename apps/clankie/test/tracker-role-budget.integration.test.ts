@@ -6,7 +6,7 @@ import { FileCredentialStore } from "@clankie/credential-broker";
 import { ProjectsSettingsSchema } from "@clankie/protocol";
 import type { TrackerRequestBudgetReport } from "@clankie/protocol/tracker-request-budget";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker, writeConvention } from "@clankie/work-items";
+import { createLocalTracker, trackerRoleRefusal, writeConvention } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { ProjectHires } from "../src/captain/project-hires.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -267,10 +267,20 @@ async function fixture(budget = new TrackerRequestBudget()) {
       env: { CLANKIE_OPERATOR_TOKEN: "owner", CLANKIE_CONTROL_PLANE_URL: "http://clankie.test" },
       fetchImpl: (input, init) => Promise.resolve(app.app.request(String(input), init)),
     }) as Promise<{ ok: boolean; body: Record<string, any> }>;
-  return { host, team, project, owner, hire, raw, call, tool, schemas, budgetReport, work, logged };
+  /** The same owner route without asserting success, for refusals. */
+  const ownerRaw = async (name: string, args: Record<string, unknown>) => {
+    const response = await app.app.request("/v1/tracker/owner/call", {
+      method: "POST",
+      headers: { authorization: "Bearer owner", "content-type": "application/json" },
+      body: JSON.stringify({ name, arguments: args }),
+    });
+    return { status: response.status, body: (await response.json()) as Record<string, any> };
+  };
+  return { host, team, project, owner, ownerRaw, hire, raw, call, tool, schemas, budgetReport, work, logged };
 }
 
 const LEAD_VERBS = [
+  "linear_post_owner_verdict",
   "linear_post_run_control",
   "linear_save_issue_status",
   "linear_save_project",
@@ -475,8 +485,60 @@ it("measures the worker tracker catalog against the full one", async () => {
     "w1:p1",
     full.map((entry) => entry.name),
   );
-  expect(worker.length).toBe(full.length - LEAD_VERBS.length);
+  // The owner app's verdict is in no agent catalog, so only the listed lead verbs are subtracted.
+  const listed = LEAD_VERBS.filter((name) => full.some((entry) => entry.name === name));
+  expect(listed).toEqual(LEAD_VERBS.filter((name) => name !== "linear_post_owner_verdict"));
+  expect(worker.length).toBe(full.length - listed.length);
   expect(JSON.stringify(worker).length).toBeLessThan(JSON.stringify(full).length);
   if (process.env.TRACKER_CATALOG_MEASURE)
     await writeFile(process.env.TRACKER_CATALOG_MEASURE, JSON.stringify({ full, worker }));
+});
+
+it("no agent lane, and not the operator bearer, gives the owner app's verdict (ADR 0299)", async () => {
+  const f = await fixture();
+  await f.hire("w1:p1", "builder");
+  // A finished item the verdict would otherwise apply to: landed, with a checked current bundle.
+  const issue = await f.call("w1:p1", "linear_save_issue", { title: "Finished work", project: f.project.id });
+  await f.call("w1:p1", "linear_post_issue_event", { issueId: issue.id, type: "result", stage: "landed" });
+  const sha256 = "a".repeat(64);
+  const bundle = await f.call("w1:p1", "linear_save_evidence_bundle", {
+    issueId: issue.id,
+    references: [{ recordId: "clip", sha256, url: `clankie://evidence/sha256/${sha256}`, type: "video" }],
+    gaps: [],
+  });
+  await f.owner("post_bundle_check", { bundleId: bundle.id });
+  const verdict = { issueId: issue.id, bundleId: bundle.id, verdict: "works" };
+
+  // No catalog lists it: not Clankie's operator lane, not a hired worker's.
+  const all = (await f.host.catalog("operator")).map((entry) => entry.qualifiedName);
+  expect(all).not.toContain("linear_post_owner_verdict");
+  expect(all).toContain("linear_post_bundle_check");
+  expect(await f.tool("w1:p1", "clankie_tools", { query: "owner verdict works send back" })).not.toContain(
+    "linear_post_owner_verdict",
+  );
+
+  // A worker calling it by name holds no grant for it; its role refuses it too.
+  expect(await f.raw("w1:p1", "linear_post_owner_verdict", verdict)).toEqual({
+    outcome: "refused",
+    reason: "worker_request_failed",
+    detail: "Tool or arguments are not granted",
+  });
+  expect(trackerRoleRefusal("worker", "post_owner_verdict", verdict)).toBe(
+    "post_owner_verdict is a lead or owner verb",
+  );
+  expect(trackerRoleRefusal("reviewer", "post_owner_verdict", verdict)).toBeDefined();
+  // Clankie's own lead lane reaches the tracker, which refuses without the owner app.
+  const lead = await f.host.call({
+    lane: "operator",
+    server: "linear",
+    tool: "post_owner_verdict",
+    arguments: verdict,
+  });
+  expect(JSON.stringify(lead)).toContain("owner_app_required");
+  // The operator bearer on the owner route is a local caller, not the owner's app.
+  expect(await f.ownerRaw("post_owner_verdict", verdict)).toMatchObject({
+    status: 422,
+    body: { reason: "owner_app_required" },
+  });
+  expect(await f.owner("get_issue", { id: issue.id })).toMatchObject({ stage: "landed" });
 });

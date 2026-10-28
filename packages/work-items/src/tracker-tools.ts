@@ -58,6 +58,12 @@ export interface TrackerToolCallOptions {
   readonly authorizeLeadClosure?: (projectId: string | null) => Promise<() => void>;
   /** Host-stamped origin recorded on resulting item events (e.g. owner_ask); never a tool argument. */
   readonly via?: string;
+  /**
+   * Host-only proof that the owner's own app is calling (ADR 0299): an active
+   * terminalControl device that is not a hosted, support or automation pairing.
+   * Only post_owner_verdict reads it. Tool arguments and the operator bearer never supply it.
+   */
+  readonly ownerApp?: { readonly deviceId: string };
   /** The caller went away: a waiting read (list_changes waitMs) stops. */
   readonly signal?: AbortSignal;
 }
@@ -110,6 +116,9 @@ export const INBOX_TOOLS: ReadonlySet<string> = new Set([
   "post_unsnooze_inbox_item",
 ]);
 
+/** Writes only the owner's own app may make (ADR 0299); no agent lane lists them. */
+export const OWNER_APP_TOOLS: ReadonlySet<string> = new Set(["post_owner_verdict"]);
+
 /** Built-in tracker only: write receipts, the audit log, preconditions and the item event stream. */
 export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   ...INBOX_TOOLS,
@@ -124,6 +133,7 @@ export const BUILT_IN_TRACKER_TOOLS: ReadonlySet<string> = new Set([
   "save_evidence_bundle",
   "get_evidence_bundle",
   "post_bundle_check",
+  "post_owner_verdict",
   "post_issue_ask",
   "post_run_control",
   "save_run",
@@ -143,10 +153,12 @@ export type TrackerRole = "worker" | "reviewer" | "lead" | "owner";
 
 /**
  * Lead and owner verbs a worker or reviewer neither sees nor may call: run control,
- * status and project (cycle length) administration, owner-only review retirement and the
- * owner's mailbox. No hired seat had written any of them in the live audit log.
+ * status and project (cycle length) administration, owner-only review retirement, the
+ * owner's mailbox and the owner app's verdict. No hired seat had written any of them in
+ * the live audit log.
  */
 const LEAD_TRACKER_TOOLS: ReadonlySet<string> = new Set([
+  ...OWNER_APP_TOOLS,
   "post_run_control",
   "save_issue_status",
   "save_project",
@@ -260,6 +272,8 @@ export interface TrackerItemEvent {
   readonly requestId?: string;
   readonly gate?: "plan" | "spend" | "destructive_action" | "merge" | "external_write";
   readonly purpose?: "decision" | "gate";
+  /** The owner's app device that carried an owner_app verdict (ADR 0299). */
+  readonly deviceId?: string;
 
   /** Host-stamped origin, e.g. owner_ask when an owner answer caused it. */
   readonly via?: string;
@@ -936,6 +950,18 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
     "Built-in tracker only. Independently check the current bundle by its ID; its publisher and actors who did the work cannot self-check. For native-first work, use an already-hired genuinely independent peer in the same project through that peer's own authenticated native channel. Children sharing the implementer's bridge and the CLI do not supply that peer's identity. Read back the current bundle, checked actor and matching bundle_checked event. An owner verification counts too.",
     { bundleId: string, body: { ...string, maxLength: 4000 }, idempotencyKey },
     ["bundleId"],
+  ),
+  tool(
+    "post_owner_verdict",
+    "Built-in tracker only, and only from the owner's own paired app (ADR 0299); every other caller is refused with owner_app_required. On a landed or delivered item, works marks it owner-verified; send_back posts the note as the owner's comment and reopens the item to accepted. bundleId must be the item's current bundle, the proof the owner saw.",
+    {
+      issueId: string,
+      bundleId: string,
+      verdict: { type: "string", enum: ["works", "send_back"] },
+      note: { ...string, maxLength: 4000 },
+      idempotencyKey,
+    },
+    ["issueId", "bundleId", "verdict"],
   ),
   tool(
     "post_issue_ask",

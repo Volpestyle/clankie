@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { TAKE_CONTROL_GRANTS, type TrackerSyncCommand } from "@clankie/protocol";
-import { createLocalTracker } from "@clankie/work-items";
+import { createLocalTracker, type LocalTrackerOptions } from "@clankie/work-items";
 import { createClankieApp } from "../../src/app.ts";
 import { createStubCaptain } from "../../src/captain/port.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../../relay/src/device-auth.ts";
@@ -14,9 +14,9 @@ import { createDeviceConversationDispatch } from "../../../relay/src/conversatio
 import { createOperatorConversationRelayHandler } from "../../../relay/src/operator-conversations.ts";
 
 /** Real journal, pairing, signed sessions, HTTP host and relay; the conversation port is unused. */
-export async function syncFixture() {
+export async function syncFixture(trackerOptions: Omit<LocalTrackerOptions, "directory"> = {}) {
   const root = await mkdtemp(join(tmpdir(), "tracker-sync-"));
-  const tracker = createLocalTracker({ directory: root });
+  const tracker = createLocalTracker({ directory: root, ...trackerOptions });
   const host = await createClankieApp({
     captain: createStubCaptain(),
     builtInTracker: tracker,
@@ -57,8 +57,13 @@ export async function syncFixture() {
       body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
     });
-  const pair = async (name: string, grants = TAKE_CONTROL_GRANTS) => {
-    const offer = await (await post(origin, "/v1/pairing/offer", {}, "owner")).json();
+  /** `offer` carries pairing offer options, such as an automation `run`. */
+  const pair = async (
+    name: string,
+    grants = TAKE_CONTROL_GRANTS,
+    offerOptions: Record<string, unknown> = {},
+  ) => {
+    const offer = await (await post(origin, "/v1/pairing/offer", offerOptions, "owner")).json();
     const pending = await (
       await post(
         origin,
@@ -134,5 +139,7 @@ export async function syncFixture() {
     await rm(root, { recursive: true, force: true });
   };
   const revoke = (deviceId: string) => post(origin, `/v1/devices/${deviceId}/revoke`, {}, "owner");
-  return { root, tracker, pair, sync, stream, revoke, close };
+  /** A direct host request, for routes other than the relay's sync dispatch. */
+  const request = (path: string, body: unknown, token: string) => post(origin, path, body, token);
+  return { root, tracker, pair, sync, stream, revoke, close, request };
 }

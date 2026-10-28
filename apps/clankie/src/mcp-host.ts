@@ -79,6 +79,7 @@ import {
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import {
+  OWNER_APP_TOOLS,
   refuseBuiltInTrackerFeatures,
   trackerArgumentReferences,
   TRACKER_LEAD,
@@ -571,6 +572,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     server.id === "linear" && server.command === API_TRACKER_COMMAND;
   const trackerCatalog = (options.localTracker ?? options.linearApiTracker)?.catalog() ?? [];
   const trackerNames = new Set(trackerCatalog.map((tool) => tool.name));
+  // The owner app's verdict (ADR 0299) is never offered to an agent; a call by name still reaches
+  // the tracker, which refuses it without the host's ownerApp proof.
+  const listedTrackerCatalog = trackerCatalog.filter((tool) => !OWNER_APP_TOOLS.has(tool.name));
   const trackerRole = async (principalId: string): Promise<"worker" | "reviewer"> =>
     // An unresolvable role gets the narrowest profile.
     options.trackerRoleForWorker
@@ -590,7 +594,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
   });
   const canonicalTrackerCatalog = (): McpToolDescriptor[] => [
     graphqlDescriptor(),
-    ...trackerCatalog.map((tool) => ({
+    ...listedTrackerCatalog.map((tool) => ({
       ...tool,
       server: "linear",
       qualifiedName: `linear_${tool.name}`,
@@ -809,7 +813,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       throw new Error(state.failure.reason);
     }
     const localConnection: McpConnection = {
-      listTools: async () => trackerCatalog,
+      listTools: async () => listedTrackerCatalog,
       callTool: async (name, args) => {
         try {
           return {
@@ -917,9 +921,9 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     // The canonical subset retains identical schemas even when the owner connects
     // Linear mid-session. The rest of Linear's native catalog remains discoverable.
     const exposed = isApiTracker(server)
-      ? options.linearApiTracker!.catalog()
+      ? options.linearApiTracker!.catalog().filter((tool) => !OWNER_APP_TOOLS.has(tool.name))
       : server.id === "linear" && (options.localTracker || options.linearApiTracker)
-        ? [...listed.filter((tool) => !trackerNames.has(tool.name)), ...trackerCatalog]
+        ? [...listed.filter((tool) => !trackerNames.has(tool.name)), ...listedTrackerCatalog]
         : listed;
     const projected = exposed
       .filter((tool) => {

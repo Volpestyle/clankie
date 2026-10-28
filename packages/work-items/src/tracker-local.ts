@@ -450,6 +450,7 @@ interface WriteContext {
   readonly guidedReviewCapture?: GuidedReviewCapture;
   readonly via?: string;
   readonly authorizeLeadClosure?: TrackerToolCallOptions["authorizeLeadClosure"];
+  readonly ownerApp?: TrackerToolCallOptions["ownerApp"];
   readonly closureFences?: (() => void)[];
 }
 
@@ -1051,6 +1052,7 @@ function moveStage(
   context: WriteContext,
   now: string,
   body?: string,
+  extra?: { readonly deviceId: string },
 ): void {
   const current = stageOf(issue);
   const back = DELIVERY_STAGES.indexOf(target) < DELIVERY_STAGES.indexOf(current);
@@ -1086,6 +1088,7 @@ function moveStage(
     to: target,
     status: store.issueStatuses.find((status) => status.id === issue.statusId)!.name,
     ...(body === undefined ? {} : { body }),
+    ...extra,
   });
 }
 
@@ -1134,6 +1137,7 @@ async function recordIssueChanges(
   // These record their own stage events.
   if (
     name === "post_issue_event" ||
+    name === "post_owner_verdict" ||
     name === "sync_releases" ||
     name === "rollover_cycles" ||
     name === "sync_transaction"
@@ -1653,6 +1657,69 @@ function currentBundle(store: Store, issueId: string, runId: string | null = nul
       ? bundles.findLast((entry) => entry.issueId === issueId && entry.runId === runId)
       : bundles[at.at(-1)!];
   return bundle && owned(store.bundles!, bundle);
+}
+
+/**
+ * The owner's verdict from his own app (ADR 0299). Only the host sets `ownerApp`, after
+ * proving an active, non-automation Take Control device; every agent lane and the operator
+ * bearer arrive without it. The verdict is the owner's: its events carry the human owner,
+ * `via: owner_app` and the device. The records it touches keep the app actor that carried it.
+ */
+function postOwnerVerdict(
+  store: Store,
+  args: Record<string, unknown>,
+  context: WriteContext,
+  now: string,
+  options: LocalTrackerOptions,
+) {
+  if (context.ownerApp === undefined)
+    throw new TrackerWriteRefused("owner_app_required", "only the owner's own paired app gives a verdict");
+  const issue = owned(store.issues, findIssue(store, args.issueId as string));
+  options.assertIssueWrite?.(issueView(store, issue));
+  const stage = stageOf(issue);
+  if (stage !== "landed" && stage !== "delivered")
+    throw new TrackerWriteRefused(
+      "verdict_not_due",
+      `a verdict is for landed or delivered work, not ${stage}`,
+    );
+  const bundle = currentBundle(store, issue.id);
+  if (bundle === undefined)
+    throw new TrackerWriteRefused("evidence_bundle_required", "a verdict needs the item's evidence bundle");
+  if (bundle.id !== args.bundleId)
+    throw new TrackerWriteRefused(
+      "bundle_superseded",
+      "the verdict names a superseded bundle; review the current proof",
+    );
+  const note = typeof args.note === "string" ? args.note.trim() : "";
+  const owner: WriteContext = {
+    ...context,
+    actor: { ...TRACKER_OWNER, onBehalfOf: [] },
+    via: "owner_app",
+  };
+  const device = { deviceId: context.ownerApp.deviceId };
+  if (args.verdict === "works") {
+    moveStage(store, issue, "owner-verified", owner, now, note || undefined, device);
+  } else {
+    if (note.length === 0)
+      throw new TrackerWriteRefused("note_required", "say what still isn't right when sending work back");
+    const comment: Comment = {
+      id: randomUUID(),
+      body: note,
+      issueId: issue.id,
+      projectId: null,
+      statusUpdateId: null,
+      parentId: null,
+      userId: store.user.id,
+      quotedText: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.comments.push(comment);
+    appendEvent(store, owner, now, issue, { type: "comment", body: note, commentId: comment.id, ...device });
+    moveStage(store, issue, "accepted", owner, now, note, device);
+  }
+  issue.updatedAt = now;
+  return issueView(store, issue);
 }
 
 function checkBundle(
@@ -3683,6 +3750,8 @@ async function dispatch(
       checkBundle(store, bundle, context, now, args.body as string | undefined);
       return bundle;
     }
+    case "post_owner_verdict":
+      return postOwnerVerdict(store, args, context, now, options);
     case "post_issue_ask":
       return postAsk(store, args, context, now, options);
     case "post_run_control":
@@ -5162,6 +5231,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       ...(callOptions?.authorizeLeadClosure === undefined
         ? {}
         : { authorizeLeadClosure: callOptions.authorizeLeadClosure }),
+      ...(callOptions?.ownerApp === undefined ? {} : { ownerApp: callOptions.ownerApp }),
       closureFences: [],
     };
     const firstEvent = (store.events?.length ?? 0) + 1;

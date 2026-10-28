@@ -131,6 +131,7 @@ its on-behalf-of chain, outermost first, and the model when the host knows it.
 | Owner's explicit `clankie work owner`     | `human` `owner`                      | none            |
 | Owner's verify/gate answer (ADR 0245)     | `human` `owner`, `via: owner_ask`    | none            |
 | Owner write from an app device            | `app` `device:<id>`                  | owner           |
+| Owner app verdict (ADR 0299) events       | `human` `owner`, `via: owner_app`    | none            |
 | Standalone use with no host               | the store's visibly local user       | none            |
 
 The operator credential proves a caller on this machine (the lead seat, a hire's

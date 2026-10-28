@@ -104,7 +104,9 @@ record IDs, matching sha256 and `clankie://evidence/sha256/…` links, typed
 first. Read with `linear_get_evidence_bundle`; item/run reads include their
 current bundle. Completion past landed requires the item's bundle and an
 independent `linear_post_bundle_check {bundleId, body?}`. Whoever did the work
-cannot check it. The owner's verify answer counts as a check. Replacing a bundle
+cannot check it. The owner's verify answer counts as a check, and so does a
+`post_owner_verdict` from the owner's own paired app (ADR 0299). No agent, the
+lead included, can call that verb; never try to stand in for it. Replacing a bundle
 requires another check; the owner must reopen an item past landed before its
 completion bundle can be replaced. Name gaps honestly. Release sync obeys the same gate.
 
