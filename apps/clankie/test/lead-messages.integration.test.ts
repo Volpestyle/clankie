@@ -60,8 +60,7 @@ it.each([false, true])(
 );
 
 it("VUH-2196: a local lead's seat confirms a lead message in time while another machine is unreachable", async () => {
-  // Past the 2s head acknowledgment window (live it was a ~10s ssh timeout), yet
-  // inside the roster's 3s read budget so the fixture still sees its local lead.
+  // Past the 2s head acknowledgment window (live it was a ~10s ssh timeout).
   const f = await leadChatFixture(false, cleanup, { slowFleetMs: 2_500 });
   const [global, work] = f.leads as [string, string];
   const workChannel = await f.bridge(work);
