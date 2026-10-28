@@ -173,8 +173,8 @@ export interface InstallDoctorReport {
     | import("@clankie/protocol/tracker-request-budget").TrackerRequestBudgetReport
     | { readonly status: "unavailable"; readonly detail: string };
   /**
-   * The built-in store's `tracker.json` against the single-string limit its open still parses
-   * under (LOCAL-VUH-47), from file metadata alone; absent without a store.
+   * The built-in store's checkpoint size against the previous build's single-string limit
+   * (LOCAL-VUH-49), from file metadata alone; absent without a store.
    */
   readonly trackerCheckpoint?:
     | (CheckpointSize & { readonly directory: string })
@@ -833,7 +833,7 @@ function collectRemediations(input: {
     input.trackerCheckpoint.state === "warn"
   )
     remediations.push(
-      `The built-in tracker's checkpoint is ${String(Math.round(input.trackerCheckpoint.bytes / 1e6))} MB, past half the ${String(Math.round(input.trackerCheckpoint.limitBytes / 1e6))} MB it can be opened at. It needs retention or a streamed open before it reaches that (LOCAL-VUH-49).`,
+      `The built-in tracker's checkpoint is ${String(Math.round(input.trackerCheckpoint.bytes / 1e6))} MB, past half the ${String(Math.round(input.trackerCheckpoint.limitBytes / 1e6))} MB previous-build string limit. This build streams checkpoint open; older builds may refuse large checkpoints. Keep this build available for rollback and use the storage recovery guide (packages/work-items/README.md#storage).`,
     );
   return remediations;
 }

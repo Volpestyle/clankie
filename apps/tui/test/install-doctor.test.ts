@@ -223,7 +223,7 @@ describe("install doctor", () => {
     expect(JSON.stringify(disabled)).not.toContain("isolated-doctor-fixture");
   });
 
-  it("reports the built-in tracker's checkpoint against the single-string limit and warns at half (LOCAL-VUH-47)", async () => {
+  it("reports the built-in tracker's checkpoint against the previous-build string limit and explains streamed open (LOCAL-VUH-49)", async () => {
     const root = await installRoot();
     const store = join(root, "state", "tracker");
     const inspect = () =>
@@ -253,7 +253,7 @@ describe("install doctor", () => {
       state: "ok",
     });
     expect(formatDoctorReport(small)).toContain(
-      "✓ Tracker checkpoint · 0.0 MB of the 537 MB it can be opened at · warns at 268 MB",
+      "✓ Tracker checkpoint · 0.0 MB · streamed open · previous-build string limit 537 MB · rollback warning at 268 MB",
     );
     expect(small.remediations.join("\n")).not.toContain("checkpoint");
 
@@ -262,10 +262,10 @@ describe("install doctor", () => {
     const large = await inspect();
     expect(large.trackerCheckpoint).toMatchObject({ state: "warn" });
     expect(formatDoctorReport(large)).toContain(
-      "! Tracker checkpoint · 268 MB of the 537 MB it can be opened at",
+      "! Tracker checkpoint · 268 MB · streamed open · previous-build string limit 537 MB",
     );
-    expect(large.remediations).toContainEqual(expect.stringContaining("retention or a streamed open"));
-    expect(large.remediations.join("\n")).toContain("LOCAL-VUH-49");
+    expect(large.remediations).toContainEqual(expect.stringContaining("This build streams checkpoint open"));
+    expect(large.remediations.join("\n")).toContain("packages/work-items/README.md#storage");
 
     // An unreadable store is one unknown field, not a failed card.
     await rm(store, { recursive: true });

@@ -1170,3 +1170,28 @@ Status: accepted (lead-approved scope, 2026-10-27).
 - **`clankie doctor` reports the checkpoint against the single-string limit.** Open
   still parses the checkpoint under that limit (536,870,888 characters). Doctor warns
   at half. Retention or a streamed open is LOCAL-VUH-49.
+
+### Amendment: streamed checkpoint open (2026-10-28, LOCAL-VUH-49)
+
+Choose streamed open over retention. Dropping events or audit would lose provenance;
+expiring receipts would change keyed-write reconciliation. None is necessary to
+remove the demonstrated whole-checkpoint string ceiling. The existing JSON layout,
+journal framing, hash chains and Vitest full-diff cross-checks remain unchanged.
+Large opens assemble top-level arrays one record at a time, hash the exact bytes
+being decoded and run the same store validation before publishing. Small files
+(up to 8 MiB) keep the native JSON parser. Host snapshot/routing reads share the
+same decoder. Checkpoint writers already emit records in chunks.
+
+The pre-build synthetic benchmark at 600 commits/day measured 300,403,245 bytes /
+1,084.8 ms at 60 days, 450,219,292 / 1,623.4 ms at 90, and 900,484,451 bytes /
+string-limit refusal at 180. The synthetic replacement for the deleted original
+seed uses its commit/issue/comment/receipt proportions, but different payloads;
+it is about 12.5% larger than LOCAL-VUH-47's 60-day checkpoint. Decision, after
+measurements and rollback evidence are in the
+[measurement record](../testing/2026-10-28-local-vuh-49-streamed-open/README.md).
+
+Previous journal builds read/write the unchanged layout below their string ceiling;
+above it they refuse before writing. Doctor retains the old limit and half-limit
+warning as rollback headroom and points to the storage guide. Whole-store memory,
+individual record size and legacy export/cutover string ceilings remain. The
+unisolated stale-client FastJsonStringifier OOM in LOCAL-VUH-51 is not proven fixed.

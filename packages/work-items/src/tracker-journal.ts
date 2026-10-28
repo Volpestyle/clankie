@@ -24,10 +24,8 @@ export const CHECKPOINT_MIN_BYTES = 4 * 1024 * 1024;
 /** Larger applied results stay only in their journal record; the receipt points at it. */
 export const RECEIPT_RESULT_BYTES = 1024;
 
-/**
- * Open still parses `tracker.json` as one string, so V8's maximum string length bounds the
- * checkpoint (LOCAL-VUH-47). A UTF-8 byte decodes to at most one UTF-16 code unit, so bytes on
- * disk are a safe measure. Doctor warns at half, months ahead at fleet volume (about 4.4 MB a day).
+/** Previous builds parse the whole checkpoint as one string. These thresholds now warn
+ * about rollback compatibility, not the streamed reader's capacity (LOCAL-VUH-49).
  */
 export const CHECKPOINT_STRING_LIMIT = bufferConstants.MAX_STRING_LENGTH;
 export const CHECKPOINT_WARN_RATIO = 0.5;

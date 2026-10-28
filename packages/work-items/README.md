@@ -275,15 +275,28 @@ hand:
 4. Once the store opens, `exportTrackerStore` writes it as one file for the rollback
    steps below.
 
-**Checkpoint size.** Open still parses `tracker.json` as one string, so V8's maximum
-string length (about 537 MB) bounds it. At fleet volume that is about four months.
-`clankie doctor` reports the checkpoint's size against that limit and warns at half
-(`trackerCheckpointSize`). Retention or a streamed open has to land before the limit;
-that is LOCAL-VUH-49. This string-length bound is not an operational guarantee:
-a sealing stress run aborted in V8 JSON serialization with a 294.83 MB checkpoint
-and 29.15 MB live tail. The exact serialization call remains unproven; the
-[retained Zone OOM finding](../../docs/testing/2026-10-27-local-vuh-51-refresh/README.md#zone-oom-finding-local-vuh-49)
-also belongs to LOCAL-VUH-49's streamed seal/open investigation.
+**Checkpoint size.** Large checkpoint opens stream the top-level JSON arrays one record
+at a time (LOCAL-VUH-49). Files up to 8 MiB use the native whole-file parser. The
+JSON layout is unchanged, and both paths run the same schema and event, audit and
+sync chain checks before publishing a snapshot. Host snapshot and routing readers
+use the same decoder. No events, audit entries, receipts or journal history are
+expired. Checkpoint writing already streams records too.
+
+The whole store still lives in memory, and an individual record or non-array field
+must fit in one JavaScript string. Streaming removes the whole-checkpoint string
+ceiling, not all memory or response-size limits. The unrelated FastJsonStringifier
+abort in the [retained Zone OOM finding](../../docs/testing/2026-10-27-local-vuh-51-refresh/README.md#zone-oom-finding-local-vuh-49)
+was not isolated to sealing and is not claimed fixed. Decision, synthetic 60/90/180-day
+measurements and real previous-build rollback proof:
+[LOCAL-VUH-49](../../docs/testing/2026-10-28-local-vuh-49-streamed-open/README.md).
+
+`clankie doctor` still reports checkpoint size against the previous runtime's
+single-string limit (about 537 MB), warning at half for rollback headroom. This
+build streams the open; a previous runtime can read and write the unchanged format
+below its own string ceiling. Above that ceiling it refuses before writing and
+leaves the store unchanged. Keep a streaming build available when rolling back a
+large store. The legacy export/cutover helpers still assemble a whole-file string;
+their old size ceiling remains, and they refuse rather than produce a partial export.
 
 **Rolling back to a journal build from before framing** (`f59461d17` up to
 LOCAL-VUH-47) needs nothing. That build reads framed lines and appends unframed ones,

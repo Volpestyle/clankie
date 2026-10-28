@@ -12,11 +12,22 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, openSync, readFileSync, writeSync, closeSync, fsyncSync } from "node:fs";
 import { join } from "node:path";
+import {
+  writeCheckpointFile,
+  writeSegment,
+  startSegment,
+  journalLine,
+} from "../../../../packages/work-items/src/tracker-journal.ts";
 import { parseArgs } from "node:util";
 
 const COMMITS_PER_DAY = 600;
 const { values } = parseArgs({
-  options: { template: { type: "string" }, days: { type: "string" }, out: { type: "string" } },
+  options: {
+    template: { type: "string" },
+    days: { type: "string" },
+    out: { type: "string" },
+    checkpoint: { type: "boolean" },
+  },
 });
 if (!values.template || !values.days || !values.out)
   throw new Error("--template, --days and --out are required");
@@ -110,6 +121,29 @@ const store: Record<string, unknown> = {
   syncId: out.syncLog.length,
 };
 mkdirSync(values.out, { recursive: true, mode: 0o700 });
+if (values.checkpoint) {
+  const history = store.syncLog as { syncId: number; hash: string }[];
+  const sealed = await writeSegment(
+    values.out,
+    1,
+    history.map((commit) => journalLine({ syncId: commit.syncId, commit })),
+  );
+  const head = history.at(-1)!;
+  delete store.syncLog;
+  delete store.syncBase;
+  store.journal = {
+    version: 1,
+    syncId: head.syncId,
+    syncHash: head.hash,
+    since: head.syncId,
+    sealed: [sealed],
+  };
+  await startSegment(values.out, head.syncId + 1);
+  console.log(
+    JSON.stringify({ days, ...(await writeCheckpointFile(store, join(values.out, "tracker.json"))) }),
+  );
+  process.exit(0);
+}
 const file = openSync(join(values.out, "tracker.json"), "w", 0o600);
 writeSync(file, "{");
 Object.entries(store).forEach(([key, value], index) => {

@@ -288,3 +288,14 @@ treat it as current state.
 reports the pilot writes Linear never saw. Those writes, including every
 `LOCAL-TEAM-n` item, then exist only in the kept pilot file, never in Linear.
 Show the owner that count before a switch-back.
+
+## Checkpoint capacity and rollback
+
+Large built-in checkpoints stream open record by record; all schema and history
+chain checks still apply, and history is not expired. The JSON layout is unchanged.
+Doctor's checkpoint warning measures headroom for an older runtime's whole-file
+string parser, not this runtime's open ceiling. A previous build refuses oversized
+checkpoints before writing; keep a streaming build available. The full store still
+needs memory, and individual records and legacy export/cutover still have string
+limits. Journal damage recovery and rollback steps live in
+[the storage reference](../../../../packages/work-items/README.md#storage).

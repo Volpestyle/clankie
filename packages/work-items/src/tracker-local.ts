@@ -1,3 +1,4 @@
+import { readCheckpointFile, readCheckpointBytes, type CheckpointRead } from "./tracker-checkpoint.ts";
 import {
   captureGuidedReview,
   validateGuidedReviewContent,
@@ -717,7 +718,10 @@ function newProject(store: Store, name: string, now: string): Project {
 
 /** Corruption is a hard error, never an empty store that would replace the owner's work. */
 function parseStore(content: string): Store {
-  const value: unknown = JSON.parse(content);
+  return validateStore(JSON.parse(content));
+}
+
+function validateStore(value: unknown): Store {
   if (value === null || typeof value !== "object") throw new Error("Invalid local tracker store");
   const store = value as Store;
   if (
@@ -4911,28 +4915,28 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   const shared = committedStores.get(path) ?? {};
   committedStores.set(path, shared);
   /** `tracker.json` as committed: the single legacy file, or a checkpoint plus its journal tail. */
-  const openCommitted = async (bytes: Buffer, version: string): Promise<Committed> => {
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    const parsed = parseStore(bytes.toString("utf8"));
+  const openCommitted = async (checkpoint: CheckpointRead, version: string): Promise<Committed> => {
+    const { digest, bytes } = checkpoint;
+    const parsed = validateStore(checkpoint.value);
     const header = parsed.journal;
-    if (header === undefined) return { version, digest, bytes: bytes.length, store: settle(parsed) };
+    if (header === undefined) return { version, digest, bytes, store: settle(parsed) };
     delete parsed.journal;
     const tail = await readJournalTail(directory, header, { verified: verifiedSegments });
     if (tail.live === undefined) throw new Error("Tracker journal has no segment to append to");
     return {
       version,
       digest,
-      bytes: bytes.length,
+      bytes,
       store: settle(replayVerified(parsed, tail.records)),
-      journal: { header, live: tail.live, bytes: tail.bytes, checkpointBytes: bytes.length },
+      journal: { header, live: tail.live, bytes: tail.bytes, checkpointBytes: bytes },
     };
   };
   /** Another process or backend committed: replay its journal records, or reopen. */
   const refresh = async (version: string, read?: Buffer): Promise<Committed> => {
-    const bytes = read ?? (await readFile(path));
+    const checkpoint = read === undefined ? await readCheckpointFile(path) : await readCheckpointBytes(read);
     const current = shared.current;
-    // Only byte-identical, already validated content may skip parsing/auditing.
-    if (current !== undefined && createHash("sha256").update(bytes).digest("hex") === current.digest) {
+    // Only byte-identical, already validated content may skip schema and chain validation.
+    if (current !== undefined && checkpoint.digest === current.digest) {
       if (current.journal === undefined) return { ...current, version };
       try {
         const head = current.store.syncLog?.at(-1) ?? current.store.syncBase!;
@@ -4950,7 +4954,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       } catch {
         // Anything but a clean continuation reopens from the checkpoint and proves it all again.
       }
-      const reopened = await openCommitted(bytes, version);
+      const reopened = await openCommitted(checkpoint, version);
       // The same checkpoint with fewer commits lost one this process acknowledged; an open may
       // skip a damaged final line only when nothing here has seen it (LOCAL-VUH-47).
       if ((reopened.store.syncId ?? 0) < (current.store.syncId ?? 0))
@@ -4959,7 +4963,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         );
       return reopened;
     }
-    return openCommitted(bytes, version);
+    return openCommitted(checkpoint, version);
   };
   // Host metadata readers do not take the write lock (some run in authorization callbacks).
   // Wait only for actual disk publication, after those callbacks, so our own append is never
@@ -5589,7 +5593,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
           try {
             const initial = await file.stat({ bigint: true });
             const bytes = await file.readFile();
-            const store = parseStore(bytes.toString("utf8"));
+            const store = validateStore((await readCheckpointBytes(bytes)).value);
             // Fixture stores are single files; a checkpoint alone is not the whole store.
             if (store.journal !== undefined)
               throw new Error("Strict fixture read requires a single-file store");
@@ -7055,9 +7059,9 @@ function summarizeStore(store: Store | undefined): TrackerStoreSummary {
   };
 }
 
-async function readStoreText(path: string): Promise<string | undefined> {
+async function readStoreCheckpoint(path: string): Promise<CheckpointRead | undefined> {
   try {
-    return await readFile(path, "utf8");
+    return await readCheckpointFile(path);
   } catch (error) {
     if (codeOf(error) === "ENOENT") return undefined;
     throw error;
@@ -7073,9 +7077,12 @@ async function readCommittedStore(
   directory: string,
   history = false,
 ): Promise<{ store: Store; text: string } | undefined> {
-  const text = await readStoreText(join(directory, "tracker.json"));
-  if (text === undefined) return undefined;
-  const parsed = parseStore(text);
+  const checkpoint = await readStoreCheckpoint(join(directory, "tracker.json"));
+  if (checkpoint === undefined) return undefined;
+  const parsed = validateStore(checkpoint.value);
+  // Exact legacy bytes are needed only for export/cutover rollback, never for ordinary reads.
+  const text =
+    history && parsed.journal === undefined ? await readFile(join(directory, "tracker.json"), "utf8") : "";
   const header = parsed.journal;
   if (header === undefined) return { store: parsed, text };
   delete parsed.journal;
@@ -7130,9 +7137,9 @@ export async function exportTrackerStore(directory: string, out: string): Promis
 export async function readTrackerStoreRecords(
   directory: string,
 ): Promise<Readonly<Record<string, unknown>> | undefined> {
-  const text = await readStoreText(join(resolve(directory), "tracker.json"));
-  if (text === undefined) return undefined;
-  const parsed = JSON.parse(text) as unknown;
+  const checkpoint = await readStoreCheckpoint(join(resolve(directory), "tracker.json"));
+  if (checkpoint === undefined) return undefined;
+  const parsed = checkpoint.value;
   if (parsed === null || typeof parsed !== "object") throw new Error("Not a tracker store");
   const header = (parsed as Record<string, unknown>).journal as JournalHeader | undefined;
   if (header === undefined) return parsed as Record<string, unknown>;

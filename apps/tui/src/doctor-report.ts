@@ -205,7 +205,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
       ? []
       : "state" in report.trackerCheckpoint
         ? [
-            `  ${report.trackerCheckpoint.state === "warn" ? "!" : "✓"} Tracker checkpoint · ${megabytes(report.trackerCheckpoint.bytes)} of the ${megabytes(report.trackerCheckpoint.limitBytes)} it can be opened at · warns at ${megabytes(report.trackerCheckpoint.warnAtBytes)}`,
+            `  ${report.trackerCheckpoint.state === "warn" ? "!" : "✓"} Tracker checkpoint · ${megabytes(report.trackerCheckpoint.bytes)} · streamed open · previous-build string limit ${megabytes(report.trackerCheckpoint.limitBytes)} · rollback warning at ${megabytes(report.trackerCheckpoint.warnAtBytes)}`,
           ]
         : [`  ○ Tracker checkpoint · unknown · ${clean(report.trackerCheckpoint.detail)}`]),
     ...(report.linearGraphql === undefined
