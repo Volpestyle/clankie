@@ -1249,6 +1249,18 @@ function fleetMailboxOnError(stderr: { write(chunk: string): unknown }): (error:
   };
 }
 
+/**
+ * The SDK's stdio transport ignores its input ending, so a harness closing stdin
+ * left the bridge running until the harness killed it (VUH-2929). Closing the
+ * transport there runs the bridge's own shutdown.
+ */
+class HarnessStdioTransport extends StdioServerTransport {
+  override async start(): Promise<void> {
+    await super.start();
+    process.stdin.once("end", () => void this.close());
+  }
+}
+
 async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   const env = options.env ?? process.env;
   const stderr = options.stderr ?? process.stderr;
@@ -1297,7 +1309,7 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
     true,
     paneId.length === 0 ? undefined : (id) => readMessageStatus(inboundRequest, id),
   );
-  const transport = options.transport ?? new StdioServerTransport();
+  const transport = options.transport ?? new HarnessStdioTransport();
   const closing = new AbortController();
   const closed = new Promise<void>((resolve) => {
     server.onclose = () => {
@@ -1421,7 +1433,7 @@ export async function runMcpCommand(
         }
       : undefined,
   );
-  const transport = options.transport ?? new StdioServerTransport();
+  const transport = options.transport ?? new HarnessStdioTransport();
   const closing = new AbortController();
   const closed = new Promise<void>((resolve) => {
     server.onclose = () => {

@@ -226,6 +226,8 @@ async function fixture(unreadableReceiptPath = false) {
     async close() {
       finish.release();
       await client.close();
+      // Closing stdin ends the bridge through its own shutdown, not the client's kill (VUH-2929).
+      expect(stderr).toContain('"event":"stdio_closed"');
       service.close();
       http.closeAllConnections();
       await new Promise<void>((resolve) => http.close(() => resolve()));

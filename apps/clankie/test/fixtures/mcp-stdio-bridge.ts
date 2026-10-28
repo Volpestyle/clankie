@@ -1,6 +1,4 @@
 import { readFileSync } from "node:fs";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   connectLaneUpstream,
   runMcpCommand,
@@ -15,7 +13,6 @@ const binding = bindingPath
 process.exitCode = await runMcpCommand(
   ["--lane", "operator", ...(binding ? ["--conversation", binding.conversationId] : [])],
   {
-    transport: new StdioServerTransport() as unknown as Transport,
     readParentArgv: async () =>
       channel === "channel" ? "claude --dangerously-load-development-channels server:clankie" : undefined,
     connectUpstream: async () =>
