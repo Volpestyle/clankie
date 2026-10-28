@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "landing-gate.json",
+      "size": 11322374,
+      "sha256": "1a0e3cf661e59eb470e393e92fd283bbcb0364aae789f654e3d5eb9b120f6126",
+      "url": "clankie://evidence/sha256/1a0e3cf661e59eb470e393e92fd283bbcb0364aae789f654e3d5eb9b120f6126"
+    },
+    {
+      "path": "landing-gate.log",
+      "size": 627500,
+      "sha256": "c02a6e9610c521673c087d4021545192e164dd63985c15a7b837517972b8c423",
+      "url": "clankie://evidence/sha256/c02a6e9610c521673c087d4021545192e164dd63985c15a7b837517972b8c423"
+    },
+    {
+      "path": "proof.log",
+      "size": 21179,
+      "sha256": "5856c3c57fcd17b8272724e03f3fed9d3b74c95d1da157ca1167b301a09b2921",
+      "url": "clankie://evidence/sha256/5856c3c57fcd17b8272724e03f3fed9d3b74c95d1da157ca1167b301a09b2921"
+    }
+  ]
+}
