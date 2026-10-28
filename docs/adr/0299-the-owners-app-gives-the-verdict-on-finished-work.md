@@ -57,6 +57,24 @@ through the `tracker_sync` transaction route and the device paths of
 operator bearer, which this write refuses on purpose. At the terminal, the owner
 keeps the existing owner routes; this verb exists only for the paired app.
 
+## Which items ask the owner (LOCAL-VUH-64, 2026-10-28)
+
+The deck flooded the owner. His rule: an item asks him only when he can try it
+in the app right now in about ten seconds, or when only a human can judge it
+(how it feels, looks, reads or sounds). The lead closes everything else, with
+its evidence and an independent check, and it never asks him.
+
+The built-in issue gains `ownerCheck`: one line saying what the owner tries or
+judges, at most 160 characters, for example "Open Work, tap a house, tap back,
+open Work: taps work". `save_issue` sets it; `null` or a blank line removes it.
+Each change is an `owner_check` item event whose body is the new line (absent on
+removal). Only the owner or the lead may set it (`owner_check_reserved`).
+Workers and reviewers neither see the argument nor may send it. A worker may
+suggest a check in its report to the lead. Other backends refuse it.
+
+The app's deck shows only landed or delivered items that are not Done and carry
+an `ownerCheck`. An item without one never reaches the owner.
+
 ## Consequences
 
 - Agents cannot verify or send back through this path. Their actor is stamped by

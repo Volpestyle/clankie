@@ -71,6 +71,10 @@ Owner verification and owner ask answers belong to the owner. Never use
 permits those calls from a same-user shell; that is a known boundary gap, not a
 secure distinction ([ADR 0253](../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)).
 Report missing isolation honestly and keep owner-verified acceptance open.
+Ask the owner to check only a ten-second try in the app or a human-only
+judgement of feel, look, reading or sound. Only the lead marks that, with
+`ownerCheck` on the built-in tracker; workers suggest a one-line check in their
+report instead. Never ask him to read evidence gaps, logs or review records.
 
 ## Rules
 

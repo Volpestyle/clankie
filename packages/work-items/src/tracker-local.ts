@@ -249,6 +249,11 @@ interface Issue extends Entity {
   leadCompletion?: { actor: TrackerActor; at: string; bundleId: string };
   /** The project cycle it is in (VUH-1931); set by the owner or lead, moved by rollover. */
   cycleId?: string | null;
+  /**
+   * What the owner tries or judges to verify this item, in one line; set only by the
+   * owner or the lead (LOCAL-VUH-64). Absent: the item never asks the owner.
+   */
+  ownerCheck?: string;
   /** Who is working on it until when (VUH-1918). Kept after expiry until released or taken. */
   lease?: Lease | null;
   blocked?: boolean;
@@ -1566,6 +1571,44 @@ function setIssueCycle(
   if (cycle.projectId !== project.id) throw new Error(`${cycleName(cycle)} belongs to a different project`);
   if (cycle.endsAt <= now) throw new Error(`${cycleName(cycle)} has ended`);
   moveCycle(store, issue, cycle, context, now);
+}
+
+const OWNER_CHECK_MAX = 160;
+
+/**
+ * The owner's check as stored: undefined leaves it untouched, null or blank removes it,
+ * and anything else is one line of at most 160 characters. Only the owner or the lead asks.
+ */
+function ownerCheckChange(value: unknown, context: WriteContext): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (!ownerOrLead(context.actor))
+    throw new TrackerWriteRefused(
+      "owner_check_reserved",
+      "only the owner or the lead asks the owner to check an item",
+    );
+  if (value === null) return null;
+  if (typeof value !== "string") throw new Error("ownerCheck must be a string or null");
+  const line = value.trim();
+  if (line === "") return null;
+  if (/[\r\n]/u.test(line)) throw new Error("ownerCheck must be one line");
+  if (line.length > OWNER_CHECK_MAX)
+    throw new Error(`ownerCheck must be at most ${String(OWNER_CHECK_MAX)} characters`);
+  return line;
+}
+
+/** Set or remove the owner's check, recorded in the item's event stream when it changes. */
+function setOwnerCheck(
+  store: Store,
+  issue: Issue,
+  next: string | null,
+  context: WriteContext,
+  now: string,
+): void {
+  if ((issue.ownerCheck ?? null) === next) return;
+  if (next === null) delete issue.ownerCheck;
+  else issue.ownerCheck = next;
+  issue.updatedAt = now;
+  appendEvent(store, context, now, issue, { type: "owner_check", ...(next === null ? {} : { body: next }) });
 }
 
 /**
@@ -3739,7 +3782,9 @@ async function dispatch(
     case "save_issue": {
       if (typeof args.id === "string")
         options.assertIssueWrite?.(issueView(store, findIssue(store, args.id)));
-      const { cycle, ...fields } = args;
+      const { cycle, ownerCheck, ...fields } = args;
+      // Refused or malformed before anything is saved (LOCAL-VUH-64).
+      const check = ownerCheckChange(ownerCheck, context);
       const saved = saveIssue(store, fields, now);
       options.assertIssueWrite?.(saved);
       const issue = findIssue(store, saved.id as string);
@@ -3748,7 +3793,8 @@ async function dispatch(
       if (cycle === undefined && inCycle !== undefined && inCycle.projectId !== issue.projectId)
         moveCycle(store, issue, undefined, context, now);
       if (cycle !== undefined) setIssueCycle(store, issue, cycle, context, now);
-      return cycle === undefined && inCycle?.projectId === issue.projectId
+      if (check !== undefined) setOwnerCheck(store, issue, check, context, now);
+      return cycle === undefined && check === undefined && inCycle?.projectId === issue.projectId
         ? saved
         : issueView(store, issue, true);
     }

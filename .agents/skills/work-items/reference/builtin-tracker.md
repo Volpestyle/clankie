@@ -52,6 +52,12 @@ Only the owner verifies or reopens work. Under `closure: owner`, landing raises
 a "check it works" ask; its answer verifies the item or sends it back to accepted.
 Lead closure creates no automatic verification ask. Existing pending and
 resolved asks and genuine owner-only gates retain their identities and authority.
+Ask the owner to check only what he can try in the app in about ten seconds,
+or what only a human can judge (feel, look, reading, sound). The lead marks it
+with `save_issue` `ownerCheck`: one line, at most 160 characters; `null` removes
+it. Only marked items reach his Proof deck. Workers can't set it; put a suggested
+one-line check in your report to the lead instead. Never ask him to read
+evidence gaps, logs or review records; the lead closes those items.
 Read `linear_list_issue_events` (resume
 with its cursor) for the item's history; `selfEcho` marks Clankie's and workers'
 own events.

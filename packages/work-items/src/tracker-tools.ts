@@ -177,6 +177,8 @@ export function trackerRoleRefusal(
   if (LEAD_TRACKER_TOOLS.has(name)) return `${name} is a lead or owner verb`;
   if (name === "save_issue" && args.cycle !== undefined)
     return "cycle planning belongs to the owner or the lead";
+  if (name === "save_issue" && args.ownerCheck !== undefined)
+    return "asking the owner to check an item belongs to the lead";
   if (name === "post_issue_event" && args.stage === "owner-verified")
     return "only the owner verifies an item";
   return undefined;
@@ -193,7 +195,7 @@ export function trackerCatalogForRole(
     .map((tool) => {
       const schema = tool.inputSchema as { properties?: Record<string, Record<string, unknown>> };
       if (tool.name === "save_issue") {
-        const { cycle: _cycle, ...properties } = schema.properties ?? {};
+        const { cycle: _cycle, ownerCheck: _ownerCheck, ...properties } = schema.properties ?? {};
         return { ...tool, inputSchema: { ...tool.inputSchema, properties } };
       }
       if (tool.name === "post_issue_event")
@@ -233,7 +235,8 @@ export interface TrackerItemEvent {
   /**
    * Worker-reported types, or what the tracker recorded: created, comment, state, priority,
    * stage, verified, reopened, cycle (from/to are cycle ids; via rollover when automatic),
-   * run (from/to are run statuses) and lease.
+   * run (from/to are run statuses), lease and owner_check (body is the owner's new check;
+   * absent when it was removed).
    */
   readonly type:
     | IssueEventType
@@ -245,6 +248,7 @@ export interface TrackerItemEvent {
     | "verified"
     | "reopened"
     | "cycle"
+    | "owner_check"
     | "run"
     | "lease"
     | "bundle"
@@ -280,7 +284,7 @@ export interface TrackerItemEvent {
   readonly prevHash: string;
   readonly hash: string;
 }
-const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt", "cycleDays", "snapshot"] as const;
+const BUILT_IN_ARGUMENTS = ["idempotencyKey", "ifUpdatedAt", "cycleDays", "snapshot", "ownerCheck"] as const;
 
 /** Other backends fail explicitly instead of silently dropping exactly-once or precondition input. */
 export function refuseBuiltInTrackerFeatures(name: string, args: Record<string, unknown>): void {
@@ -668,6 +672,11 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
         type: ["string", "number", "null"],
         description:
           "Cycle ID, number, or current/next; null removes the issue from its cycle. On the built-in tracker the issue needs a project, and only the owner or the lead sets cycle membership.",
+      },
+      ownerCheck: {
+        type: ["string", "null"],
+        description:
+          "Built-in tracker only. One line the owner can try in the app in about ten seconds, or judge by feel, look, sound or reading; only these reach the owner's Proof deck. Null removes it. Only the owner or the lead sets it; everything else is closed by the lead.",
       },
       dueDate: nullableString,
       estimate: { type: ["number", "null"] },
