@@ -1,0 +1,37 @@
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/local-vuh-59b
+
+ ❯ |parallel| apps/clankie/test/tracker-role-budget.integration.test.ts (6 tests | 1 failed | 5 skipped) 593ms
+   × a hired worker's writes carry its persona, and their author fields name the writer (LOCAL-VUH-59) 592ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |parallel| apps/clankie/test/tracker-role-budget.integration.test.ts > a hired worker's writes carry its persona, and their author fields name the writer (LOCAL-VUH-59)
+AssertionError: expected { …(8) } to match object { author: 'Lark' }
+(7 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "author": "Lark",
++   "author": "Local owner",
+  }
+
+ ❯ apps/clankie/test/tracker-role-budget.integration.test.ts:626:21
+    624|   const ownerWrite = await f.owner("save_comment", { issueId: issue.id…
+    625|   // Each write's own response names its writer, as the stored record …
+    626|   expect(larkWrite).toMatchObject({ author: "Lark" });
+       |                     ^
+    627|   expect(pcWrite).toMatchObject({ author: "Wren" });
+    628|   expect(JSON.parse((lead as { content: string }).content)).toMatchObj…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  11:00:13
+   Duration  3.89s (transform 2.15s, setup 36ms, import 3.14s, tests 593ms, environment 0ms)
+

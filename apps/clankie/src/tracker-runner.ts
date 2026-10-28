@@ -93,7 +93,10 @@ export function trackerWorkerNameForPrincipal(
   if (!match || match[2] === "unverified") return undefined;
   const hire = candidate(match[1]!, match[2]!);
   if (hire.state !== "confirmed") return undefined;
-  // Live seat ids qualify the seat with its fleet outside the default one.
-  const seatId = match[1] === "default" ? hire.seat : `${match[1]}/${hire.seat}`;
+  // Live seat ids qualify the seat with its fleet outside the default one; a remote hire records
+  // its seat already qualified, as pc/term_….
+  const fleet = match[1]!;
+  const seatId =
+    fleet === "default" || hire.seat.startsWith(`${fleet}/`) ? hire.seat : `${fleet}/${hire.seat}`;
   return personaName(seatId, hire.nativeOccupantId) ?? hire.seat;
 }

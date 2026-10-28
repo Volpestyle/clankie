@@ -5321,7 +5321,16 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
     for (const view of views) {
       if (typeof view.updatedAt === "string" && view.updatedAt >= now) {
         view.updatedByActor = actor;
-        if (typeof view.createdAt === "string" && view.createdAt >= now) view.createdByActor = actor;
+        if (typeof view.createdAt === "string" && view.createdAt >= now) {
+          view.createdByActor = actor;
+          // The display fields were derived before the writer was known (LOCAL-VUH-59).
+          if (typeof view.userId === "string") {
+            if ("author" in view) view.author = writer(store, view.userId, actor);
+            if ("user" in view) view.user = writer(store, view.userId, actor);
+          }
+          if (typeof view.creatorId === "string" && "createdBy" in view)
+            view.createdBy = writer(store, view.creatorId, actor).name;
+        }
       }
       const derived = store.issues.find((issue) => issue.id === view.id);
       if (derived !== undefined) {

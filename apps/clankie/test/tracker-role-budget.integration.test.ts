@@ -207,7 +207,8 @@ async function fixture(budget = new TrackerRequestBudget()) {
     hires.launch(id, saved);
     hires.pane(id, pane);
     hires.confirmed(id);
-    hires.observe(id, `seat-${pane}`, `occupant-${pane}`, {
+    // A remote fleet's census qualifies the terminal, so the hire records pc/seat-….
+    hires.observe(id, fleet === "default" ? `seat-${pane}` : `${fleet}/seat-${pane}`, `occupant-${pane}`, {
       nativeOccupantId: `occupant-${pane}`,
       fleet,
       pane,
@@ -581,7 +582,7 @@ it("a hired worker's writes carry its persona, and their author fields name the 
   await f.hire("w1:p2", "builder");
   f.personaNames.set("seat-w1:p1 occupant-w1:p1", "Lark");
   const issue = await f.call("w1:p1", "linear_save_issue", { title: "Named", project: f.project.id });
-  await f.call("w1:p1", "linear_save_comment", { issueId: issue.id, body: "From Lark." });
+  const larkWrite = await f.call("w1:p1", "linear_save_comment", { issueId: issue.id, body: "From Lark." });
   await f.call("w1:p1", "linear_post_issue_event", { issueId: issue.id, type: "ack" });
   await f.call("w1:p1", "linear_save_evidence_bundle", {
     issueId: issue.id,
@@ -599,7 +600,7 @@ it("a hired worker's writes carry its persona, and their author fields name the 
   // A linked PC's worker: its live seat id carries its fleet.
   await f.hire("w2:p1", "builder", "pc");
   f.personaNames.set("pc/seat-w2:p1 occupant-w2:p1", "Wren");
-  await f.call("w2:p1", "linear_save_comment", { issueId: issue.id, body: "From the PC." });
+  const pcWrite = await f.call("w2:p1", "linear_save_comment", { issueId: issue.id, body: "From the PC." });
   // An outside member, as the Discord forum mirror writes one: untrusted, never the owner.
   await f.tracker.call(
     "save_comment",
@@ -620,7 +621,12 @@ it("a hired worker's writes carry its persona, and their author fields name the 
     arguments: { issueId: issue.id, body: "From Clankie." },
   });
   expect(lead, JSON.stringify(lead)).toMatchObject({ outcome: "ok", isError: false });
-  await f.owner("save_comment", { issueId: issue.id, body: "From the owner." });
+  const ownerWrite = await f.owner("save_comment", { issueId: issue.id, body: "From the owner." });
+  // Each write's own response names its writer, as the stored record does; the tool reply is compact.
+  expect(larkWrite).toMatchObject({ author: "Lark" });
+  expect(pcWrite).toMatchObject({ author: "Wren" });
+  expect(JSON.parse((lead as { content: string }).content)).toMatchObject({ author: "Clankie" });
+  expect(ownerWrite).toMatchObject({ author: { name: "Local owner", isLocal: true } });
 
   // The pane stays the actor id; the persona is its name, on behalf of the owner and Clankie.
   const lark = {
