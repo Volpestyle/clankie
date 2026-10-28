@@ -1,14 +1,17 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
-import { ProjectsSettingsSchema } from "@clankie/protocol";
+import { ProjectsSettingsSchema, type OperatorFleetSeat } from "@clankie/protocol";
 import type { TrackerRequestBudgetReport } from "@clankie/protocol/tracker-request-budget";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker, trackerRoleRefusal, writeConvention } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { ProjectHires } from "../src/captain/project-hires.ts";
+import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
+import { PersonaStore } from "../src/captain/personas.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { TrackerRequestBudget } from "../src/tracker-request-budget.ts";
@@ -51,8 +54,9 @@ async function fixture(budget = new TrackerRequestBudget()) {
   const hires = new ProjectHires(join(root, "project-hires.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const logged: Record<string, unknown>[] = [];
-  /** Personas bound to `seatId occupantId`, as the captain's live roster binds them. */
-  const personaNames = new Map<string, string>();
+  // The captain's persona store and live roster, fed census-shaped observations of each pane.
+  const personas = new PersonaStore(join(root, "personas"));
+  let liveSeats: readonly OperatorFleetSeat[] = [];
   /** Panes hired outside the default fleet, such as a linked PC's. */
   const paneFleets = new Map<string, string>();
   let workItems!: ReturnType<typeof createWorkItemsService>;
@@ -96,7 +100,7 @@ async function fixture(budget = new TrackerRequestBudget()) {
       trackerWorkerNameForPrincipal(
         principalId,
         (fleet, pane) => hires.membershipCandidate(fleet, pane),
-        (seatId, occupantId) => personaNames.get(`${seatId} ${occupantId}`),
+        (seatId, occupantId) => personas.boundPersona(liveSeats, seatId, occupantId)?.name,
       ),
     logger: { info() {}, warn: (context) => void logged.push(context) },
   });
@@ -193,14 +197,14 @@ async function fixture(budget = new TrackerRequestBudget()) {
       ],
     }),
   }));
-  const hire = async (pane: string, role: string, fleet = "default") => {
+  const hire = async (pane: string, role: string, fleet = "default", title = `${role} ${pane}`) => {
     if (fleet !== "default") paneFleets.set(pane, fleet);
     const saved = (await settings.load()).projects;
     const { id } = hires.reserve(saved, "project-x", {
       schemaVersion: 1,
       ...(fleet === "default" ? {} : { fleet }),
       workingDirectory: workspace,
-      title: `${role} ${pane}`,
+      title,
       harness: "claude",
       role,
     });
@@ -208,8 +212,8 @@ async function fixture(budget = new TrackerRequestBudget()) {
     hires.pane(id, pane);
     hires.confirmed(id);
     // A remote fleet's census qualifies the terminal, so the hire records pc/seat-….
-    hires.observe(id, fleet === "default" ? `seat-${pane}` : `${fleet}/seat-${pane}`, `occupant-${pane}`, {
-      nativeOccupantId: `occupant-${pane}`,
+    hires.observe(id, fleet === "default" ? `seat-${pane}` : `${fleet}/seat-${pane}`, occupant(pane), {
+      nativeOccupantId: occupant(pane),
       fleet,
       pane,
       binding: { socketPath: join(root, "herdr.sock") },
@@ -308,9 +312,22 @@ async function fixture(budget = new TrackerRequestBudget()) {
     budgetReport,
     work,
     logged,
-    personaNames,
+    personas,
+    /** A census round: the roster the captain projects from these observations and its hire ledger. */
+    census: (seats: readonly ObservedFleetSeat[]) =>
+      (liveSeats = personas.reconcile(seats, (seat) =>
+        hires.hireTitle("default", undefined, seat.occupantId),
+      )),
+    /** The hire adopting its pane under the name the lead gave it, as the captain does. */
+    adopt: (seat: ObservedFleetSeat, name: string) => {
+      const adopted = personas.adoptSpawn(seat, name);
+      liveSeats = [...liveSeats.filter((entry) => entry.personaId !== adopted.personaId), adopted];
+    },
   };
 }
+
+/** A pane's native session as the census keys it. */
+const occupant = (pane: string) => `session-${createHash("sha256").update(pane).digest("hex")}`;
 
 const LEAD_VERBS = [
   "linear_post_owner_verdict",
@@ -578,9 +595,37 @@ it("no agent lane, and not the operator bearer, gives the owner app's verdict (A
 
 it("a hired worker's writes carry its persona, and their author fields name the writer (LOCAL-VUH-59)", async () => {
   const f = await fixture();
-  await f.hire("w1:p1", "builder");
+  await f.hire("w1:p1", "builder", "default", "Lark");
   await f.hire("w1:p2", "builder");
-  f.personaNames.set("seat-w1:p1 occupant-w1:p1", "Lark");
+  // A linked PC's worker: its live seat id carries its fleet.
+  await f.hire("w2:p1", "builder", "pc", "Wren");
+  // Each Claude hire starts under the Herdr handle minted from its title, is adopted under its name,
+  // and then reads as an unnamed pane once Herdr drops the handle, as every live Claude hire did
+  // (LOCAL-VUH-59).
+  const life = (pane: string, handle: string, fleet?: string) => {
+    const paneId = fleet === undefined ? pane : `${fleet}/${pane}`;
+    const seat = {
+      seatId: fleet === undefined ? `seat-${pane}` : `${fleet}/seat-${pane}`,
+      paneId,
+      occupantId: occupant(pane),
+      harness: "claude",
+      status: "working" as const,
+      title: "Clankie captain brief assignment",
+      subject: fleet === undefined ? handle : `${fleet}-${handle}`,
+    };
+    const paneSubject = `adhoc-${createHash("sha256").update(paneId).digest("hex").slice(0, 20)}`;
+    return {
+      named: { ...seat, renamed: { name: handle, from: paneSubject } },
+      spawned: { ...seat, title: handle.replace(/-[0-9a-f]{4}$/u, "") },
+      unnamed: { ...seat, subject: paneSubject },
+    };
+  };
+  const larkPane = life("w1:p1", "lark-1a2b");
+  const wrenPane = life("w2:p1", "wren-3c4d", "pc");
+  f.census([larkPane.named, wrenPane.named]);
+  f.adopt(larkPane.spawned, "Lark");
+  f.adopt(wrenPane.spawned, "Wren");
+  f.census([larkPane.unnamed, wrenPane.unnamed]);
   const issue = await f.call("w1:p1", "linear_save_issue", { title: "Named", project: f.project.id });
   const larkWrite = await f.call("w1:p1", "linear_save_comment", { issueId: issue.id, body: "From Lark." });
   await f.call("w1:p1", "linear_post_issue_event", { issueId: issue.id, type: "ack" });
@@ -597,9 +642,6 @@ it("a hired worker's writes carry its persona, and their author fields name the 
     gaps: [],
   });
   await f.call("w1:p2", "linear_save_comment", { issueId: issue.id, body: "No persona bound." });
-  // A linked PC's worker: its live seat id carries its fleet.
-  await f.hire("w2:p1", "builder", "pc");
-  f.personaNames.set("pc/seat-w2:p1 occupant-w2:p1", "Wren");
   const pcWrite = await f.call("w2:p1", "linear_save_comment", { issueId: issue.id, body: "From the PC." });
   // An outside member, as the Discord forum mirror writes one: untrusted, never the owner.
   await f.tracker.call(

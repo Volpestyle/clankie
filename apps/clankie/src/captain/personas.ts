@@ -43,8 +43,8 @@ import {
   type UpdateOperatorAgentPersona,
 } from "@clankie/protocol";
 import { z } from "zod";
-import type { ObservedFleetSeat } from "./herdr-census.ts";
-import { adoptedName } from "./hire-name.ts";
+import { subjectForHerdrName, type ObservedFleetSeat } from "./herdr-census.ts";
+import { adoptedName, herdrAgentName } from "./hire-name.ts";
 
 function retiredPersona(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
@@ -78,6 +78,19 @@ const PersonaFileSchema = z.discriminatedUnion("schemaVersion", [
     })
     .strict(),
 ]);
+/**
+ * Who named what, kept beside personas.json rather than in it: the previous runtime reads that file
+ * strictly, and an owner's rollback must still find it readable (LOCAL-VUH-59). Missing reads as empty.
+ */
+const PersonaMarkersSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    /** Subjects Clankie minted when it hired their occupants: never an owner's name. */
+    hired: z.array(z.string()),
+    /** Personas whose name the owner gave, through update_persona or a Herdr rename (ADR 0147). */
+    ownerNamed: z.array(OperatorAgentPersonaIdSchema),
+  })
+  .strict();
 
 const PendingRoleSchema = z
   .object({
@@ -91,14 +104,19 @@ const PendingRolesSchema = z.array(PendingRoleSchema).max(10_000);
 type PendingRole = z.infer<typeof PendingRoleSchema>;
 export type PersonaRoleWrite = { outcome: "pending"; operationId: string } | { outcome: "unsaved" };
 
-type PersonaBinding = z.infer<typeof PersonaBindingSchema>;
+type PersonaBinding = z.infer<typeof PersonaBindingSchema> & {
+  /** Clankie minted this subject when it hired this occupant (PersonaMarkersSchema). */
+  readonly hired?: true;
+};
 
 /** Host-owned fleet characters. Herdr seats are only their current locations. */
 export class PersonaStore {
   private readonly path: string;
+  private readonly markersPath: string;
   private readonly avatarDir: string;
   private readonly records = new Map<string, OperatorAgentPersona>();
   private readonly bindings = new Map<string, PersonaBinding>();
+  private readonly ownerNamed = new Set<string>();
   private unreadable = false;
   private loadedSource: string | undefined;
   private projectStore?: SettingsStore;
@@ -112,6 +130,7 @@ export class PersonaStore {
 
   public constructor(stateDir: string) {
     this.path = join(stateDir, "personas.json");
+    this.markersPath = join(stateDir, "personas.markers.json");
     this.avatarDir = join(stateDir, "persona-avatars");
     mkdirSync(stateDir, { recursive: true });
     mkdirSync(this.avatarDir, { recursive: true });
@@ -134,6 +153,16 @@ export class PersonaStore {
           }
           this.bindings.set(binding.subject, binding);
         }
+      }
+      if (existsSync(this.markersPath)) {
+        const markers = PersonaMarkersSchema.parse(JSON.parse(readFileSync(this.markersPath, "utf8")));
+        // A rolled-back runtime may have rewritten personas.json since; mark only what still exists.
+        for (const subject of markers.hired) {
+          const binding = this.bindings.get(subject);
+          if (binding !== undefined) this.bindings.set(subject, { ...binding, hired: true });
+        }
+        for (const personaId of markers.ownerNamed)
+          if (this.records.has(personaId)) this.ownerNamed.add(personaId);
       }
     } catch {
       this.unreadable = true;
@@ -296,6 +325,18 @@ export class PersonaStore {
     return { ...persona, ...(role === undefined ? {} : { role }) };
   }
 
+  /** The host-bound persona of exactly this live seat and native occupant, or none. */
+  public boundPersona(
+    seats: readonly OperatorFleetSeat[],
+    seatId: string,
+    occupantId: string,
+  ): OperatorAgentPersona | undefined {
+    const matches = seats.filter((seat) => seat.seatId === seatId && seat.occupantId === occupantId);
+    return matches.length === 1 && this.personaForOccupant(occupantId) === matches[0]!.personaId
+      ? this.records.get(matches[0]!.personaId)
+      : undefined;
+  }
+
   /** Exact native session binding, independent of names and roster prose. */
   public personaForOccupant(occupantId: string): string | undefined {
     const matches = [...this.bindings.values()].filter((binding) => binding.occupantId === occupantId);
@@ -321,13 +362,25 @@ export class PersonaStore {
     }
   }
 
-  /** Resolve Herdr subjects to durable characters, then bind their current occupants and seats. */
-  public reconcile(observedSeats: readonly ObservedFleetSeat[]): readonly OperatorFleetSeat[] {
-    const previousRecords = new Map(this.records);
-    const previousBindings = new Map(this.bindings);
+  /**
+   * Resolve Herdr subjects to durable characters, then bind their current occupants and seats.
+   * `hireTitle` reads Clankie's own hire ledger: the title a seat was hired under, from which its
+   * Herdr handle was minted.
+   */
+  public reconcile(
+    observedSeats: readonly ObservedFleetSeat[],
+    hireTitle?: (seat: ObservedFleetSeat) => string | undefined,
+  ): readonly OperatorFleetSeat[] {
+    const restore = this.snapshot();
     let changed = false;
     const seats = observedSeats.map((observed) => {
-      const bound = this.bindSeat(observed);
+      const title = hireTitle?.(observed);
+      const bound = this.bindSeat(
+        observed,
+        (subject) =>
+          this.bindings.get(subject)?.hired === true ||
+          (title !== undefined && mintedFrom(title, subject, observed.paneId)),
+      );
       changed ||= bound.changed;
       return bound.seat;
     });
@@ -335,10 +388,7 @@ export class PersonaStore {
       try {
         this.save();
       } catch (error) {
-        this.records.clear();
-        this.bindings.clear();
-        for (const [personaId, persona] of previousRecords) this.records.set(personaId, persona);
-        for (const [subject, binding] of previousBindings) this.bindings.set(subject, binding);
+        restore();
         throw error;
       }
     }
@@ -353,20 +403,54 @@ export class PersonaStore {
     onRoleWrite?: (status: PersonaRoleWrite) => void,
     projectId = DEFAULT_PROJECT_ID,
   ): OperatorFleetSeat {
+    return this.adopt(observed, name, true, role, onRoleWrite, projectId);
+  }
+
+  /** A moved seat keeps its subject and character; the move mints no new hire handle. */
+  public adoptMoved(observed: ObservedFleetSeat, name: string): OperatorFleetSeat {
+    return this.adopt(observed, name, false);
+  }
+
+  private adopt(
+    observed: ObservedFleetSeat,
+    name: string,
+    hired: boolean,
+    role?: OperatorAgentRole,
+    onRoleWrite?: (status: PersonaRoleWrite) => void,
+    projectId = DEFAULT_PROJECT_ID,
+  ): OperatorFleetSeat {
     const previousRecords = new Map(this.records);
-    const previousBindings = new Map(this.bindings);
-    const { seat } = this.bindSeat(observed);
+    const restore = this.snapshot();
+    // A hire's seat is filed under the handle Clankie just minted for it.
+    const { seat, binding } = this.bindSeat(
+      observed,
+      (subject) =>
+        this.bindings.get(subject)?.hired === true ||
+        (hired && subject === observed.subject && !isPaneSubject(subject)),
+    );
     const current = this.records.get(seat.personaId);
     if (current === undefined) throw new Error("Agent persona binding did not create a character");
     const now = new Date().toISOString();
     // A census can file the pane before the hire adopts it, naming the persona after the title its
-    // harness wrote ("Clankie brief 9ffe6b76 assignment"). Nobody chose that name, so the hire's
-    // replaces it; a name the owner gave stays (VUH-2667).
+    // harness wrote ("Clankie brief 9ffe6b76 assignment") or after the handle Clankie started it
+    // under. Nobody chose either, so the hire's name replaces it; a name the owner gave stays
+    // (VUH-2667, LOCAL-VUH-59).
     const kept = previousRecords.get(seat.personaId)?.name;
+    // The census names a hire it sees first after the handle minted from this same title.
+    const fromHandle =
+      binding.hired === true &&
+      kept !== undefined &&
+      (kept === adoptedName(seat.personaId, herdrAgentName(name, "0000")) ||
+        (/-[0-9a-f]{4}$/u.test(kept) && kept === herdrAgentName(name, kept.slice(-4))));
     this.records.set(seat.personaId, {
       schemaVersion: 1,
       personaId: seat.personaId,
-      name: kept === undefined || discoveredName(kept, observed) ? name : kept,
+      name:
+        kept === undefined ||
+        (!this.ownerNamed.has(seat.personaId) &&
+          (discoveredName(kept, observed) || GENERIC_NAME.test(kept) || fromHandle))
+          ? name
+          : kept,
       appearance: current.appearance,
       // A move re-adopts the same character; it keeps the role it had.
       ...((this.projectStore ? current.role : (role ?? current.role)) === undefined
@@ -392,13 +476,24 @@ export class PersonaStore {
       }
       this.save();
     } catch (error) {
-      this.records.clear();
-      this.bindings.clear();
-      for (const [personaId, persona] of previousRecords) this.records.set(personaId, persona);
-      for (const [subject, binding] of previousBindings) this.bindings.set(subject, binding);
+      restore();
       throw error;
     }
     return { ...seat, title: this.records.get(seat.personaId)!.name };
+  }
+
+  private snapshot(): () => void {
+    const records = new Map(this.records);
+    const bindings = new Map(this.bindings);
+    const ownerNamed = new Set(this.ownerNamed);
+    return () => {
+      this.records.clear();
+      this.bindings.clear();
+      this.ownerNamed.clear();
+      for (const [personaId, persona] of records) this.records.set(personaId, persona);
+      for (const [subject, binding] of bindings) this.bindings.set(subject, binding);
+      for (const personaId of ownerNamed) this.ownerNamed.add(personaId);
+    };
   }
 
   /**
@@ -492,10 +587,14 @@ export class PersonaStore {
       updatedAt: new Date().toISOString(),
     };
     this.records.set(parsed.personaId, updated);
+    // update_persona is the owner's operator API; the census never renames a name set here.
+    const marked = parsed.name !== undefined && !this.ownerNamed.has(parsed.personaId);
+    if (marked) this.ownerNamed.add(parsed.personaId);
     try {
       this.save();
     } catch (error) {
       this.records.set(parsed.personaId, current);
+      if (marked) this.ownerNamed.delete(parsed.personaId);
       throw error;
     }
     return updated;
@@ -573,10 +672,31 @@ export class PersonaStore {
     };
   }
 
-  private bindSeat(observed: ObservedFleetSeat): { readonly seat: OperatorFleetSeat; changed: boolean } {
+  /**
+   * `minted` says whether Clankie minted a subject for this seat when it hired it, from its own
+   * records, never from the subject's shape: owner names and hire handles look alike (LOCAL-VUH-59).
+   */
+  private bindSeat(
+    observed: ObservedFleetSeat,
+    minted: (subject: string) => boolean,
+  ): { readonly seat: OperatorFleetSeat; readonly binding: PersonaBinding; changed: boolean } {
     let changed = false;
-    let binding = this.bindings.get(observed.subject);
+    // The key this seat is bound under: its observed subject, or its hire's when Herdr lost the name.
+    let subject = observed.subject;
+    let binding = this.bindings.get(subject);
     let renamed = false;
+    if (observed.renamed === undefined && isPaneSubject(subject)) {
+      // Herdr drops the name a Claude hire was started with, so its pane reads as unnamed. The
+      // binding its hire made for this exact occupant is still its persona (LOCAL-VUH-59), unless
+      // the owner has named the pane's own persona in the meantime.
+      const hired = [...this.bindings.values()].filter(
+        (entry) => entry.occupantId === observed.occupantId && minted(entry.subject),
+      );
+      if (hired.length === 1 && (binding === undefined || !this.ownerNamed.has(binding.personaId))) {
+        binding = hired[0]!;
+        subject = binding.subject;
+      }
+    }
     if (binding === undefined && observed.renamed !== undefined) {
       // Naming an agent in Herdr re-keys the character the operator is already
       // talking to; it never hires a stranger (ADR 0147). Without this the
@@ -585,14 +705,15 @@ export class PersonaStore {
       const previous = this.bindings.get(observed.renamed.from);
       if (previous !== undefined) {
         this.bindings.delete(observed.renamed.from);
-        const { account, ...identity } = previous;
+        // The new subject is Clankie's only if it minted it; `minted` decides that below.
+        const { account, hired: _hired, ...identity } = previous;
         binding = {
           ...identity,
           ...(previous.occupantId === observed.occupantId && account ? { account } : {}),
           subject: observed.subject,
           occupantId: observed.occupantId,
         };
-        this.bindings.set(observed.subject, binding);
+        this.bindings.set(subject, binding);
         changed = true;
         renamed = true;
       }
@@ -602,26 +723,54 @@ export class PersonaStore {
       // matching record preserves its conversations; new ids are always minted.
       const legacyPersonaId = `agent-${observed.occupantId.slice("session-".length)}`;
       const personaId = this.records.has(legacyPersonaId) ? legacyPersonaId : `agent-${randomUUID()}`;
-      binding = { subject: observed.subject, personaId, occupantId: observed.occupantId };
-      this.bindings.set(observed.subject, binding);
+      binding = { subject, personaId, occupantId: observed.occupantId };
+      this.bindings.set(subject, binding);
       changed = true;
     } else if (binding.occupantId !== observed.occupantId) {
-      binding = { subject: binding.subject, personaId: binding.personaId, occupantId: observed.occupantId };
-      this.bindings.set(observed.subject, binding);
+      binding = {
+        subject: binding.subject,
+        personaId: binding.personaId,
+        occupantId: observed.occupantId,
+        ...(binding.hired ? { hired: binding.hired } : {}),
+      };
+      this.bindings.set(subject, binding);
       changed = true;
     }
+
+    const hire = minted(binding.subject);
+    if (hire && binding.hired !== true) {
+      binding = { ...binding, hired: true };
+      this.bindings.set(subject, binding);
+      changed = true;
+    }
+    // One occupant, one persona: a hire's binding retires the pane binding Herdr's lost name left.
+    if (hire)
+      for (const [key, entry] of this.bindings)
+        if (
+          isPaneSubject(key) &&
+          entry.occupantId === observed.occupantId &&
+          !this.ownerNamed.has(entry.personaId)
+        ) {
+          this.bindings.delete(key);
+          changed = true;
+        }
 
     if (
       observed.account &&
       (binding.account?.label !== observed.account.label || binding.account?.home !== observed.account.home)
     ) {
       binding = { ...binding, account: observed.account };
-      this.bindings.set(observed.subject, binding);
+      this.bindings.set(subject, binding);
       changed = true;
     }
-    // A name the operator typed outranks a title the harness happened to write.
+    // A name the operator typed outranks a title the harness happened to write. The handle Clankie
+    // minted for a hire is not one (LOCAL-VUH-59); the hire's own name follows.
+    const handle =
+      observed.renamed !== undefined && minted(observed.subject) ? observed.renamed.name : undefined;
     const chosen =
-      observed.renamed === undefined ? undefined : OperatorAgentNameSchema.safeParse(observed.renamed.name);
+      observed.renamed === undefined || handle !== undefined
+        ? undefined
+        : OperatorAgentNameSchema.safeParse(observed.renamed.name);
     const current = this.records.get(binding.personaId);
     if (current === undefined) {
       const now = new Date().toISOString();
@@ -630,23 +779,38 @@ export class PersonaStore {
       this.records.set(binding.personaId, {
         schemaVersion: 1,
         personaId: binding.personaId,
-        name: discoveredName.success ? discoveredName.data : `${observed.harness} agent`,
+        name:
+          handle !== undefined
+            ? adoptedName(binding.personaId, handle)
+            : discoveredName.success
+              ? discoveredName.data
+              : `${observed.harness} agent`,
         appearance: defaultOperatorAgentAppearance(observed.harness, binding.personaId),
         harness: observed.harness,
         createdAt: now,
         updatedAt: now,
       });
+      if (chosen?.success === true) this.ownerNamed.add(binding.personaId);
       changed = true;
     } else {
       // Only the rename itself adopts the Herdr name, so a later rename in the
       // app is not overwritten on the next census.
-      const generic = /^(?:(?:claude(?: code)?|codex)(?: agent)?$|clankie[ -]?brief\b)/iu.test(current.name);
-      const name =
-        renamed && chosen?.success === true
-          ? chosen.data
-          : generic
-            ? adoptedName(binding.personaId, observed.renamed?.name)
-            : current.name;
+      const owner = this.ownerNamed.has(binding.personaId);
+      const adopt = (renamed || (!owner && GENERIC_NAME.test(current.name))) && chosen?.success === true;
+      const name = adopt
+        ? chosen.data
+        : owner
+          ? current.name
+          : GENERIC_NAME.test(current.name)
+            ? adoptedName(binding.personaId, handle)
+            : // Filed under its own hire handle before LOCAL-VUH-59: read it like a hire's name.
+              hire && keyOf(current.name, observed.paneId) === binding.subject
+              ? adoptedName(binding.personaId, current.name)
+              : current.name;
+      if (adopt && !owner) {
+        this.ownerNamed.add(binding.personaId);
+        changed = true;
+      }
       if (name !== current.name || current.harness !== observed.harness) {
         this.records.set(binding.personaId, {
           ...current,
@@ -675,6 +839,7 @@ export class PersonaStore {
         personaId: binding.personaId,
         title: this.records.get(binding.personaId)!.name,
       },
+      binding,
       changed,
     };
   }
@@ -689,6 +854,14 @@ export class PersonaStore {
   private save(): void {
     if (this.unreadable) throw new Error("Agent identity state is unreadable; refusing to overwrite it");
     if (this.initializing) throw new Error("Agent identity migration is still in progress");
+    // Markers first: a save cut off between the two leaves the markers ahead of the file. An added
+    // owner mark only keeps a name; a hire mark moved off a renamed subject leaves the binding still
+    // in the file unmarked until the hire ledger marks it again.
+    durableJson(this.markersPath, {
+      schemaVersion: 1,
+      hired: [...this.bindings.values()].filter((binding) => binding.hired).map((binding) => binding.subject),
+      ownerNamed: [...this.ownerNamed],
+    });
     durableJson(this.path, {
       schemaVersion: 2,
       personas: [...this.records.values()].map((persona) => {
@@ -696,7 +869,7 @@ export class PersonaStore {
         const { role: _role, ...identity } = persona;
         return identity;
       }),
-      bindings: [...this.bindings.values()],
+      bindings: [...this.bindings.values()].map(({ hired: _hired, ...binding }) => binding),
     });
   }
 }
@@ -815,6 +988,30 @@ function acquireJournalWriter(journal: string): { path: string; nonce: string } 
   durableJson(join(path, "owner.json"), { pid: process.pid, nonce });
   return { path, nonce };
 }
+
+/** The census's key for a pane whose agent Herdr has not named (subjectForHerdrPane). */
+const isPaneSubject = (subject: string) => subject.startsWith("adhoc-");
+/** The census's key for a Herdr name on this pane (subjectForHerdrName, with a remote seat's fleet). */
+const keyOf = (name: string, paneId: string) => subjectForHerdrName(name, /^([^/]+)\//u.exec(paneId)?.[1]);
+/**
+ * Whether a subject is the census's key for a handle herdrAgentName minted from this hire title,
+ * whatever its tag. The key keeps 32 characters, so a remote seat's can lose the tag's tail: the
+ * positions the tag reaches are the ones that differ between the lowest and highest tag.
+ */
+const mintedFrom = (title: string, subject: string, paneId: string) => {
+  const low = keyOf(herdrAgentName(title, "0000"), paneId);
+  const high = keyOf(herdrAgentName(title, "ffff"), paneId);
+  return (
+    low !== undefined &&
+    high !== undefined &&
+    subject.length === low.length &&
+    [...subject].every((char, index) =>
+      low[index] === high[index] ? char === low[index] : /^[0-9a-f]$/u.test(char),
+    )
+  );
+};
+/** Titles a harness writes from its brief ("Clankie captain brief assignment"), never a name. */
+const GENERIC_NAME = /^(?:(?:claude(?: code)?|codex)(?: agent)?$|clankie(?:[ -]?captain)?[ -]?brief\b)/iu;
 
 /** A name the census took from the pane's own title, or its harness fallback: nobody chose it. */
 function discoveredName(name: string, seat: { readonly title: string; readonly harness: string }): boolean {

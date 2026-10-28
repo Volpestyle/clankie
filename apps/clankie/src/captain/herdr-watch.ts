@@ -2221,6 +2221,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public leadHireMembershipOwner(pane: string, seat: string, occupant: string) {
     return this.hireOwners.hiredProjectContext(pane, seat, occupant);
   }
+  /** The title this seat was hired under, from Clankie's own hire ledger (LOCAL-VUH-59). */
+  public hireTitle(seat: { readonly paneId: string; readonly occupantId: string }): string | undefined {
+    const fleet = splitFleetQualified(seat.paneId)?.fleet ?? "default";
+    return this.projectHires.hireTitle(fleet, projectHirePane(fleet, seat.paneId), seat.occupantId);
+  }
   public projectHireMembershipCandidate(fleet: string, pane: string) {
     const address = projectHirePane(fleet, pane);
     if (address === undefined) return { state: "none" as const };

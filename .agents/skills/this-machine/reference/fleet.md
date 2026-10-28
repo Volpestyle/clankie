@@ -42,7 +42,8 @@ lost native turn acknowledgment remains uncertain.
 
 ## Names and roles
 
-Give each hire a short human name. Rename with `clankie agents rename
+Give each hire a short human name; the roster, tracker attribution and the app
+keep it even after Herdr drops the hire's `name-1a2b` handle (ADR 0147). Rename with `clankie agents rename
 NAME|PERSONA_ID "NEW NAME"`, which preserves native identity, appearance and
 project assignment. `update_persona` preserves omitted fields: send only `name`
 for a rename, and omit `name` when saving appearance or an avatar.

@@ -3,7 +3,13 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { OperatorConversation } from "@clankie/protocol";
+import {
+  OperatorAgentPersonaIdSchema,
+  OperatorAgentPersonaSchema,
+  OperatorCodexAccountSchema,
+  type OperatorConversation,
+} from "@clankie/protocol";
+import { z } from "zod";
 import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
 import { PersonaStore } from "../src/captain/personas.ts";
 
@@ -455,6 +461,352 @@ it("loads retired contact fields as offline identity without losing native perso
     });
     expect(personas.every((p) => !("swarm" in p) && p.activeSeatId === undefined)).toBe(true);
     expect(JSON.parse(readFileSync(join(root, "personas.json"), "utf8")).personas).toHaveLength(2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("gives a Claude hire whose Herdr name was dropped back its hire's persona, as on the live fleet (LOCAL-VUH-59)", () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-lost-handle-personas-"));
+  try {
+    // The live store on 2026-10-28: each hire's own binding, named after its handle, beside the
+    // pane binding the census made once Herdr dropped the name ("Quill" was picked for it). None
+    // carries a marker yet; Clankie's hire ledger says which subjects it minted.
+    const sable = `session-${"4".repeat(64)}`;
+    const wynn = `session-${"a".repeat(64)}`;
+    const named = `session-${"c".repeat(64)}`;
+    const handStarted = `session-${"d".repeat(64)}`;
+    const persona = (personaId: string, name: string) => ({
+      schemaVersion: 1,
+      personaId,
+      name,
+      appearance: { variant: "azure", accessory: "implementer", shape: "squircle" },
+      harness: "claude",
+      createdAt: "2026-10-28T01:10:34.834Z",
+      updatedAt: "2026-10-28T01:37:41.422Z",
+    });
+    const ids = {
+      sable: "agent-f6c1903f-5787-4a45-a273-1dd247964f1b",
+      quill: "agent-7a3b14ce-d31b-4905-a7ed-4fec1bd5e18b",
+      wynn: "agent-c77e7445-f1f6-45b2-b8e6-5d08be5d693e",
+      wynnPane: "agent-e56833a0-63cf-4f12-af3f-cb9731fc52f0",
+      tess: "agent-00000000-0000-4000-8000-000000000001",
+      juniper: "agent-00000000-0000-4000-8000-000000000002",
+      solo: "agent-00000000-0000-4000-8000-000000000003",
+    };
+    writeFileSync(
+      join(root, "personas.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        personas: [
+          persona(ids.sable, "sable-9e78"),
+          persona(ids.quill, "Quill"),
+          persona(ids.wynn, "wynn-e3f1"),
+          persona(ids.wynnPane, "Clankie captain brief assignment"),
+          persona(ids.tess, "tess-07c2"),
+          persona(ids.juniper, "Juniper"),
+          persona(ids.solo, "Build grove"),
+        ],
+        bindings: [
+          { subject: "pc-sable-9e78", personaId: ids.sable, occupantId: sable },
+          { subject: "adhoc-a718d701d04fa111e3da", personaId: ids.quill, occupantId: sable },
+          { subject: "wynn-e3f1", personaId: ids.wynn, occupantId: wynn },
+          { subject: "adhoc-b2192b2c6b94d951c27a", personaId: ids.wynnPane, occupantId: wynn },
+          // The owner renamed this pane's own persona: it keeps it.
+          { subject: "tess-07c2", personaId: ids.tess, occupantId: named },
+          { subject: "adhoc-0000000000000000000c", personaId: ids.juniper, occupantId: named },
+          // A pane started by hand: no hire stands behind it.
+          { subject: "adhoc-0000000000000000000d", personaId: ids.solo, occupantId: handStarted },
+        ],
+      }),
+    );
+    // The owner named this pane's own persona in the app.
+    writeFileSync(
+      join(root, "personas.markers.json"),
+      JSON.stringify({ schemaVersion: 1, hired: [], ownerNamed: [ids.juniper] }),
+    );
+    // The hire ledger: the title each hire's handle was minted from. The hand-started pane has none.
+    const ledger = new Map([
+      [sable, "Sable"],
+      [wynn, "Wynn"],
+      [named, "Tess"],
+    ]);
+    const hireTitle = (seat: ObservedFleetSeat) => ledger.get(seat.occupantId);
+    const unnamed = (seatId: string, paneId: string, subject: string, occupantId: string) => ({
+      seatId,
+      paneId,
+      subject,
+      occupantId,
+      harness: "claude",
+      status: "working" as const,
+      title: "Clankie captain brief assignment",
+    });
+    const live = [
+      unnamed("pc/term_65edc3a6edf0325", "pc/w18:p15", "adhoc-a718d701d04fa111e3da", sable),
+      unnamed("term_65edc2c43c2861d8", "w4F:p3D", "adhoc-b2192b2c6b94d951c27a", wynn),
+      unnamed("term_named", "w1:p3", "adhoc-0000000000000000000c", named),
+      { ...unnamed("term_solo", "w1:p4", "adhoc-0000000000000000000d", handStarted), title: "Build grove" },
+    ];
+    // Without the ledger nothing marks a subject as Clankie's, so nothing moves.
+    const unread = mkdtempSync(join(tmpdir(), "clankie-lost-handle-unread-"));
+    try {
+      for (const file of ["personas.json", "personas.markers.json"])
+        writeFileSync(join(unread, file), readFileSync(join(root, file)));
+      expect(new PersonaStore(unread).reconcile(live).map((seat) => seat.personaId)).toEqual([
+        ids.quill,
+        ids.wynnPane,
+        ids.juniper,
+        ids.solo,
+      ]);
+    } finally {
+      rmSync(unread, { recursive: true, force: true });
+    }
+    const store = new PersonaStore(root);
+    const seats = store.reconcile(live, hireTitle);
+    // The hires read as the names they were hired under, each bound once, so the tracker finds them.
+    expect(seats.map((seat) => [seat.personaId, seat.title])).toEqual([
+      [ids.sable, "Sable"],
+      [ids.wynn, "Wynn"],
+      [ids.juniper, "Juniper"],
+      [ids.solo, "Build grove"],
+    ]);
+    expect(store.boundPersona(seats, "pc/term_65edc3a6edf0325", sable)?.name).toBe("Sable");
+    expect(store.boundPersona(seats, "term_65edc2c43c2861d8", wynn)?.name).toBe("Wynn");
+    expect(store.personaForOccupant(named)).toBeUndefined();
+    const saved = JSON.parse(readFileSync(join(root, "personas.json"), "utf8")) as {
+      bindings: { subject: string; occupantId: string }[];
+      personas: { personaId: string; name: string }[];
+    };
+    // One binding for the hire, which the markers now record as Clankie's.
+    expect(saved.bindings.filter((binding) => binding.occupantId === sable)).toEqual([
+      expect.objectContaining({ subject: "pc-sable-9e78" }),
+    ]);
+    expect(markers(root)).toEqual({
+      schemaVersion: 1,
+      hired: ["pc-sable-9e78", "wynn-e3f1"],
+      ownerNamed: [ids.juniper],
+    });
+    expect(saved.bindings.filter((binding) => binding.occupantId === named)).toHaveLength(2);
+    // The pane personas stay as offline records; nothing is deleted or renamed but the handles.
+    expect(saved.personas.find((entry) => entry.personaId === ids.quill)?.name).toBe("Quill");
+    expect(saved.personas.find((entry) => entry.personaId === ids.tess)?.name).toBe("tess-07c2");
+    // Herdr reports the owner-renamed hire's handle again, as a Codex hire's stays: the hire's
+    // binding is observed directly, and the pane persona the owner named keeps its binding.
+    store.reconcile(
+      [
+        {
+          ...unnamed("term_named", "w1:p3", "tess-07c2", named),
+          renamed: { name: "tess-07c2", from: "adhoc-0000000000000000000c" },
+        },
+      ],
+      hireTitle,
+    );
+    expect(
+      (JSON.parse(readFileSync(join(root, "personas.json"), "utf8")) as typeof saved).bindings.filter(
+        (binding) => binding.occupantId === named,
+      ),
+    ).toEqual([
+      expect.objectContaining({ subject: "tess-07c2" }),
+      expect.objectContaining({ subject: "adhoc-0000000000000000000c", personaId: ids.juniper }),
+    ]);
+    expect(markers(root).hired).toEqual(["pc-sable-9e78", "wynn-e3f1", "tess-07c2"]);
+    // The next census keeps all of it, from the recorded markers alone.
+    expect(new PersonaStore(root).reconcile(live).map((seat) => seat.title)).toEqual([
+      "Sable",
+      "Wynn",
+      "Juniper",
+      "Build grove",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** The persona store's markers: who minted each hire's subject, and which names the owner gave. */
+function markers(root: string): { schemaVersion: number; hired: string[]; ownerNamed: string[] } {
+  return JSON.parse(readFileSync(join(root, "personas.markers.json"), "utf8"));
+}
+
+/** A Claude pane as the census first sees it: unnamed, under its pane's key. */
+function claudePane(paneId: string, occupantId: string, title = "Claude Code"): ObservedFleetSeat {
+  return {
+    seatId: `term_${paneId.replaceAll(/\W/gu, "_")}`,
+    paneId,
+    subject: `adhoc-${createHash("sha256").update(paneId).digest("hex").slice(0, 20)}`,
+    occupantId,
+    harness: "claude",
+    status: "working",
+    title,
+  };
+}
+
+/** The same pane once Herdr names its agent; a remote fleet prefixes the key, as subjectForHerdrName does. */
+function herdrNamed(seat: ObservedFleetSeat, name: string): ObservedFleetSeat {
+  const fleet = /^([^/]+)\//u.exec(seat.paneId)?.[1];
+  return {
+    ...seat,
+    subject: (fleet === undefined ? name : `${fleet}-${name}`).slice(0, 32),
+    renamed: { name, from: seat.subject },
+  };
+}
+
+it("keeps an owner's Herdr name even when it reads like a hire handle (LOCAL-VUH-59 review)", () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-owner-handle-personas-"));
+  try {
+    const issue = `session-${"1".repeat(64)}`;
+    const later = `session-${"2".repeat(64)}`;
+    const hire = `session-${"3".repeat(64)}`;
+    const wynn = `session-${"4".repeat(64)}`;
+    const wren = `session-${"5".repeat(64)}`;
+    // Clankie's hire ledger knows only its hires: the owner started the first two panes.
+    const ledger = new Map([
+      [hire, "Lark"],
+      [wynn, "Wynn"],
+      [wren, "Wren"],
+    ]);
+    const hireTitle = (seat: ObservedFleetSeat) => ledger.get(seat.occupantId);
+    const store = new PersonaStore(root);
+    // The owner names a pane after the issue it works on, as the fleet usually does.
+    const issuePane = herdrNamed(claudePane("w1:p1", issue), "vuh-2933");
+    const laterPane = claudePane("w1:p2", later);
+    const hirePane = herdrNamed(claudePane("w1:p3", hire), "lark-1a2b");
+    expect(store.reconcile([issuePane, laterPane, hirePane], hireTitle).map((seat) => seat.title)).toEqual([
+      "vuh-2933",
+      "Claude Code",
+      "Lark",
+    ]);
+    // An unnamed pane the owner then names in Herdr, with a year that is also four hex digits.
+    const renamedPane = herdrNamed(laterPane, "fix-2026");
+    const seats = store.reconcile([issuePane, renamedPane, hirePane], hireTitle);
+    expect(seats.map((seat) => seat.title)).toEqual(["vuh-2933", "fix-2026", "Lark"]);
+    // Both are recorded as the owner's, so a restart's census reads them the same way.
+    expect(markers(root).ownerNamed).toEqual([seats[0]!.personaId, seats[1]!.personaId]);
+    expect(
+      new PersonaStore(root)
+        .reconcile([issuePane, renamedPane, hirePane], hireTitle)
+        .map((seat) => seat.title),
+    ).toEqual(["vuh-2933", "fix-2026", "Lark"]);
+    // The owner names hired panes after their hires: a stem with a tail that is not a tag, and the
+    // bare stem. Neither is a handle Clankie minted, so both are the owner's.
+    expect(
+      store
+        .reconcile(
+          [herdrNamed(claudePane("w1:p4", wynn), "wynn-test"), herdrNamed(claudePane("w1:p5", wren), "wren")],
+          hireTitle,
+        )
+        .map((seat) => seat.title),
+    ).toEqual(["wynn-test", "wren"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("names a hire by the title Clankie hired it under, whichever census files it first (LOCAL-VUH-59)", () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-hire-title-personas-"));
+  try {
+    const brief = "Clankie captain brief assignment";
+    const lark = `session-${"5".repeat(64)}`;
+    const wren = `session-${"6".repeat(64)}`;
+    const long = `session-${"7".repeat(64)}`;
+    const ledger = new Map([
+      [lark, "Lark Two"],
+      [wren, "Wren"],
+      [long, "Persona follow-up for the tracker"],
+    ]);
+    const hireTitle = (seat: ObservedFleetSeat) => ledger.get(seat.occupantId);
+    const store = new PersonaStore(root);
+
+    // The census sees the handle Herdr was started with before the hire adopts the pane. The
+    // handle is Clankie's, not an owner's name, so the hire's name stands in until adoption.
+    const larkPane = claudePane("w2:p1", lark, brief);
+    expect(store.reconcile([herdrNamed(larkPane, "lark-two-1a2b")], hireTitle)[0]!.title).toBe("Lark two");
+    expect(
+      store.adoptSpawn({ ...larkPane, subject: "lark-two-1a2b", title: "Lark Two" }, "Lark Two").title,
+    ).toBe("Lark Two");
+    expect(store.reconcile([larkPane], hireTitle)[0]!.title).toBe("Lark Two");
+
+    // Filed under its pane and the brief's title first, then under its handle: the brief's title
+    // was never a name.
+    const wrenPane = claudePane("w2:p2", wren, brief);
+    expect(store.reconcile([wrenPane], hireTitle)[0]!.title).toBe(brief);
+    const wrenNamed = herdrNamed(wrenPane, "wren-3c4d");
+    const wrenSeat = store.reconcile([wrenNamed], hireTitle)[0]!;
+    expect(wrenSeat.title).toBe("Wren");
+    // A name the owner gives in the app stays, even one spelled like the handle.
+    store.update({ schemaVersion: 1, personaId: wrenSeat.personaId, name: "wren-3c4d" });
+    expect(new PersonaStore(root).reconcile([wrenNamed], hireTitle)[0]!.title).toBe("wren-3c4d");
+
+    // A linked PC's hire with a long title: its fleet-prefixed key is cut at 32 characters,
+    // through its tag, and is still the hire's.
+    const longPane = claudePane("pc/w3:p1", long, brief);
+    const longNamed = herdrNamed(longPane, "persona-follow-up-for-the-t-1a2b");
+    expect(longNamed.subject).toBe("pc-persona-follow-up-for-the-t-1");
+    store.reconcile([longNamed], hireTitle);
+    store.adoptSpawn({ ...longPane, subject: longNamed.subject }, "Persona follow-up for the tracker");
+    const longSeat = store.reconcile([longPane], hireTitle)[0]!;
+    expect(longSeat.title).toBe("Persona follow-up for the tracker");
+    expect(store.personaForOccupant(long)).toBe(longSeat.personaId);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("keeps the persona file readable by the previous runtime, with its markers beside it (LOCAL-VUH-59 review)", () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-persona-rollback-"));
+  try {
+    // The schemaVersion 2 file as the previous runtime (17ff7d461) reads it, strictly.
+    const previousRuntimeFile = z
+      .object({
+        schemaVersion: z.literal(2),
+        personas: z.array(OperatorAgentPersonaSchema),
+        bindings: z.array(
+          z
+            .object({
+              account: OperatorCodexAccountSchema.optional(),
+              subject: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/u),
+              personaId: OperatorAgentPersonaIdSchema,
+              occupantId: z.string().regex(/^session-[a-f0-9]{64}$/u),
+            })
+            .strict(),
+        ),
+      })
+      .strict();
+    const hire = `session-${"8".repeat(64)}`;
+    const owned = `session-${"9".repeat(64)}`;
+    const hireTitle = (seat: ObservedFleetSeat) => (seat.occupantId === hire ? "Wynn" : undefined);
+    const wynn = herdrNamed(claudePane("w1:p1", hire), "wynn-e3f1");
+    const store = new PersonaStore(root);
+    const [hired, ownerPane] = store.reconcile([wynn, claudePane("w1:p2", owned)], hireTitle);
+    store.update({ schemaVersion: 1, personaId: ownerPane!.personaId, name: "Juniper" });
+    // Both markers are written, and neither reaches the file the previous runtime reads.
+    expect(markers(root)).toEqual({
+      schemaVersion: 1,
+      hired: ["wynn-e3f1"],
+      ownerNamed: [ownerPane!.personaId],
+    });
+    expect(
+      previousRuntimeFile.safeParse(JSON.parse(readFileSync(join(root, "personas.json"), "utf8"))).success,
+    ).toBe(true);
+    // This runtime reads the markers back.
+    const unnamed = claudePane("w1:p1", hire);
+    expect(new PersonaStore(root).reconcile([unnamed]).map((seat) => seat.personaId)).toEqual([
+      hired!.personaId,
+    ]);
+    // A marker for a persona the file no longer holds, as a rolled-back runtime can leave, is dropped.
+    const stale = "agent-00000000-0000-4000-8000-00000000dead";
+    writeFileSync(
+      join(root, "personas.markers.json"),
+      JSON.stringify({ ...markers(root), ownerNamed: [ownerPane!.personaId, stale] }),
+    );
+    new PersonaStore(root).update({ schemaVersion: 1, personaId: ownerPane!.personaId, name: "Juniper" });
+    expect(markers(root).ownerNamed).toEqual([ownerPane!.personaId]);
+    // With no markers beside it the file reads as unmarked, and the hire ledger marks the hire again.
+    rmSync(join(root, "personas.markers.json"));
+    const unmarked = new PersonaStore(root);
+    expect(
+      unmarked.reconcile([wynn, claudePane("w1:p2", owned)], hireTitle).map((seat) => seat.title),
+    ).toEqual(["Wynn", "Juniper"]);
+    expect(markers(root)).toEqual({ schemaVersion: 1, hired: ["wynn-e3f1"], ownerNamed: [] });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -1357,13 +1357,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : conversations.conversation(conversationId)?.title.trim().slice(0, 120) || "Lead",
     conversationId,
   });
-  /** Current host-bound persona for the exact native seat and occupant. */
-  const boundFleetPersona = (seatId: string, occupantId: string): string | undefined => {
-    const matches = liveSeats.filter((seat) => seat.seatId === seatId && seat.occupantId === occupantId);
-    return matches.length === 1 && personas.personaForOccupant(occupantId) === matches[0]!.personaId
-      ? matches[0]!.personaId
-      : undefined;
-  };
   const workerParty = (seatId: string): FleetRoomParty => {
     const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
     const name =
@@ -4205,11 +4198,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     let workSeats: readonly OperatorFleetSeat[];
     if (options.nativeCensusRunner) {
-      workSeats = personas.reconcile(fleet.seats);
+      workSeats = personas.reconcile(fleet.seats, (seat) => herdrWatches.hireTitle(seat));
     } else {
       const subagents = await diagnostics.measure("subagents", () =>
         withSeatSubagents(
-          personas.reconcile(fleet.seats),
+          personas.reconcile(fleet.seats, (seat) => herdrWatches.hireTitle(seat)),
           fleet.seats,
           (seat) =>
             conversations.conversationIdForPersona(seat.personaId) !== undefined ||
@@ -7833,13 +7826,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     bodyRoomConversation: (lane, targetId) => conversations.roomConversation(lane, targetId),
 
-    personaForFleetOccupant: (seatId, occupantId) => boundFleetPersona(seatId, occupantId),
-    personaNameForFleetOccupant: (seatId, occupantId) => {
-      const personaId = boundFleetPersona(seatId, occupantId);
-      if (personaId === undefined) return undefined;
-      return personas.all(liveSeats, () => undefined).find((persona) => persona.personaId === personaId)
-        ?.name;
-    },
+    personaForFleetOccupant: (seatId, occupantId) =>
+      personas.boundPersona(liveSeats, seatId, occupantId)?.personaId,
+    personaNameForFleetOccupant: (seatId, occupantId) =>
+      personas.boundPersona(liveSeats, seatId, occupantId)?.name,
     replayAutoRounds: async (query) => {
       const project = (await settings()).projects.projects.find((entry) => entry.id === query.project);
       if (!project) throw new AutoReplayInputError("Unknown replay project");

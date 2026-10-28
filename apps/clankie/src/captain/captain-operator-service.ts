@@ -901,7 +901,7 @@ export function createOperatorService(
         ctx.fleetChanges.touch();
         return { op: "move_seat", schemaVersion: 1, result: moved };
       }
-      const rehired = ctx.personas.adoptSpawn(moved.seat, seat.title);
+      const rehired = ctx.personas.adoptMoved(moved.seat, seat.title);
       ctx.conversations.bindPersona(rehired.personaId, rehired.seatId, seat.title);
       ctx.liveSeats = [
         ...ctx.liveSeats.filter((current) => current.personaId !== rehired.personaId),

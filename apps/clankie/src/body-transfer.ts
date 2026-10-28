@@ -97,6 +97,7 @@ const STATE_ENTRIES = [
   "captain/huddles.json",
   "captain/turn-settled.jsonl",
   "captain/personas.json",
+  "captain/personas.markers.json",
   "captain/persona-avatars",
   "captain/seat-ledger.jsonl",
   "captain/delivery-receipts",

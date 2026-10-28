@@ -1,0 +1,16 @@
+# Rollback probe (LOCAL-VUH-59 review round 2): one state directory, read in turn by this change's
+# personas.ts and the previous runtime's (17ff7d461), through a throwaway vitest file (deleted).
+# Each step: new PersonaStore(dir), census a hire (wynn-e3f1, ledger title Wynn) and an owner pane,
+# step 1 also renames the owner pane to Juniper through update(), then census again.
+
+1. this change writes the state: ok ["Wynn","Juniper"]
+  personas.json bindings: [{"subject":"wynn-e3f1","personaId":"agent-7e9a2b8b-bc69-4030-84bb-5074221c5a03","occupantId":"session-1111111111111111111111111111111111111111111111111111111111111111"},{"subject":"adhoc-w1p20000000000000000","personaId":"agent-d2c1fc48-e95c-4d7d-b37d-a8e486514281","occupantId":"session-2222222222222222222222222222222222222222222222222222222222222222"}]
+  personas.markers.json: {"schemaVersion":1,"hired":["wynn-e3f1"],"ownerNamed":["agent-d2c1fc48-e95c-4d7d-b37d-a8e486514281"]}
+2. the previous runtime (17ff7d461) reads and reconciles it: ok ["Wynn","Juniper"]
+  personas.json bindings: [{"subject":"wynn-e3f1","personaId":"agent-7e9a2b8b-bc69-4030-84bb-5074221c5a03","occupantId":"session-1111111111111111111111111111111111111111111111111111111111111111"},{"subject":"adhoc-w1p20000000000000000","personaId":"agent-d2c1fc48-e95c-4d7d-b37d-a8e486514281","occupantId":"session-2222222222222222222222222222222222222222222222222222222222222222"}]
+3. this change reads it again: ok ["Wynn","Juniper"]
+  personas.json bindings: [{"subject":"wynn-e3f1","personaId":"agent-7e9a2b8b-bc69-4030-84bb-5074221c5a03","occupantId":"session-1111111111111111111111111111111111111111111111111111111111111111"},{"subject":"adhoc-w1p20000000000000000","personaId":"agent-d2c1fc48-e95c-4d7d-b37d-a8e486514281","occupantId":"session-2222222222222222222222222222222222222222222222222222222222222222"}]
+
+For contrast, the round-1 candidate (3498fff50), which kept its markers in personas.json:
+1. 3498fff50 writes the state: ok ["Wynn","Juniper"]
+2. the previous runtime (17ff7d461) reads it: threw Agent identity state is unreadable; refusing to overwrite it

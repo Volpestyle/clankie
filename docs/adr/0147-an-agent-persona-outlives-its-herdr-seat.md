@@ -140,3 +140,60 @@ refresh and service restart preserve the owner's rename. The existing
 update_persona operation accepts omitted appearance for an atomic name-only
 change; older rename/restyle clients continue to work. CLI and TUI expose
 agents rename through that operation, without a duplicate endpoint.
+
+## Amendment: one persona per hire when Herdr drops its name, 2026-10-28
+
+Tracks LOCAL-VUH-59 (Clankie Work). Clankie starts every hire under a tagged
+Herdr handle, such as `wynn-e3f1`, and adopts it under the name the lead gave
+it. Herdr drops that handle from a Claude pane: its saved session keeps the
+pane label but no `agent_name`, and only Codex panes keep theirs. About 30
+seconds after each hire, the census then saw an unnamed pane and minted a
+second persona for the same native occupant, under the pane's key. It was named
+after the terminal title or given a picked name such as "Quill". The roster
+showed that stranger, and anything that needs the occupant's single persona,
+like tracker attribution, found two and named the seat instead. The census had
+also filed Clankie's own handle as if the owner had typed it, so the hire's
+persona was named `wynn-e3f1` rather than Wynn.
+
+Now the census works from two recorded facts, never from a name's shape. Owner
+names and hire handles look alike: Herdr names are lower-case slugs, and an
+issue-numbered name such as `vuh-2933` ends in four hex digits just like
+Clankie's tag.
+
+- **Clankie's handle.** A binding records `hired` when Clankie minted its
+  subject: at adoption, or on the next census when Clankie's hire ledger
+  (ProjectHires) holds a started hire for that occupant, or for that pane
+  while its session is not yet known, and the subject is the census's key for
+  `herdrAgentName(title, tag)`. A persona the census files under such a
+  handle reads like a hire's name ("Wynn"), and the hire's own title replaces
+  it at adoption, as it already replaces a title the harness wrote.
+- **The owner's name.** `ownerNamed` records each persona the owner named,
+  through `update_persona` or a Herdr rename the census adopted. Any other
+  Herdr name, whatever it looks like, is the owner's.
+- When a pane reads as unnamed and its exact occupant holds exactly one
+  `hired` binding, the census keeps that binding as the seat's persona. The
+  pane's own binding for that occupant is dropped, so one occupant has one
+  persona. The pane's persona stays as an offline record with its history.
+- A persona marked as the owner's is never moved or renamed. If it is the
+  pane's persona, the seat keeps it and both bindings stay. A pane with no
+  hire behind it keeps its pane persona, marked or not.
+
+Both markers live in `personas.markers.json`, beside `personas.json` and never
+in it. The previous runtime reads `personas.json` strictly, so the owner can
+still roll back. A missing markers file reads as empty, and the next census
+marks hires again from the ledger. A name the owner gives while rolled back is
+not marked. A body transfer (ADR 0286) moves the markers file with
+`personas.json` and replaces the destination's own.
+
+Existing seats switch from their pane personas (Quill, Fern and the like) to
+their hire names (Sable, Odette) on the next census after deploy. Their
+bindings are recognised from the hire ledger. A persona already named after
+its own handle is renamed the same way when its seat is next observed.
+
+No durable trail shows which existing names the owner gave in the app.
+`update_persona` was not logged, and the conversation title it rewrites is
+also written by the census, with no history. So an unmarked pane persona on a
+hired occupant counts as the census's. If the owner renamed one before this
+change, the seat now shows the hire's name; the renamed record is kept
+offline. An occupant with no allocation, such as a hire from before the ledger
+began on 2026-10-03, keeps both bindings.

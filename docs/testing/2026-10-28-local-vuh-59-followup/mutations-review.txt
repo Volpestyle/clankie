@@ -1,0 +1,23 @@
+# Each mutation of personas.ts, then: pnpm exec vitest run test/personas.test.ts test/tracker-role-budget.integration.test.ts
+# (the last: body-transfer.ts, then test/body-transfer-hosted.integration.test.ts).
+# Unmutated: 29 passed, and 1 passed. Every mutation below fails at least one test.
+
+adoptSpawn kept reverted to discoveredName:       Tests  1 failed | 28 passed (29)
+chosen without the minted check:       Tests  4 failed | 25 passed (29)
+new record named by its title, not its handle:       Tests  3 failed | 26 passed (29)
+GENERIC_NAME without captain:       Tests  1 failed | 28 passed (29)
+retire loop without its owner guard:       Tests  1 failed | 28 passed (29)
+rejoin without its owner guard:       Tests  1 failed | 28 passed (29)
+update_persona sets no marker:       Tests  2 failed | 27 passed (29)
+tag positions compared literally (no tag matches):       Tests  5 failed | 24 passed (29)
+tag positions accept any character:       Tests  1 failed | 28 passed (29)
+a key of any length matches its stem:       Tests  1 failed | 28 passed (29)
+no ledger: minted only by stored marker:       Tests  5 failed | 24 passed (29)
+census Herdr rename sets no owner marker:       Tests  1 failed | 28 passed (29)
+a persona named after its own handle is not repaired:       Tests  1 failed | 28 passed (29)
+the fleet left out of the census key:       Tests  3 failed | 26 passed (29)
+hired markers not read back from the sidecar:       Tests  2 failed | 27 passed (29)
+owner markers not read back from the sidecar:       Tests  2 failed | 27 passed (29)
+stale owner markers kept:       Tests  1 failed | 28 passed (29)
+markers written into personas.json:       Tests  10 failed | 19 passed (29)
+body-transfer.ts without captain/personas.markers.json (body-transfer-hosted.integration.test.ts):       Tests  1 failed (1)

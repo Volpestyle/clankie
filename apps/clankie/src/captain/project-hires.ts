@@ -127,6 +127,24 @@ export class ProjectHires {
     );
   }
   /**
+   * The title Clankie hired this native session under, or is still hiring this pane under before
+   * its session is known. Its Herdr handle was minted from that title (LOCAL-VUH-59).
+   */
+  public hireTitle(fleet: string, pane: string | undefined, occupantId: string): string | undefined {
+    const started = this.read().allocations.filter((entry) => entry.started);
+    return (
+      started.findLast((entry) => entry.occupantId === occupantId) ??
+      (pane === undefined
+        ? undefined
+        : started.findLast(
+            (entry) =>
+              entry.occupantId === undefined &&
+              (entry.request.fleet ?? "default") === fleet &&
+              entry.pane === pane,
+          ))
+    )?.request.title;
+  }
+  /**
    * Every roster projection reads this ledger once per seat. Parse a given
    * file version once: writes replace the file by rename, so its identity,
    * size and timestamps change with every committed state. The cached state

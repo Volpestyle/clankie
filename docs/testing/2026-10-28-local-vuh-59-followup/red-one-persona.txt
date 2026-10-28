@@ -1,0 +1,58 @@
+AssertionError: expected [ [ …(2) ], [ …(2) ], [ …(2) ], …(1) ] to deeply equal [ [ …(2) ], [ …(2) ], [ …(2) ], …(1) ]
+
+- Expected
++ Received
+
+@@ -1,13 +1,13 @@
+  [
+    [
+-     "agent-f6c1903f-5787-4a45-a273-1dd247964f1b",
+-     "Sable",
++     "agent-7a3b14ce-d31b-4905-a7ed-4fec1bd5e18b",
++     "Quill",
+    ],
+    [
+-     "agent-c77e7445-f1f6-45b2-b8e6-5d08be5d693e",
+-     "Wynn",
++     "agent-e56833a0-63cf-4f12-af3f-cb9731fc52f0",
++     "Clankie captain brief assignment",
+    ],
+    [
+      "agent-00000000-0000-4000-8000-000000000002",
+      "Juniper",
+    ],
+
+ ❯ apps/clankie/test/personas.test.ts:533:63
+    531|     ]);
+    532|     // The hires read as the names they were hired under, each bound o…
+    533|     expect(seats.map((seat) => [seat.personaId, seat.title])).toEqual([
+       |                                                               ^
+    534|       [ids.sable, "Sable"],
+    535|       [ids.wynn, "Wynn"],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |parallel| apps/clankie/test/tracker-role-budget.integration.test.ts > a hired worker's writes carry its persona, and their author fields name the writer (LOCAL-VUH-59)
+AssertionError: expected { …(8) } to match object { author: 'Lark' }
+(7 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "author": "Lark",
++   "author": "seat-w1:p1",
+  }
+
+ ❯ apps/clankie/test/tracker-role-budget.integration.test.ts:664:21
+    662|   const ownerWrite = await f.owner("save_comment", { issueId: issue.id…
+    663|   // Each write's own response names its writer, as the stored record …
+    664|   expect(larkWrite).toMatchObject({ author: "Lark" });
+       |                     ^
+    665|   expect(pcWrite).toMatchObject({ author: "Wren" });
+    666|   expect(JSON.parse((lead as { content: string }).content)).toMatchObj…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)

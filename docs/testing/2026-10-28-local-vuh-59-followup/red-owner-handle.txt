@@ -1,0 +1,32 @@
+# The round-1 cases against personas.ts at 3e4c9c086 (the first part 2 candidate), with this round's tests.
+# pnpm exec vitest run test/personas.test.ts -t "owner's Herdr name even when|whichever census files it first"
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/local-vuh-59c
+ ❯ |parallel| apps/clankie/test/personas.test.ts (22 tests | 2 failed | 20 skipped) 163ms
+   × keeps an owner's Herdr name even when it reads like a hire handle (LOCAL-VUH-59 review) 31ms
+   × names a hire by the title Clankie hired it under, whichever census files it first (LOCAL-VUH-59) 128ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  |parallel| apps/clankie/test/personas.test.ts > keeps an owner's Herdr name even when it reads like a hire handle (LOCAL-VUH-59 review)
+AssertionError: expected [ 'Vuh', 'Claude Code', 'Lark' ] to deeply equal [ 'vuh-2933', 'Claude Code', 'Lark' ]
+- Expected
++ Received
+  [
+-   "vuh-2933",
++   "Vuh",
+    "Claude Code",
+    "Lark",
+  ]
+ ❯ apps/clankie/test/personas.test.ts:644:100
+       |                                                                                                    ^
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+ FAIL  |parallel| apps/clankie/test/personas.test.ts > names a hire by the title Clankie hired it under, whichever census files it first (LOCAL-VUH-59)
+AssertionError: expected 'Wren' to be 'wren-3c4d' // Object.is equality
+Expected: "wren-3c4d"
+Received: "Wren"
+ ❯ apps/clankie/test/personas.test.ts:698:80
+       |                                                                                ^
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+ Test Files  1 failed (1)
+      Tests  2 failed | 20 skipped (22)
+   Start at  11:37:00
+   Duration  1.37s (transform 873ms, setup 52ms, import 1.01s, tests 163ms, environment 0ms)

@@ -8,6 +8,8 @@ import { SettingsStore } from "@clankie/settings";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { BodyTransfer, createBodyTransferRoutes } from "../src/body-transfer.ts";
 import { createDormantApp } from "../src/dormant-body.ts";
+import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
+import { PersonaStore } from "../src/captain/personas.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { GatewayEncryptionHost } from "../src/gateway-encryption.ts";
 import { HostedBodyClient } from "../src/hosted-body.ts";
@@ -36,7 +38,12 @@ it("moves this Mac's Clankie into a managed body with the hosted CLI transport",
   const encryption = new GatewayEncryptionHost(f.hostId, randomBytes(32));
   const deviceSessionKey = randomBytes(32);
   const hostedState = join(root, "hosted/state");
-  await mkdir(hostedState, { recursive: true });
+  await mkdir(join(hostedState, "captain"), { recursive: true });
+  // The managed body ran Clankie before: its own persona markers must not outlive the move.
+  await writeFile(
+    join(hostedState, "captain/personas.markers.json"),
+    JSON.stringify({ schemaVersion: 1, hired: ["stale-0000"], ownerNamed: [] }),
+  );
   const hostedSettings = new SettingsStore(join(root, "hosted/settings.json"));
   let hosted: ClankieApp | undefined;
   let restarts = 0;
@@ -106,6 +113,22 @@ it("moves this Mac's Clankie into a managed body with the hosted CLI transport",
   await writeFile(join(macState, "memory/captain-episodes/operator.jsonl"), note);
   const attachment = randomBytes(2 * 1024 * 1024);
   await writeFile(join(macState, "attachments/delivered/photo.bin"), attachment);
+  // A hire whose pane persona the owner named "Juniper" before Herdr dropped its handle (ADR 0147).
+  const pane: ObservedFleetSeat = {
+    seatId: "term_hire",
+    paneId: "w1:p1",
+    subject: "adhoc-00000000000000000001",
+    occupantId: `session-${"1".repeat(64)}`,
+    harness: "claude",
+    status: "working",
+    title: "Claude Code",
+  };
+  const macPersonas = new PersonaStore(join(macState, "captain"));
+  const [ownerPane] = macPersonas.reconcile([pane]);
+  macPersonas.update({ schemaVersion: 1, personaId: ownerPane!.personaId, name: "Juniper" });
+  macPersonas.adoptSpawn({ ...pane, subject: "wynn-e3f1" }, "Wynn");
+  expect(macPersonas.reconcile([pane]).map((seat) => seat.title)).toEqual(["Juniper"]);
+  const markers = await readFile(join(macState, "captain/personas.markers.json"), "utf8");
   const macSettings = new SettingsStore(join(root, "mac/settings.json"));
   const mac = new BodyTransfer({
     roots: { state: macState, memory: join(macState, "memory"), attachments: join(macState, "attachments") },
@@ -219,6 +242,11 @@ it("moves this Mac's Clankie into a managed body with the hosted CLI transport",
   expect((await readFile(join(hostedState, "attachments/delivered/photo.bin"))).equals(attachment)).toBe(
     true,
   );
+  // The persona markers moved with the personas, so the owner's name holds on the managed body.
+  expect(await readFile(join(hostedState, "captain/personas.markers.json"), "utf8")).toBe(markers);
+  expect(new PersonaStore(join(hostedState, "captain")).reconcile([pane]).map((seat) => seat.title)).toEqual([
+    "Juniper",
+  ]);
 
   // Status through the same hosted CLI transport reads the destination.
   output.length = 0;
