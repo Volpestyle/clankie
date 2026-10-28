@@ -49,11 +49,12 @@ const machineSampleFile = "samples.jsonl";
 /** About two days of 30-second samples per file. */
 const machineSampleMaxBytes = 4 * 1_048_576;
 
-// `-c`/`-e` take a whole shell or interpreter script, which can carry any secret.
-const secretFlag =
-  /^(?:-H|-c|-e|--eval|-u|--user|--?[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*)$/iu;
-const secretFlagValue =
-  /^(--(?:eval|user|[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*)=).+$/iu;
+// `-c`/`-e` take a whole shell or interpreter script, which can carry any secret. Case
+// matters: `-C dir` (pnpm, git), `-E` and `-U` are ordinary arguments worth keeping.
+const scriptOrUserFlag = /^(?:-H|-c|-e|-u|--eval|--user)$/u;
+const secretName = String.raw`--?[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*`;
+const secretNamedFlag = new RegExp(`^${secretName}$`, "iu");
+const secretFlagValue = new RegExp(`^((?:--eval|--user|${secretName})=).+$`, "iu");
 const urlUserinfo = /([a-z][\w+.-]*:\/\/)[^/@\s]+@/giu;
 
 /** The command line, with environment assignments, scripts and credentials withheld. */
@@ -61,7 +62,7 @@ export function leaseCommand(command: string, args: readonly string[]): string {
   const shown = args.map((arg, index) =>
     /^[A-Za-z_][A-Za-z0-9_]*=/u.test(arg)
       ? `${arg.slice(0, arg.indexOf("="))}=***`
-      : index > 0 && secretFlag.test(args[index - 1]!)
+      : index > 0 && (scriptOrUserFlag.test(args[index - 1]!) || secretNamedFlag.test(args[index - 1]!))
         ? "***"
         : arg.replace(secretFlagValue, "$1***").replace(urlUserinfo, "$1***@"),
   );

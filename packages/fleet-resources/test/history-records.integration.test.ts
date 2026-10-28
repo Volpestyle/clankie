@@ -98,6 +98,12 @@ it.each([
     args: ["-e", "process.exit(0)", "--", "https://carol:secret-four@example.invalid/repo"],
     recorded: "node -e *** -- https://***@example.invalid/repo",
   },
+  {
+    withheld: "single-dash secret assignments",
+    command: process.execPath,
+    args: ["-e", "process.exit(0)", "--", "-token=secret-five", "-Dpassword=secret-six"],
+    recorded: "node -e *** -- -token=*** -Dpassword=***",
+  },
 ])("lease history withholds $withheld", async ({ command, args, recorded }) => {
   const registry = join(await scratch(), "registry");
   const governor = await governorIn(registry);
@@ -109,6 +115,26 @@ it.each([
   expect(await readFile(join(registry, "leases.jsonl"), "utf8")).not.toContain("secret-");
   expect(await lines(join(registry, "leases.jsonl"))).toEqual([
     expect.objectContaining({ event: "admitted", command: recorded }),
+    expect.objectContaining({ event: "released", exitCode: 0 }),
+  ]);
+});
+
+it("lease history keeps ordinary capital flags readable", async () => {
+  const registry = join(await scratch(), "registry");
+  const governor = await governorIn(registry);
+  try {
+    expect(
+      await governor.runHeavy(
+        process.execPath,
+        ["-e", "process.exit(0)", "--", "-C", "apps/clankie", "-E", "foo|bar", "-U", "3"],
+        { holderId: "history" },
+      ),
+    ).toBe(0);
+  } finally {
+    await governor.close();
+  }
+  expect(await lines(join(registry, "leases.jsonl"))).toEqual([
+    expect.objectContaining({ event: "admitted", command: "node -e *** -- -C apps/clankie -E foo|bar -U 3" }),
     expect.objectContaining({ event: "released", exitCode: 0 }),
   ]);
 });
