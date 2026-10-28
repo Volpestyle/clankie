@@ -98,7 +98,9 @@ it.skipIf(process.env.NATIVE_CLAUDE_CACHE_FIXTURES !== "1")(
       await exec("claude", ["plugin", "install", pluginId, "--scope", "user"], { env, timeout: 30_000 });
       const state = JSON.parse(await readFile(join(profile, "plugins/installed_plugins.json"), "utf8"));
       const installed = state.plugins[pluginId].find((entry: { scope: string }) => entry.scope === "user");
-      expect(installed.version).toBe("0.6.20");
+      // The installed plugin is the one this checkout ships.
+      const shipped = JSON.parse(await readFile(root + "worker/.claude-plugin/plugin.json", "utf8")).version;
+      expect(installed.version).toBe(shipped);
       const config = JSON.parse(await readFile(join(installed.installPath, "hooks/hooks.json"), "utf8"));
       const guard = config.hooks.PreToolUse.find((entry: { hooks: { command: string }[] }) =>
         entry.hooks.some((handler) => handler.command.includes("tracker-hook.mjs")),

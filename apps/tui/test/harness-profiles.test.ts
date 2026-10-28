@@ -191,7 +191,13 @@ it.each([true, false])(
 
 it("ships matching Claude and Codex worker versions for doctor comparisons", async () => {
   const root = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
-  for (const manifest of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
-    expect(JSON.parse(await readFile(join(root, manifest), "utf8")).version).toBe("0.6.20");
-  }
+  // Doctor's expected version is the Claude manifest's, compared for both harnesses,
+  // so the two must agree; reading them keeps a version bump from breaking this.
+  const [claude, codex] = await Promise.all(
+    [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"].map(
+      async (manifest) => JSON.parse(await readFile(join(root, manifest), "utf8")).version as string,
+    ),
+  );
+  expect(claude).toMatch(/^\d+\.\d+\.\d+$/u);
+  expect(codex).toBe(claude);
 });
