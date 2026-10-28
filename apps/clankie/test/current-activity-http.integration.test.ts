@@ -123,6 +123,11 @@ it("serves opt-in owner activity from live native events and call ownership, pre
         "Check available space without changing files",
       ],
       ["hire", { taskTitle: "Fix the desktop pet", prompt: "PRIVATE_BRIEF" }, "Fix the desktop pet"],
+      [
+        "hire_agent",
+        { taskTitle: "Check the desktop pet", prompt: "PRIVATE_BRIEF" },
+        "Check the desktop pet",
+      ],
       ["mcp__worker__message_peer", { text: "PRIVATE_MESSAGE" }, "Sending a message"],
       ["unknown_native_tool", { command: "PRIVATE_COMMAND" }, "Working"],
       [

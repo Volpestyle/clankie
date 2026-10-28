@@ -42,7 +42,7 @@ function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "t
   // A description on issue/edit tools is content, not a summary of this call.
   const humanSummary = /(?:^|__|\.)(?:exec|exec_command|bash|shell)$/u.test(name)
     ? args?.description
-    : /(?:^|__|\.)(?:hire|hire_worker)$/u.test(name)
+    : /(?:^|__|\.)(?:hire|hire_worker|hire_agent)$/u.test(name)
       ? args?.taskTitle
       : undefined;
   const description =
@@ -56,7 +56,7 @@ function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "t
         : "Working with issues"
       : /(?:^|__|\.)(?:message_peer|message_clankie|send_message|followup_task)$/u.test(name)
         ? "Sending a message"
-        : /(?:^|__|\.)(?:hire|hire_worker)$/u.test(name)
+        : /(?:^|__|\.)(?:hire|hire_worker|hire_agent)$/u.test(name)
           ? "Hiring a worker"
           : source === "coding"
             ? "Working on code"
