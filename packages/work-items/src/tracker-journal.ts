@@ -409,9 +409,32 @@ export async function readJournalTail(
 }
 
 /**
+ * Bytes past the size an append expects are cut only when they are a torn tail, which is one
+ * interrupted append. Past this they are refused unread rather than proven torn.
+ */
+export const TORN_TAIL_LIMIT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Whether bytes that start at a record boundary hold a whole record anywhere, framed or not
+ * (LOCAL-VUH-54). An acknowledged record always parses; a torn tail, or damage before a later
+ * record, never does.
+ */
+function holdsRecord(tail: Buffer): boolean {
+  for (let at = 0; at < tail.length;) {
+    const end = recordEnd(tail, at, true);
+    if (end >= 0 && parses(tail.toString("utf8", at, end))) return true;
+    const next = tail.indexOf(0x0a, at);
+    if (next < 0) return false;
+    at = next + 1;
+  }
+  return false;
+}
+
+/**
  * One durable commit: a complete line appended to the newest segment, then one fsync. The
  * segment is cut back to the size this backend last saw first, so a torn line left by an
- * interrupted append is never extended.
+ * interrupted append is never extended. Bytes there that hold a whole record are another
+ * writer's acknowledged commit, read from a stale base: the append refuses and cuts nothing.
  */
 export async function appendJournal(
   directory: string,
@@ -426,7 +449,19 @@ export async function appendJournal(
     beforeAppend();
     const { size } = await handle.stat();
     if (size < live.size) throw new Error("Tracker journal segment shrank under this backend");
-    if (size > live.size) await handle.truncate(live.size);
+    if (size > live.size) {
+      if (size - live.size > TORN_TAIL_LIMIT_BYTES)
+        throw new Error(
+          `Tracker journal segment ${live.name} has ${String(size - live.size)} bytes this backend has not read; refusing to cut them`,
+        );
+      const tail = Buffer.alloc(size - live.size);
+      await readAll(handle, tail, live.size);
+      if (holdsRecord(tail))
+        throw new Error(
+          `Tracker journal segment ${live.name} holds a record this backend has not read; refusing to cut it`,
+        );
+      await handle.truncate(live.size);
+    }
     const bytes = Buffer.from(line);
     try {
       await writeAll(handle, bytes, live.size);
@@ -509,6 +544,16 @@ async function writeAll(handle: FileHandle, bytes: Buffer, position?: number): P
     );
     if (bytesWritten === 0) throw new Error("Tracker journal write made no progress");
     written += bytesWritten;
+  }
+}
+
+/** Fills `bytes` from `position`: a short read would judge a tail by part of it. */
+async function readAll(handle: FileHandle, bytes: Buffer, position: number): Promise<void> {
+  let read = 0;
+  while (read < bytes.length) {
+    const { bytesRead } = await handle.read(bytes, read, bytes.length - read, position + read);
+    if (bytesRead === 0) throw new Error("Tracker journal segment shrank under this backend");
+    read += bytesRead;
   }
 }
 

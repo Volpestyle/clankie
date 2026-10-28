@@ -248,7 +248,11 @@ records in order:
 - A final line with no newline is an interrupted append. It is left out.
 - A final line whose bytes are not a whole parseable record at its stated length is also
   left out. A power cut can persist the line's size and newline but not all of its pages.
-- The next append cuts either kind off.
+- The next append cuts either kind off, but only after reading what it cuts. If those
+  bytes hold a whole parseable record anywhere, framed or not, they are another
+  writer's acknowledged commit seen from a stale base, and the append refuses with
+  nothing cut (LOCAL-VUH-54). Over 64 MiB of unexpected bytes, more than one
+  interrupted append, is refused unread.
 - The same damage anywhere else refuses the open, and so does a damaged final line that
   a whole record follows.
 - A live process refuses to drop a record it already acknowledged.

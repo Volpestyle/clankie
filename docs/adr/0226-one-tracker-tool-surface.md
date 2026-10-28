@@ -1142,6 +1142,15 @@ Status: accepted (lead-approved scope, 2026-10-27).
   - A journal build from before framing, after a rollback, appends unframed lines
     after framed ones. Such a line reads as a record when it parses, so the rollback
     and the return keep every write.
+- **An append proves what it cuts (LOCAL-VUH-54).** Bytes past the size the appending
+  backend last saw are cut only when they hold no whole parseable record, framed or
+  unframed, at any line start. Otherwise they are an acknowledged commit read from a
+  stale base, and the append refuses before cutting or writing. This is independent
+  of LOCAL-VUH-51's under-lock generation guard, which keeps a stale base from
+  reaching the append at all. A torn tail is one interrupted append, so the tail is
+  read only up to 64 MiB. A larger one is refused unread, and recovering from it
+  (an interrupted append of a record over 64 MiB) is the manual recovery in the
+  work-items README.
 - **`clankie doctor` reports the checkpoint against the single-string limit.** Open
   still parses the checkpoint under that limit (536,870,888 characters). Doctor warns
   at half. Retention or a streamed open is LOCAL-VUH-49.

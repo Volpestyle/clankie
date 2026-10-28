@@ -1,12 +1,12 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
-import { JOURNAL_DIRECTORY } from "../src/tracker-journal.ts";
+import { appendJournal, JOURNAL_DIRECTORY, TORN_TAIL_LIMIT_BYTES } from "../src/tracker-journal.ts";
 import { createLocalTracker } from "../src/tracker-local.ts";
 
 // LOCAL-VUH-47: each journal line names its length. A power cut can persist an unacknowledged
@@ -147,4 +147,119 @@ it("keeps unframed records a rolled-back build appended after framed ones", asyn
     `${await readFile(live, "utf8")}{"syncId":${String(after.syncId + 1)},"commit":\0\0\0\n`,
   );
   expect(await opened(directory)).toEqual(after);
+}, 120_000);
+
+/** A store already on the journal, and its live segment. */
+async function journalStore(prefix: string): Promise<{ directory: string; live: string }> {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  roots.push(directory);
+  const tracker = createLocalTracker({ directory });
+  for (let index = 0; !existsSync(join(directory, JOURNAL_DIRECTORY)); index++)
+    await tracker.call("save_issue", {
+      team: "LOCAL",
+      title: `large ${String(index)}`,
+      description: "x".repeat(300 * 1024),
+    });
+  await tracker.call("save_issue", { team: "LOCAL", title: "kept" });
+  const names = (await readdir(join(directory, JOURNAL_DIRECTORY))).filter((name) => name.endsWith(".jsonl"));
+  return { directory, live: join(directory, JOURNAL_DIRECTORY, names.sort().at(-1)!) };
+}
+const saveInChild = (directory: string, title: string) =>
+  inChild(
+    directory,
+    `await createLocalTracker({ directory }).call("save_issue", { team: "LOCAL", title: ${JSON.stringify(title)} });`,
+  );
+/** The line as a journal build from before framing wrote it. */
+const unframed = (line: string) => {
+  const { length, ...record } = JSON.parse(line) as Record<string, unknown>;
+  expect(typeof length).toBe("number");
+  return JSON.stringify(record);
+};
+
+// LOCAL-VUH-54: an append from a stale base must not cut another writer's acknowledged record
+// as if it were a torn tail. The tracker's own generation guard is bypassed by calling
+// appendJournal with the base's size, as the rejected LOCAL-VUH-51 head did.
+it("refuses to cut a whole record past a stale base's size and keeps it across a fresh open", async () => {
+  const { directory, live } = await journalStore("tracker-journal-stale-base-");
+  const stale = { name: live.split("/").at(-1)!, size: (await stat(live)).size };
+  // The stale writer's own next record: a copy of the store commits from the same base.
+  const fork = await mkdtemp(join(tmpdir(), "tracker-journal-stale-fork-"));
+  roots.push(fork);
+  await cp(directory, fork, { recursive: true });
+  await saveInChild(fork, "Local");
+  const line = (await readFile(join(fork, JOURNAL_DIRECTORY, stale.name))).subarray(stale.size).toString();
+  expect(line).toMatch(/^\{"syncId":\d+,"length":\d+,.*\n$/su);
+
+  await saveInChild(directory, "ExternalX"); // acknowledged by another process
+  const committed = await opened(directory);
+  expect(committed.titles).toContain("ExternalX");
+  const original = await readFile(live);
+  const external = original.subarray(stale.size).toString();
+  const tails: Record<string, string> = {
+    framed: external,
+    unframed: `${unframed(external.slice(0, -1))}\n`,
+    "after damage": `{"syncId":\0\0\0\n${external}`,
+  };
+  for (const [kind, tail] of Object.entries(tails)) {
+    const bytes = Buffer.concat([original.subarray(0, stale.size), Buffer.from(tail)]);
+    await writeFile(live, bytes);
+    await expect(
+      appendJournal(directory, stale, line, () => {}),
+      kind,
+    ).rejects.toThrow(/holds a record this backend has not read/u);
+    expect((await readFile(live)).equals(bytes), kind).toBe(true);
+    if (kind !== "after damage") expect(await opened(directory), kind).toEqual(committed);
+  }
+
+  // An unexpected tail too large to be one interrupted append is refused unread.
+  await writeFile(live, original);
+  await truncate(live, stale.size + TORN_TAIL_LIMIT_BYTES + 1);
+  await expect(appendJournal(directory, stale, line, () => {})).rejects.toThrow(/refusing to cut them/u);
+  expect((await stat(live)).size).toBe(stale.size + TORN_TAIL_LIMIT_BYTES + 1);
+  await writeFile(live, original);
+  expect(await opened(directory)).toEqual(committed);
+}, 120_000);
+
+it("still cuts torn final lines, framed or unframed, including after a rollback", async () => {
+  const { directory, live } = await journalStore("tracker-journal-torn-tails-");
+  const next = async () => {
+    const lines = (await readFile(live, "utf8")).split("\n").filter(Boolean);
+    return lines
+      .at(-1)!
+      .replace(/^\{"syncId":(\d+),/u, (_, id: string) => `{"syncId":${String(Number(id) + 1)},`);
+  };
+  const tails: Record<string, (line: string) => string> = {
+    // Interrupted framed append: a prefix of the line, no newline.
+    "framed prefix": (line) => line.slice(0, Math.floor(line.length / 2)),
+    // A newline before the stated length: it parses, but its frame does not match.
+    "framed length mismatch": (line) =>
+      `${line.replace(/"length":(\d+),/u, (_, length: string) => `"length":${String(Number(length) + 1)},`)}\n`,
+    // An older build's whole record that never got its newline.
+    "unframed without newline": (line) => unframed(line),
+  };
+  // The mixed rollback case: an older build appended unframed lines, then a framed append tore.
+  const rollback = async () => {
+    const lines = (await readFile(live, "utf8")).split("\n");
+    for (const at of [lines.length - 3, lines.length - 2]) lines[at] = unframed(lines[at]!);
+    await writeFile(live, lines.join("\n"));
+  };
+  for (const kind of [...Object.keys(tails), "framed after unframed"]) {
+    if (kind === "framed after unframed") {
+      await saveInChild(directory, "older build");
+      await rollback();
+    }
+    const before = await opened(directory);
+    const tail = (tails[kind] ?? tails["framed prefix"]!)(await next());
+    await writeFile(live, `${await readFile(live, "utf8")}${tail}`);
+    expect(await opened(directory), kind).toEqual(before);
+    await saveInChild(directory, `after ${kind}`);
+    for (const line of (await readFile(live, "utf8")).split("\n").filter(Boolean))
+      expect(() => JSON.parse(line), kind).not.toThrow();
+    const after = await opened(directory);
+    expect(after.titles, kind).toEqual([...before.titles, `after ${kind}`].sort());
+    expect(after.syncId, kind).toBe(before.syncId + 1);
+  }
+  // Both rollback records survived the repair.
+  const lines = (await readFile(live, "utf8")).split("\n").filter(Boolean);
+  expect(lines.filter((line) => !/^\{"syncId":\d+,"length":/u.test(line))).toHaveLength(2);
 }, 120_000);
