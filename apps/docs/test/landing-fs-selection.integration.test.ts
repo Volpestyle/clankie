@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { fsInputScope } from "../../../scripts/testing/landing-fs-inputs.mjs";
+import { fsInputScope, landingFsInputs } from "../../../scripts/testing/landing-fs-inputs.mjs";
 
 const source = fileURLToPath(new URL("../../..", import.meta.url));
 const roots: string[] = [];
@@ -12,7 +12,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture() {
+function fixture(kind: "manifest" | "bridge" = "manifest") {
   const root = mkdtempSync(join(tmpdir(), "landing-fs-selection-"));
   roots.push(root);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -55,15 +55,31 @@ function fixture() {
   write(".local/owner-settings.json", "{}\n");
   write(
     "vitest.config.ts",
-    `export default { resolve: { alias: { vitest: ${JSON.stringify(fileURLToPath(import.meta.resolve("vitest")))} } }, test: { include: ["apps/tui/test/*.test.ts"], pool: "forks", maxWorkers: 1 } };\n`,
+    `export default { resolve: { alias: { vitest: ${JSON.stringify(fileURLToPath(import.meta.resolve("vitest")))} } }, test: { include: ["apps/*/test/*.test.ts"], pool: "forks", maxWorkers: 1 } };\n`,
   );
-  const input = "integrations/claude-plugin/worker/.claude-plugin/plugin.json";
-  const consumer = "apps/tui/test/harness-profiles.test.ts";
-  write(input, '{"value":1}\n');
+  const input =
+    kind === "manifest"
+      ? "integrations/claude-plugin/worker/.claude-plugin/plugin.json"
+      : "integrations/claude-plugin/worker/bin/seat-channel.mjs";
+  const consumer =
+    kind === "manifest" ? "apps/tui/test/harness-profiles.test.ts" : "apps/tui/test/worker-link.test.ts";
+  const contents = (value: number) =>
+    kind === "manifest" ? JSON.stringify({ value }) + "\n" : `export const value = ${value};\n`;
+  write(input, contents(1));
+  // Other declared consumers need to exist in this tiny repository. The fixed
+  // expected consumer below performs the actual path read/child import; it is
+  // not inferred from the map, so deleting its edge fails the assertion.
+  for (const [test, inputs] of Object.entries(landingFsInputs))
+    if ((inputs as string[]).includes(input))
+      write(test, 'import {it} from "vitest"; it("other mapped consumer", () => {});\n');
   write(
     consumer,
-    `import { it, expect } from "vitest"; import { readFileSync } from "node:fs";
-it("reads a repository input by path", () => expect(JSON.parse(readFileSync(new URL("../../../${input}", import.meta.url), "utf8")).value).toBe(2));\n`,
+    kind === "manifest"
+      ? `import { it, expect } from "vitest"; import { readFileSync } from "node:fs";
+it("reads a repository input by path", () => expect(JSON.parse(readFileSync(new URL("../../../${input}", import.meta.url), "utf8")).value).toBe(2));\n`
+      : `import {it, expect} from "vitest"; import {execFileSync} from "node:child_process";
+const moduleUrl = new URL("../../../${input}", import.meta.url).href;
+it("imports a repository module in a child", () => expect(execFileSync(process.execPath, ["--input-type=module", "-e", "import(" + JSON.stringify(moduleUrl) + ").then(m => console.log(m.value))"], {encoding:"utf8"}).trim()).toBe("2"));\n`,
   );
   git("add", "-A");
   git("commit", "-qm", "fixture base");
@@ -83,20 +99,33 @@ it("reads a repository input by path", () => expect(JSON.parse(readFileSync(new 
     const report = JSON.parse(readFileSync(join(root, ".local/landing-gate.json"), "utf8"));
     return { ...result, report };
   };
-  return { root, git, write, base, input, consumer, gate };
+  return { root, git, write, base, input, consumer, gate, contents };
 }
 
 it("runs the real gate union and records filesystem edges in the real reporter", () => {
   const f = fixture();
-  f.write(f.input, '{"value":2}\n');
+  f.write(f.input, f.contents(2));
   f.git("add", f.input);
   f.git("commit", "-qm", "change only a filesystem input");
   const result = f.gate();
   expect(result.status, result.stderr + result.stdout).toBe(0);
   expect(result.report.change.files).toEqual([f.input]);
-  expect(result.report.tests.testModules).toEqual([f.consumer]);
+  expect(result.report.tests.testModules).toContain(f.consumer);
+  expect(result.report.tests.testModules).toContain("apps/tui/test/worker-link.test.ts");
   expect(result.report.tests.modules[f.consumer]).toContain(f.input);
   expect(result.report.tests.dependencies).toContain(f.input);
+}, 60_000);
+
+it("a seat-channel.mjs-only commit selects worker-link and records its child-import edge", () => {
+  const f = fixture("bridge");
+  f.write(f.input, f.contents(2));
+  f.git("add", f.input);
+  f.git("commit", "-qm", "change only seat-channel.mjs");
+  const result = f.gate();
+  expect(result.status, result.stderr + result.stdout).toBe(0);
+  expect(result.report.change.files).toEqual(["integrations/claude-plugin/worker/bin/seat-channel.mjs"]);
+  expect(result.report.tests.testModules).toContain("apps/tui/test/worker-link.test.ts");
+  expect(result.report.tests.modules["apps/tui/test/worker-link.test.ts"]).toContain(f.input);
 }, 60_000);
 
 it("fails the real gate closed and names an unmapped executable, including deletion", () => {

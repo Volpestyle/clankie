@@ -17,7 +17,9 @@ imports), with serial compiler execution. Compiler/dependency configuration
 changes check all projects. Test selection unions Vitest's `--changed` import
 graph with the per-test filesystem inputs in
 `scripts/testing/landing-fs-inputs.mjs`. Declare paths there when a test reads a
-manifest, fixture or native source through fs or a spawned build. These edges
+manifest, fixture, native source or JS module through fs, a spawned build, or
+a child-process import. In particular, worker bridge entrypoints and the local
+modules their children import need declared edges even though they are `.mjs`. These edges
 also enter each selected test's recorded dependencies, including the VUH-2044
 manifest revalidation scope. A docs-only change adds no tests.
 Changed non-JS executable inputs (native/script extensions, executable modes or

@@ -4,11 +4,32 @@ import { resolve } from "node:path";
 
 // Paths read/built at runtime are invisible to Vitest's import graph. Keep each
 // edge explicit: these inputs also belong to the test's revalidation footprint.
+// build-fleet-proof selects one platform source; the five regressions exercise
+// the resulting transport/census, including the blocked-caller timing boundary.
 const fleetInputs = [
   "integrations/fleet-proof/native-process-proof.c",
   "integrations/fleet-proof/linux-process-proof.py",
   "scripts/build-fleet-proof.mjs",
 ];
+const workerBin = (...names) => names.map((name) => `integrations/claude-plugin/worker/bin/${name}.mjs`);
+// The child imports this closure outside Vite. These are explicit runtime edges,
+// shared only by tests that start/import runSeatChannel in a spawned process.
+// seat-channel also reads its version manifest with fs when the child starts.
+const seatChannelInputs = workerBin(
+  "seat-channel",
+  "mcp-result",
+  "inbound-receipt",
+  "message-status",
+  "admission",
+  "peer-receipt",
+  "review-tools",
+  "evidence-push",
+  "catalog-watch",
+  "link",
+).concat("integrations/claude-plugin/worker/.claude-plugin/plugin.json");
+// seat-hook's child imports these helpers while probing its real parent process.
+const seatHookInputs = workerBin("seat-hook", "link", "codex-tool-catalog", "pane-presence");
+
 export const landingFsInputs = Object.fromEntries([
   [
     "apps/docs/test/landing-revalidation.integration.test.ts",
@@ -29,7 +50,8 @@ export const landingFsInputs = Object.fromEntries([
     "apps/clankie/test/linux-native-fleet.integration.test.ts",
     ["integrations/fleet-proof/linux-process-proof.py", "integrations/fleet-proof/test/linux-proof.py"],
   ],
-  ...["probe-failure", "darwin-pressure", "host-specs", "heavy-process", "store-lock"].map((suite) => [
+  // process.ts launches native.py for these real pressure, process and lock proofs.
+  ...["probe-failure", "darwin-pressure", "host-specs", "store-lock"].map((suite) => [
     `packages/fleet-resources/test/${suite}.integration.test.ts`,
     ["packages/fleet-resources/src/native.py"],
   ]),
@@ -53,10 +75,13 @@ export const landingFsInputs = Object.fromEntries([
     "packages/fleet-resources/test/simulator-usage.integration.test.ts",
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/test/fixtures/simulator-usage.c"],
   ],
+  // sandbox.wrap resolves worker-shell by path; this proof creates a scratch
+  // keychain through the protected Python helper before running the sandbox.
   [
     "apps/clankie/test/worker-sandbox.integration.test.ts",
     ["packages/credential-broker/src/protected-keychain.py", "apps/clankie/src/worker-shell.sh"],
   ],
+  // Credential-store lock checks launch this Python helper during native cache reads.
   [
     "apps/clankie/test/keychain-cache-native.integration.test.ts",
     ["packages/credential-broker/src/keychain-status.py"],
@@ -72,6 +97,7 @@ export const landingFsInputs = Object.fromEntries([
     "apps/clankie/test/prepared-host-herdr-golden.integration.test.ts",
     ["integrations/opencode-plugin/process-birth.py"],
   ],
+  // The churn harness compiles each named C fixture during its real child proof.
   [
     "apps/clankie/test/native-proof-churn.integration.test.ts",
     [
@@ -91,6 +117,7 @@ export const landingFsInputs = Object.fromEntries([
       ].map((name) => `apps/clankie/test/helpers/native-proof-churn/${name}.c`),
     ],
   ],
+  // The project proof compiles exec-argv and invokes the shell fixture by path.
   [
     "apps/clankie/test/project-native-proof.integration.test.ts",
     [
@@ -98,6 +125,7 @@ export const landingFsInputs = Object.fromEntries([
       "apps/clankie/test/helpers/project-native-proof/shell.sh",
     ],
   ],
+  // The frequency proof builds its sampler from this C source at runtime.
   [
     "apps/clankie/test/project-proof-frequency.integration.test.ts",
     ["apps/clankie/test/helpers/project-native-proof/cpu-snapshot.c"],
@@ -113,6 +141,66 @@ export const landingFsInputs = Object.fromEntries([
       "apps/clankie/test/fixtures/harness-login-bin/codex",
     ],
   ],
+  // These tests execute child imports/entrypoints. Their local imports are not
+  // reachable from Vitest's parent-process module graph.
+  [
+    "apps/tui/test/worker-link.test.ts",
+    [...seatChannelInputs, ...seatHookInputs, ...workerBin("fleet-mcp", "swarm-mcp")],
+  ],
+  ...[
+    "worker-bridge-health.integration",
+    "worker-bridge-concurrency.integration",
+    "worker-report-deadline.integration",
+    "worker-channel-restart.integration",
+    "claude-channel-permission.integration",
+    "remote-codex-discovery",
+    "remote-worker-report-admission.integration",
+    "hired-catalog-bridge",
+  ].map((suite) => [`apps/clankie/test/${suite}.test.ts`, seatChannelInputs]),
+  ["apps/clankie/test/local-fleet-discovery.test.ts", workerBin("link")],
+  [
+    "apps/clankie/test/remote-seat-evidence-peers.integration.test.ts",
+    [...seatChannelInputs, ...workerBin("clankie-cli"), "integrations/claude-plugin/worker/bin/clankie"],
+  ],
+  ["apps/tui/test/peer-receipt.test.ts", [...seatChannelInputs, ...workerBin("fleet-mcp")]],
+  ...["worker-next-turn-hook", "claude-channel-startup.integration", "claude-plugin"].map((suite) => [
+    `apps/tui/test/${suite}.test.ts`,
+    seatHookInputs,
+  ]),
+  ["apps/clankie/test/claude-hook-command.integration.test.ts", seatHookInputs],
+  ["apps/tui/test/clankie-tracker-hook.integration.test.ts", workerBin("tracker-hook")],
+  // prepareFleet copies the plugin and runs setup/inspect and the installed MCP
+  // entrypoint. source-setup.mjs and parent.mjs in these tests are generated
+  // fixtures, not repository inputs. Static native-codex/harness-* imports are
+  // already followed by Vite; only this installed child needs extra edges.
+  [
+    "apps/tui/test/harness-refresh.integration.test.ts",
+    [
+      ...seatChannelInputs,
+      ...workerBin(
+        "fleet-mcp",
+        "harness-setup",
+        "harness-inspect",
+        "harness-install",
+        "harness-status",
+        "native-codex",
+        "skill-bundle",
+      ),
+      "integrations/claude-plugin/worker/skills/clankie.bundle.json",
+    ],
+  ],
+  // The governor is started by these on-disk child drivers, not test imports.
+  [
+    "packages/fleet-resources/test/heavy-process.integration.test.ts",
+    [
+      "packages/fleet-resources/src/native.py",
+      ...["heavy-command", "heavy-driver", "registration-driver"].map(
+        (name) => `packages/fleet-resources/test/fixtures/${name}.mjs`,
+      ),
+    ],
+  ],
+  ["apps/tui/test/codex-plugin.test.ts", ["integrations/codex-plugin/hooks/run.mjs"]],
+  ["apps/clankie/test/codex-tool-catalog.test.ts", ["integrations/codex-plugin/hooks/run.mjs"]],
   [
     "apps/tui/test/harness-profiles.test.ts",
     [
@@ -133,7 +221,7 @@ const landingNonVitestInputs = [
   {
     prefix: "apps/vox/",
     reason:
-      "Native Vox source: cargo fmt/clippy run in landing; cargo tests and builds belong to the release/manual gate.",
+      "Native Vox source: pnpm fmt:check runs cargo fmt, and pnpm lint runs cargo clippy in landing; cargo tests and builds belong to the release/manual gate.",
   },
   {
     prefix: "apps/tui/native/",
@@ -184,10 +272,6 @@ const landingNonVitestInputs = [
     [
       "integrations/herdr-plugin/status.sh",
       "Herdr status integration: exercised through its explicit installed-plugin smoke check.",
-    ],
-    [
-      "integrations/claude-plugin/worker/bin/clankie",
-      "Linked-machine shell launcher: explicit installed-worker CLI smoke coverage; no ordinary Vitest consumer.",
     ],
     [
       "integrations/claude-plugin/worker/bin/clankie.cmd",
