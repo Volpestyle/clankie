@@ -1195,3 +1195,13 @@ above it they refuse before writing. Doctor retains the old limit and half-limit
 warning as rollback headroom and points to the storage guide. Whole-store memory,
 individual record size and legacy export/cutover string ceilings remain. The
 unisolated stale-client FastJsonStringifier OOM in LOCAL-VUH-51 is not proven fixed.
+
+LOCAL-VUH-49 review follow-up: preserve digest-before-decode on external journal
+appends. Hash the checkpoint Buffer first; a matching digest continues from the
+committed snapshot using only new journal records. Decode on mismatch or failed
+continuation. On the same 126.44 MB synthetic checkpoint, three external-append
+reads fell from 976/946/797 ms to 86/93/71 ms (higher load after). A real-process
+regression observes zero checkpoint decodes on that continuation, and a fresh
+large-open guard rejects whole-buffer string conversion. The
+[measurement record](../testing/2026-10-28-local-vuh-49-streamed-open/README.md#review-revision-hash-before-decoding)
+retains the full results and the original 900 MB proof's scope.

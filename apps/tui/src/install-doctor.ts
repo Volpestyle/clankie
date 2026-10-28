@@ -833,7 +833,7 @@ function collectRemediations(input: {
     input.trackerCheckpoint.state === "warn"
   )
     remediations.push(
-      `The built-in tracker's checkpoint is ${String(Math.round(input.trackerCheckpoint.bytes / 1e6))} MB, past half the ${String(Math.round(input.trackerCheckpoint.limitBytes / 1e6))} MB previous-build string limit. This build streams checkpoint open; older builds may refuse large checkpoints. Keep this build available for rollback and use the storage recovery guide (packages/work-items/README.md#storage).`,
+      `The built-in tracker's checkpoint is ${String(Math.round(input.trackerCheckpoint.bytes / 1e6))} MB, past half the ${String(Math.round(input.trackerCheckpoint.limitBytes / 1e6))} MB previous-build string limit. This build streams checkpoint open; older builds may refuse large checkpoints. Keep a streaming build available for rollback. See https://docs.clankie.bot/cli/#doctor for recovery guidance.`,
     );
   return remediations;
 }

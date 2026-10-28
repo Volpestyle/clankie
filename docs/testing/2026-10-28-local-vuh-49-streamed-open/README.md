@@ -34,11 +34,11 @@ no repeated 180-day benchmarks. Children have a 60-second open/proof timeout and
 
 ## Result
 
-| Fleet days | Streamed cold open | First durable write | Load1 |
-| ---------: | -----------------: | ------------------: | ----: |
-|         60 |         2,345.1 ms |             54.1 ms | 19.59 |
-|         90 |         4,769.2 ms |            108.0 ms | 24.43 |
-|        180 |         9,076.0 ms |            184.0 ms | 21.42 |
+| Fleet days | R1 streamed cold open | First durable write | Load1 |
+| ---------: | --------------------: | ------------------: | ----: |
+|         60 |            2,345.1 ms |             54.1 ms | 19.59 |
+|         90 |            4,769.2 ms |            108.0 ms | 24.43 |
+|        180 |            9,076.0 ms |            184.0 ms | 21.42 |
 
 The 180-day process then sealed a 900,487,431-byte checkpoint in 4,392.6 ms at
 sync 108001. All three sizes wrote successfully in fresh processes. Runtime was
@@ -75,3 +75,49 @@ unisolated; this evidence makes no claim about every response serialization path
 
 Raw baseline/after/rollback JSON, exact source hashes, check logs and cleanup record:
 [proof archive](clankie://evidence/sha256/7d330dea3499ed7b433432650711bdbee6c8116d153f9a6f64ed4e320878b9ca).
+
+## Review revision: hash before decoding
+
+R1 `3f58484ae` decoded the checkpoint before comparing its digest during external
+journal refresh. Hollis measured the regression and verified the decoder with
+30,000 differential fuzz cases, but required restoring the existing continuation
+path. R2 hashes the Buffer first, replays only the journal tail on a match, and
+decodes only for a changed checkpoint or a failed continuation. Buffers do not
+have the whole-string ceiling; ordinary cold opens now retain the checkpoint
+Buffer while hashing and decoding it in record-sized chunks. Host snapshot
+helpers still stream from the file. No decoder or journal format change was needed.
+
+`flows/refresh.ts` uses one new 25-day synthetic generated seed and byte-identical
+copies, each **126,439,182 bytes**, SHA-256
+`194951de23ffeee982de02aa2c9712a34216d8d04fa18889c7211cee1e973b9c`.
+Each runtime warms a reader, makes three one-comment external commits in fresh
+child processes and times the parent's next `get_issue`. The before runtime is
+all work-items sources archived from R1; after is R2. All ran through the heavy
+queue with scratch HOME and an 8 GiB old-space cap.
+
+| External append | R1 refresh | R2 refresh |
+| --------------: | ---------: | ---------: |
+|               1 |   976.0 ms |    85.8 ms |
+|               2 |   946.0 ms |    92.7 ms |
+|               3 |   796.5 ms |    70.9 ms |
+
+Load1 was 12.90–13.47 before and 21.46–21.85 after. These are three observations,
+not a percentile or a same-load speed guarantee. Checkpoint bytes and hash stayed
+identical through both runs. The new real-process regression fails on R1 with
+three checkpoint decodes and passes R2 with zero. The full work-items suite passes
+27 files / 104 tests on its first R2 run; doctor and focused checks pass 28/28,
+and package typecheck and scoped lint pass.
+
+A second guard forbids any whole-buffer `toString` over 8 MiB while a fresh
+backend opens the real large checkpoint. Forcing both native whole-string paths
+back on makes it fail with `Whole-checkpoint Buffer.toString forbidden`. The clean
+decoder was restored before R2 checks. Installed doctor now gives the public
+`https://docs.clankie.bot/cli/#doctor` recovery pointer.
+
+The 180-day dataset was **not regenerated or rerun** for R2. The earlier 900 MB
+proof is R1 runtime evidence; its decoder and checkpoint/journal writer are
+unchanged. R2's fresh-process guard and external-append proof cover the revised
+Buffer wiring and cache path. The new 126 MB datasets and archived R1 runtime
+were removed after capture.
+
+[R2 regression, guard mutation, timings, checks and cleanup](clankie://evidence/sha256/e7025370e26e8361e66be767fba0c635cd7a2a1b175eb5eb893881a9b6a0659b).

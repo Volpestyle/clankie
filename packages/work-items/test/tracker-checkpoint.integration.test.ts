@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   createLocalTracker,
   readTrackerStoreRecords,
@@ -53,6 +53,14 @@ it("opens and writes a streamed checkpoint in a fresh process and keeps all reco
       `
     const {createLocalTracker,readTrackerStoreSnapshot}=await import(${JSON.stringify(source)});
     const tracker=createLocalTracker({directory:${JSON.stringify(directory)}});
+    const toString = Buffer.prototype.toString;
+    Buffer.prototype.toString = function(encoding, start, end) {
+      if ((end ?? this.length) - (start ?? 0) > ${STREAM_CHECKPOINT_BYTES})
+        throw new Error("Whole-checkpoint Buffer.toString forbidden");
+      return toString.call(this, encoding, start, end);
+    };
+    try { await tracker.call("get_issue", { id: ${JSON.stringify(issue.id)} }); }
+    finally { Buffer.prototype.toString = toString; }
     await tracker.call("save_comment",{issueId:${JSON.stringify(issue.id)},body:"fresh process",idempotencyKey:"stream-fresh-process"});
     await tracker.checkpoint();
     const store=await readTrackerStoreSnapshot(${JSON.stringify(directory)});
@@ -106,4 +114,56 @@ it("keeps JSON grammar and unknown-field semantics across chunks, refusing damag
   await writeCheckpointFile(broken, file + ".next");
   await writeFile(file, await readFile(file + ".next"));
   await expect(readTrackerStoreSnapshot(directory)).rejects.toThrow("audit log is not intact");
+}, 30000);
+
+it("replays an external append without decoding an unchanged large checkpoint", async () => {
+  const directory = await scratch();
+  const tracker = createLocalTracker({ directory });
+  const marker = "checkpoint-only-description-marker";
+  const issue = (await tracker.call("save_issue", {
+    team: "LOCAL",
+    title: "external refresh",
+    description: marker + "x".repeat(STREAM_CHECKPOINT_BYTES + 1024),
+  })) as { id: string };
+  await tracker.checkpoint();
+  const file = join(directory, "tracker.json");
+  const originalBytes = await readFile(file);
+  expect(originalBytes.length).toBeGreaterThan(STREAM_CHECKPOINT_BYTES);
+  const source = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+  // Native JSON.parse is only observed, never replaced as a data producer. A checkpoint
+  // record contains the marker; the external comment and its journal delta do not.
+  const parse = JSON.parse;
+  let checkpointDecodes = 0;
+  const observed = vi.spyOn(JSON, "parse").mockImplementation((...args: Parameters<typeof JSON.parse>) => {
+    if (args[0].includes(marker)) checkpointDecodes++;
+    return parse(...args);
+  });
+  try {
+    for (let i = 0; i < 3; i++) {
+      await promisify(execFile)(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+        const {createLocalTracker}=await import(${JSON.stringify(source)});
+        await createLocalTracker({directory:${JSON.stringify(directory)}}).call("save_comment",{
+          issueId:${JSON.stringify(issue.id)},body:"external comment ${i}"
+        });
+      `,
+        ],
+        { timeout: 20000 },
+      );
+      expect(((await tracker.call("get_issue", { id: issue.id })) as { title: string }).title).toBe(
+        "external refresh",
+      );
+    }
+    expect(checkpointDecodes).toBe(0);
+    expect(
+      ((await tracker.call("list_comments", { issueId: issue.id })) as { comments: unknown[] }).comments,
+    ).toHaveLength(3);
+    expect((await readFile(file)).equals(originalBytes)).toBe(true);
+  } finally {
+    observed.mockRestore();
+  }
 }, 30000);

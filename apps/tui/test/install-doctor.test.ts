@@ -265,7 +265,7 @@ describe("install doctor", () => {
       "! Tracker checkpoint · 268 MB · streamed open · previous-build string limit 537 MB",
     );
     expect(large.remediations).toContainEqual(expect.stringContaining("This build streams checkpoint open"));
-    expect(large.remediations.join("\n")).toContain("packages/work-items/README.md#storage");
+    expect(large.remediations.join("\n")).toContain("https://docs.clankie.bot/cli/#doctor");
 
     // An unreadable store is one unknown field, not a failed card.
     await rm(store, { recursive: true });

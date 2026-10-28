@@ -293,6 +293,8 @@ Show the owner that count before a switch-back.
 
 Large built-in checkpoints stream open record by record; all schema and history
 chain checks still apply, and history is not expired. The JSON layout is unchanged.
+External journal appends hash before decoding and replay only the tail when the
+checkpoint is unchanged; same-process publications reuse the committed snapshot.
 Doctor's checkpoint warning measures headroom for an older runtime's whole-file
 string parser, not this runtime's open ceiling. A previous build refuses oversized
 checkpoints before writing; keep a streaming build available. The full store still

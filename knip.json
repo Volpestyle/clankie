@@ -55,6 +55,7 @@
         "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/baseline.mjs",
         "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/after.mjs",
         "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/open.ts",
+        "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/refresh.ts",
         "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/rollback.mjs",
         "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/template.ts",
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",

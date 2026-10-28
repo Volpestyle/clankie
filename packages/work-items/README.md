@@ -216,6 +216,9 @@ host-only `referenceProjects` against its shared validated committed snapshot
 metadata readers wait for disk publication and the shared snapshot update, including
 failed appends; the fence starts after authorization callbacks to avoid deadlock.
 External changes still trigger validation, and missing or damaged stores refuse.
+An external journal append hashes the checkpoint before decoding: an unchanged
+digest replays only the tail. A changed checkpoint or failed continuation reopens
+and proves the whole store.
 If another snapshot publishes during a refresh, the reader restarts the disk
 generation check before choosing a snapshot. It reuses a publication that matches
 disk or refreshes again, so a writer never drafts from an older reader's base.

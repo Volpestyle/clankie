@@ -4933,10 +4933,13 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
   };
   /** Another process or backend committed: replay its journal records, or reopen. */
   const refresh = async (version: string, read?: Buffer): Promise<Committed> => {
-    const checkpoint = read === undefined ? await readCheckpointFile(path) : await readCheckpointBytes(read);
+    // The journal changes storeVersion on every external append. Hash first: an
+    // unchanged checkpoint needs only tail replay, never a second decoded store.
+    const bytes = read ?? (await readFile(path));
+    const digest = createHash("sha256").update(bytes).digest("hex");
     const current = shared.current;
     // Only byte-identical, already validated content may skip schema and chain validation.
-    if (current !== undefined && checkpoint.digest === current.digest) {
+    if (current !== undefined && digest === current.digest) {
       if (current.journal === undefined) return { ...current, version };
       try {
         const head = current.store.syncLog?.at(-1) ?? current.store.syncBase!;
@@ -4954,7 +4957,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
       } catch {
         // Anything but a clean continuation reopens from the checkpoint and proves it all again.
       }
-      const reopened = await openCommitted(checkpoint, version);
+      const reopened = await openCommitted(await readCheckpointBytes(bytes), version);
       // The same checkpoint with fewer commits lost one this process acknowledged; an open may
       // skip a damaged final line only when nothing here has seen it (LOCAL-VUH-47).
       if ((reopened.store.syncId ?? 0) < (current.store.syncId ?? 0))
@@ -4963,7 +4966,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         );
       return reopened;
     }
-    return openCommitted(checkpoint, version);
+    return openCommitted(await readCheckpointBytes(bytes), version);
   };
   // Host metadata readers do not take the write lock (some run in authorization callbacks).
   // Wait only for actual disk publication, after those callbacks, so our own append is never
