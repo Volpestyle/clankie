@@ -406,5 +406,7 @@ export interface FleetResourceGovernor {
   releaseSimulator(id: string, token: string): Promise<void>;
   /** Append-only `simulator-settled.jsonl`; a lease's record is gone once released. */
   recordSimulatorSettled(receipt: SimulatorSettledReceipt): Promise<void>;
+  /** One machine sample into `samples.jsonl` beside the journal (VUH-2933). */
+  recordMachineSample?(): Promise<void>;
   close(): Promise<void>;
 }

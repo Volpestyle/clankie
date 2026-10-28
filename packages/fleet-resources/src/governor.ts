@@ -1,6 +1,6 @@
 import { observeSimulatorUsage, simulatorUsageFor } from "./simulator-usage.ts";
 import { randomUUID } from "node:crypto";
-import { appendFile, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { constants, userInfo } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -51,6 +51,7 @@ import {
   simulatorBootSettleMs,
 } from "./pressure.ts";
 import { ResourceStore } from "./store.ts";
+import { appendRecords, leaseCommand, recordLease, recordMachineSample } from "./records.ts";
 import { proveRestartResources } from "./restart-guard.ts";
 import {
   heavyJobArgs,
@@ -404,15 +405,7 @@ export function createResourceGovernor(
     leaseDirectory = directory,
     name = "reaped.jsonl",
   ): Promise<void> {
-    const path = join(leaseDirectory, name);
-    try {
-      if ((await stat(path)).size > 262_144) await rename(path, `${path}.1`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    await appendFile(path, receipts.map((receipt) => `${JSON.stringify(receipt)}\n`).join(""), {
-      mode: 0o600,
-    });
+    await appendRecords(leaseDirectory, name, receipts);
   }
   async function project(
     state: ResourceState,
@@ -1010,6 +1003,8 @@ export function createResourceGovernor(
       ...(options.signal ? [options.signal] : []),
     ]);
     let lease: HeavyLease | undefined;
+    let record: Omit<Parameters<typeof recordLease>[1], "event"> | undefined;
+    let exitCode: number | undefined;
     let child: ReturnType<typeof spawn> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const lane = options.mergeGate ? "full" : options.server ? "server" : heavyJobLane(command, args);
@@ -1060,11 +1055,24 @@ export function createResourceGovernor(
           signal.removeEventListener("abort", cancel);
         }
       }
+      const requestedAt = Date.now();
       lease = await acquire({
         ...options,
         signal,
         lane,
         executable: basename(command).slice(0, 128),
+      });
+      record = {
+        leaseId: lease.id,
+        lane,
+        ...(lease.holderId ? { holderId: lease.holderId } : {}),
+        ...(lease.seatId ? { seatId: lease.seatId } : {}),
+        command: leaseCommand(command, args),
+      };
+      await recordLease(directory, {
+        ...record,
+        event: "admitted",
+        waitedMs: lease.createdAtMs - requestedAt,
       });
       if (signal.aborted) throw abort();
       child = spawn(
@@ -1147,7 +1155,7 @@ export function createResourceGovernor(
         cancel();
       } else input.write("go\n");
       try {
-        return await done;
+        return (exitCode = await done);
       } finally {
         signal.removeEventListener("abort", cancel);
         input.end();
@@ -1160,6 +1168,13 @@ export function createResourceGovernor(
       if (killTimer) clearTimeout(killTimer);
       process.removeListener("SIGINT", onInt);
       process.removeListener("SIGTERM", onTerm);
+      if (lease && record)
+        await recordLease(directory, {
+          ...record,
+          event: "released",
+          heldMs: Date.now() - lease.createdAtMs,
+          ...(exitCode === undefined ? {} : { exitCode }),
+        });
       if (lease) {
         const seen = await look(store);
         await store.transaction(async (state) => {
@@ -1170,6 +1185,8 @@ export function createResourceGovernor(
   }
   return {
     arbitrate,
+    /** One machine sample into `samples.jsonl` beside the journal (VUH-2933). */
+    recordMachineSample: () => recordMachineSample(directory),
     arbitration: () => (lastArbitration === undefined ? undefined : structuredClone(lastArbitration)),
     async configure(policy: FleetResourcePolicy) {
       const parsed = FleetResourcePolicySchema.parse(policy);

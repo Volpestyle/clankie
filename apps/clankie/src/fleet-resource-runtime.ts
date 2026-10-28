@@ -133,6 +133,7 @@ export async function createFleetResourceRuntime(input: {
   let refreshing: Promise<void> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
   let arbiter: ReturnType<typeof setInterval> | undefined;
+  let sampler: ReturnType<typeof setInterval> | undefined;
   let arbitrating: Promise<unknown> | undefined;
   let closed = false;
   let progressAt = 0;
@@ -670,6 +671,11 @@ export async function createFleetResourceRuntime(input: {
           });
       }, input.arbitrateMs ?? 1_000);
       arbiter.unref();
+      // History for explaining load afterwards: admission keeps none (VUH-2933).
+      sampler = setInterval(() => {
+        void governor.recordMachineSample?.().catch(input.onError ?? (() => {}));
+      }, 30_000);
+      sampler.unref();
     },
     async close() {
       closed = true;
@@ -677,6 +683,8 @@ export async function createFleetResourceRuntime(input: {
       timer = undefined;
       if (arbiter) clearInterval(arbiter);
       arbiter = undefined;
+      if (sampler) clearInterval(sampler);
+      sampler = undefined;
       await arbitrating;
       simulators.close();
       await refreshing?.catch(() => {});

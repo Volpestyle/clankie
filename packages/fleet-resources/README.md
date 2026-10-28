@@ -350,6 +350,21 @@ exact model then close model then family determines preference. `exact: true`
 never substitutes a different model; an explicit `deviceId` remains strict.
 Missing or malformed metadata is unknown, never proof of a previous boot.
 
+Admission is checked once, when a job starts, and the journal holds only the
+present. So that a load spike can be explained afterwards, the registry keeps
+three histories beside it (VUH-2933). Each rotates to a single `.1` file, and
+writing one never fails the work it describes:
+
+- `leases.jsonl`: every heavy permit's `admitted` and `released` events from the
+  command that holds it. Each carries its lane, holder, seat, command line
+  (truncated to 256 characters), wait or hold time, exit code and load1.
+- `samples.jsonl`: every 30 s from the service: load 1/5/15, the share of all
+  cores busy since the previous sample, free disk, and the five busiest
+  processes.
+- `bulk-ops.jsonl`: one line per service prune or cache reclaim, with its start,
+  duration, outcome and counts. This work runs outside heavy admission.
+  Integration reclaim writes the same line to its own directory.
+
 The subprocess integration suite exercises actual OS locks, processes, filesystem
 receipts, cancellation and native runner registration. It never hires agents or
 boots simulators. Run manually through the fleet heavy limiter; production native

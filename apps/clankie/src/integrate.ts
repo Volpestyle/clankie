@@ -26,6 +26,7 @@ import {
   processIdentity,
   probeProcess,
   type FleetResourceGovernor,
+  recordBulkOperation,
 } from "@clankie/fleet-resources";
 import { fileURLToPath } from "node:url";
 import { serviceResourceDirectory } from "./service-fleet-resources.ts";
@@ -1010,6 +1011,19 @@ export class IntegrationQueue {
   async reclaimWorktrees(
     at = Date.now(),
     guard: () => Promise<void> = async () => {},
+  ): Promise<{ reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number }> {
+    // Outside heavy admission, so its timing is kept for load investigations (VUH-2933).
+    return recordBulkOperation(
+      this.options.directory,
+      "integrate_reclaim",
+      () => this.reclaimWorktreesLocked(at, guard),
+      (result) => ({ reclaimed: result.reclaimed.length, freedBytes: result.freedBytes }),
+    );
+  }
+
+  private async reclaimWorktreesLocked(
+    at: number,
+    guard: () => Promise<void>,
   ): Promise<{ reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number }> {
     return withDirectoryLock(join(this.options.directory, "reclamation.lock"), () =>
       withReclamationWindow(this.options.directory, async (busy) => {

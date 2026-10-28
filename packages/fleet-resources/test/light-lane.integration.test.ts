@@ -60,6 +60,7 @@ wait();
   const release = (name: string) => writeFile(join(root, `${name}.json.release`), "");
   return {
     governor,
+    registry: join(root, "registry"),
     run,
     caps,
     release,
@@ -124,10 +125,71 @@ it("a one-file test starts beside a full gate holding every slot at high load, c
     expect(await queuedFull).toBe(130);
     await f.release("gate");
     expect(await gate).toBe(0);
+
+    // Each admitted permit leaves its admission and release on record; the
+    // cancelled waiter was never admitted, so it leaves none (VUH-2933).
+    const records = (await readFile(join(f.registry, "leases.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "admitted", lane: "full", command: "gate check:landing" }),
+        expect.objectContaining({
+          event: "released",
+          lane: "full",
+          command: "gate check:landing",
+          exitCode: 0,
+        }),
+        expect.objectContaining({
+          event: "admitted",
+          lane: "light",
+          holderId: "light-lane-vitest",
+          command: "vitest run test/fleet-resource-hire.integration.test.ts",
+        }),
+        expect.objectContaining({
+          event: "released",
+          lane: "light",
+          holderId: "light-lane-vitest",
+          exitCode: 0,
+        }),
+      ]),
+    );
+    expect(records).toHaveLength(4);
   } finally {
     await f.close();
   }
 }, 120_000);
+
+it("records what the machine was doing beside the journal", async () => {
+  const f = await fixture();
+  try {
+    await f.governor.recordMachineSample!();
+    await delay(300);
+    await f.governor.recordMachineSample!();
+    const samples = (await readFile(join(f.registry, "samples.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(samples).toHaveLength(2);
+    expect(samples[1]).toEqual({
+      atMs: expect.any(Number),
+      load: [expect.any(Number), expect.any(Number), expect.any(Number)],
+      cores: expect.any(Number),
+      cpuRatio: expect.any(Number),
+      freeDiskGb: expect.any(Number),
+      top: expect.any(Array),
+    });
+    const top = samples[1]!.top as { pid: number; cpu: number; command: string }[];
+    expect(top.length).toBeGreaterThan(0);
+    expect(top.length).toBeLessThanOrEqual(5);
+    expect(top.map((process) => process.cpu)).toEqual(
+      top.map((process) => process.cpu).sort((a, b) => b - a),
+    );
+  } finally {
+    await f.close();
+  }
+});
 
 it("the light lane still holds below the memory floor and lists its waiter", async () => {
   const f = await fixture();

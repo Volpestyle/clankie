@@ -58,6 +58,7 @@ import {
   projectPathContains,
   projectRoleForPersona,
 } from "@clankie/settings";
+import { recordBulkOperation } from "@clankie/fleet-resources";
 import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
 import {
   hasNestedRegisteredWorktree,
@@ -2581,6 +2582,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       throw Error("Select a registered owner checkout");
     return Promise.all((repository === undefined ? repositories : [repository]).map(syncOwnerCheckout));
   };
+  // Beside the fleet resource journal: this work runs outside heavy admission (VUH-2933).
+  const bulkOperationDirectory = join(options.stateDir, "fleet-resources");
   const reclaimCaches = async (
     repository: string,
     path?: string,
@@ -2592,16 +2595,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       .filter((root) => root.machineId === "local" && root.repoPath === repository)
       .map((root) => root.path);
     if (!roots.length) throw Error("Select a registered local owner checkout");
-    return reclaimWorktreeCaches(repository, herdrRunner, {
-      roots,
-      ...(path === undefined ? {} : { path }),
-      protection: { runtimeRoot: options.repoRoot },
-      guard: async () => {
-        await guard();
-        if (JSON.stringify((await settings()).projects) !== JSON.stringify(current.projects))
-          throw Error("Project enrollment changed");
-      },
-    });
+    return recordBulkOperation(
+      bulkOperationDirectory,
+      "reclaim_caches",
+      () =>
+        reclaimWorktreeCaches(repository, herdrRunner, {
+          roots,
+          ...(path === undefined ? {} : { path }),
+          protection: { runtimeRoot: options.repoRoot },
+          guard: async () => {
+            await guard();
+            if (JSON.stringify((await settings()).projects) !== JSON.stringify(current.projects))
+              throw Error("Project enrollment changed");
+          },
+        }),
+      (result) => ({ reclaimed: result.reclaimed.length, kept: result.kept.length }),
+    );
   };
   const admitPrune = async (
     current: Awaited<ReturnType<typeof settings>>,
@@ -2636,13 +2645,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<PruneWorktreeResult> => {
     const current = await settings();
     await admitPrune(current, repository, path);
-    return pruneTidyWorktree(
-      repository,
-      path,
-      join(options.stateDir, "worktree-evidence"),
-      herdrRunner,
-      pruneGuard(current, guard),
-      pruneProtection,
+    return recordBulkOperation(
+      bulkOperationDirectory,
+      "prune_worktree",
+      () =>
+        pruneTidyWorktree(
+          repository,
+          path,
+          join(options.stateDir, "worktree-evidence"),
+          herdrRunner,
+          pruneGuard(current, guard),
+          pruneProtection,
+        ),
+      (result) => ({ worktrees: 1, removed: result.outcome === "removed" ? 1 : 0 }),
     );
   };
   /** One fetch and one admission census for the batch; every tree still gets its fresh check (VUH-2932). */
@@ -2653,14 +2668,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<{ results: PruneWorktreeResult[] }> => {
     const current = await settings();
     return {
-      results: await pruneTidyWorktrees(
-        repository,
-        paths,
-        join(options.stateDir, "worktree-evidence"),
-        herdrRunner,
-        pruneGuard(current, guard),
-        pruneProtection,
-        (path) => admitPrune(current, repository, path),
+      results: await recordBulkOperation(
+        bulkOperationDirectory,
+        "prune_worktree",
+        () =>
+          pruneTidyWorktrees(
+            repository,
+            paths,
+            join(options.stateDir, "worktree-evidence"),
+            herdrRunner,
+            pruneGuard(current, guard),
+            pruneProtection,
+            (path) => admitPrune(current, repository, path),
+          ),
+        (results) => ({
+          worktrees: results.length,
+          removed: results.filter((result) => result.outcome === "removed").length,
+        }),
       ),
     };
   };
