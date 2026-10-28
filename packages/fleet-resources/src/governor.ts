@@ -690,12 +690,13 @@ export function createResourceGovernor(
     }
     return heavyHead(state);
   }
-  /** Whether the head of this lane's queue may start, under one sample. */
+  /** Whether `ticket`, this lane's `laneHead`, may start under one sample. */
   function headAdmits(
     lane: HeavyJobLane,
     state: ResourceState,
     policy: FleetResourcePolicy,
     sampled: ResourcePressure,
+    ticket: string,
   ): boolean {
     const held = state.leases.filter((lease) => lease.kind === "heavy");
     if (lane === "server") return held.length < serverLaneCapacity().slots && sampled.healthy;
@@ -705,7 +706,7 @@ export function createResourceGovernor(
     // job above the base slots needs measured room (VUH-2054).
     return lane === "light"
       ? sampled.reason !== "probe-unavailable" &&
-          (sampled.reason !== "disk" || freesDisk.has(laneHead(lane, state, sampled)?.id ?? "")) &&
+          (sampled.reason !== "disk" || freesDisk.has(ticket)) &&
           sampled.availableMemoryMb >= policy.minAvailableMemoryMb
       : heavyAdmission(policy, sampled, held, Date.now(), jobSettleMs) === "admit";
   }
@@ -767,13 +768,14 @@ export function createResourceGovernor(
         pid: head.owner.pid,
         queuedAtMs: head.queuedAtMs,
         marked: grantable(head.id),
-        admits: headAdmits(lane, state, policy, sampled),
+        admits: headAdmits(lane, state, policy, sampled, head.id),
       });
     };
     for (const [index, { lane, from }] of lanes.entries()) {
       const peek = peeks[index]!;
       if (!peek.queue.some((entry) => entry.kind === "heavy")) continue;
-      if (!due && !headAdmits(lane, peek, policy, sampled)) {
+      const peekHead = laneHead(lane, peek, sampled);
+      if (!due && (!peekHead || !headAdmits(lane, peek, policy, sampled, peekHead.id))) {
         recordHead(lane, peek);
         continue;
       }
@@ -784,7 +786,7 @@ export function createResourceGovernor(
         for (;;) {
           const head = laneHead(lane, state, sampled);
           // An older waiter at the head judges for itself; FIFO waits on it.
-          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled)) {
+          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled, head.id)) {
             recordHead(lane, state);
             return count;
           }
@@ -871,7 +873,8 @@ export function createResourceGovernor(
     const policyFor = async (state: ResourceState) =>
       options.lane !== "full" ? (await mainStore.read()).policy : state.policy;
     const admits = (state: ResourceState, policy: FleetResourcePolicy, sampled: ResourcePressure) =>
-      laneHead(options.lane, state, sampled)?.id === id && headAdmits(options.lane, state, policy, sampled);
+      laneHead(options.lane, state, sampled)?.id === id &&
+      headAdmits(options.lane, state, policy, sampled, id);
     // A disk-freeing ticket may lead under the disk floor, which only a sample shows.
     const isHead = (state: ResourceState) => heavyHead(state)?.id === id || freesDisk.has(id);
     /** A lease granted to this request, by an arbiter or by this waiter. */
