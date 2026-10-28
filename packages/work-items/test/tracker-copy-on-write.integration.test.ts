@@ -38,10 +38,11 @@ it("runs every write tool, update and transaction through the frozen committed s
     name: string,
     args: Record<string, unknown>,
     actor: TrackerActor = lead,
+    ownerApp?: { readonly deviceId: string },
   ) => {
     used.add(name);
     try {
-      return (await tracker.call(name, args, { actor })) as T;
+      return (await tracker.call(name, args, { actor, ...(ownerApp ? { ownerApp } : {}) })) as T;
     } catch (error) {
       throw new Error(`${name} failed: ${(error as Error).message}`, { cause: error });
     }
@@ -137,6 +138,15 @@ it("runs every write tool, update and transaction through the frozen committed s
     worker,
   );
   await call("post_bundle_check", { bundleId: bundle.id, body: "Checked" }, owner);
+  // The owner's app sends it back (a comment and a stage move in one write), then it lands again.
+  const app: TrackerActor = { type: "app", id: "device:phone", onBehalfOf: [TRACKER_OWNER] };
+  await call(
+    "post_owner_verdict",
+    { issueId: issue.id, bundleId: bundle.id, verdict: "send_back", note: "Not yet" },
+    app,
+    { deviceId: "phone" },
+  );
+  await call("post_issue_event", { issueId: issue.id, type: "result", stage: "landed", body: "Fixed" });
   await call("post_issue_event", { issueId: issue.id, type: "result", stage: "owner-verified" }, owner);
 
   const view = await call<{ id: string; updatedAt: string }>("save_issue_view", {
