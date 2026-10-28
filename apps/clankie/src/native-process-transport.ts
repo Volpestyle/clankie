@@ -171,7 +171,14 @@ class NativeProcessTransport {
     this.active = this.queue.shift();
     if (!this.active) return;
     // Queue time is not kernel-proof time; a burst must not kill unrelated jobs.
-    this.active.timer = setTimeout(() => this.timeout(), this.answered ? proofTimeoutMs : startupTimeoutMs);
+    const job = this.active;
+    this.active.timer = setTimeout(
+      // A caller that blocked its event loop past the bound fires this timer before
+      // reading a reply already in the pipe. Let pending I/O settle first, so only
+      // a helper that truly has not answered fails (VUH-2937).
+      () => setImmediate(() => this.active === job && this.timeout()),
+      this.answered ? proofTimeoutMs : startupTimeoutMs,
+    );
     this.child.stdin.write(`${this.active.id} ${this.active.args.join(" ")}\n`);
   }
 
