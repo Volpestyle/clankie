@@ -34,11 +34,12 @@ type Event = {
   body?: string;
 };
 
-async function fixture() {
+async function fixture(options: { readonly hosted?: boolean } = {}) {
   let evidence: ReturnType<typeof trackerEvidence> | undefined;
-  const f = await syncFixture({
-    validateEvidence: (issueKey, references) => evidence!.validateEvidence(issueKey, references),
-  });
+  const f = await syncFixture(
+    { validateEvidence: (issueKey, references) => evidence!.validateEvidence(issueKey, references) },
+    options,
+  );
   evidence = trackerEvidence(f.root);
   cleanups.push(async () => {
     evidence!.store.close();
@@ -246,7 +247,7 @@ it("refuses a verdict on unfinished work and on finished work with no proof, lea
   expect(await f.issue(bare.id)).toMatchObject({ stage: "landed" });
 });
 
-it("refuses hosted visitors and support sessions, which can otherwise write; the owner's local and hosted operator pairings count", async () => {
+it("refuses every hosted and support pairing, which can otherwise write; only the owner's local pairing counts", async () => {
   const root = await mkdtemp(join(tmpdir(), "owner-verdict-devices-"));
   const evidence = trackerEvidence(root);
   const tracker = createLocalTracker({
@@ -258,7 +259,7 @@ it("refuses hosted visitors and support sessions, which can otherwise write; the
   const now = Math.floor(Date.now() / 1000) * 1000;
   const devices = [
     { id: "owner", mintedBy: "local-operator" },
-    { id: "hosted-owner", mintedBy: "hosted-account-operator" },
+    { id: "hosted-operator", mintedBy: "hosted-account-operator" },
     { id: "visitor", mintedBy: "hosted-account" },
     { id: "support-grant", mintedBy: "local-operator", supportGrantId: randomUUID() },
     { id: "support-mint", mintedBy: "support:grant-1" },
@@ -358,9 +359,9 @@ it("refuses hosted visitors and support sessions, which can otherwise write; the
     });
     expect(await stage(issue.id)).toBe("landed");
   }
-  // A hosted visitor, and a support mint that lost its grant id, can write as the app: only the
-  // owner-device rule keeps them from the verdict.
-  for (const deviceId of ["visitor", "support-mint"]) {
+  // Hosted pairings, and a support mint that lost its grant id, can write as the app: only the
+  // owner-app rule keeps them from the verdict.
+  for (const deviceId of ["hosted-operator", "visitor", "support-mint"]) {
     const { issue, bundle } = await finished(`Not for ${deviceId}`);
     expect(
       await sync(deviceId, {
@@ -377,13 +378,35 @@ it("refuses hosted visitors and support sessions, which can otherwise write; the
     );
     expect(await stage(issue.id), deviceId).toBe("landed");
   }
-  for (const deviceId of ["owner", "hosted-owner"]) {
-    const { issue, bundle } = await finished(`For ${deviceId}`);
-    expect(await sync(deviceId, verdict(`${deviceId}-verdict`, issue.id, bundle.id)), deviceId).toMatchObject(
-      {
-        result: { outcome: "applied" },
-      },
-    );
-    expect(await stage(issue.id), deviceId).toBe("owner-verified");
-  }
+  const { issue, bundle } = await finished("For the owner");
+  expect(await sync("owner", verdict("owner-verdict", issue.id, bundle.id))).toMatchObject({
+    result: { outcome: "applied" },
+  });
+  expect(await stage(issue.id)).toBe("owner-verified");
+});
+
+it("refuses both verdicts from a device the owner paired through their hosted account", async () => {
+  const f = await fixture({ hosted: true });
+  const hosted = await f.pairHosted();
+  const { issue, bundle } = await f.finished("Paired from the hosted account");
+  expect(
+    await f.sync(
+      hosted.deviceToken,
+      f.transaction("hosted-comment", "save_comment", { issueId: issue.id, body: "Seen" }),
+    ),
+  ).toMatchObject({ outcome: "applied" });
+  for (const verdict of ["works", "send_back"] as const)
+    expect(
+      await f.sync(
+        hosted.deviceToken,
+        f.transaction(`hosted-${verdict}`, "post_owner_verdict", {
+          issueId: issue.id,
+          bundleId: bundle.id,
+          verdict,
+          note: "From the hosted account",
+        }),
+      ),
+      verdict,
+    ).toMatchObject({ outcome: "refused", reason: "owner_app_required" });
+  expect(await f.issue(issue.id)).toMatchObject({ stage: "landed" });
 });

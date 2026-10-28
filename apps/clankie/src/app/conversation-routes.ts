@@ -314,6 +314,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const record = ctx.devices.get(deviceId);
     return (
       ownerDeviceRecord(record) &&
+      // A hosted pairing proves the hosted account, not this owner's hands, until ADR 0253's signer.
+      record.mintedBy !== "hosted-account-operator" &&
       record.status === "active" &&
       record.grants.terminalControl &&
       record.run === undefined
@@ -1326,7 +1328,8 @@ const TRACKER_CALL_PATH = "/v1/tracker/call";
 const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
 /**
  * A device the owner paired themselves: never a hosted visitor (`hosted-account`) or a support
- * session (a support grant or a `support:` mint). One rule for every owner-device route.
+ * session (a support grant or a `support:` mint). One rule for every owner-device route; the
+ * verdict also refuses the owner's hosted pairings (ADR 0299).
  */
 export function ownerDeviceRecord(record: DeviceRecord | undefined): record is DeviceRecord {
   return (
