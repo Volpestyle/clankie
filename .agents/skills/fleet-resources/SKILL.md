@@ -25,6 +25,11 @@ rules that matter on most turns:
    as your harness's background task and continue on its completion notice;
    never loop on `sleep` in the foreground to poll a log or a status. Each
    foreground step re-reads your whole context.
+8. Write shell commands Claude Code can parse safely. Before running one it
+   can't, such as an unguarded `rm -rf $VAR/*` or a zsh-only expansion like
+   `${(f)"$(cat f)"}`, it asks the owner, never the lead. In a hired seat
+   nobody answers, and the command is denied after about two minutes. Use
+   `"${VAR:?}"`, literal paths, plain file lists or `xargs`.
 
 ```sh
 clankie heavy -- pnpm --workspace-concurrency=1 --filter @clankie/clankie typecheck
