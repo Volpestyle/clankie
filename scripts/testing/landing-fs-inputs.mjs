@@ -171,7 +171,7 @@ export const landingFsInputs = Object.fromEntries([
   ["apps/tui/test/clankie-tracker-hook.integration.test.ts", workerBin("tracker-hook")],
   // prepareFleet copies the plugin and runs setup/inspect and the installed MCP
   // entrypoint. source-setup.mjs and parent.mjs in these tests are generated
-  // fixtures, not repository inputs. Static native-codex/harness-* imports are
+  // fixtures (like the installed skill bundle), not repository inputs. Static native-codex/harness-* imports are
   // already followed by Vite; only this installed child needs extra edges.
   [
     "apps/tui/test/harness-refresh.integration.test.ts",
@@ -186,7 +186,6 @@ export const landingFsInputs = Object.fromEntries([
         "native-codex",
         "skill-bundle",
       ),
-      "integrations/claude-plugin/worker/skills/clankie.bundle.json",
     ],
   ],
   // The governor is started by these on-disk child drivers, not test imports.

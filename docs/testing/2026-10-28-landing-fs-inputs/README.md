@@ -19,7 +19,7 @@ authorize pushing any scratch commit. The C-only run selected
 `fleet-health-metrics`, `native-process-blocked-caller`,
 `process-working-directories`, `tidy-worktrees-home-pane`, and `tidy-worktrees`.
 
-The [raw proof bundle](clankie://evidence/sha256/06e5742a0493ccae6b1eb706df63efecc02f123e50bd05386bbe7696427167d9) contains the full gate reports, logs, source identities, selected
+The [raw proof bundle](clankie://evidence/sha256/5377f1ffeea62d61ff27256a4c5bb8c5a91731d8050b0c5c4124755dfafe4bb2) contains the full gate reports, logs, source identities, selected
 modules and dependency graphs. The declarations are also recorded in the
 per-test dependencies used by VUH-2044 revalidation. The landing-related
 regression checks passed first attempt: 3 suites, 19 tests, including the new
@@ -54,3 +54,23 @@ The bundle includes these controls, run in the independent scratch clone:
 These intentional mutation failures are negative controls, not timing flakes or
 recovered gate failures. The bundle also includes the deleted extensionless
 executable proof on `1d3f1abf8`: exit 1 names the deleted executable.
+
+## Child-import bridge coverage
+
+The follow-up also declares worker bridge modules loaded in child processes,
+including the explicit local dependency closure of `seat-channel.mjs` and
+`seat-hook.mjs`, installed harness setup/inspection, and heavy-process child
+drivers. Direct static imports remain covered by Vitest. Generated parent,
+source-setup and installed skill-bundle files are not repository inputs.
+The Vox declaration names `pnpm lint` as the step that runs cargo clippy.
+
+A new real-gate scratch case changes only `seat-channel.mjs`, imports it in a
+spawned Node process, and confirms `worker-link.test.ts` is selected and records
+the edge. The manifest case now also requires worker-link: seat-channel reads
+its version manifest through fs. Current bridge consumers therefore extend the
+initial manifest-only selection recorded above.
+
+The first positive run passed 20 tests in two suites without retries. The bundle
+also retains bridge-specific controls: unchanged gate/reporter passes, M1 fails
+the recorded child-input assertion, and M2 fails when the child consumer is not
+selected. Both negative controls returned the expected exit 1.

@@ -3,9 +3,9 @@
   "objects": [
     {
       "path": "proof.json",
-      "size": 179087,
-      "sha256": "06e5742a0493ccae6b1eb706df63efecc02f123e50bd05386bbe7696427167d9",
-      "url": "clankie://evidence/sha256/06e5742a0493ccae6b1eb706df63efecc02f123e50bd05386bbe7696427167d9"
+      "size": 184714,
+      "sha256": "5377f1ffeea62d61ff27256a4c5bb8c5a91731d8050b0c5c4124755dfafe4bb2",
+      "url": "clankie://evidence/sha256/5377f1ffeea62d61ff27256a4c5bb8c5a91731d8050b0c5c4124755dfafe4bb2"
     }
   ]
 }
