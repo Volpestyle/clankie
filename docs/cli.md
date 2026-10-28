@@ -4808,8 +4808,9 @@ and `unkeep` releases a gone pane's keep by its old pane id. The close runs `clo
 guards: no unsent draft, still idle, and positive work proof. A lifecycle counter
 change restarts the full idle window when observed, even for a turn between
 sweeps. Reports (including acknowledged ones) and recorded progress extend the
-window too. Report wording does not keep a seat waiting for the lead; explicitly
-keep it when its live context is needed for follow-up. Automatic landing
+window too, even on older Herdr builds that omit lifecycle counters and cannot
+detect turns between sweeps. Report wording does not keep a seat waiting for the
+lead; explicitly keep it when its live context is needed for follow-up. Automatic landing
 requires ancestry in actual advertised `origin/main` or a retained merge-queue
 handoff/current-HEAD work decision covering every unlanded commit; a pushed
 feature branch, local ref or patch equivalence is insufficient. Missing or

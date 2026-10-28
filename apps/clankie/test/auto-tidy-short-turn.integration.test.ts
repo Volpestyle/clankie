@@ -138,7 +138,22 @@ it.skipIf(process.platform !== "darwin")(
       await auto.panes();
       expect(attempts).toEqual([herdr.pane]);
       // A report arriving during close checks invalidates the existing authority.
+      const eligibleReportAt = reportedAt;
       reportedAt = new Date(clock).toISOString();
+      expect(await authorizeClose!()).toBe(false);
+      // Restore the old report so only the next real turn can invalidate the
+      // authority captured before the asynchronous close checks.
+      reportedAt = eligibleReportAt;
+      expect(await authorizeClose!()).toBe(true);
+      await report("working");
+      await expect
+        .poll(() => runner.get(herdr.pane).then((agent) => agent.status), { timeout: 5_000, interval: 50 })
+        .toBe("working");
+      await report("idle");
+      await expect
+        .poll(() => runner.get(herdr.pane).then((agent) => agent.status), { timeout: 5_000, interval: 50 })
+        .toMatch(/^(idle|done)$/u);
+      expect((await runner.get(herdr.pane)).stateChangeSeq).toBeGreaterThan(completed.stateChangeSeq!);
       expect(await authorizeClose!()).toBe(false);
       expect((await runner.get(herdr.pane)).session?.value).toBe("scratch-short-turn");
     } finally {

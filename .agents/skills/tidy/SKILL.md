@@ -19,8 +19,9 @@ Acknowledge a report only once you have its result; that is what lets the pane
 go. The service also tidies on its own under the owner's `autoTidy` fleet setting
 (default `1h`), through the same guards, and never closes a seat a project names
 as its standing reviewer. Every observed lifecycle change restarts the full idle
-window, including a short turn between five-minute sweeps. Recent reports
-(including acknowledged ones) and progress also extend the window. Report text
+window, including a short turn between five-minute sweeps. This requires Herdr
+lifecycle counters. Recent reports (including acknowledged ones) and progress
+also extend the window, even on older builds. Report text
 does not automatically keep a seat waiting on the lead; use `keep_worker_pane`
 when follow-up needs its live context. It closes only with positive work proof: a
 kept report, every report acknowledged, and every unlanded commit landed on

@@ -21,7 +21,10 @@ fits entirely between tidy sweeps and takes less than the 300,000 ms poll
 interval. The seat remains ineligible at the old expiry and until the renewed
 window. A later acknowledged report extends the window again. At expiry the
 close seam records one eligible attempt; a report arriving during close checks
-invalidates the existing close authority. The proof calls no pane-close route.
+invalidates the existing close authority. It then restores that old report time,
+proves the authority is valid again, runs another real short turn without changing
+the report time, and verifies the close authority refuses. The proof calls no
+pane-close route.
 
 - Original `auto-tidy.ts` from `616e0345990e`, with the new parser and regression:
   **failed** at the old expiry: expected no close attempt, received `w1:p1`.
@@ -42,3 +45,19 @@ The owner's auto-tidy setting was read as `1h` and was never changed.
 Waiting-on-lead report wording does not create an automatic keep: heuristics
 would guess at intent. The lead can use `keep_worker_pane` for follow-up context.
 The lead owns issue closure after landing and evidence review.
+
+## Review guard proof
+
+The revised regression passes with the complete guard. Mutation X4 removes only
+the comparison of fresh completion/state-change counters in `authorize`: the
+test then fails at the final `authorizeClose()` assertion (expected false,
+received true). The comparison was restored afterward.
+
+The new per-pane `agent get` runs only inside auto-tidy's pane sweep/close
+authority. The disk-reclamation and HOME-pane cache fixtures do not invoke that
+flow: prune/cache operations accept only `Pick<HerdrWatchRunner, "list">` and
+call `tidyPaneDirectories`. The disk fixture throws on any native command other
+than `pane list`. Their imported runner's list implementation is unchanged.
+This rules out those new reads in their execution paths; it does not establish
+why the shared-volume free-space assertion or scratch-directory cleanup failed
+in the first landing run. A fresh gate must pass both on its first attempt.
