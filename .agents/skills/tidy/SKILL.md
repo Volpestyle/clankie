@@ -81,12 +81,17 @@ read-only `list_tidy_worktrees({ repository: REPO_PATH, mergedInto: "origin/main
 destination). List the landed candidates with path, branch and destination
 evidence (`landedBy: content` means every commit is on the destination by patch;
 `decision` means a recorded safe_to_drop), and explain relevant exclusions. Main,
-dirty, unlanded or live worktrees are excluded, and an unavailable or changing
-census returns no candidates. Classify each retained unmerged or dirty tree as
+dirty, unlanded or live (`live_pane`, `live_process`) worktrees are excluded, and
+an unavailable or changing pane or process census returns no candidates. Classify each retained unmerged or dirty tree as
 landed by content, worth landing, or safe to drop, and record the last two with
 `decide_tidy_worktree` and a one-line reason. Unlanded work is never removed
 without one, and uncommitted files are never pruned. Even idle or shell panes
-protect their working directories and worktrees nested below them. The list does
+protect the worktree holding their cwd and worktrees nested below it, as does any
+process working there. A cwd at `$HOME`, above it, or above the repository's main
+checkout protects nothing below it on its own, so a seat at home no longer hides
+every tree. A cwd at a worktree root (say `~/dev/clankie-wt`) still holds every
+tree below it as `live_pane`; if every tree is held, look for a pane there
+([ADR 0280](../../../docs/adr/0280-automatic-tidy-requires-positive-work-proof.md)). The list does
 not establish ownership or refresh the destination ref: confirm your ownership
 and current landing proof before removing a candidate.
 

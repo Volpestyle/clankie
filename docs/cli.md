@@ -4810,7 +4810,8 @@ Pruning preserves the exact HEAD of content-equivalent work under
 `refs/clankie/pruned-worktrees/`, alongside decided-drop refs under
 `refs/clankie/dropped-worktrees/`. Native HEAD/branch locks prevent a new commit
 from losing its only ref during removal; changing or busy refs keep the tree.
-A live non-Git parent directory also protects worktrees nested below it.
+A live non-Git parent directory also protects worktrees nested below it, except
+`$HOME`, its ancestors and directories above the repository's main checkout.
 Where the owner turned automatic tidy off, it stays off until they decide
 otherwise; installing an update does not change that setting.
 
@@ -6081,9 +6082,15 @@ is `list_tidy_worktrees({ repository, mergedInto? })`. All return
 optional `branch`, and `sha`, while excluded entries contain `path` and a reason.
 
 Listing is read-only. It excludes the main checkout, locked or prunable entries,
-dirty or unmerged worktrees, and directories occupied by any observed local pane,
-including idle agents and shells. Unknown or changing pane inventory returns
-`outcome: "unavailable"` with no candidates. The command does not fetch refs or
+dirty or unmerged worktrees, and worktrees occupied by any observed local pane
+(`live_pane`, including idle agents and shells) or process (`live_process`). A
+pane or process cwd holds the worktree it is in and the worktrees nested below
+it, unless that cwd is `$HOME`, an ancestor of `$HOME`, or above the
+repository's main checkout. Those protect nothing below them on their own
+([ADR 0280](adr/0280-automatic-tidy-requires-positive-work-proof.md), VUH-2926).
+Unknown or changing pane inventory, or an unavailable process census
+(`process_inventory_unavailable`), returns `outcome: "unavailable"` with no
+candidates. The command does not fetch refs or
 prove ownership. Use the `tidy` skill to harvest results, verify ownership and
 fresh merge/clean evidence, then remove finished owned worktrees after landing.
 
@@ -9942,7 +9949,9 @@ inventories must show no live use. A pane left in a directory deleted under it
 makes the pane inventory unknown, so the sweep refuses and names that path until
 the pane closes. Main, managed runtime, locked and alias trees are protected. Missing or changing observations refuse cleanup. A sweep examines
 at most 32 worktrees, checking every cache in each; a `cache_worktree_limit`
-receipt names every deferred tree. Select each exact tree with `--path` to continue.
+receipt names every deferred tree. The next full sweep resumes after the last tree
+examined, wrapping round, so repeated sweeps cover every tree; `--path` continues
+with one exact tree now and leaves that order alone.
 Commits, source files, `.local` evidence and logs stay.
 The owner-authenticated `POST /v1/checkouts/reclaim-caches` accepts `repository`
 and optional `path`; tidy uses `reclaim_tidy_worktree_caches`. This is manual;

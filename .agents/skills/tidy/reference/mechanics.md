@@ -132,8 +132,10 @@ handles and a 60-second budget checked between entries; filesystem I/O can take 
 An incomplete check keeps the cache intact. Workspace importer caches use their own
 install metadata or the root pnpm marker plus installed lockfile snapshot naming the
 canonical project; changing or unknown evidence is refused. Root caches go last.
-Each sweep examines at most 32 worktrees and every cache within them. Report all
-`cache_worktree_limit` deferred paths and continue with each exact `path`.
+Each sweep examines at most 32 worktrees and every cache within them, and the next
+sweep resumes after the last tree examined, so repeated sweeps cover every tree.
+Report the `cache_worktree_limit` deferred paths; run another sweep, or continue
+now with each exact `path`.
 
 ## Before a manual close
 

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "green.json",
+      "size": 31003,
+      "sha256": "ff2e949bbb0d6e0b29eda614986bf0d2a8d100ea3bd113f8f41cd9e714566a66",
+      "url": "clankie://evidence/sha256/ff2e949bbb0d6e0b29eda614986bf0d2a8d100ea3bd113f8f41cd9e714566a66"
+    }
+  ]
+}

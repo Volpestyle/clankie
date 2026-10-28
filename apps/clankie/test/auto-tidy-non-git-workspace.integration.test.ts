@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { createAutoTidy } from "../src/captain/auto-tidy.ts";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import {
@@ -16,6 +16,13 @@ import {
 } from "../src/captain/prune-worktree.ts";
 
 const exec = promisify(execFile);
+// Listing reads the account process cwd census through the native helper (VUH-2926).
+beforeAll(async () => {
+  if (process.platform === "darwin")
+    await promisify(execFile)(process.execPath, [
+      join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs"),
+    ]);
+});
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();

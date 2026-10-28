@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { canonicalProjectPath, projectPathContains } from "@clankie/settings";
+import { processWorkingDirectories } from "../process-working-directories.ts";
 import type { HerdrWatchRunner } from "./herdr-watch.ts";
 
 export interface TidyWorktreesResult {
@@ -150,6 +151,21 @@ export async function tidyPaneDirectories(runner: Pick<HerdrWatchRunner, "list">
   return [...new Set(paths)].sort();
 }
 
+/**
+ * A live cwd protects the worktree holding it, and the worktrees nested below it, since it may
+ * be an unattributed research parent (ADR 0280). Home, its ancestors and the directories above
+ * the repository's main worktree hold the whole repository rather than one piece of work, so
+ * by themselves they protect nothing nested below (VUH-2926).
+ */
+function cwdProtectsWorktree(cwd: string, tree: string, home: string, main: string): boolean {
+  if (projectPathContains(tree, cwd, platform)) return true;
+  return (
+    projectPathContains(cwd, tree, platform) &&
+    !projectPathContains(cwd, home, platform) &&
+    !projectPathContains(cwd, main, platform, true)
+  );
+}
+
 /** Read-only suggestions; every future removal must freshly verify its own admission. */
 export async function listTidyWorktrees(
   repositoryPath: string,
@@ -186,10 +202,21 @@ export async function listTidyWorktrees(
   } catch {
     return unavailable("pane_inventory_unavailable");
   }
+  // A process working in a tree protects it even with no pane there; an unknown census is no proof.
+  let processPaths: string[];
+  try {
+    processPaths = await processWorkingDirectories();
+  } catch {
+    return unavailable("process_inventory_unavailable");
+  }
   try {
     const raw = await git(repo.top, ["worktree", "list", "--porcelain", "-z"]);
     const inventory = tidyWorktreeInventory(raw);
     const managedPaths = await managedWorktreePaths(protection);
+    const configuredHome = resolve(protection.home ?? homedir());
+    const home = await realpath(configuredHome).catch(() => configuredHome);
+    const protects = (cwds: readonly string[], tree: string) =>
+      cwds.some((cwd) => cwdProtectsWorktree(cwd, tree, home, inventory[0]!.path));
     const result: TidyWorktreesResult = { outcome: "listed", mergedInto, candidates: [], excluded: [] };
     for (const entry of inventory) {
       if (protection.only !== undefined && entry.path !== protection.only) continue;
@@ -220,14 +247,8 @@ export async function listTidyWorktrees(
             throw new Error("Unverified worktree backlink");
           const head = (await git(entry.path, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
           if (head !== entry.sha) throw new Error("Worktree changed");
-          if (
-            panePaths.some(
-              (path) =>
-                projectPathContains(entry.path, path, platform) ||
-                projectPathContains(path, entry.path, platform),
-            )
-          )
-            reason = "live_pane";
+          if (protects(panePaths, entry.path)) reason = "live_pane";
+          else if (protects(processPaths, entry.path)) reason = "live_process";
           else if (await git(entry.path, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]))
             reason = "dirty";
           else {
@@ -273,6 +294,10 @@ export async function listTidyWorktrees(
       (await git(repo.top, ["worktree", "list", "--porcelain", "-z"])) !== raw ||
       JSON.stringify(await tidyPaneDirectories(runner)) !== JSON.stringify(panePaths)
     )
+      return unavailable("inventory_changed");
+    // Processes come and go all the time; only one now working in a candidate changes the answer.
+    const freshProcesses = await processWorkingDirectories();
+    if (result.candidates.some((candidate) => protects(freshProcesses, candidate.path)))
       return unavailable("inventory_changed");
     return result;
   } catch {

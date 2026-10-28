@@ -40,3 +40,41 @@ process, pane, runtime and evidence guards remain.
 Automatic tidy remains off in the affected fleet. Landing this fix does not
 enable it; James decides whether to enable it again. Regression proofs use
 disposable Git repositories and native-close fixtures, never incident worktrees.
+
+## Amendment: home and repository containers protect nothing below them, 2026-10-27
+
+Tracks [VUH-2926](https://linear.app/vuhlp/issue/VUH-2926). On the live Mac,
+`list_tidy_worktrees` found no candidates in clankie or clankie-app (about 670
+worktrees, all `live_pane`) with 104 GiB of 3.6 TB free. Four panes, including
+the operator seat, sat at `$HOME` and two at `~/dev`. The nested-below rule
+above protected every worktree under them.
+
+The proposed fix was that a cwd outside any Git worktree should never protect
+the worktrees nested below it. That would also drop the case this ADR keeps on
+purpose: a research seat holding its source trees in a non-Git parent
+directory. So the rule names containers instead. A pane or process cwd still
+protects the worktree that holds it, and still protects the worktrees nested
+below it, unless that cwd is `$HOME`, an ancestor of `$HOME`, or a strict
+ancestor of the repository's main worktree. Those directories hold the whole
+repository and its siblings, never one piece of work. The main checkout itself
+still protects worktrees inside it, for harnesses that enter a worktree under
+the checkout while their pane stays at the checkout.
+
+Listing and pruning now also read the account's native process cwd census
+(the one cache reclaim already uses) under the same rule. A process working in
+a tree holds it as `live_process` even when no pane is there, and an
+unavailable census returns `process_inventory_unavailable` with no candidates.
+The final check before returning re-reads the census and withholds the listing
+if a process has started working in a candidate.
+
+A cwd at an enrolled worktree root, such as `~/dev/clankie-wt`, still protects
+every tree below it, the same as a research parent. It doesn't contain the main
+worktree, and nothing else separates it from a research parent without reading
+enrollment. This hold fails safe: it shows as `live_pane` on every tree below
+that root.
+
+Cache reclaim's 32-tree sweep window now advances. Eligible trees are ordered
+by path, and each full sweep resumes after the last tree the previous sweep
+examined, wrapping round. The position is kept in the repository's common Git
+directory. It only orders the work and never admits a tree; a missing or
+unreadable cursor restarts at the first tree.

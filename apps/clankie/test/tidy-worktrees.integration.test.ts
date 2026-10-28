@@ -4,11 +4,18 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it } from "vitest";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
 import { createHerdrWatchRunner, type HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 
 const exec = promisify(execFile);
+// Listing reads the account process cwd census through the native helper (VUH-2926).
+beforeAll(async () => {
+  if (process.platform === "darwin")
+    await promisify(execFile)(process.execPath, [
+      join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs"),
+    ]);
+});
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));

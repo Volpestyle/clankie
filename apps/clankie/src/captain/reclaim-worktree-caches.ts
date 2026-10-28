@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstat, opendir, readFile, realpath, rename, stat } from "node:fs/promises";
+import { lstat, opendir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative as relativePath, resolve } from "node:path";
 import { promisify } from "node:util";
 import { projectPathContains } from "@clankie/settings";
@@ -184,27 +184,46 @@ export async function reclaimWorktreeCaches(
       const managed = await managedWorktreePaths(options.protection ?? {});
       const cwds = await processWorkingDirectories();
       const panes = await tidyPaneDirectories(runner);
-      let examined = 0;
-      for (const entry of entries) {
-        if (options.path && entry.path !== options.path) continue;
-        if (
-          entry.bare ||
-          entry.path === entries[0]!.path ||
-          entry.locked ||
-          entry.prunable ||
-          !options.roots.some((root) => contains(root, entry.path)) ||
-          managed.some((root) => contains(root, entry.path) || contains(entry.path, root))
+      const eligible = entries
+        .filter(
+          (entry) =>
+            (!options.path || entry.path === options.path) &&
+            !entry.bare &&
+            entry.path !== entries[0]!.path &&
+            !entry.locked &&
+            !entry.prunable &&
+            options.roots.some((root) => contains(root, entry.path)) &&
+            !managed.some((root) => contains(root, entry.path) || contains(entry.path, root)),
         )
-          continue;
+        .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      // Each full sweep resumes after the last tree the previous one examined, so repeated
+      // sweeps work through every tree (VUH-2926). The cursor orders work; it admits nothing.
+      const cursorPath = join(repo.common, "clankie-cache-reclaim-cursor");
+      const after = options.path
+        ? undefined
+        : // allow-swallowed-rejection -- a missing or unreadable cursor only restarts the order at the first tree
+          await readFile(cursorPath, "utf8").catch(() => undefined);
+      const start =
+        after === undefined
+          ? 0
+          : Math.max(
+              0,
+              eligible.findIndex((entry) => entry.path > after),
+            );
+      const ordered = [...eligible.slice(start), ...eligible.slice(0, start)];
+      let examined = 0;
+      let last: string | undefined;
+      for (const entry of ordered) {
         if (!options.path && examined >= 32) {
           result.kept.push({
             path: entry.path,
             reason:
-              "cache_worktree_limit: limit=32; deferred this worktree; continue with --path for this exact worktree",
+              "cache_worktree_limit: limit=32; deferred this worktree to the next sweep, which continues after the last tree examined; or continue now with --path for this exact worktree",
           });
           continue;
         }
         examined++;
+        last = entry.path;
         const keep = (reason: string) => result.kept.push({ path: entry.path, reason });
         try {
           const candidate = await inspectTidyRepository(entry.path);
@@ -402,6 +421,20 @@ export async function reclaimWorktreeCaches(
           }
         } catch (error) {
           keep(String(error));
+        }
+      }
+      if (!options.path && last !== undefined) {
+        const staged = `${cursorPath}.${randomUUID()}`;
+        try {
+          await writeFile(staged, last, { flag: "wx", mode: 0o600 });
+          await rename(staged, cursorPath);
+        } catch (error) {
+          // allow-swallowed-rejection -- the receipt below already reports the unsaved cursor
+          await rm(staged, { force: true }).catch(() => undefined);
+          result.kept.push({
+            path: repository,
+            reason: `cache_cursor_unsaved: the next sweep starts again where this one did; cause=${String(error)}`,
+          });
         }
       }
       return result;

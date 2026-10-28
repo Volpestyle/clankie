@@ -13,7 +13,7 @@ import { createServer, type Socket } from "node:net";
 import { nativeRequest } from "../src/herdr-native-request.ts";
 import { nativeHerdrRead } from "../src/herdr-native-read.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it } from "vitest";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
 import { createAutoTidy } from "../src/captain/auto-tidy.ts";
 import { paneDraftState } from "../src/captain/pane-draft.ts";
@@ -37,6 +37,14 @@ import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import { remoteRetirementWork } from "../src/captain/remote-retirement-work.ts";
 import { DeliveryFence, ReceiptSchema } from "../src/captain/delivery-fence.ts";
+
+// Listing reads the account process cwd census through the native helper (VUH-2926).
+beforeAll(async () => {
+  if (process.platform === "darwin")
+    await promisify(execFile)(process.execPath, [
+      join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs"),
+    ]);
+});
 
 const roots: string[] = [];
 const socketCleanups: (() => Promise<void>)[] = [];

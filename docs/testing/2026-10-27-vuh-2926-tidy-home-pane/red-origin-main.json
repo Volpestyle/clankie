@@ -1,0 +1,64 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 1,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 2,
+  "numPassedTests": 0,
+  "numFailedTests": 2,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1793156011821,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "a pane at $HOME or above the main checkout no longer protects every worktree; panes and processes inside, research parents and the main checkout still do",
+          "status": "failed",
+          "title": "a pane at $HOME or above the main checkout no longer protects every worktree; panes and processes inside, research parents and the main checkout still do",
+          "duration": 1096.729208,
+          "failureMessages": [
+            "AssertionError: expected [] to deeply equal [ { …(2) } ]\n    at /Users/james/dev/clankie-wt/vuh-2926/apps/clankie/test/tidy-worktrees-home-pane.integration.test.ts:143:31\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///Users/james/dev/clankie-wt/vuh-2926/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "repeated cache reclaim sweeps advance past the first 32 worktrees",
+          "status": "failed",
+          "title": "repeated cache reclaim sweeps advance past the first 32 worktrees",
+          "duration": 7894.863041999999,
+          "failureMessages": [
+            "AssertionError: {\"outcome\":\"reclaimed\",\"reclaimed\":[],\"kept\":[{\"path\":\"/private/tmp/cv-eIyC2D/tmp/clankie-tidy-home-kr2q9c/home/dev/repo-wt/worker-32\",\"reason\":\"cache_worktree_limit: limit=32; deferred this worktree; continue with --path for this exact worktree\"},{\"path\":\"/private/tmp/cv-eIyC2D/tmp/clankie-tidy-home-kr2q9c/home/dev/repo-wt/worker-33\",\"reason\":\"cache_worktree_limit: limit=32; deferred this worktree; continue with --path for this exact worktree\"}]}: expected [] to deeply equal [ …(2) ]\n    at /Users/james/dev/clankie-wt/vuh-2926/apps/clankie/test/tidy-worktrees-home-pane.integration.test.ts:208:54\n    at file:///Users/james/dev/clankie-wt/vuh-2926/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793156013200,
+      "endTime": 1793156022191.863,
+      "status": "failed",
+      "message": "",
+      "name": "/Users/james/dev/clankie-wt/vuh-2926/apps/clankie/test/tidy-worktrees-home-pane.integration.test.ts"
+    }
+  ]
+}

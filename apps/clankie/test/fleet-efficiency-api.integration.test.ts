@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it } from "vitest";
 import { OperatorFleetSeatSchema } from "@clankie/protocol";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
@@ -14,6 +14,13 @@ import { listTidyWorktrees } from "../src/captain/tidy-worktrees.ts";
 import type { FleetEfficiencyReview } from "../src/captain/fleet-efficiency-tools.ts";
 
 const exec = promisify(execFile);
+// Listing reads the account process cwd census through the native helper (VUH-2926).
+beforeAll(async () => {
+  if (process.platform === "darwin")
+    await promisify(execFile)(process.execPath, [
+      join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs"),
+    ]);
+});
 const cleanups: (() => Promise<void>)[] = [];
 const checkedAt = "2026-10-05T12:00:00.000Z";
 afterEach(async () => {
