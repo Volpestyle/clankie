@@ -413,6 +413,8 @@ const HEAD_LANE_HOLD_MS = 45_000;
 export const REPORT_ROUND_MS = 10 * 60_000;
 /** How often the service considers a fresh restart of the default lead seat (ADR 0271). */
 const LEAD_RESTART_CHECK_MS = 5 * 60_000;
+/** The longest a prune or cache reclaim waits for its light permit (VUH-2933). */
+const BULK_PERMIT_WAIT_MS = 5 * 60_000;
 /** ADR 0293's accepted work budget, independent of Claude's model window. */
 const LEAD_RESTART_CONTEXT_TOKENS = 250_000;
 const LEAD_RESTART_AGE_MS = 12 * 60 * 60_000;
@@ -2597,17 +2599,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return Promise.all((repository === undefined ? repositories : [repository]).map(syncOwnerCheckout));
   };
   // Beside the fleet resource journal. The batch holds a light permit, so it queues
-  // behind memory pressure and shows in fleet status (VUH-2933).
+  // behind memory pressure and shows in fleet status; low disk never holds it,
+  // since this is the work that frees disk (VUH-2933).
   const bulkOperationDirectory = join(options.stateDir, "fleet-resources");
-  const bulkOperation = <T>(
+  const bulkOperation = async <T>(
     operation: "reclaim_caches" | "prune_worktree",
     work: () => Promise<T>,
     summary: (result: T) => object,
   ): Promise<T> => {
     const recorded = () => recordBulkOperation(bulkOperationDirectory, operation, work, summary);
-    return options.fleetResources
-      ? options.fleetResources.governor.holdLight({ holderId: `service:${operation}`, operation }, recorded)
-      : recorded();
+    if (!options.fleetResources) return recorded();
+    // An owner request or tidy round reports busy instead of waiting without end.
+    const waited = AbortSignal.timeout(BULK_PERMIT_WAIT_MS);
+    let admitted = false;
+    try {
+      return await options.fleetResources.governor.holdLight(
+        { holderId: `service:${operation}`, operation, signal: waited },
+        () => {
+          admitted = true;
+          return recorded();
+        },
+      );
+    } catch (error) {
+      if (admitted || !waited.aborted) throw error;
+      throw Error(
+        `Fleet resources are busy: ${operation} waited ${BULK_PERMIT_WAIT_MS / 60_000} minutes for a light permit; nothing was removed`,
+      );
+    }
   };
   const reclaimCaches = async (
     repository: string,

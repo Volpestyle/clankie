@@ -391,7 +391,8 @@ export interface FleetResourceGovernor {
   /**
    * The service's own bulk work (prune, cache reclaim) under a light permit held
    * by this process, with no child command. It queues and counts like any light
-   * job, and is reaped if this process dies holding it (VUH-2933).
+   * job except that low disk never holds it, since it frees disk. It is reaped if
+   * this process dies holding it (VUH-2933).
    */
   holdLight<T>(
     options: ResourceWaitOptions & { holderId: string; operation: string },

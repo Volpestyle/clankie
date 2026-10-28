@@ -670,6 +670,13 @@ export function createResourceGovernor(
   function heavyHead(state: ResourceState) {
     return state.queue.find((entry) => entry.kind === "heavy");
   }
+  /**
+   * Light requests this process queued for its own bulk removal (`holdLight`),
+   * the work that frees disk, so the disk floor must not hold it. Only this
+   * process's waiter and arbiter consult the set; nothing in the journal or a
+   * caller's label claims it, and slots and the memory floor still bind.
+   */
+  const freesDisk = new Set<string>();
   /** Whether the head of this lane's queue may start, under one sample. */
   function headAdmits(
     lane: HeavyJobLane,
@@ -685,7 +692,7 @@ export function createResourceGovernor(
     // job above the base slots needs measured room (VUH-2054).
     return lane === "light"
       ? sampled.reason !== "probe-unavailable" &&
-          sampled.reason !== "disk" &&
+          (sampled.reason !== "disk" || freesDisk.has(heavyHead(state)?.id ?? "")) &&
           sampled.availableMemoryMb >= policy.minAvailableMemoryMb
       : heavyAdmission(policy, sampled, held, Date.now(), jobSettleMs) === "admit";
   }
@@ -802,6 +809,7 @@ export function createResourceGovernor(
       executable: string;
       lane: HeavyJobLane;
       mergeGate?: string;
+      freesDisk?: boolean;
     },
   ): Promise<HeavyLease> {
     const store = laneStore(options.lane);
@@ -815,6 +823,7 @@ export function createResourceGovernor(
       throw new Error("Invalid fleet holder identity");
     const id = randomUUID(),
       token = randomUUID();
+    if (options.freesDisk) freesDisk.add(id);
     // Before the ticket exists, so an arbiter never sees it unmarked.
     mkdirSync(grantsDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(join(grantsDirectory, id), "", { mode: 0o600 });
@@ -941,6 +950,7 @@ export function createResourceGovernor(
         await wait(jittered(PEEK_MS), signal);
       }
     } finally {
+      freesDisk.delete(id);
       rmSync(join(grantsDirectory, id), { force: true });
       if (!admitted)
         await store.transaction((state) => {
@@ -1200,6 +1210,7 @@ export function createResourceGovernor(
       holderId: options.holderId,
       executable: options.operation.slice(0, 128),
       lane: "light",
+      freesDisk: true,
     });
     const record = {
       leaseId: lease.id,

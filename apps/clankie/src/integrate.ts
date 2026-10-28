@@ -2135,7 +2135,8 @@ export class IntegrationQueue {
     };
     delete repo.install;
     delete repo.gate;
-    await removeDirectory(join(repo.directory, ".local"), { force: true });
+    // This batch's regate waits on it, so it is not background cleanup.
+    await removeDirectory(join(repo.directory, ".local"), { force: true, background: false });
     await this.save(batch);
     await this.installAndGate(batch, root);
   }
