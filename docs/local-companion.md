@@ -37,9 +37,13 @@ connection. It mints a session only when that process's running code satisfies
 one of the owner's trusted code requirements. Trust an app with
 `clankie companion trust /Applications/Clankie.app`.
 
-- A Developer ID build is trusted by team and bundle id.
-- An ad-hoc or development build is trusted only by its exact code hash, so it
-  is trusted again after each rebuild.
+- A Developer ID build is trusted by team and bundle id. The Mac app's id is
+  `bot.clankie.mac`.
+- An Apple Development build is trusted by bundle id and that certificate, so
+  every later build with the same id signed by the same certificate is trusted
+  too, from any checkout. A proof copy under another id is not.
+- An ad-hoc build is trusted only by its exact code hash, so it is trusted again
+  after each rebuild.
 
 The list starts empty, and an empty list refuses every app. Any other app gets
 `403 companion_app_untrusted` with a `reason` (`untrusted`, `not_signed` or

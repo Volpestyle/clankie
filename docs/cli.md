@@ -1815,10 +1815,11 @@ clankie companion remove ID
 Chooses which apps on this Mac may take the same-Mac companion handoff
 ([ADR 0204, VUH-2604](adr/0204-a-self-hosted-mac-pairs-the-app-directly.md)).
 `trust` checks the app's signature strictly. It then records its designated
-requirement (team and bundle id for a Developer ID build, the exact code hash for
-an ad-hoc or development build) and prints the trusted list. The service runs
-these checks against the process that actually connects, so a different
-bundle, or a rebuild claiming the same bundle id, is refused. The list starts
+requirement (team and bundle id for a Developer ID build, bundle id and
+certificate for an Apple Development build, the exact code hash for an ad-hoc
+build) and prints the trusted list. The service runs these checks against the
+process that actually connects, so a different bundle, or an ad-hoc rebuild
+claiming the same bundle id, is refused. The list starts
 empty and refuses every app. It is a machine setting, never moved by a
 transfer. The route is `POST /v1/pairing/local/trusted-apps`, operator bearer
 over native loopback only.
