@@ -728,9 +728,10 @@ static int prove_cwd(int argc, char **argv) {
 /* An account process that execs a setuid program (ps, top, sudo) leaves the
  * account after it was listed, and its full snapshot then refuses. Only a fresh
  * kernel read showing another effective user makes that a changed census; the
- * retry re-lists without it. A denied process still the account's refuses. */
+ * retry re-lists without it. A short-lived program can also exit before that
+ * read. A denied process still the account's refuses. */
 static int left_account(pid_t pid, int error) {
-  return (error == EPERM || error == EACCES) && protected_other_user(pid);
+  return (error == EPERM || error == EACCES) && (protected_other_user(pid) || exited(pid));
 }
 
 /* Cleanup needs a complete fresh account census before each removal. Reading

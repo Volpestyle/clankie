@@ -77,9 +77,12 @@ golden replay does not claim to force their occurrence on every machine.
 while four loops exec the setuid `/bin/ps`. A listed account process that becomes
 root's mid-census is `process_census_changed` with its EPERM, and the census
 retries; before VUH-2937 it refused as `process_census_unavailable`. The case
-fails against the earlier helper. An EPERM on a process still the account's
-keeps refusing: no supported operation was found that produces one, so that
-branch is held by the helper's fresh effective-user read, not by a capture.
+fails against the earlier helper. Three narrower branches are held by reasoning,
+not by a capture: the same change at the vnode path read, when the exec lands
+between a successful snapshot and that read; a setuid program that exits before
+the helper's fresh effective-user read, which also retries; and an EPERM on a
+process still the account's, which keeps refusing. No deterministic producer was
+found for the first two, and no supported operation produces the third.
 
 `fleet-health-metrics.integration.test.ts` derives the complete fixed native
 vocabulary from the helper's diagnostic declarations, compares it to the protocol
