@@ -14,7 +14,16 @@ onto fetched `origin/main` first. The command fixes `CLANKIE_LANDING_BASE`
 (default: `origin/main`) to a SHA, runs static checks, then the compiler projects
 affected through real imports (including type-only and relative cross-package
 imports), with serial compiler execution. Compiler/dependency configuration
-changes check all projects. Vitest's existing `--changed` selection is unchanged.
+changes check all projects. Test selection unions Vitest's `--changed` import
+graph with the per-test filesystem inputs in
+`scripts/testing/landing-fs-inputs.mjs`. Declare paths there when a test reads a
+manifest, fixture or native source through fs or a spawned build. These edges
+also enter each selected test's recorded dependencies, including the VUH-2044
+manifest revalidation scope. A docs-only change adds no tests.
+Changed non-JS executable inputs (native/script extensions, executable modes or
+shebangs) without a declared consumer fail closed and are listed in the landing
+report's `fsInputScope.unmappedExecutableInputs`. This is an explicit coverage
+boundary; arbitrary data files still need declarations to select their consumers.
 The compiler-input hash participates in Turbo's cache key, including imports
 across package boundaries that are absent from package manifests.
 Its static checks include `scripts/check-swallowed-rejections.mjs`: a line the

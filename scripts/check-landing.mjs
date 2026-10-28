@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { landingTypechecks } from "./testing/landing-typechecks.mjs";
 import { randomUUID } from "node:crypto";
@@ -12,6 +12,8 @@ import {
   revalidateLanding,
   sourceFingerprint,
 } from "./testing/landing-validity.mjs";
+
+import { fsInputScope } from "./testing/landing-fs-inputs.mjs";
 
 const args = process.argv.slice(2);
 const separator = args.indexOf("--");
@@ -112,6 +114,20 @@ const save = () => {
 };
 const started = performance.now();
 let exit = 0;
+try {
+  report.fsInputScope = fsInputScope(root, report.change.files);
+  if (report.fsInputScope.unmappedExecutableInputs.length) {
+    console.error(
+      `[landing] Unmapped executable filesystem inputs (declare tests in scripts/testing/landing-fs-inputs.mjs): ${report.fsInputScope.unmappedExecutableInputs.join(", ")}`,
+    );
+    exit = 1;
+  }
+} catch (error) {
+  report.fsInputScopeError = error.message;
+  console.error(`[landing] Cannot determine filesystem-input scope: ${error.message}`);
+  exit = 1;
+}
+save();
 const run = (name, command, environment = {}) => {
   if (exit) return;
   console.log(`[landing] ${name}: ${command.join(" ")}`);
@@ -187,6 +203,46 @@ const firstReport = `${reportPath}.tests.json`;
 const testRunId = randomUUID();
 rmSync(graphPath, { force: true });
 rmSync(firstReport, { force: true });
+// Preserve Vitest's normal selection, then union declared filesystem consumers.
+// Listing files does not execute tests; the one run below retains project lanes,
+// exclusions, reporters and the ordinary retry contract.
+let testSelection = ["--changed", base];
+if (!exit && report.fsInputScope.tests.length) {
+  const selectionPath = `${reportPath}.selection.json`;
+  rmSync(selectionPath, { force: true });
+  run(
+    "test-selection",
+    [
+      "pnpm",
+      "exec",
+      "vitest",
+      "list",
+      "--config",
+      "vitest.config.ts",
+      "--changed",
+      base,
+      "--filesOnly",
+      `--json=${selectionPath}`,
+    ],
+    { CLANKIE_LANDING_TESTS: "1" },
+  );
+  if (!exit) {
+    try {
+      const imported = JSON.parse(readFileSync(selectionPath, "utf8"));
+      testSelection = [
+        ...new Set([
+          ...imported.map(({ file }) => relative(root, file).replaceAll("\\", "/")),
+          ...report.fsInputScope.tests,
+        ]),
+      ].sort();
+      report.fsInputScope.selectedTests = testSelection;
+      console.log(`[landing] filesystem-input tests: ${report.fsInputScope.tests.join(", ")}`);
+    } catch (error) {
+      console.error(`[landing] Cannot read test selection: ${error.message}`);
+      exit = 1;
+    }
+  }
+}
 run(
   "tests",
   [
@@ -196,8 +252,7 @@ run(
     "run",
     "--config",
     "vitest.config.ts",
-    "--changed",
-    base,
+    ...testSelection,
     "--bail",
     retryTests ? "0" : "1",
     "--passWithNoTests",
@@ -240,9 +295,20 @@ if (retryTests && exit && report.phases.at(-1)?.name === "tests" && !report.phas
   });
   if (recovered) exit = 0;
 }
+if (!exit && !existsSync(graphPath)) {
+  console.error("[landing] Test dependency report is missing; landing blocked.");
+  exit = 1;
+}
 if (!exit && existsSync(graphPath)) {
   report.tests = JSON.parse(readFileSync(graphPath, "utf8"));
   rmSync(graphPath, { force: true });
+  const missing = (report.fsInputScope?.tests ?? []).filter(
+    (test) => !report.tests.testModules.includes(test),
+  );
+  if (missing.length) {
+    console.error(`[landing] Mapped filesystem-input tests did not run: ${missing.join(", ")}`);
+    exit = 1;
+  }
   // A changed manifest makes Vitest rerun every test, so the recorded graph
   // spans the repository. The tests this change can affect are the ones that
   // load a changed file or compile against it, plus any outside the compiler

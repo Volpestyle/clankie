@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { changePatchId, sourceFingerprint } from "../../../scripts/testing/landing-validity.mjs";
 import { changedLockfileImporters } from "../../../scripts/testing/lockfile-importers.mjs";
+import { landingFsInputs } from "../../../scripts/testing/landing-fs-inputs.mjs";
 import { landingTypechecks } from "../../../scripts/testing/landing-typechecks.mjs";
 
 // VUH-2024: a green landing gate survives a base move that touches nothing it
@@ -264,6 +265,29 @@ it("revalidates a manifest change against the tests that can see it, not Vitest'
     repo.write("apps/two/src/unrelated.ts", "export const unrelated = 2;\n"),
   );
   expect(revalidate(repo.root, moved)).toMatchObject({ status: 0, verdict: { valid: true, overlaps: [] } });
+});
+
+it.each([
+  ["apps/tui/test/harness-profiles.test.ts", "integrations/claude-plugin/worker/.codex-plugin/plugin.json"],
+  [
+    "apps/clankie/test/process-working-directories.integration.test.ts",
+    "integrations/fleet-proof/native-process-proof.c",
+  ],
+])("invalidates %s when an incoming commit changes its filesystem input", async (test, input) => {
+  const repo = repository();
+  repo.write(input, "initial filesystem input\n");
+  const base = repo.commit("filesystem input");
+  repo.git("branch", "-f", "main", base);
+  // The reporter adds these same declared edges to the module's import graph.
+  const dependencies = [test, ...landingFsInputs[test]];
+  expect(dependencies).toContain(input);
+  await recordGreenGate(repo.root, base, base, {
+    tests: { testModules: [test], dependencies, modules: { [test]: dependencies } },
+  });
+  const moved = moveMainAndRebase(repo, () => repo.write(input, "changed filesystem input\n"));
+  const { status, verdict } = revalidate(repo.root, moved);
+  expect(status).toBe(1);
+  expect(verdict.reasons).toContain(`incoming commit changes checked input ${input}`);
 });
 
 it("scopes a real lockfile change to the importers whose resolved dependencies changed", () => {

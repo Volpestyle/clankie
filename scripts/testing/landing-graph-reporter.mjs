@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { relative } from "node:path";
+import { landingFsInputs } from "./landing-fs-inputs.mjs";
 
 /**
  * Records what the landing gate's `--changed` run depended on (VUH-2024): each
@@ -23,7 +24,7 @@ export default class LandingGraphReporter {
     for (const module of testModules) {
       if ([...module.children.allTests()].some((test) => test.result().state === "skipped"))
         skipped.push(local(module.moduleId));
-      const own = new Set([local(module.moduleId)]);
+      const own = new Set([local(module.moduleId), ...(landingFsInputs[local(module.moduleId)] ?? [])]);
       const specification = module.project.createSpecification(module.moduleId);
       for (const path of await this.vitest.specifications.getTestDependencies(specification))
         own.add(local(path));
