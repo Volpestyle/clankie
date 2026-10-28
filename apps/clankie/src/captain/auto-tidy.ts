@@ -140,7 +140,12 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       if (!SETTLED.has(listed.status) || !["claude", "codex"].includes(listed.agent)) continue;
       // pane list omits lifecycle counters. agent get carries them; an unavailable
       // fresh observation must never authorize a close from the older roster row.
-      const agent = ports.runner.get ? await ports.runner.get(listed.paneId).catch(() => undefined) : listed;
+      const agent = ports.runner.get
+        ? await ports.runner.get(listed.paneId).catch((error: unknown) => {
+            console.warn("Auto-tidy native observation unavailable", listed.paneId, String(error));
+            return undefined;
+          })
+        : listed;
       if (!agent) continue;
       if (!SETTLED.has(agent.status) || !["claude", "codex"].includes(agent.agent)) continue;
       if (agent.session?.kind !== "id") continue;
@@ -207,7 +212,12 @@ export function createAutoTidy(ports: AutoTidyPorts) {
         if (!(await ports.ownerValid(owner)) || now() - latestActivity() < delay) return false;
         // Close/adoption guards run again after asynchronous worktree checks.
         // A new short turn or report during those checks must hold this close too.
-        const fresh = ports.runner.get ? await ports.runner.get(agent.paneId).catch(() => undefined) : agent;
+        const fresh = ports.runner.get
+          ? await ports.runner.get(agent.paneId).catch((error: unknown) => {
+              console.warn("Auto-tidy close observation unavailable", agent.paneId, String(error));
+              return undefined;
+            })
+          : agent;
         return (
           fresh !== undefined &&
           fresh.terminalId === agent.terminalId &&
