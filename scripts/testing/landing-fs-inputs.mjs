@@ -34,7 +34,7 @@ export const landingFsInputs = Object.fromEntries([
   ],
 ]);
 
-export function fsInputScope(root, changed) {
+export function fsInputScope(root, changed, base) {
   const tests = Object.entries(landingFsInputs)
     .filter(([, inputs]) => inputs.some((path) => changed.includes(path)))
     .map(([test]) => test)
@@ -42,16 +42,24 @@ export function fsInputScope(root, changed) {
   for (const test of tests)
     if (!existsSync(resolve(root, test))) throw new Error(`Mapped filesystem-input test is missing: ${test}`);
   const mapped = new Set(Object.values(landingFsInputs).flat());
-  const indexed = execFileSync("git", ["ls-files", "--stage", "-z"], { cwd: root, encoding: "utf8" });
+  const modes = [
+    ["ls-files", "--stage", "-z"],
+    // Retain deleted executables and files whose executable bit was removed.
+    ["ls-tree", "-r", "-z", base],
+  ].map((args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }));
   const executable = new Set(
-    indexed
-      .split("\0")
+    modes
+      .flatMap((output) => output.split("\0"))
       .filter((entry) => entry.startsWith("100755 "))
       .map((entry) => entry.split("\t")[1]),
   );
   const unmappedExecutableInputs = changed.filter((path) => {
     if (mapped.has(path) || /\.(?:[cm]?[jt]sx?)$/u.test(path)) return false;
-    if (/\.(?:c|h|cc|hh|cpp|hpp|cxx|m|mm|swift|rs|go|py|sh|bash|zsh|fish|ps1|bat|cmd|rb|pl|lua)$/u.test(path))
+    if (
+      /\.(?:c|h|cc|hh|cpp|hpp|cxx|s|asm|m|mm|swift|rs|go|java|kt|kts|py|sh|bash|zsh|fish|ps1|bat|cmd|rb|pl|lua)$/iu.test(
+        path,
+      )
+    )
       return true;
     if (executable.has(path)) return true;
     const absolute = resolve(root, path);

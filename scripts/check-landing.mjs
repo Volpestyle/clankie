@@ -115,7 +115,7 @@ const save = () => {
 const started = performance.now();
 let exit = 0;
 try {
-  report.fsInputScope = fsInputScope(root, report.change.files);
+  report.fsInputScope = fsInputScope(root, report.change.files, base);
   if (report.fsInputScope.unmappedExecutableInputs.length) {
     console.error(
       `[landing] Unmapped executable filesystem inputs (declare tests in scripts/testing/landing-fs-inputs.mjs): ${report.fsInputScope.unmappedExecutableInputs.join(", ")}`,
