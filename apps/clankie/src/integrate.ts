@@ -1016,12 +1016,12 @@ export class IntegrationQueue {
     return recordBulkOperation(
       this.options.directory,
       "integrate_reclaim",
-      () => this.reclaimWorktreesLocked(at, guard),
+      () => this.reclaimWorktreesNow(at, guard),
       (result) => ({ reclaimed: result.reclaimed.length, freedBytes: result.freedBytes }),
     );
   }
 
-  private async reclaimWorktreesLocked(
+  private async reclaimWorktreesNow(
     at: number,
     guard: () => Promise<void>,
   ): Promise<{ reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number }> {

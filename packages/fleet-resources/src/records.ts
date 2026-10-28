@@ -18,6 +18,8 @@ export async function appendRecords(
   maxBytes = 262_144,
 ): Promise<void> {
   const path = join(directory, name);
+  // Unlocked: two writers that both see an oversized file can rotate twice and
+  // drop one generation. Acceptable for best-effort history.
   try {
     if ((await stat(path)).size > maxBytes) await rename(path, `${path}.1`);
   } catch (error) {
@@ -47,8 +49,19 @@ const machineSampleFile = "samples.jsonl";
 /** About two days of 30-second samples per file. */
 const machineSampleMaxBytes = 4 * 1_048_576;
 
+const secretFlag = /^(?:-H|--?[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*)$/iu;
+const secretFlagValue = /^(--?[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*=).+$/iu;
+
+/** The command line, with environment assignments and secret-looking flag values withheld. */
 export function leaseCommand(command: string, args: readonly string[]): string {
-  return [basename(command), ...args].join(" ").slice(0, 256);
+  const shown = args.map((arg, index) =>
+    /^[A-Za-z_][A-Za-z0-9_]*=/u.test(arg)
+      ? `${arg.slice(0, arg.indexOf("="))}=***`
+      : index > 0 && secretFlag.test(args[index - 1]!)
+        ? "***"
+        : arg.replace(secretFlagValue, "$1***"),
+  );
+  return [basename(command), ...shown].join(" ").slice(0, 256);
 }
 
 /** Recording never fails the permit it describes. */
