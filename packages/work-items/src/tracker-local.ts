@@ -2982,8 +2982,9 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
   return view;
 }
 /**
- * The person a Linear-shaped field names for a record. Clankie's and his workers' writes name
- * their own actor, never the store's local owner (LOCAL-VUH-59); the owner's, a device's and
+ * The person a Linear-shaped field names for a record. Clankie's, his workers' and outside
+ * members' writes name their own actor, never the store's local owner (LOCAL-VUH-59): an
+ * external write is untrusted and must not read as the owner's. The owner's, a device's and
  * older records without an actor keep the stored user.
  */
 function writer(
@@ -2991,7 +2992,7 @@ function writer(
   reference: string,
   actor: TrackerActor | undefined,
 ): User | { id: string; name: string; displayName: string; isLocal: false } {
-  if (actor?.type !== "agent-worker") return findUser(store, reference);
+  if (actor?.type !== "agent-worker" && actor?.type !== "external") return findUser(store, reference);
   const name = actorName(actor);
   return { id: actorKey(actor), name, displayName: name, isLocal: false };
 }

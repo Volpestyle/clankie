@@ -53,6 +53,8 @@ async function fixture(budget = new TrackerRequestBudget()) {
   const logged: Record<string, unknown>[] = [];
   /** Personas bound to `seatId occupantId`, as the captain's live roster binds them. */
   const personaNames = new Map<string, string>();
+  /** Panes hired outside the default fleet, such as a linked PC's. */
+  const paneFleets = new Map<string, string>();
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
     credentials,
@@ -140,7 +142,12 @@ async function fixture(budget = new TrackerRequestBudget()) {
         const pane = request.headers.get("x-test-local-pane");
         return pane === null
           ? undefined
-          : { fleet: "default", pane, validate: async () => true, current: () => true };
+          : {
+              fleet: paneFleets.get(pane) ?? "default",
+              pane,
+              validate: async () => true,
+              current: () => true,
+            };
       },
     },
     authenticateOperator: async (request) =>
@@ -186,10 +193,12 @@ async function fixture(budget = new TrackerRequestBudget()) {
       ],
     }),
   }));
-  const hire = async (pane: string, role: string) => {
+  const hire = async (pane: string, role: string, fleet = "default") => {
+    if (fleet !== "default") paneFleets.set(pane, fleet);
     const saved = (await settings.load()).projects;
     const { id } = hires.reserve(saved, "project-x", {
       schemaVersion: 1,
+      ...(fleet === "default" ? {} : { fleet }),
       workingDirectory: workspace,
       title: `${role} ${pane}`,
       harness: "claude",
@@ -200,7 +209,7 @@ async function fixture(budget = new TrackerRequestBudget()) {
     hires.confirmed(id);
     hires.observe(id, `seat-${pane}`, `occupant-${pane}`, {
       nativeOccupantId: `occupant-${pane}`,
-      fleet: "default",
+      fleet,
       pane,
       binding: { socketPath: join(root, "herdr.sock") },
       processes: [{ pid: 22, startTime: "today" }],
@@ -285,6 +294,7 @@ async function fixture(budget = new TrackerRequestBudget()) {
   };
   return {
     host,
+    tracker,
     team,
     project,
     owner,
@@ -586,6 +596,23 @@ it("a hired worker's writes carry its persona, and their author fields name the 
     gaps: [],
   });
   await f.call("w1:p2", "linear_save_comment", { issueId: issue.id, body: "No persona bound." });
+  // A linked PC's worker: its live seat id carries its fleet.
+  await f.hire("w2:p1", "builder", "pc");
+  f.personaNames.set("pc/seat-w2:p1 occupant-w2:p1", "Wren");
+  await f.call("w2:p1", "linear_save_comment", { issueId: issue.id, body: "From the PC." });
+  // An outside member, as the Discord forum mirror writes one: untrusted, never the owner.
+  await f.tracker.call(
+    "save_comment",
+    { issueId: issue.id, body: "From a member." },
+    { actor: { type: "external", id: "discord:42", name: "Pip", onBehalfOf: [] }, via: "discord_forum" },
+  );
+  const leadUpdate = await f.host.call({
+    lane: "operator",
+    server: "linear",
+    tool: "save_status_update",
+    arguments: { type: "project", project: f.project.id, body: "On track." },
+  });
+  expect(leadUpdate, JSON.stringify(leadUpdate)).toMatchObject({ outcome: "ok", isError: false });
   const lead = await f.host.call({
     lane: "operator",
     server: "linear",
@@ -621,6 +648,21 @@ it("a hired worker's writes carry its persona, and their author fields name the 
   expect(comment("From Clankie.")).toMatchObject({
     createdByActor: { type: "agent-worker", id: "clankie", name: "Clankie" },
     author: { name: "Clankie", isLocal: false },
+  });
+  expect(comment("From the PC.")).toMatchObject({
+    createdByActor: { id: "fleet:pc:pane:w2:p1", name: "Wren" },
+    author: { name: "Wren", isLocal: false },
+  });
+  expect(comment("From a member.")).toMatchObject({
+    createdByActor: { type: "external", id: "discord:42", name: "Pip" },
+    author: { id: "external:discord:42", name: "Pip", isLocal: false },
+    user: { name: "Pip", isLocal: false },
+  });
+  const updates = (await f.owner("get_status_updates", { type: "project", project: f.project.id }))
+    .statusUpdates;
+  expect(updates.find((entry: { body: string }) => entry.body === "On track.").user).toMatchObject({
+    name: "Clankie",
+    isLocal: false,
   });
   expect(comment("From the owner.")).toMatchObject({
     createdByActor: { type: "human" },

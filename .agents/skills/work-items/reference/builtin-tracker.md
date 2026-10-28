@@ -29,9 +29,9 @@ original result instead of writing twice; after a lost reply, read
 (safe to send again). Pass the `updatedAt` you read as `ifUpdatedAt` on updates
 so a concurrent change is refused (`precondition_failed`) rather than
 overwritten. Records show who wrote them (`createdByActor`, `updatedByActor`,
-with the on-behalf-of chain). A hired worker is named by its persona, and an
-agent's record names that agent in `author`, `user` and `createdBy`, never the
-local owner; `linear_list_audit_events` reads the append-only
+with the on-behalf-of chain). A hired worker is named by its persona. An
+agent's or outside member's record names that writer in `author`, `user` and
+`createdBy`, never the local owner; `linear_list_audit_events` reads the append-only
 history. You never name yourself: the host stamps your identity. Other backends
 refuse these arguments explicitly.
 

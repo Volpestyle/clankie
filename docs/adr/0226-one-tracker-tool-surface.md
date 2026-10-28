@@ -147,10 +147,12 @@ pane principal stays the actor id. The records it creates or changes carry
 `createdByActor` and `updatedByActor`.
 
 The Linear-shaped person fields (`author` and `user` on comments, `createdBy`
-on issues, `user` on status updates) name the record's `agent-worker` writer
-when it has one: a hired worker by its name, or Clankie. They carry
-`isLocal: false`. Owner, device and standalone writes, and records written
-before actors, keep the store's local user.
+on issues, `user` on status updates) name the record's `agent-worker` or
+`external` writer when it has one: a hired worker by its name, Clankie, or an
+outside member such as a Discord forum poster. They carry `isLocal: false`; an
+external write is untrusted and never reads as the owner. Owner, device and
+standalone writes, and records written before actors, keep the store's local
+user.
 
 Amended 2026-10-28 (LOCAL-VUH-59).
 Before this, workers were named by their Herdr terminal ID (`term_…`), and every
