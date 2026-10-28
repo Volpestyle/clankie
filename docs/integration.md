@@ -71,7 +71,8 @@ Each member needs at most its shared attempt and one individual attempt to
 attribute that failure. Main moving into checked inputs still requires the
 existing bounded re-gating described below. Failure of a single request is
 terminal; base or infrastructure faults may independently fail every member.
-Every attempt retains its logs and exact tree.
+Every attempt retains its logs, and its exact tree while its retry chain needs
+it and for the retention window after.
 
 An individual attempt can retain a repository's earlier zero-exit gate only when
 its exact tree, base, approved contributions, source, destination and sibling
@@ -340,10 +341,14 @@ again, so only one process takes it over. When the queue reclaims `queue.lock`,
 the batches the dead owner left running are recorded `interrupted` with that
 reason. Recovery-enabled requests receive their one automatic retry. A lock with a live owner still refuses. Inspect the
 record, logs, processes and origin before starting a fresh batch. Batch
-records, logs and commit stores remain for review; automatic cleanup and
+records and logs remain for review; automatic cleanup and
 `clankie integrate reclaim` remove disposable terminal worktrees and isolation
-caches after their processes and retries have finished. Never move a tree while
-its gate is running.
+caches after their processes and retries have finished. While the queue is idle,
+the sweep also removes the composed clone (`repositories/*`): a pushed batch's
+at the next sweep, other finished attempts' after 72 hours, and a pass or hold
+left unlanded for 7 days, which then expires and refuses `push` and `revert`
+([ADR 0240](adr/0240-changes-land-directly-on-main.md), VUH-2939). Never move a
+tree while its gate is running.
 
 The operator API is `POST /v1/integrate` with typed `run`, `status`, `push`,
 `cancel`, `hold`, `holds` and `release` actions in

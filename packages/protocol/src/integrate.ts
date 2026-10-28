@@ -238,10 +238,16 @@ export const IntegrationBatchSchema = z.object({
   isolationReclamation: z
     .object({ path: z.string(), freedBytes: z.number().nonnegative(), at: z.iso.datetime() })
     .optional(),
-  /** Reclaimed scratch trees; commits stay reachable in the retained repository clone. */
+  /** Reclaimed scratch trees; commits stay reachable in the clone until it is reclaimed too. */
   worktreeReclamation: z
     .array(z.object({ path: z.string(), head: Sha, keptRef: z.string(), at: z.iso.datetime() }))
     .optional(),
+  /** Reclaimed composed clones (VUH-2939); pushed heads stay on origin/main, records and logs remain. */
+  repositoryReclamation: z
+    .array(z.object({ path: z.string(), freedBytes: z.number().nonnegative(), at: z.iso.datetime() }))
+    .optional(),
+  /** A pass or hold left unlanded for 7 days; push refuses and its trees and clone are reclaimed. */
+  expired: z.object({ at: z.iso.datetime() }).optional(),
   error: z.string().optional(),
   // Request receipts retain their original input and point to the shared attestation.
   batchId: Id.optional(),

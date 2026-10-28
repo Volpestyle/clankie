@@ -1354,8 +1354,8 @@ unknown queue owner still refuses.
 
 Pushed batches and failed, cancelled, interrupted or conflicting attempts lose
 their disposable scratch worktrees and private `isolation/` install/gate caches as soon as the queue no longer needs them.
-Failed shared attempts remain while individual retries reuse them. Records,
-gate logs and repository clones remain; detached commits are pinned before
+Failed shared attempts remain while individual retries reuse them. Records and
+gate logs remain; detached commits are pinned before
 `git worktree remove --force` and `git worktree prune`. Gate artifacts and dirty
 scratch files do not prevent cleanup. A partially removed checkout missing its
 `.git` file can be finished only when its exact private Git registration and
@@ -1366,7 +1366,22 @@ On macOS, each fresh cwd census reads kernel vnode paths through the native
 process helper, including a complete account inventory. It avoids repeated
 `lsof` filesystem scans while retaining the live-process recheck before every
 removal; no cwd snapshot is reused across deletions.
-Restore reads a reclaimed pushed batch's retained commit store.
+Clones (`repositories/core`, `repositories/app`) are removed only by this sweep,
+and only while it holds the idle queue's lock:
+
+- a pushed batch's at the next sweep. Its head is on `origin/main`, and
+  `revert` restores from there; it refuses if main no longer contains the head.
+- a failed, cancelled, interrupted or conflicting attempt's 72 hours after it
+  settled, unless it is a retry source.
+- a passed or held batch's after 7 days unlanded. The batch gains `expired`, and
+  `push` and `revert` refuse it: land again with a fresh request.
+
+Partial landings and retry sources keep theirs. Each removal is recorded in
+`repositoryReclamation`; a clone still inside its window is reported as
+`repository_retention`, and one left for the next pass after the 90-second
+per-pass limit as `repository_deferred`. Old receipts that still say `queued` are history, not
+queue entries; status shows their shared attempt's result
+([ADR 0240](adr/0240-changes-land-directly-on-main.md)).
 Recursive scratch and cache deletion runs in an awaited child process, so large
 installs do not occupy the live service's filesystem threadpool. The same
 ownership, retry and live-process checks still authorize each removal.

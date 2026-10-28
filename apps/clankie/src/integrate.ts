@@ -39,6 +39,10 @@ import {
   reclaimCopiedInstallStores,
   integrationRetrySources,
   integrationReclamationState,
+  integrationRepositoryDisposable,
+  integrationPassExpired,
+  pathExists,
+  INTEGRATION_CLONE_PASS_MS,
 } from "./integrate-reclamation.ts";
 
 const execute = promisify(execFile);
@@ -119,6 +123,8 @@ class RemoteCommandFailure extends Error {
 class GateNotCovering extends Error {}
 /** A stopped runner cannot attest a completed install or gate. */
 class IntegrationInterrupted extends Error {}
+const expiredPass = (id: string) =>
+  `Batch ${id} expired after 7 days without landing and its trees were reclaimed; land again with a fresh request`;
 /** A revalidated HEAD inherits its gate; otherwise only the gated HEAD is attested. */
 const attested = (repo: IntegrationRepo) =>
   repo.revalidations?.findLast((record) => record.covered)?.head ?? repo.gate?.head;
@@ -870,20 +876,25 @@ export class IntegrationQueue {
     } while (this.draining);
   }
 
-  /** Only disposable terminal scratch trees; passed/held/partial trees still support push. */
+  /**
+   * Only disposable terminal scratch trees; passed/held/partial trees still support push.
+   * `repositories` also admits clones and expired passes until its deadline;
+   * only the idle census sweep passes it.
+   */
   private async reclaimBatch(
     batch: IntegrationBatch,
     result: { reclaimed: string[]; kept: { id: string; reason: string }[]; freedBytes: number },
     cwds: string[],
     guard: () => Promise<void>,
     at: number,
+    repositories?: { deadline: number },
   ): Promise<void> {
     // Automatic cleanup and sweeps share a per-batch writer lock. A fresh read
     // keeps reclamation metadata from overwriting another cleanup's evidence.
     await withDirectoryLock(join(this.options.directory, "reclamation-batches", batch.id), async () => {
       const latest = await this.read(batch.id);
       if (latest.id !== batch.id) throw Error("batch_alias");
-      await this.reclaimBatchUnlocked(latest, result, cwds, guard, at);
+      await this.reclaimBatchUnlocked(latest, result, cwds, guard, at, repositories);
     });
   }
   private async reclaimBatchUnlocked(
@@ -892,19 +903,34 @@ export class IntegrationQueue {
     cwds: string[],
     guard: () => Promise<void>,
     at: number,
+    repositories: { deadline: number } | undefined,
   ): Promise<void> {
     const id = batch.id;
     const shared = batch.batchId ? await this.read(batch.batchId) : undefined;
     if (shared && shared.id !== batch.batchId) throw Error("batch_alias");
     const state = integrationReclamationState(batch, shared);
+    const terminal = ["pushed", "failed", "cancelled", "interrupted", "conflict"].includes(state);
+    const expired = repositories !== undefined && integrationPassExpired(batch, state, at, shared);
     if (
       this.running.has(id) ||
       this.retries.some((job) => job.reuse?.id === id) ||
       this.current?.job.reuse?.id === id ||
-      !["pushed", "failed", "cancelled", "interrupted", "conflict"].includes(state)
+      (!terminal && !expired)
     )
       return;
     const root = resolve(dirname(this.path(id)));
+    // Each idle pass removes clones for a bounded time; later sweeps continue the backlog.
+    const clonesDue = repositories !== undefined && Date.now() < repositories.deadline;
+    if (
+      repositories &&
+      !clonesDue &&
+      integrationRepositoryDisposable(batch, state, at, shared) &&
+      (await pathExists(join(root, "repositories")))
+    ) {
+      result.kept.push({ id, reason: "repository_deferred" });
+      if (!terminal) return;
+    }
+    const expiring = expired && clonesDue;
     const contains = (path: string) => {
       const child = relative(root, path);
       return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
@@ -913,6 +939,17 @@ export class IntegrationQueue {
       if (batch.evidence !== join(root, "record.json") || (await realpath(root)) !== root)
         throw Error("batch_alias");
       if (cwds.some(contains)) throw Error("live_cwd");
+      if (expiring && !batch.expired)
+        // Landing rereads the record under push.lock, so it refuses once this is saved.
+        await withDirectoryLock(join(root, "push.lock"), async () => {
+          // A landing that held push.lock first may have moved it on; the next sweep decides again.
+          const latest = await this.read(id);
+          if (latest.state !== batch.state || latest.updatedAt !== batch.updatedAt)
+            throw Error("batch_changed");
+          batch.expired = { at: new Date(at).toISOString() };
+          batch.error = `${expiredPass(id)}${batch.error ? `. It was ${state}: ${batch.error}` : ""}`;
+          await this.save(batch);
+        });
       const trees = join(root, "worktrees");
       if (await lstat(trees).catch(() => undefined)) {
         if ((await realpath(trees)) !== trees) throw Error("worktrees_alias");
@@ -1002,6 +1039,47 @@ export class IntegrationQueue {
         batch.isolationReclamation = { path: isolation, freedBytes: bytes, at: new Date(at).toISOString() };
         await this.save(batch);
       }
+      const clones = join(root, "repositories");
+      if (clonesDue && (await pathExists(clones))) {
+        if (!integrationRepositoryDisposable(batch, state, at, shared)) {
+          result.kept.push({ id, reason: "repository_retention" });
+          return;
+        }
+        if ((await realpath(clones)) !== clones) throw Error("repositories_alias");
+        // A scratch tree that could not be removed still depends on its clone.
+        if (await pathExists(trees)) throw Error("repository_has_worktrees");
+        for (const name of await readdir(clones)) {
+          if (name !== "core" && name !== "app") throw Error("repository_unrecorded");
+          const repository = join(clones, name);
+          if (
+            (await realpath(repository)) !== repository ||
+            (await realpath(join(repository, ".git"))) !== join(repository, ".git")
+          )
+            throw Error("repository_alias");
+          // Every tree is gone; only locked registrations survive pruning, and they refuse.
+          await this.git(repository, ["worktree", "prune"]);
+          const registrations = (await this.git(repository, ["worktree", "list", "--porcelain"]))
+            .split("\n\n")
+            .filter((entry) => entry.trim());
+          if (registrations.length !== 1 || registrations[0]!.split("\n")[0] !== `worktree ${repository}`)
+            throw Error("repository_has_worktrees");
+          if ((await processWorkingDirectories()).some(contains)) throw Error("live_cwd");
+          const { stdout } = await execute("du", ["-sk", repository], { maxBuffer: 1024 * 1024 });
+          const bytes = Number(stdout.trim().split(/\s/u)[0]) * 1024;
+          if (!Number.isSafeInteger(bytes) || bytes < 0) throw Error("repository_size_unknown");
+          await guard();
+          await removeDirectory(repository, { force: true });
+          result.reclaimed.push(repository);
+          result.freedBytes += bytes;
+          (batch.repositoryReclamation ??= []).push({
+            path: repository,
+            freedBytes: bytes,
+            at: new Date(at).toISOString(),
+          });
+          await this.save(batch);
+        }
+        await rmdir(clones);
+      }
     } catch (error) {
       result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
     }
@@ -1017,7 +1095,12 @@ export class IntegrationQueue {
       this.options.directory,
       "integrate_reclaim",
       () => this.reclaimWorktreesNow(at, guard),
-      (result) => ({ reclaimed: result.reclaimed.length, freedBytes: result.freedBytes }),
+      (result) => ({
+        reclaimed: result.reclaimed.length,
+        freedBytes: result.freedBytes,
+        clones: result.reclaimed.filter((path) => /[/]repositories[/](?:core|app)$/u.test(path)).length,
+        clonesDeferred: result.kept.filter((entry) => entry.reason === "repository_deferred").length,
+      }),
     );
   }
 
@@ -1055,7 +1138,8 @@ export class IntegrationQueue {
             result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
           }
         }
-        const sources = integrationRetrySources(records);
+        const sources = integrationRetrySources(records, at);
+        const clones = busy ? undefined : { deadline: Date.now() + INTEGRATION_CLONE_PASS_MS };
         const cwds = await processWorkingDirectories();
         for (const [id, batch] of records) {
           try {
@@ -1079,7 +1163,8 @@ export class IntegrationQueue {
               result.kept.push({ id, reason: "retry_source" });
               continue;
             }
-            await this.reclaimBatch(batch, result, cwds, guard, at);
+            // Clones go only while this sweep holds the idle queue: nothing composes or retries.
+            await this.reclaimBatch(batch, result, cwds, guard, at, clones);
           } catch (error) {
             result.kept.push({ id, reason: error instanceof Error ? error.message : String(error) });
           }
@@ -1480,6 +1565,7 @@ export class IntegrationQueue {
     const restore = batch.request.restore ? await this.status(batch.request.restore) : undefined;
     if (restore && !["passed", "held", "pushed", "partial"].includes(restore.state))
       throw Error("Restore requires a recorded passed batch");
+    if (restore?.expired) throw Error(`Restore source: ${expiredPass(restore.id)}`);
     const names: ("core" | "app")[] = restore
       ? restore.repos.map((r) => r.name)
       : (batch.members ?? [batch.request]).some((member) => member.app !== undefined)
@@ -1531,7 +1617,7 @@ export class IntegrationQueue {
         )
           throw Error("Restore source does not match a recorded passed tree");
         const retained = join(dirname(dirname(good.directory)), "repositories", name);
-        let restoreSource = retained;
+        let restoreSource: string | undefined = retained;
         if (restore.state !== "pushed") {
           try {
             await lstat(good.directory);
@@ -1539,8 +1625,14 @@ export class IntegrationQueue {
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
           }
+        } else if (restore.repositoryReclamation?.some((entry) => entry.path === retained)) {
+          // A reclaimed pushed clone's head landed on origin/main, fetched above.
+          restoreSource = undefined;
+          await this.git(directory, ["cat-file", "-e", `${good.head}^{commit}`]).catch(() => {
+            throw Error(`Restore source ${name} ${good.head} was reclaimed and is no longer on origin/main`);
+          });
         }
-        await this.git(directory, ["fetch", restoreSource, good.head]);
+        if (restoreSource) await this.git(directory, ["fetch", restoreSource, good.head]);
         await this.git(directory, ["read-tree", "--reset", "-u", `${good.head}^{tree}`]);
         await this.git(directory, [
           "commit",
@@ -2127,6 +2219,7 @@ export class IntegrationQueue {
     if (batch.state === "pushed") return batch;
     if (!["passed", "held", "partial"].includes(batch.state))
       throw Error(`Batch ${id} has no landable pass (${batch.state})`);
+    if (batch.expired) throw Error(expiredPass(id));
     const wasRunning = this.running.has(id);
     if (!wasRunning && this.options.holds)
       return withDirectoryLock(
@@ -2151,6 +2244,7 @@ export class IntegrationQueue {
     this.running.add(id);
     try {
       return await withDirectoryLock(join(dirname(batch.evidence), "push.lock"), async () => {
+        if ((await this.stored(id)).expired) throw Error(expiredPass(id));
         try {
           await guard();
           // Read the persisted attestation rather than trusting an in-memory check result.

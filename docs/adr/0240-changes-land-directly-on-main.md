@@ -5,7 +5,8 @@ Status: Accepted (James, 2026-10-07). Retires the mandatory landing queue in
 Amended 2026-10-10 for gate revalidation (VUH-2024) and timed deploy holds
 (VUH-2049). Amended 2026-10-21 by [ADR 0287](0287-a-standing-reviewer-gates-every-landing.md):
 when the project names a reviewer, the gate also holds until that reviewer
-approves the exact patch, and exits 3 while it waits.
+approves the exact patch, and exits 3 while it waits. Amended 2026-10-28 for
+integration batch retention (VUH-2939).
 
 ## Context
 
@@ -179,3 +180,49 @@ app install. Fixture admission correctly refused them. Its source boundary stays
 unchanged; widening trust to accommodate a mislinked dependency is not a fix.
 Manual paired worktrees use the same order and repeat core's frozen install after
 any later app install, before building or checking core.
+
+## Integration batches keep records, not clones (VUH-2939, 2026-10-28)
+
+Every batch composes a private clone at `repositories/<core|app>`. Reclamation
+removed only the clone's checked-out worktrees and caches, so the clones stayed
+forever. By 2026-10-28, 678 of 1,100 batches still held one: 43–57 MB for core
+and 363–387 MB for core with app. They used about 120 GB on a disk with 62 GB
+free. Fourteen passed or held batches, some 18 days old, kept a further 2.1 GB
+each of worktree and install.
+
+The rule is now: a batch keeps `record.json` and its logs indefinitely. Its
+clone, worktrees and isolation go when nothing can still read them:
+
+- **pushed**: at the next sweep. The pushed head is on `origin/main`, and a
+  revert of the batch restores its tree from the commit that composition fetches
+  with main. If main was rewritten so the head is gone, revert refuses.
+- **failed, conflict, cancelled, interrupted**: 72 hours after the batch
+  settled. Retries never read an old clone: they fetch approved commits from the
+  source checkout again. Recovery and retries are fenced by durable
+  dependencies, not by age. The 72 hours exist only so a person can inspect the
+  composed candidate, and they cover a weekend.
+- **passed and held**: 7 days after the batch settled, the batch expires. It
+  keeps its state and gains `expired`, and `integrate push` and `revert` refuse
+  it with "expired after 7 days; land again with a fresh request". Main has moved
+  past a pass that old, so landing it would mean a regate anyway.
+- **Never**: partial landings, active batches, retry sources, and anything an
+  incomplete census, a live process cwd, an alias or a still-registered worktree
+  protects.
+
+Settled time is the earliest of the record's `updatedAt` and its reclamation
+times, because reclamation saves move `updatedAt`. Clones are removed only by
+the census sweep: the automatic five-minute sweep or `clankie integrate
+reclaim`. The sweep must also hold the idle queue's lock, so nothing is
+composing, gating or waiting to retry. One pass removes clones for at most 90
+seconds, so a landing never waits on a backlog; the rest are reported
+`repository_deferred` and go in later sweeps. Each removal is recorded in
+`repositoryReclamation` with its path, bytes and time. The sweep's timing and
+freed bytes are kept in `integration/bulk-ops.jsonl` (VUH-2933).
+
+Old `queued` records are not queue entries. The queue, its waiting list,
+commit hand-offs and progress all read in-memory state. A member receipt keeps
+`queued` after its shared attempt settles, and status projects the shared
+result. Legacy receipts that never started, saved before restart recovery
+existed, show as `interrupted`. These records stay as history. Member receipts of a
+passed or held attempt now take that attempt's state for retention, so they
+fence it only until it expires.

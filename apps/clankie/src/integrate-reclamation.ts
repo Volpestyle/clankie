@@ -9,7 +9,7 @@ import { removeDirectory } from "./remove-directory.ts";
 
 const execute = promisify(execFile);
 
-async function pathExists(path: string): Promise<boolean> {
+export async function pathExists(path: string): Promise<boolean> {
   try {
     await lstat(path);
     return true;
@@ -106,6 +106,9 @@ export function integrationReclamationState(
   if (!record.batchId || !shared || !["queued", "passed", "held", "partial"].includes(record.state))
     return record.state;
   if (shared.state === "pushed") return "pushed";
+  // Member receipts keep saying queued after their shared attempt passes or holds.
+  if (record.state === "queued" && (shared.state === "passed" || shared.state === "held"))
+    return shared.state;
   if (shared.state === "interrupted" && record.restartRecovery !== true) return "interrupted";
   // A failed singleton has no further isolation retry. A shared failure still
   // needs its queued member receipts to fence the failure-to-retry window.
@@ -113,8 +116,70 @@ export function integrationReclamationState(
   return record.state;
 }
 
+/**
+ * How long a finished attempt that did not land keeps its composed clone for
+ * diagnosis (ADR 0240, VUH-2939). Retries and recovery are fenced by durable
+ * dependencies, never by age; records and logs are kept regardless.
+ */
+export const INTEGRATION_REPOSITORY_RETENTION_MS = 72 * 60 * 60_000;
+/** One idle sweep removes clones for at most this long, so a queue landing never waits on a backlog. */
+export const INTEGRATION_CLONE_PASS_MS = 90_000;
+/** A pass or hold this old cannot land cleanly on a main that has moved on. */
+export const INTEGRATION_PASS_EXPIRY_MS = 7 * 24 * 60 * 60_000;
+
+/** Reclamation saves move updatedAt, so the earliest recorded time after settling stands in for it. */
+function settledFor(batch: IntegrationBatch, at: number): number {
+  const settled = Math.min(
+    ...[
+      batch.updatedAt,
+      batch.isolationReclamation?.at,
+      ...(batch.worktreeReclamation ?? []).map((entry) => entry.at),
+    ]
+      .filter((time): time is string => time !== undefined)
+      .map(Date.parse),
+  );
+  return Number.isFinite(settled) ? at - settled : 0;
+}
+
+/**
+ * A passed or held batch past expiry gives up its trees and clone; partial
+ * landings never do. A receipt also waits for its shared attempt to go quiet.
+ */
+export function integrationPassExpired(
+  batch: IntegrationBatch,
+  state: IntegrationBatch["state"],
+  at: number,
+  shared?: IntegrationBatch,
+): boolean {
+  return (
+    batch.expired !== undefined ||
+    ((state === "passed" || state === "held") &&
+      [batch, shared ?? batch].every((record) => settledFor(record, at) >= INTEGRATION_PASS_EXPIRY_MS))
+  );
+}
+
+/**
+ * A batch's clone is disposable once nothing can read it: a pushed head is on
+ * origin/main, other terminal attempts keep theirs for diagnosis, and passes
+ * keep theirs until they expire.
+ */
+export function integrationRepositoryDisposable(
+  batch: IntegrationBatch,
+  state: IntegrationBatch["state"],
+  at: number,
+  shared?: IntegrationBatch,
+): boolean {
+  if (state === "pushed") return true;
+  if (["failed", "cancelled", "interrupted", "conflict"].includes(state))
+    return settledFor(batch, at) >= INTEGRATION_REPOSITORY_RETENTION_MS;
+  return integrationPassExpired(batch, state, at, shared);
+}
+
 /** Durable dependencies fence startup recovery before in-memory retry jobs exist. */
-export function integrationRetrySources(records: ReadonlyMap<string, IntegrationBatch>): Set<string> {
+export function integrationRetrySources(
+  records: ReadonlyMap<string, IntegrationBatch>,
+  at: number,
+): Set<string> {
   const sources = new Set<string>();
   const active = new Set(["queued", "composing", "installing", "gating", "isolating", "pushing"]);
   for (const record of records.values()) {
@@ -126,7 +191,8 @@ export function integrationRetrySources(records: ReadonlyMap<string, Integration
     const recoverable = record.restartRecovery === true && state === "interrupted";
     // Held receipts can preserve their attestation while an in-memory regate
     // runs. Keep their lineage until an unambiguous terminal completion too.
-    const resumable = ["passed", "held", "partial"].includes(state);
+    const resumable =
+      ["passed", "held", "partial"].includes(state) && !integrationPassExpired(record, state, at, shared);
     if (!active.has(state) && !recoverable && !resumable) continue;
     sources.add(record.id);
     for (const source of [

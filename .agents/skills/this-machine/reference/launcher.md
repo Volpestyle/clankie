@@ -135,6 +135,9 @@ submitting a replacement after an uncertain cancellation; never infer withdrawal
 from a timeout. Each active attempt holds deploys for at most sixty minutes: do
 not override that hold merely to hasten a routine update, and follow the original
 UUID after an interruption. Never manually delete a batch or a lock.
+A pass or hold left unlanded for 7 days expires: `push` and `revert` refuse it,
+so land again with a fresh request. The automatic sweep frees old batch clones;
+an old record still reading `queued` is history, not a waiting request.
 [Integration](../../../../docs/integration.md) owns the contract, including
 reclaim, deploy holds and paired app/core installs.
 
