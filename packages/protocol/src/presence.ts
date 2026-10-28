@@ -80,7 +80,7 @@ export const OperatorCurrentActivitySchema = z
     id: z.string().trim().min(1).max(1024),
     source: z.enum(["chat", "discord", "issue", "coding", "call"]),
     /** Absent on older hosts and ordinary chat/questions. Tools are never speech. */
-    kind: z.enum(["tool", "message"]).optional(),
+    kind: z.literal("tool").optional(),
     text: z.string().trim().min(1).max(32768),
     target: z.discriminatedUnion("kind", [
       z

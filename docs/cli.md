@@ -227,7 +227,8 @@ released call clears its glimpse. A pending owner question instead shows its
 full redacted prompt and its own thread target, and disappears once answered or
 cancelled. The same presence read supplies it; no new poller is added. Older hosts
 retain their ordinary presence
-through the compatibility retry. See [ADR 0294](adr/0294-owner-activity-glimpses-follow-live-presence.md).
+through the compatibility retry. Against a host that predates the tool opt-in,
+status retries ordinary presence without current activity. See [ADR 0294](adr/0294-owner-activity-glimpses-follow-live-presence.md).
 
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
 `discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the

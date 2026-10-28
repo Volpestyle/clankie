@@ -46,16 +46,16 @@ function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "t
   const label =
     source === "issue"
       ? issueKey
-        ? `Updating ${issueKey}`
+        ? `Working on ${issueKey}`
         : "Working with issues"
       : /(?:^|__|\.)(?:message_peer|message_clankie|send_message|followup_task)$/u.test(name)
-        ? "Messaging a worker"
+        ? "Sending a message"
         : /(?:^|__|\.)(?:hire|hire_worker)$/u.test(name)
           ? "Hiring a worker"
           : source === "coding"
-            ? "Running a check"
+            ? "Working on code"
             : source === "discord"
-              ? "Checking Discord"
+              ? "Using Discord"
               : "Working";
   return { source, text: description || label, ...(issueKey ? { key: issueKey } : {}) };
 }

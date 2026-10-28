@@ -97,7 +97,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       source: "coding",
       target: { kind: "conversation", conversationId: "global-default" },
     });
-    expect.soft(coding.currentActivity?.text).toBe("Running a check");
+    expect.soft(coding.currentActivity?.text).toBe("Working on code");
     expect.soft(coding.currentActivity).toMatchObject({ kind: "tool" });
     expect(coding.currentActivity?.text).not.toContain("private-token");
     expect(coding.currentActivity?.text).not.toContain("abcdefghijklmnop");
@@ -123,9 +123,9 @@ it("serves opt-in owner activity from live native events and call ownership, pre
         "Check available space without changing files",
       ],
       ["hire", { taskTitle: "Fix the desktop pet", prompt: "PRIVATE_BRIEF" }, "Fix the desktop pet"],
-      ["mcp__worker__message_peer", { text: "PRIVATE_MESSAGE" }, "Messaging a worker"],
+      ["mcp__worker__message_peer", { text: "PRIVATE_MESSAGE" }, "Sending a message"],
       ["unknown_native_tool", { command: "PRIVATE_COMMAND" }, "Working"],
-      ["Bash", { command: "PRIVATE_COMMAND", description: "   " }, "Running a check"],
+      ["Bash", { command: "PRIVATE_COMMAND", description: "   " }, "Working on code"],
     ] as const) {
       conversations.publishHeadEvent({
         type: "tool",
@@ -150,7 +150,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
     expect((await read()).currentActivity).toMatchObject({
       source: "issue",
       kind: "tool",
-      text: "Updating VUH-2819",
+      text: "Working on VUH-2819",
       target: { kind: "issue", key: "VUH-2819" },
     });
     expect(JSON.stringify(await read())).not.toContain("hidden-key");
@@ -247,7 +247,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
     expect((await read()).currentActivity).toMatchObject({
       source: "coding",
       kind: "tool",
-      text: "Running a check",
+      text: "Working on code",
     });
     headOccupant = "native-A";
     conversations.rememberNativeHead("global-default", headOccupant);
@@ -259,7 +259,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       detail: "HEAD_A_COMMAND",
     });
     const headA = (await read()).currentActivity;
-    expect(headA?.text).toBe("Running a check");
+    expect(headA?.text).toBe("Working on code");
     expect((await read()).currentActivity).toEqual(headA);
     // Census observes B before B has a transcript, while working remains true.
     headOccupant = "native-B";
@@ -272,7 +272,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       phase: "started",
       detail: "HEAD_B_COMMAND",
     });
-    expect((await read()).currentActivity?.text).toBe("Running a check");
+    expect((await read()).currentActivity?.text).toBe("Working on code");
     conversations.publishHeadEvent({
       type: "tool",
       toolCallId: "head-B-tool",
