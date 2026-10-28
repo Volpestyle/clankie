@@ -31,9 +31,31 @@ when any line start holds a whole parseable record, framed or unframed. Over
 - **Landing gate.** `check:landing` is green: 423 files and 3,095 tests passed,
   16 tests skipped. It exits 3 pending review.
 
-`proof.log` holds the red and green runs, the suites, both flows and the
-candidate diff. `landing-gate.log` and `landing-gate.json` are the gate's
-output and evidence.
+[`proof.log`](clankie://evidence/sha256/5856c3c57fcd17b8272724e03f3fed9d3b74c95d1da157ca1167b301a09b2921)
+holds the red and green runs, the suites, both flows and the candidate diff.
+[`landing-gate.log`](clankie://evidence/sha256/c02a6e9610c521673c087d4021545192e164dd63985c15a7b837517972b8c423)
+and
+[`landing-gate.json`](clankie://evidence/sha256/1a0e3cf661e59eb470e393e92fd283bbcb0364aae789f654e3d5eb9b120f6126)
+are the gate's output and evidence. That gate run exited 3 pending review; the
+rerun after approval on the same head exited 0.
+
+## Review follow-up
+
+The fix landed as `96e4fa200` after the reviewer approved it. The follow-up acts
+on that review's notes:
+
+- Both refusals now run before `beforeAppend` and dispatch, so the caller sees
+  a definite no-effect refusal instead of an uncertain dispatch. A re-stat
+  after dispatch refuses if the size moved. The stale-base test asserts that
+  dispatch never ran. On the `96e4fa200` order it fails with
+  `framed: expected true to be false`.
+- The oversized tail is now only zeros past the stale size. With the limit
+  removed, it fails with `promise resolved "625854" instead of rejecting`, so it
+  proves "refused unread" on its own.
+- The work-items README says that a failed fsync plus a failed self-cut leaves
+  a whole line. The process then needs a restart.
+
+[`followup.log`](clankie://evidence/sha256/f724477b326453ebf64576114f49ee5a6b801d921f8ffb26b81303621ea98703) holds the follow-up's green run, both red runs and its diff.
 
 ## Gap
 

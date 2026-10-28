@@ -252,7 +252,10 @@ records in order:
   bytes hold a whole parseable record anywhere, framed or not, they are another
   writer's acknowledged commit seen from a stale base, and the append refuses with
   nothing cut (LOCAL-VUH-54). Over 64 MiB of unexpected bytes, more than one
-  interrupted append, is refused unread.
+  interrupted append, is refused unread. Both refusals come before dispatch, so the
+  write provably changed nothing. If an append's fsync fails and cutting its own line
+  back fails too, that whole line stays. The caller saw an error, yet a reopen keeps
+  the record, and the same process refuses every later append until it restarts.
 - The same damage anywhere else refuses the open, and so does a damaged final line that
   a whole record follows.
 - A live process refuses to drop a record it already acknowledged.

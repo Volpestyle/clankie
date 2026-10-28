@@ -444,9 +444,7 @@ export async function appendJournal(
 ): Promise<number> {
   const handle = await open(join(directory, JOURNAL_DIRECTORY, live.name), "r+", 0o600);
   try {
-    // Before touching the segment: a holder whose lock went stale must not cut another
-    // process's acknowledged record.
-    beforeAppend();
+    // Only reads before dispatch, so these refusals provably wrote nothing.
     const { size } = await handle.stat();
     if (size < live.size) throw new Error("Tracker journal segment shrank under this backend");
     if (size > live.size) {
@@ -460,8 +458,13 @@ export async function appendJournal(
         throw new Error(
           `Tracker journal segment ${live.name} holds a record this backend has not read; refusing to cut it`,
         );
-      await handle.truncate(live.size);
     }
+    // Before touching the segment: a holder whose lock went stale must not cut another
+    // process's acknowledged record.
+    beforeAppend();
+    if ((await handle.stat()).size !== size)
+      throw new Error("Tracker journal segment changed under this backend");
+    if (size > live.size) await handle.truncate(live.size);
     const bytes = Buffer.from(line);
     try {
       await writeAll(handle, bytes, live.size);

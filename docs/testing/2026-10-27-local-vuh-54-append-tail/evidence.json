@@ -2,6 +2,12 @@
   "version": 1,
   "objects": [
     {
+      "path": "followup.log",
+      "size": 24575,
+      "sha256": "f724477b326453ebf64576114f49ee5a6b801d921f8ffb26b81303621ea98703",
+      "url": "clankie://evidence/sha256/f724477b326453ebf64576114f49ee5a6b801d921f8ffb26b81303621ea98703"
+    },
+    {
       "path": "landing-gate.json",
       "size": 11322374,
       "sha256": "1a0e3cf661e59eb470e393e92fd283bbcb0364aae789f654e3d5eb9b120f6126",

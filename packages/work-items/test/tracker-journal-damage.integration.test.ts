@@ -203,16 +203,22 @@ it("refuses to cut a whole record past a stale base's size and keeps it across a
   for (const [kind, tail] of Object.entries(tails)) {
     const bytes = Buffer.concat([original.subarray(0, stale.size), Buffer.from(tail)]);
     await writeFile(live, bytes);
+    let dispatched = false;
     await expect(
-      appendJournal(directory, stale, line, () => {}),
+      appendJournal(directory, stale, line, () => {
+        dispatched = true;
+      }),
       kind,
     ).rejects.toThrow(/holds a record this backend has not read/u);
+    // A definite refusal: it never reached dispatch.
+    expect(dispatched, kind).toBe(false);
     expect((await readFile(live)).equals(bytes), kind).toBe(true);
     if (kind !== "after damage") expect(await opened(directory), kind).toEqual(committed);
   }
 
-  // An unexpected tail too large to be one interrupted append is refused unread.
-  await writeFile(live, original);
+  // An unexpected tail too large to be one interrupted append is refused unread, even one of
+  // zeros that holds no record.
+  await writeFile(live, original.subarray(0, stale.size));
   await truncate(live, stale.size + TORN_TAIL_LIMIT_BYTES + 1);
   await expect(appendJournal(directory, stale, line, () => {})).rejects.toThrow(/refusing to cut them/u);
   expect((await stat(live)).size).toBe(stale.size + TORN_TAIL_LIMIT_BYTES + 1);
