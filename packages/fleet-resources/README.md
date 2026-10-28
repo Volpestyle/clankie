@@ -365,8 +365,17 @@ writing one never fails the work it describes:
   cores busy since the previous sample, free disk, and the five busiest
   processes.
 - `bulk-ops.jsonl`: one line per service prune or cache reclaim, with its start,
-  duration, outcome and counts. This work runs outside heavy admission.
-  Integration reclaim writes the same line to its own directory.
+  duration, outcome and counts. Integration reclaim writes the same line to its
+  own directory.
+
+The service's own prune and cache-reclaim batches hold a light permit
+(`holdLight`), so they wait behind the memory floor, count against light slots and
+show in fleet status as `service:prune_worktree` or `service:reclaim_caches`. The
+permit has no child command: its lease stays `starting` with the service as claim
+owner, and reconciliation reaps it as `claim_owner_exited` if the service dies
+holding it. Their directory removals, and integration reclaim's, run at background
+priority (`taskpolicy -b` on macOS, `nice -n 19` on Linux). Integration's
+five-minute reclaim sweep holds no permit.
 
 The subprocess integration suite exercises actual OS locks, processes, filesystem
 receipts, cancellation and native runner registration. It never hires agents or

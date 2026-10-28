@@ -9990,7 +9990,9 @@ Commits, source files, `.local` evidence and logs stay.
 The owner-authenticated `POST /v1/checkouts/reclaim-caches` accepts `repository`
 and optional `path`; tidy uses `reclaim_tidy_worktree_caches`. This is manual;
 there is no automatic cache-deletion timer. Reinstall dependencies or rebuild
-before using a reclaimed tree again.
+before using a reclaimed tree again. A sweep, like a service prune, holds a light
+fleet-resource permit (`service:reclaim_caches`, `service:prune_worktree` in
+`clankie fleet resources`) and deletes at background priority.
 
 Ignored-path output is bounded to 1 MiB before capture can overflow. A
 `git_output_limit` receipt identifies the Git phase, tree and byte limit; truncated

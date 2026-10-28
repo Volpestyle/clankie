@@ -2596,8 +2596,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       throw Error("Select a registered owner checkout");
     return Promise.all((repository === undefined ? repositories : [repository]).map(syncOwnerCheckout));
   };
-  // Beside the fleet resource journal: this work runs outside heavy admission (VUH-2933).
+  // Beside the fleet resource journal. The batch holds a light permit, so it queues
+  // behind memory pressure and shows in fleet status (VUH-2933).
   const bulkOperationDirectory = join(options.stateDir, "fleet-resources");
+  const bulkOperation = <T>(
+    operation: "reclaim_caches" | "prune_worktree",
+    work: () => Promise<T>,
+    summary: (result: T) => object,
+  ): Promise<T> => {
+    const recorded = () => recordBulkOperation(bulkOperationDirectory, operation, work, summary);
+    return options.fleetResources
+      ? options.fleetResources.governor.holdLight({ holderId: `service:${operation}`, operation }, recorded)
+      : recorded();
+  };
   const reclaimCaches = async (
     repository: string,
     path?: string,
@@ -2609,8 +2620,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       .filter((root) => root.machineId === "local" && root.repoPath === repository)
       .map((root) => root.path);
     if (!roots.length) throw Error("Select a registered local owner checkout");
-    return recordBulkOperation(
-      bulkOperationDirectory,
+    return bulkOperation(
       "reclaim_caches",
       () =>
         reclaimWorktreeCaches(repository, herdrRunner, {
@@ -2659,8 +2669,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<PruneWorktreeResult> => {
     const current = await settings();
     await admitPrune(current, repository, path);
-    return recordBulkOperation(
-      bulkOperationDirectory,
+    return bulkOperation(
       "prune_worktree",
       () =>
         pruneTidyWorktree(
@@ -2682,8 +2691,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   ): Promise<{ results: PruneWorktreeResult[] }> => {
     const current = await settings();
     return {
-      results: await recordBulkOperation(
-        bulkOperationDirectory,
+      results: await bulkOperation(
         "prune_worktree",
         () =>
           pruneTidyWorktrees(

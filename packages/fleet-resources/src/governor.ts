@@ -1183,6 +1183,50 @@ export function createResourceGovernor(
       }
     }
   }
+  /**
+   * A light permit this process holds around its own work. The lease stays
+   * `starting` with this process as its claim owner and never gains a runner,
+   * so reconciliation reaps it if this process dies (`claim_owner_exited`) and
+   * no process group is ever signalled for it.
+   */
+  async function holdLight<T>(
+    options: ResourceWaitOptions & { holderId: string; operation: string },
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const requestedAt = Date.now();
+    const lease = await acquire({
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.onWait ? { onWait: options.onWait } : {}),
+      holderId: options.holderId,
+      executable: options.operation.slice(0, 128),
+      lane: "light",
+    });
+    const record = {
+      leaseId: lease.id,
+      lane: "light" as const,
+      holderId: options.holderId,
+      command: options.operation.slice(0, 256),
+    };
+    await recordLease(directory, { ...record, event: "admitted", waitedMs: lease.createdAtMs - requestedAt });
+    let exitCode = 1;
+    try {
+      const result = await work();
+      exitCode = 0;
+      return result;
+    } finally {
+      await lightStore.transaction((state) => {
+        state.leases = state.leases.filter(
+          (held) => held.kind !== "heavy" || held.id !== lease.id || held.token !== lease.token,
+        );
+      });
+      await recordLease(directory, {
+        ...record,
+        event: "released",
+        heldMs: Date.now() - lease.createdAtMs,
+        exitCode,
+      });
+    }
+  }
   return {
     arbitrate,
     /** One machine sample into `samples.jsonl` beside the journal (VUH-2933). */
@@ -1224,6 +1268,13 @@ export function createResourceGovernor(
     runHeavy(command, args, options) {
       const job = runHeavy(command, args, options);
       active.add(job);
+      void job.finally(() => active.delete(job)).catch(() => undefined);
+      return job;
+    },
+    holdLight(options, work) {
+      const job = holdLight(options, work);
+      active.add(job);
+      // allow-swallowed-rejection -- the caller awaits `job` and gets its error; this copy only tracks it for close().
       void job.finally(() => active.delete(job)).catch(() => undefined);
       return job;
     },

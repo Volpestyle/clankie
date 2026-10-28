@@ -1,6 +1,9 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it } from "vitest";
 import { createResourceGovernor } from "../src/governor.ts";
@@ -209,6 +212,94 @@ it("the light lane still holds below the memory floor and lists its waiter", asy
     await f.close();
   }
 }, 30_000);
+
+// The service's prune and cache reclaim used to run outside admission (VUH-2933).
+it("the service's own bulk work holds a light slot, and a holder that dies frees it", async () => {
+  const f = await fixture();
+  let holder: ReturnType<typeof spawn> | undefined;
+  try {
+    // Held in this process: the slot is taken, so a focused check waits behind it.
+    let finish!: () => void;
+    const held = f.governor.holdLight(
+      { holderId: "service:reclaim_caches", operation: "reclaim_caches" },
+      () => new Promise<string>((resolve) => (finish = () => resolve("reclaimed"))),
+    );
+    await until(
+      () => f.governor.snapshot(),
+      (snapshot) => snapshot.lightLeases.length === 1,
+    );
+    const focused = f.run("vitest", ["run", "a.test.ts"]);
+    const waiting = await until(
+      () => f.governor.snapshot(),
+      (snapshot) => snapshot.lightQueue.length === 1,
+    );
+    expect(waiting.capacity).toMatchObject({ lightSlots: 1, lightUsed: 1 });
+    expect(waiting.lightLeases).toEqual([
+      expect.objectContaining({ holderId: "service:reclaim_caches", executable: "reclaim_caches" }),
+    ]);
+    expect(await f.caps("vitest")).toBeUndefined();
+    finish();
+    expect(await held).toBe("reclaimed");
+    await until(() => f.caps("vitest"), Boolean);
+    await f.release("vitest");
+    expect(await focused).toBe(0);
+
+    // Failed work returns its permit and keeps its own error.
+    await expect(
+      f.governor.holdLight({ holderId: "service:prune_worktree", operation: "prune_worktree" }, () =>
+        Promise.reject(new Error("prune refused")),
+      ),
+    ).rejects.toThrow("prune refused");
+    expect((await f.governor.snapshot()).capacity.lightUsed).toBe(0);
+
+    // Another process holds one and dies holding it: reconciliation reaps it.
+    holder = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `const { createResourceGovernor } = await import(${JSON.stringify(
+          new URL("../src/governor.ts", import.meta.url).href,
+        )});
+        const governor = createResourceGovernor({ directory: process.argv[1],
+          probe: async () => ({ loadRatio: 0.1, availableMemoryMb: 64000 }) });
+        await governor.holdLight({ holderId: "service:prune_worktree", operation: "prune_worktree" },
+          () => new Promise(() => console.log("held")));`,
+        f.registry,
+      ],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const [line] = await once(createInterface({ input: holder.stdout! }), "line");
+    expect(line).toBe("held");
+    expect((await f.governor.snapshot()).lightLeases).toEqual([
+      expect.objectContaining({ holderId: "service:prune_worktree", state: "starting" }),
+    ]);
+    holder.kill("SIGKILL");
+    await once(holder, "exit");
+    await until(
+      () => f.governor.snapshot(),
+      (snapshot) => snapshot.capacity.lightUsed === 0,
+    );
+    expect(await readFile(join(f.registry, "light", "reaped.jsonl"), "utf8")).toContain(
+      '"reason":"claim_owner_exited"',
+    );
+
+    const records = (await readFile(join(f.registry, "leases.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((record) => JSON.parse(record) as Record<string, unknown>);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "admitted", lane: "light", holderId: "service:reclaim_caches" }),
+        expect.objectContaining({ event: "released", holderId: "service:reclaim_caches", exitCode: 0 }),
+        expect.objectContaining({ event: "released", holderId: "service:prune_worktree", exitCode: 1 }),
+      ]),
+    );
+  } finally {
+    if (holder && holder.exitCode === null && holder.signalCode === null) holder.kill("SIGKILL");
+    await f.close();
+  }
+}, 60_000);
 
 it("sizes the commands workers actually run", () => {
   const lanes = Object.fromEntries(

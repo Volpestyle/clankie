@@ -388,6 +388,15 @@ export interface FleetResourceGovernor {
     heavyQueued?: { maxLoadRatio: number };
   }>;
   runHeavy(command: string, args: readonly string[], options?: HeavyRunOptions): Promise<number>;
+  /**
+   * The service's own bulk work (prune, cache reclaim) under a light permit held
+   * by this process, with no child command. It queues and counts like any light
+   * job, and is reaped if this process dies holding it (VUH-2933).
+   */
+  holdLight<T>(
+    options: ResourceWaitOptions & { holderId: string; operation: string },
+    work: () => Promise<T>,
+  ): Promise<T>;
   queueSimulator(
     options: Omit<SimulatorAcquireOptions, "externalActive"> & {
       selection: Omit<SimulatorTicketSelection, "occupantId" | "fleet" | "expiresAtMs">;
