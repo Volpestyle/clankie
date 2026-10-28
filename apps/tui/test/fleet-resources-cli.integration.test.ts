@@ -425,13 +425,20 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
         ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
         f.options,
       );
+      // Hold an empty pending file for 500 ms to exercise the readiness race (VUH-2952).
+      // Publish only complete JSON; file existence must mean the child is ready.
       const receipt = join(f.directory, "signal-ready.json");
       const run = await f.headless([
         "heavy",
         "--",
         process.execPath,
         "-e",
-        "require('node:fs').writeFileSync(process.argv[1],JSON.stringify({pid:process.pid}));setInterval(()=>{},1000)",
+        [
+          "const fs=require('node:fs'),receipt=process.argv[1],pending=receipt+'.pending';",
+          "fs.writeFileSync(pending,'');",
+          "setTimeout(()=>{fs.writeFileSync(pending,JSON.stringify({pid:process.pid}));fs.renameSync(pending,receipt);},500);",
+          "setInterval(()=>{},1000);",
+        ].join("\n"),
         receipt,
       ]);
       await eventually(() => exists(receipt), Boolean, run);
