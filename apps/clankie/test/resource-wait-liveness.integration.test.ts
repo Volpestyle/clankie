@@ -330,6 +330,7 @@ async function fixture() {
     setSession: (id: string) => (sessionId = id),
     replace: (value = true) => (replaced = value),
     deny: () => (admitted = false),
+    allow: () => (admitted = true),
     devices: async () => JSON.parse(await readFile(statePath, "utf8")),
   };
 }
@@ -697,9 +698,10 @@ it.skipIf(process.platform !== "darwin")(
   "stalled ordinary tool hooks release promptly while question hooks retain their long wait",
   async () => {
     const f = await fixture();
-    const lease = await f.acquire();
+    await f.acquire();
+    f.advance(120_000);
     for (const event of ["PreToolUse", "PostToolUse"]) {
-      await f.cli("touch", { ...f.owner, id: lease.id });
+      const before = (await f.governor.simulatorReservations())[0]!.lastUsedAtMs;
       const held = f.holdRequests();
       const start = performance.now();
       try {
@@ -713,6 +715,11 @@ it.skipIf(process.platform !== "darwin")(
       } finally {
         held.release();
       }
+      expect(existsSync(f.hint)).toBe(true);
+      await f.send({
+        workerHook: { hook_event_name: event, session_id: "fixture-original-session", tool_name: "Read" },
+      });
+      expect((await f.governor.simulatorReservations())[0]!.lastUsedAtMs).toBeGreaterThan(before);
       const heldCli = f.holdRequests();
       const cliStart = performance.now();
       try {
@@ -859,6 +866,78 @@ it.skipIf(process.platform !== "darwin")(
             "Each sample includes both registered shell prechecks and any Node helpers plus kernel-authenticated TCP, real route/resource manager/governor. No-lease shells finish completely (a conservative bound on async blocking launch); CPU is a separate one-pair sample, time -p child/helper/admission CPU and ps native-observer CPU rounded to 10ms, plus service/driver process CPU. Ungated no-lease CPU invokes the previous Node command for comparison. Native discovery and simulator adapter are surrogates; ordinary hooks bypass captain recording; question/lifecycle recording is a stub. Baseline without hooks has no added calls.",
         },
       }) + "\n",
+    );
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "a refused ordinary hook preserves the hint and later admitted hooks renew",
+  async () => {
+    const f = await fixture();
+    await f.acquire();
+    f.advance(120_000);
+    const before = (await f.governor.simulatorReservations())[0]!.lastUsedAtMs;
+    f.deny();
+    await f.send({
+      workerHook: {
+        hook_event_name: "PreToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+      },
+      allowHookFailure: true,
+    });
+    expect(existsSync(f.hint)).toBe(true);
+    f.allow();
+    const count = f.hooks().length;
+    for (let i = 0; i < 3; i += 1)
+      await f.send({
+        workerHook: {
+          hook_event_name: "PostToolUse",
+          session_id: "fixture-original-session",
+          tool_name: "Read",
+        },
+      });
+    expect(f.hooks().length - count).toBe(3);
+    expect((await f.governor.simulatorReservations())[0]!.lastUsedAtMs).toBeGreaterThan(before);
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "releasing one of two root leases preserves the hint and a later hook renews the other",
+  async () => {
+    const f = await fixture();
+    const { policy } = await f.governor.snapshot();
+    await f.governor.configure({ ...policy, simulatorSlots: 2 });
+    const first = await f.acquire();
+    const owner = (await f.governor.simulatorReservations())[0]!;
+    const second = await f.governor.tryAcquireSimulator({
+      seatId: owner.seatId,
+      occupantId: owner.occupantId,
+      holderId: owner.holderId!,
+      fleet: owner.fleet!,
+      pane: owner.pane!,
+      binding: owner.binding!,
+      ownerProcesses: owner.ownerProcesses!,
+      deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      deviceType,
+      runtime,
+      externalActive: async () => 0,
+    });
+    expect(second.admitted).toBe(true);
+    if (!second.admitted) throw Error("second lease was refused");
+    await f.cli("release", { ...f.owner, id: first.id });
+    expect((await f.governor.simulatorReservations()).map((lease) => lease.id)).toEqual([second.lease.id]);
+    expect(existsSync(f.hint)).toBe(true);
+    f.advance(120_000);
+    await f.send({
+      workerHook: {
+        hook_event_name: "PreToolUse",
+        session_id: "fixture-original-session",
+        tool_name: "Read",
+      },
+    });
+    expect((await f.governor.simulatorReservations())[0]!.lastUsedAtMs).toBeGreaterThan(
+      second.lease.lastUsedAtMs,
     );
   },
 );

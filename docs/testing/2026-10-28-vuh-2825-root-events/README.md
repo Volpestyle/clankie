@@ -127,3 +127,35 @@ Removing the shell hint gate fails the zero-request assertion (24 requests inste
 of the prior 12); restoring the exact shell source preserves the passing probe.
 Service typecheck passes in 181.13s, fleet-resources in 0.75s; scoped lint and
 plugin generation pass. Root gate and new independent review remain pending.
+
+Revision 5 fixes two R4 recovery defects found by independent review. The shell
+now retains its atomic claim while the Node helper runs. On exit it restores the
+hint without overwriting a newer hint, except when the admitted service explicitly
+returns `rootLeaseAbsent: true`; only that definitive result retires a stale claim.
+Timeouts, connection errors, refused admission, old/unknown responses and admitted
+non-renewing events leave later hooks able to retry. No renewal is inferred from
+the hint or from a failed request. The child-only empty journal update is removed.
+
+Release/expiry hint cleanup is serialized with grants and checks all remaining
+reservations for the holder, pane and native socket. Ending one device no longer
+disables renewal of another. Both new regressions fail on R4 (2/2 red), then pass
+on R5. The stalled-host regression also now requires a later request to renew.
+The two-lease fixture uses the real governor to reserve its second device, then
+the real manager/CLI to release the first and the shipped hook to renew the second;
+CoreSimulator remains the explicit surrogate. The reference discloses that the
+shell's CLANKIE_STATE/HOME hint root must match the governor's OS-owned registry.
+
+R5 focused check: 26/26 in four files (69.53s). The measurement in that run,
+concurrent with governed typechecks, remains below the no-lease bar: 15 ms median /
+17 ms maximum per tool, with zero HTTP/Node work. With a lease it measured 595 ms /
+779 ms in the background. CPU sample: 512 ms with a lease, 1 ms rounded without;
+the ungated no-lease comparison in the same run was 518 ms. Component breakdowns
+and the prior R4 measurements are retained in the evidence; host-load differences
+are not attributed to this source change. These remain boundary measurements,
+not installed-worker acceptance. The lead's live closure check still requires a
+fresh Claude worker session after deployment, without reloading existing seats.
+
+Service typecheck passes (178.20s) and fleet-resources passes (0.99s), with scoped
+lint, plugin generation and shell syntax also passing. The first service typecheck
+reported optional-field types in the new fixture; those were annotated before the
+passing run. Both typecheck logs are retained, without calling the first green.

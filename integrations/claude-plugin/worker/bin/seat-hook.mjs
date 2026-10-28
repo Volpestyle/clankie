@@ -4,6 +4,7 @@
 // a machine linked to his fleet (VUH-1527) it reports over that link instead.
 // A session outside a pane has nothing to report here.
 import { randomUUID } from "node:crypto";
+import { unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import {
   authorization,
@@ -120,6 +121,22 @@ async function reportOverLink(link, pane) {
         signal: AbortSignal.timeout(question ? 570_000 : ordinaryTool ? 2_000 : 20_000),
       });
     let response = await sendHook(body);
+    if (response.ok && ordinaryTool) {
+      // Only an admitted, explicit no-reservation result retires this claim.
+      // Timeout, refusal, unknown/older response and failed proof remain retryable.
+      const result = await response
+        .clone()
+        .json()
+        .catch(() => undefined);
+      const claim = process.env.CLANKIE_ROOT_HOOK_CLAIM;
+      if (result?.rootLeaseAbsent === true && claim?.endsWith(`.claim.${process.ppid}`)) {
+        try {
+          unlinkSync(claim);
+        } catch {
+          /* A concurrent cleanup already retired it. */
+        }
+      }
+    }
     // A strict older host rejects the new metadata before applying anything.
     if (
       response.status === 400 &&

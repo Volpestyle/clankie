@@ -298,8 +298,12 @@ last proven activity. Explicit touch remains independent, as do reservation and
 runaway cleanup. The manager does not persist activity as authority across its
 restart. Finite Claude root hook events instead advance the exact holder's durable
 explicit-use clock to their event time, giving one idle window with no permanent
-working state. Long quiet root turns and a general non-heavy process-held simulator
-path remain open. Supported native activity and the remaining root API requirement
+working state. Ordinary async hooks first check a local socket/pane lease hint,
+without Node or HTTP on the no-hint path. A claimed hint is restored after transient
+failures or non-renewing reports, and retired only by an admitted explicit absence
+response. Release/expiry keeps it until the last matching reservation ends. Hints
+confer no lease authority or time. Long quiet root turns and a general non-heavy
+process-held simulator path remain open. Supported native activity and the remaining root API requirement
 are documented in the [simulator reference](../../.agents/skills/fleet-resources/reference/simulators.md).
 
 Simulator reservations remain durable when request processes die. Only the

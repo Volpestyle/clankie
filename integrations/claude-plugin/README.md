@@ -699,10 +699,12 @@ body after a definite HTTP400 rejection and gains no renewal behavior.
 Ordinary Pre/Post renewal hooks are async. Their shell-only lease-hint check
 exits before Node or HTTP when this socket/pane has no Claude root lease hint.
 The journal writes that exact holder's hint on grant/update, and removes it on
-release/expiry. The shell atomically consumes a hint before running the helper;
-a lease update re-arms it, while a stale hint costs one helper call. A missing
-hint only loses renewal; it never extends a deadline. Child events re-arm an
-existing root hint without renewing that root. The hint grants no authority.
+release/expiry. The shell atomically claims a hint before running the helper. It restores the
+claim after transient failures or non-renewing reports, unless an admitted service
+response explicitly confirms no matching reservation. A definitively stale hint
+costs one helper. Release/expiry removes the hint only when the last reservation
+for that holder, pane and socket ends. A missing hint only loses renewal; it never
+extends a deadline. Child events restore the hint without renewing that root. The hint grants no authority.
 The helper keeps a two-second HTTP timeout and five-second native command limit;
 PermissionRequest and AskUserQuestion stay synchronous with their long wait.
 The timestamp is the helper wall clock at invocation, not a native event emission

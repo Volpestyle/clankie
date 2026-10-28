@@ -931,14 +931,16 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     }
     // Question hooks may hold their response; observe finite activity on arrival.
     const admitted = identity && proof && (await identity.validate());
-    if (admitted) await ctx.dependencies.fleetResources?.recordRootHook(pane.paneId, parsed.data, proof);
+    const rootLeaseAbsent =
+      admitted &&
+      (await ctx.dependencies.fleetResources?.recordRootHook(pane.paneId, parsed.data, proof)) === "absent";
     // Admitted ordinary tool hooks carry lease hints only, never conversation state.
     if (
       admitted &&
       (parsed.data.event === "PostToolUse" ||
         (parsed.data.event === "PreToolUse" && parsed.data.toolName !== "AskUserQuestion"))
     )
-      return context.json({ schemaVersion: 1, recorded: true });
+      return context.json({ schemaVersion: 1, recorded: true, rootLeaseAbsent: !!rootLeaseAbsent });
     const recorded = await ctx.dependencies.captain.recordSeatHook(
       pane.paneId,
       parsed.data,

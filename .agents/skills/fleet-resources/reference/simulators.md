@@ -119,13 +119,22 @@ hooks, so they carry no tool decision. A shell-only check skips Node and HTTP wh
 the pane has no root-lease hint. The journal writes a hint for the exact Claude
 root holder, indexed by native socket and pane, on grant/update, and removes it
 on release/expiry. The hint is not authority: session/process proof still applies.
-The shell atomically consumes it before reporting; a lease update re-arms it, so
-an orphaned hint costs one helper. Missing hints or failed reports confer no time;
-the normal finite deadline still applies. Child events can re-arm an existing
-root hint without moving that root's deadline. Ordinary hooks remain best-effort:
+The shell atomically claims it before reporting. A successful update re-arms it;
+otherwise the shell restores the claim unless an admitted service response
+explicitly confirms that no matching reservation exists. Timeouts, refusals,
+restart errors and non-renewing events therefore leave later hooks able to retry.
+A definitively stale hint costs one helper. Release/expiry removes the shared
+hint only after the last reservation for that holder, pane and socket ends.
+Hints never extend a deadline themselves. Missing hints confer no time; the
+normal finite deadline still applies. Child events restore the existing hint
+without moving that root's deadline. Ordinary hooks remain best-effort:
 two-second HTTP timeouts and five-second native command limits. Only PermissionRequest and AskUserQuestion retain the long
 question wait. Sessions without simulator reservations skip resource owner proofs.
-New registrations take effect after `/reload-plugins` or a new session; shipping the
+The shell hint lookup uses `CLANKIE_STATE` or `$HOME/.clankie`; it must match the
+OS owner's `.clankie` root used by the machine governor. Changing worker HOME or
+CLANKIE_STATE does not move that registry and can cause missing hints. The scratch
+fixture explicitly aligns the paths. New registrations take effect after
+`/reload-plugins` or a new session; shipping the
 service does not change an existing seat's loaded hooks. Do not reload or restart
 someone's seat to obtain coverage. Older hosts receive the legacy hook body after
 a definite HTTP400 rejection; they do not gain event renewal.

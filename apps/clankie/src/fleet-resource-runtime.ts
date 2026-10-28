@@ -96,7 +96,8 @@ export interface FleetResourceRuntime {
   ): Promise<SimulatorOwner>;
   /** Original-native renewal; a caller cannot supply lease/process ownership. */
   recordNativeActivity(pane: string, hook: FleetSeatHook, proof: ProjectProcessProof): Promise<boolean>;
-  recordRootHook(pane: string, hook: FleetSeatHook, proof: ProjectProcessProof): Promise<boolean>;
+  /** False is retryable; only an admitted no-reservation lookup returns absent. */
+  recordRootHook(pane: string, hook: FleetSeatHook, proof: ProjectProcessProof): Promise<boolean | "absent">;
   observeSeats(seats: readonly ObservedSeat[]): Promise<void>;
   /** Notice seats whose panes use simulators booted outside leases. */
   noticeExternalSimulators(): Promise<void>;
@@ -498,20 +499,9 @@ export async function createFleetResourceRuntime(input: {
             (lease.fleet ?? "default") === proof.fleet,
         )
       )
-        return false;
-      if (hook.agentId !== undefined) {
-        // A child may consume its pane's hint, but grants the root no event time.
-        // Re-arm the existing reservation without changing its idle deadline.
-        const lease = held.find(
-          (lease) =>
-            lease.holderId === `claude:${hook.sessionId}` &&
-            lease.pane === proof.pane &&
-            lease.occupantId === proof.nativeOccupantId &&
-            (lease.fleet ?? "default") === proof.fleet,
-        )!;
-        await governor.updateSimulator(lease.id, lease.token, {});
-        return false;
-      }
+        return "absent";
+      // The shell restores a matched hint even if this event cannot renew it.
+      if (hook.agentId !== undefined) return false;
       const agent = await resolver?.resolve(pane);
       const session = agent?.session;
       if (

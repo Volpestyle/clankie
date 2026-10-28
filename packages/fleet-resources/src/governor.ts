@@ -1578,7 +1578,19 @@ export function createResourceGovernor(
         );
         return prior;
       });
-      if (removed) rootHookHint(removed, true);
+      if (removed)
+        await store.transaction((state) => {
+          // Serialize hint cleanup with grants. One device ending does not retire
+          // a shared holder/pane hint while another reservation remains.
+          const remaining = state.leases.find(
+            (lease): lease is SimulatorReservation =>
+              lease.kind === "simulator" &&
+              lease.holderId === removed.holderId &&
+              lease.pane === removed.pane &&
+              lease.binding?.socketPath === removed.binding?.socketPath,
+          );
+          rootHookHint(remaining ?? removed, !remaining);
+        });
     },
     async recordSimulatorSettled(receipt: SimulatorSettledReceipt) {
       await recordReaped([receipt], directory, "simulator-settled.jsonl");

@@ -24,6 +24,12 @@
       "size": 178216,
       "sha256": "9e6487c31fc5029a1ea342436735f04eed636cef2f6190541c0536aa0ada2172",
       "url": "clankie://evidence/sha256/9e6487c31fc5029a1ea342436735f04eed636cef2f6190541c0536aa0ada2172"
+    },
+    {
+      "path": "review-r5-evidence.json",
+      "size": 217913,
+      "sha256": "01007502bc50810f93f1e8af8b8663cf01e009571f1ad2b81529e94f338b212c",
+      "url": "clankie://evidence/sha256/01007502bc50810f93f1e8af8b8663cf01e009571f1ad2b81529e94f338b212c"
     }
   ]
 }
