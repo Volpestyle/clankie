@@ -60,6 +60,9 @@ export async function runSeatHookCommand(
   };
   const event = hook.hook_event_name as FleetSeatHook["event"];
   if (!EVENTS.has(event) || typeof hook.session_id !== "string") return 0;
+  const question =
+    event === "PermissionRequest" || (event === "PreToolUse" && hook.tool_name === "AskUserQuestion");
+  const ordinaryTool = event === "PostToolUse" || (event === "PreToolUse" && !question);
   let lastMessage = typeof hook.last_assistant_message === "string" ? hook.last_assistant_message : undefined;
   if (lastMessage === undefined && (event === "Stop" || event === "StopFailure")) {
     // Older Claude Code omits the final text from the hook; the transcript has it.
@@ -118,7 +121,7 @@ export async function runSeatHookCommand(
       method: "POST",
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
       body: JSON.stringify(value),
-      signal: AbortSignal.timeout(event === "PermissionRequest" || event === "PreToolUse" ? 570_000 : 10_000),
+      signal: AbortSignal.timeout(question ? 570_000 : ordinaryTool ? 2_000 : 10_000),
     });
   let response = await sendHook(body);
   // A strict older host rejected this body without recording it.

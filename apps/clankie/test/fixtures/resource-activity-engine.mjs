@@ -19,7 +19,8 @@ for (const name of [
 }
 let sessionId = "fixture-original-session",
   now = Date.now(),
-  activityExitCode;
+  activityExitCode,
+  workerHookResult;
 let children = [];
 const hooks = new Map(),
   after = [],
@@ -132,12 +133,10 @@ process.on("message", (message) => {
       if (message.workerHook) {
         const result = await api.process.run(
           [process.execPath, resolve(process.env.ACTIVITY_PLUGIN_ROOT, "bin/seat-hook.mjs")],
-          {
-            stdin: JSON.stringify(message.workerHook),
-            timeoutMs: 4500,
-          },
+          { stdin: JSON.stringify(message.workerHook), timeoutMs: 6000 },
         );
-        if (result.exitCode !== 0 || result.stderr) throw Error(result.stderr);
+        workerHookResult = result;
+        if (!message.allowHookFailure && (result.exitCode !== 0 || result.stderr)) throw Error(result.stderr);
       }
       if (message.hook) {
         const helper = new URL("../../../../integrations/claude-plugin/worker/bin/link.mjs", import.meta.url)
@@ -156,7 +155,7 @@ process.on("message", (message) => {
       if (message.event) await emit(message.event, message.input);
       if (message.tick) for (const entry of timers) if (!entry.cancelled) await entry.callback();
       await drain();
-      process.send({ id: message.id, ok: true, activityExitCode });
+      process.send({ id: message.id, ok: true, activityExitCode, workerHookResult });
     } catch (error) {
       process.send({ id: message.id, error: String(error) });
     }

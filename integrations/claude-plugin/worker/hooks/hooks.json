@@ -76,6 +76,17 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
             "timeout": 600
           }
+        ],
+        "matcher": "AskUserQuestion"
+      },
+      {
+        "matcher": "^(?!AskUserQuestion$).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
+            "timeout": 5
+          }
         ]
       },
       {
@@ -117,7 +128,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs\"",
-            "timeout": 30
+            "timeout": 5
           }
         ]
       }

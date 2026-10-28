@@ -488,6 +488,18 @@ export async function createFleetResourceRuntime(input: {
         !["UserPromptSubmit", "PreToolUse", "PostToolUse"].includes(hook.event)
       )
         return false;
+      // Almost every tool call has no simulator. Do not re-prove native ownership then.
+      const held = await governor.simulatorReservations();
+      if (
+        !held.some(
+          (lease) =>
+            lease.holderId === `claude:${hook.sessionId}` &&
+            lease.pane === proof.pane &&
+            lease.occupantId === proof.nativeOccupantId &&
+            (lease.fleet ?? "default") === proof.fleet,
+        )
+      )
+        return false;
       const agent = await resolver?.resolve(pane);
       const session = agent?.session;
       if (

@@ -23,6 +23,7 @@ import type { FleetSeatHook } from "@clankie/protocol";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { clientPid } from "../src/local-fleet-proof.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { runSeatHookCommand } from "../../tui/src/command/seat-hook.ts";
 import { runSimulatorCommand } from "../../tui/src/command/fleet-resources.ts";
 import { FileCredentialStore } from "@clankie/credential-broker";
 
@@ -112,10 +113,12 @@ async function fixture() {
       processes: [{ pid: identity.pid, startTime: replaced ? "replaced-birth" : identity.startTime }],
     };
   };
+  let resolutions = 0;
   resources.bindSeats({
     isLocalFleet: async () => true,
-    resolve: async (id) =>
-      ["w1:p1", "fixture-seat"].includes(id)
+    resolve: async (id) => {
+      resolutions += 1;
+      return ["w1:p1", "fixture-seat"].includes(id)
         ? {
             terminalId: "fixture-seat",
             paneId: "w1:p1",
@@ -124,7 +127,8 @@ async function fixture() {
             title: "Native fixture",
             session: session(),
           }
-        : undefined,
+        : undefined;
+    },
     proof: async () => native(),
   });
   // Real TCP kernel ownership and native birth/ancestry. Only harness discovery
@@ -161,12 +165,15 @@ async function fixture() {
   const hooks: FleetSeatHook[] = [];
   let hookBarrier = Promise.resolve();
   let hookEntered = () => {};
+  let requestBarrier = Promise.resolve();
   app.use("/v1/fleet/seats/:paneId/hook", async (context, next) => {
+    const body = await context.req.json();
+    await requestBarrier;
     if (legacy) {
-      const body = await context.req.json();
       if (body.occurredAt !== undefined || body.agentId !== undefined || body.event === "PostToolUse")
         return context.json({ error: "invalid_request" }, 400);
     }
+    hooks.push(body);
     await next();
   });
   registerSeatRoutes({
@@ -174,8 +181,7 @@ async function fixture() {
     dependencies: {
       captain: {
         ...createStubCaptain(),
-        recordSeatHook: async (_pane, hook) => {
-          hooks.push(hook);
+        recordSeatHook: async () => {
           hookEntered();
           await hookBarrier;
           return true;
@@ -184,9 +190,10 @@ async function fixture() {
       fleetResources: resources,
       localFleet: link,
     },
-    authenticateLane: async () => ({
-      denial: Response.json({ error: "operator_required" }, { status: 403 }),
-    }),
+    authenticateLane: async (context) =>
+      context.req.header("authorization") === "Bearer fixture-owner"
+        ? { lane: "operator" }
+        : { denial: Response.json({ error: "operator_required" }, { status: 403 }) },
   });
   app.route(
     "/",
@@ -199,7 +206,8 @@ async function fixture() {
   const nativeFetch = link.fetch(app.fetch);
   const server = serve({
     fetch: (request, env) =>
-      new URL(request.url).pathname.startsWith("/v1/fleet/seats/")
+      new URL(request.url).pathname.startsWith("/v1/fleet/seats/") &&
+      request.headers.get("authorization") !== "Bearer fixture-owner"
         ? nativeFetch(request, env)
         : app.fetch(request),
     hostname: "127.0.0.1",
@@ -247,6 +255,7 @@ async function fixture() {
     expect(received, errors).toMatchObject({ id, ok: true });
     if (received.activityExitCode !== undefined || message.expectedActivityExit !== undefined)
       expect(received.activityExitCode, errors).toBe(message.expectedActivityExit ?? 0);
+    return received;
   };
   const cli = (action: string, data: Record<string, unknown>) =>
     runSimulatorCommand([action, JSON.stringify(data)], {
@@ -263,6 +272,12 @@ async function fixture() {
   return {
     root,
     legacy: () => (legacy = true),
+    holdRequests: () => {
+      let release!: () => void;
+      requestBarrier = new Promise<void>((resolve) => (release = resolve));
+      cleanups.push(async () => release());
+      return { release };
+    },
     holdHooks: () => {
       let release!: () => void;
       const entered = new Promise<void>((resolve) => (hookEntered = resolve));
@@ -271,6 +286,7 @@ async function fixture() {
       return { entered, release };
     },
     hooks: () => hooks,
+    resolutions: () => resolutions,
     host,
     directory,
     resources,
@@ -281,6 +297,19 @@ async function fixture() {
     child,
     native,
     cli,
+    seatHook: (event: string) =>
+      runSeatHookCommand([], {
+        host,
+        env: { HERDR_PANE_ID: "w1:p1", CLANKIE_OPERATOR_TOKEN: "fixture-owner" },
+        operatorCredentialStore: new FileCredentialStore(join(root, "credentials.json")),
+        stdin: (async function* () {
+          yield JSON.stringify({
+            hook_event_name: event,
+            session_id: "fixture-original-session",
+            tool_name: "Read",
+          });
+        })(),
+      }),
     advance: (ms: number) => (now += ms),
     now: () => now,
     setSession: (id: string) => (sessionId = id),
@@ -526,10 +555,13 @@ it.skipIf(process.platform !== "darwin")(
     }
     // A replay keeps the original event deadline, not receipt time.
     await hook("UserPromptSubmit", eventAt);
+    // An older in-window delivery must not shorten a newer event's deadline.
+    await hook("PreToolUse");
+    await hook("PostToolUse", eventAt);
     await hook("Stop");
     await hook("StopFailure");
     await hook("SessionEnd");
-    f.advance(579_999);
+    f.advance(599_999);
     await f.resources.simulators.tick();
     expect(await f.governor.simulatorReservations()).toHaveLength(1);
     f.advance(1);
@@ -641,5 +673,100 @@ it.skipIf(process.platform !== "darwin")(
       },
     });
     expect(f.hooks()).toHaveLength(count);
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "stalled ordinary tool hooks release promptly while question hooks retain their long wait",
+  async () => {
+    const f = await fixture();
+    for (const event of ["PreToolUse", "PostToolUse"]) {
+      const held = f.holdRequests();
+      const start = performance.now();
+      try {
+        const result = await f.send({
+          workerHook: { hook_event_name: event, session_id: "fixture-original-session", tool_name: "Read" },
+          allowHookFailure: true,
+        });
+        expect(result.workerHookResult.exitCode).toBe(0);
+        expect(result.workerHookResult.stderr).toMatch(/timeout|timed out/iu);
+        expect(performance.now() - start).toBeLessThan(5_000);
+      } finally {
+        held.release();
+      }
+      const heldCli = f.holdRequests();
+      const cliStart = performance.now();
+      try {
+        await expect(f.seatHook(event)).rejects.toThrow(/timeout|timed out/iu);
+        expect(performance.now() - cliStart).toBeLessThan(5_000);
+      } finally {
+        heldCli.release();
+      }
+    }
+    const held = f.holdHooks();
+    let settled = false;
+    const question = f
+      .send({
+        workerHook: {
+          hook_event_name: "PreToolUse",
+          session_id: "fixture-original-session",
+          tool_name: "AskUserQuestion",
+          tool_input: { questions: [] },
+        },
+      })
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    await held.entered;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2_200));
+      expect(settled).toBe(false);
+    } finally {
+      held.release();
+      await question;
+    }
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "ordinary hooks skip resource ownership work without a lease and measure the real helper and HTTP route cost",
+  async () => {
+    const f = await fixture();
+    const lease = await f.acquire();
+    f.advance(120_000);
+    const samples = async () => {
+      const times: number[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        const start = performance.now();
+        for (const event of ["PreToolUse", "PostToolUse"])
+          await f.send({
+            workerHook: { hook_event_name: event, session_id: "fixture-original-session", tool_name: "Read" },
+          });
+        times.push(performance.now() - start);
+      }
+      times.sort((a, b) => a - b);
+      return {
+        samples: times.length,
+        perToolP50Ms: Math.round(times[2]!),
+        perToolP95Ms: Math.round(times[4]!),
+      };
+    };
+    const withLease = await samples();
+    await f.cli("release", { ...f.owner, id: lease.id });
+    expect(await f.governor.simulatorReservations()).toHaveLength(0);
+    const before = f.resolutions();
+    const withoutLease = await samples();
+    expect(f.resolutions() - before).toBe(0);
+    process.stdout.write(
+      JSON.stringify({
+        rootHookLatency: {
+          withLease,
+          withoutLease,
+          scope:
+            "Each sample includes both cold worker hook helpers, kernel-authenticated TCP, real route/resource manager/governor. Native discovery and simulator adapter are surrogates; ordinary hooks bypass captain recording; question/lifecycle recording is a stub. Baseline without hooks has no added calls.",
+        },
+      }) + "\n",
+    );
   },
 );

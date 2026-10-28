@@ -104,15 +104,21 @@ original-native mod's five-second timer and exact `agent.list()` IDs/states.
 Reports expire after fifteen seconds, keep original state-change timestamps,
 and reject stale/future timestamps, replayed sequences, changed sessions and
 wrong producer processes. Waiting/idle children do not borrow a working sibling's
-activity. Claude root UserPromptSubmit, PreToolUse and PostToolUse events with a native
+activity. Claude root UserPromptSubmit, PreToolUse and PostToolUse events with a helper
 observation timestamp extend only that session's leases to one idle window from
 the event. Child hooks do not extend the root. Replay or delayed delivery does
 not move the original deadline; future/stale events and changed ownership confer
-no time. Stop, StopFailure and SessionEnd renew nothing. There is no permanent
+no time. This is the hook helper's wall clock at invocation, not a timestamp
+emitted by Claude. A linked machine whose clock runs ahead confers no time until
+the clock mismatch is resolved; future observations fail closed.
+Stop, StopFailure and SessionEnd renew nothing. There is no permanent
 open-until-Stop state: Esc and a blocked prompt can omit Stop.
 
-The worker plugin registers all-tool PreToolUse and PostToolUse reporting. New
-registrations take effect after `/reload-plugins` or a new session; shipping the
+The worker plugin registers all-tool PreToolUse and PostToolUse reporting. Its
+ordinary tool hooks are best-effort: two-second HTTP timeouts and five-second
+native command limits. Only PermissionRequest and AskUserQuestion retain the long
+question wait. Sessions without simulator reservations skip resource owner proofs.
+New registrations take effect after `/reload-plugins` or a new session; shipping the
 service does not change an existing seat's loaded hooks. Do not reload or restart
 someone's seat to obtain coverage. Older hosts receive the legacy hook body after
 a definite HTTP400 rejection; they do not gain event renewal.

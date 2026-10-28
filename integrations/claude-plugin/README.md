@@ -696,6 +696,12 @@ quiet thinking past that window still require a positive current-root-turn API.
 New hook registrations apply after `/reload-plugins` or a new session, never by
 silently reloading a running worker. A strict older service receives the legacy
 body after a definite HTTP400 rejection and gains no renewal behavior.
+Ordinary Pre/Post hooks have a two-second HTTP timeout and five-second native
+command limit; only PermissionRequest and AskUserQuestion retain the long wait.
+The timestamp is the helper wall clock at invocation, not a native event emission
+time; a linked clock ahead of the service fails closed. Sessions with no matching
+simulator reservation skip resource ownership proof, and admitted ordinary tool
+hooks do not enter conversation-state handling.
 
 The worker plugin forwards synchronous `PermissionRequest` hooks and
 `PreToolUse` questions matching `AskUserQuestion`. The service binds each request to

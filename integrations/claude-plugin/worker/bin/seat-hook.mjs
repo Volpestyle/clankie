@@ -51,6 +51,9 @@ async function reportOverLink(link, pane) {
     process.exit(0);
   }
   const event = hook?.hook_event_name;
+  const question =
+    event === "PermissionRequest" || (event === "PreToolUse" && hook.tool_name === "AskUserQuestion");
+  const ordinaryTool = event === "PostToolUse" || (event === "PreToolUse" && !question);
   if (
     ![
       "SessionStart",
@@ -114,9 +117,7 @@ async function reportOverLink(link, pane) {
         method: "POST",
         headers: { ...authorization(link), "content-type": "application/json" },
         body: JSON.stringify(value),
-        signal: AbortSignal.timeout(
-          event === "PermissionRequest" || event === "PreToolUse" ? 570_000 : 20_000,
-        ),
+        signal: AbortSignal.timeout(question ? 570_000 : ordinaryTool ? 2_000 : 20_000),
       });
     let response = await sendHook(body);
     // A strict older host rejects the new metadata before applying anything.

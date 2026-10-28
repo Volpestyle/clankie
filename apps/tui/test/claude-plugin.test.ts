@@ -137,6 +137,7 @@ describe("clankie-worker claude plugin", () => {
     };
     expect(Object.keys(hooks.hooks).sort()).toEqual([
       "PermissionRequest",
+      "PostToolUse",
       "PreToolUse",
       "SessionEnd",
       "SessionStart",
@@ -151,7 +152,11 @@ describe("clankie-worker claude plugin", () => {
             {
               type: "command",
               command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"',
-              timeout: ["PermissionRequest", "PreToolUse"].includes(event) ? 600 : 30,
+              timeout: ["PermissionRequest", "PreToolUse"].includes(event)
+                ? 600
+                : event === "PostToolUse"
+                  ? 5
+                  : 30,
               ...(["Stop", "StopFailure"].includes(event) ? { async: true } : {}),
             },
           ],
@@ -159,6 +164,12 @@ describe("clankie-worker claude plugin", () => {
         },
         ...(event === "PreToolUse"
           ? [
+              {
+                matcher: "^(?!AskUserQuestion$).*",
+                hooks: [
+                  { type: "command", command: 'node "${CLAUDE_PLUGIN_ROOT}/bin/seat-hook.mjs"', timeout: 5 },
+                ],
+              },
               {
                 matcher: "Bash",
                 hooks: [

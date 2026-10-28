@@ -49,3 +49,40 @@ its handler's response (for example, AskUserQuestion). On the first candidate,
 the held response let the original lease expire; moving the admitted finite
 event ahead of that wait fixes it. The timestamp still gives only its original
 idle window, never the response/answer time.
+
+Review revision 3 addresses the hook contract and per-tool cost. AskUserQuestion
+has its own long PreToolUse registration; the disjoint ordinary PreToolUse and
+PostToolUse registrations have five-second native limits and two-second HTTP
+limits in both helpers. A stalled real HTTP service releases both ordinary
+helper paths within five seconds; the question path remains pending beyond that
+ordinary HTTP deadline and completes after the handler is released.
+
+The resource path first looks up reservations for the exact root holder/pane/
+occupant/fleet. An empty lookup performs zero resource seat resolutions or owner
+proofs. Admitted ordinary hooks also bypass captain conversation-state handling.
+Native process admission still runs; this does not remove the two Node helpers.
+Five measured Pre/Post pairs per condition, including both cold helper processes,
+kernel-authenticated TCP, the real HTTP route, manager and governor, added a median
+370 ms per tool with a lease (observed maximum 389 ms), and 361 ms without a lease
+(maximum 365 ms). These are local boundary measurements, not installed fleet
+latency: native discovery and simulator operations are surrogates. Ordinary hooks
+bypass the captain; question/lifecycle handling is a stub. The pre-feature baseline
+has no ordinary-tool hook calls. No claimed model-token saving is inferred from
+these timings.
+
+The helper stamps its wall clock at invocation, not Claude's event-emission time.
+A linked host clock ahead of the service fails closed. The delayed-event case now
+sends an older in-window event after a newer one and checks the newer deadline;
+it guards against shortening the lease as well as extending it by replay.
+
+Revision 3 focused checks: 24/24 tests in four files pass (51.78s); the separate
+latency probe passes (one test, 7.87s). The first revision-3 run had a fixture-only
+403 on the operator CLI timeout path; the explicit scratch operator route was
+corrected before the passing run. The worker native-admission path was unchanged.
+
+Mutation checks: removing the monotonic last-use guard fails the newer-deadline
+assertion (the older event expires the lease early). Restoring the long ordinary
+PreToolUse HTTP timeout fails the stalled-host case: the fixture's six-second
+process cap kills the helper instead of its own two-second best-effort release.
+Both sources were restored after each negative run. Service and TUI typechecks
+pass (176.84s and 55.63s), as do scoped lint and plugin generation.
