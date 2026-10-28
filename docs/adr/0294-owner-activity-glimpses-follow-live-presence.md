@@ -30,7 +30,12 @@ from speech without changing existing sources or targets. Tool text contains
 only a one-line human description (`description` or `taskTitle`) or a fixed
 plain label, never a tool name or serialized arguments. Explicit Linear issue
 keys retain their destination. The pet suppresses tool bubbles; chat, calls
-and owner questions retain their existing text. Older hosts may omit `kind`. A pending owner question
+and owner questions retain their existing text. Older hosts may omit `kind`.
+Tool activity requires both `includeCurrentActivity: true` and
+`includeToolActivity: true`. Existing strict clients receive no tool activity,
+so they cannot reject the new optional kind or mistake tools for speech.
+Chat, calls and owner questions retain their existing shape.
+A pending owner question
 takes priority over the volatile event projection.
 Its canonical receipt supplies the full redacted prompt, a stable question/incarnation
 ID and its own conversation target. Answering or cancelling it removes that

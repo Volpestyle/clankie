@@ -28,6 +28,7 @@ export function projectPresence(
   includeBeats = false,
   includeActivities = false,
   includeCurrentActivity = false,
+  includeToolActivity = false,
 ): OperatorPresenceSnapshot {
   const { activeSeats, pendingOwnerItem } = sources;
   const [mood, detail, since] = pendingOwnerItem
@@ -95,7 +96,9 @@ export function projectPresence(
     ...(sources.expression === undefined ? {} : { expression: sources.expression }),
     ...(includeBeats && sources.beats?.length ? { beats: sources.beats } : {}),
     ...(includeActivities ? { activities } : {}),
-    ...(includeCurrentActivity && sources.currentActivity
+    ...(includeCurrentActivity &&
+    sources.currentActivity &&
+    (sources.currentActivity.kind !== "tool" || includeToolActivity)
       ? { currentActivity: sources.currentActivity }
       : {}),
   };

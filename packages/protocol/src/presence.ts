@@ -137,6 +137,8 @@ export const OperatorPresenceRequestSchema = z
     includeActivities: z.boolean().optional(),
     /** Private content: admitted only for an authenticated owner/API device. */
     includeCurrentActivity: z.boolean().optional(),
+    /** Include typed tool activity; legacy strict readers receive only speech/questions. */
+    includeToolActivity: z.boolean().optional(),
     waitMs: z.number().int().min(0).max(OPERATOR_PRESENCE_WAIT_MS_MAX).optional(),
   })
   .strict();

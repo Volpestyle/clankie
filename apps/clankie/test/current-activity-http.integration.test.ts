@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
-import { OperatorPresenceResultSchema } from "@clankie/protocol/presence";
+import {
+  OperatorCurrentActivitySchema,
+  OperatorPresenceSnapshotSchema,
+  OperatorPresenceResultSchema,
+} from "@clankie/protocol/presence";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -59,7 +63,7 @@ it("serves opt-in owner activity from live native events and call ownership, pre
   await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Fixture did not listen");
-  const request = (current = true, bearer = "owner") =>
+  const request = (current = true, bearer = "owner", tools = true) =>
     fetch(`http://127.0.0.1:${address.port}/operator/v1/dispatch`, {
       method: "POST",
       headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
@@ -67,9 +71,14 @@ it("serves opt-in owner activity from live native events and call ownership, pre
         op: "presence",
         schemaVersion: 1,
         includeActivities: true,
-        ...(current ? { includeCurrentActivity: true } : {}),
+        ...(current ? { includeCurrentActivity: true, ...(tools ? { includeToolActivity: true } : {}) } : {}),
       }),
     });
+  const legacyResult = OperatorPresenceResultSchema.extend({
+    snapshot: OperatorPresenceSnapshotSchema.extend({
+      currentActivity: OperatorCurrentActivitySchema.omit({ kind: true }).strict().optional(),
+    }),
+  });
   const read = async () => OperatorPresenceResultSchema.parse(await (await request()).json()).snapshot;
   try {
     await conversations.serve({ op: "get", schemaVersion: 1, conversationId: "global-default" });
@@ -93,6 +102,10 @@ it("serves opt-in owner activity from live native events and call ownership, pre
     expect(coding.currentActivity?.text).not.toContain("private-token");
     expect(coding.currentActivity?.text).not.toContain("abcdefghijklmnop");
     expect(await read()).toEqual(coding);
+    // An old strict client opts into current activity, but knows no kind field.
+    // It gets no tool bubble; speech and questions still use their original shape.
+    const oldClient = legacyResult.parse(await (await request(true, "owner", false)).json()).snapshot;
+    expect(oldClient.currentActivity).toBeUndefined();
     const unchanged = OperatorPresenceResultSchema.parse(
       await (await request(false, "captain")).json(),
     ).snapshot;
@@ -207,6 +220,10 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       entries: [first, { ...first, id: "new", text: "Live owner chat" }],
     });
     expect((await read()).currentActivity).toMatchObject({ source: "chat", text: "Live owner chat" });
+    const legacyChat = legacyResult.parse(await (await request(true, "owner", false)).json()).snapshot
+      .currentActivity;
+    expect(legacyChat).toMatchObject({ source: "chat", text: "Live owner chat" });
+    expect(legacyChat).not.toHaveProperty("kind");
     conversations.publishHeadEvent({
       type: "tool",
       toolCallId: "old-session-tool",
@@ -311,6 +328,9 @@ it("serves opt-in owner activity from live native events and call ownership, pre
     });
     expect(questionActivity?.text).toBe(prompt.replace("api_key=private-question-secret", "[REDACTED]"));
     expect(questionActivity!.text.length).toBeGreaterThan(200);
+    expect(
+      legacyResult.parse(await (await request(true, "owner", false)).json()).snapshot.currentActivity,
+    ).toEqual(questionActivity);
     expect((await read()).currentActivity).toEqual(questionActivity);
     const ordinary = OperatorPresenceResultSchema.parse(
       await (await request(false, "captain")).json(),

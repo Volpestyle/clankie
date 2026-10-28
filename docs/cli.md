@@ -216,7 +216,11 @@ only a short human description or fixed activity label, never tool names or raw
 arguments. Pet bubbles exclude tool activity; chat and owner questions retain
 their text. The optional kind preserves reads from older hosts. The status read opts in to the existing presence
 request with `includeCurrentActivity: true`; Take Control owner devices use the
-same contract. Support devices and non-owner bearers cannot opt in. Ordinary
+same contract. Support devices and non-owner bearers cannot opt in.
+Tool activity requires both `includeCurrentActivity: true` and
+`includeToolActivity: true`. Existing strict clients receive no tool activity,
+so they cannot reject the new optional kind or mistake tools for speech.
+Chat, calls and owner questions retain their existing shape. Ordinary
 presence fields and labels stay unchanged. Missing activity means the host has
 no safe live event to show, not a guessed idle task. A settled tool/turn or a
 released call clears its glimpse. A pending owner question instead shows its

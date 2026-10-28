@@ -26,7 +26,10 @@ it("folds whoami and the phone-access next step into status without reading cred
     listPortOwnersImpl: () => [],
     fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/operator/v1/dispatch")) {
-        expect(JSON.parse(String(init?.body))).toMatchObject({ includeCurrentActivity: true });
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          includeCurrentActivity: true,
+          includeToolActivity: true,
+        });
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer operator-secret");
       }
       return String(input).endsWith("/operator/v1/dispatch")

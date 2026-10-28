@@ -19,7 +19,8 @@ Tests       3 passed (3)
 ```
 
 The HTTP regression checks Bash descriptions, collapsed whitespace, hire titles,
-plain fallbacks, typed Linear issue routing, call lifetime, unchanged chat,
+plain fallbacks, typed Linear issue routing, strict pre-kind client compatibility,
+call lifetime, unchanged chat,
 complete pending owner questions, revocation and settled-event removal.
 
 The separate app worktree is `/Users/james/dev/clankie-app-wt/vuh-2949-app`.
@@ -28,3 +29,9 @@ bubbles; 103 existing cases passed). With the filter, all 107 component tests
 passed. The working pose remains and a subsequent chat still bubbles. This is
 component evidence, not a native Mac or installed-build claim. Native verification,
 service deployment and Mac shipping are recorded on the issue when available.
+
+The compatibility regression also parses current-activity reads using the prior
+strict schema (no `kind`). Removing the opt-in filter makes that HTTP test fail
+with `Unrecognized key: "kind"`; restoring it passes. The mutation output is
+`.local/vuh-2949/compat-mutation.log`. CLI status explicitly opts into safe tool
+labels; pets do not request them.

@@ -418,6 +418,7 @@ export function createOperatorService(
             request.includeBeats === true,
             request.includeActivities === true,
             request.includeCurrentActivity === true,
+            request.includeToolActivity === true,
           );
         },
         request.cursor,
