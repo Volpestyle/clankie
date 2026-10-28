@@ -18,7 +18,11 @@ without waiting for the owner to list panes or approve each close.
 Acknowledge a report only once you have its result; that is what lets the pane
 go. The service also tidies on its own under the owner's `autoTidy` fleet setting
 (default `1h`), through the same guards, and never closes a seat a project names
-as its standing reviewer. It closes only with positive work proof: a
+as its standing reviewer. Every observed lifecycle change restarts the full idle
+window, including a short turn between five-minute sweeps. Recent reports
+(including acknowledged ones) and progress also extend the window. Report text
+does not automatically keep a seat waiting on the lead; use `keep_worker_pane`
+when follow-up needs its live context. It closes only with positive work proof: a
 kept report, every report acknowledged, and every unlanded commit landed on
 advertised `origin/main`, covered by a retained current-HEAD decision, or parked
 (below). Missing or non-Git working directories, dirty files and incomplete

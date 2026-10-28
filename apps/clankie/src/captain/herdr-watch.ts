@@ -250,6 +250,9 @@ export interface HerdrAgentSnapshot {
   readonly session?: HerdrAgentSession;
   readonly workingDirectory?: string;
   readonly foregroundWorkingDirectory?: string;
+  /** Herdr lifecycle counters survive turns shorter than a roster poll. */
+  readonly completionSeq?: number;
+  readonly stateChangeSeq?: number;
 }
 
 type SpawnOperatorSeat = HireRequest & { harness: NonNullable<HireRequest["harness"]> };
@@ -483,6 +486,16 @@ function snapshotOf(value: unknown): HerdrAgentSnapshot {
     agent: typeof value.agent === "string" ? value.agent : "unknown",
     status: typeof value.agent_status === "string" ? value.agent_status : "unknown",
     title: titleOf(value),
+    ...(typeof value.completion_seq === "number" &&
+    Number.isSafeInteger(value.completion_seq) &&
+    value.completion_seq >= 0
+      ? { completionSeq: value.completion_seq }
+      : {}),
+    ...(typeof value.state_change_seq === "number" &&
+    Number.isSafeInteger(value.state_change_seq) &&
+    value.state_change_seq >= 0
+      ? { stateChangeSeq: value.state_change_seq }
+      : {}),
     ...(session === undefined ? {} : { session }),
     ...(typeof value.cwd === "string" ? { workingDirectory: value.cwd } : {}),
     ...(typeof value.foreground_cwd === "string" ? { foregroundWorkingDirectory: value.foreground_cwd } : {}),

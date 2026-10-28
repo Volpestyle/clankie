@@ -1159,7 +1159,10 @@ evidence in the configured state directory and rechecks complete local pane
 and Git inventories. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
 setting on two timers: every five minutes it closes settled local hires whose
 reports are kept and acknowledged through `PaneTidy.close` (same landed-work,
-draft and idle checks; kept panes in `pane-keeps.json` are skipped). First it
+draft and idle checks; kept panes in `pane-keeps.json` are skipped). Fresh
+`agent get` lifecycle counters restart the idle window when they change, so
+short turns between sweeps are retained; exact-occupant reports and progress
+also extend it, including reports already acknowledged. First it
 adopts an unconfirmed local project hire through `HerdrWatchStore.adoptUnconfirmedForTidy`,
 only from the exact session its original receipt observed, and it hands the lead
 round the hires past the window it could not close. Hourly

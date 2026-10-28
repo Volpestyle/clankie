@@ -6029,6 +6029,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     reviewerSeats: async () => reviewerSeatIds((await settings()).projects),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     unreadReports: (agent) => reportSummaries(undefined, agent).length,
+    activityAt: (agent) => {
+      const occupant = agent.session && occupantIdForHerdrSession(agent.session);
+      const seat = liveSeats.find((row) => row.seatId === agent.terminalId && row.occupantId === occupant);
+      return [
+        ...reportSummaries(undefined, agent, true).map((report) => report.acceptedAt),
+        seat?.efficiency?.lastReportAt,
+        seat?.efficiency?.lastProgressAt,
+      ];
+    },
     ownerValid: validateConversationOwner,
     adoptUnconfirmed: (agent, owner, guard) => herdrWatches.adoptUnconfirmedForTidy(agent, owner, guard),
     closed: async (owner, entries, adopted) => {

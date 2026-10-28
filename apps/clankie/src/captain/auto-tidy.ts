@@ -40,7 +40,9 @@ const platform = process.platform === "win32" ? "windows" : "posix";
 
 export interface AutoTidyPorts {
   readonly setting: () => Promise<FleetAutoTidy>;
-  readonly runner: Pick<HerdrWatchRunner, "list">;
+  readonly runner: Pick<HerdrWatchRunner, "list"> & Partial<Pick<HerdrWatchRunner, "get">>;
+  /** Latest report/progress from this exact occupant, including acknowledged reports. */
+  readonly activityAt?: (agent: HerdrAgentSnapshot) => readonly (string | undefined)[];
   readonly tidy: Pick<PaneTidy, "close" | "keptPane" | "keepVersion" | "hasKeptReport">;
   /** Seats a project names as its standing reviewer; they stay open like kept panes. */
   readonly reviewerSeats?: () => Promise<ReadonlySet<string>>;
@@ -109,8 +111,8 @@ async function lastActivity(path: string): Promise<number | undefined> {
  */
 export function createAutoTidy(ports: AutoTidyPorts) {
   const now = () => ports.now?.() ?? Date.now();
-  /** When each session was first seen settled in its pane; a working turn starts it over. */
-  const settledSince = new Map<string, number>();
+  /** A lifecycle change starts a full window at observation, even between polls. */
+  const settledSince = new Map<string, { since: number; activity: string }>();
   /** A close that was refused or failed waits for another settled period before it is retried. */
   const retryAt = new Map<string, number>();
   /** Why each settled hire past its window is still open, by session key. */
@@ -127,17 +129,22 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       return [];
     }
     const delay = FLEET_AUTO_TIDY_MS[setting];
-    const at = now();
     const seen = new Set<string>();
     const closed = new Map<
       string,
       { owner: ConversationOwner; entries: ClosedWorkerPaneHistory[]; adopted: string[] }
     >();
     const reviewers = (await ports.reviewerSeats?.()) ?? new Set<string>();
-    for (const agent of await ports.runner.list()) {
+    for (const listed of await ports.runner.list()) {
       if (ports.stopped()) break;
+      if (!SETTLED.has(listed.status) || !["claude", "codex"].includes(listed.agent)) continue;
+      // pane list omits lifecycle counters. agent get carries them; an unavailable
+      // fresh observation must never authorize a close from the older roster row.
+      const agent = ports.runner.get ? await ports.runner.get(listed.paneId).catch(() => undefined) : listed;
+      if (!agent) continue;
       if (!SETTLED.has(agent.status) || !["claude", "codex"].includes(agent.agent)) continue;
       if (agent.session?.kind !== "id") continue;
+      const at = now();
       const sessionKey = tidySessionKey(agent);
       const key = JSON.stringify([agent.terminalId, sessionKey, ports.tidy.keepVersion(agent)]);
       seen.add(key);
@@ -149,8 +156,19 @@ export function createAutoTidy(ports: AutoTidyPorts) {
         held.delete(key);
         continue;
       }
-      const since = settledSince.get(key) ?? at;
-      settledSince.set(key, since);
+      const activity = JSON.stringify([agent.completionSeq, agent.stateChangeSeq]);
+      const previous = settledSince.get(key);
+      const latestActivity = () =>
+        Math.max(
+          0,
+          ...(ports.activityAt?.(agent) ?? []).map((stamp) => {
+            const parsed = stamp === undefined ? NaN : Date.parse(stamp);
+            return Number.isFinite(parsed) ? parsed : 0;
+          }),
+        );
+      const since = Math.max(previous?.activity === activity ? previous.since : at, latestActivity());
+      settledSince.set(key, { since, activity });
+      if (previous && since !== previous.since) retryAt.delete(key);
       if (at - since < delay) {
         held.delete(key);
         continue;
@@ -185,7 +203,20 @@ export function createAutoTidy(ports: AutoTidyPorts) {
         hold("reports_unread", unread);
         continue;
       }
-      const authorize = () => ports.ownerValid(owner);
+      const authorize = async () => {
+        if (!(await ports.ownerValid(owner)) || now() - latestActivity() < delay) return false;
+        // Close/adoption guards run again after asynchronous worktree checks.
+        // A new short turn or report during those checks must hold this close too.
+        const fresh = ports.runner.get ? await ports.runner.get(agent.paneId).catch(() => undefined) : agent;
+        return (
+          fresh !== undefined &&
+          fresh.terminalId === agent.terminalId &&
+          tidySessionKey(fresh) === sessionKey &&
+          SETTLED.has(fresh.status) &&
+          JSON.stringify([fresh.completionSeq, fresh.stateChangeSeq]) === activity &&
+          now() - latestActivity() >= delay
+        );
+      };
       // A hire that never confirmed its start holds its close until its original receipt
       // settles; adopt it here only from the exact native session that receipt observed.
       const adopted = await ports
