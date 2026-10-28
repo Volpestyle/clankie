@@ -725,6 +725,14 @@ static int prove_cwd(int argc, char **argv) {
   return 0;
 }
 
+/* An account process that execs a setuid program (ps, top, sudo) leaves the
+ * account after it was listed, and its full snapshot then refuses. Only a fresh
+ * kernel read showing another effective user makes that a changed census; the
+ * retry re-lists without it. A denied process still the account's refuses. */
+static int left_account(pid_t pid, int error) {
+  return (error == EPERM || error == EACCES) && protected_other_user(pid);
+}
+
 /* Cleanup needs a complete fresh account census before each removal. Reading
  * vnode paths directly avoids lsof's repeated machine-wide filesystem setup.
  * Keep readable other-user paths too; an inaccessible live account PID refuses
@@ -752,6 +760,11 @@ static int prove_cwds(int argc) {
     if (observed != 1) {
       int error = errno;
       if (!required && protected_other_user(pid)) continue;
+      if (left_account(pid, error)) {
+        diagnostic("census", "process_census_changed", error, 1);
+        result = 2;
+        break;
+      }
       int retry = error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN;
       diagnostic("census", "process_census_unavailable", error, retry);
       result = retry ? 2 : refuse();
@@ -765,7 +778,8 @@ static int prove_cwds(int argc) {
         result = 0;
         continue;
       }
-      if (error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN) {
+      if (error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN ||
+          left_account(pid, error)) {
         diagnostic("census", "process_census_changed", error, 1);
         result = 2;
       }

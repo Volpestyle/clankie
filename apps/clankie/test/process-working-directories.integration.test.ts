@@ -55,3 +55,33 @@ it.runIf(process.platform === "darwin")(
     expect(await processWorkingDirectories()).not.toContain(next);
   },
 );
+
+// /bin/ps is setuid root. An account process listed by the census that then
+// execs it becomes root's mid-census; that refused 5-8 of 150 censuses while
+// fleet tooling ran ps (VUH-2937). The census now retries such a change.
+it.runIf(process.platform === "darwin")(
+  "an account process that execs setuid ps mid-census changes the census, never refuses it",
+  async () => {
+    let spawning = true;
+    const loops = Array.from(
+      { length: 4 },
+      () =>
+        new Promise<void>((resolve) => {
+          const next = () => {
+            if (!spawning) return resolve();
+            spawn("/bin/ps", ["-A", "-o", "pid="], { stdio: "ignore" }).on("exit", next);
+          };
+          next();
+        }),
+    );
+    let censuses = 0;
+    try {
+      for (; censuses < 150; censuses++) await processWorkingDirectories();
+    } finally {
+      spawning = false;
+      await Promise.all(loops);
+    }
+    expect(censuses).toBe(150);
+  },
+  60_000,
+);

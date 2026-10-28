@@ -279,7 +279,10 @@ returning `{schemaVersion:1,uid,cwds}`. Every live process in the effective-user
 inventory must be observed; readable other-user paths are included too. Each
 path is bracketed by matching process lifetimes, and a second account inventory
 detects new or unobserved live processes. Churn retries within the existing
-200ms attempt / 600ms total budget. Inaccessible account processes, incomplete
+200ms attempt / 600ms total budget. An account process that execs a setuid
+program such as `/bin/ps` leaves the account after it was listed; when a fresh
+kernel read confirms another effective user, its refused read is churn and the
+retry re-lists without it (VUH-2937). Inaccessible account processes, incomplete
 inventories and oversized output refuse the census.
 
 Integration and worktree-cache reclamation request this census again before

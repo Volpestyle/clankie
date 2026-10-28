@@ -73,6 +73,14 @@ also observed `socket_unavailable`, `process_unavailable` and
 `process_census_changed`. The captures prove these OS branches occurred; a
 golden replay does not claim to force their occurrence on every machine.
 
+`process-working-directories.integration.test.ts` runs 150 real cwd censuses
+while four loops exec the setuid `/bin/ps`. A listed account process that becomes
+root's mid-census is `process_census_changed` with its EPERM, and the census
+retries; before VUH-2937 it refused as `process_census_unavailable`. The case
+fails against the earlier helper. An EPERM on a process still the account's
+keeps refusing: no supported operation was found that produces one, so that
+branch is held by the helper's fresh effective-user read, not by a capture.
+
 `fleet-health-metrics.integration.test.ts` derives the complete fixed native
 vocabulary from the helper's diagnostic declarations, compares it to the protocol
 enum, and checks every token through the collector and authenticated HTTP schema.
