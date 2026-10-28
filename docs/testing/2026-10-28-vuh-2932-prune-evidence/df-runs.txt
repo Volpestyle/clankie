@@ -1,0 +1,8 @@
+VUH-2932 df readings from prune-evidence-disk.integration.test.ts on this Mac's APFS data volume
+(statfs bavail*bsize after `sync`, settled; shared volume, other writers active).
+
+Heavy .local: 256 MiB (268435456 bytes) of regenerable installs/caches plus kept evidence.
+  fixed:  +265441280, +256729088, +259801088, +257486848, +265924608, +238665728, +183259136 bytes
+APFS clones in .local (two clones of one 128 MiB file):
+  fixed:  -5890048, -4411392, +552960, -6680576, +39202816, -892928 bytes; one -43966464 run beat the old -32 MiB tolerance (now -64 MiB)
+  origin/main (copy): -275189760 and -285900800 bytes

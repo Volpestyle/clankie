@@ -62,6 +62,7 @@ import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
 import {
   hasNestedRegisteredWorktree,
   pruneTidyWorktree,
+  pruneTidyWorktrees,
   type PruneWorktreeResult,
 } from "./prune-worktree.ts";
 import { managedWorktreePaths } from "./tidy-worktrees.ts";
@@ -2595,12 +2596,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
     });
   };
-  const pruneWorktree = async (
+  const admitPrune = async (
+    current: Awaited<ReturnType<typeof settings>>,
     repository: string,
     path: string,
-    guard: () => Promise<void> = async () => {},
-  ): Promise<PruneWorktreeResult> => {
-    const current = await settings();
+  ): Promise<void> => {
     const platform = process.platform === "win32" ? "windows" : "posix";
     const roots = current.projects.projects
       .flatMap((project) => project.worktreeRoots)
@@ -2609,23 +2609,53 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       throw Error("Select a linked worktree in a registered root; managed runtime trees are protected");
     if (await hasNestedRegisteredWorktree(await checkoutRepositories(), path))
       throw Error("Nested registered worktree is still present; keep the parent");
+  };
+  const pruneProtection = {
+    runtimeRoot: options.repoRoot,
+    dropDecided: (path: string, head: string): boolean =>
+      paneTidy.decisions.latest(path, head)?.decision === "safe_to_drop",
+  };
+  const pruneGuard =
+    (current: Awaited<ReturnType<typeof settings>>, guard: () => Promise<void>) => async () => {
+      await guard();
+      const latest = await settings();
+      if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
+        throw Error("Project enrollment changed");
+    };
+  const pruneWorktree = async (
+    repository: string,
+    path: string,
+    guard: () => Promise<void> = async () => {},
+  ): Promise<PruneWorktreeResult> => {
+    const current = await settings();
+    await admitPrune(current, repository, path);
     return pruneTidyWorktree(
       repository,
       path,
       join(options.stateDir, "worktree-evidence"),
       herdrRunner,
-      async () => {
-        await guard();
-        const latest = await settings();
-        if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
-          throw Error("Project enrollment changed");
-      },
-      {
-        runtimeRoot: options.repoRoot,
-        dropDecided: (path: string, head: string): boolean =>
-          paneTidy.decisions.latest(path, head)?.decision === "safe_to_drop",
-      },
+      pruneGuard(current, guard),
+      pruneProtection,
     );
+  };
+  /** One fetch and one admission census for the batch; every tree still gets its fresh check (VUH-2932). */
+  const pruneWorktrees = async (
+    repository: string,
+    paths: readonly string[],
+    guard: () => Promise<void> = async () => {},
+  ): Promise<{ results: PruneWorktreeResult[] }> => {
+    const current = await settings();
+    return {
+      results: await pruneTidyWorktrees(
+        repository,
+        paths,
+        join(options.stateDir, "worktree-evidence"),
+        herdrRunner,
+        pruneGuard(current, guard),
+        pruneProtection,
+        (path) => admitPrune(current, repository, path),
+      ),
+    };
   };
 
   // One hire path for the compose page and the captain's own `hire_agent`
@@ -2901,6 +2931,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...(deps.commitHandoffs ? { commitHandoffs: deps.commitHandoffs } : {}),
     reclaimCaches,
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
+    pruneMany: (repository, paths, guard) => pruneWorktrees(repository, paths, guard),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),
     ownerValid: validateConversationOwner,
     retirementGuard: async (agent) => {
@@ -7925,6 +7956,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     checkoutReport,
     syncCheckouts,
     pruneWorktree,
+    pruneWorktrees,
     reclaimWorktreeCaches: reclaimCaches,
     fleetRoster: readFleetRoster,
     fleetRosterAction: (command, authority) =>

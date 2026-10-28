@@ -239,6 +239,10 @@ export interface CaptainPort {
     repository: string,
     path: string,
   ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
+  pruneWorktrees?(
+    repository: string,
+    paths: readonly string[],
+  ): Promise<{ results: import("./prune-worktree.ts").PruneWorktreeResult[] }>;
   tidyWorktrees?(
     repository: string,
     mergedInto?: string,

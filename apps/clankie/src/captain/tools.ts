@@ -1488,15 +1488,24 @@ function herdrWatchTools(
             name: "prune_tidy_worktree",
             label: "Remove a landed worktree",
             description:
-              "After keeping its result, remove one landed (merged, by content, or decided safe_to_drop), clean, inactive linked worktree in an enrolled root. Fetches origin/main, preserves .local evidence, rechecks all panes including foreground cwd, and uses git worktree remove without force. Deletes its branch only when merged. Never removes main or managed runtime trees; list_tidy_worktrees explains kept trees.",
+              "After keeping its result, remove one landed (merged, by content, or decided safe_to_drop), clean, inactive linked worktree in an enrolled root, or pass `paths` (up to 64) to prune a batch with one fetch and one admission census, deepest first. Fetches origin/main, moves .local evidence into the evidence store and discards its regenerable installs and build caches, rechecks all panes and process cwds, and uses git worktree remove without force. A failed removal reports what it left. Deletes its branch only when merged. Never removes main or managed runtime trees; list_tidy_worktrees explains kept trees.",
             parameters: Type.Object({
               repository: Type.String({ minLength: 1, maxLength: 4096 }),
-              path: Type.String({ minLength: 1, maxLength: 4096 }),
+              path: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+              paths: Type.Optional(
+                Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 64 }),
+              ),
             }),
             execute: async (_id, input) => {
               const authority = captureConversationAuthority(turn.conversationAuthority);
               await assertConversationAuthority(authority);
-              return json(await watches.tidy!.pruneWorktree(input.repository, input.path, authority));
+              if ((input.path === undefined) === (input.paths === undefined))
+                throw Error("Pass exactly one of path or paths");
+              return json(
+                input.paths
+                  ? await watches.tidy!.pruneWorktrees(input.repository, input.paths, authority)
+                  : await watches.tidy!.pruneWorktree(input.repository, input.path!, authority),
+              );
             },
           }),
           defineTool({

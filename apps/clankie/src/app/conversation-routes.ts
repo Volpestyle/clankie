@@ -221,7 +221,13 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       const parsed = (
         action === "sync"
           ? z.strictObject({ repository: z.string().min(1).max(4096).optional() })
-          : z.strictObject({ repository: z.string().min(1).max(4096), path: z.string().min(1).max(4096) })
+          : z.union([
+              z.strictObject({ repository: z.string().min(1).max(4096), path: z.string().min(1).max(4096) }),
+              z.strictObject({
+                repository: z.string().min(1).max(4096),
+                paths: z.array(z.string().min(1).max(4096)).min(1).max(64),
+              }),
+            ])
       ).safeParse(await readJson(context.req.raw));
       if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
       try {
@@ -229,6 +235,12 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           if (!ctx.dependencies.captain.syncCheckouts)
             return context.json({ error: "checkouts_unavailable" }, 503);
           return context.json(await ctx.dependencies.captain.syncCheckouts(parsed.data.repository));
+        }
+        const { paths } = parsed.data as { paths?: string[] };
+        if (paths) {
+          if (!ctx.dependencies.captain.pruneWorktrees)
+            return context.json({ error: "checkouts_unavailable" }, 503);
+          return context.json(await ctx.dependencies.captain.pruneWorktrees(parsed.data.repository!, paths));
         }
         if (!ctx.dependencies.captain.pruneWorktree)
           return context.json({ error: "checkouts_unavailable" }, 503);

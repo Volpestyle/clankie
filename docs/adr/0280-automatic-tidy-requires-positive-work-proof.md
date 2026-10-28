@@ -95,3 +95,28 @@ by path, and each full sweep resumes after the last tree the previous sweep
 examined, wrapping round. The position is kept in the repository's common Git
 directory. It only orders the work and never admits a tree; a missing or
 unreadable cursor restarts at the first tree.
+
+## Amendment: evidence is moved, and regenerable content is not kept, 2026-10-28
+
+Tracks [VUH-2932](https://linear.app/vuhlp/issue/VUH-2932). Prune kept a tree's
+`.local` by copying it into the evidence store. On APFS, pnpm installs are clones
+of its store, so the copy wrote out every block while deleting the original
+freed almost none. Pruning 39 trees grew the store to 24 GB, 20.3 GB of it
+`node_modules` in nested `.local` checkouts, and lowered free disk by about
+11 GB.
+
+Prune now renames `.local` into the store while it holds the tree's HEAD and
+branch locks, after the fresh census. On the same volume that costs no new disk.
+Across volumes it copies all but the regenerable content. Regenerable installs
+and caches (`node_modules`, `.turbo`, `DerivedData`, `.pnpm-store`, `.gradle`,
+`.next`, and Rust `target` with a `CACHEDIR.TAG`) are discarded rather than kept.
+They move into the store's `.trash` and are deleted off the request path; a
+sweep a restart interrupts finishes on the next prune. Nested clones keep their
+`.git`. A worktree registered inside `.local` refuses the prune, so it is pruned
+on its own and its registration never breaks. If Git's removal fails, `.local`
+goes back only into a tree Git still holds intact (registered, present and
+clean). Otherwise it stays in the store, and the result says what was left.
+
+A batch prune fetches once and admits every tree from one listing. Each tree
+still gets its own fresh pane and process census right before removal, because
+admission alone cannot see a worker that arrived since.

@@ -205,6 +205,11 @@ export class PaneTidy {
       path: string,
       guard: () => Promise<void>,
     ): Promise<import("./prune-worktree.ts").PruneWorktreeResult>;
+    pruneMany?(
+      repository: string,
+      paths: readonly string[],
+      guard: () => Promise<void>,
+    ): Promise<{ results: import("./prune-worktree.ts").PruneWorktreeResult[] }>;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
     retirementGuard?(agent: HerdrAgentSnapshot): Promise<RetirementGuard>;
     worktreeHold?(
@@ -433,6 +438,12 @@ export class PaneTidy {
     await this.authority(authority);
     if (!this.ports.prune) throw Error("Worktree pruning unavailable");
     return this.ports.prune(repository, path, () => this.authority(authority));
+  }
+  async pruneWorktrees(repository: string, paths: readonly string[], source: ConversationAuthority) {
+    const authority = captureConversationAuthority(source);
+    await this.authority(authority);
+    if (!this.ports.pruneMany) throw Error("Worktree pruning unavailable");
+    return this.ports.pruneMany(repository, paths, () => this.authority(authority));
   }
   private now(): number {
     return this.ports.now?.() ?? Date.now();

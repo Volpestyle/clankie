@@ -9986,8 +9986,19 @@ one landed, clean, inactive linked worktree in an enrolled worktree root:
 merged, on main by content, or decided `safe_to_drop` for that exact HEAD. A
 decided drop keeps its commits under `refs/clankie/dropped-worktrees/SHA`. The
 Tidy up skill uses the equivalent `prune_tidy_worktree` tool after preserving
-its result. The service fetches main, copies ignored `.local` evidence, then
-rechecks Git and every live local pane's cwd and foreground cwd. Main checkouts,
+its result. Repeat `--path` (API `paths`, up to 64) to prune a batch: one fetch
+and one admission listing, deepest trees first, and a fresh check of each tree
+before its removal. The result is `{ results }`. The service fetches main, rechecks
+Git and every live local pane's cwd, foreground cwd and process cwd, then moves
+ignored `.local` evidence into the store, which costs no new disk on the same
+volume. On another volume it copies all but the regenerable content. Regenerable
+installs and caches inside `.local` (`node_modules`, `.turbo`, `DerivedData`,
+`.pnpm-store`, `.gradle`, `.next`, Rust `target` with a `CACHEDIR.TAG`) are
+discarded and listed in `discarded`. A worktree registered inside `.local`
+refuses with `nested_worktree: .local/PATH`; prune it first. A failed removal
+reports `left`: `registered`, `directory`, and whether `evidence` was `restored`
+to the intact tree or `kept` at `evidencePath`. The CLI waits up to 30 minutes
+for a prune's answer instead of giving up at two. Main checkouts,
 managed pinned/runtime/update namespaces, the running service checkout, locked,
 dirty, unmerged, and live trees stay regardless of developer-root enrollment. Git
 removal is never forced; local branches are deleted only if merged. Evidence

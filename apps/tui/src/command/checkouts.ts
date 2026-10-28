@@ -15,22 +15,32 @@ export async function runCheckoutsCommand(
         args[1] !== "--repository" ||
         (args.length === 5 && args[3] !== "--path")
       : action === "prune"
-        ? args.length !== 5 || args[1] !== "--repository" || args[3] !== "--path"
+        ? args.length < 5 ||
+          args.length % 2 === 0 ||
+          args[1] !== "--repository" ||
+          args.slice(3).some((arg, index) => index % 2 === 0 && arg !== "--path")
         : (action === "status" ? ![0, 1].includes(args.length) : ![1, 3].includes(args.length)) ||
           (args.length === 3 && args[1] !== "--repository"))
   )
     throw Error(
-      `Usage: clankie checkouts status | sync [--repository OWNER_CHECKOUT] | prune --repository OWNER_CHECKOUT --path WORKTREE | reclaim-caches --repository OWNER_CHECKOUT [--path WORKTREE] | ${DECIDE_USAGE}`,
+      `Usage: clankie checkouts status | sync [--repository OWNER_CHECKOUT] | prune --repository OWNER_CHECKOUT --path WORKTREE [--path WORKTREE ...] | reclaim-caches --repository OWNER_CHECKOUT [--path WORKTREE] | ${DECIDE_USAGE}`,
     );
+  const paths = action === "prune" ? args.slice(4).filter((_, index) => index % 2 === 0) : [];
   return request(
     action === "status" ? "" : `/${action}`,
     action === "status"
       ? undefined
       : {
           ...(args[2] ? { repository: args[2] } : {}),
-          ...(["prune", "reclaim-caches"].includes(action) && args[4] ? { path: args[4] } : {}),
+          ...(paths.length > 1
+            ? { paths }
+            : ["prune", "reclaim-caches"].includes(action) && args[4]
+              ? { path: args[4] }
+              : {}),
         },
     options,
+    // A prune reports what it left behind; every step it waits on is bounded on the service.
+    action === "prune" ? 30 * 60_000 : 120_000,
   );
 }
 
@@ -66,6 +76,7 @@ async function request(
   suffix: string,
   body: Record<string, unknown> | undefined,
   options: BrowserCommandOptions,
+  timeoutMs = 120_000,
 ): Promise<unknown> {
   const credential = await resolveOperatorCredential({
     env: options.env ?? process.env,
@@ -78,7 +89,7 @@ async function request(
       method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeoutMs),
     },
   );
   const result: unknown = await response.json();

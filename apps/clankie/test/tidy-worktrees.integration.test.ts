@@ -1,6 +1,17 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -622,7 +633,7 @@ it("authenticated pruning retains enrolled managed namespaces and archives devel
   }
 }, 30_000);
 
-it("prune refuses evidence aliases, an archive inside the retiring tree, and copy failures without removal", async () => {
+it("prune refuses evidence aliases and an archive inside the retiring tree, and moves unreadable evidence intact", async () => {
   const { pruneTidyWorktree } = await import("../src/captain/prune-worktree.ts");
   const f = await fixture();
   const origin = join(f.root, "origin.git");
@@ -650,18 +661,19 @@ it("prune refuses evidence aliases, an archive inside the retiring tree, and cop
   const file = join(f.root, "archive-file");
   await writeFile(file, "not a directory\n");
   expect(await prune(file)).toMatchObject({ outcome: "unavailable" });
-  if (process.platform !== "win32" && process.getuid?.() !== 0) {
-    // A real failed copy must retain the original evidence and registered tree.
-    await chmod(join(path, ".local", "proof.txt"), 0);
-    try {
-      expect(await prune(join(f.root, "copy-failure"))).toMatchObject({ outcome: "unavailable" });
-      expect(existsSync(path)).toBe(true);
-    } finally {
-      await chmod(join(path, ".local", "proof.txt"), 0o600);
-    }
-  }
   expect(existsSync(path)).toBe(true);
   expect(await readFile(join(path, ".local", "proof.txt"), "utf8")).toBe("must survive\n");
+  if (process.platform !== "win32" && process.getuid?.() !== 0) {
+    // A copy failed on a file it could not read; a move keeps the file as it is (VUH-2932).
+    await chmod(join(path, ".local", "proof.txt"), 0);
+    const moved = await prune(join(f.root, "archive"));
+    expect(moved).toMatchObject({ outcome: "removed" });
+    expect(existsSync(path)).toBe(false);
+    const kept = join(moved.evidencePath!, "proof.txt");
+    expect((await stat(kept)).mode & 0o777).toBe(0);
+    await chmod(kept, 0o600);
+    expect(await readFile(kept, "utf8")).toBe("must survive\n");
+  }
 });
 
 // VUH-2392 acceptance: automatic tidy removes enrolled worktrees whose HEAD is in origin/main,

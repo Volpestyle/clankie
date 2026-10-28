@@ -68,12 +68,21 @@ project membership, and keeps every result, draft and work check.
 ## Pruning an owned worktree
 
 For an authorized owned cleanup, use `prune_tidy_worktree({repository, path})`
-(or `clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE`). It
-fetches `origin/main`, verifies a registered linked-worktree root, copies ignored
-`.local` evidence to `worktree-evidence/` under Clankie’s configured state directory
-(default `~/.clankie/captain/worktree-evidence/`), then freshly checks
-landing, cleanliness and every live local pane's cwd and foreground cwd. It uses
-`git worktree remove` without force and deletes only a merged local branch.
+(or `clankie checkouts prune --repository OWNER_CHECKOUT --path WORKTREE`). For
+several trees, pass `paths` (or repeat `--path`): one batch fetches and lists once,
+prunes the deepest trees first and still checks each tree freshly before removing
+it. It fetches `origin/main`, verifies a registered linked-worktree root, freshly
+checks landing, cleanliness and every live pane and process cwd, then moves the
+ignored `.local` evidence into `worktree-evidence/` under Clankie’s configured state
+directory (default `~/.clankie/captain/worktree-evidence/`). A move costs no new
+disk. Regenerable installs and caches inside it (`node_modules`, `.turbo`,
+`DerivedData`, `.pnpm-store`, `.gradle`, `.next`, tagged Rust `target`) are
+discarded, not kept, and the result lists them. A worktree registered inside
+`.local` refuses the prune (`nested_worktree: .local/...`): prune that tree on its
+own first. It uses `git worktree remove` without force and deletes only a merged
+local branch. A failed removal says what it `left`: whether the tree is still
+registered and present, and whether its `.local` went back into the intact tree or
+stays in the evidence store.
 Native HEAD/branch locks hold the verified commit stable through removal; a
 changed or busy ref keeps the checkout. Retained refs preserve detached commits
 even after reflog expiry and garbage collection.
