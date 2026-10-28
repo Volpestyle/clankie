@@ -1126,9 +1126,12 @@ export function runSeatChannel({
           if (receipt?.acknowledged === true && receipt.eventId === eventId) return;
           throw new ChannelReceiptMismatch("Exact channel acknowledgment is unresolved");
         }
-        // allow-swallowed-rejection -- An unreadable refusal cannot establish a permanent unknown_event.
-        const unknown =
-          ack.status === 404 && (await ack.json().catch(() => undefined))?.error === "unknown_event";
+        let refusal;
+        if (ack.status === 404) {
+          // allow-swallowed-rejection -- An unreadable refusal cannot establish a permanent unknown_event.
+          refusal = await ack.json().catch(() => undefined);
+        }
+        const unknown = refusal?.error === "unknown_event";
         if (unknown) {
           const currentLink = JSON.stringify(link);
           if (unknownSince === undefined || unknownLink !== currentLink) {
