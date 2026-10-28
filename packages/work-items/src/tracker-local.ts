@@ -2937,7 +2937,7 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
     team: store.team.name,
     project: project?.name ?? null,
     assignee: assignee?.name ?? null,
-    createdBy: findUser(store, issue.creatorId).name,
+    createdBy: writer(store, issue.creatorId, issue.createdByActor).name,
     createdById: issue.creatorId,
     url: localUrl("issue", issue.id),
     stage: stageOf(issue),
@@ -2981,10 +2981,25 @@ function issueView(store: Store, issue: Issue, relations = false): Record<string
   }
   return view;
 }
+/**
+ * The person a Linear-shaped field names for a record. Clankie's and his workers' writes name
+ * their own actor, never the store's local owner (LOCAL-VUH-59); the owner's, a device's and
+ * older records without an actor keep the stored user.
+ */
+function writer(
+  store: Store,
+  reference: string,
+  actor: TrackerActor | undefined,
+): User | { id: string; name: string; displayName: string; isLocal: false } {
+  if (actor?.type !== "agent-worker") return findUser(store, reference);
+  const name = actorName(actor);
+  return { id: actorKey(actor), name, displayName: name, isLocal: false };
+}
+
 function updateView(store: Store, update: StatusUpdate): Record<string, unknown> {
   return {
     ...update,
-    user: findUser(store, update.userId),
+    user: writer(store, update.userId, update.createdByActor),
     project: findProject(store, update.projectId).name,
     url: localUrl("status-update", update.id),
   };
@@ -3018,8 +3033,8 @@ function projectView(store: Store, project: Project): Record<string, unknown> {
 function commentView(store: Store, comment: Comment): Record<string, unknown> {
   return {
     ...comment,
-    author: findUser(store, comment.userId),
-    user: findUser(store, comment.userId),
+    author: writer(store, comment.userId, comment.createdByActor),
+    user: writer(store, comment.userId, comment.createdByActor),
     onBehalfOf: linearRow(comment).onBehalfOf ?? null,
     attachments: linearRow(comment).attachments ?? [],
     url: localUrl("comment", comment.id),

@@ -12,7 +12,11 @@ import { ProjectHires } from "../src/captain/project-hires.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { TrackerRequestBudget } from "../src/tracker-request-budget.ts";
-import { trackerRepoForPrincipal, trackerRoleForPrincipal } from "../src/tracker-runner.ts";
+import {
+  trackerRepoForPrincipal,
+  trackerRoleForPrincipal,
+  trackerWorkerNameForPrincipal,
+} from "../src/tracker-runner.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 import { runWorkCommand } from "../../tui/src/command/work.ts";
@@ -47,6 +51,8 @@ async function fixture(budget = new TrackerRequestBudget()) {
   const hires = new ProjectHires(join(root, "project-hires.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const logged: Record<string, unknown>[] = [];
+  /** Personas bound to `seatId occupantId`, as the captain's live roster binds them. */
+  const personaNames = new Map<string, string>();
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
     credentials,
@@ -83,12 +89,13 @@ async function fixture(budget = new TrackerRequestBudget()) {
           (await settings.read()).projects.projects.find((project) => project.id === projectId)?.review,
       ),
     trackerRequestBudget: budget,
-    // A fleet worker is named by the seat it was hired into, as the service names it.
-    trackerWorkerName: (principalId) => {
-      const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
-      const candidate = match ? hires.membershipCandidate(match[1]!, match[2]!) : undefined;
-      return candidate?.state === "confirmed" ? candidate.seat : undefined;
-    },
+    // As the service names a fleet worker: its bound persona, else its seat (LOCAL-VUH-59).
+    trackerWorkerName: (principalId) =>
+      trackerWorkerNameForPrincipal(
+        principalId,
+        (fleet, pane) => hires.membershipCandidate(fleet, pane),
+        (seatId, occupantId) => personaNames.get(`${seatId} ${occupantId}`),
+      ),
     logger: { info() {}, warn: (context) => void logged.push(context) },
   });
   workItems = createWorkItemsService({
@@ -276,7 +283,22 @@ async function fixture(budget = new TrackerRequestBudget()) {
     });
     return { status: response.status, body: (await response.json()) as Record<string, any> };
   };
-  return { host, team, project, owner, ownerRaw, hire, raw, call, tool, schemas, budgetReport, work, logged };
+  return {
+    host,
+    team,
+    project,
+    owner,
+    ownerRaw,
+    hire,
+    raw,
+    call,
+    tool,
+    schemas,
+    budgetReport,
+    work,
+    logged,
+    personaNames,
+  };
 }
 
 const LEAD_VERBS = [
@@ -541,4 +563,71 @@ it("no agent lane, and not the operator bearer, gives the owner app's verdict (A
     body: { reason: "owner_app_required" },
   });
   expect(await f.owner("get_issue", { id: issue.id })).toMatchObject({ stage: "landed" });
+});
+
+it("a hired worker's writes carry its persona, and their author fields name the writer (LOCAL-VUH-59)", async () => {
+  const f = await fixture();
+  await f.hire("w1:p1", "builder");
+  await f.hire("w1:p2", "builder");
+  f.personaNames.set("seat-w1:p1 occupant-w1:p1", "Lark");
+  const issue = await f.call("w1:p1", "linear_save_issue", { title: "Named", project: f.project.id });
+  await f.call("w1:p1", "linear_save_comment", { issueId: issue.id, body: "From Lark." });
+  await f.call("w1:p1", "linear_post_issue_event", { issueId: issue.id, type: "ack" });
+  await f.call("w1:p1", "linear_save_evidence_bundle", {
+    issueId: issue.id,
+    references: [
+      {
+        recordId: "fixture",
+        sha256: "0".repeat(64),
+        url: `clankie://evidence/sha256/${"0".repeat(64)}`,
+        type: "log",
+      },
+    ],
+    gaps: [],
+  });
+  await f.call("w1:p2", "linear_save_comment", { issueId: issue.id, body: "No persona bound." });
+  const lead = await f.host.call({
+    lane: "operator",
+    server: "linear",
+    tool: "save_comment",
+    arguments: { issueId: issue.id, body: "From Clankie." },
+  });
+  expect(lead, JSON.stringify(lead)).toMatchObject({ outcome: "ok", isError: false });
+  await f.owner("save_comment", { issueId: issue.id, body: "From the owner." });
+
+  // The pane stays the actor id; the persona is its name, on behalf of the owner and Clankie.
+  const lark = {
+    type: "agent-worker",
+    id: "fleet:default:pane:w1:p1",
+    name: "Lark",
+    onBehalfOf: [
+      { type: "human", id: "owner", name: "Owner" },
+      { type: "agent-worker", id: "clankie", name: "Clankie" },
+    ],
+  };
+  const comments = (await f.owner("list_comments", { issueId: issue.id })).comments as Record<string, any>[];
+  const comment = (body: string) => comments.find((entry) => entry.body === body)!;
+  expect(comment("From Lark.")).toMatchObject({
+    createdByActor: lark,
+    author: { id: "agent-worker:fleet:default:pane:w1:p1", name: "Lark", isLocal: false },
+    user: { name: "Lark", isLocal: false },
+  });
+  // A seat with no bound persona is still named by its seat.
+  expect(comment("No persona bound.")).toMatchObject({
+    createdByActor: { id: "fleet:default:pane:w1:p2", name: "seat-w1:p2" },
+    author: { name: "seat-w1:p2", isLocal: false },
+  });
+  // The lead's and the owner's attribution are unchanged; only the lead's author stops reading as the owner.
+  expect(comment("From Clankie.")).toMatchObject({
+    createdByActor: { type: "agent-worker", id: "clankie", name: "Clankie" },
+    author: { name: "Clankie", isLocal: false },
+  });
+  expect(comment("From the owner.")).toMatchObject({
+    createdByActor: { type: "human" },
+    author: { name: "Local owner", isLocal: true },
+  });
+  expect(await f.owner("get_issue", { id: issue.id })).toMatchObject({ createdBy: "Lark" });
+  const events = (await f.owner("list_issue_events", { issueId: issue.id })).events as Record<string, any>[];
+  expect(events.find((event) => event.type === "ack")?.actor).toMatchObject(lark);
+  expect((await f.owner("get_evidence_bundle", { issueId: issue.id })).actor).toMatchObject(lark);
 });

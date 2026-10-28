@@ -270,6 +270,8 @@ export interface CaptainPort {
   }>;
   /** Current host-bound persona for the exact native seat and occupant. */
   personaForFleetOccupant(seatId: string, occupantId: string): string | undefined;
+  /** That persona's display name, such as Lark, for attributing the seat's writes (LOCAL-VUH-59). */
+  personaNameForFleetOccupant?(seatId: string, occupantId: string): string | undefined;
   /** Display-only hire attribution: null means a recorded hire with no project; undefined means no hire. */
   leadHireMembershipProject?(
     fleet: string,

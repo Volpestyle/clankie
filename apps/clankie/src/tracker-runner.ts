@@ -77,3 +77,23 @@ export async function trackerRoleForPrincipal(
     ? "reviewer"
     : "worker";
 }
+
+/**
+ * A delegated worker's display name in the tracker (LOCAL-VUH-59): the persona bound to the
+ * exact seat and session its confirmed hire recorded, such as Lark, or that seat when no
+ * persona is bound. Undefined for any other principal. Never from tool arguments; the
+ * principal stays the actor id.
+ */
+export function trackerWorkerNameForPrincipal(
+  principalId: string,
+  candidate: (fleet: string, pane: string) => ReturnType<CaptainPort["projectHireMembershipCandidate"]>,
+  personaName: (seatId: string, occupantId: string) => string | undefined,
+): string | undefined {
+  const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
+  if (!match || match[2] === "unverified") return undefined;
+  const hire = candidate(match[1]!, match[2]!);
+  if (hire.state !== "confirmed") return undefined;
+  // Live seat ids qualify the seat with its fleet outside the default one.
+  const seatId = match[1] === "default" ? hire.seat : `${match[1]}/${hire.seat}`;
+  return personaName(seatId, hire.nativeOccupantId) ?? hire.seat;
+}

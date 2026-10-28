@@ -255,7 +255,12 @@ import { BrokerCredentialStore } from "./captain/model.ts";
 import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { EvidenceStore } from "./evidence-store.ts";
 import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
-import { trackerRepoForPrincipal, trackerRoleForPrincipal, trackerRunner } from "./tracker-runner.ts";
+import {
+  trackerRepoForPrincipal,
+  trackerRoleForPrincipal,
+  trackerRunner,
+  trackerWorkerNameForPrincipal,
+} from "./tracker-runner.ts";
 import { createWorkItemsService } from "./work-items.ts";
 import {
   collectLinearImport,
@@ -792,13 +797,13 @@ const mcpHost = createMcpHost({
         (await settingsStore.read()).projects.projects.find((project) => project.id === projectId)?.review,
     ),
   trackerRequestBudget,
-  // A fleet worker is named by the seat it was hired into, as the host recorded it.
-  trackerWorkerName: (principalId) => {
-    const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
-    if (!match || match[2] === "unverified") return undefined;
-    const candidate = captain.projectHireMembershipCandidate(match[1]!, match[2]!);
-    return candidate.state === "confirmed" ? candidate.seat : undefined;
-  },
+  // A fleet worker is named by its bound persona, such as Lark (LOCAL-VUH-59).
+  trackerWorkerName: (principalId) =>
+    trackerWorkerNameForPrincipal(
+      principalId,
+      (fleet, pane) => captain.projectHireMembershipCandidate(fleet, pane),
+      (seatId, occupantId) => captain.personaNameForFleetOccupant?.(seatId, occupantId),
+    ),
   minecraftMotor: {
     command: process.execPath,
     args: [

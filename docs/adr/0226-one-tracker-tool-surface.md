@@ -141,9 +141,22 @@ Before that, the operator credential wrote as `human` `owner` and the CLI's
 `/v1/work` verbs as the store's local user. The lead's own bundles then counted
 as the owner's work, so the owner's verify answer was refused as a self-check.
 
-A fleet worker is named by the seat its hire recorded. The records it creates
-or changes carry `createdByActor` and `updatedByActor`; existing Linear-shaped
-fields such as `author` and `createdBy` keep their meaning.
+A fleet worker is named by the persona bound to the exact seat and session its
+hire recorded, such as Lark. With no bound persona it is named by that seat. Its
+pane principal stays the actor id. The records it creates or changes carry
+`createdByActor` and `updatedByActor`.
+
+The Linear-shaped person fields (`author` and `user` on comments, `createdBy`
+on issues, `user` on status updates) name the record's `agent-worker` writer
+when it has one: a hired worker by its name, or Clankie. They carry
+`isLocal: false`. Owner, device and standalone writes, and records written
+before actors, keep the store's local user.
+
+Amended 2026-10-28 (LOCAL-VUH-59).
+Before this, workers were named by their Herdr terminal ID (`term_…`), and every
+built-in record's `author` read "Local owner". A client showing `author` then made
+an agent's comment look like the owner's. Historical records keep the names
+they were stamped with.
 
 **Exactly-once writes.** Write tools accept an optional `idempotencyKey`. The
 store keeps one receipt per (actor, key): the request fingerprint, `applied` or
