@@ -118,7 +118,7 @@ try {
   report.fsInputScope = fsInputScope(root, report.change.files, base);
   if (report.fsInputScope.unmappedExecutableInputs.length) {
     console.error(
-      `[landing] Unmapped executable filesystem inputs (declare tests in scripts/testing/landing-fs-inputs.mjs): ${report.fsInputScope.unmappedExecutableInputs.join(", ")}`,
+      `[landing] Unmapped executable filesystem inputs (declare a real test consumer or a non-Vitest coverage reason in scripts/testing/landing-fs-inputs.mjs): ${report.fsInputScope.unmappedExecutableInputs.join(", ")}`,
     );
     exit = 1;
   }
