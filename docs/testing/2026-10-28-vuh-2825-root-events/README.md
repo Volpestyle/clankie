@@ -43,3 +43,9 @@ Final boundary check: 29/29 tests in four files pass (35.26s), including the
 existing native catalog and question/permission integration checks. Current-main
 blocking integration status and existing child renewal passed 2/2 (39.04s).
 Root landing gate, independent review and installed delivery remain pending.
+
+The response-hold regression also proves renewal happens before a hook waits for
+its handler's response (for example, AskUserQuestion). On the first candidate,
+the held response let the original lease expire; moving the admitted finite
+event ahead of that wait fixes it. The timestamp still gives only its original
+idle window, never the response/answer time.

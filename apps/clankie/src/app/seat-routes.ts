@@ -929,14 +929,15 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
         ? context.json({ schemaVersion: 1, recorded: true })
         : context.json({ error: "native_activity_refused" }, 403);
     }
+    // Question hooks may hold their response; observe finite activity on arrival.
+    if (identity && proof && (await identity.validate()))
+      await ctx.dependencies.fleetResources?.recordRootHook(pane.paneId, parsed.data, proof);
     const recorded = await ctx.dependencies.captain.recordSeatHook(
       pane.paneId,
       parsed.data,
       proof,
       context.req.raw.signal,
     );
-    if (recorded && identity && proof && (await identity.validate()))
-      await ctx.dependencies.fleetResources?.recordRootHook(pane.paneId, parsed.data, proof);
     return recorded
       ? context.json({
           schemaVersion: 1 as const,

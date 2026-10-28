@@ -6,6 +6,12 @@
       "size": 44962,
       "sha256": "9754d4392927f9e3ba84d93cc793aec5aa6bd09ff1d77b914e7be3f13f15dae6",
       "url": "clankie://evidence/sha256/9754d4392927f9e3ba84d93cc793aec5aa6bd09ff1d77b914e7be3f13f15dae6"
+    },
+    {
+      "path": "response-hold-evidence.json",
+      "size": 29295,
+      "sha256": "3766d4deb6eb2f80266b88640c74773aac7ee224f5942275c8a88c0ccc8a49a0",
+      "url": "clankie://evidence/sha256/3766d4deb6eb2f80266b88640c74773aac7ee224f5942275c8a88c0ccc8a49a0"
     }
   ]
 }

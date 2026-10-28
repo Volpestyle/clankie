@@ -159,6 +159,8 @@ async function fixture() {
   const app = new Hono();
   let legacy = false;
   const hooks: FleetSeatHook[] = [];
+  let hookBarrier = Promise.resolve();
+  let hookEntered = () => {};
   app.use("/v1/fleet/seats/:paneId/hook", async (context, next) => {
     if (legacy) {
       const body = await context.req.json();
@@ -174,6 +176,8 @@ async function fixture() {
         ...createStubCaptain(),
         recordSeatHook: async (_pane, hook) => {
           hooks.push(hook);
+          hookEntered();
+          await hookBarrier;
           return true;
         },
       },
@@ -259,6 +263,13 @@ async function fixture() {
   return {
     root,
     legacy: () => (legacy = true),
+    holdHooks: () => {
+      let release!: () => void;
+      const entered = new Promise<void>((resolve) => (hookEntered = resolve));
+      hookBarrier = new Promise<void>((resolve) => (release = resolve));
+      cleanups.push(async () => release());
+      return { entered, release };
+    },
     hooks: () => hooks,
     host,
     directory,
@@ -502,10 +513,17 @@ it.skipIf(process.platform !== "darwin")(
     const lease = await f.acquire();
     f.advance(590_000);
     const eventAt = f.now();
-    await hook("UserPromptSubmit");
-    f.advance(20_000);
-    await f.resources.simulators.tick();
-    expect((await f.governor.simulatorReservations()).map((row) => row.id)).toEqual([lease.id]);
+    const held = f.holdHooks();
+    const pending = hook("UserPromptSubmit");
+    await held.entered;
+    try {
+      f.advance(20_000);
+      await f.resources.simulators.tick();
+      expect((await f.governor.simulatorReservations()).map((row) => row.id)).toEqual([lease.id]);
+    } finally {
+      held.release();
+      await pending;
+    }
     // A replay keeps the original event deadline, not receipt time.
     await hook("UserPromptSubmit", eventAt);
     await hook("Stop");
