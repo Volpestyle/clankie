@@ -55,9 +55,16 @@ wait();
     runs.push(job.catch(() => -1));
     return job;
   };
+  // A file the command is still writing reads as not yet written; `until` asks again.
   const caps = (name: string) =>
     readFile(join(root, `${name}.json`), "utf8").then(
-      (text) => JSON.parse(text) as { vitest: string; cargo: string; make: string },
+      (text) => {
+        try {
+          return JSON.parse(text) as { vitest: string; cargo: string; make: string };
+        } catch {
+          return undefined;
+        }
+      },
       () => undefined,
     );
   const release = (name: string) => writeFile(join(root, `${name}.json.release`), "");
