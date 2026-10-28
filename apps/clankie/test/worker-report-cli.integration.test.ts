@@ -50,7 +50,8 @@ async function fixture(
     const id = randomUUID();
     ids.push(id);
     // These cases read a restored historical inbox. Produce its legacy record
-    // shape once; bulk fixture construction need not fsync hundreds of live admissions.
+    // shape once; bulk fixture construction need not fsync hundreds of live admissions,
+    // which cost about 90 ms each and timed out landing gates under load (VUH-2929).
     if (options.directAcceptance && index > 0) continue;
     const reportText = options.reportText?.(index) ?? `Retained report ${index}`;
     // The large inbox proof needs retained acceptance, not each sender's separate delivery fence.
@@ -280,7 +281,7 @@ it("projects a large restored inbox without offering or changing retained payloa
 }, 60_000);
 
 it.each([20, 100])("acknowledges %i exact IDs returned by a real CLI HTTP page", async (count) => {
-  const f = await fixture(count);
+  const f = await fixture(count, { directAcceptance: true });
   const page = WorkerReportPageSchema.parse(
     await runAgentsCommand(["reports", "--conversation", "global-default", "--limit", String(count)], {
       env: f.env,
@@ -538,7 +539,7 @@ it("accepts the returned JSON page verbatim and preserves conversation binding",
 });
 
 it("retires 165 selected migrated reports only as the operator, while preserving a fresh unread report", async () => {
-  const f = await fixture(165);
+  const f = await fixture(165, { directAcceptance: true });
   const fresh = randomUUID();
   new InboundSeatReceipts(join(f.root, "fresh-receipts.json"), f.store).accept(
     "w3Z:pFresh",
@@ -581,7 +582,7 @@ it("retires 165 selected migrated reports only as the operator, while preserving
 });
 
 it("clears the roster history warning and preserves acknowledgments after restart", async () => {
-  const f = await fixture(165);
+  const f = await fixture(165, { directAcceptance: true });
   const before = await f.serve({ op: "roster", schemaVersion: 1 });
   expect(before.op === "roster" && before.workerReports).toHaveLength(165);
   await runAgentsCommand(["reports", "ack-history", ...f.ids, "--conversation", "global-default"], {
