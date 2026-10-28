@@ -21,6 +21,7 @@ import {
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceRequestSchema,
   OperatorDeliveredFileDownloadRequestSchema,
+  type DeviceRecord,
   type DomainEvent,
   SERVICE_RESTARTING_SEAT_HANDOFF,
 } from "@clankie/protocol";
@@ -84,13 +85,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
         return context.json({ error: "forbidden" }, 403);
       const record = ctx.devices.get(device.deviceId);
-      if (
-        !record ||
-        record.supportGrantId !== undefined ||
-        record.mintedBy === "hosted-account" ||
-        record.mintedBy.startsWith("support:")
-      )
-        return context.json({ error: "forbidden" }, 403);
+      if (!ownerDeviceRecord(record)) return context.json({ error: "forbidden" }, 403);
     }
     if (!ctx.dependencies.integration) return context.json({ error: "integration_unavailable" }, 503);
     return context.json(ShippingSnapshotSchema.parse(await ctx.dependencies.integration.shipping()));
@@ -105,12 +100,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const device = await ctx.authenticateDevice(context.req.raw);
         if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return false;
         const record = ctx.devices.get(device.deviceId);
-        return (
-          record !== undefined &&
-          record.supportGrantId === undefined &&
-          record.mintedBy !== "hosted-account" &&
-          !record.mintedBy.startsWith("support:")
-        );
+        return ownerDeviceRecord(record);
       };
       if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
       if (!ctx.dependencies.captain.fleetRoster || !ctx.dependencies.captain.fleetRosterAction)
@@ -323,13 +313,10 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   const ownerAppDevice = (deviceId: string): boolean => {
     const record = ctx.devices.get(deviceId);
     return (
-      record !== undefined &&
+      ownerDeviceRecord(record) &&
       record.status === "active" &&
       record.grants.terminalControl &&
-      record.supportGrantId === undefined &&
-      record.run === undefined &&
-      record.mintedBy !== "hosted-account" &&
-      !record.mintedBy.startsWith("support:")
+      record.run === undefined
     );
   };
   /** Host-only ownerApp for a device principal that is the owner's own app; never for the operator bearer. */
@@ -490,12 +477,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const record = ctx.devices.get(owner.principal.id);
         // Local pairing records the configured operator ID, not a fixed name.
         // Hosted visitor pairing uses the distinct "hosted-account" principal.
-        return (
-          record !== undefined &&
-          record.supportGrantId === undefined &&
-          record.mintedBy !== "hosted-account" &&
-          !record.mintedBy.startsWith("support:")
-        );
+        return ownerDeviceRecord(record);
       };
       if (!ownerDevice() || !owner || !(await owner.authorize()))
         return context.json({ error: "owner_device_required" }, 403);
@@ -521,12 +503,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         if (!owner?.current()) return false;
         if (owner.principal.kind === "operator") return true;
         const record = ctx.devices.get(owner.principal.id);
-        return (
-          record !== undefined &&
-          record.supportGrantId === undefined &&
-          record.mintedBy !== "hosted-account" &&
-          !record.mintedBy.startsWith("support:")
-        );
+        return ownerDeviceRecord(record);
       };
       if (!ownerReader() || !owner || !(await owner.authorize()))
         return context.json({ error: "owner_required" }, 403);
@@ -543,12 +520,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         if (owner.principal.kind === "operator") return true;
         const record = ctx.devices.get(owner.principal.id);
         // Never a hosted visitor, whichever route its request took (as lead_chats).
-        return (
-          record !== undefined &&
-          record.supportGrantId === undefined &&
-          record.mintedBy !== "hosted-account" &&
-          !record.mintedBy.startsWith("support:")
-        );
+        return ownerDeviceRecord(record);
       };
       const denied = () => context.json({ error: "owner_required" }, 403);
       if (!ownerReader() || !owner || !(await owner.authorize())) return denied();
@@ -1352,6 +1324,18 @@ const TRACKER_OWNER_CALL_PATH = "/v1/tracker/owner/call";
 const TRACKER_CALL_PATH = "/v1/tracker/call";
 /** Clankie (the lead) acting for the owner. */
 const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+/**
+ * A device the owner paired themselves: never a hosted visitor (`hosted-account`) or a support
+ * session (a support grant or a `support:` mint). One rule for every owner-device route.
+ */
+export function ownerDeviceRecord(record: DeviceRecord | undefined): record is DeviceRecord {
+  return (
+    record !== undefined &&
+    record.supportGrantId === undefined &&
+    record.mintedBy !== "hosted-account" &&
+    !record.mintedBy.startsWith("support:")
+  );
+}
 const appActor = (deviceId: string): TrackerActor => ({
   type: "app",
   id: `device:${deviceId}`,

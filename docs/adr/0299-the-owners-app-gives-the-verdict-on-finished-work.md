@@ -27,8 +27,11 @@ and moves the item back to `accepted` with the note as the `reopened` body.
 
 **Who may call it.** Only the owner's app: an authenticated device principal that
 is active, holds `terminalControl`, has no support grant, was not minted by a
-hosted account or for support, and is not an automation `run` pairing. The host
-checks the device record and passes `ownerApp: {deviceId}` in the write
+hosted account or for support, and is not an automation `run` pairing. The
+owner's own pairings count whether the local operator or the owner's hosted
+account operator minted them (`hosted-account-operator`); a hosted visitor's
+device (`hosted-account`) does not. One predicate (`ownerDeviceRecord`) decides
+this for every owner-device route. The host checks the device record and passes `ownerApp: {deviceId}` in the write
 context. Tool arguments cannot set it. Its item events (`verified`, or `comment`
 and `reopened`) belong to the owner (`human`, `via: "owner_app"`) and record the
 `deviceId`. The records it touches keep the `app` actor that carried it. It is reachable
@@ -41,7 +44,9 @@ through the `tracker_sync` transaction route and the device paths of
 - every MCP lane: hired workers, reviewers and Clankie's own lead and room lanes.
   The tool is also left out of their catalogs;
 - the repository-scoped `clankie work` path;
-- devices minted for a hosted account, for support or for an automation run;
+- devices minted for a hosted visitor, for support or for an automation run.
+  A support session's device is already refused at authentication outside its
+  own device state; the owner-device rule refuses it again;
 - a `bundleId` that is not the item's current bundle (`bundle_superseded`), so the
   verdict is about the proof the owner saw;
 - an item that is not landed or delivered (`verdict_not_due`), one with no bundle
