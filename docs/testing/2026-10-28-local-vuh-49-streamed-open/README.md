@@ -121,3 +121,16 @@ Buffer wiring and cache path. The new 126 MB datasets and archived R1 runtime
 were removed after capture.
 
 [R2 regression, guard mutation, timings, checks and cleanup](clankie://evidence/sha256/e7025370e26e8361e66be767fba0c635cd7a2a1b175eb5eb893881a9b6a0659b).
+
+## Separate review follow-up: helper reader guard
+
+After R2 landed at `7b70f9e09`, the fresh-process guard also reads a tracker
+snapshot before restoring `Buffer.prototype.toString`. This covers
+`readCommittedStore` and `readCheckpointFile` as well as ordinary tracker open.
+M3 (forcing `readCheckpointFile` to parse a whole-buffer string) now fails with
+`Whole-checkpoint Buffer.toString forbidden` through that snapshot call. The
+production decoder was restored byte for byte; the full checkpoint integration
+file passes 3/3. No new capacity benchmark or runtime change was needed.
+`docs/cli.md` now names the actual public doctor URL as the warning's destination.
+
+[Helper guard mutation, green run and unchanged runtime hash](clankie://evidence/sha256/a148c2d2cdd57a83f31af16143df059983ac2cd0233a41381b973d373cdd7036).

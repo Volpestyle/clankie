@@ -314,9 +314,11 @@ so use `--json` to read them. This observation never adds project or tool access
 `trackerCheckpoint` reports the built-in tracker's `tracker.json` (under
 `<CLANKIE_STATE>/tracker`) against the previous runtime's single-string limit,
 about 537 MB. It is read from file metadata only. Past half, `state` is `warn` for
-rollback headroom. This build streams checkpoint open; the warning points to the
-[storage and recovery guide](../packages/work-items/README.md#storage), since older
-builds may refuse large stores. It is absent when there is no built-in store.
+rollback headroom. This build streams checkpoint open; the warning points to
+https://docs.clankie.bot/cli/#doctor for recovery guidance because older builds
+may refuse large stores. Recovery and rollback steps live in the
+[storage and recovery guide](../packages/work-items/README.md#storage).
+It is absent when there is no built-in store.
 
 Local fleet discovery uses `<CLANKIE_STATE>/links`, defaulting to
 `~/.clankie/links`. Local hires carry the service's absolute state path, including

@@ -59,7 +59,10 @@ it("opens and writes a streamed checkpoint in a fresh process and keeps all reco
         throw new Error("Whole-checkpoint Buffer.toString forbidden");
       return toString.call(this, encoding, start, end);
     };
-    try { await tracker.call("get_issue", { id: ${JSON.stringify(issue.id)} }); }
+    try {
+      await tracker.call("get_issue", { id: ${JSON.stringify(issue.id)} });
+      await readTrackerStoreSnapshot(${JSON.stringify(directory)});
+    }
     finally { Buffer.prototype.toString = toString; }
     await tracker.call("save_comment",{issueId:${JSON.stringify(issue.id)},body:"fresh process",idempotencyKey:"stream-fresh-process"});
     await tracker.checkpoint();
