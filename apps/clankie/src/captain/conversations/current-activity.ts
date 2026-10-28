@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { redactSensitiveText, sanitizeForSupportBundle } from "@clankie/observability";
+import { redactSensitiveText } from "@clankie/observability";
 import type { OperatorCurrentActivity } from "@clankie/protocol/presence";
 import type { OperatorConversationStreamEvent } from "@clankie/protocol";
 import type { ConversationMeta } from "./types.ts";
@@ -11,7 +11,7 @@ export function safeCurrentActivityText(text: string): string {
 /** The event's actual tool identity, including the fleet bridge's structured operation. */
 function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "tool" }>) {
   let operation = event.name;
-  let detail = event.detail ?? event.summary ?? "";
+  const detail = event.detail ?? event.summary ?? "";
   let args: Record<string, unknown> | undefined;
   try {
     const parsed: unknown = JSON.parse(detail);
@@ -22,25 +22,42 @@ function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "t
         if (object.arguments !== null && typeof object.arguments === "object")
           args = object.arguments as Record<string, unknown>;
       } else args = object;
-      detail = JSON.stringify(sanitizeForSupportBundle(parsed), null, 2);
     }
   } catch {
-    /* A native tool may supply a plain-text summary, already bounded by its event. */
+    /* Unstructured summaries are not a safe source of activity text. */
   }
-  const source: OperatorCurrentActivity["source"] = /(?:^|__)linear_/u.test(operation)
+  const name = operation.toLowerCase();
+  const source: OperatorCurrentActivity["source"] = /(?:^|__)linear_/u.test(name)
     ? "issue"
-    : /(?:^|__)discord_/u.test(operation)
+    : /(?:^|__)discord_/u.test(name)
       ? "discord"
-      : /(?:^|__|\.)(?:exec|exec_command|apply_patch|read|write|edit|bash|shell)$/u.test(operation)
+      : /(?:^|__|\.)(?:exec|exec_command|apply_patch|read|write|edit|bash|shell)$/u.test(name)
         ? "coding"
         : "chat";
   // Only a typed tool's explicit issue identity becomes an issue route. Never scan prose for keys.
   const key = source === "issue" ? (args?.issueId ?? args?.id ?? args?.issue) : undefined;
-  return {
-    source,
-    text: safeCurrentActivityText(`${operation}${detail ? `\n${detail}` : ""}`),
-    ...(typeof key === "string" && /^[A-Z][A-Z0-9]*-\d+$/u.test(key) ? { key } : {}),
-  };
+  const issueKey = typeof key === "string" && /^[A-Z][A-Z0-9]*-\d+$/u.test(key) ? key : undefined;
+  // Only explicitly human descriptions may become text. Never serialize arguments,
+  // interpolate a tool name, or fall back to an unstructured native summary.
+  const description = [args?.description, args?.taskTitle]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => safeCurrentActivityText(value).replace(/\s+/gu, " ").slice(0, 160))
+    .find(Boolean);
+  const label =
+    source === "issue"
+      ? issueKey
+        ? `Updating ${issueKey}`
+        : "Working with issues"
+      : /(?:^|__|\.)(?:message_peer|message_clankie|send_message|followup_task)$/u.test(name)
+        ? "Messaging a worker"
+        : /(?:^|__|\.)(?:hire|hire_worker)$/u.test(name)
+          ? "Hiring a worker"
+          : source === "coding"
+            ? "Running a check"
+            : source === "discord"
+              ? "Checking Discord"
+              : "Working";
+  return { source, text: description || label, ...(issueKey ? { key: issueKey } : {}) };
 }
 
 /** Volatile event projection. No disk reads, transcript scans, timers or model calls on presence reads. */
@@ -88,6 +105,7 @@ export class CurrentActivities {
       const tool = toolActivity(event);
       activity = {
         id: `${conversationId}:${event.cursor}`,
+        kind: "tool",
         source: tool.source,
         text: tool.text,
         target: tool.key ? { kind: "issue", key: tool.key } : { kind: "conversation", conversationId },

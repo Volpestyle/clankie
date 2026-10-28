@@ -23,15 +23,21 @@ The conversation store retains a bounded, volatile projection when live events
 arrive. Only top-level owner global/workspace threads qualify. Mixed rooms,
 channels, worker conversations, side forks, reasoning and historical transcript
 folds are excluded. The existing diagnostic structured-key sanitization and
-free-text credential redaction apply before publication. A pending owner question
+free-text credential redaction apply before publication.
+
+VUH-2949 amends tool publication: optional `kind: "tool"` distinguishes work
+from speech without changing existing sources or targets. Tool text contains
+only a one-line human description (`description` or `taskTitle`) or a fixed
+plain label, never a tool name or serialized arguments. Explicit Linear issue
+keys retain their destination. The pet suppresses tool bubbles; chat, calls
+and owner questions retain their existing text. Older hosts may omit `kind`. A pending owner question
 takes priority over the volatile event projection.
 Its canonical receipt supplies the full redacted prompt, a stable question/incarnation
 ID and its own conversation target. Answering or cancelling it removes that
 glimpse on the next existing presence read. Mixed-room and side-fork questions
 remain withheld. The same pending-question selection already used by presence
 is reused, without another question scan or a new cache. Otherwise the latest
-active tool or committed message supplies the text; there is no invented task
-caption.
+active tool supplies its safe label or a committed message supplies its text.
 Underlying event lifetimes are still checked while a question is visible.
 A completed tool/turn or waiting event clears its event glimpse. Call text additionally requires
 the same conversation's exact active voice-lease incarnation, captured when

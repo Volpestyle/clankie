@@ -20,7 +20,9 @@ does not establish that the owner saw it.
 
 The owner-only `includeCurrentActivity: true` presence read, also used by
 `clankie status`, adds the actual live event's stable ID, source, redacted full
-text and typed destination. It shares the existing presence update; do not add
+text and typed destination. Tools carry `kind: "tool"` and only a short human
+description or fixed label, never tool names or raw arguments. The pet reserves
+bubbles for speech and questions, while its working pose can remain. It shares the existing presence update; do not add
 a polling loop or infer a task from the newest arrival. Only top-level owner
 threads qualify, never mixed-room content, worker history or reasoning. A
 completed task, disconnected source or ended call supplies no glimpse. A pending

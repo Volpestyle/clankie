@@ -211,7 +211,10 @@ values.
 
 `presence.currentActivity`, when available to the operator, contains a stable
 `id`, `source` (`chat`, `discord`, `issue`, `coding`, `call`), redacted full
-`text`, and a typed `target`. The status read opts in to the existing presence
+`text`, and a typed `target`. Tool events additionally carry `kind: "tool"` and
+only a short human description or fixed activity label, never tool names or raw
+arguments. Pet bubbles exclude tool activity; chat and owner questions retain
+their text. The optional kind preserves reads from older hosts. The status read opts in to the existing presence
 request with `includeCurrentActivity: true`; Take Control owner devices use the
 same contract. Support devices and non-owner bearers cannot opt in. Ordinary
 presence fields and labels stay unchanged. Missing activity means the host has
