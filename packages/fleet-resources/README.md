@@ -358,8 +358,9 @@ writing one never fails the work it describes:
 - `leases.jsonl`: every heavy permit's `admitted` and `released` events from the
   command that holds it. Each carries its lane, holder, seat, command line
   (truncated to 256 characters), wait or hold time, exit code and load1. The
-  command line shows `KEY=VALUE` values and the values of `-H` and
-  token/key/secret/password/auth/header/cookie flags as `***`.
+  command line shows as `***` the values of `KEY=VALUE` arguments, of `-H`,
+  `-u`/`--user` and token/key/secret/password/auth/header/cookie flags, the
+  script after `-c`/`-e`/`--eval`, and URL userinfo.
 - `samples.jsonl`: every 30 s from the service: load 1/5/15, the share of all
   cores busy since the previous sample, free disk, and the five busiest
   processes.

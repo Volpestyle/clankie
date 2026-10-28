@@ -73,8 +73,42 @@ it("lease history withholds environment assignments and secret flag values", asy
   expect(await lines(join(registry, "leases.jsonl"))).toEqual([
     expect.objectContaining({
       event: "admitted",
-      command: "node -e process.exit(0) API_KEY=*** --token *** --auth-header=***",
+      command: "node -e *** API_KEY=*** --token *** --auth-header=***",
     }),
+    expect.objectContaining({ event: "released", exitCode: 0 }),
+  ]);
+});
+
+it.each([
+  {
+    withheld: "a shell script",
+    command: "/bin/sh",
+    args: ["-c", "exit 0 # curl -H 'Authorization: Bearer secret-one'"],
+    recorded: "sh -c ***",
+  },
+  {
+    withheld: "user credentials",
+    command: process.execPath,
+    args: ["-e", "process.exit(0)", "--", "-u", "alice:secret-two", "--user=bob:secret-three"],
+    recorded: "node -e *** -- -u *** --user=***",
+  },
+  {
+    withheld: "URL userinfo",
+    command: process.execPath,
+    args: ["-e", "process.exit(0)", "--", "https://carol:secret-four@example.invalid/repo"],
+    recorded: "node -e *** -- https://***@example.invalid/repo",
+  },
+])("lease history withholds $withheld", async ({ command, args, recorded }) => {
+  const registry = join(await scratch(), "registry");
+  const governor = await governorIn(registry);
+  try {
+    expect(await governor.runHeavy(command, args, { holderId: "history" })).toBe(0);
+  } finally {
+    await governor.close();
+  }
+  expect(await readFile(join(registry, "leases.jsonl"), "utf8")).not.toContain("secret-");
+  expect(await lines(join(registry, "leases.jsonl"))).toEqual([
+    expect.objectContaining({ event: "admitted", command: recorded }),
     expect.objectContaining({ event: "released", exitCode: 0 }),
   ]);
 });

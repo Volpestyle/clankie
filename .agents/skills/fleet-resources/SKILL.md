@@ -20,6 +20,9 @@ rules that matter on most turns:
    exact-holder heavy work retains supported holders without timer touches.
 5. A wait is the governor working. Never bypass it with another registry,
    launch route or `HOME`, and never stop a job you can't prove is yours.
+   Never stop processes by pattern (`pkill -f`, `killall`) on a shared
+   machine: every seat runs as the same user, so a pattern kills other seats'
+   gates. Stop your own job by its PID or process group.
 6. Search with `rg`, or with `find` from a narrow directory and a `-maxdepth`.
 7. Wait outside your turn. Run a long heavy command, gate or integration wait
    as your harness's background task and continue on its completion notice;

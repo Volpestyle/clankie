@@ -49,17 +49,21 @@ const machineSampleFile = "samples.jsonl";
 /** About two days of 30-second samples per file. */
 const machineSampleMaxBytes = 4 * 1_048_576;
 
-const secretFlag = /^(?:-H|--?[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*)$/iu;
-const secretFlagValue = /^(--?[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*=).+$/iu;
+// `-c`/`-e` take a whole shell or interpreter script, which can carry any secret.
+const secretFlag =
+  /^(?:-H|-c|-e|--eval|-u|--user|--?[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*)$/iu;
+const secretFlagValue =
+  /^(--(?:eval|user|[\w-]*(?:token|secret|password|auth|key|header|cookie)[\w-]*)=).+$/iu;
+const urlUserinfo = /([a-z][\w+.-]*:\/\/)[^/@\s]+@/giu;
 
-/** The command line, with environment assignments and secret-looking flag values withheld. */
+/** The command line, with environment assignments, scripts and credentials withheld. */
 export function leaseCommand(command: string, args: readonly string[]): string {
   const shown = args.map((arg, index) =>
     /^[A-Za-z_][A-Za-z0-9_]*=/u.test(arg)
       ? `${arg.slice(0, arg.indexOf("="))}=***`
       : index > 0 && secretFlag.test(args[index - 1]!)
         ? "***"
-        : arg.replace(secretFlagValue, "$1***"),
+        : arg.replace(secretFlagValue, "$1***").replace(urlUserinfo, "$1***@"),
   );
   return [basename(command), ...shown].join(" ").slice(0, 256);
 }
