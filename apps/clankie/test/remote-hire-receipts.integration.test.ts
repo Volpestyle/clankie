@@ -529,6 +529,28 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
       let freshPreparations = 0;
       const freshOptions = {
         remoteHireReceipts: native,
+        // New work hires are admitted against observed plan usage (VUH-2256).
+        workerAccountsReport: async () => ({
+          machine: "pc",
+          shell: "posix" as const,
+          observedAt: new Date().toISOString(),
+          accounts: [
+            {
+              harness: "codex" as const,
+              label: "fixture",
+              home,
+              signedIn: true,
+              usable: true,
+              plan: "pro",
+              headroom: 0.8,
+              usage: {
+                source: "codex-rate-limits" as const,
+                observedAt: new Date().toISOString(),
+                windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+              },
+            },
+          ],
+        }),
         runner: createHerdrWatchRunner(
           undefined,
           async (args) =>
@@ -561,6 +583,9 @@ it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST 
         schemaVersion: 1 as const,
         title: "Ada",
         harness: "codex" as const,
+        // A work hire states its own effort since VUH-2256; without it every launch stops at not_ready.
+        effort: "low" as const,
+        effortReason: "Fixture launch that only reaches the owner's preparation denial.",
         fleet: "pc",
         workingDirectory: home,
         freshIntent: { id: randomUUID(), afterReceiptId: freshOriginal.receiptId },

@@ -4147,6 +4147,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     diagnostics: FleetProjectionDiagnostics,
   ): Promise<readonly OperatorFleetSeat[]> {
     await diagnostics.measure("settings_binding", () => personas.ready(settingsStore));
+    // A seat closed after this read may still be listed; the issue keeper ignores it (VUH-2924).
+    const censusAt = Date.now();
     const fleet = await observeFleet(
       false,
       (source, pending, outcome) => {
@@ -4578,7 +4580,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     stopAttribution();
     await diagnostics
-      .measure("issue_keeper", () => issueStatus.observe(liveIssues))
+      .measure("issue_keeper", () => issueStatus.observe(liveIssues, censusAt))
       .then((results) => {
         for (const result of results) if (result.outcome === "failed") warnSeatIssueUnavailable(result);
       });

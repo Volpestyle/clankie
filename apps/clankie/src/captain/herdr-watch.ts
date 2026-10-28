@@ -905,7 +905,7 @@ function settleOriginalFirst(receiptIds: readonly string[]): string {
   const id = receiptIds.length === 1 ? receiptIds[0] : undefined;
   return id === undefined
     ? `Settle the original native hire receipt before retiring its unconfirmed pane${receiptIds.length ? ` (candidates: ${receiptIds.join(", ")})` : "; no unique original was found"}.`
-    : `Settle original native hire receipt ${id} before retiring its unconfirmed pane: settle_hire_receipt ${id} adopt when a local pane still runs its harness, otherwise abandoned.`;
+    : `Settle original native hire receipt ${id} before retiring its unconfirmed pane. The operator settles it: clankie hire-receipt settle ${id} adopt when a local pane still runs its harness, otherwise abandoned.`;
 }
 
 export class HerdrWatchStore implements HerdrWatchPort {

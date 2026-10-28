@@ -1,0 +1,40 @@
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+  server: local-vuh-58 / claude:0b5c7b48-2242-4ec7-af2d-da14e0861b27 / env · server · held 15m
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2924
+
+ ❯ |parallel| apps/clankie/test/seat-issue-settlement.integration.test.ts (6 tests | 1 failed) 1479ms
+   × a seat closed while a roster round runs is neither its own successor nor retired again 104ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |parallel| apps/clankie/test/seat-issue-settlement.integration.test.ts > a seat closed while a roster round runs is neither its own successor nor retired again
+AssertionError: expected { outcome: 'failed', …(3) } to match object { outcome: 'updated', …(2) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "issue": "LOCAL-VUH-4",
+-   "outcome": "updated",
+-   "status": "In Progress",
++   "outcome": "failed",
+  }
+
+ ❯ apps/clankie/test/seat-issue-settlement.integration.test.ts:428:23
+    426|   const stale = await keeper.observe([closing.refused], censusAt);
+    427|   release();
+    428|   expect(await close).toMatchObject({ outcome: "updated", issue: "LOCA…
+       |                       ^
+    429|   expect(await close).not.toHaveProperty("retryUntil");
+    430|   expect(stale).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  09:30:59
+   Duration  2.66s (transform 666ms, setup 55ms, import 955ms, tests 1.48s, environment 0ms)
+

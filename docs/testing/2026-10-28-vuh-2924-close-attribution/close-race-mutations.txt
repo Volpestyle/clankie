@@ -1,0 +1,18 @@
+# VUH-2924 review R1: seat-issue-settlement.integration.test.ts at three source states
+
+== m3
+   × a close that lands while a round awaits the seat's refused capture settles once 107ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 7 passed (8)
+
+== m24
+   × a close that lands while a round awaits the seat's live capture settles once 130ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 7 passed (8)
+
+== base
+   × a seat closed while a roster round runs is neither its own successor nor retired again 101ms
+   × a close that lands while a round awaits the seat's live capture settles once 129ms
+   × a close that lands while a round awaits the seat's refused capture settles once 109ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  3 failed | 5 passed (8)

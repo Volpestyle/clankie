@@ -1,0 +1,38 @@
+clankie heavy: light lane waiting (1/4 held, 1 queued)
+  server: local-vuh-58 / claude:0b5c7b48-2242-4ec7-af2d-da14e0861b27 / env · server · held 16m
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2924
+
+stdout | apps/clankie/test/zz-probe-2924.integration.test.ts > a seat closed while a roster round runs is neither its own successor nor retired again
+VUH-2924 close result {"outcome":"failed","issue":"LOCAL-VUH-4","detail":"Native hire attribution is unavailable or changed occupant.","retryUntil":"2026-10-27T04:45:06.000Z"}
+
+ ❯ |parallel| apps/clankie/test/zz-probe-2924.integration.test.ts (6 tests | 1 failed | 5 skipped) 127ms
+   × a seat closed while a roster round runs is neither its own successor nor retired again 125ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |parallel| apps/clankie/test/zz-probe-2924.integration.test.ts > a seat closed while a roster round runs is neither its own successor nor retired again
+AssertionError: expected { outcome: 'failed', …(3) } to not have property "retryUntil"
+
+- Expected:
+undefined
+
++ Received:
+"2026-10-27T04:45:06.000Z"
+
+ ❯ apps/clankie/test/zz-probe-2924.integration.test.ts:429:27
+    427|   release();
+    428|   console.log("VUH-2924 close result", JSON.stringify(await close));
+    429|   expect(await close).not.toHaveProperty("retryUntil");
+       |                           ^
+    430|   expect(stale).toEqual([]);
+    431|   // A capture taken before the close still confirms the seat; it is n…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  09:31:23
+   Duration  1.26s (transform 667ms, setup 45ms, import 937ms, tests 127ms, environment 0ms)
+

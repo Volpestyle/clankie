@@ -234,6 +234,10 @@ export class SeatIssueKeeper {
   // In memory only: attribution cannot outlive the process, and the daily check
   // still reports an issue whose retirement was lost to a restart.
   private readonly pending = new Map<string, PendingRetirement>();
+  // Seats a lead closed, by close time. A roster read before the close can
+  // still list the exiting seat (VUH-2924); there it is neither a live owner
+  // nor a successor to its own issue, and never comes back to exit again.
+  private readonly closedSeats = new Map<string, number>();
   private readonly seats = new Map<
     string,
     {
@@ -291,10 +295,14 @@ export class SeatIssueKeeper {
   /**
    * Each roster refresh: a seat absent past the grace period exited without a
    * close, and an issue this keeper paused goes back to In Progress once a live
-   * seat holds it again.
+   * seat holds it again. `censusAt` is when the roster was read, on this keeper's clock.
    */
-  public async observe(seats: readonly LiveSeatIssue[]): Promise<SeatIssueSettlement[]> {
+  public async observe(
+    seats: readonly LiveSeatIssue[],
+    censusAt = this.now(),
+  ): Promise<SeatIssueSettlement[]> {
     const now = this.now();
+    const closedAfterCensus = (seatId: string) => (this.closedSeats.get(seatId) ?? -Infinity) > censusAt;
     const results: SeatIssueSettlement[] = [];
     const present = new Map<
       string,
@@ -307,8 +315,10 @@ export class SeatIssueKeeper {
     >();
     this.liveOwners.clear();
     this.unknownOwners.clear();
+    for (const [seatId, at] of this.closedSeats) if (now - at >= DAY_MS) this.closedSeats.delete(seatId);
     const observedKeys = new Set<string>();
     for (const seat of seats) {
+      if (closedAfterCensus(seat.seatId)) continue;
       const observationKey = JSON.stringify([seat.seatId, seat.occupantId, seat.keys, seat.ownedKeys]);
       observedKeys.add(observationKey);
       const unavailable = this.unavailable.get(observationKey);
@@ -328,11 +338,17 @@ export class SeatIssueKeeper {
         const scope = await attribution.resolve();
         this.scopes.set(scope.identity, attribution);
         const canonicalId = issue === undefined ? undefined : await this.canonicalId(scope, issue);
+        const identities: string[] = [];
+        for (const key of [issue, ...(seat.ownedKeys ?? []).map(issueKey)])
+          if (key !== undefined) identities.push(scopedKey(scope, await this.canonicalId(scope, key)));
+        // Closed while this round waited on its tracker.
+        if (closedAfterCensus(seat.seatId)) {
+          this.unknownOwners.delete(seat.seatId);
+          continue;
+        }
         if (issue !== undefined && canonicalId !== undefined)
           present.set(seat.seatId, { ...seat, issue, canonicalId, attribution, scope });
-        for (const key of [issue, ...(seat.ownedKeys ?? []).map(issueKey)]) {
-          if (key === undefined) continue;
-          const identity = scopedKey(scope, await this.canonicalId(scope, key));
+        for (const identity of identities) {
           this.liveOwners.set(identity, [
             ...(this.liveOwners.get(identity) ?? []),
             { seatId: seat.seatId, title: seat.title },
@@ -341,6 +357,11 @@ export class SeatIssueKeeper {
         this.unavailable.delete(observationKey);
         this.unknownOwners.delete(seat.seatId);
       } catch (error) {
+        // An exiting seat's capture fails once its process is gone; that is its close, not a refusal.
+        if (closedAfterCensus(seat.seatId)) {
+          this.unknownOwners.delete(seat.seatId);
+          continue;
+        }
         const result: SeatIssueSettlement = {
           outcome: "failed",
           ...(issue ? { issue } : {}),
@@ -355,6 +376,7 @@ export class SeatIssueKeeper {
       }
     }
     for (const key of this.unavailable.keys()) if (!observedKeys.has(key)) this.unavailable.delete(key);
+    for (const seatId of present.keys()) if (closedAfterCensus(seatId)) present.delete(seatId);
     this.live = new Set(this.liveOwners.keys());
     for (const [seatId, seat] of present)
       this.seats.set(seatId, {
@@ -402,6 +424,7 @@ export class SeatIssueKeeper {
     /** Refs this close parked clean unlanded commits on (VUH-2802). */
     parked?: readonly string[] | undefined;
   }): Promise<SeatIssueSettlement> {
+    this.closedSeats.set(input.seatId, this.now());
     const seat = this.seats.get(input.seatId);
     this.seats.delete(input.seatId);
     this.unknownOwners.delete(input.seatId);

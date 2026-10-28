@@ -1,0 +1,41 @@
+clankie heavy: light lane waiting (0/4 held, 1 queued)
+  server: local-vuh-58 / claude:0b5c7b48-2242-4ec7-af2d-da14e0861b27 / env · server · held 11m
+
+ RUN  v4.1.10 /Users/james/dev/clankie-wt/vuh-2924
+
+stdout | apps/clankie/test/remote-hire-receipts.integration.test.ts > seals a real Herdr/process census, survives restart, blocks late launch and preserves original evidence
+hire_agent: {"harness":"codex","fleet":"pc","outcome":"failed","control":{"mode":"none","reason":"not_ready"},"reason":"not_ready","detail":"Choose effort for this job and give effortReason: why it is the smallest effort that meets acceptance. Fleet-wide effort is retired."}
+
+ ❯ |parallel| apps/clankie/test/remote-hire-receipts.integration.test.ts (19 tests | 1 failed | 18 skipped) 3942ms
+   × seals a real Herdr/process census, survives restart, blocks late launch and preserves original evidence 3939ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |parallel| apps/clankie/test/remote-hire-receipts.integration.test.ts > seals a real Herdr/process census, survives restart, blocks late launch and preserves original evidence
+AssertionError: expected [ 'not_ready', 'not_ready' ] to deeply equal [ 'not_ready', 'start_unconfirmed' ]
+
+- Expected
++ Received
+
+  [
+    "not_ready",
+-   "start_unconfirmed",
++   "not_ready",
+  ]
+
+ ❯ apps/clankie/test/remote-hire-receipts.integration.test.ts:598:11
+    596|         expect(
+    597|           concurrent.map((result) => (result.outcome === "failed" ? re…
+    598|         ).toEqual(["not_ready", "start_unconfirmed"]);
+       |           ^
+    599|         expect(freshPreparations).toBe(1);
+    600|         expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 skipped (19)
+   Start at  09:26:30
+   Duration  10.30s (transform 3.83s, setup 108ms, import 5.99s, tests 3.94s, environment 0ms)
+

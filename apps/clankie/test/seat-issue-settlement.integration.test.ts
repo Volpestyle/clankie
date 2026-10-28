@@ -398,3 +398,83 @@ it("settles past an unattributed seat on another tracker's key, and keeps status
     ),
   ]);
 });
+
+it("a seat closed while a roster round runs is neither its own successor nor retired again", async () => {
+  // VUH-2924: close_worker_pane failed issue settlement with "changed occupant" on ordinary local seats.
+  const { keeper, project, advance } = await setup();
+  const a = await project("a");
+  const closing = await a.hire("Piers", "LOCAL-VUH-4");
+  let hold: Promise<void> | undefined;
+  const tracked: LiveSeatIssue = {
+    ...closing.live,
+    attribution: {
+      resolve: async () => {
+        await hold;
+        return closing.live.attribution!.resolve();
+      },
+    },
+  };
+  await keeper.observe([tracked]);
+  // The next round reads the roster, and the lead closes the seat while that round still runs.
+  advance(5_000);
+  const censusAt = Date.parse("2026-10-26T22:45:05Z");
+  advance(1_000);
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  const close = keeper.closed({ seatId: closing.live.seatId, reason: "work landed" });
+  // That round still lists the exiting seat; with its process gone, the capture can't prove the occupant.
+  const stale = await keeper.observe([closing.refused], censusAt);
+  release();
+  expect(await close).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", status: "In Progress" });
+  expect(await close).not.toHaveProperty("retryUntil");
+  expect(stale).toEqual([]);
+  // A capture taken before the close still confirms the seat; it is not tracked again.
+  expect(await keeper.observe([closing.live], censusAt)).toEqual([]);
+  expect(await keeper.observe([])).toEqual([]);
+  advance(120_000);
+  expect(await keeper.observe([])).toEqual([]);
+  expect(await a.comments(4)).toEqual([
+    expect.stringContaining("Piers left: work landed. Status kept: In Progress (no outcome stated)."),
+  ]);
+  expect(await a.issue(4)).toMatchObject({ status: "In Progress" });
+});
+
+// From Corvin's review: the close lands while the round waits on the seat's tracker, as a Linear read can.
+for (const capture of ["live", "refused"] as const)
+  it(`a close that lands while a round awaits the seat's ${capture} capture settles once`, async () => {
+    const { keeper, project, advance } = await setup();
+    const a = await project("a");
+    const closing = await a.hire("Piers", "LOCAL-VUH-4");
+    await keeper.observe([closing.live]);
+    advance(5_000);
+    const censusAt = Date.parse("2026-10-26T22:45:05Z");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const waiting: LiveSeatIssue = {
+      ...closing[capture],
+      attribution: {
+        resolve: async () => {
+          entered();
+          await gate;
+          return closing[capture].attribution!.resolve();
+        },
+      },
+    };
+    const round = keeper.observe([waiting], censusAt);
+    await inside;
+    advance(1_000);
+    const close = await keeper.closed({ seatId: closing.live.seatId, reason: "work landed" });
+    release();
+    expect(close).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", status: "In Progress" });
+    // A refused capture is the exit, not a failure; a live one does not track the seat again.
+    expect(await round).toEqual([]);
+    expect(await keeper.observe([])).toEqual([]);
+    advance(120_000);
+    expect(await keeper.observe([])).toEqual([]);
+    expect(await a.comments(4)).toEqual([
+      expect.stringContaining("Piers left: work landed. Status kept: In Progress (no outcome stated)."),
+    ]);
+    expect(await a.issue(4)).toMatchObject({ status: "In Progress" });
+  });
