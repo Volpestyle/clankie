@@ -98,6 +98,20 @@ any repo.
   left untouched. Anything it cannot fetch or verify is named with its reason,
   and the command exits non-zero.
 
+**Amendment (VUH-2923, 2026-10-27): linked machines push over the fleet link.**
+A fleet machine such as the Windows PC has no Clankie CLI and no operator
+credential, only Node and the worker plugin. The plugin now carries the push
+walk (`worker/bin/evidence-push.mjs`, which Clankie's own CLI also runs) and two
+ways in: a `clankie` command in its `bin/`, which Claude Code appends to PATH so
+an installed CLI still wins, and an `evidence_push` bridge tool for harnesses
+without that PATH. Both need `--issue`; key inference stays on Clankie's
+machine. The upload and receipt reads go to `/v1/fleet/seats/{pane}/evidence-uploads`,
+where the seat proves itself as a peer sender does and becomes the record's
+actor (`seat`, its worker name, and its lead as `onBehalfOf`). The bytes then go
+to the store's signed upload path on the same link; its signature authorizes
+them, so no remote proof runs while they stream. The store still refuses any
+blob whose sha256 differs from the one the pane hashed.
+
 **Manifest.** `evidence.json` sits beside the folder's `README.md`, so agents
 grepping the repo still find every pointer:
 

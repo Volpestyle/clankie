@@ -335,6 +335,8 @@ export const FleetPeerReceiptSchema = z
 export type FleetPeerReceipt = z.infer<typeof FleetPeerReceiptSchema>;
 export const FLEET_PEER_SEATS_PATH = "/v1/fleet/seats/:paneId/peers";
 export const FLEET_PEER_MESSAGES_PATH = "/v1/fleet/seats/:paneId/peer-messages";
+/** A fleet pane's evidence upload and receipt reads over its own link (VUH-2923). */
+export const FLEET_EVIDENCE_UPLOADS_PATH = "/v1/fleet/seats/:paneId/evidence-uploads";
 /**
  * The link a machine on an ssh fleet uses to reach Clankie (VUH-1527): his
  * service through a reverse ssh forward on that machine's loopback, and a

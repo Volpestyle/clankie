@@ -262,6 +262,8 @@ const workerCallResponse = <T extends { outcome: string; isError?: boolean }>(re
 // bridge to serve them; its expected catalog names the same ones (VUH-2904).
 const WORKER_REVIEWS = "on" as const;
 const WORKER_REVIEW_TOOL_NAMES = WORKER_REVIEWS === "on" ? REVIEW_TOOLS.map((tool) => tool.name) : [];
+/** The evidence seat routes (VUH-2923): a linked pane's bridge serves evidence_push over its link. */
+const WORKER_EVIDENCE = "on" as const;
 const FLEET_TOOLS = [
   {
     name: "clankie_tools",
@@ -1425,6 +1427,7 @@ export class WorkerMcp {
       ...((await this.fleetToolsEnabled()) ? FLEET_TOOLS.map((tool) => tool.name) : []),
       ...((await this.options.fleetPeerMessages?.()) === "on" ? ["list_fleet_seats", "message_peer"] : []),
       ...WORKER_REVIEW_TOOL_NAMES,
+      ...(WORKER_EVIDENCE === "on" ? ["evidence_push"] : []),
     ];
   }
 
@@ -1638,6 +1641,7 @@ export class WorkerMcp {
                   tools: connected ? "connected" : "off",
                   peerMessages,
                   reviews: WORKER_REVIEWS,
+                  evidence: WORKER_EVIDENCE,
                   refreshPending,
                   catalogRevision: this.catalogRevisionOf(
                     authority.fleet,

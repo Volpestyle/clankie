@@ -17,6 +17,7 @@ import type { ConversationOwner, ConversationAuthority, WorkerWriteAuthority } f
 import type { SeatTranscriptUpload } from "@clankie/agent-transcript";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type { PeerSeatAuthority } from "./peer-seat-messages.ts";
+import type { EvidenceActor } from "@clankie/protocol/evidence";
 import type { ReviewGate } from "./review-gate.ts";
 import type { InboundSeatRequest } from "./inbound-seat-receipts.ts";
 import type {
@@ -543,6 +544,8 @@ export interface CaptainPort {
     delivery: FleetSeatMessageDelivery,
     fingerprint: string,
   ): Promise<FleetPeerReceipt | undefined>;
+  /** The proven seat as an evidence record's actor, with its worker name and lead (VUH-2923). */
+  fleetSeatEvidenceActor(authority: PeerSeatAuthority): Promise<EvidenceActor | undefined>;
   /** The seat's answer to an escalation; false when nothing waits on that id. */
   replySeatEvent(eventId: string, text: string, conversationId?: string): Promise<boolean>;
   /**
@@ -724,6 +727,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       throw new Error("Peer delivery unavailable");
     },
     reconcileFleetPeerMessage: async () => undefined,
+    fleetSeatEvidenceActor: async () => undefined,
     replySeatEvent: async () => false,
     bodyRoomConversation: (lane, targetId) => `room:${lane}:${targetId}`,
     laneToolBank: async (lane) => ({ lane, tools: [] }),

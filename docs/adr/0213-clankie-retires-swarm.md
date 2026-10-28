@@ -220,3 +220,14 @@ Deterministic server and bridge tests cover authority, fleet isolation, stale
 bindings, the switch and uncertain receipt reconciliation. The live PC check with
 two KH2 panes follows landing and re-pin; those tests are not evidence that the
 installed native PC path worked.
+
+**Amendment (VUH-2923, 2026-10-27): one lead's seats reach each other across
+machines.** A PC worker couldn't message the lead's standing reviewer on the Mac,
+so the lead relayed by hand. A recipient on another fleet machine is now allowed
+when the sender's and recipient's persisted leads are the same conversation,
+read for each exact native occupant. Discovery lists the sender's own fleet as
+before, plus the seats on other fleets that its lead's roster names; the service
+rechecks both leads at the dispatch fence. A seat no conversation leads, or one
+whose occupant no longer matches its claim, keeps only its own fleet. Another
+lead's seat is never listed and a hand-built send to it is refused, even with
+its exact binding.

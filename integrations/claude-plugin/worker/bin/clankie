@@ -1,0 +1,4 @@
+#!/bin/sh
+# A linked machine's `clankie` (VUH-2923): see clankie-cli.mjs. Claude Code
+# appends this directory to PATH, so an installed Clankie CLI still wins.
+exec node "$(dirname "$0")/clankie-cli.mjs" "$@"

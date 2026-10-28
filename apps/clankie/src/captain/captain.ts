@@ -6387,6 +6387,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     recipient: (seat) => herdrRunner.resolveTerminal(seat).catch(() => undefined),
     // A linked machine's seat lists its own machine's inventory (VUH-2616).
     seats: (fleet) => herdrRunner.list?.(fleet === "default" ? undefined : fleet) ?? Promise.resolve([]),
+    // Seats on other machines reach each other only under one lead (VUH-2923).
+    lead: (agent) => herdrWatches.nativeOwner(agent),
+    leadSeats: async (lead) => {
+      const seats = (await refreshFleet()).filter(
+        (seat) => seat.owner?.conversationId === lead.conversationId,
+      );
+      const resolved = await Promise.all(
+        // allow-swallowed-rejection -- A seat Herdr cannot resolve is no live peer.
+        seats.map((seat) => herdrRunner.resolveTerminal(seat.seatId).catch(() => undefined)),
+      );
+      return resolved.filter((seat): seat is HerdrAgentSnapshot => seat !== undefined);
+    },
     deliver: (seat, text, deliveryOptions) =>
       deliverToSeat(
         seat,
@@ -6513,6 +6525,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     sendFleetPeerMessage: (authority, input) => peerMessages.send(authority, input),
     reconcileFleetPeerMessage: (authority, delivery, fingerprint) =>
       peerMessages.reconcile(authority, delivery, fingerprint),
+    async fleetSeatEvidenceActor(authority) {
+      const proof = authority.proof;
+      const pane = proof.fleet === "default" ? proof.pane : `${proof.fleet}/${proof.pane}`;
+      const agent = proof.nativeSessionPending
+        ? undefined
+        : // allow-swallowed-rejection -- A seat Herdr cannot read is no proven actor; the route refuses it.
+          await herdrRunner.get(pane).catch(() => undefined);
+      if (
+        !agent?.session ||
+        agent.paneId !== pane ||
+        occupantIdForHerdrSession(agent.session) !== proof.nativeOccupantId ||
+        !(await authority.validate())
+      )
+        return undefined;
+      let lead: ConversationOwner | undefined;
+      try {
+        lead = herdrWatches.nativeOwner(agent);
+      } catch {
+        // A changed occupant has no lead to name; the seat itself is still proven.
+        lead = undefined;
+      }
+      return {
+        kind: "seat" as const,
+        id: agent.terminalId,
+        name: workerParty(agent.terminalId).label,
+        onBehalfOf: lead === undefined ? [] : [{ kind: "conversation", id: lead.conversationId }],
+      };
+    },
     async submitChannelProjectionMessage(request) {
       const discord = discordGuildSettings(
         await readDiscordServerSettings(options.discordEnvironment, settingsStore),

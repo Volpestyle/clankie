@@ -440,6 +440,7 @@ export {
   type FleetPeerReceipt,
   FLEET_PEER_SEATS_PATH,
   FLEET_PEER_MESSAGES_PATH,
+  FLEET_EVIDENCE_UPLOADS_PATH,
   FleetLinkFileSchema,
   type FleetLinkFile,
   OperatorSeatReplySchema,

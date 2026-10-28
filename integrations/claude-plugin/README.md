@@ -378,8 +378,11 @@ it runs the native seat mailbox or fleet link, with no coordinator runtime.
 
 - **A machine in one of his ssh fleets** (VUH-1527): when
   `~/.clankie/link.json` exists, the same channel and hooks run in plain Node
-  over that machine's link to Clankie, with no `clankie` CLI or operator
-  credential there (`bin/seat-channel.mjs`, `bin/link.mjs`). The link's token
+  over that machine's link to Clankie, with no Clankie CLI or operator
+  credential there (`bin/seat-channel.mjs`, `bin/link.mjs`). The plugin's own
+  `bin/clankie` answers only `clankie evidence push PATH --issue KEY` over the
+  pane's link (VUH-2923); Claude Code appends `bin/` to PATH, so an installed
+  CLI still wins, and the bridge's `evidence_push` tool does the same push. The link's token
   only reaches the seat routes of that fleet's panes. Windows reads the
   launching session's command line from the process table instead of `ps`.
   `clankie herdr prepare NAME` ships this plugin there as a `clankie`

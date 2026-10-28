@@ -10,6 +10,7 @@ import {
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { splitFleetQualified } from "../herdr-fleet.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
@@ -17,6 +18,7 @@ import { deliveryFingerprint } from "./delivery-fence.ts";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
+import type { ConversationOwner } from "./conversation-owner.ts";
 
 /** Supplied by the trusted listener, never by a message's arguments. */
 export interface PeerSeatAuthority {
@@ -155,6 +157,13 @@ export class PeerSeatMessages {
     recipient(seatId: string): Promise<HerdrAgentSnapshot | undefined>;
     /** The complete inventory of one fleet: `default` is this machine's. */
     seats(fleet: string): Promise<readonly HerdrAgentSnapshot[]>;
+    /**
+     * The persisted lead of this exact native occupant, or undefined for a seat
+     * no conversation leads. Throws when the occupant no longer matches its claim.
+     */
+    lead?(agent: HerdrAgentSnapshot): ConversationOwner | undefined;
+    /** Live seats on any fleet that this lead's roster names; `lead` rechecks each. */
+    leadSeats?(lead: ConversationOwner): Promise<readonly HerdrAgentSnapshot[]>;
     deliver(seatId: string, text: string, options: PeerDeliveryOptions): Promise<FleetSeatDelivery>;
     /** A first confirmed native acceptance, never an attempt or receipt read. */
     confirmed?(event: {
@@ -215,6 +224,20 @@ export class PeerSeatMessages {
       : undefined;
   }
 
+  /** One lead's seats reach each other across machines; any other seat stays in its own fleet (VUH-2923). */
+  private sameLead(sender: HerdrAgentSnapshot, recipient: HerdrAgentSnapshot): boolean {
+    try {
+      const lead = this.options.lead?.(sender);
+      return lead !== undefined && isDeepStrictEqual(lead, this.options.lead!(recipient));
+    } catch {
+      return false;
+    }
+  }
+
+  private reachable(sender: HerdrAgentSnapshot, recipient: HerdrAgentSnapshot): boolean {
+    return fleetOf(recipient) === fleetOf(sender) || this.sameLead(sender, recipient);
+  }
+
   async list(authority: PeerSeatAuthority): Promise<FleetPeerSeats | undefined> {
     if (!(await this.options.enabled())) return undefined;
     // Discovery only reads observations. The final fresh authority check below
@@ -223,6 +246,18 @@ export class PeerSeatMessages {
     const sender = await this.sender(authority, false);
     if (!sender) return undefined;
     const seats = await this.options.seats(authority.proof.fleet);
+    let lead: ConversationOwner | undefined;
+    try {
+      lead = this.options.lead?.(sender);
+    } catch {
+      lead = undefined;
+    }
+    const elsewhere =
+      lead === undefined || this.options.leadSeats === undefined
+        ? []
+        : (await this.options.leadSeats(lead)).filter(
+            (seat) => fleetOf(seat) !== authority.proof.fleet && this.sameLead(sender, seat),
+          );
     if (!(await authority.validate()) || !(await this.options.enabled())) return undefined;
     const card = (agent: HerdrAgentSnapshot) => ({
       seatId: agent.terminalId,
@@ -235,13 +270,13 @@ export class PeerSeatMessages {
       schemaVersion: 1,
       fleet: authority.proof.fleet,
       sender: card(sender),
-      seats: seats
-        .filter(
-          (seat) =>
-            fleetOf(seat) === authority.proof.fleet &&
-            seat.terminalId !== sender.terminalId &&
-            seatBinding(seat),
-        )
+      seats: [
+        ...seats.filter((seat) => fleetOf(seat) === authority.proof.fleet),
+        ...elsewhere.filter(
+          (seat, index) => elsewhere.findIndex((other) => other.terminalId === seat.terminalId) === index,
+        ),
+      ]
+        .filter((seat) => seat.terminalId !== sender.terminalId && seatBinding(seat))
         .map(card),
     };
   }
@@ -276,7 +311,7 @@ export class PeerSeatMessages {
       seatBinding(sender) === input.delivery.binding &&
       !!recipient &&
       recipient.terminalId === input.seatId &&
-      fleetOf(recipient) === authority.proof.fleet &&
+      this.reachable(sender, recipient) &&
       recipient.terminalId !== sender.terminalId &&
       seatBinding(recipient) === input.recipientBinding &&
       (!native ||
@@ -417,7 +452,7 @@ export class PeerSeatMessages {
     if (record.receipt.deliveryStage !== "uncertain") return record.receipt;
     if (
       !recipient ||
-      fleetOf(recipient) !== record.fleet ||
+      recipient.terminalId !== record.input.seatId ||
       seatBinding(recipient) !== record.input.recipientBinding
     ) {
       try {

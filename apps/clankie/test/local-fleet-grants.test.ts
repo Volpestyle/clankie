@@ -13,7 +13,8 @@ import { WorkerMcp } from "../src/worker-mcp.ts";
 import type { HttpBindings } from "@hono/node-server";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 
-const reviewTools = ["submit_for_review", "review_candidate", "review_verdict"];
+// The bridge's own seat tools the service expects beside its wrappers (ADR 0287, VUH-2923).
+const seatTools = ["submit_for_review", "review_candidate", "review_verdict", "evidence_push"];
 
 it("gives proven local panes the two-tool bridge without project proof and rechecks admission and the kill switch", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-fleet-tools-"));
@@ -136,7 +137,7 @@ it("gives proven local panes the two-tool bridge without project proof and reche
     expect(await worker.expectedProjectToolNames("ungranted")).toEqual([
       "clankie_tools",
       "clankie_call",
-      ...reviewTools,
+      ...seatTools,
     ]);
     const initialized = await rpc("w1:p1", "initialize", {
       protocolVersion: "2025-06-18",
@@ -172,7 +173,7 @@ it("gives proven local panes the two-tool bridge without project proof and reche
     tools = "off";
     expect(await list()).toEqual([]);
     // The bridge still serves the review gate's tools (VUH-2904).
-    expect(await worker.expectedProjectToolNames("anything")).toEqual(reviewTools);
+    expect(await worker.expectedProjectToolNames("anything")).toEqual(seatTools);
     expect((await call()).isError).toBe(true);
     expect(calls).toHaveBeenCalledOnce();
     tools = "connected";

@@ -77,13 +77,15 @@ class HeldSettings extends SettingsStore {
   }
 }
 
-// A real bridge reports the review gate's tools beside the wrappers (VUH-2904).
+// A real bridge reports the review gate's tools beside the wrappers (VUH-2904),
+// and its evidence push (VUH-2923).
 const reportedTools = [
   "clankie_tools",
   "clankie_call",
   "submit_for_review",
   "review_candidate",
   "review_verdict",
+  "evidence_push",
 ];
 const requestTimeoutMs = 250;
 // The bridge's request budget. A slow binding lookup is held until the case

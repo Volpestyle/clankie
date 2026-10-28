@@ -291,8 +291,9 @@ The service enforces this authority on local and remote paths. The sender must
 have a proven native pane process and a matching native session. Transport-only
 fleet admission, caller-supplied pane IDs and legacy bearer-only links cannot
 establish that identity. Connected-tool access and project approval do not widen
-peer-message scope. The recipient must belong to the same fleet, retain the exact
-current binding and have an available native delivery route. A changed occupant
+peer-message scope. The recipient must belong to the same fleet, or to another
+fleet machine under the sender's own lead (VUH-2923), retain the exact current
+binding and have an available native delivery route. A changed occupant
 or session requires fresh discovery, not redirecting the old message.
 
 Discovery uses `GET /v1/fleet/seats/{paneId}/peers`, sending uses
@@ -348,9 +349,9 @@ The service retains full bodies for the latest 100 settled messages and every
 unresolved message. Older settled bodies are pruned, with compact exact receipts
 retained to prevent an old delivery ID from dispatching again.
 [ADR 0213](adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608)
-records this contract. Peers never cross a fleet boundary: a seat on one machine
-cannot message a seat on another, and the send is refused as unknown or ambiguous
-in this fleet. Until [ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md),
+records this contract. Peers cross a fleet boundary only under one lead: a PC
+worker reaches the Mac reviewer its own lead leads, and another lead's seat is
+never listed and refused if addressed (VUH-2923). Until [ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md),
 remote seats also saw an empty catalog; that is fixed.
 
 ## Landing review

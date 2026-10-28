@@ -1,24 +1,9 @@
 import { runEvidenceStorageCommand } from "./evidence-storage.ts";
-import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import {
-  lstat,
-  mkdir,
-  readFile,
-  readdir,
-  realpath,
-  rename,
-  rm,
-  stat,
-  unlink,
-  writeFile,
-  copyFile,
-} from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { promisify } from "node:util";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
   EVIDENCE_RECENT_PATH,
@@ -35,12 +20,26 @@ import {
   evidenceIssueKeys,
   evidenceReadmeIssueKeys,
   type EvidenceManifest,
-  type EvidenceManifestObject,
   type EvidenceReceipt,
   type EvidenceRecord,
 } from "@clankie/protocol/evidence";
 import { WorkConventionSchema } from "@clankie/protocol/work-items";
+import {
+  MANIFEST,
+  MIRROR,
+  evidenceRoots,
+  exists,
+  inside,
+  posix,
+  pushEvidence,
+  refusal,
+  repoRootOf,
+  sha256File,
+  type EvidencePushInput,
+} from "../../../../integrations/claude-plugin/worker/bin/evidence-push.mjs";
 import { commandHost } from "./io.ts";
+
+export { evidenceRoots };
 
 /**
  * `clankie evidence push|fetch|list|receipt` (ADR 0258). Paths resolve from the
@@ -56,31 +55,6 @@ const EVIDENCE_USAGE = [
   "       clankie evidence list --recent [--project NAME] [--repo REPO] [--issue KEY] [--actor-kind KIND] [--actor-name NAME] [--media-type TYPE] [--since ISO] [--until ISO] [--cursor CURSOR] [--limit N]",
   "       clankie evidence receipt RECEIPT_ID",
 ].join("\n");
-
-/** Repository-relative evidence roots (ADR 0258). Only files under these ever move. */
-const DEFAULT_EVIDENCE_ROOTS = ["docs/testing"] as const;
-const EVIDENCE_CONFIG = join(".clankie", "evidence.json");
-const MANIFEST = "evidence.json";
-const MIRROR = join(".local", "evidence");
-/** Non-media files below this stay readable in git. */
-const RAW_MIN_BYTES = 16 * 1024;
-const MEDIA_TYPES: Readonly<Record<string, string>> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-};
-const RAW_TYPES: Readonly<Record<string, string>> = {
-  ".json": "application/json",
-  ".jsonl": "application/x-ndjson",
-  ".log": "text/plain",
-  ".txt": "text/plain",
-};
-
-const execFileAsync = promisify(execFile);
 
 export interface EvidenceOptions {
   readonly cwd?: string;
@@ -202,19 +176,6 @@ class EvidenceClient {
   }
 }
 
-async function git(cwd: string, args: readonly string[]) {
-  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args]);
-  return stdout.trim();
-}
-
-async function repoRootOf(cwd: string) {
-  try {
-    return await realpath(await git(cwd, ["rev-parse", "--show-toplevel"]));
-  } catch {
-    throw new Error(`${cwd} is not inside a git repository`);
-  }
-}
-
 /**
  * The tracker team keys an inferred evidence key may carry: the convention's
  * Linear team, beside the built-in tracker's own `LOCAL-…` keys that every repo
@@ -234,49 +195,6 @@ export async function evidenceKeyTeams(repo: string): Promise<string[]> {
   return team ? [team.replace(/[^A-Za-z0-9]/gu, "").toUpperCase()] : [];
 }
 
-export async function evidenceRoots(repo: string): Promise<readonly string[]> {
-  try {
-    const parsed: unknown = JSON.parse(await readFile(join(repo, EVIDENCE_CONFIG), "utf8"));
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      !Array.isArray((parsed as { roots?: unknown }).roots) ||
-      !(parsed as { roots: unknown[] }).roots.length ||
-      (parsed as { roots: unknown[] }).roots.some(
-        (root) =>
-          typeof root !== "string" ||
-          root.length === 0 ||
-          isAbsolute(root) ||
-          root.split(/[\\/]/u).includes(".."),
-      )
-    )
-      throw new Error(`must contain a non-empty relative roots array`);
-    return (parsed as { roots: string[] }).roots.map((root) =>
-      root.replaceAll("\\", "/").replace(/\/+$/u, ""),
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return DEFAULT_EVIDENCE_ROOTS;
-    throw new Error(`Invalid ${EVIDENCE_CONFIG}: ${String(error)}`);
-  }
-}
-
-const posix = (path: string) => path.split(sep).join("/");
-
-async function sha256File(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  await pipeline(createReadStream(path), hash);
-  return hash.digest("hex");
-}
-
-async function exists(path: string) {
-  try {
-    await lstat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function readManifest(path: string): Promise<EvidenceManifest | undefined> {
   let text: string;
   try {
@@ -288,273 +206,17 @@ async function readManifest(path: string): Promise<EvidenceManifest | undefined>
   return EvidenceManifestSchema.parse(JSON.parse(text));
 }
 
-function serializeManifest(objects: readonly EvidenceManifestObject[]): string {
-  const sorted = [...objects].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return `${JSON.stringify({ version: 1, objects: sorted }, null, 2)}\n`;
-}
-
-/** Media of any size, or any other non-Markdown file of 16 KiB or more (ADR 0258). */
-function evidenceKind(name: string, size: number): string | undefined {
-  const extension = extname(name).toLowerCase();
-  if (name === MANIFEST || extension === ".md") return undefined;
-  const media = MEDIA_TYPES[extension];
-  if (media !== undefined) return media;
-  return size >= RAW_MIN_BYTES ? (RAW_TYPES[extension] ?? "application/octet-stream") : undefined;
-}
-
-async function walk(directory: string): Promise<string[]> {
-  const files: string[] = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...(await walk(path)));
-    else if (entry.isFile()) files.push(path);
-  }
-  return files;
-}
-
-function inside(parent: string, child: string) {
-  const rel = relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-}
-
-/** The folder whose manifest lists `start`: the nearest with evidence.json, else with README.md, else `start`. */
-async function manifestFolder(root: string, start: string): Promise<string> {
-  for (const marker of [MANIFEST, "README.md"]) {
-    for (let folder = start; inside(root, folder); folder = dirname(folder))
-      if (await exists(join(folder, marker))) return folder;
-  }
-  return start;
-}
-
-function refusal(repoRelative: string, roots: readonly string[]) {
-  return new Error(
-    `${repoRelative || "."} is outside the evidence roots (${roots.join(", ")}); ` +
-      "push a folder inside one. Product assets stay in git.",
-  );
-}
-
-interface EvidencePushResult {
-  readonly ok: boolean;
-  readonly manifest?: string;
-  readonly issueKey?: string;
-  readonly issueSource?: string;
-  readonly manifestChanged: boolean;
-  readonly uploaded: number;
-  readonly added: readonly { path: string; url: string }[];
-  readonly changed: readonly { path: string; url: string }[];
-  readonly moved: readonly { from: string; to: string }[];
-  readonly receipts: readonly { path: string; receiptId: string; state: string }[];
-  readonly failures: readonly Failure[];
-  readonly summary: string;
-}
-
-async function evidencePush(
-  input: {
-    path?: string;
-    issueKey?: string;
-    caption?: string;
-    project?: string;
-    repo?: string;
-    model?: string;
-    outcome?: string;
-  },
-  options: EvidenceOptions = {},
-): Promise<EvidencePushResult> {
-  const cwd = options.cwd ?? process.cwd();
-  const repo = await repoRootOf(cwd);
-  const roots = await evidenceRoots(repo);
-  const requested = resolve(cwd, input.path ?? ".");
-  if (!(await exists(requested))) throw new Error(`${input.path ?? "."} does not exist`);
-  const target = await realpath(requested);
-  const targetRelative = posix(relative(repo, target));
-  const root = roots.map((entry) => join(repo, entry)).find((entry) => inside(entry, target));
-  if (root === undefined) throw refusal(targetRelative, roots);
-  const isFile = (await stat(target)).isFile();
-  const folder = await manifestFolder(root, isFile ? dirname(target) : target);
-  const folderRelative = posix(relative(repo, folder));
-  const manifestPath = join(folder, MANIFEST);
-  const commit = await git(repo, ["rev-parse", "HEAD"]).catch(() => undefined);
-  let issueKey = input.issueKey;
-  let issueSource = issueKey === undefined ? undefined : "--issue";
-  if (issueKey === undefined) {
-    const teams = await evidenceKeyTeams(repo);
-    for (const [source, keys] of [
-      ["branch", evidenceIssueKeys(await git(repo, ["branch", "--show-current"]).catch(() => ""), teams)],
-      ["worktree directory", evidenceIssueKeys(repo.split(sep).at(-1) ?? "", teams)],
-      [
-        "folder README",
-        evidenceReadmeIssueKeys(await readFile(join(folder, "README.md"), "utf8").catch(() => ""), teams),
-      ],
-    ] as const) {
-      if (keys.length) {
-        issueKey = keys.join(" ");
-        issueSource = source;
-        break;
-      }
-    }
-  }
-  const issueSummary =
-    issueKey === undefined ? "No issue key found." : `Issue ${issueKey} from ${issueSource}.`;
-
-  const candidates: { file: string; size: number; contentType: string }[] = [];
-  for (const file of isFile ? [target] : await walk(target)) {
-    if (!inside(folder, file)) continue;
-    const size = (await stat(file)).size;
-    const contentType = evidenceKind(file.slice(file.lastIndexOf(sep) + 1), size);
-    if (contentType !== undefined) candidates.push({ file, size, contentType });
-  }
-
-  const existing = await readManifest(manifestPath);
-  const entries = new Map((existing?.objects ?? []).map((object) => [object.path, object]));
-  const added: { path: string; url: string }[] = [];
-  const changed: { path: string; url: string }[] = [];
-  const failures: Failure[] = [];
-  const receipts: { path: string; receiptId: string; state: string }[] = [];
-  const pushed: { file: string; path: string; sha256: string }[] = [];
-  let uploaded = 0;
-  const repoName =
-    input.repo ?? (await git(repo, ["remote", "get-url", "origin"]).catch(() => repo.split(sep).at(-1)));
-  const client = candidates.length === 0 ? undefined : await EvidenceClient.connect(options);
-  for (const candidate of candidates) {
-    const path = posix(relative(folder, candidate.file));
-    const repoPath = posix(relative(repo, candidate.file));
-    try {
-      const sha256 = await sha256File(candidate.file);
-      const request = {
-        // Deterministic: a retried push asks for the same receipt instead of a second record.
-        idempotencyKey: createHash("sha256")
-          .update(
-            JSON.stringify([
-              repoPath,
-              sha256,
-              commit ?? null,
-              issueKey ?? null,
-              input.caption ?? null,
-              repoName ?? null,
-              input.project ?? null,
-              input.model ?? null,
-              input.outcome ?? null,
-            ]),
-          )
-          .digest("hex"),
-        sha256,
-        size: candidate.size,
-        contentType: candidate.contentType,
-        fileName: repoPath,
-        repo: repoName,
-        ...(input.project === undefined ? {} : { project: input.project }),
-        ...(input.model === undefined ? {} : { model: input.model }),
-        ...(input.outcome === undefined ? {} : { outcome: input.outcome }),
-        ...(issueKey === undefined ? {} : { issueKey }),
-        ...(commit === undefined ? {} : { commit }),
-        ...(input.caption === undefined ? {} : { caption: input.caption }),
-      };
-      let receipt: EvidenceReceipt;
-      try {
-        receipt = await client!.upload(request);
-      } catch (error) {
-        // An unanswered upload is reconciled by its receipt, never resent blind.
-        const known = await client!.receipt(request.idempotencyKey);
-        if (known === undefined) throw error;
-        receipt = known;
-      }
-      for (let attempt = 0; receipt.state === "pending" && attempt < 2; attempt += 1) {
-        try {
-          receipt = await client!.putBlob(receipt.uploadUrl!, candidate.file, candidate.size);
-          uploaded += 1;
-        } catch (error) {
-          const known = await client!.receipt(request.idempotencyKey);
-          if (known === undefined || attempt === 1) throw error;
-          receipt = known;
-        }
-      }
-      receipts.push({ path, receiptId: receipt.receiptId, state: receipt.state });
-      if (receipt.state !== "applied") {
-        failures.push({ path, reason: receipt.refusal ?? `upload ${receipt.state}` });
-        continue;
-      }
-      const url = evidenceLink(sha256);
-      const previous = entries.get(path);
-      if (previous === undefined) added.push({ path, url });
-      else if (previous.sha256 !== sha256) changed.push({ path, url });
-      entries.set(path, { path, size: candidate.size, sha256, url });
-      pushed.push({ file: candidate.file, path, sha256 });
-    } catch (error) {
-      failures.push({ path, reason: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
-  let manifestChanged = false;
-  if (entries.size > 0) {
-    const next = serializeManifest([...entries.values()]);
-    const before = existing === undefined ? undefined : await readFile(manifestPath, "utf8");
-    if (before !== next) {
-      await writeFile(manifestPath, next);
-      manifestChanged = true;
-    }
-  }
-
-  const moved: { from: string; to: string }[] = [];
-  for (const object of pushed) {
-    const destination = join(repo, MIRROR, folderRelative, object.path);
-    try {
-      await mkdir(dirname(destination), { recursive: true });
-      if (await exists(destination)) {
-        if ((await sha256File(destination)) !== object.sha256) {
-          failures.push({
-            path: object.path,
-            reason: `${posix(relative(repo, destination))} holds different bytes; the pushed file stays in place`,
-          });
-          continue;
-        }
-        await unlink(object.file);
-      } else {
-        try {
-          await rename(object.file, destination);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
-          await copyFile(object.file, destination);
-          await unlink(object.file);
-        }
-      }
-      moved.push({ from: posix(relative(repo, object.file)), to: posix(relative(repo, destination)) });
-    } catch (error) {
-      failures.push({
-        path: object.path,
-        reason: `move failed: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-  }
-
-  const manifest = entries.size > 0 ? posix(relative(repo, manifestPath)) : undefined;
-  const summary =
-    uploaded === 0 && !manifestChanged && added.length === 0 && changed.length === 0 && failures.length === 0
-      ? `Nothing uploaded; ${manifest ?? "no manifest"} ${manifest === undefined ? "written" : "unchanged"}.`
-      : [
-          `Uploaded ${uploaded} blob${uploaded === 1 ? "" : "s"}; ${manifest ?? "no manifest"} ${manifestChanged ? "updated" : "unchanged"}.`,
-          ...added.map((entry) => `added ${entry.path} ${entry.url}`),
-          ...changed.map((entry) => `changed ${entry.path} ${entry.url}`),
-          ...(moved.length
-            ? [
-                `moved ${moved.length} raw file${moved.length === 1 ? "" : "s"} to ${posix(join(MIRROR, folderRelative))}/`,
-              ]
-            : []),
-          ...failures.map((failure) => `failed ${failure.path}: ${failure.reason}`),
-        ].join("\n");
-  return {
-    ok: failures.length === 0,
-    ...(manifest === undefined ? {} : { manifest }),
-    manifestChanged,
-    uploaded,
-    added,
-    changed,
-    moved,
-    receipts,
-    failures,
-    ...(issueKey === undefined ? {} : { issueKey }),
-    ...(issueSource === undefined ? {} : { issueSource }),
-    summary: `${issueSummary}\n${summary}`,
-  };
+/** Push through the operator credential; the shared walk infers keys with the protocol's rules. */
+function evidencePush(input: EvidencePushInput, options: EvidenceOptions = {}) {
+  return pushEvidence(input, {
+    cwd: options.cwd ?? process.cwd(),
+    client: () => EvidenceClient.connect(options),
+    issueKeys: {
+      teams: evidenceKeyTeams,
+      fromText: evidenceIssueKeys,
+      fromReadme: evidenceReadmeIssueKeys,
+    },
+  });
 }
 
 interface EvidenceFetchResult {

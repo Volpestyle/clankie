@@ -54,6 +54,8 @@
         "docs/testing/2026-10-27-local-vuh-47-tracker-write-cost/flows/profile-summary.mjs",
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
+        "integrations/claude-plugin/worker/bin/clankie-cli.mjs",
+        "integrations/claude-plugin/worker/bin/evidence-push.d.mts",
         "integrations/claude-plugin/worker/bin/inbound-receipt.d.mts",
         "integrations/claude-plugin/worker/bin/message-status.d.mts",
         "integrations/claude-plugin/worker/bin/seat-channel.d.mts",

@@ -7,6 +7,7 @@ import {
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import {
   CaptainSessionLaneV2Schema,
+  FLEET_EVIDENCE_UPLOADS_PATH,
   FLEET_PEER_MESSAGES_PATH,
   FLEET_PEER_SEATS_PATH,
   FLEET_SEAT_EVENTS_PATH,
@@ -59,6 +60,7 @@ import {
   ReviewVerdictInputSchema,
 } from "@clankie/protocol/reviews";
 import { reviewRefusalStatus } from "../review-routes.ts";
+import { EvidenceRefusal } from "../evidence-store.ts";
 
 /**
  * A seat bridge talking to a service that is shutting down gets a 503 and a
@@ -590,6 +592,40 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     return receipt
       ? context.json(receipt)
       : context.json({ error: "unknown_peer_receipt", deliveryStage: "uncertain" }, 404);
+  });
+
+  // A fleet pane's evidence (VUH-2923). The seat proves itself as a peer sender
+  // does and becomes the record's actor; the bytes follow to the store's own
+  // signed upload path on the same link, so no proof runs while they stream.
+  const seatEvidence = async (
+    context: Context,
+    use: (
+      store: NonNullable<typeof ctx.dependencies.evidenceStore>,
+      actor: import("@clankie/protocol/evidence").EvidenceActor,
+    ) => Promise<unknown>,
+  ): Promise<Response> => {
+    try {
+      const authority = await peerSeatAuthority(context);
+      if (!authority) return context.json({ error: "native_seat_required" }, 403);
+      const store = ctx.dependencies.evidenceStore;
+      if (!store) return context.json({ error: "evidence_store_unavailable" }, 503);
+      const actor = await ctx.dependencies.captain.fleetSeatEvidenceActor(authority);
+      if (!actor) return context.json({ error: "native_seat_required" }, 403);
+      return context.json(await use(store, actor));
+    } catch (error) {
+      if (error instanceof RemoteObservationError)
+        return fleetAdmissionUnavailableResponse({ observation: error.code });
+      if (error instanceof EvidenceRefusal) return context.json({ error: error.code }, error.status);
+      if (error instanceof SyntaxError) return context.json({ error: "invalid_request" }, 400);
+      throw error;
+    }
+  };
+  ctx.app.post(FLEET_EVIDENCE_UPLOADS_PATH, bodyLimit({ maxSize: 64 * 1024 }), (context) =>
+    seatEvidence(context, async (store, actor) => store.upload(actor, await context.req.json())),
+  );
+  ctx.app.get(`${FLEET_EVIDENCE_UPLOADS_PATH}/:receiptId`, (context) => {
+    context.header("cache-control", "no-store");
+    return seatEvidence(context, (store, actor) => store.lookup(actor, context.req.param("receiptId")));
   });
 
   // The standing review gate (ADR 0287): the author submits and the reviewer

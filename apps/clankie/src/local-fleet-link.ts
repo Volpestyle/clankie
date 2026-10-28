@@ -26,6 +26,7 @@ export interface LocalFleetProofRequestContext {
     | "review-candidates"
     | "review-verdicts"
     | "tool-catalog"
+    | "evidence-uploads"
     | "fixture-admissions"
     | "receipt";
   readonly method: "GET" | "POST" | "other";
@@ -35,6 +36,8 @@ export interface LocalFleetProofRequestContext {
 }
 
 const bridgeUuid = z.string().uuid();
+/** The store's signed blob upload (VUH-2923); its signature, not the link, authorizes the bytes. */
+export const LINK_EVIDENCE_BLOB = /^\/v1\/evidence\/uploads\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]{16,128}\/blob$/u;
 
 /**
  * Idle keep-alive for the local fleet listener (VUH-2389). Node's fetch (undici)
@@ -109,7 +112,7 @@ export class LocalFleetLink {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const path = new URL(request.url).pathname;
       const seatRoute =
-        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|review-candidates|review-verdicts|tool-catalog)$/u.exec(
+        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|review-candidates|review-verdicts|tool-catalog|evidence-uploads)$/u.exec(
           path,
         ) ||
         // A review candidate's read is its author's or reviewer's own (ADR 0287).
@@ -117,7 +120,9 @@ export class LocalFleetLink {
           ? null
           : /^\/v1\/fleet\/seats\/([^/]+)\/(review-candidates)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
               path,
-            ));
+            ) ||
+            // An evidence receipt is its idempotency key (VUH-2923).
+            /^\/v1\/fleet\/seats\/([^/]+)\/(evidence-uploads)\/[A-Za-z0-9_-]{16,128}$/u.exec(path));
       const receipt =
         request.method === "GET" &&
         (/^\/v1\/fleet\/seats\/([^/]+)\/(?:messages|peer-messages)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.exec(
@@ -130,6 +135,8 @@ export class LocalFleetLink {
         request.method === "POST" && /^\/v1\/fleet\/seats\/([^/]+)\/events\/[^/]+\/ack$/u.exec(path);
       const fixtureAdmission = /^\/v1\/fleet\/seats\/([^/]+)\/fixture-admissions(?:\/.*)?$/u.exec(path);
       const seat = seatRoute || receipt || ack || fixtureAdmission;
+      // The store's signed blob path carries its own authority and needs no pane proof.
+      if (!seat && request.method === "PUT" && LINK_EVIDENCE_BLOB.test(path)) return forward(request);
       if (path !== "/v1/fleet/mcp" && !seat) return Response.json({ error: "not_found" }, { status: 404 });
       const pane = request.headers.get("x-clankie-pane") ?? "";
       if (seat && decodeURIComponent(seat[1]!) !== pane)

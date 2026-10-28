@@ -3538,6 +3538,13 @@ may expire sooner); manifests keep only stable `clankie://evidence` links.
   keys elsewhere in the text. If none is found, the record stays unkeyed. Multiple keys are stored separately in
   record metadata; the wire `issueKey` retains the first for existing clients. Issue lookups and
   recent filters match any key, including historical multi-key strings.
+  On a fleet machine without Clankie's CLI (the Windows PC), the worker plugin's
+  own `clankie evidence push [PATH] --issue KEY [--caption TEXT]` runs the same
+  push over the pane's fleet link, with no operator credential (VUH-2923). It
+  requires `--issue` and has no other commands; the worker bridge's
+  `evidence_push({path, issue, caption?})` tool takes an absolute `path` and
+  does the same. Records name the seat as their actor, with its worker name
+  and lead.
 - `clankie evidence backfill --database SQLITE [--repo PATH] [--apply]` repairs
   local SQLite records only. It opens the database read-only by default and
   prints proposed changes and before/after counts. `--repo` defaults to the
@@ -8031,12 +8038,14 @@ loss. The strict refusal guarantee is not met; see
 [ADR 0217](adr/0217-fleet-membership-gets-connected-tools.md) and VUH-1585. Manual
 grants keep their existing restrictions.
 
-Use `list_fleet_seats({})` to discover seats in the sender's own fleet, then pass
+Use `list_fleet_seats({})` to discover seats in the sender's own fleet, plus seats
+on other fleet machines that the sender's lead also leads (VUH-2923), then pass
 the returned recipient `seatId` as `seat` to `message_peer({seat, text})`. The
 bridge obtains the sender and recipient bindings; workers do not supply them.
 Both the Claude worker plugin and `clankie mcp --fleet` use `runSeatChannel` for
 this path. The server requires the caller's proven native pane process and matching
-session, confines recipients to the same fleet and checks their current binding.
+session, confines recipients to the same fleet or the sender's own lead, and
+checks their current binding.
 Peer content reaches the existing `message_seat` native channel/session delivery
 path as agent output, never an owner instruction. It records a server audit and
 an agent-role message in Clankie's default transcript. Native channel events carry
