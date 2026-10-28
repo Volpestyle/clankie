@@ -39,10 +39,16 @@ function toolActivity(event: Extract<OperatorConversationStreamEvent, { type: "t
   const issueKey = typeof key === "string" && /^[A-Z][A-Z0-9]*-\d+$/u.test(key) ? key : undefined;
   // Only explicitly human descriptions may become text. Never serialize arguments,
   // interpolate a tool name, or fall back to an unstructured native summary.
-  const description = [args?.description, args?.taskTitle]
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => safeCurrentActivityText(value).replace(/\s+/gu, " ").slice(0, 160))
-    .find(Boolean);
+  // A description on issue/edit tools is content, not a summary of this call.
+  const humanSummary = /(?:^|__|\.)(?:exec|exec_command|bash|shell)$/u.test(name)
+    ? args?.description
+    : /(?:^|__|\.)(?:hire|hire_worker)$/u.test(name)
+      ? args?.taskTitle
+      : undefined;
+  const description =
+    typeof humanSummary === "string"
+      ? safeCurrentActivityText(humanSummary).replace(/\s+/gu, " ").slice(0, 160)
+      : undefined;
   const label =
     source === "issue"
       ? issueKey

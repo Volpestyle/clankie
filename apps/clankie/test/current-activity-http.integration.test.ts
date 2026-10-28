@@ -125,6 +125,12 @@ it("serves opt-in owner activity from live native events and call ownership, pre
       ["hire", { taskTitle: "Fix the desktop pet", prompt: "PRIVATE_BRIEF" }, "Fix the desktop pet"],
       ["mcp__worker__message_peer", { text: "PRIVATE_MESSAGE" }, "Sending a message"],
       ["unknown_native_tool", { command: "PRIVATE_COMMAND" }, "Working"],
+      [
+        "linear_save_issue",
+        { id: "VUH-2819", description: "## Background\nThe owner asked privately about the rent dispute" },
+        "Working on VUH-2819",
+      ],
+      ["unknown_native_tool", { description: "PRIVATE_CONTENT", taskTitle: "PRIVATE_TITLE" }, "Working"],
       ["Bash", { command: "PRIVATE_COMMAND", description: "   " }, "Working on code"],
     ] as const) {
       conversations.publishHeadEvent({

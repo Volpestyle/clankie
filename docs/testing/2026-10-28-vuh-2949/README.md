@@ -35,3 +35,9 @@ strict schema (no `kind`). Removing the opt-in filter makes that HTTP test fail
 with `Unrecognized key: "kind"`; restoring it passes. The mutation output is
 `.local/vuh-2949/compat-mutation.log`. CLI status explicitly opts into safe tool
 labels; pets do not request them.
+
+Review caught issue-body `description` fields, which are content rather than a
+call summary. Summary extraction is now limited to shell/exec `description`
+and hire `taskTitle`. An HTTP regression sends a private Linear issue body and
+expects exactly `Working on VUH-2819`; an unknown tool's description/title are
+also ignored. The focused HTTP/protocol/CLI checks pass 4/4 after that fix.

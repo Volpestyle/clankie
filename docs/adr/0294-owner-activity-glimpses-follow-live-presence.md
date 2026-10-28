@@ -27,7 +27,7 @@ free-text credential redaction apply before publication.
 
 VUH-2949 amends tool publication: optional `kind: "tool"` distinguishes work
 from speech without changing existing sources or targets. Tool text contains
-only a one-line human description (`description` or `taskTitle`) or a fixed
+only a one-line human description (shell/exec `description` or hire `taskTitle`) or a fixed
 plain label, never a tool name or serialized arguments. Explicit Linear issue
 keys retain their destination. The pet suppresses tool bubbles; chat, calls
 and owner questions retain their existing text. Older hosts may omit `kind`.
