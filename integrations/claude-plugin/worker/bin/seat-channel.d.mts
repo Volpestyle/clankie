@@ -9,4 +9,5 @@ export function runSeatChannel(options: {
   paneId?: string;
   parentArgv?: string;
   requestTimeoutMs?: number;
+  unknownAckTimeoutMs?: number;
 }): void;

@@ -50,6 +50,7 @@ const PEER_REQUEST_TIMEOUT_MS = 50_000;
 // Report a prolonged receipt recovery before the service's 30s delivery waiter
 // expires. That waiter's uncertainty never cancels an idempotent exact ACK.
 const ACK_RETRY_MS = 20_000;
+const UNKNOWN_ACK_TIMEOUT_MS = 60_000;
 // Native clients can retain only their first catalog. Let a newly started pane
 // settle, within Codex's 30-second startup timeout, without weakening proof.
 const FIRST_TOOLS_WAIT_MS = 20_000;
@@ -538,9 +539,17 @@ export async function callNativeReceipt(args, { env = process.env, fetchImpl = f
   return (await receiptAwareFleetCall(granted, "clankie_call", args)).result;
 }
 
-export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_TIMEOUT_MS }) {
+export function runSeatChannel({
+  paneId,
+  parentArgv,
+  requestTimeoutMs = REQUEST_TIMEOUT_MS,
+  unknownAckTimeoutMs = UNKNOWN_ACK_TIMEOUT_MS,
+}) {
   if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs <= 0)
     throw new Error("Fleet request timeout must be a positive integer");
+  if (!Number.isInteger(unknownAckTimeoutMs) || unknownAckTimeoutMs <= 0)
+    throw new Error("Unknown channel acknowledgment timeout must be a positive integer");
+  unknownAckTimeoutMs = Math.min(unknownAckTimeoutMs, UNKNOWN_ACK_TIMEOUT_MS);
   // The production bound cannot be widened. A shorter budget exercises the
   // same subprocess/HTTP boundary without parking a test for thirty seconds.
   requestTimeoutMs = Math.min(requestTimeoutMs, REQUEST_TIMEOUT_MS);
@@ -716,6 +725,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         ]
       : [];
   let reportObservation;
+  let channelStoppedReason;
   let toolObservation = { status: "missing", reason: "Catalog not observed" };
   const report = (
     status,
@@ -723,6 +733,10 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
     tools = publishedCatalog ?? [],
     revision = publishedRuntimeRevision,
   ) => {
+    if (channelStoppedReason) {
+      status = "missing";
+      reason = channelStoppedReason;
+    }
     toolObservation = { status, reason };
     return granted.report({
       ...(reportObservation === undefined ? {} : { report: reportObservation }),
@@ -1065,7 +1079,14 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           return;
         }
         if (receiptUnresolved) {
-          log("channel receipt unresolved; stopped polling without replay");
+          channelStoppedReason =
+            "Channel receive loop stopped: " +
+            (error instanceof Error ? error.message : String(error)) +
+            ". Reload the plugin in this pane (/reload-plugins) to reconnect; do not resend the original notification.";
+          log(channelStoppedReason);
+          await report("missing", channelStoppedReason)?.catch((failure) =>
+            log(`channel stop observation failed (${String(failure)})`),
+          );
           return;
         }
         if (refused(error) && refresh()) continue;
@@ -1084,6 +1105,8 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   // A 2xx naming another event is a protocol fault and is never retried.
   async function acknowledge(eventId, source) {
     let noticeAt = Date.now() + ACK_RETRY_MS;
+    let unknownSince;
+    let unknownLink;
     for (let backoff = 250; ; backoff = Math.min(backoff * 2, RETRY_MS)) {
       let transient;
       try {
@@ -1103,9 +1126,29 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
           if (receipt?.acknowledged === true && receipt.eventId === eventId) return;
           throw new ChannelReceiptMismatch("Exact channel acknowledgment is unresolved");
         }
+        // allow-swallowed-rejection -- An unreadable refusal cannot establish a permanent unknown_event.
+        const unknown =
+          ack.status === 404 && (await ack.json().catch(() => undefined))?.error === "unknown_event";
+        if (unknown) {
+          const currentLink = JSON.stringify(link);
+          if (unknownSince === undefined || unknownLink !== currentLink) {
+            unknownSince = Date.now();
+            unknownLink = currentLink;
+          }
+          if (Date.now() - unknownSince >= unknownAckTimeoutMs)
+            throw new ChannelReceiptMismatch(
+              `Exact acknowledgment remained unknown_event on a live link for ${String(unknownAckTimeoutMs)} ms`,
+            );
+        } else {
+          unknownSince = undefined;
+          unknownLink = undefined;
+        }
         transient = `ack answered ${String(ack.status)}`;
       } catch (error) {
         if (error instanceof FleetMembershipRefused || error instanceof ChannelReceiptMismatch) throw error;
+        // A network error or 5xx is not evidence of a permanently unknown event.
+        unknownSince = undefined;
+        unknownLink = undefined;
         transient = error instanceof Error ? error.message : String(error);
       }
       if (closed) throw new Error("Channel closed during exact acknowledgment");

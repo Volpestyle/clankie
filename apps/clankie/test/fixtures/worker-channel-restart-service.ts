@@ -19,6 +19,9 @@ const mailbox = (pane: string) => fleetSeatMailbox(mailboxes, pane, join(root, "
 const conversations = new ConversationStore(join(root, "conversations"), async () => {});
 const receipts = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
 const acks: string[] = [];
+const ackAttempts: string[] = [];
+let changedBinding = false;
+const currentBinding = (pane: string) => (pane === "sable" && changedBinding ? "b".repeat(64) : binding);
 let holdAck = mode === "hold-ack" || mode === "lost-ack";
 const app = await createClankieApp({
   localFleet: {
@@ -28,17 +31,20 @@ const app = await createClankieApp({
     }),
   },
   captain: createStubCaptain({
-    fleetSeatMessageBinding: async () => binding,
+    fleetSeatMessageBinding: async (pane) => currentBinding(pane),
     receiveFleetSeatMessage: async (pane, text, delivery) => receipts.accept(pane, delivery!, text, text),
-    fleetSeatMessageStatus: async (pane, id) => receipts.status(pane, binding, id),
+    fleetSeatMessageStatus: async (pane, id) => receipts.status(pane, currentBinding(pane), id),
     pollFleetSeatEvents: async (pane, waitMs, signal) => {
-      const events = await mailbox(pane).poll(waitMs, signal, binding);
-      return events.length ? [...events, ...conversations.senderReportEvents(pane, binding)] : [];
+      const events = await mailbox(pane).poll(waitMs, signal, currentBinding(pane));
+      return events.length
+        ? [...events, ...conversations.senderReportEvents(pane, currentBinding(pane))]
+        : [];
     },
     acknowledgeFleetSeatEvent: async (pane, id) => {
+      ackAttempts.push(id);
       const acknowledged = id.startsWith("report:")
-        ? conversations.acknowledgeSenderReportEvent(pane, binding, id)
-        : mailbox(pane).acknowledge(id, binding);
+        ? conversations.acknowledgeSenderReportEvent(pane, currentBinding(pane), id)
+        : mailbox(pane).acknowledge(id, currentBinding(pane));
       if (acknowledged) acks.push(id);
       return acknowledged;
     },
@@ -49,6 +55,8 @@ const server = serve({
   port: 0,
   fetch: async (request) => {
     const path = new URL(request.url).pathname;
+    if (mode === "binding-changed" && path.includes("/sable/events/report%3A") && path.endsWith("/ack"))
+      changedBinding = true;
     // Interrupt a receipt after its notification was written, optionally after
     // the server committed its ACK. Killing this exact child drops the reply.
     if (holdAck && path.includes("/sable/events/report%3A") && path.endsWith("/ack")) {
@@ -86,8 +94,12 @@ process.on("message", async (raw) => {
       });
     } else if (command.action === "status") {
       result = {
-        bound: { sable: mailbox("sable").boundTo(binding), kit: mailbox("kit").boundTo(binding) },
+        bound: {
+          sable: mailbox("sable").boundTo(currentBinding("sable")),
+          kit: mailbox("kit").boundTo(currentBinding("kit")),
+        },
         acks,
+        ackAttempts,
         pendingReports: conversations.senderReportEvents(command.pane, binding).map((event) => event.id),
       };
     } else throw new Error(`Unknown fixture command: ${command.action}`);

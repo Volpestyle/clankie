@@ -359,7 +359,7 @@ async function startBridge(
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : harness)},requestTimeoutMs:${String(bridgeRequestTimeoutMs)}});`,
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : harness)},requestTimeoutMs:${String(bridgeRequestTimeoutMs)},unknownAckTimeoutMs:1000});`,
     ],
     { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: f.pane } },
   );
@@ -954,6 +954,24 @@ it("bounds an unfinished initialize body without activating a late replacement s
     status: "ready",
     reason: "Native bridge reported: Original catalog still accepted",
   });
+});
+
+it("keeps a stopped channel diagnostic through catalog refresh after permanently unknown acknowledgments", async () => {
+  const f = await fixture(false, "w1:p1", { status: 404, error: "unknown_event", ack: true });
+  const notifications: string[] = [];
+  const call = await startBridge(f, true, "claude", notifications);
+  await expect.poll(() => f.status().reason, { timeout: 5_000 }).toContain("Channel receive loop stopped:");
+  expect(f.status().reason).toContain("Reload the plugin in this pane (/reload-plugins)");
+  const attempts = f.mailboxAcks();
+  await call("tools/list", {});
+  expect(f.status()).toMatchObject({
+    status: "missing",
+    reason: expect.stringContaining("Channel receive loop stopped:"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  expect(f.mailboxAcks()).toBe(attempts);
+  expect(f.mailboxPolls()).toBe(1);
+  expect(notifications.filter((method) => method === "notifications/claude/channel")).toHaveLength(1);
 });
 
 it.each([false, true])(

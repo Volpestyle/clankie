@@ -410,6 +410,15 @@ It resumes polling after the ack lands, without emitting the notification again.
 A mismatched acknowledgment, failed output write or explicit membership refusal
 still stops delivery. There is no terminal-input fallback.
 
+Consecutive `404 unknown_event` replies from an unchanged live link have a
+60-second grace. If the event remains unknown, the bridge stops ACK requests
+within that grace plus one request/retry window (at most 72 seconds), without
+writing the notification again. Network failures, 5xx/admission refusals and a
+republished link reset this grace. A stopped loop remains flagged through catalog
+refreshes, including on worker 0.6.21: the roster tells the owner to reload the
+plugin in that pane. This covers a native binding that changed during the outage
+or a receipt the replacement service no longer recognizes.
+
 The service discards live worker poll bindings when it stops and rebinds each
 channel on its next authenticated poll. After the replacement link is published
 and native admission succeeds within each request budget, a live proof with at

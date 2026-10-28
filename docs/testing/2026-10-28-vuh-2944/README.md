@@ -61,6 +61,19 @@ Raw check output is published through the adjacent evidence manifest. Early
 fixture startup/assertion corrections are not product regressions; `baseline.log`
 records the decisive original-code failure at the two-seat rebind assertion.
 
+The review revision also changes the native session binding before a sender
+receipt's ACK. Real service routes then return `404 unknown_event` permanently.
+With a one-second grace in the subprocess fixture, ACK attempts stop within five
+seconds, the notification appears once, and the unresolved receipt stays pending.
+Separate bridge-health coverage proves that the stop reason survives `tools/list`;
+the roster integration displays the reload instruction for this condition on
+0.6.21 too. Production uses 60 seconds of consecutive unknown replies on the same
+live link, plus at most one request/retry window (72 seconds total). Network,
+5xx/admission failures and a republished link restart that grace.
+The review revision passed **78/78** focused cases (3 process crash/binding,
+24 bridge-health, 51 parent-routing); the final native-binding fixture also
+passed its separate **3/3** process run.
+
 ## Lead-owned live proof at a scheduled deploy (not run by the builder)
 
 1. Deploy the landed runtime and worker 0.6.21 through the normal release route.
@@ -79,6 +92,8 @@ records the decisive original-code failure at the two-seat rebind assertion.
    its corresponding ACK is still pending. **The lead alone performs the normal
    service restart.** Keep the event ID, notification time, shutdown time and
    pre-shutdown receipt state. Do not resend an uncertain original.
+   Record the actual number of outstanding ACKs, not just the intended limit;
+   an attempt with more than three is outside this 90-second proof budget.
 4. Start the recovery clock when the replacement `fleet pc: link ready` event is
    logged and native admission is available. Observe the same seat/PID rebind to
    `messageReceiver.state=live` within **90 seconds**. This bounds the stale ACK

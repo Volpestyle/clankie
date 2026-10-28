@@ -6,6 +6,12 @@
       "size": 56832,
       "sha256": "2b0b35b97cfbf30e97788eb85d85901762c28a16229bb9bde31efe6acb8f0888",
       "url": "clankie://evidence/sha256/2b0b35b97cfbf30e97788eb85d85901762c28a16229bb9bde31efe6acb8f0888"
+    },
+    {
+      "path": "review-r2.tar",
+      "size": 36352,
+      "sha256": "99046a70f178e59e8537d95cb727f4b2746060ff9fc5d805d4b7445a6985a769",
+      "url": "clankie://evidence/sha256/99046a70f178e59e8537d95cb727f4b2746060ff9fc5d805d4b7445a6985a769"
     }
   ]
 }

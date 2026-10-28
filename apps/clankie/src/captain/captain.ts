@@ -1532,10 +1532,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       native.session?.kind === "id" ? native.session.value : undefined,
     );
     const remote = splitFleetQualified(native.paneId);
-    const version = remote && options.workerBridgeStatus?.(remote.fleet, remote.id)?.pluginVersion;
+    const bridge = remote && options.workerBridgeStatus?.(remote.fleet, remote.id);
+    const version = bridge?.pluginVersion;
     const legacyChannel = version && /^0\.6\.(\d+)$/u.exec(version);
     // Absence of a poll cannot prove why a loop stopped. Name the observed
     // condition and the old bridge's recovery action without asserting a cause.
+    if (native.agent === "claude" && !live && bridge?.reason.includes("Channel receive loop stopped:"))
+      return {
+        ...receiver,
+        detail:
+          "This seat's receive loop stopped. Reload the plugin in this pane (/reload-plugins) to reconnect. " +
+          receiver.detail,
+      };
     if (native.agent === "claude" && !live && legacyChannel && Number(legacyChannel[1]) < 21)
       return {
         ...receiver,

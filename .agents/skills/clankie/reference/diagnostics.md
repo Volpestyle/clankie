@@ -70,6 +70,10 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
   proof with at most three pending acknowledgments allows 90 seconds after the
   link and admission recover; larger pages drain in order. An outage or an
   unresolved receipt is not permission to resend.
+  Consecutive `unknown_event` ACK replies on the same healthy link stop that
+  loop within 72 seconds; network/5xx failures reset this grace. The stopped-loop
+  reload instruction also appears for the current plugin and survives catalog
+  refreshes. The original notification is never written again.
 - `clankie access linear` and `access list`: inspect the connected actor and
   manual/legacy grants. Never paste grant files, bearers or broker data.
 

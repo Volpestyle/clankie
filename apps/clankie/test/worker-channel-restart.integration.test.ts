@@ -58,6 +58,7 @@ const environment = (root: string) => ({
 interface State {
   bound: { sable: boolean; kit: boolean };
   acks: string[];
+  ackAttempts: string[];
   pendingReports: string[];
 }
 async function runtime(root: string, mode: string) {
@@ -131,7 +132,7 @@ async function bridge(root: string, pane: string) {
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(module.href)};runSeatChannel({paneId:${JSON.stringify(pane)},parentArgv:'claude --channels plugin:clankie-worker@clankie',requestTimeoutMs:1000});`,
+      `import {runSeatChannel} from ${JSON.stringify(module.href)};runSeatChannel({paneId:${JSON.stringify(pane)},parentArgv:'claude --channels plugin:clankie-worker@clankie',requestTimeoutMs:1000,unknownAckTimeoutMs:1000});`,
     ],
     { env: { ...environment(root), HERDR_PANE_ID: pane }, stdio: ["pipe", "pipe", "pipe"] },
   );
@@ -220,3 +221,29 @@ it.each(["hold-ack", "lost-ack"])(
   },
   30_000,
 );
+
+it("bounds a permanently mismatched native binding's unknown ACK without replaying the notification", async () => {
+  const root = await mkdtemp(join(tmpdir(), "worker-channel-unknown-ack-"));
+  roots.push(root);
+  const service = await runtime(root, "binding-changed");
+  const reportId = randomUUID();
+  expect(await service.call("seed-report", "sable", { reportId })).toMatchObject({ received: true });
+  const sable = await bridge(root, "sable");
+  await expect.poll(async () => (await service.status()).bound.sable).toBe(true);
+  const started = Date.now();
+  expect(await service.call("deliver", "sable", { text: "Carry the original receipt" })).toMatchObject({
+    outcome: "delivered",
+  });
+  await expect
+    .poll(sable.stderr, { timeout: 5_000 })
+    .toContain("Channel receive loop stopped: Exact acknowledgment remained unknown_event");
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(sable.stderr()).toContain("Reload the plugin in this pane (/reload-plugins)");
+  const attempts = (await service.status()).ackAttempts.length;
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  expect((await service.status()).ackAttempts).toHaveLength(attempts);
+  expect((await service.status()).bound.sable).toBe(false);
+  expect(sable.events.filter((id) => id === `report:${reportId}:stored`)).toHaveLength(1);
+  expect(new Set(sable.events).size).toBe(sable.events.length);
+  expect((await service.status()).pendingReports).toContain(`report:${reportId}:stored`);
+});

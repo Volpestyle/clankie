@@ -95,6 +95,7 @@ async function fixture(
     nonApiCaptain?: boolean;
     captainApi?: boolean;
     pluginVersion?: string;
+    bridgeReason?: string;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-parent-routing-"));
@@ -259,7 +260,7 @@ async function fixture(
         : {
             workerBridgeStatus: () => ({
               status: "ready" as const,
-              reason: "Fixture bridge",
+              reason: options.bridgeReason ?? "Fixture bridge",
               pluginVersion: options.pluginVersion!,
             }),
           }),
@@ -641,10 +642,18 @@ async function adopt(service: Service, conversationId: string, seat: string) {
   });
 }
 
-it.each(["0.6.19", "0.6.21"])(
-  "names the pane-local recovery for a remote Claude receive loop on plugin %s",
-  async (pluginVersion) => {
-    const f = await fixture({ remote: true, captainApi: true, pluginVersion });
+it.each([
+  { pluginVersion: "0.6.19", bridgeReason: "Fixture bridge", reload: true },
+  { pluginVersion: "0.6.21", bridgeReason: "Fixture bridge", reload: false },
+  {
+    pluginVersion: "0.6.21",
+    bridgeReason: "Native bridge reported: Channel receive loop stopped: unknown_event",
+    reload: true,
+  },
+])(
+  "names pane-local recovery on $pluginVersion (reload=$reload)",
+  async ({ pluginVersion, bridgeReason, reload }) => {
+    const f = await fixture({ remote: true, captainApi: true, pluginVersion, bridgeReason });
     const parent = f.rows[1]!;
     await hook(f.service, parent);
     const current = async () => {
@@ -658,9 +667,7 @@ it.each(["0.6.19", "0.6.21"])(
     };
     const receiver = await current();
     expect(receiver.state).toBe("next-turn-only");
-    expect(receiver.detail.includes("Reload the plugin in this pane (/reload-plugins)")).toBe(
-      pluginVersion === "0.6.19",
-    );
+    expect(receiver.detail.includes("Reload the plugin in this pane (/reload-plugins)")).toBe(reload);
     await expect
       .poll(async () => {
         await f.service.nativeRequest(PARENT, `${fleetSeatEventsPath(PARENT)}?wait=1`);
