@@ -150,6 +150,7 @@ export async function leadChatFixture(
   // Setup's roster check needs only the local lead; the case's own calls meet the slow
   // machine. Waiting it out here too cost each case 2.5 s against the roster budget (VUH-2929).
   let fleetDelayMs = 0;
+  let slowFleetCalls = 0;
   const settings = new SettingsStore(join(root, "settings.json"));
   if (remote || options.slowFleetMs !== undefined)
     await settings.update((current) => ({
@@ -205,6 +206,7 @@ export async function leadChatFixture(
               list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
               // Like an ssh connect timeout to a machine that went away.
               run: () => async () => {
+                if (fleetDelayMs > 0) slowFleetCalls++;
                 await new Promise((resolve) => setTimeout(resolve, fleetDelayMs));
                 throw new Error("ssh: connect to host fixture.invalid port 22: Operation timed out");
               },
@@ -295,5 +297,7 @@ export async function leadChatFixture(
     settings,
     root,
     hidden,
+    /** Fleet calls that met the slow machine after setup. */
+    slowFleetCalls: () => slowFleetCalls,
   };
 }

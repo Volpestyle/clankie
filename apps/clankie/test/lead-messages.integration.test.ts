@@ -70,6 +70,7 @@ it("VUH-2196: a local lead's seat confirms a lead message in time while another 
     leadConversationId: work,
   });
   expect(workChannel).toHaveBeenCalledOnce();
+  expect(f.slowFleetCalls()).toBeGreaterThan(0);
 }, 30_000);
 
 it("VUH-2196: a local lead's polls do not each wait on an unreachable machine's inventory", async () => {
@@ -94,6 +95,7 @@ it("VUH-2245: a lead's poll answers inside its wait even when its source proof i
   const started = Date.now();
   expect(await f.captain.pollSeatEvents(3_000, undefined, f.leads[1]!, capabilities)).toEqual([]);
   expect(Date.now() - started).toBeLessThan(3_800);
+  expect(f.slowFleetCalls()).toBeGreaterThan(0);
 }, 30_000);
 
 it("VUH-2245: a lead message sent while its seat's poll is still proving its source reaches that seat", async () => {
@@ -123,6 +125,7 @@ it("VUH-2245: a lead message sent while its seat's poll is still proving its sou
     leadConversationId: work,
   });
   expect(notification).toHaveBeenCalledOnce();
+  expect(f.slowFleetCalls()).toBeGreaterThan(0);
 }, 30_000);
 
 it("VUH-2174: a disconnected remote-only lead still refuses without a local queue", async () => {
