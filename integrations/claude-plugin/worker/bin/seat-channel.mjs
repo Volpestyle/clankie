@@ -47,7 +47,8 @@ const RETRY_MS = 2_000;
  * (VUH-2779). Codex ends an MCP tool call at 60s by default, so stay under it.
  */
 const PEER_REQUEST_TIMEOUT_MS = 50_000;
-// The service waits 30s for an exact ack (FLEET_ACK_TIMEOUT_MS); retries end first.
+// Report a prolonged receipt recovery before the service's 30s delivery waiter
+// expires. That waiter's uncertainty never cancels an idempotent exact ACK.
 const ACK_RETRY_MS = 20_000;
 // Native clients can retain only their first catalog. Let a newly started pane
 // settle, within Codex's 30-second startup timeout, without weakening proof.
@@ -1013,7 +1014,9 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
       let receiptUnresolved = false;
       firstPollAt ??= Date.now();
       try {
-        const response = await fetch(`${seatRoute(link, paneId, "events")}?wait=${String(WAIT_MS)}`, {
+        refresh();
+        const source = link;
+        const response = await fetch(`${seatRoute(source, paneId, "events")}?wait=${String(WAIT_MS)}`, {
           headers: linkHeaders(),
           signal: AbortSignal.timeout(WAIT_MS + 10_000),
         });
@@ -1052,7 +1055,7 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
               error ? reject(error) : resolve(),
             );
           });
-          await acknowledge(event.id);
+          await acknowledge(event.id, source);
           receiptUnresolved = false;
         }
       } catch (error) {
@@ -1075,16 +1078,24 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
   // The ack is an idempotent receipt for an event already written, never a
   // replay. Under load its process proof or pane lookup can fail or stall
   // (VUH-2034, VUH-2015), so retry the exact ack before giving up the channel.
+  // A restart can take longer than the delivery waiter's deadline. Keep this
+  // one receipt pending and refresh the link on each attempt; never exit the
+  // receive loop or write the notification a second time because of an outage.
   // A 2xx naming another event is a protocol fault and is never retried.
-  async function acknowledge(eventId) {
-    const deadline = Date.now() + Math.min(ACK_RETRY_MS, requestTimeoutMs);
+  async function acknowledge(eventId, source) {
+    let noticeAt = Date.now() + ACK_RETRY_MS;
     for (let backoff = 250; ; backoff = Math.min(backoff * 2, RETRY_MS)) {
       let transient;
       try {
+        refresh();
+        if (!link) throw new Error("Waiting for the fleet link to be republished");
+        if (link.fleet !== source.fleet || link.socket !== source.socket)
+          throw new ChannelReceiptMismatch("Fleet identity changed during exact channel acknowledgment");
         const ack = await fetch(`${seatRoute(link, paneId, "events")}/${encodeURIComponent(eventId)}/ack`, {
           method: "POST",
           headers: linkHeaders(),
-          signal: AbortSignal.timeout(Math.max(1, Math.min(10_000, deadline - Date.now()))),
+          signal: AbortSignal.timeout(Math.min(10_000, requestTimeoutMs)),
+          redirect: "error",
         });
         await checkFleetMembership(ack);
         if (ack.ok) {
@@ -1097,9 +1108,11 @@ export function runSeatChannel({ paneId, parentArgv, requestTimeoutMs = REQUEST_
         if (error instanceof FleetMembershipRefused || error instanceof ChannelReceiptMismatch) throw error;
         transient = error instanceof Error ? error.message : String(error);
       }
-      if (closed || Date.now() + backoff >= deadline)
-        throw new Error(`Exact channel acknowledgment is unresolved (${transient})`);
-      log(`channel ack for ${eventId} failed (${transient}); retrying the exact receipt`);
+      if (closed) throw new Error("Channel closed during exact acknowledgment");
+      if (Date.now() >= noticeAt) {
+        log(`channel ack for ${eventId} is still unresolved (${transient}); reconnecting without replay`);
+        noticeAt = Date.now() + ACK_RETRY_MS;
+      }
       await delay(backoff);
     }
   }

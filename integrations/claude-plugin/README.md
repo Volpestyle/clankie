@@ -403,9 +403,28 @@ hook output acknowledgment means `delivered`, not model consumption.
 Each channel poll and ack passes a native process proof, which can take
 seconds or refuse under fleet load. A worker mailbox therefore stays bound for
 15 seconds between polls and waits 30 seconds for an event's exact ack. The
-bridge retries that same ack for up to 20 seconds and keeps polling once it
-lands (VUH-2034). It stops polling only when the ack names another event or
-never lands. A roster that shows the seat as not `live` is then accurate.
+bridge keeps retrying that exact ack across a service restart, refreshing its
+fleet link before each attempt (VUH-2944). Each request takes at most 10 seconds,
+with at most 2 seconds between retries; an outage does not end the receive loop.
+It resumes polling after the ack lands, without emitting the notification again.
+A mismatched acknowledgment, failed output write or explicit membership refusal
+still stops delivery. There is no terminal-input fallback.
+
+The service discards live worker poll bindings when it stops and rebinds each
+channel on its next authenticated poll. After the replacement link is published
+and native admission succeeds within each request budget, a live proof with at
+most three outstanding acknowledgments allows 90 seconds for recovery: an old
+10-second ack attempt, 2-second retry, three successful 10-second acks and a
+35-second poll request. Larger pages drain their remaining acks in order (up to
+64 events per page); each successful ack adds at most 10 seconds. A longer outage
+stays in receipt reconciliation; it never replays the message. The real-process
+regression also covers a committed ack whose HTTP reply was lost.
+
+On an older linked Claude bridge with no live receiver, the roster adds:
+"This seat's receive loop is not live; its older bridge can stop after a restart.
+Reload the plugin in this pane (/reload-plugins) to reconnect." Missing polls alone
+cannot prove why the loop stopped. Updating files or restarting the service does
+not replace code already loaded in a bridge; the owner coordinates the reload.
 
 An expired poll binding does not mean the owner took over. Claude's native
 work status and Stop hooks remain watchable while live channel delivery is

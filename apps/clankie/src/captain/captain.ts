@@ -1525,12 +1525,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       !!binding &&
       (fleetMailboxes.get(native.terminalId)?.boundTo(binding) === true ||
         (attached !== undefined && seatOutboxes.get(attached)?.boundTo(binding) === true));
-    return nextTurnMailboxes.messageReceiver(
+    const receiver = nextTurnMailboxes.messageReceiver(
       native.terminalId,
       binding,
       live,
       native.session?.kind === "id" ? native.session.value : undefined,
     );
+    const remote = splitFleetQualified(native.paneId);
+    const version = remote && options.workerBridgeStatus?.(remote.fleet, remote.id)?.pluginVersion;
+    const legacyChannel = version && /^0\.6\.(\d+)$/u.exec(version);
+    // Absence of a poll cannot prove why a loop stopped. Name the observed
+    // condition and the old bridge's recovery action without asserting a cause.
+    if (native.agent === "claude" && !live && legacyChannel && Number(legacyChannel[1]) < 21)
+      return {
+        ...receiver,
+        detail:
+          "This seat's receive loop is not live; its older bridge can stop after a restart. Reload the plugin in this pane (/reload-plugins) to reconnect. " +
+          receiver.detail,
+      };
+    return receiver;
   }
   async function publishWaitingNotice(seat: string, binding: string | undefined, pane: string) {
     const notice = nextTurnMailboxes.waitingNotice(seat, binding, pane);

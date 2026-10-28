@@ -94,6 +94,7 @@ async function fixture(
     parentAdapter?: boolean;
     nonApiCaptain?: boolean;
     captainApi?: boolean;
+    pluginVersion?: string;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-parent-routing-"));
@@ -253,6 +254,15 @@ async function fixture(
       nativeCensusRunner: async (_command, args) => ({ stdout: await execute("default", args), stderr: "" }),
       nativeSummariesPath: join(root, "summaries.json"),
       discordEnvironment: {},
+      ...(options.pluginVersion === undefined
+        ? {}
+        : {
+            workerBridgeStatus: () => ({
+              status: "ready" as const,
+              reason: "Fixture bridge",
+              pluginVersion: options.pluginVersion!,
+            }),
+          }),
     });
     const link = new LocalFleetLink({
       directory: join(root, "local-link"),
@@ -630,6 +640,37 @@ async function adopt(service: Service, conversationId: string, seat: string) {
     outcome: "delivered",
   });
 }
+
+it.each(["0.6.19", "0.6.21"])(
+  "names the pane-local recovery for a remote Claude receive loop on plugin %s",
+  async (pluginVersion) => {
+    const f = await fixture({ remote: true, captainApi: true, pluginVersion });
+    const parent = f.rows[1]!;
+    await hook(f.service, parent);
+    const current = async () => {
+      const response = await f.service.operatorRequest("/operator/v1/dispatch", {
+        schemaVersion: 1,
+        op: "roster",
+      });
+      const result = OperatorConversationServiceResultSchema.parse(await response.json());
+      if (result.op !== "roster") throw new Error("Wrong roster result");
+      return result.seats.find((seat) => seat.seatId === f.pane(parent.terminal_id))!.messageReceiver!;
+    };
+    const receiver = await current();
+    expect(receiver.state).toBe("next-turn-only");
+    expect(receiver.detail.includes("Reload the plugin in this pane (/reload-plugins)")).toBe(
+      pluginVersion === "0.6.19",
+    );
+    await expect
+      .poll(async () => {
+        await f.service.nativeRequest(PARENT, `${fleetSeatEventsPath(PARENT)}?wait=1`);
+        return (await current()).state;
+      })
+      .toBe("live");
+    expect((await current()).detail).not.toContain("Reload the plugin");
+    expect(f.nativeSends).toEqual([]);
+  },
+);
 
 it.each([false, true])(
   "warns before adopting an idle %s remote Claude lead with only a next-turn receiver",

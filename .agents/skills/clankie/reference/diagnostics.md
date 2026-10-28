@@ -61,6 +61,15 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
   v1 response stays unchanged for shipped apps.
 - `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`) and
   `fleet.peerMessages` (`on` or `off`).
+- A linked Claude seat with no live receive loop on an older worker bridge gets
+  a roster line to reload the plugin in that pane (`/reload-plugins`). Coordinate
+  that reload with its owner; never type it into the pane yourself. Updated
+  bridge files cannot repair a loop already stopped in a running old process.
+  Worker 0.6.21 keeps retrying only the exact pending channel acknowledgment
+  across restarts, then polls again without replaying the notification. A live
+  proof with at most three pending acknowledgments allows 90 seconds after the
+  link and admission recover; larger pages drain in order. An outage or an
+  unresolved receipt is not permission to resend.
 - `clankie access linear` and `access list`: inspect the connected actor and
   manual/legacy grants. Never paste grant files, bearers or broker data.
 
