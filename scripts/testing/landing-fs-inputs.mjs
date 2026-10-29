@@ -168,6 +168,10 @@ export const landingFsInputs = Object.fromEntries([
     seatHookInputs,
   ]),
   ["apps/clankie/test/claude-hook-command.integration.test.ts", seatHookInputs],
+  [
+    "apps/clankie/test/resource-wait-liveness.integration.test.ts",
+    ["integrations/claude-plugin/worker/bin/root-lease-hook.sh"],
+  ],
   ["apps/tui/test/clankie-tracker-hook.integration.test.ts", workerBin("tracker-hook")],
   // prepareFleet copies the plugin and runs setup/inspect and the installed MCP
   // entrypoint. source-setup.mjs and parent.mjs in these tests are generated
