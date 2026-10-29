@@ -7005,27 +7005,30 @@ The Mac service generates the Windows relay bootstrap and sends it over the
 existing SSH stream; a newly launched relay after deployment receives the timing
 code. Existing older relays remain compatible and emit no telemetry.
 
-### `metrics --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]`
+### `metrics --issues [--issue ID] [--worker ID] [--project ID] [--since ISO] [--until ISO]`
 
 Per-issue and per-worker measurements from the service's existing records,
 through the operator-only `GET /v1/captain/issue-metrics` route. `--issue` or
 `--worker` also selects this mode. Worker matches an exact label, terminal ID,
 or retained native session reference. `--since` and `--until` are ISO timestamps;
 the default window is the last 24 hours, with an exclusive end and a maximum
-of 366 days. The window selects approval time for accepted episodes, or the
-latest observation for unfinished episodes; totals cover the whole selected
+of 366 days. The window selects observed landing time, otherwise approval time
+for accepted episodes or latest observation for unfinished episodes; totals cover the whole selected
 episode. Turn-mode `--run` / `--limit` cannot be combined with issue mode.
-Issue-only queries stream assignment records from exact retained bindings before
-loading matching histories. Unrelated histories do not consume the 256 MiB full-read
-budget; each source still has a 64 MiB limit. Unavailable or ambiguous sources
-remain explicit coverage warnings.
+Native histories are streamed into bounded measurement projections, newest modified
+sources first; histories last modified before the window are skipped. Large tool
+results do not spend the projection budget. `--project` filters worker histories
+by the exact project ID saved in hire records (for example `clankie`); histories
+without that attribution are excluded. Lead measurements retain their fleet scope.
+Saved Claude `clankieBrief` assignments are read only from the retained service
+brief directory. Unavailable or ambiguous sources remain explicit coverage warnings.
 
 ```sh
 clankie metrics --issue VUH-1608 --since 2026-10-04T00:00:00Z --until 2026-10-05T00:00:00Z
 clankie metrics --issues --worker Noor
 ```
 
-The JSON `report` contains `issues`, `workers`, `window`, and explicit `coverage`:
+The JSON `report` contains `issues`, `workers`, `sessions`, `summary`, `window`, and explicit `coverage`:
 
 - `reportedTokens` sums provider-reported native worker responses, including
   cached input. Codex response IDs and Claude message IDs are deduplicated;
@@ -7037,9 +7040,22 @@ The JSON `report` contains `issues`, `workers`, `window`, and explicit `coverage
 - `fullCheckRuns` counts recognized worker `pnpm check` invocations in native
   tool command records (shell and literal Python subprocess forms). Lead batch
   checks and unrecognized wrappers are outside this partial count.
-- `reviewRounds` counts explicit fix requests and approvals; `reworkRounds`
-  counts fix requests. Native prompt wording is the evidence, not Linear's Done
-  status. Unrecognized wording remains unknown.
+- `reviewRounds` counts explicit fix requests/approvals and structured native
+  `review_verdict` decisions; `reworkRounds` counts fix requests. A standing
+  review request's explicit issue selects its review episode. Unrecognized wording
+  stays unknown; tracker Done does not establish approval.
+- `landedAt` and `wallTimeToLandedMs` measure assignment to an observed successful
+  fast-forward push to `main`, correlated with the native `git push` call. The
+  issue value uses its latest observed push and earliest assignment. This is an
+  observed landing, not proof every part of an issue shipped. Missing pushes,
+  unsupported wrappers, and pushes returned later through a shell-session poll
+  remain unknown (`null`).
+- `workerWaitMs` / `waitCount` use the review baseline: a native assistant event
+  followed directly by a Clankie channel user message. An intervening user/tool
+  result breaks that wait. This includes legitimate end-of-task pauses.
+  `exchanges` counts incoming channel messages and outgoing `message_clankie`
+  calls (attempts, not confirmed delivery). `reviewChangeRequests` counts explicit
+  fix requests and structured change verdicts.
 - `leadReportedTokens` separately sums settled report-handling turns whose
   retained inbound acceptance names exactly one issue. Mixed/ambiguous inbound issue references
   are excluded; other work in a turn’s context is unknown. This is not all lead
@@ -7059,11 +7075,36 @@ IDs, session IDs, and transcript paths can select that worker with `--worker`.
 These historical bindings provide attribution; they grant no current pane
 control or delivery authority and cannot establish issue approval.
 
-Missing, remote, malformed, conflicting, unreadable, or over-64-MiB sources
-appear in `coverage.warnings`. Unbound session directories are not searched for
+`sessions` includes bound local workers even when their issue cannot be attributed,
+including standing reviewers. Each row records its harness, native session, whole
+observed wall time, waits, exchanges and structured verdict counts. `summary`
+aggregates hired sessions overlapping the window; `workerWaitShare`,
+`waitsPerSession`, and `reviewChangeRate` can be compared with the review baseline
+using the same session cohort. Fleet scope can differ from a project-only baseline.
+`exchangesPerTask` uses the selected issue episodes. Issue filters also select the
+sessions contributing those episodes. Episode/session totals cover their whole
+observed span, not only time inside the query window.
+
+`leadBusyMs` / `leadBusyFraction` use the union of retained native lead
+`turn_duration` intervals, clipped to the window. `leadNativeSessions` names the
+coverage count; older swapped lead sessions without retained bindings are missing.
+`leadSettledElapsedMs` separately unions settled operator turn spans, including
+blocked/failed elapsed time; it is not added to native busy time.
+`leadInboxVolumePerDay` counts unique native channel event IDs on each UTC day,
+including days with zero observed events. It covers the same retained lead sources.
+`summary.current` is a separate present-time census: paginated In Progress tracker
+issues against live seats. `--project` selects that project's tracker and seats;
+unknown tracker/roster observations return `null` with warnings, never a false zero.
+It never reconciles or changes tracker status.
+
+Missing, remote, malformed, conflicting or unreadable sources appear in
+`coverage.warnings`. `coverage.missingHistories` explicitly names each unavailable
+machine (including `pc`), harness, worker and native session. Unbound session directories are not searched for
 issue mentions. Separate files claiming the same native session are ambiguous
 and excluded, including when `--worker` selects only one of their aliases. Reads also have
-a 256-MiB total request budget, with skipped sources reported. There is no
+a 64-MiB per-source and 256-MiB total retained-projection budget. Native scans
+are capped at 2 GiB per file and 16 GiB per request, with a 16-MiB row limit;
+metadata/log reads retain their 64-MiB per-file limit. Every skipped source is reported. There is no
 fuzzy pane attribution or new metrics ledger. Known totals are partial when
 other sources are unavailable. No transcript, command, tool output, or
 credential appears in the response. This read neither launches checks nor

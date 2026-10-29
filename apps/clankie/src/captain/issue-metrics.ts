@@ -4,9 +4,8 @@ import {
 } from "./conversations/inbound-report-store.ts";
 import { isDeepStrictEqual } from "node:util";
 import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, readdir, stat, realpath } from "node:fs/promises";
+import { join, basename } from "node:path";
 import { resolveHerdrSeatTranscriptPathAsync, sessionIdFromPath } from "@clankie/agent-transcript";
 import {
   CaptainTurnSettledMetricsSchema,
@@ -26,10 +25,31 @@ const MAX_REQUEST_BYTES = 256 * 1024 * 1024;
 const SESSION_UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu;
 const obj = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-const identifiers = (text: string) => [...new Set(text.match(/\b[A-Z][A-Z0-9]*-\d+\b/gu) ?? [])];
-type Worker = IssueMetricsReport["issues"][number]["workers"][number];
+const identifiers = (text: string) => [...new Set(text.match(/\b(?:LOCAL-)?[A-Z][A-Z0-9]*-\d+\b/gu) ?? [])];
+type WorkerBase = IssueMetricsReport["issues"][number]["workers"][number];
+type Worker = WorkerBase &
+  Required<
+    Pick<
+      WorkerBase,
+      "landedAt" | "wallTimeToLandedMs" | "workerWaitMs" | "waitCount" | "exchanges" | "reviewChangeRequests"
+    >
+  >;
 type Episode = Worker & { issueId: string; lastAt: string; source: string };
-type NativeRecord = { at: string; id: string; prompt?: string; tokens?: number; commands?: string[] };
+type NativeRecord = {
+  at: string;
+  id: string;
+  prompt?: string;
+  tokens?: number;
+  commands?: string[];
+  report?: boolean;
+  landed?: boolean;
+  pushResultFor?: string;
+  busy?: [string, string];
+  activity?: "assistant" | "user" | "channel";
+  verdict?: "approve" | "changes";
+  inbound?: string[];
+  brief?: boolean;
+};
 const MetaSchema = z.object({
   title: z.string(),
   scope: z.object({ kind: z.string(), seatId: z.string().optional() }).optional(),
@@ -52,6 +72,7 @@ type MetricsBinding = {
   aliases: Set<string>;
   owner?: string;
   priority: number;
+  projectId?: string;
 };
 const HistoricalSessionKeySchema = z.tuple([
   z.string().min(1),
@@ -88,7 +109,7 @@ function commands(value: unknown, name: unknown): string[] {
   return result;
 }
 
-function fullChecks(command: string): number {
+function commandClauses(command: string): string[] {
   // Count invocations, never report prose, grep/tail commands or command strings
   // written to logs. Recognize the shell and literal Python launch forms kept
   // in today's native records; unknown wrappers remain outside this count.
@@ -120,7 +141,11 @@ function fullChecks(command: string): number {
     }
   }
   clauses.push(command.slice(from));
-  const shell = clauses.filter((clause) =>
+  return clauses;
+}
+
+function fullChecks(command: string): number {
+  const shell = commandClauses(command).filter((clause) =>
     /^\s*(?:CI=\S+\s+)?pnpm\s+(?:run\s+)?check(?=\s|$)/u.test(clause),
   ).length;
   const python = [
@@ -155,7 +180,54 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
     )
       continue;
     const payload = obj(harness === "codex" ? entry.payload : entry.message);
-    const id = String(entry.uuid ?? payload.call_id ?? payload.response_id ?? entry.ordinal ?? lineId);
+    const id = String(
+      entry.uuid ?? payload.call_id ?? payload.response_id ?? entry.ordinal ?? `${at}:${lineId}`,
+    );
+    if (
+      harness === "claude" &&
+      entry.type === "system" &&
+      entry.subtype === "turn_duration" &&
+      typeof entry.durationMs === "number" &&
+      entry.durationMs >= 0
+    )
+      records.push({ at, id, busy: [new Date(Date.parse(at) - entry.durationMs).toISOString(), at] });
+    if (
+      (harness === "claude" && ["user", "assistant"].includes(String(entry.type))) ||
+      (harness === "codex" &&
+        entry.type === "response_item" &&
+        payload.type === "message" &&
+        ["user", "assistant"].includes(String(payload.role)))
+    ) {
+      const text =
+        typeof payload.content === "string"
+          ? payload.content
+          : Array.isArray(payload.content)
+            ? payload.content
+                .map((p) => obj(p).text)
+                .filter((v) => typeof v === "string")
+                .join("\n")
+            : "";
+      const channel =
+        /<channel source="(?:plugin:clankie-worker|clankie)/u.test(text) || text.startsWith("[Lead message #");
+      records.push({
+        at,
+        id: `activity:${id}`,
+        activity: payload.role === "assistant" ? "assistant" : channel ? "channel" : "user",
+      });
+    }
+    // Lead inbox events may arrive between model calls in queued attachments.
+    const inboundText =
+      harness === "claude" && entry.type === "attachment"
+        ? obj(entry.attachment).prompt
+        : payload.role === "user"
+          ? payload.content
+          : undefined;
+    if (typeof inboundText === "string") {
+      const inbound = [...inboundText.matchAll(/<channel\s+[^>]*event_id="([^"]+)"[^>]*>/gu)].map(
+        (m) => m[1]!,
+      );
+      if (inbound.length) records.push({ at, id: `inbound:${id}`, inbound });
+    }
     if (harness === "codex" && entry.type === "token_usage_record") {
       if (sessionId !== undefined && typeof payload.thread_id === "string" && payload.thread_id !== sessionId)
         continue;
@@ -173,6 +245,27 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
       continue;
     }
     if (harness === "codex" && entry.type !== "response_item") continue;
+    const outputs: { callId: string; text: unknown }[] =
+      harness === "codex" &&
+      ["function_call_output", "custom_tool_call_output"].includes(String(payload.type))
+        ? [{ callId: String(payload.call_id), text: payload.output }]
+        : harness === "claude" && Array.isArray(payload.content)
+          ? payload.content
+              .filter((p) => obj(p).type === "tool_result" && obj(p).is_error !== true)
+              .map((p) => ({ callId: String(obj(p).tool_use_id), text: obj(p).content }))
+          : [];
+    for (const output of outputs) {
+      let text = output.text;
+      if (typeof text !== "string") continue;
+      try {
+        const parsed = obj(JSON.parse(text));
+        if (typeof parsed.output === "string") text = parsed.output;
+      } catch {
+        /* Plain native output. */
+      }
+      if (/^\s+[a-f0-9]{7,40}\.\.[a-f0-9]{7,40}\s+\S+\s+->\s+main\s*$/mu.test(String(text)))
+        records.push({ at, id: `landed:${id}:${output.callId}`, landed: true, pushResultFor: output.callId });
+    }
     if (payload.role === "user" && (harness === "claude" || payload.type === "message")) {
       const content = payload.content;
       const text =
@@ -184,7 +277,7 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
                 .filter((v) => typeof v === "string")
                 .join("\n")
             : "";
-      if (!used.has(`prompt:${at}:${text}`)) {
+      if (text.trim() && !used.has(`prompt:${at}:${text}`)) {
         used.add(`prompt:${at}:${text}`);
         records.push({ at, id, prompt: text });
       }
@@ -218,6 +311,15 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
           if (tool.type === "tool_use" && typeof tool.id === "string" && !used.has(`call:${tool.id}`)) {
             used.add(`call:${tool.id}`);
             const input = obj(tool.input);
+            if (String(tool.name).endsWith("review_verdict")) {
+              const decision = String(input.verdict ?? input.decision ?? input.outcome ?? "");
+              if (/^(approve|approved|pass|ship|accept)/iu.test(decision))
+                records.push({ at, id: String(tool.id), verdict: "approve" });
+              else if (/^(changes|request|reject|fix|rework|block)/iu.test(decision))
+                records.push({ at, id: String(tool.id), verdict: "changes" });
+            }
+            if (String(tool.name).endsWith("message_clankie"))
+              records.push({ at, id: String(tool.id), report: true });
             if (tool.name === "Bash" && typeof input.command === "string")
               records.push({ at, id: String(tool.id), commands: [input.command] });
           }
@@ -229,7 +331,24 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
       !used.has(`call:${id}`)
     ) {
       used.add(`call:${id}`);
-      records.push({ at, id, commands: commands(payload.arguments ?? payload.input, payload.name) });
+      if (String(payload.name).endsWith("review_verdict")) {
+        try {
+          const input = obj(JSON.parse(String(payload.arguments)));
+          const decision = String(input.verdict ?? input.decision ?? input.outcome ?? "");
+          if (/^(approve|approved|pass|ship|accept)/iu.test(decision))
+            records.push({ at, id: `verdict:${id}`, verdict: "approve" });
+          else if (/^(changes|request|reject|fix|rework|block)/iu.test(decision))
+            records.push({ at, id: `verdict:${id}`, verdict: "changes" });
+        } catch {
+          /* Invalid native arguments are not a verdict. */
+        }
+      }
+      records.push({
+        at,
+        id,
+        commands: commands(payload.arguments ?? payload.input, payload.name),
+        ...(String(payload.name).endsWith("message_clankie") ? { report: true } : {}),
+      });
     }
   }
   records.push(...claudeUsage.values());
@@ -238,44 +357,81 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
 
 function assignedIssue(text: string): string | undefined {
   return (
+    text.match(/^Review request [\s\S]*?\bIssue:\s*((?:LOCAL-)?[A-Z][A-Z0-9]*-\d+)\b/u)?.[1] ??
     text.match(/^(?:You own Linear|You own|Implement|Fix)\s+([A-Z][A-Z0-9]*-\d+)\b/u)?.[1] ??
-    text.match(/\bNext for you:\s*([A-Z][A-Z0-9]*-\d+)\b/u)?.[1]
+    text.match(/\bNext for you:\s*([A-Z][A-Z0-9]*-\d+)\b/u)?.[1] ??
+    (/^(?:You're|You are|Your (?:task|assignment)|(?:Implement|Fix|Investigate|Take|Own)\b)/u.test(text) &&
+    !/standing reviewer/iu.test(text.slice(0, 500))
+      ? identifiers(text.slice(0, 1000))[0]
+      : undefined)
   );
 }
 
-/** Scan only an already bound source, retaining one line at a time. An issue
- * mention in model/tool output cannot select a source. The full read budgets
- * apply after selection, so unrelated histories cannot starve an issue query. */
-async function containsAssignment(
+/** Stream exact retained bindings, retaining measurements rather than multi-megabyte
+ * tool outputs. Budgets bound the projection; old histories cannot consume it. */
+async function projectNative(
   path: string,
   harness: "codex" | "claude",
   sessionId: string | undefined,
-  issue: string,
-): Promise<boolean> {
-  const stream = createReadStream(path, { encoding: "utf8", end: MAX_SOURCE_BYTES - 1 });
-  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  stateDir: string,
+  warnings: string[],
+): Promise<NativeRecord[]> {
+  const stream = createReadStream(path, { encoding: "utf8" });
+  const lines = nativeLines(stream);
+  const pushes = new Set<string>();
+  const records = new Map<string, NativeRecord>();
   let scanned = 0;
+  let retained = 0;
   try {
     for await (const line of lines) {
       scanned += Buffer.byteLength(line) + 1;
-      if (scanned > MAX_SOURCE_BYTES) throw new Error("Source grew beyond scan budget");
-      let entry;
-      try {
-        entry = obj(JSON.parse(line));
-      } catch {
-        continue;
-      }
-      if (obj(harness === "codex" ? entry.payload : entry.message).role !== "user") continue;
-      if (
-        nativeRecords(line, harness, sessionId).some(
-          (row) => row.prompt !== undefined && assignedIssue(row.prompt) === issue,
+      if (scanned > 2 * 1024 ** 3) throw new Error("Native scan exceeds 2 GiB");
+      for (const row of nativeRecords(line, harness, sessionId)) {
+        if (
+          row.commands?.some((c) =>
+            commandClauses(c).some((clause) =>
+              /^\s*git\s+push\s+(?:origin\s+)?(?:HEAD(?::main)?|main)(?:\s|$)/u.test(clause),
+            ),
+          )
         )
-      )
-        return true;
+          pushes.add(row.id);
+        if (row.landed && !pushes.has(row.pushResultFor ?? "")) continue;
+        if (row.prompt) {
+          // Only the service-owned brief named by a native user assignment can
+          // supply a brief. Never follow arbitrary paths or tool-result mentions.
+          const ref = row.prompt.match(
+            /^Execute the assignment in the clankieBrief JSON field of @([^\n]+)$/u,
+          )?.[1];
+          if (ref) {
+            row.brief = true;
+            const name = basename(ref);
+            const directory = await realpath(join(stateDir, "claude-briefs")).catch(() =>
+              join(stateDir, "claude-briefs"),
+            );
+            if (ref === join(directory, name) && /^clankie-brief-[a-f0-9-]+\.json$/u.test(name)) {
+              try {
+                if ((await stat(ref)).size > 1024 * 1024) throw new Error("Brief exceeds 1 MiB");
+                const brief = obj(JSON.parse(await readFile(ref, "utf8")));
+                if (typeof brief.clankieBrief === "string") row.prompt = brief.clankieBrief;
+              } catch {
+                warnings.push(`Saved assignment brief unavailable: ${name}`);
+              }
+            } else warnings.push(`Saved assignment brief outside retained directory: ${name}`);
+          }
+        }
+        const key =
+          row.tokens !== undefined
+            ? `usage:${row.id}`
+            : row.prompt !== undefined
+              ? `prompt:${row.at}:${row.prompt}`
+              : `${row.id}:${row.landed ?? false}:${row.verdict ?? ""}`;
+        retained += Buffer.byteLength(JSON.stringify(row));
+        if (retained > MAX_SOURCE_BYTES) throw new Error("Native projection exceeds 64 MiB");
+        records.set(key, row);
+      }
     }
-    return false;
+    return [...records.values()].sort((a, b) => a.at.localeCompare(b.at));
   } finally {
-    lines.close();
     stream.destroy();
   }
 }
@@ -289,6 +445,7 @@ function episodes(
 ): Episode[] {
   const result: Episode[] = [];
   let active: Episode | undefined;
+  let previousActivity: NativeRecord | undefined;
   for (const record of records) {
     if (record.prompt !== undefined) {
       const text = record.prompt;
@@ -311,6 +468,7 @@ function episodes(
         ) {
           active.reviewRounds = (active.reviewRounds ?? 0) + 1;
           active.reworkRounds = (active.reworkRounds ?? 0) + 1;
+          active.reviewChangeRequests++;
         }
       }
       const assigned = assignedIssue(text);
@@ -323,6 +481,12 @@ function episodes(
           source,
           startedAt: record.at,
           acceptedAt: null,
+          landedAt: null,
+          wallTimeToLandedMs: null,
+          workerWaitMs: 0,
+          waitCount: 0,
+          exchanges: 0,
+          reviewChangeRequests: 0,
           lastAt: record.at,
           wallTimeMs: null,
           reportedTokens: null,
@@ -336,7 +500,30 @@ function episodes(
         result.push(active);
       }
     }
-    if (!active || active.acceptedAt !== null || record.at < active.startedAt) continue;
+    if (record.activity) {
+      if (active && record.activity === "channel") {
+        active.exchanges++;
+        if (previousActivity?.activity === "assistant") {
+          active.workerWaitMs += Math.max(0, Date.parse(record.at) - Date.parse(previousActivity.at));
+          active.waitCount++;
+        }
+      }
+      previousActivity = record;
+    }
+    if (!active || record.at < active.startedAt) continue;
+    if (record.report) active.exchanges++;
+    if (record.verdict) {
+      active.reviewRounds = (active.reviewRounds ?? 0) + 1;
+      if (record.verdict === "changes") {
+        active.reviewChangeRequests++;
+        active.reworkRounds = (active.reworkRounds ?? 0) + 1;
+      }
+    }
+    if (record.landed && active.landedAt === null) {
+      active.landedAt = record.at;
+      active.wallTimeToLandedMs = Math.max(0, Date.parse(record.at) - Date.parse(active.startedAt));
+    }
+    if (active.acceptedAt !== null) continue;
     active.lastAt = record.at;
     if (record.tokens !== undefined) {
       active.reportedTokens = (active.reportedTokens ?? 0) + record.tokens;
@@ -358,6 +545,7 @@ const sumKnown = (values: (number | null)[]) =>
 export async function readIssueMetrics(
   stateDir: string,
   input: IssueMetricsQuery = {},
+  current?: NonNullable<IssueMetricsReport["summary"]>["current"],
 ): Promise<IssueMetricsReport> {
   const query = IssueMetricsQuerySchema.parse(input);
   const until = new Date(query.until ?? Date.now()).toISOString();
@@ -365,7 +553,9 @@ export async function readIssueMetrics(
   if (Date.parse(since) >= Date.parse(until) || Date.parse(until) - Date.parse(since) > 366 * 86_400_000)
     throw new RangeError("Metrics window must be positive and at most 366 days");
   const warnings: string[] = [];
+  const missingHistories: NonNullable<IssueMetricsReport["coverage"]["missingHistories"]> = [];
   let bytesRead = 0;
+  let scanBytes = 0;
   const read = async (path: string): Promise<string | undefined> => {
     try {
       const info = await stat(path);
@@ -415,19 +605,74 @@ export async function readIssueMetrics(
     }
   }
   const all: Episode[] = [];
+  const sessions: NonNullable<IssueMetricsReport["sessions"]> = [];
+  const leadBusy: [number, number][] = [];
+  const settledBusy: [number, number][] = [];
+  const inbox = new Map<string, string>();
+  const leadSessionIds = new Set<string>();
+  const leadRefs = new Set(
+    metas
+      .filter((m) => m.nativeSource && ["global", "project"].includes(m.scope?.kind ?? ""))
+      .map((m) => m.nativeSource!.session.value),
+  );
   const bindings: MetricsBinding[] = [];
   const seatLabels = new Map<string, string>();
   for (const meta of metas)
     if (meta.scope?.kind === "seat" && meta.scope.seatId) seatLabels.set(meta.scope.seatId, meta.title);
-  const bind = (native: NativeSource, label: string, priority: number, owner?: string) => {
+  const bind = (
+    native: NativeSource,
+    label: string,
+    priority: number,
+    owner?: string,
+    projectId?: string,
+  ) => {
     bindings.push({
       native,
       label,
       priority,
+      ...(projectId ? { projectId } : {}),
       ...(owner === undefined ? {} : { owner }),
       aliases: new Set([native.terminalId, label, native.session.value]),
     });
   };
+  const relaunch = await read(join(stateDir, "lead-seat-relaunches.json"));
+  if (relaunch) {
+    try {
+      const journal = obj(JSON.parse(relaunch));
+      if (Array.isArray(journal.receipts))
+        for (const value of journal.receipts) {
+          const receipt = obj(value);
+          for (const [field, launch] of [
+            ["previousSessionId", "from"],
+            ["sessionId", "to"],
+          ] as const) {
+            const id = receipt[field];
+            const harness = obj(receipt[launch]).harness;
+            if (
+              typeof id !== "string" ||
+              !SESSION_UUID.test(id) ||
+              !["claude", "codex"].includes(String(harness)) ||
+              typeof receipt.paneId !== "string" ||
+              typeof receipt.seatId !== "string"
+            )
+              continue;
+            leadRefs.add(id);
+            bind(
+              {
+                terminalId: receipt.seatId,
+                paneId: receipt.paneId,
+                agent: harness as "claude" | "codex",
+                session: { source: `herdr:${harness}`, kind: "id", value: id },
+              },
+              "Lead",
+              0,
+            );
+          }
+        }
+    } catch {
+      warnings.push("Invalid retained lead relaunch history");
+    }
+  }
   for (const meta of metas) {
     const native = meta.nativeSource;
     if (!native) continue;
@@ -441,6 +686,7 @@ export async function readIssueMetrics(
     try {
       const owners = HireOwnersStateSchema.parse(JSON.parse(ownersRaw));
       for (const hire of owners.hires) {
+        if (query.project !== undefined && hire.hireProjectId !== query.project) continue;
         if (!hire.seatId) continue; // A bare startup intent has no native history yet.
         let session;
         try {
@@ -451,6 +697,13 @@ export async function readIssueMetrics(
         }
         const [fleet, agent, value] = session;
         if (fleet !== "local") {
+          missingHistories.push({
+            machine: fleet,
+            workerId: hire.seatId,
+            harness: agent,
+            nativeSessionId: value,
+            reason: "remote_not_collected",
+          });
           warnings.push(`Remote native history unavailable: ${hire.seatId}`);
           continue;
         }
@@ -468,6 +721,7 @@ export async function readIssueMetrics(
           seatLabels.get(hire.seatId) ?? hire.seatId,
           1,
           hire.owner.conversationId,
+          hire.hireProjectId,
         );
       }
     } catch {
@@ -507,11 +761,25 @@ export async function readIssueMetrics(
   for (const binding of bindings) {
     const native = binding.native;
     if (native.paneId.includes("/")) {
+      missingHistories.push({
+        machine: native.paneId.split("/")[0]!,
+        workerId: native.terminalId,
+        harness: native.agent,
+        nativeSessionId: native.session.value,
+        reason: "remote_not_collected",
+      });
       warnings.push(`Remote native history unavailable: ${native.terminalId}`);
       continue;
     }
     const path = await resolveHerdrSeatTranscriptPathAsync(native.agent, native.session);
     if (!path) {
+      missingHistories.push({
+        machine: "local",
+        workerId: native.terminalId,
+        harness: native.agent,
+        nativeSessionId: native.session.value,
+        reason: "not_found_or_ambiguous",
+      });
       warnings.push(`Native history unavailable: ${native.terminalId}`);
       continue;
     }
@@ -559,10 +827,13 @@ export async function readIssueMetrics(
     for (const key of files) ambiguousFiles.add(key);
   }
   const sourceSessions = new Map<string, Set<string>>();
-  for (const [key, group] of groups) {
-    if (ambiguousFiles.has(key)) continue;
+  for (const [key, group] of [...groups].sort((a, b) => b[1].mtimeMs - a[1].mtimeMs)) {
+    if (ambiguousFiles.has(key) || group.mtimeMs < Date.parse(since)) continue;
     const found = group.bindings.sort((a, b) => b.priority - a.priority);
     const primary = found[0]!;
+    const isLeadSource = found.some((b) => leadRefs.has(b.native.session.value));
+    if (query.project !== undefined && !isLeadSource && !found.some((b) => b.projectId === query.project))
+      continue;
     const aliases = new Set(found.flatMap((binding) => [...binding.aliases]));
     if (query.worker !== undefined && !aliases.has(query.worker)) continue;
     const owners = new Set(found.flatMap((binding) => (binding.owner === undefined ? [] : [binding.owner])));
@@ -581,22 +852,64 @@ export async function readIssueMetrics(
     const sessionId =
       found.find((binding) => binding.native.session.kind === "id")?.native.session.value ??
       (SESSION_UUID.test(namedSession) ? namedSession : undefined);
-    if (query.issue !== undefined) {
-      if (group.size > MAX_SOURCE_BYTES) {
-        warnings.push(`Source exceeds 64 MiB: ${path.split("/").at(-1)}`);
-        continue;
-      }
-      try {
-        if (!(await containsAssignment(path, native.agent, sessionId, query.issue))) continue;
-      } catch {
-        warnings.push(`Native history scan unavailable: ${native.terminalId}`);
-        continue;
-      }
-    }
-    const raw = await read(path);
-    if (raw === undefined) {
-      warnings.push(`Native history unreadable: ${native.terminalId}`);
+    let records: NativeRecord[];
+    try {
+      if (group.size > 2 * 1024 ** 3) throw new Error("Native scan exceeds 2 GiB");
+      if (scanBytes + group.size > 16 * 1024 ** 3) throw new Error("Request scan exceeds 16 GiB");
+      scanBytes += group.size;
+      records = await projectNative(path, native.agent, sessionId, stateDir, warnings);
+    } catch (error) {
+      warnings.push(
+        `Native history scan unavailable: ${native.terminalId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       continue;
+    }
+    if (
+      query.issue !== undefined &&
+      !records.some((r) => r.prompt && assignedIssue(r.prompt) === query.issue)
+    )
+      continue;
+    const projectedBytes = Buffer.byteLength(JSON.stringify(records));
+    if (bytesRead + projectedBytes > MAX_REQUEST_BYTES) {
+      warnings.push(`256 MiB request projection budget exhausted: ${native.terminalId}`);
+      continue;
+    }
+    bytesRead += projectedBytes;
+    const activities = records.filter((r) => r.activity);
+    const first = activities[0];
+    const last = activities.at(-1);
+    const isLead = found.some((b) => leadRefs.has(b.native.session.value));
+    if (isLead) {
+      leadSessionIds.add(sessionId ?? native.session.value);
+      for (const row of records) {
+        if (row.busy) leadBusy.push([Date.parse(row.busy[0]), Date.parse(row.busy[1])]);
+        if (row.at >= since && row.at < until)
+          for (const id of row.inbound ?? []) if (!inbox.has(id)) inbox.set(id, row.at.slice(0, 10));
+      }
+    } else if (first && last && last.at >= since && first.at < until) {
+      const wait = activities.flatMap((r, i) =>
+        r.activity === "channel" && activities[i - 1]?.activity === "assistant"
+          ? [Math.max(0, Date.parse(r.at) - Date.parse(activities[i - 1]!.at))]
+          : [],
+      );
+      sessions.push({
+        workerId: native.terminalId,
+        nativeSessionId: sessionId ?? native.session.value,
+        harness: native.agent,
+        hired:
+          native.agent === "claude"
+            ? records.find((r) => r.prompt !== undefined)?.brief === true
+            : found.some((b) => b.owner !== undefined),
+        startedAt: first.at,
+        lastAt: last.at,
+        observedWallTimeMs: Math.max(0, Date.parse(last.at) - Date.parse(first.at)),
+        workerWaitMs: wait.reduce((n, v) => n + v, 0),
+        waitCount: wait.length,
+        exchanges:
+          activities.filter((r) => r.activity === "channel").length + records.filter((r) => r.report).length,
+        reviewVerdicts: records.filter((r) => r.verdict).length,
+        reviewChangeRequests: records.filter((r) => r.verdict === "changes").length,
+      });
     }
     sourceSessions.set(
       key,
@@ -605,20 +918,12 @@ export async function readIssueMetrics(
         ...(sessionId === undefined ? [] : [sessionId]),
       ]),
     );
-    all.push(
-      ...episodes(
-        nativeRecords(raw, native.agent, sessionId),
-        native.terminalId,
-        primary.label,
-        native.session.value,
-        key,
-      ),
-    );
+    if (!isLead) all.push(...episodes(records, native.terminalId, primary.label, native.session.value, key));
   }
   const rows = all.filter(
     (row) =>
-      (row.acceptedAt ?? row.lastAt) >= since &&
-      (row.acceptedAt ?? row.lastAt) < until &&
+      (row.landedAt ?? row.acceptedAt ?? row.lastAt) >= since &&
+      (row.landedAt ?? row.acceptedAt ?? row.lastAt) < until &&
       (query.issue === undefined || row.issueId === query.issue),
   );
   const ledger = ((await read(join(stateDir, "seat-ledger.jsonl"))) ?? "").split("\n");
@@ -669,6 +974,9 @@ export async function readIssueMetrics(
       const parsed = CaptainTurnSettledMetricsSchema.safeParse(JSON.parse(line));
       if (!parsed.success) continue;
       const metric = parsed.data;
+      const end = metric.completedAt ?? metric.failedAt;
+      if (metric.lane === "operator" && end)
+        settledBusy.push([Date.parse(metric.acceptedAt), Date.parse(end)]);
       const runId = metric.runId;
       const linked = assignments.get(runId);
       const issue = linked?.size === 1 ? [...linked][0] : undefined;
@@ -717,6 +1025,22 @@ export async function readIssueMetrics(
       fullCheckRuns: sumKnown(found.map((r) => r.fullCheckRuns)),
       reviewRounds: sumKnown(found.map((r) => r.reviewRounds)),
       reworkRounds: sumKnown(found.map((r) => r.reworkRounds)),
+      landedAt:
+        found
+          .flatMap((r) => (r.landedAt ? [r.landedAt] : []))
+          .sort()
+          .at(-1) ?? null,
+      wallTimeToLandedMs: found.some((r) => r.landedAt !== null)
+        ? Math.max(
+            0,
+            Math.max(...found.flatMap((r) => (r.landedAt ? [Date.parse(r.landedAt)] : []))) -
+              Date.parse(startedAt),
+          )
+        : null,
+      workerWaitMs: found.reduce((n, r) => n + r.workerWaitMs, 0),
+      waitCount: found.reduce((n, r) => n + r.waitCount, 0),
+      exchanges: found.reduce((n, r) => n + r.exchanges, 0),
+      reviewChangeRequests: found.reduce((n, r) => n + r.reviewChangeRequests, 0),
       leadReportedTokens: lead.get(issueId)?.tokens ?? null,
       leadUsageReports: lead.get(issueId)?.reports ?? 0,
       workers: found.map(({ issueId: _issue, lastAt: _last, source: _source, ...worker }) => worker),
@@ -736,21 +1060,107 @@ export async function readIssueMetrics(
       reworkRounds: sumKnown(found.map((r) => r.reworkRounds)),
     };
   });
+  const selectedSessions =
+    query.issue === undefined
+      ? sessions
+      : sessions.filter((s) => rows.some((r) => r.nativeSessionId === s.nativeSessionId));
+  const hired = selectedSessions.filter((s) => s.hired);
+  const total = (
+    key:
+      | "observedWallTimeMs"
+      | "workerWaitMs"
+      | "waitCount"
+      | "exchanges"
+      | "reviewVerdicts"
+      | "reviewChangeRequests",
+  ) => hired.reduce((n, s) => n + s[key], 0);
+  const nativeBusyMs = unionDuration(leadBusy, Date.parse(since), Date.parse(until));
+  const settledBusyMs = unionDuration(settledBusy, Date.parse(since), Date.parse(until));
+  const busyMs = nativeBusyMs;
+  const busyKnown = leadBusy.length > 0;
+  const perDay = new Map<string, number>();
+  for (let day = Date.parse(since.slice(0, 10)); day < Date.parse(until); day += 86_400_000)
+    perDay.set(new Date(day).toISOString().slice(0, 10), 0);
+  for (const day of inbox.values()) perDay.set(day, (perDay.get(day) ?? 0) + 1);
   return IssueMetricsReportSchema.parse({
     schemaVersion: 1,
     window: { since, until },
     issues,
     workers,
+    sessions: selectedSessions,
+    summary: {
+      workerSessions: hired.length,
+      observedWorkerWallTimeMs: total("observedWallTimeMs"),
+      workerWaitMs: total("workerWaitMs"),
+      workerWaitShare: total("observedWallTimeMs")
+        ? total("workerWaitMs") / total("observedWallTimeMs")
+        : null,
+      waitCount: total("waitCount"),
+      waitsPerSession: hired.length ? total("waitCount") / hired.length : null,
+      exchanges: total("exchanges"),
+      exchangesPerTask: rows.length ? rows.reduce((n, r) => n + r.exchanges, 0) / rows.length : null,
+      reviewVerdicts: total("reviewVerdicts"),
+      reviewChangeRequests: total("reviewChangeRequests"),
+      reviewChangeRate: total("reviewVerdicts")
+        ? total("reviewChangeRequests") / total("reviewVerdicts")
+        : null,
+      leadNativeBusyMs: leadBusy.length ? nativeBusyMs : null,
+      leadSettledElapsedMs: settledBusy.length ? settledBusyMs : null,
+      leadBusyMs: busyKnown ? busyMs : null,
+      leadBusyFraction: busyKnown ? busyMs / (Date.parse(until) - Date.parse(since)) : null,
+      leadNativeSessions: leadSessionIds.size,
+      leadInboxVolumePerDay: [...perDay].map(([day, count]) => ({ day, count })),
+      current: current ?? {
+        observedAt: new Date().toISOString(),
+        inProgressCount: null,
+        liveSeats: null,
+        warnings: ["Live tracker and fleet observation unavailable"],
+      },
+    },
     coverage: {
+      missingHistories: [...new Map(missingHistories.map((r) => [JSON.stringify(r), r])).values()],
       tokens:
         "Provider-reported native worker responses (including cached input); Codex response IDs and Claude message IDs deduplicated. Native subagents, missing/legacy usage are not allocated. Report-handling lead turns with mixed/ambiguous retained inbound issue references are excluded; other work in their context is unknown. leadReportedTokens counts only uniquely linked settled report-handling turns, separately.",
       wallTime:
-        "Assignment to explicit approval in the worker's native user messages; elapsed time includes waits. Window selects approval time, or latest observation for unfinished work. Worker sums can overlap; issue wall time is the envelope.",
+        "Assignment to explicit approval in the worker's native user messages; elapsed time includes waits. Window selects observed landing, otherwise approval time, or latest observation for unfinished work. Worker sums can overlap; issue wall time is the envelope.",
       fullChecks:
         "Observed worker command launches of full pnpm check (shell/literal Python subprocess forms). Partial counts exclude unrecognized wrappers, native children and lead batch checks; no log/prose mentions counted.",
       reviews:
         "Explicit native review requests and approvals; rework counts explicit requests for fixes. Seat ledger passed/ship events are observations, never issue acceptance. Hire receipts retain unresolved attempts only; absence is not historical proof of delivery.",
+      efficiency:
+        "Waits use the review baseline: a native assistant event immediately followed by a Clankie channel user message; all intervening user/tool-result events break the wait. Includes legitimate end-of-task pauses. Session totals cover whole retained sessions overlapping the window; issue totals cover assigned episodes. Exchanges count channel messages plus observed message_clankie calls, not delivery receipts. Review change rate uses structured review_verdict decisions, including standing reviewer sessions without a task assignment. Landed means an observed successful native git push fast-forward to main, not approval or tracker Done. Lead busy is the union of retained native turn_duration intervals clipped to the query window, following the review baseline. Settled operator elapsed time is reported separately, since it includes blocked and failed turns and does not establish native activity; retained relaunch bindings may omit older lead sessions. Inbox counts unique native channel event IDs per UTC day. Missing PC histories and unbound sessions are excluded; this is measured coverage, not a complete census.",
       warnings: [...new Set(warnings)],
     },
   });
+}
+
+function unionDuration(intervals: [number, number][], since: number, until: number): number {
+  let end = since;
+  let total = 0;
+  for (const [a, b] of intervals.sort((a, b) => a[0] - b[0])) {
+    const start = Math.max(since, a, end);
+    const stop = Math.min(until, b);
+    if (stop > start) {
+      total += stop - start;
+      end = stop;
+    }
+  }
+  return total;
+}
+
+/** Bound a malformed or image-heavy single JSONL row before readline could
+ * accumulate the entire file in memory. */
+async function* nativeLines(stream: ReturnType<typeof createReadStream>): AsyncGenerator<string> {
+  let pending = "";
+  for await (const chunk of stream) {
+    pending += String(chunk);
+    let end: number;
+    while ((end = pending.indexOf("\n")) !== -1) {
+      if (end > 16 * 1024 * 1024) throw new Error("Native row exceeds 16 MiB");
+      yield pending.slice(0, end);
+      pending = pending.slice(end + 1);
+    }
+    if (pending.length > 16 * 1024 * 1024) throw new Error("Native row exceeds 16 MiB");
+  }
+  if (pending) yield pending;
 }

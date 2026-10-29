@@ -320,9 +320,20 @@ it("serves the real VUH-1608 golden through the production service, client and C
       );
     const retainedPaths = [metaPath, ownersPath, tidyPath, native];
     const cli = await unchanged(retainedPaths, () => runCli());
-    expect(JSON.parse(cli.stdout)).toEqual({ ok: true, report });
-    expect(IssueMetricsReportSchema.parse(JSON.parse(cli.stdout).report)).toEqual(report);
+    const cliReport = JSON.parse(cli.stdout);
+    expect(cliReport.ok).toBe(true);
+    // Historical measurements are stable; the live census has its own timestamp.
+    const cliCurrentAt = cliReport.report.summary.current.observedAt;
+    expect(Number.isFinite(Date.parse(cliCurrentAt))).toBe(true);
+    cliReport.report.summary.current.observedAt = report.summary!.current.observedAt;
+    expect(cliReport).toEqual({ ok: true, report });
+    expect(IssueMetricsReportSchema.parse(cliReport.report)).toEqual(report);
     expect((await client.readIssueMetrics({ ...query, worker: "Noor" })).issues).toEqual(report.issues);
+    if (unrelated.length) {
+      const fleetWide = await client.readIssueMetrics({ since: query.since, until: query.until });
+      expect(fleetWide.issues).toEqual(report.issues);
+      expect(fleetWide.coverage.warnings.some((w) => /256 MiB/u.test(w))).toBe(false);
+    }
     if (unrelated.length)
       console.log(
         JSON.stringify({
@@ -746,6 +757,108 @@ it("serves the real VUH-1608 golden through the production service, client and C
     const unavailable = await client.readIssueMetrics(query);
     expect(unavailable.issues).toEqual([]);
     expect(unavailable.coverage.warnings).toContain(`Native history unavailable: ${manifest.terminalId}`);
+    // Current native Claude hire shape, with lab timing and shortened prose.
+    // The original hire message delegates to a service-owned brief; tool output
+    // mentioning an issue or a fabricated push cannot select or land a task.
+    const claudeId = "08972436-9763-428e-9436-8ae82d423400";
+    const claudeDir = join(home, ".claude", "projects", "lab-current-hire");
+    const briefDir = join(captain, "claude-briefs");
+    await mkdir(claudeDir, { recursive: true });
+    await mkdir(briefDir, { recursive: true });
+    const brief = join(briefDir, "clankie-brief-92152b65-1c73-4b48-9aba-638602cb6aa5.json");
+    await writeFile(
+      brief,
+      JSON.stringify({ clankieBrief: "You're Odalys, on VUH-2967. Fix the metrics report." }),
+    );
+    const at = (second: number) => `2026-10-04T12:00:${String(second).padStart(2, "0")}.000Z`;
+    const user = (second: number, content: unknown) => ({
+      type: "user",
+      uuid: `lab-user-${second}`,
+      sessionId: claudeId,
+      timestamp: at(second),
+      message: { role: "user", content },
+    });
+    const assistant = (second: number, content: unknown) => ({
+      type: "assistant",
+      uuid: `lab-assistant-${second}`,
+      sessionId: claudeId,
+      timestamp: at(second),
+      message: { role: "assistant", content },
+    });
+    const pushOutput = "  abcdef0..1234567  HEAD -> main\n";
+    await writeFile(
+      join(claudeDir, `${claudeId}.jsonl`),
+      [
+        user(0, `Execute the assignment in the clankieBrief JSON field of @${brief}`),
+        assistant(1, [{ type: "text", text: "Ready for review." }]),
+        user(3, '<channel source="plugin:clankie-worker" kind="message">Continue.</channel>'),
+        assistant(4, [
+          {
+            type: "tool_use",
+            id: "lab-report",
+            name: "mcp__worker__message_clankie",
+            input: { text: "Ready" },
+          },
+          {
+            type: "tool_use",
+            id: "lab-review",
+            name: "mcp__worker__review_verdict",
+            input: { verdict: "changes" },
+          },
+          { type: "tool_use", id: "lab-print", name: "Bash", input: { command: "printf fake-push" } },
+        ]),
+        user(5, [{ type: "tool_result", tool_use_id: "lab-print", content: pushOutput }]),
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n") + "\n",
+    );
+    const claudeMeta = join(captain, "conversations", "lab-current-hire");
+    await mkdir(claudeMeta);
+    await writeFile(
+      join(claudeMeta, "meta.json"),
+      JSON.stringify({
+        title: "Odalys",
+        nativeSource: {
+          terminalId: "term_lab_claude",
+          paneId: "lab:p1",
+          agent: "claude",
+          session: { source: "herdr:claude", kind: "id", value: claudeId },
+        },
+      }),
+    );
+    const currentQuery = { ...query, issue: "VUH-2967" };
+    const beforePush = await client.readIssueMetrics(currentQuery);
+    expect(beforePush.issues[0]).toMatchObject({
+      issueId: "VUH-2967",
+      workerWaitMs: 2000,
+      waitCount: 1,
+      exchanges: 2,
+      reviewChangeRequests: 1,
+      landedAt: null,
+      wallTimeToLandedMs: null,
+    });
+    expect(beforePush.summary).toMatchObject({
+      workerSessions: 1,
+      waitCount: 1,
+      reviewVerdicts: 1,
+      reviewChangeRequests: 1,
+      reviewChangeRate: 1,
+    });
+    await appendFile(
+      join(claudeDir, `${claudeId}.jsonl`),
+      [
+        assistant(6, [
+          { type: "tool_use", id: "lab-push", name: "Bash", input: { command: "git push origin HEAD:main" } },
+        ]),
+        user(7, [{ type: "tool_result", tool_use_id: "lab-push", content: pushOutput }]),
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n") + "\n",
+    );
+    expect((await client.readIssueMetrics(currentQuery)).issues[0]).toMatchObject({
+      landedAt: at(7),
+      wallTimeToLandedMs: 7000,
+    });
     if (process.env.CLANKIE_METRICS_EVIDENCE !== undefined) {
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "metrics-cli.json"), cli.stdout);
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "loopback-service.log"), output);

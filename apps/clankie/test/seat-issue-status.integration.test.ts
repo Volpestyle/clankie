@@ -438,3 +438,31 @@ it.each([false, true])(
     expect(f.provider.validationErrors).toEqual([]);
   },
 );
+
+it("reads the metrics In Progress census through the tracker adapter without settling issues", async () => {
+  const f = await setup();
+  const { readIssueMetricsCurrent } = await import("../src/captain/issue-metrics-current.ts");
+  const before = JSON.stringify(f.provider.rows);
+  const snapshot = await readIssueMetricsCurrent({
+    projectIds: ["clankie"],
+    tracker: async () => ({
+      identity: "metrics-fixture",
+      backend: "linear",
+      call: async (tool, args, requestPriority) => {
+        const result = await f.host.call({
+          lane: "operator",
+          server: "linear",
+          tool,
+          arguments: args,
+          resultMode: "data",
+          requestPriority,
+        });
+        if (result.outcome !== "ok" || result.isError) throw Error("Tracker refused");
+        return JSON.parse(result.content);
+      },
+    }),
+    roster: async () => ({ liveSeats: 2, warnings: [] }),
+  });
+  expect(snapshot).toMatchObject({ inProgressCount: 3, liveSeats: 2, warnings: [] });
+  expect(JSON.stringify(f.provider.rows)).toBe(before);
+});

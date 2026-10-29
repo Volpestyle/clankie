@@ -217,6 +217,16 @@ flag. A review whose census missed its deadline is not recorded; after a call
 ends without an answer, compare `efficiency.reviewedAt` from `show` with when
 you sent it.
 
+For historical comparisons, run `clankie metrics --issues --project PROJECT_ID
+--since ISO --until ISO`. It reads exact retained local Claude/Codex histories,
+including saved Claude briefs, and reports issue landing observations, wait gaps,
+exchanges, reviews and session/fleet summaries. Waits include end-of-task pauses;
+exchanges are attempts, not receipt proof. Compare the same session cohort and
+window. Native lead busy time covers retained lead bindings only. Always include
+`coverage.missingHistories` (especially PC sessions) and `summary.current.warnings`
+with the numbers; a missing source is not zero activity. The present-time census
+reads In Progress issues and live seats without changing their state.
+
 ## Closing panes and tidying worktrees
 
 Load `tidy`: its "Closing panes" and "Worktrees" sections are the canonical

@@ -284,6 +284,7 @@ import { hireDisplayName } from "./hire-name.ts";
 import { hasPendingInboundClaim } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 import { InboundSeatReceipts } from "./inbound-seat-receipts.ts";
 import { readIssueMetrics } from "./issue-metrics.ts";
+import { readIssueMetricsCurrent } from "./issue-metrics-current.ts";
 import { LaneLog } from "./lane-log.ts";
 import { buildLaneToolBank, laneAuthoredTools, laneAuthoredToolsNamed } from "./lane-tools.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
@@ -7691,7 +7692,48 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return turnSettled.read(query);
     },
 
-    readIssueMetrics: (query) => readIssueMetrics(options.stateDir, query),
+    async readIssueMetrics(query) {
+      const fence = await settingsStore.loadFenced();
+      const projects = fence.settings.projects.projects.filter(
+        (p) => query.project === undefined || p.id === query.project,
+      );
+      const census = boundedFleetRead(4_000);
+      const observed = await census.bounded(
+        "issue_metrics_current",
+        readIssueMetricsCurrent({
+          projectIds: projects.map((p) => p.id),
+          tracker: async (id) => {
+            if (!deps.workItems?.prepareSeatIssueTracker) throw new Error("Tracker reader unavailable");
+            return deps.workItems.prepareSeatIssueTracker(id, async () => fence.assertCurrent());
+          },
+          roster: async () => {
+            const roster = await readFleetRoster({ includeWork: query.project !== undefined });
+            const warnings = (roster.readWarnings ?? []).map((w) => w.message);
+            const unknownProject = query.project !== undefined && roster.agents.some((s) => !s.project);
+            if (unknownProject) warnings.push("Some live seats have unknown project membership");
+            return {
+              liveSeats:
+                roster.complete && !unknownProject
+                  ? roster.agents.filter(
+                      (s) =>
+                        !s.stale &&
+                        !s.pending &&
+                        (query.project === undefined || s.project?.id === query.project),
+                    ).length
+                  : null,
+              warnings,
+            };
+          },
+        }),
+      );
+      const current = observed?.value ?? {
+        observedAt: new Date().toISOString(),
+        inProgressCount: null,
+        liveSeats: null,
+        warnings: census.readWarnings.map((w) => w.message),
+      };
+      return readIssueMetrics(options.stateDir, query, current);
+    },
 
     voiceLaneInstructions(surface) {
       // The same Identity every lane starts from, then the one voice register.

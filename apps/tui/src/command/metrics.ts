@@ -13,7 +13,7 @@ import {
 import { commandHost } from "./io.ts";
 
 const METRICS_USAGE =
-  "Usage: clankie metrics [--run ID] [--limit N] | --fleet | --app | --issues [--issue ID] [--worker ID] [--since ISO] [--until ISO]";
+  "Usage: clankie metrics [--run ID] [--limit N] | --fleet | --app | --issues [--issue ID] [--worker ID] [--project ID] [--since ISO] [--until ISO]";
 
 export interface MetricsCliCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -57,10 +57,10 @@ export function parseMetricsArgs(args: readonly string[]): MetricsCliArgs {
       issueMode = true;
       continue;
     }
-    if (["--issue", "--worker", "--since", "--until"].includes(flag!)) {
+    if (["--issue", "--worker", "--project", "--since", "--until"].includes(flag!)) {
       if (value === undefined) throw new Error(METRICS_USAGE);
       issueQuery[flag!.slice(2)] = value;
-      if (flag === "--issue" || flag === "--worker") issueMode = true;
+      if (flag === "--issue" || flag === "--worker" || flag === "--project") issueMode = true;
       index += 1;
       continue;
     }

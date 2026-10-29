@@ -8,8 +8,9 @@ export const IssueMetricsQuerySchema = z
     until: z.string().datetime({ offset: true }).optional(),
     issue: z
       .string()
-      .regex(/^[A-Z][A-Z0-9]*-\d+$/u)
+      .regex(/^(?:LOCAL-)?[A-Z][A-Z0-9]*-\d+$/u)
       .optional(),
+    project: z.string().min(1).max(200).optional(),
     worker: z.string().min(1).max(200).optional(),
   })
   .strict();
@@ -21,6 +22,28 @@ const Totals = {
   reviewRounds: Count.nullable(),
   reworkRounds: Count.nullable(),
 };
+const Efficiency = {
+  landedAt: z.string().datetime().nullable().optional(),
+  wallTimeToLandedMs: Count.nullable().optional(),
+  workerWaitMs: Count.optional(),
+  waitCount: Count.optional(),
+  exchanges: Count.optional(),
+  reviewChangeRequests: Count.optional(),
+};
+const Session = z.object({
+  workerId: z.string(),
+  nativeSessionId: z.string(),
+  harness: z.enum(["claude", "codex"]),
+  hired: z.boolean(),
+  startedAt: z.string().datetime(),
+  lastAt: z.string().datetime(),
+  observedWallTimeMs: Count,
+  workerWaitMs: Count,
+  waitCount: Count,
+  exchanges: Count,
+  reviewVerdicts: Count,
+  reviewChangeRequests: Count,
+});
 const WorkerIssue = z.object({
   workerId: z.string(),
   label: z.string(),
@@ -29,6 +52,7 @@ const WorkerIssue = z.object({
   acceptedAt: z.string().datetime().nullable(),
   wallTimeMs: Count.nullable(),
   ...Totals,
+  ...Efficiency,
   seatSettlements: z.object({ passed: Count, failed: Count, prompt: Count, ship: Count }),
   unresolvedHireReceipt: z.boolean(),
 });
@@ -43,6 +67,7 @@ export const IssueMetricsReportSchema = z.object({
       acceptedAt: z.string().datetime().nullable(),
       wallTimeMs: Count.nullable(),
       ...Totals,
+      ...Efficiency,
       leadReportedTokens: Count.nullable(),
       leadUsageReports: Count,
       workers: z.array(WorkerIssue),
@@ -57,11 +82,51 @@ export const IssueMetricsReportSchema = z.object({
       ...Totals,
     }),
   ),
+  sessions: z.array(Session).optional(),
+  summary: z
+    .object({
+      workerSessions: Count,
+      observedWorkerWallTimeMs: Count,
+      workerWaitMs: Count,
+      workerWaitShare: z.number().nonnegative().nullable(),
+      waitCount: Count,
+      waitsPerSession: z.number().nonnegative().nullable(),
+      exchanges: Count,
+      exchangesPerTask: z.number().nonnegative().nullable(),
+      reviewVerdicts: Count,
+      reviewChangeRequests: Count,
+      reviewChangeRate: z.number().min(0).max(1).nullable(),
+      leadNativeBusyMs: Count.nullable(),
+      leadSettledElapsedMs: Count.nullable(),
+      leadBusyMs: Count.nullable(),
+      leadBusyFraction: z.number().min(0).max(1).nullable(),
+      leadNativeSessions: Count,
+      leadInboxVolumePerDay: z.array(z.object({ day: z.string(), count: Count })),
+      current: z.object({
+        observedAt: z.string().datetime(),
+        inProgressCount: Count.nullable(),
+        liveSeats: Count.nullable(),
+        warnings: z.array(z.string()),
+      }),
+    })
+    .optional(),
   coverage: z.object({
+    missingHistories: z
+      .array(
+        z.object({
+          machine: z.string(),
+          workerId: z.string(),
+          harness: z.string(),
+          nativeSessionId: z.string(),
+          reason: z.enum(["remote_not_collected", "not_found_or_ambiguous"]),
+        }),
+      )
+      .optional(),
     tokens: z.string(),
     wallTime: z.string(),
     fullChecks: z.string(),
     reviews: z.string(),
+    efficiency: z.string().optional(),
     warnings: z.array(z.string()),
   }),
 });
