@@ -2124,6 +2124,7 @@ it.runIf(process.platform === "darwin")(
     const batch = await f.queue.status(id);
     expect(batch.state).toBe("pushed");
     const tree = batch.repos[0]!.directory;
+    const repositories = [join(f.directory, "batches", id, "repositories", "core")];
     expect(existsSync(tree)).toBe(false);
     for (let round = 1; round < 10; round++) {
       const next = randomUUID();
@@ -2134,6 +2135,7 @@ it.runIf(process.platform === "darwin")(
       );
       await f.queue.wait();
       const landed = await f.queue.status(next);
+      repositories.push(join(f.directory, "batches", next, "repositories", "core"));
       expect(landed.state).toBe("pushed");
       expect(existsSync(landed.repos[0]!.directory)).toBe(false);
       expect(existsSync(join(f.directory, "batches", next, "isolation"))).toBe(false);
@@ -2150,16 +2152,22 @@ it.runIf(process.platform === "darwin")(
         ).includes(landed.repos[0]!.directory),
       ).toBe(false);
     }
-    const cli = await queueCli(f);
-    expect((await runIntegrationCommand(["reclaim"], cli)).reclamation?.freedBytes).toBe(0);
     const log = await readFile(batch.repos[0]!.gate!.log, "utf8");
-    expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toBe(log);
-    const retained = await f.queue.status(id);
-    expect(retained.worktreeReclamation?.[0]?.head).toBe(batch.repos[0]!.head);
     const repository = join(f.directory, "batches", id, "repositories", "core");
     expect(await git(repository, "show", "refs/clankie/retained/core:retained-feature")).toBe(
       "keep this commit",
     );
+    // Pushed clones survive immediate scratch cleanup, then leave on the next sweep.
+    // The restore below must still recover the recorded tree from origin's history.
+    const cli = await queueCli(f);
+    const reclamation = (await runIntegrationCommand(["reclaim"], cli)).reclamation!;
+    expect(reclamation.reclaimed.sort()).toEqual(repositories.sort());
+    expect(reclamation.freedBytes).toBeGreaterThan(0);
+    for (const clone of repositories) expect(existsSync(clone)).toBe(false);
+    expect((await runIntegrationCommand(["reclaim"], cli)).reclamation?.freedBytes).toBe(0);
+    const retained = await f.queue.status(id);
+    expect(retained.worktreeReclamation?.[0]?.head).toBe(batch.repos[0]!.head);
+    expect(await readFile(batch.repos[0]!.gate!.log, "utf8")).toBe(log);
     const restore = randomUUID();
     await f.queue.start(IntegrationRunSchema.parse({ action: "run", id: restore, restore: id }), guard);
     await f.queue.wait();
@@ -2352,6 +2360,9 @@ it.runIf(process.platform === "darwin")(
         protectedTrees.push(tree);
       } else if (round < 34) reclaimable.push(tree);
       else protectedTrees.push(tree);
+      // A foreign worktree still depends on its clone, as does non-terminal work.
+      if (round === 1 || round >= 34) protectedTrees.push(repository);
+      else reclaimable.push(repository);
     }
     const result = await f.queue.reclaimWorktrees();
     expect(result.reclaimed.sort(), JSON.stringify(result.kept)).toEqual(reclaimable.sort());

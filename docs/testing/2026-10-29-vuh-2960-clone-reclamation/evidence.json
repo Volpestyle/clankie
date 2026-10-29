@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "final-verification.json",
+      "size": 31238,
+      "sha256": "a013b643a97dd459e2a72e8e8f05d5b272ec21a50642bf898cc7d2517dfba4e7",
+      "url": "clankie://evidence/sha256/a013b643a97dd459e2a72e8e8f05d5b272ec21a50642bf898cc7d2517dfba4e7"
+    },
+    {
+      "path": "proof.json",
+      "size": 167868,
+      "sha256": "0a06a179593a9fecea7b773a4332363524654a9fdcfad11c0f61082a1ab040b0",
+      "url": "clankie://evidence/sha256/0a06a179593a9fecea7b773a4332363524654a9fdcfad11c0f61082a1ab040b0"
+    }
+  ]
+}
