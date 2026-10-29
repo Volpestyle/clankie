@@ -1667,6 +1667,7 @@ it("projects token-free lease attribution to an observe device and fences late r
     expect(token).toBe(TOKEN);
     return Response.json({
       leases: [{ resource: "voice", conversationId: "owner-thread", state: "active", expiresAt: 1000 }],
+      computer: { resource: "computer", conversationId: "owner-thread", state: "active", expiresAt: 1000 },
     });
   });
   const relay = await startRelay({
@@ -1681,6 +1682,7 @@ it("projects token-free lease attribution to an observe device and fences late r
     fetch(`${relay.url}/v1/body-leases`, { headers: { authorization: `Bearer ${TOKEN}` } });
   expect(await (await request()).json()).toEqual({
     leases: [{ resource: "voice", conversationId: "owner-thread", state: "active", expiresAt: 1000 }],
+    computer: { resource: "computer", conversationId: "owner-thread", state: "active", expiresAt: 1000 },
   });
   readBodyLeases.mockImplementationOnce(async () => {
     revoked = true;

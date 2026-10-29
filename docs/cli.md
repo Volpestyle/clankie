@@ -4146,13 +4146,17 @@ clankie body request '{"action":"ask","resource":"voice","conversationId":"CONVE
 ```
 
 `computer` ownership is exposed separately through `clankie computer request`
-and `/v1/computer`; the legacy body status resource set stays unchanged.
+and `/v1/computer`; the body status `leases` list keeps its original resource
+set.
 
 `GET /v1/body-leases` returns `{leases:[...]}` with resource, owning stable
 conversation ID, expiry and `active`/`recovery_required` state. It accepts the
 operator or an active paired device's existing observe grant. It exposes no
 incarnation tokens, actor details, room text or request messages. The relay
-forwards the same read with the original device bearer.
+forwards the same read with the original device bearer. A held computer lease
+comes back in its own optional `computer` key, outside `leases`, because older
+clients parse that list against the resource set without `computer`; the app
+uses it to list "Using your Mac" beside Clankie's other activities.
 
 `POST /v1/body-leases` uses the strict JSON request above and operator authority
 bound to the selected runnable conversation. Busy results name the holder and

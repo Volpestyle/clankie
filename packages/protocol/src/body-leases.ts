@@ -112,7 +112,15 @@ export const BodyVoiceLeaseRequestSchema = z.discriminatedUnion("action", [
 export type BodyVoiceLeaseRequest = z.infer<typeof BodyVoiceLeaseRequestSchema>;
 
 export const BODY_LEASE_STATUS_PATH = "/v1/body-leases";
-export const BodyLeaseStatusSchema = z.strictObject({ leases: z.array(BodyLeaseViewSchema).max(4) });
+export const BodyLeaseStatusSchema = z.strictObject({
+  leases: z.array(BodyLeaseViewSchema).max(4),
+  /**
+   * The computer lease, apart from `leases` because older clients parse that
+   * list against a resource enum without `computer`. They skip this key as an
+   * additive one (ADR 0016); newer clients read it.
+   */
+  computer: BodyLeaseViewSchema.optional(),
+});
 export type BodyLeaseStatus = z.infer<typeof BodyLeaseStatusSchema>;
 
 export const BodyVoiceSubjectSchema = z.strictObject({

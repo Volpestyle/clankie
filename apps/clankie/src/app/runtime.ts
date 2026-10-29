@@ -2222,14 +2222,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     context.header("cache-control", "no-store");
     if (dependencies.bodyLeases === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
     try {
+      const computer = dependencies.bodyLeases.store.status("computer");
       return context.json({
-        // The computer contract is opt-in; old clients have a closed body-resource enum.
+        // Old clients have a closed body-resource enum, so the computer lease
+        // travels in its own additive key rather than in this list.
         leases: BodyResourceSchema.options
           .filter((resource) => resource !== "computer")
           .flatMap((resource) => {
             const lease = dependencies.bodyLeases!.store.status(resource);
             return lease === undefined ? [] : [lease];
           }),
+        ...(computer === undefined ? {} : { computer }),
       });
     } catch {
       return context.json({ error: "body_leases_unavailable" }, 503);

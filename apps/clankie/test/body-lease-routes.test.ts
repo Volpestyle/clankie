@@ -1,4 +1,10 @@
-import type { BodyResource, CallBrowserToolRequest, CallBrowserToolResult } from "@clankie/protocol";
+import {
+  BodyLeaseStatusSchema,
+  safeParseProtocolResponse,
+  type BodyResource,
+  type CallBrowserToolRequest,
+  type CallBrowserToolResult,
+} from "@clankie/protocol";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -202,4 +208,27 @@ it("requires separate operator authority for explicit head designation and rejec
     (await f.post("/v1/conversation-heads", { conversationId: "a", headConversationId: null })).status,
   ).toBe(401);
   expect(designation).toHaveBeenCalledTimes(1);
+});
+
+it("reports the computer lease in its own key so older clients keep their list", async () => {
+  const { app, store } = await fixture();
+  const read = async () =>
+    (await (
+      await app.app.request("/v1/body-leases", { headers: { authorization: "Bearer owner" } })
+    ).json()) as {
+      leases: { resource: string; conversationId: string }[];
+      computer?: { resource: string; conversationId: string };
+    };
+  expect(await read()).toEqual({ leases: [] });
+  expect(store.acquire("computer", "a", 60_000).outcome).toBe("acquired");
+  expect(store.acquire("voice", "b", 60_000).outcome).toBe("acquired");
+  const status = await read();
+  expect(status.leases.map(({ resource, conversationId }) => [resource, conversationId])).toEqual([
+    ["voice", "b"],
+  ]);
+  expect(status.computer).toMatchObject({ resource: "computer", conversationId: "a", state: "active" });
+  // A reader that predates the key still parses the response.
+  expect(safeParseProtocolResponse(BodyLeaseStatusSchema.omit({ computer: true }), status).success).toBe(
+    true,
+  );
 });
