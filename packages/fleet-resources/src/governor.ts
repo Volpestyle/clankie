@@ -234,6 +234,11 @@ export function createResourceGovernor(
     probe?: () => Promise<ResourcePressureInput>;
     simulatorBootSettleMs?: number;
     heavyJobSettleMs?: number;
+    /** Host-owned original native registrations may connect detached harness servers to their seat. Never caller labels. */
+    nativeSimulatorOwner?: (
+      owner: SimulatorReservation,
+      ancestors: readonly ProcessIdentity[],
+    ) => Promise<boolean>;
   } = {},
 ): FleetResourceGovernor {
   const bootSettleMs = options.simulatorBootSettleMs ?? simulatorBootSettleMs;
@@ -1515,6 +1520,7 @@ export function createResourceGovernor(
         // Walk only this request's ancestry. A copied holder label, another
         // session in the pane or a reused PID cannot keep a simulator alive.
         const chain: ProcessIdentity[] = [];
+        let nativeAncestor = false;
         let pid = entry.process.pid;
         for (let depth = 0; pid > 1 && depth < 64; depth++) {
           const current = await processIdentity(pid);
@@ -1524,21 +1530,26 @@ export function createResourceGovernor(
           if (
             owner.ownerProcesses.some((proof) => proof.pid === pid && proof.startTime === current.startTime)
           ) {
-            // Recheck every birth and edge after the walk, including the
-            // native holder. Unknown or changing observations grant no time.
-            const fresh = await Promise.all(chain.map((row) => processIdentity(row.pid)));
-            if (
-              fresh.every(
-                (row, index) =>
-                  row?.startTime === chain[index]!.startTime && row?.ppid === chain[index]!.ppid,
-              ) &&
-              (await Promise.all(owner.ownerProcesses.map(probeProcess))).every((state) => state === "live")
-            )
-              return true;
+            nativeAncestor = true;
             break;
           }
           pid = current.ppid;
         }
+        // Codex tool commands descend from its original detached app-server,
+        // not its foreground TUI. Only the host's native registration can join
+        // that observed ancestry to the same seat/occupant/binding.
+        if (!nativeAncestor && !(chain.length && (await options.nativeSimulatorOwner?.(owner, chain))))
+          continue;
+        // Recheck every birth and edge after either proof, including the
+        // foreground native holder. Unknown or changing evidence grants no time.
+        const fresh = await Promise.all(chain.map((row) => processIdentity(row.pid)));
+        if (
+          fresh.every(
+            (row, index) => row?.startTime === chain[index]!.startTime && row?.ppid === chain[index]!.ppid,
+          ) &&
+          (await Promise.all(owner.ownerProcesses.map(probeProcess))).every((state) => state === "live")
+        )
+          return true;
       }
       return false;
     },

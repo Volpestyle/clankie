@@ -1469,6 +1469,14 @@ export function createSimulatorManager(input: {
             // mutations. A pending read for one holder cannot block releases.
             // allow-swallowed-rejection -- Missing native evidence grants no activity; current process and lease checks still apply below.
             const observed = await proveSeat(candidate).catch(() => undefined);
+            let heavyAt: number | undefined;
+            if (observed && "owner" in observed && matchesOwner(candidate, observed.owner)) {
+              // The host may need a fresh original-server/occupant observation.
+              // Keep it outside mutations just like native task reads.
+              // allow-swallowed-rejection -- Unavailable native membership grants no heavy activity.
+              if (await input.governor.simulatorHolderHasHeavyWork(candidate).catch(() => false))
+                heavyAt = now();
+            }
             await serial(async () => {
               const lease = await find(candidate.id);
               // A release may have completed while the native read was pending.
@@ -1481,7 +1489,7 @@ export function createSimulatorManager(input: {
                 const live = processes.length > 0 && states.every((state) => state === "live");
                 const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS;
                 const hotFor = runawayFor(lease, usage, pressure);
-                let active = false;
+                let activeAt: number | undefined;
                 let promptAt: number | undefined;
                 if (live && !stale) {
                   try {
@@ -1492,19 +1500,23 @@ export function createSimulatorManager(input: {
                           Number.isFinite(proof.idleSinceMs) && proof.idleSinceMs! <= now()
                             ? proof.idleSinceMs
                             : now();
-                      active =
-                        (proof.status === "working" &&
-                          Number.isFinite(proof.activityUntilMs) &&
-                          proof.activityUntilMs! > now() &&
-                          proof.activityUntilMs! <= now() + 5 * 60_000) ||
-                        (await input.governor.simulatorHolderHasHeavyWork(lease));
+                      activeAt =
+                        proof.status === "working" &&
+                        Number.isFinite(proof.activityUntilMs) &&
+                        proof.activityUntilMs! > now() &&
+                        proof.activityUntilMs! <= now() + 5 * 60_000
+                          ? now()
+                          : heavyAt !== undefined && now() - heavyAt < 10_000
+                            ? heavyAt
+                            : undefined;
                     }
                   } catch {
                     // Missing evidence cannot renew a previous working state.
                   }
                 }
+                const active = activeAt !== undefined;
                 const previous = activity.get(lease.id);
-                if (active) activity.set(lease.id, { active: true, at: now() });
+                if (activeAt !== undefined) activity.set(lease.id, { active: true, at: activeAt });
                 else if (previous?.active) {
                   // Retain the last heavy/turn sample if the native prompt
                   // predates that work. Lost evidence never starts a new clock.

@@ -1438,6 +1438,25 @@ const minecraftHost = new MinecraftHostService({
 });
 let fleetProjectMembership: FleetProjectMembership | undefined;
 const fleetResources = await createServiceFleetResourceRuntime({
+  nativeSimulatorOwner: async (owner, chain) => {
+    if ((owner.fleet && owner.fleet !== "default") || !owner.pane || !owner.holderId?.startsWith("codex:"))
+      return false;
+    const binding = await localFleetBinding();
+    if (
+      !binding ||
+      owner.binding?.socketPath !== binding.socketPath ||
+      owner.binding.session !== binding.session
+    )
+      return false;
+    // The same original-launch, process-birth and restored-occupant proof as
+    // private Codex tool admission; a pane/holder label never grants membership.
+    return localCodexSeats.allows(
+      chain.map((row) => row.pid),
+      owner.pane,
+      binding,
+      owner.occupantId,
+    );
+  },
   policy: async () => {
     const { fleet } = await settingsStore.load();
     return fleet.machineResources?.local ?? fleet.resources;

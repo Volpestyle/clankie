@@ -309,6 +309,12 @@ confer no lease authority or time. Long quiet Claude root turns and a general no
 process-held simulator path remain open. Supported native activity and the remaining root API requirement
 are documented in the [simulator reference](../../.agents/skills/fleet-resources/reference/simulators.md).
 
+Codex tools descend from a detached app-server rather than its foreground TUI.
+The service joins that observed ancestry through the same original launch
+registry used for private-seat admission, checking the native occupant, binding
+and process birth. It still rechecks the full command ancestry and live TUI;
+matching holder or pane labels alone never renew a lease.
+
 Timer and seat-census ticks share one pending observation round. Native activity
 reads run outside the simulator mutation queue, so a slow holder observation
 cannot queue repeated rounds ahead of another request's release. Applying a

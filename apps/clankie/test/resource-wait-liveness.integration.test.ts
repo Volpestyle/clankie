@@ -27,6 +27,7 @@ import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { runSeatHookCommand } from "../../tui/src/command/seat-hook.ts";
 import { runSimulatorCommand } from "../../tui/src/command/fleet-resources.ts";
 import { FileCredentialStore } from "@clankie/credential-broker";
+import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 
 const execute = promisify(execFile);
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -43,7 +44,7 @@ async function stop(child: ChildProcess) {
   await closed;
 }
 
-async function fixture(context?: TestContext) {
+async function fixture(context?: TestContext, detachedCodex = false) {
   const stages: unknown[] = [];
   const trace = (stage: string, data: Record<string, unknown> = {}) => {
     if (!context) return;
@@ -84,17 +85,62 @@ async function fixture(context?: TestContext) {
   await writeFile(statePath, JSON.stringify({ devices: {} }));
   await writeFile(log, "");
   const directory = join(root, "state", "fleet-resources");
+  const paneId = detachedCodex ? "w48:p5F" : "w1:p1";
+  const seatId = detachedCodex ? "term_65ef24ebb035f201" : "fixture-seat";
+  const binding = {
+    runtime: "external" as const,
+    session: "default",
+    socketPath: join(root, "fixture.sock"),
+  };
+  let child: ChildProcess;
+  let sessionId = detachedCodex ? "01a185b6-0a85-77c0-983a-eea6c1aeac32" : "fixture-original-session",
+    replaced = false,
+    admitted = true;
+  const session = () => ({
+    source: detachedCodex ? "herdr:codex" : "herdr:claude",
+    kind: "id" as const,
+    value: sessionId,
+  });
+  const durable = {
+    path: join(root, "local-codex-seats.json"),
+    observeOccupant: async () => occupantIdForHerdrSession(session()),
+  };
+  let privateSeats = new LocalCodexSeats(() => binding, undefined, durable);
+  let privateProofBarrier: (() => Promise<void>) | undefined;
+  const frontend = detachedCodex
+    ? spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { env, stdio: "ignore" })
+    : undefined;
+  if (frontend) {
+    await once(frontend, "spawn");
+    cleanups.push(() => stop(frontend));
+  }
   const governor = createResourceGovernor({
     directory,
     probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 32768 }),
     simulatorBootSettleMs: 0,
     heavyJobSettleMs: 0,
+    nativeSimulatorOwner: async (owner, chain) => {
+      const barrier = privateProofBarrier;
+      privateProofBarrier = undefined;
+      await barrier?.();
+      return (
+        owner.pane === paneId &&
+        owner.binding?.socketPath === binding.socketPath &&
+        privateSeats.allows(
+          chain.map((row) => row.pid),
+          paneId,
+          binding,
+          owner.occupantId,
+        )
+      );
+    },
   });
   const resources = await createFleetResourceRuntime({
     governor,
     policy: async () => undefined,
     simulator: {
       clock: () => now,
+      ...(detachedCodex ? { respondWithinMs: 2000 } : {}),
       adapter: createSimctlAdapter({
         run: async (args, timeout) =>
           (
@@ -117,21 +163,17 @@ async function fixture(context?: TestContext) {
     minAvailableMemoryMb: 0,
     minFreeDiskGb: 0,
   });
-  let child: ChildProcess;
-  let sessionId = "fixture-original-session",
-    replaced = false,
-    admitted = true;
-  const session = () => ({ source: "herdr:claude", kind: "id" as const, value: sessionId });
   const native = async () => {
-    const identity = child?.pid
-      ? await observed("native-process-proof", () => processIdentity(child.pid!))
+    const nativePid = frontend?.pid ?? child?.pid;
+    const identity = nativePid
+      ? await observed("native-process-proof", () => processIdentity(nativePid))
       : undefined;
     if (!identity) throw Error("Fixture native process unavailable");
     return {
       fleet: "default",
-      pane: "w1:p1",
+      pane: paneId,
       nativeOccupantId: occupantIdForHerdrSession(session()),
-      binding: { socketPath: join(root, "fixture.sock") },
+      binding: { socketPath: binding.socketPath, ...(detachedCodex ? { session: binding.session } : {}) },
       shell: { pid: identity.pid, startTime: identity.startTime },
       processes: [{ pid: identity.pid, startTime: replaced ? "replaced-birth" : identity.startTime }],
     };
@@ -141,11 +183,11 @@ async function fixture(context?: TestContext) {
     isLocalFleet: async () => true,
     resolve: async (id) => {
       resolutions += 1;
-      return ["w1:p1", "fixture-seat"].includes(id)
+      return [paneId, seatId].includes(id)
         ? {
-            terminalId: "fixture-seat",
-            paneId: "w1:p1",
-            agent: "claude",
+            terminalId: seatId,
+            paneId,
+            agent: detachedCodex ? "codex" : "claude",
             status: "working",
             title: "Native fixture",
             session: session(),
@@ -160,7 +202,7 @@ async function fixture(context?: TestContext) {
   let measureAdmissionCpu = false,
     admissionCpuMs = 0;
   const prove = async (socket: Socket, pane: string) => {
-    if (!admitted || pane !== "w1:p1" || socket.destroyed) return false;
+    if (!admitted || pane !== paneId || socket.destroyed) return false;
     let pid = socketOwners.get(socket);
     if (!pid) {
       const args = ["-nP", "-iTCP", "-Fpn"];
@@ -177,6 +219,18 @@ async function fixture(context?: TestContext) {
       socketOwners.set(socket, pid);
     }
     const holder = await native().catch(() => undefined);
+    if (detachedCodex) {
+      const chain: number[] = [];
+      for (
+        let current = await processIdentity(pid);
+        current && chain.length < 64;
+        current = await processIdentity(current.ppid)
+      ) {
+        chain.push(current.pid);
+        if (current.ppid <= 1) break;
+      }
+      return privateSeats.allows(chain, paneId, binding, holder?.nativeOccupantId);
+    }
     // time(1) is an optional measurement parent; admission still requires exact
     // live ancestry to this fixture's pinned native process and birth.
     for (let current = await processIdentity(pid), depth = 0; current && depth < 5; depth += 1) {
@@ -270,10 +324,11 @@ async function fixture(context?: TestContext) {
       CLAUDE_PLUGIN_ROOT: resolve("integrations/claude-plugin/worker"),
       ACTIVITY_MOD_PATH: resolve("integrations/claude-plugin/worker/mods/tool-catalog.mjs"),
       ...(context ? { ACTIVITY_TRACE: "1" } : {}),
-      HERDR_PANE_ID: "w1:p1",
+      HERDR_PANE_ID: paneId,
       HERDR_SOCKET_PATH: join(root, "fixture.sock"),
     },
     stdio: ["ignore", "ignore", "pipe", "ipc"],
+    detached: detachedCodex,
   });
   let errors = "";
   child.stderr!.on("data", (data) => {
@@ -284,6 +339,12 @@ async function fixture(context?: TestContext) {
   trace("engine-ready:start", { pid: child.pid });
   expect((await once(child, "message"))[0], errors).toEqual({ ready: true });
   trace("engine-ready:end", { pid: child.pid });
+  if (detachedCodex) {
+    const registration = privateSeats.register(child.pid!, paneId);
+    await registration.bindSession!(sessionId);
+    // As after a service restart, only the durable original launch remains.
+    privateSeats = new LocalCodexSeats(() => binding, undefined, durable);
+  }
   let nextId = 0;
   const send = async (message: Record<string, unknown>) => {
     const id = ++nextId;
@@ -303,7 +364,7 @@ async function fixture(context?: TestContext) {
       env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" },
       operatorCredentialStore: new FileCredentialStore(join(root, "credentials.json")),
     });
-  const owner = { seatId: "fixture-seat", holderId: `claude:${sessionId}` };
+  const owner = { seatId, holderId: `${detachedCodex ? "codex" : "claude"}:${sessionId}` };
   const acquire = async (holderId = owner.holderId) => {
     const result = (await observed("simulator-acquire", () =>
       cli("acquire", { ...owner, holderId, deviceType, runtime }),
@@ -345,6 +406,20 @@ async function fixture(context?: TestContext) {
     owner,
     child,
     native,
+    pausePrivateProof: () => {
+      let entered!: () => void, resume!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const barrier = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      privateProofBarrier = async () => {
+        entered();
+        await barrier;
+      };
+      return { waiting, resume };
+    },
     cli,
     seatHook: (event: string) =>
       runSeatHookCommand([], {
@@ -524,13 +599,14 @@ it.skipIf(process.platform !== "darwin")(
   30_000,
 );
 
-it.skipIf(process.platform !== "darwin").each(["root", "child", "codex"])(
+it.skipIf(process.platform !== "darwin").each(["root", "child", "codex", "detached-codex"])(
   "exact native holder heavy queue and permit retain the lease; copied labels outside its process ancestry do not (%s)",
   async (scope) => {
-    const f = await fixture();
+    const f = await fixture(undefined, scope === "detached-codex");
+    if (scope === "detached-codex") expect((await f.native()).processes[0]!.pid).not.toBe(f.child.pid);
     if (scope === "child") f.owner.holderId += ":agent:a3333333333333333";
     if (scope === "codex") f.owner.holderId = "codex:fixture-original-session";
-    await f.send({ event: "session.start", input: { isInteractive: true } });
+    if (scope !== "detached-codex") await f.send({ event: "session.start", input: { isInteractive: true } });
     const lease = await f.acquire();
     const busyReceipt = join(f.root, "busy-ready"),
       busyRelease = join(f.root, "busy-release"),
@@ -555,7 +631,7 @@ it.skipIf(process.platform !== "darwin").each(["root", "child", "codex"])(
       directory: f.directory,
       release,
       holderId: f.owner.holderId,
-      seatId: "w1:p1",
+      seatId: scope === "detached-codex" ? "w48:p5F" : "w1:p1",
     });
     cleanups.push(() => f.send({ heavy: "stop" }));
     expect((await f.governor.snapshot()).queue).toContainEqual(
@@ -595,6 +671,33 @@ it.skipIf(process.platform !== "darwin").each(["root", "child", "codex"])(
     // End only the governed command allocated by this proof.
     await f.governor.close();
     await copied;
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "a slow original Codex server membership proof does not block simulator release",
+  async () => {
+    const f = await fixture(undefined, true);
+    const lease = await f.acquire();
+    await f.send({
+      heavy: "start",
+      directory: f.directory,
+      release: join(f.root, "private-release"),
+      holderId: f.owner.holderId,
+      seatId: "w48:p5F",
+    });
+    cleanups.push(() => f.send({ heavy: "stop" }));
+    await f.send({ heavy: "ready" });
+    const paused = f.pausePrivateProof();
+    const ticking = f.resources.simulators.tick();
+    await paused.waiting;
+    try {
+      expect(await f.cli("release", { ...f.owner, id: lease.id })).toEqual({ outcome: "released" });
+    } finally {
+      paused.resume();
+      await ticking;
+    }
+    expect(await f.governor.simulatorReservations()).toEqual([]);
   },
 );
 

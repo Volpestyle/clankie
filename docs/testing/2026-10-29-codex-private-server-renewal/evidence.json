@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "private-server-captures.tar",
+      "size": 30720,
+      "sha256": "04fb449d60aaaa90f4846f8ef6af2dab83804ff83ca572a7046d1f8e719ded1e",
+      "url": "clankie://evidence/sha256/04fb449d60aaaa90f4846f8ef6af2dab83804ff83ca572a7046d1f8e719ded1e"
+    }
+  ]
+}

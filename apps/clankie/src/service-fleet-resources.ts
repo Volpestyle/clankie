@@ -48,16 +48,20 @@ export async function serviceResourceDirectory(env: NodeJS.ProcessEnv = process.
 
 /** Only service fixtures honor this seam; worker/CLI governors always share the OS registry. */
 export async function createServiceFleetResourceRuntime(
-  input: Pick<Parameters<typeof createFleetResourceRuntime>[0], "policy" | "onError">,
+  input: Pick<Parameters<typeof createFleetResourceRuntime>[0], "policy" | "onError"> & {
+    nativeSimulatorOwner?: NonNullable<Parameters<typeof createResourceGovernor>[0]>["nativeSimulatorOwner"];
+  },
   env: NodeJS.ProcessEnv = process.env,
 ) {
-  if (env.VITEST !== "true" && env.NODE_ENV !== "test") return createFleetResourceRuntime(input);
+  const native = input.nativeSimulatorOwner ? { nativeSimulatorOwner: input.nativeSimulatorOwner } : {};
+  if (env.VITEST !== "true" && env.NODE_ENV !== "test")
+    return createFleetResourceRuntime({ ...input, governor: createResourceGovernor(native) });
 
   const { directory, dispose } = await serviceResourceDirectory(env);
   const refuse = async (): Promise<never> => {
     throw new Error("Native simulators are unavailable in a test service");
   };
-  const governor = createResourceGovernor(directory ? { directory } : {});
+  const governor = createResourceGovernor({ ...native, ...(directory ? { directory } : {}) });
   try {
     const runtime = await createFleetResourceRuntime({
       ...input,
