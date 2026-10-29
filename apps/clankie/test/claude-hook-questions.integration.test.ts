@@ -99,6 +99,7 @@ it("consumes permission denials and refuses freeform approval labels", async () 
     async (q) => publish(q),
   );
   const q = await published;
+  expect(q.questions[0]!.question).toBe("A worker wants to run a command.\n\n```\ngit push\n```");
   expect(
     await registry.answer(ref, { requestId: q.requestId, answers: { q0: { answers: ["Sure"] } } }),
   ).toMatchObject({ outcome: "refused" });
@@ -168,3 +169,49 @@ it("refuses the second concurrent answer and denies an expired or aborted hook",
     },
   });
 });
+
+// Exercise the native pending/deny path for non-command permissions too.
+it.each([
+  {
+    toolName: "Write",
+    toolInput: { file_path: "/tmp/sample.md", content: 'First line\nA "quoted" line\n```inside```' },
+    summary: "write a file",
+    detail: 'content:\n  First line\n  A "quoted" line\n  ```inside```',
+  },
+  {
+    toolName: "UnknownStep",
+    toolInput: { value: "First line\nSecond line" },
+    summary: "continue with this step",
+    detail: "value:\n  First line\n  Second line",
+  },
+])(
+  "keeps $toolName readable through the native permission path",
+  async ({ toolName, toolInput, summary, detail }) => {
+    const registry = new ClaudeHookQuestions(await journal());
+    const abort = new AbortController();
+    let publish!: (q: SeatQuestion) => void;
+    const published = new Promise<SeatQuestion>((resolve) => {
+      publish = resolve;
+    });
+    const pending = registry.open(
+      ref,
+      { ...ask, event: "PermissionRequest", toolName, toolInput },
+      async (q) => publish(q),
+      abort.signal,
+      undefined,
+      "Thea",
+    );
+    try {
+      const q = await published;
+      const text = q.questions[0]!.question;
+      expect(text).toContain(`Thea wants to ${summary}.\n\n`);
+      expect(text).toContain(detail);
+      expect(text).not.toContain('\\"');
+      if (toolName === "Write") expect(text).toContain("\n````\n");
+      expect(registry.pending(ref, q.requestId)?.questions).toEqual(q.questions);
+    } finally {
+      abort.abort();
+      expect(await pending).toMatchObject({ hookSpecificOutput: { decision: { behavior: "deny" } } });
+    }
+  },
+);

@@ -12,6 +12,14 @@ it("escalates a real pending Claude permission through the owner ask store and r
   const root = await mkdtemp(join(tmpdir(), "worker-owner-escalation-"));
   const registry = new ClaudeHookQuestions(join(root, "native-claims.json"));
   const ref = { harness: "claude" as const, paneId: "worker-pane", sessionId: "native-session" };
+  const command = [
+    "export CLAUDE_SESSION_ID='native-session'",
+    "export API_KEY='sk-private-token-value'",
+    "cat <<'END'",
+    'a "quoted" line',
+    "END",
+    ...Array.from({ length: 120 }, (_, i) => `printf 'check ${i}'`),
+  ].join("\n");
   const store = new ConversationStore(join(root, "conversations"), async () => {});
   const owner = {
     principal: { kind: "operator" as const, id: "owner" },
@@ -60,7 +68,7 @@ it("escalates a real pending Claude permission through the owner ask store and r
         event: "PermissionRequest",
         toolName: "Bash",
         toolUseId: "permission-invocation",
-        toolInput: { command: "git push" },
+        toolInput: { command, description: "Compare the check across shells" },
       },
       async (question) => {
         native = question;
@@ -70,6 +78,9 @@ it("escalates a real pending Claude permission through the owner ask store and r
         });
         publish();
       },
+      undefined,
+      undefined,
+      "Thea",
     );
     await announced;
     expect(native.gate).toBe("moneyAndAccounts");
@@ -79,6 +90,15 @@ it("escalates a real pending Claude permission through the owner ask store and r
     );
     if (read.op !== "input_get" || !read.result.question) throw new Error("No owner ask");
     const q = read.result.question;
+    expect(q.prompt).toBe("Thea wants to: Compare the check across shells");
+    const detail = q.workerQuestion!.questions[0]!.question;
+    expect(detail).toContain(`cat <<'END'\na "quoted" line\nEND`);
+    expect(detail).toContain("check 119");
+    expect(detail).toMatch(/\n`{3}$/u);
+    expect(detail).not.toContain(ref.sessionId);
+    expect(detail).not.toContain("sk-private-token-value");
+    expect(detail).not.toContain('\\"');
+    expect(detail).not.toContain('"command":');
     expect(q.workerQuestion?.requestId).toBe(native.requestId);
     expect(q.workerQuestion?.questions[0]?.options?.map((o) => o.label)).toEqual(["Allow", "Deny"]);
     const request = {

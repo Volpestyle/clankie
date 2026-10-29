@@ -45,6 +45,53 @@ const DecisionSchema = z
   })
   .strict();
 
+/** Display input as code, preserving string newlines rather than JSON escapes. */
+function readablePermissionInput(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value))
+    return value.map((entry) => `- ${readablePermissionInput(entry).replaceAll("\n", "\n  ")}`).join("\n");
+  if (value !== null && typeof value === "object")
+    return Object.entries(value)
+      .map(([key, entry]) => {
+        const text = readablePermissionInput(entry);
+        return text.includes("\n") ? `${key}:\n  ${text.replaceAll("\n", "\n  ")}` : `${key}: ${text}`;
+      })
+      .join("\n");
+  return String(value);
+}
+
+function permissionQuestion(hook: FleetSeatHook, input: Record<string, unknown>, workerName: string): string {
+  const who = workerName.trim().replace(/\s+/gu, " ") || "A worker";
+  const description =
+    hook.toolName === "Bash" && typeof input.description === "string"
+      ? input.description.trim().replace(/\s+/gu, " ")
+      : "";
+  const action: Record<string, string> = {
+    Bash: "run a command",
+    Read: "read a file",
+    Write: "write a file",
+    Edit: "edit a file",
+    Glob: "find files",
+    Grep: "search for text",
+    WebSearch: "search the web",
+    WebFetch: "read a web page",
+  };
+  const summary = description
+    ? `${who} wants to: ${description}`
+    : `${who} wants to ${action[hook.toolName ?? ""] ?? "continue with this step"}.`;
+  const code =
+    hook.toolName === "Bash" && typeof input.command === "string"
+      ? input.command
+      : readablePermissionInput(input);
+  const fence = "`".repeat(Math.max(3, ...[...code.matchAll(/`+/gu)].map((match) => match[0].length + 1)));
+  return redactSensitiveText(`${summary}\n\n${fence}\n${code}\n${fence}`)
+    .replace(
+      /\b(?:CLAUDE_(?:SESSION|AGENT)_ID|CODEX_THREAD_ID|CLANKIE_RESOURCE_HOLDER)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s;]+)/gu,
+      "[REDACTED]",
+    )
+    .replaceAll(hook.sessionId, "[REDACTED]");
+}
+
 /** Only provably local routine calls are eligible for the lead's existing policy. */
 function permissionGate(hook: FleetSeatHook, workspace?: string): NonNullable<SeatQuestion["gate"]> {
   if (hook.permissionTransport === "channel") return "moneyAndAccounts";
@@ -251,6 +298,7 @@ export class ClaudeHookQuestions {
     notify: (question: SeatQuestion) => Promise<void>,
     signal?: AbortSignal,
     workspace?: string,
+    workerName = "A worker",
   ): Promise<ClaudeHookAnswer> {
     if (
       ref.harness !== "claude" ||
@@ -273,12 +321,12 @@ export class ClaudeHookQuestions {
         {
           id: "q0",
           header: "Permission",
-          question: redactSensitiveText(`Allow ${hook.toolName ?? "tool"}?\n${JSON.stringify(input)}`),
+          question: permissionQuestion(hook, input, workerName),
           isOther: false,
           isSecret: false,
           options: [
-            { label: "Allow", description: "Allow this tool invocation once." },
-            { label: "Deny", description: "Refuse this tool invocation." },
+            { label: "Allow", description: "Let this step run once." },
+            { label: "Deny", description: "Keep this step stopped." },
           ],
         },
       ];

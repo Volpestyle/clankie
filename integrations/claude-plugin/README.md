@@ -723,6 +723,12 @@ projects its options into the hiring conversation. The lead answers through
 `message_seat.questionAnswer` with the exact request and question IDs. An
 owner-reserved decision uses the existing owner ask/escalation path.
 
+Permission asks name the worker and describe the step in plain words. Shell asks
+use Claude's description when supplied; their command keeps real newlines in a
+fenced code block, with sensitive values redacted. Other inputs use readable
+key/value lines. The short owner-ask preview contains only the opening sentence;
+the full pending question retains the code and the same Allow/Deny choices.
+
 A permission answer returns `hookSpecificOutput.decision.behavior` as `allow`
 or `deny` for that invocation. An ask-the-user answer returns a `PreToolUse`
 `allow` plus `updatedInput.answers`, keyed by the original question text.

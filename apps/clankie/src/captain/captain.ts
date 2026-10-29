@@ -8385,7 +8385,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : session.kind === "id"
             ? session.value
             : basename(session.value, ".jsonl");
-      if (agent?.agent !== "claude" || sessionId !== hook.sessionId) return false;
+      if (agent?.agent !== "claude" || !session || sessionId !== hook.sessionId) return false;
       const ref = { harness: "claude" as const, sessionId, paneId: agent.paneId };
       if (hook.deliveredQuestionId) return hookQuestions.acknowledge(ref, hook.deliveredQuestionId);
       if (
@@ -8398,6 +8398,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           (question) => herdrWatches.forwardNativeQuestion(ref, question),
           signal,
           splitFleetQualified(paneId) === undefined ? agent.workingDirectory : undefined,
+          personas.boundPersona(liveSeats, agent.terminalId, occupantIdForHerdrSession(session))?.name,
         );
         return { recorded: true as const, hookOutput: { ...hookOutput } };
       }
