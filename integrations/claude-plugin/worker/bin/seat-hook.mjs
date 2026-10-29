@@ -127,6 +127,7 @@ async function reportOverLink(link, pane) {
       const result = await response
         .clone()
         .json()
+        // allow-swallowed-rejection -- Undecodable absence leaves the claim intact for the shell to restore.
         .catch(() => undefined);
       const claim = process.env.CLANKIE_ROOT_HOOK_CLAIM;
       if (result?.rootLeaseAbsent === true && claim?.endsWith(`.claim.${process.ppid}`)) {
@@ -141,11 +142,11 @@ async function reportOverLink(link, pane) {
     if (
       response.status === 400 &&
       body.occurredAt !== undefined &&
-      // allow-swallowed-rejection -- Only a decoded schema refusal permits the legacy retry.
       (
         await response
           .clone()
           .json()
+          // allow-swallowed-rejection -- Undecodable refusals never retry; the intact claim is restored by the shell.
           .catch(() => undefined)
       )?.error === "invalid_request"
     ) {

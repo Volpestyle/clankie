@@ -128,11 +128,11 @@ export async function runSeatHookCommand(
   if (
     response.status === 400 &&
     body.occurredAt !== undefined &&
-    // allow-swallowed-rejection -- Only a decoded schema refusal permits the legacy retry.
     (
       await response
         .clone()
         .json()
+        // allow-swallowed-rejection -- Undecodable refusals never retry; the original refusal still fails below.
         .catch(() => undefined)
     )?.error === "invalid_request"
   ) {
