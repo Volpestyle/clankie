@@ -1387,7 +1387,7 @@ it("reads a surviving Codex holder after host restart and returns idle without r
     expect(await status()).toBe("idle");
     const held = f.native.holdNextRead();
     const pending = status();
-    await held.entered;
+    await held.pending;
     const original = f.pane.agent_session;
     f.pane.agent_session = { ...original, value: "replaced-thread" };
     held.release();

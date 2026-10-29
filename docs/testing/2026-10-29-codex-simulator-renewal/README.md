@@ -7,7 +7,7 @@ IDs before checking ancestry; restarted services could not observe surviving
 Codex holders because native-task reads required a launch controller in memory.
 
 Raw captures are in `source-captures.tar` in [the evidence manifest](./evidence.json):
-`clankie://evidence/sha256/32e34c1fa040486050c64377480583f54e93267c8527af633ef70cc89c7cb358`.
+`clankie://evidence/sha256/2dbf1b4c5b9e8f74832c291c48af095f2aac1fa11bbb48ac85794dae41dac864`.
 
 ## Focused source proof
 
