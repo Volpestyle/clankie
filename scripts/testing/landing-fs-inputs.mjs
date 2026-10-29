@@ -170,7 +170,14 @@ export const landingFsInputs = Object.fromEntries([
   ["apps/clankie/test/claude-hook-command.integration.test.ts", seatHookInputs],
   [
     "apps/clankie/test/resource-wait-liveness.integration.test.ts",
-    ["integrations/claude-plugin/worker/bin/root-lease-hook.sh"],
+    [
+      ...seatHookInputs,
+      "integrations/claude-plugin/worker/bin/root-lease-hook.sh",
+      "apps/clankie/test/fixtures/resource-activity-engine.mjs",
+      "integrations/claude-plugin/worker/mods/tool-catalog.mjs",
+      "packages/fleet-resources/test/fixtures/simctl.mjs",
+      "packages/fleet-resources/src/native.py",
+    ],
   ],
   ["apps/tui/test/clankie-tracker-hook.integration.test.ts", workerBin("tracker-hook")],
   // prepareFleet copies the plugin and runs setup/inspect and the installed MCP
