@@ -397,6 +397,11 @@ type HireAuthority = ConversationAuthority & {
   readonly intentId?: string;
   /** Host-resolved saved thread, admitted against its existing persisted owner. */
   readonly resumedSessionKey?: string;
+  /**
+   * Host-only: this authority's check for one project launch, given that hire's own
+   * startup occupant as the store derives it (Auto re-reads the hire's project).
+   */
+  readonly authorizeLaunch?: (startup: ProjectHireStartup | undefined) => Promise<boolean>;
 };
 type AdoptHire = (result: Extract<HerdrSeatSpawnResult, { outcome: "spawned" }>, projectId?: string) => void;
 
@@ -902,12 +907,33 @@ export interface NativeLaunchPolicy {
   }): Promise<void>;
 }
 
+/**
+ * The service's own startup occupant for one in-flight project hire: the pane the
+ * controller allocated and recorded for that exact allocation, while its occupant
+ * is unobserved. Built only from the allocation record, never from a request.
+ */
+export interface ProjectHireStartup {
+  readonly projectId: string;
+  readonly fleet: string;
+  readonly pane: string;
+}
+
+/**
+ * Which admission a project read serves. Only a fresh hire may resolve its lead's
+ * project through service absence; an existing hire's restart never does, and an
+ * omitted admission is neither. `startup` is launch admission only (admitProjectLaunch).
+ */
+export type ProjectHireAdmission =
+  | { readonly mode: "fresh"; readonly startup?: ProjectHireStartup }
+  | { readonly mode: "restart" };
+
 export interface ProjectHirePolicy {
   settings(): Promise<ProjectsSettings>;
   project(
     input: Readonly<HireRequest>,
     settings: ProjectsSettings,
     authority?: ConversationAuthority,
+    admission?: ProjectHireAdmission,
   ): Promise<string | undefined>;
   proof?(fleet: string, pane: string): Promise<ProjectHireProcessProof | undefined>;
   tools?(projectId: string): Promise<readonly string[]>;
@@ -2368,7 +2394,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         input = { ...input, workingDirectory: canonicalDirectory };
       }
       const settings = await this.projectPolicy.settings();
-      const projectId = await this.projectPolicy.project(input, settings, authority);
+      const projectId = await this.projectPolicy.project(input, settings, authority, { mode: "fresh" });
       if (input.projectId !== undefined && input.projectId !== projectId)
         throw new Error("The selected project does not match this hiring conversation or workspace.");
       if (projectId === undefined) {
@@ -2473,7 +2499,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         subjectOverride,
         brief,
         resume,
-        authority,
+        this.launchAuthority(seat, authority),
         adopt,
         flushAdoption,
         work,
@@ -2597,7 +2623,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private async admitProjectLaunch(
     input: SpawnOperatorSeat,
     dispatched = false,
-    authorityOverride?: ConversationAuthority,
+    /** Only an existing hire's restart passes its own authority; that admission is a restart. */
+    restartAuthority?: ConversationAuthority,
   ): Promise<void> {
     await this.runProjectPolicy(async () => {
       await this.requireWorkerAccess?.(input.fleet);
@@ -2614,7 +2641,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (!id || !context || !this.projectPolicy) return;
       const policy = this.projectPolicy;
       const settings = await policy.settings();
-      const project = await policy.project(input, settings, authorityOverride ?? context.authority);
+      const startup = this.projectHireStartup(id, context.projectId);
+      const project = await policy.project(
+        input,
+        settings,
+        restartAuthority ?? context.authority,
+        restartAuthority !== undefined
+          ? { mode: "restart" }
+          : { mode: "fresh", ...(startup === undefined ? {} : { startup }) },
+      );
       const latest = await policy.settings();
       if (project !== context.projectId || projectsRevision(settings) !== projectsRevision(latest))
         throw new Error(
@@ -2623,6 +2658,53 @@ export class HerdrWatchStore implements HerdrWatchPort {
       this.projectHires.launch(id, latest, dispatched);
       context.projectName = latest.projects.find((entry) => entry.id === context.projectId)!.name;
     });
+  }
+
+  /**
+   * This in-flight hire's allocated pane while its occupant is unobserved: no seat,
+   * occupant, proof or confirmation yet. Any other state or allocation carries none.
+   */
+  private projectHireStartup(id: string, projectId: string): ProjectHireStartup | undefined {
+    const allocation = this.projectHires.allocation(id);
+    if (
+      allocation === undefined ||
+      !this.activeProjectHires.has(id) ||
+      allocation.gone ||
+      !allocation.started ||
+      allocation.confirmed ||
+      allocation.pane === undefined ||
+      allocation.seat !== undefined ||
+      allocation.occupantId !== undefined ||
+      allocation.proof !== undefined ||
+      allocation.projectId !== projectId
+    )
+      return undefined;
+    return { projectId, fleet: allocation.request.fleet ?? "default", pane: allocation.pane };
+  }
+
+  /**
+   * A launch's authority whose own check re-reads this hire's project (Auto) carries
+   * the hire's startup occupant, derived afresh from its allocation at every check,
+   * so it ends exactly when admitProjectLaunch's does. Other authorities are unchanged.
+   */
+  private launchAuthority(
+    input: SpawnOperatorSeat,
+    authority: HireAuthority | undefined,
+  ): HireAuthority | undefined {
+    const authorizeLaunch = authority?.authorizeLaunch;
+    if (authority === undefined || authorizeLaunch === undefined) return authority;
+    return {
+      ...authority,
+      authorize: () => {
+        const id = this.projectAllocations.get(input);
+        const context = this.projectContexts.get(input);
+        return authorizeLaunch(
+          id === undefined || context === undefined
+            ? undefined
+            : this.projectHireStartup(id, context.projectId),
+        );
+      },
+    };
   }
 
   private runProjectPolicy(action: () => Promise<void>): Promise<void> {
@@ -3497,9 +3579,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   /**
    * Whether a present pane holds only its own shell: no harness or session
-   * reported, and its shell is the only foreground process (VUH-2243).
+   * reported, and its shell is the only foreground process (VUH-2243). Its shell
+   * pid, or why not; an unreadable process read rejects. Service-absence hiring
+   * proves an omitted-agent pane with it too (VUH-2975).
    */
-  private async shellOnlyPane(pane: HerdrAgentSnapshot): Promise<number | string> {
+  public async shellOnlyPane(pane: HerdrAgentSnapshot): Promise<number | string> {
     if (pane.agent !== "unknown" || pane.session !== undefined)
       return `Pane ${pane.paneId} reports a ${pane.agent === "unknown" ? `${pane.session!.source} session` : pane.agent} occupant`;
     if (!this.runner.paneShell) return "Pane process info is unavailable";
@@ -4996,7 +5080,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
               const context = this.projectContexts.get(input);
               if (context && this.projectPolicy) {
                 const settings = await this.projectPolicy.settings();
-                const project = await this.projectPolicy.project(input, settings, restartAuthority);
+                // A restart keeps live native authority; service absence never admits one (VUH-2975).
+                const project = await this.projectPolicy.project(input, settings, restartAuthority, {
+                  mode: "restart",
+                });
                 if (project !== context.projectId) throw new Error("Original hire project access revoked");
               }
               // Losing a previously granted tool is revocation; additional tools do not

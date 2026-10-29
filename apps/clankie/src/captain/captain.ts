@@ -75,7 +75,7 @@ import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy, readableLinkedRepos } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { ReviewGate } from "./review-gate.ts";
-import type { ProjectHirePolicy } from "./herdr-watch.ts";
+import type { ProjectHireAdmission, ProjectHirePolicy, ProjectHireStartup } from "./herdr-watch.ts";
 import { prepareStoppedTurnSettlement } from "./stopped-turn.ts";
 import { fleetInstructions } from "./captain-prompts.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
@@ -789,6 +789,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     input: Pick<Parameters<ProjectHirePolicy["project"]>[0], "workingDirectory" | "fleet" | "projectId">,
     projects: Parameters<ProjectHirePolicy["project"]>[1],
     authority?: Parameters<ProjectHirePolicy["project"]>[2],
+    admission?: ProjectHireAdmission,
   ) => {
     const localProject = async (directory: string) =>
       (
@@ -820,15 +821,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // prompt can hold it for hours). Then the conversation hires as one without a
       // native source does: only into the project its owner binding or Auto routing
       // assigns it. A missing proof or read, a proven session, another terminal or
-      // no exact open receipt is checked as before.
+      // no exact open receipt is checked as before. Service absence (VUH-2975)
+      // admits only a fresh hire; an existing hire's restart needs live native authority.
       const pending =
         configuredProject !== undefined && origin !== undefined && proof?.nativeSessionPending === true
           ? // allow-swallowed-rejection -- an unreadable pane proves nothing; the unchanged guard below refuses.
             await herdrRunner.get(native.paneId).catch(() => undefined)
           : undefined;
       source =
-        pending !== undefined &&
-        leadSeats.pendingReceipt(origin!, leadSeatPane(native), leadSeatPane(pending)) !== undefined
+        (pending !== undefined &&
+          leadSeats.pendingReceipt(origin!, leadSeatPane(native), leadSeatPane(pending)) !== undefined) ||
+        (configuredProject !== undefined &&
+          origin !== undefined &&
+          proof === undefined &&
+          admission?.mode === "fresh" &&
+          (await serviceHireSourceAbsent(origin, native, configuredProject, admission.startup)))
           ? configuredProject
           : await nativeHireProject(
               projects,
@@ -2789,9 +2796,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // admission boundary, including after asynchronous checkout preparation.
     const authority =
       autonomous === true
-        ? autoHireAuthority(captured, async () => {
+        ? autoHireAuthority(captured, async (startup) => {
             const current = await settings();
-            const projectId = await resolveHireProject(request, current.projects, captured);
+            // Inside a launch the store supplies this hire's own startup occupant (VUH-2975).
+            const projectId = await resolveHireProject(request, current.projects, captured, {
+              mode: "fresh",
+              ...(startup === undefined ? {} : { startup }),
+            });
             return {
               autonomy: current.autonomy,
               project: current.projects.projects.find((entry) => entry.id === projectId),
@@ -2899,7 +2910,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       };
     try {
       const current = await settings();
-      const projectId = await resolveHireProject(request, current.projects, authority);
+      const projectId = await resolveHireProject(request, current.projects, authority, { mode: "fresh" });
       const project = current.projects.projects.find((entry) => entry.id === projectId);
       const policy = effectiveFleetAutonomy(current.autonomy, project?.autonomy);
       brief = [
@@ -6154,6 +6165,91 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       title: "title" in seat ? seat.title : "",
       ...(seat.session === undefined ? {} : { session: seat.session }),
     };
+  }
+
+  /** A service-driven lead retains its project, not the authority of a missing native occupant. */
+  async function serviceHireSourceAbsent(
+    conversationId: string,
+    native: HerdrAgentSnapshot,
+    project: string,
+    startup?: ProjectHireStartup,
+  ): Promise<boolean> {
+    const fleet = splitFleetQualified(native.terminalId)?.fleet ?? "default";
+    const binding = inboundBinding(native);
+    const session = nativeSessionId(native);
+    const eligible = () => {
+      if (
+        binding === undefined ||
+        session === undefined ||
+        !conversations.runsCaptainTurns(conversationId) ||
+        conversationDriver(conversationId) !== undefined ||
+        headSeat !== undefined
+      )
+        return false;
+      // The real outbox, opened from its durable receipt journal and presence even
+      // when nothing has routed through it since a restart. A seat still holding the
+      // lane (VUH-2874) or any unresolved or unreadable receipt is not service-driven.
+      const outbox = seatOutbox(conversationId);
+      return (
+        !outbox.holdsLane() &&
+        !outbox.uncertain() &&
+        inboundBinding(conversations.nativeSource(conversationId)) === binding &&
+        herdrWatches.projectHireAssignment(fleet, native.paneId, undefined).state === "none"
+      );
+    };
+    // Only this hire's own startup occupant: the exact pane the controller allocated
+    // and recorded for it, before it reports any session. The original pane,
+    // terminal and session refuse first, whatever pane they appear in.
+    const startupOccupant = (candidate: HerdrAgentSnapshot) =>
+      startup !== undefined &&
+      startup.projectId === project &&
+      candidate.session === undefined &&
+      candidate.paneId === startup.pane &&
+      (splitFleetQualified(candidate.paneId)?.fleet ?? "default") === startup.fleet;
+    try {
+      if (!eligible() || herdrRunner.list === undefined) return false;
+      // The fail-soft roster cannot prove absence. Every registered inventory must
+      // answer, with the same fleet identities before and after the complete read.
+      await refreshFleets();
+      const identities = JSON.stringify([...fleetIdentities]);
+      const inventory = (
+        await Promise.all([
+          herdrRunner.list(),
+          ...[...remoteFleets, ...namedLocal].map((entry) => herdrRunner.list!(entry.id)),
+        ])
+      ).flat();
+      if (
+        inventory.filter(startupOccupant).length > 1 ||
+        inventory.some(
+          (candidate) =>
+            candidate.paneId === native.paneId ||
+            candidate.terminalId === native.terminalId ||
+            nativeSessionId(candidate) === session,
+        )
+      )
+        return false;
+      for (const candidate of inventory) {
+        if (
+          candidate.agent === "shell" ||
+          nativeSessionId(candidate) !== undefined ||
+          startupOccupant(candidate)
+        )
+          continue;
+        // Current Herdr omits a plain shell's agent field, read as "unknown". Such a
+        // session-less pane counts only when its own process read shows nothing but its
+        // shell, as receipt settlement proves it (VUH-2243); any other occupant refuses.
+        if (
+          candidate.agent !== "unknown" ||
+          typeof (await herdrWatches.shellOnlyPane(candidate)) !== "number"
+        )
+          return false;
+      }
+      await refreshFleets();
+      return identities === JSON.stringify([...fleetIdentities]) && eligible();
+    } catch {
+      // allow-swallowed-rejection -- an unavailable inventory or outbox never proves an absent source; the native guard still refuses.
+      return false;
+    }
   }
 
   // A complete inventory that could not answer (an unreachable machine waits out

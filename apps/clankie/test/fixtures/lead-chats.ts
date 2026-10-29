@@ -7,7 +7,7 @@ import {
 } from "../../src/discord-presence-session.ts";
 import { readVoiceSpeechSnapshot } from "../../src/voice-receipt-activity.ts";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, vi } from "vitest";
@@ -21,6 +21,7 @@ import {
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../../src/captain/herdr-watch.ts";
+import type { MachineWorkerAccounts } from "../../src/captain/harness-accounts.ts";
 import type { CaptainDeps } from "../../src/captain/deps.ts";
 import type { CaptainOptions } from "../../src/captain/captain-types.ts";
 
@@ -40,12 +41,33 @@ export async function leadChatFixture(
     nativeStatus?: () => string;
     nativeSourceProof?: boolean;
     /** Runs before the complete local Herdr inventory answers; it may hold or fail that answer. */
-    inventory?: () => Promise<void>;
+    inventory?: (fleet?: string) => Promise<void>;
+    /** Complete occupants after a lead leaves; undefined retains the fixture's initial native seat. */
+    inventoryAgents?: (fleet?: string) => HerdrAgentSnapshot[] | undefined;
+    /** A second registered inventory, independent of the native lead's local one. */
+    additionalFleet?: boolean;
+    remoteShell?: NonNullable<CaptainDeps["fleets"]>["shell"];
+    /**
+     * Herdr's `pane process-info` for one pane (undefined fleet is local); it may throw.
+     * Unset, no process read answers. VUH-2975 omitted-agent shell proof.
+     */
+    paneShell?: (
+      fleet: string | undefined,
+      paneId: string,
+    ) => { readonly shellPid?: number; readonly foreground: readonly { pid: number; name: string }[] };
     leadRestartCheckMs?: number;
     defaultLead?: boolean;
     beforeOpen?: (sessionId: string) => Promise<void>;
     projectHireIdentity?: CaptainOptions["projectHireIdentity"];
     paneReadFails?: () => boolean;
+    /** Opt-in native launch surface for one hire's own new pane (VUH-2975). */
+    launch?: {
+      readonly seatAdapters: NonNullable<CaptainOptions["seatAdapters"]>;
+      readonly createTab: () => Promise<string>;
+      /** Herdr's occupant of exactly this allocated pane; undefined keeps the native lead. */
+      readonly pane: (paneId: string) => HerdrAgentSnapshot | undefined;
+      readonly tools: NonNullable<CaptainOptions["projectHireTools"]>;
+    };
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
@@ -115,35 +137,107 @@ export async function leadChatFixture(
     if (head.session === undefined) delete wire.agent_session;
     else wire.agent_session = { ...head.session };
   };
-  const herdrResponse = (args: readonly string[]) => {
+  const herdrResponse = (args: readonly string[], fleet?: string) => {
     wire.agent_status = options.nativeStatus?.() ?? "idle";
+    const agents = options.inventoryAgents?.(fleet)?.map((snapshot) => ({
+      pane_id: snapshot.paneId.replace(/^pc\//u, ""),
+      terminal_id: snapshot.terminalId.replace(/^pc\//u, ""),
+      // The parser reads an omitted agent field as "unknown", as current Herdr sends a plain shell.
+      ...(snapshot.agent === "unknown" ? {} : { agent: snapshot.agent }),
+      agent_status: snapshot.status,
+      title: snapshot.title,
+      ...(snapshot.session === undefined ? {} : { agent_session: snapshot.session }),
+      cwd: snapshot.workingDirectory ?? root,
+    })) ?? [wire];
     let result: unknown;
-    if (args[0] === "agent" && args[1] === "list") result = { agents: [wire] };
-    else if (args[0] === "agent" && args[1] === "get") result = { agent: wire };
-    else if (args[0] === "pane" && args[1] === "list") result = { panes: [wire] };
+    if (args[0] === "agent" && args[1] === "list") result = { agents };
+    else if (args[0] === "agent" && args[1] === "get") result = { agent: agents[0] };
+    else if (args[0] === "pane" && args[1] === "list") result = { panes: agents };
     else if (args[0] === "workspace" && args[1] === "list") result = { workspaces: [] };
     else if (args[0] === "api" && args[1] === "snapshot")
-      result = { snapshot: { workspaces: [], tabs: [], panes: [wire], agents: [wire] } };
-    else throw new Error(`Unexpected Herdr command: ${args.join(" ")}`);
+      result = { snapshot: { workspaces: [], tabs: [], panes: agents, agents } };
+    else if (
+      options.paneShell !== undefined &&
+      args[0] === "pane" &&
+      args[1] === "process-info" &&
+      args[2] === "--pane"
+    ) {
+      const shell = options.paneShell(fleet, args[3]!);
+      result = {
+        process_info: {
+          pane_id: args[3],
+          ...(shell.shellPid === undefined ? {} : { shell_pid: shell.shellPid }),
+          foreground_processes: shell.foreground,
+        },
+      };
+    } else throw new Error(`Unexpected Herdr command: ${args.join(" ")}`);
     return JSON.stringify({ result });
   };
   // The worker delivery path types nothing here; any call proves a lead was treated as a hire.
   const workerDelivery = vi.spyOn(HerdrWatchStore.prototype, "deliverToSeat");
   const adoption = vi.spyOn(HerdrWatchStore.prototype, "adoptSeat");
-  vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
+  // A launch observes one fixture Codex account in a temp home, as project-hires.test.ts
+  // does, never the real ~/.codex or its CLI. createCaptain has no option for these
+  // observation sources; it assigns workerAccountsReport just before it starts the
+  // store, so the store's own start installs them. Admission over them stays real.
+  let launchAccounts: ((store: unknown) => void) | undefined;
+  if (options.launch !== undefined) {
+    const codexHome = join(root, "codex-home");
+    mkdirSync(codexHome);
+    writeFileSync(join(codexHome, "auth.json"), "fixture presence only");
+    const observed = (): MachineWorkerAccounts => ({
+      machine: "local",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "codex",
+          label: "fixture",
+          home: codexHome,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "codex-rate-limits",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    });
+    launchAccounts = (store) =>
+      Object.assign(store as object, {
+        workerAccountsReport: async () => observed(),
+        workerAccounts: async (_fleet: string | undefined, harness: string) => {
+          const report = observed();
+          return { ...report, accounts: report.accounts.filter((account) => account.harness === harness) };
+        },
+        accounts: async () => [{ label: "fixture", home: codexHome }],
+      });
+  }
+  vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(function (this: unknown) {
+    launchAccounts?.(this);
+  });
   const runner: HerdrWatchRunner = {
     ...(options.slowFleetMs === undefined && !options.nativeSourceProof
       ? {}
       : {
-          list: async () => {
-            await options.inventory?.();
-            return [head];
+          list: async (fleet) => {
+            await options.inventory?.(fleet);
+            return options.inventoryAgents?.(fleet) ?? [head];
           },
         }),
-    get: async () => {
+    get: async (target) => {
       if (options.paneReadFails?.()) throw new Error("Herdr pane read unavailable");
-      return head;
+      return options.launch?.pane(target) ?? head;
     },
+    ...(options.launch === undefined
+      ? {}
+      : { createTab: options.launch.createTab, runInPane: async () => {}, startAgent: async () => {} }),
+    ...(options.paneShell === undefined
+      ? {}
+      : { paneShell: async (paneId: string) => options.paneShell!(undefined, paneId) }),
     resolveTerminal: async (id) => (id === head.terminalId ? head : Promise.reject(new Error("gone"))),
     wait: async () => head,
   };
@@ -152,7 +246,7 @@ export async function leadChatFixture(
   let fleetDelayMs = 0;
   let slowFleetCalls = 0;
   const settings = new SettingsStore(join(root, "settings.json"));
-  if (remote || options.slowFleetMs !== undefined)
+  if (remote || options.slowFleetMs !== undefined || options.additionalFleet)
     await settings.update((current) => ({
       ...current,
       machines: [{ id: "pc", ssh: "fixture.invalid", shell: "posix", aliases: [] }],
@@ -193,26 +287,37 @@ export async function leadChatFixture(
     memory: {},
     browser: { catalog: async () => ({ available: false, tools: [] }) },
     mcp: { catalog: async () => [], call: async () => ({ outcome: "ok", content: "", isError: false }) },
-    ...(remote
+    ...(options.additionalFleet
       ? {
           fleets: {
             list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
-            run: () => async (args: readonly string[]) => herdrResponse(args),
+            ...(options.remoteShell === undefined ? {} : { shell: options.remoteShell }),
+            run: (fleet: { id: string }) => async (args: readonly string[]) => {
+              await options.inventory?.(fleet.id);
+              return herdrResponse(args, fleet.id);
+            },
           },
         }
-      : options.slowFleetMs !== undefined
+      : remote
         ? {
             fleets: {
               list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
-              // Like an ssh connect timeout to a machine that went away.
-              run: () => async () => {
-                if (fleetDelayMs > 0) slowFleetCalls++;
-                await new Promise((resolve) => setTimeout(resolve, fleetDelayMs));
-                throw new Error("ssh: connect to host fixture.invalid port 22: Operation timed out");
-              },
+              run: () => async (args: readonly string[]) => herdrResponse(args),
             },
           }
-        : {}),
+        : options.slowFleetMs !== undefined
+          ? {
+              fleets: {
+                list: [{ id: "pc", session: "default", ssh: { host: "fixture.invalid", shell: "posix" } }],
+                // Like an ssh connect timeout to a machine that went away.
+                run: () => async () => {
+                  if (fleetDelayMs > 0) slowFleetCalls++;
+                  await new Promise((resolve) => setTimeout(resolve, fleetDelayMs));
+                  throw new Error("ssh: connect to host fixture.invalid port 22: Operation timed out");
+                },
+              },
+            }
+          : {}),
   } as unknown as CaptainDeps;
   /** One service process over the same state directory; a second call is a restart. */
   const open = () => {
@@ -231,7 +336,8 @@ export async function leadChatFixture(
         ? {}
         : { projectHireIdentity: options.projectHireIdentity }),
       discordEnvironment: {},
-      seatAdapters: [],
+      seatAdapters: options.launch?.seatAdapters ?? [],
+      ...(options.launch === undefined ? {} : { projectHireTools: options.launch.tools }),
     });
     cleanup.push(() => opened.close());
     return opened;

@@ -16,6 +16,7 @@ import {
   HerdrWatchStore,
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
+  type ProjectHirePolicy,
 } from "../src/captain/herdr-watch.ts";
 import {
   localWorkspaceProject,
@@ -256,6 +257,53 @@ describe("project hiring", () => {
         expect.anything(),
       );
       expect(start.mock.calls[0]![0].brief).toContain("native-first");
+    } finally {
+      store.close();
+    }
+  });
+  it("threads only this hire's own allocated, unobserved pane into launch admission (VUH-2975)", async () => {
+    const f = await fixture("codex");
+    f.store.close();
+    Object.assign(f.projectSettings.projects[0]!.roles[0]!, {
+      model: "sol 6.1",
+      effort: "xhigh",
+      delegation: "native-first",
+      placement: "new-tab",
+      account: "fixture",
+    });
+    f.runner.runInPane = vi.fn(async () => {});
+    const project = vi.fn(
+      async (..._args: Parameters<ProjectHirePolicy["project"]>) => "game" as string | undefined,
+    );
+    const startup: unknown[] = [];
+    const start = vi.fn<HarnessSeatAdapter["start"]>(async (_launch, view) => {
+      await view.start?.("codex", []);
+      await view.guard?.();
+      startup.push(project.mock.lastCall?.[3]);
+      const ref = { harness: "codex" as const, paneId: "p1", sessionId: "s1" };
+      await view.bound?.(ref);
+      startup.push(project.mock.lastCall?.[3]);
+      return { outcome: "started" as const, control: { ref } as SeatControl };
+    });
+    const store = new HerdrWatchStore(f.path, {
+      ...f.options,
+      resolveHireModel: async (_h, m) => (m === "sol 6.1" ? "gpt-6.1-sol" : m),
+      projectHirePolicy: { ...f.options.projectHirePolicy, project },
+      seatAdapters: [{ harness: "codex", attach: async () => undefined, start }],
+    });
+    try {
+      expect(
+        await store.spawnSeat({ ...request(f.root), deliverable: "VUH-2975" }, undefined, "Implement X"),
+      ).toMatchObject({ outcome: "spawned" });
+      expect(project.mock.calls[0]![3]).toEqual({ mode: "fresh" });
+      expect(startup).toEqual([
+        { mode: "fresh", startup: { projectId: "game", fleet: "default", pane: "p1" } },
+        { mode: "fresh" },
+      ]);
+      for (const [, , , admission] of project.mock.calls) {
+        expect(admission?.mode).toBe("fresh");
+        if (admission?.mode === "fresh") expect([undefined, "p1"]).toContain(admission.startup?.pane);
+      }
     } finally {
       store.close();
     }
