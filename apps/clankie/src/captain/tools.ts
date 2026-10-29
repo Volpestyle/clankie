@@ -1100,7 +1100,9 @@ function hireAgentTool(
     }),
     executionMode: "sequential",
     execute: async (_id, params) => {
-      if (available?.() === false)
+      // This capability describes the local binding, not a named remote fleet.
+      // Explicit remote hires still pass through the hire port's host and authority checks.
+      if (params.fleet === undefined && available?.() === false)
         return json({ outcome: "failed", reason: "herdr_unreachable", deliveryStage: "unavailable" });
       const authority = captureConversationAuthority(turn.conversationAuthority);
       const assignment = structuredClone(params);

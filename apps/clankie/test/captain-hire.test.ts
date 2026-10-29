@@ -191,6 +191,53 @@ describe("captain hire_agent", () => {
     expect(hireSeat).not.toHaveBeenCalled();
   });
 
+  it.each(["not_ready", "start_unconfirmed"] as const)(
+    "routes an explicit remote hire without local Herdr and preserves %s",
+    async (reason) => {
+      const hireSeat = vi.fn(
+        (_seat: SpawnOperatorSeat): Promise<OperatorSeatSpawnResult> =>
+          Promise.resolve({ outcome: "failed", reason }),
+      );
+      const tool = hireTool(
+        captainTools(
+          { ...deps, herdrAvailable: () => false } as CaptainDeps,
+          {
+            targetId: "global-default",
+            conversationAuthority: {
+              owner: { conversationId: "global-default" },
+              current: () => true,
+              authorize: async () => true,
+            },
+          },
+          {} as LaneLog,
+          "operator",
+          undefined,
+          undefined,
+          undefined,
+          hireSeat,
+        ),
+      );
+      const seat = {
+        harness: "claude",
+        title: "Nessa",
+        role: "reviewer",
+        fleet: "pc",
+        workingDirectory: "C:\\review",
+      };
+      const result = await tool.execute("remote-call", seat, undefined, undefined, {} as never);
+      expect(hireSeat).toHaveBeenCalledExactlyOnceWith(
+        { schemaVersion: 1, ...seat },
+        undefined,
+        expect.objectContaining({ owner: { conversationId: "global-default" } }),
+      );
+      expect(result.details).toEqual({
+        outcome: "failed",
+        reason,
+        deliveryStage: reason === "start_unconfirmed" ? "uncertain" : "unavailable",
+      });
+    },
+  );
+
   it("rejects a schema violation before it reaches the hire port", async () => {
     const hireSeat = vi.fn();
     const tool = hireTool(
