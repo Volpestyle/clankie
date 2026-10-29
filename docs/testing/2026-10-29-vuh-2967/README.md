@@ -12,6 +12,10 @@ proof. The owned governed server was stopped after capture.
 | Rolling 14 days: 2026-10-15 03:24 → 2026-10-29 03:24 UTC |    211 |     175 |                      49 |
 | Default 24 hours, captured 2026-10-29                    |     26 |      24 |                      10 |
 
+After the final review guards, the rolling 14-day and project review-window
+CLI captures were repeated: their counts and landing counts are unchanged. The
+initial full-fleet/default captures remain in the manifest for comparison.
+
 Before the fix, the installed CLI and current source both returned no issues or
 workers. The current reproduction had 619 warnings: 52 remote histories, 117
 unresolved local histories, 17 sources over 64 MiB, 432 native reads skipped
@@ -81,7 +85,13 @@ lead analysis
 
 Focused integration checks cover the production service/client/CLI, exact source
 aliasing, current Claude briefs, wait and review measurements, fake push output
-rejection, correlated landing output, and read-only tracker census. The optional
+rejection, correlated landing output, and read-only tracker census. Sable's review
+found two additional boundaries: real Git dry-run output looked like a landing,
+and a canonical brief filename could follow an outside symlink. The final
+journey exercises real local bare-Git `--dry-run`, `-n`, quoted variants and a
+real redirected push; it checks the origin ref and report together. Brief reads
+use one no-follow descriptor, validate a bounded regular file, and reject an
+outside-symlink fixture while accepting the regular-file control. The optional
 starvation journey reads five bound histories totaling over 256 MiB and verifies
 both the issue-specific and fleet-wide report remain populated without budget
 starvation. It runs only when explicitly requested:

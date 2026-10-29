@@ -3,8 +3,8 @@ import {
   decodeInboundReportShard,
 } from "./conversations/inbound-report-store.ts";
 import { isDeepStrictEqual } from "node:util";
-import { createReadStream } from "node:fs";
-import { readFile, readdir, stat, realpath } from "node:fs/promises";
+import { createReadStream, constants } from "node:fs";
+import { readFile, readdir, stat, realpath, open } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { resolveHerdrSeatTranscriptPathAsync, sessionIdFromPath } from "@clankie/agent-transcript";
 import {
@@ -135,6 +135,7 @@ function commandClauses(command: string): string[] {
       quote = char;
       continue;
     }
+    if (char === "&" && command[index - 1] === ">") continue;
     if (";&|\n".includes(char)) {
       clauses.push(command.slice(from, index));
       from = index + 1;
@@ -391,7 +392,7 @@ async function projectNative(
         if (
           row.commands?.some((c) =>
             commandClauses(c).some((clause) =>
-              /^\s*git\s+push\s+(?:origin\s+)?(?:HEAD(?::main)?|main)(?:\s|$)/u.test(clause),
+              /^\s*git\s+push\s+(?:origin\s+)?(?:HEAD(?::main)?|main)(?:\s+2>&1)?\s*$/u.test(clause),
             ),
           )
         )
@@ -411,8 +412,7 @@ async function projectNative(
             );
             if (ref === join(directory, name) && /^clankie-brief-[a-f0-9-]+\.json$/u.test(name)) {
               try {
-                if ((await stat(ref)).size > 1024 * 1024) throw new Error("Brief exceeds 1 MiB");
-                const brief = obj(JSON.parse(await readFile(ref, "utf8")));
+                const brief = obj(JSON.parse(await readBrief(ref)));
                 if (typeof brief.clankieBrief === "string") row.prompt = brief.clankieBrief;
               } catch {
                 warnings.push(`Saved assignment brief unavailable: ${name}`);
@@ -1164,4 +1164,26 @@ async function* nativeLines(stream: ReturnType<typeof createReadStream>): AsyncG
     if (pending.length > 16 * 1024 * 1024) throw new Error("Native row exceeds 16 MiB");
   }
   if (pending) yield pending;
+}
+
+/** The same no-follow descriptor supplies both the file check and its bytes.
+ * A canonical-looking final-component symlink must never select an assignment. */
+async function readBrief(path: string): Promise<string> {
+  if (typeof constants.O_NOFOLLOW !== "number") throw new Error("No-follow brief reads unavailable");
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > 1024 * 1024) throw new Error("Brief is not a bounded regular file");
+    const buffer = Buffer.alloc(1024 * 1024 + 1);
+    let used = 0;
+    while (used < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, used, buffer.length - used, null);
+      if (!bytesRead) break;
+      used += bytesRead;
+    }
+    if (used > 1024 * 1024) throw new Error("Brief exceeds 1 MiB");
+    return buffer.subarray(0, used).toString("utf8");
+  } finally {
+    await handle.close();
+  }
 }

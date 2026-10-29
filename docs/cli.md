@@ -7021,7 +7021,8 @@ results do not spend the projection budget. `--project` filters worker histories
 by the exact project ID saved in hire records (for example `clankie`); histories
 without that attribution are excluded. Lead measurements retain their fleet scope.
 Saved Claude `clankieBrief` assignments are read only from the retained service
-brief directory. Unavailable or ambiguous sources remain explicit coverage warnings.
+brief directory, through a bounded no-follow file descriptor. Symlinked brief
+files are refused. Unavailable or ambiguous sources remain explicit coverage warnings.
 
 ```sh
 clankie metrics --issue VUH-1608 --since 2026-10-04T00:00:00Z --until 2026-10-05T00:00:00Z
@@ -7048,7 +7049,8 @@ The JSON `report` contains `issues`, `workers`, `sessions`, `summary`, `window`,
   fast-forward push to `main`, correlated with the native `git push` call. The
   issue value uses its latest observed push and earliest assignment. This is an
   observed landing, not proof every part of an issue shipped. Missing pushes,
-  unsupported wrappers, and pushes returned later through a shell-session poll
+  commands with extra options (including `--dry-run` / `-n`), unsupported wrappers,
+  and pushes returned later through a shell-session poll
   remain unknown (`null`).
 - `workerWaitMs` / `waitCount` use the review baseline: a native assistant event
   followed directly by a Clankie channel user message. An intervening user/tool

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { InboundReportStore } from "../src/captain/conversations/inbound-report-store.ts";
 import { InboundAcceptanceSchema } from "../src/captain/conversations/constants.ts";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile, rm, appendFile, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm, appendFile, stat, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -844,21 +844,92 @@ it("serves the real VUH-1608 golden through the production service, client and C
       reviewChangeRequests: 1,
       reviewChangeRate: 1,
     });
-    await appendFile(
-      join(claudeDir, `${claudeId}.jsonl`),
-      [
-        assistant(6, [
-          { type: "tool_use", id: "lab-push", name: "Bash", input: { command: "git push origin HEAD:main" } },
-        ]),
-        user(7, [{ type: "tool_result", tool_use_id: "lab-push", content: pushOutput }]),
-      ]
-        .map((r) => JSON.stringify(r))
-        .join("\n") + "\n",
+    const pushRepo = join(dir, "push-repo");
+    const pushOrigin = join(dir, "push-origin.git");
+    await exec("git", ["init", "--initial-branch=main", pushRepo]);
+    await exec("git", ["init", "--bare", pushOrigin]);
+    const git = (args: string[]) =>
+      exec(
+        "git",
+        [
+          "-c",
+          "user.name=MetricsFixture",
+          "-c",
+          "user.email=metrics@example.test",
+          "-c",
+          "commit.gpgSign=false",
+          ...args,
+        ],
+        { cwd: pushRepo },
+      );
+    await git(["remote", "add", "origin", pushOrigin]);
+    await writeFile(join(pushRepo, "value.txt"), "first\n");
+    await git(["add", "value.txt"]);
+    await git(["commit", "-m", "first"]);
+    await git(["push", "origin", "HEAD:main"]);
+    const originHead = () => exec("git", ["--git-dir", pushOrigin, "rev-parse", "refs/heads/main"]);
+    const originalHead = (await originHead()).stdout.trim();
+    await writeFile(join(pushRepo, "value.txt"), "second\n");
+    await git(["commit", "-am", "second"]);
+    const recordPush = async (second: number, args: string[], id: string, literal?: string) => {
+      const result = literal ? await exec("sh", ["-c", literal], { cwd: pushRepo }) : await git(args);
+      await appendFile(
+        join(claudeDir, `${claudeId}.jsonl`),
+        [
+          assistant(second, [
+            { type: "tool_use", id, name: "Bash", input: { command: literal ?? `git ${args.join(" ")}` } },
+          ]),
+          user(second + 1, [
+            { type: "tool_result", tool_use_id: id, content: result.stdout + result.stderr },
+          ]),
+        ]
+          .map((r) => JSON.stringify(r))
+          .join("\n") + "\n",
+      );
+    };
+    // Genuine git dry-run output looks exactly like a real fast-forward push.
+    for (const [second, flag, literal] of [
+      [6, "--dry-run", undefined],
+      [8, "-n", undefined],
+      [10, "--dry-run", 'git push origin HEAD:main "--dry-run"'],
+      [12, "-n", "git push origin HEAD:main '-n'"],
+    ] as const) {
+      await recordPush(second, ["push", "origin", "HEAD:main", flag], `lab-dry-${second}`, literal);
+      expect((await originHead()).stdout.trim()).toBe(originalHead);
+      expect((await client.readIssueMetrics(currentQuery)).issues[0]).toMatchObject({
+        landedAt: null,
+        wallTimeToLandedMs: null,
+      });
+    }
+    await recordPush(
+      14,
+      ["push", "origin", "HEAD:main"],
+      "lab-real-push",
+      "git push origin HEAD:main 2>&1 | tail -3",
     );
+    expect((await originHead()).stdout.trim()).not.toBe(originalHead);
     expect((await client.readIssueMetrics(currentQuery)).issues[0]).toMatchObject({
-      landedAt: at(7),
-      wallTimeToLandedMs: 7000,
+      landedAt: at(15),
+      wallTimeToLandedMs: 15000,
     });
+    const outside = join(dir, "outside-brief.json");
+    await writeFile(
+      outside,
+      JSON.stringify({ clankieBrief: "You're Odalys, on VUH-9998. Outside assignment." }),
+    );
+    await rm(brief);
+    await symlink(outside, brief);
+    const linked = await client.readIssueMetrics({ ...currentQuery, issue: "VUH-9998" });
+    expect(linked.issues).toEqual([]);
+    expect(linked.coverage.warnings).toContain(
+      `Saved assignment brief unavailable: ${brief.split("/").at(-1)}`,
+    );
+    await rm(brief);
+    await writeFile(
+      brief,
+      JSON.stringify({ clankieBrief: "You're Odalys, on VUH-2967. Fix the metrics report." }),
+    );
+    expect((await client.readIssueMetrics(currentQuery)).issues[0]).toMatchObject({ landedAt: at(15) });
     if (process.env.CLANKIE_METRICS_EVIDENCE !== undefined) {
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "metrics-cli.json"), cli.stdout);
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "loopback-service.log"), output);
