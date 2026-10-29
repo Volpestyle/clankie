@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "release-backlog-captures.tar",
+      "size": 30720,
+      "sha256": "c4d594cb4b6a7fac1cdc39837bfb4fbf43706b64aa28e56d48dded75d88b6212",
+      "url": "clankie://evidence/sha256/c4d594cb4b6a7fac1cdc39837bfb4fbf43706b64aa28e56d48dded75d88b6212"
+    }
+  ]
+}

@@ -324,6 +324,7 @@ export function createSimulatorManager(input: {
   let timer: ReturnType<typeof setInterval> | undefined;
   let closed = false;
   let operations: Promise<unknown> = Promise.resolve();
+  let ticking: Promise<void> | undefined;
   const acquisitions = new Map<string, Promise<SimulatorResult>>();
   const acquisitionSelections = new Map<string, string>();
   /** Server-owned preparation by lease id; it outlives any request that started it. */
@@ -1454,71 +1455,95 @@ export function createSimulatorManager(input: {
         if (lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS)
           // allow-swallowed-rejection -- a failed release keeps the reservation for the next tick.
           await forget(lease, "reservation_stale").catch(() => undefined);
-      await serial(async () => {
-        const { policy, pressure } = await input.governor.snapshot();
-        const leases = await reservations();
-        const usage = leases.some((lease) => lease.phase === "booted")
+      // Timer and census callers share one observation round. Slow native
+      // reads must not build an unbounded FIFO ahead of an owner's release.
+      if (ticking) return ticking;
+      const pending = (async () => {
+        const observedLeases = await reservations();
+        const usage = observedLeases.some((lease) => lease.phase === "booted")
           ? await observeUsage().catch(() => new Map<string, SimulatorUsage>())
           : new Map<string, SimulatorUsage>();
-        for (const lease of leases) {
-          try {
-            const processes = lease.ownerProcesses ?? [];
-            const exited =
-              processes.length > 0 &&
-              (await Promise.all(processes.map(probe))).every((state) => state === "exited");
-            const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS;
-            const hotFor = runawayFor(lease, usage, pressure);
-            let active = false;
-            let promptAt: number | undefined;
-            if (!exited && !stale) {
+        const outcomes = await Promise.allSettled(
+          observedLeases.map(async (candidate) => {
+            // Native RPC and census reads are observations, never serialized
+            // mutations. A pending read for one holder cannot block releases.
+            // allow-swallowed-rejection -- Missing native evidence grants no activity; current process and lease checks still apply below.
+            const observed = await proveSeat(candidate).catch(() => undefined);
+            await serial(async () => {
+              const lease = await find(candidate.id);
+              // A release may have completed while the native read was pending.
+              if (!lease) return;
+              const { policy, pressure } = await input.governor.snapshot();
               try {
-                const proof = await proveSeat(lease);
-                if ("owner" in proof && matchesOwner(lease, proof.owner)) {
-                  if (["idle", "done", "blocked"].includes(proof.status))
-                    promptAt =
-                      Number.isFinite(proof.idleSinceMs) && proof.idleSinceMs! <= now()
-                        ? proof.idleSinceMs
-                        : now();
-                  active =
-                    (proof.status === "working" &&
-                      Number.isFinite(proof.activityUntilMs) &&
-                      proof.activityUntilMs! > now() &&
-                      proof.activityUntilMs! <= now() + 5 * 60_000) ||
-                    (await input.governor.simulatorHolderHasHeavyWork(lease));
+                const processes = lease.ownerProcesses ?? [];
+                const states = await Promise.all(processes.map(probe));
+                const exited = processes.length > 0 && states.every((state) => state === "exited");
+                const live = processes.length > 0 && states.every((state) => state === "live");
+                const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS;
+                const hotFor = runawayFor(lease, usage, pressure);
+                let active = false;
+                let promptAt: number | undefined;
+                if (live && !stale) {
+                  try {
+                    const proof = observed;
+                    if (proof && "owner" in proof && matchesOwner(lease, proof.owner)) {
+                      if (["idle", "done", "blocked"].includes(proof.status))
+                        promptAt =
+                          Number.isFinite(proof.idleSinceMs) && proof.idleSinceMs! <= now()
+                            ? proof.idleSinceMs
+                            : now();
+                      active =
+                        (proof.status === "working" &&
+                          Number.isFinite(proof.activityUntilMs) &&
+                          proof.activityUntilMs! > now() &&
+                          proof.activityUntilMs! <= now() + 5 * 60_000) ||
+                        (await input.governor.simulatorHolderHasHeavyWork(lease));
+                    }
+                  } catch {
+                    // Missing evidence cannot renew a previous working state.
+                  }
                 }
+                const previous = activity.get(lease.id);
+                if (active) activity.set(lease.id, { active: true, at: now() });
+                else if (previous?.active) {
+                  // Retain the last heavy/turn sample if the native prompt
+                  // predates that work. Lost evidence never starts a new clock.
+                  activity.set(lease.id, {
+                    active: false,
+                    at: Math.max(previous.at, promptAt ?? previous.at),
+                  });
+                }
+                const idleFrom = Math.max(lease.lastUsedAtMs, activity.get(lease.id)?.at ?? 0);
+                await reconcile(
+                  lease,
+                  exited
+                    ? "owner_exited"
+                    : stale
+                      ? "reservation_stale"
+                      : !active && now() - idleFrom >= policy.simulatorIdleMs
+                        ? "idle"
+                        : hotFor >= RUNAWAY_SUSTAIN_MS
+                          ? "runaway"
+                          : false,
+                );
               } catch {
-                // Missing evidence cannot renew a previous working state.
+                /* Unknown inventory or command outcome never frees a slot. */
               }
-            }
-            const previous = activity.get(lease.id);
-            if (active) activity.set(lease.id, { active: true, at: now() });
-            else if (previous?.active) {
-              // Retain the last heavy/turn sample if the native prompt
-              // predates that work. Lost evidence never starts a new clock.
-              activity.set(lease.id, {
-                active: false,
-                at: Math.max(previous.at, promptAt ?? previous.at),
-              });
-            }
-            const idleFrom = Math.max(lease.lastUsedAtMs, activity.get(lease.id)?.at ?? 0);
-            await reconcile(
-              lease,
-              exited
-                ? "owner_exited"
-                : stale
-                  ? "reservation_stale"
-                  : !active && now() - idleFrom >= policy.simulatorIdleMs
-                    ? "idle"
-                    : hotFor >= RUNAWAY_SUSTAIN_MS
-                      ? "runaway"
-                      : false,
-            );
-          } catch {
-            /* Unknown inventory or command outcome never frees a slot. */
-          }
-        }
-      });
+            });
+          }),
+        );
+        const failed = outcomes.find((outcome) => outcome.status === "rejected");
+        if (failed) throw failed.reason;
+      })();
+      ticking = pending;
+      const clear = () => {
+        if (ticking === pending) ticking = undefined;
+      };
+      // Callers retain the original rejection; both outcomes clear single-flight state.
+      void pending.then(clear, clear);
+      return pending;
     },
+
     /** Resolves when every preparation this manager started has settled. */
     async settled(): Promise<void> {
       while (jobs.size) await Promise.allSettled(jobs.values());

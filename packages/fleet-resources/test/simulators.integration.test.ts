@@ -81,6 +81,7 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     minAvailableMemoryMb: 0,
   });
   let nativeReplyBarrier: ((args: readonly string[]) => Promise<void>) | undefined;
+  let nativeSeatBarrier: (() => Promise<void>) | undefined;
   const adapter = createSimctlAdapter({
     run: async (args, timeout) => {
       const result = await execute(
@@ -111,6 +112,9 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
         ]),
       ),
     observeSeat: async (identity: Pick<SimulatorOwner, "seatId" | "occupantId" | "fleet" | "holderId">) => {
+      const barrier = nativeSeatBarrier;
+      nativeSeatBarrier = undefined;
+      await barrier?.();
       const state = seats.get(identity.holderId ?? "") ?? "proven";
       observations.push({ ...(identity.holderId ? { holderId: identity.holderId } : {}), state });
       if (state === "unproven") return { unproven: "The seat's Herdr process census failed." };
@@ -254,6 +258,20 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
       seats.set(holderId, state);
     },
     observations,
+    pauseSeatProof: () => {
+      let entered!: () => void, resume!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const barrier = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      nativeSeatBarrier = async () => {
+        entered();
+        await barrier;
+      };
+      return { waiting, resume };
+    },
     restart: async () => {
       manager.close();
       await governor.close();
@@ -1412,4 +1430,37 @@ it("a reservation stalled past its limit frees the slot even while the serial se
   await ticking;
   await f.manager.settled();
   expect((await f.commands()).filter((args) => args[0] === "create" || args[0] === "boot")).toEqual([]);
+});
+
+it("a pending native activity read does not block another request's proven simulator release", async () => {
+  const f = await fixture({ respondWithinMs: 2000 });
+  await f.manager.acquire(f.request);
+  await f.manager.settled();
+  const acquired = lease(await f.manager.acquire(f.request));
+  expect(acquired.phase).toBe("booted");
+  const paused = f.pauseSeatProof();
+  const ticking = f.manager.tick();
+  await paused.waiting;
+  try {
+    expect(await f.http("/release", { id: acquired.id, owner: f.owner })).toEqual({ outcome: "released" });
+    expect(await f.governor.simulatorReservations()).toEqual([]);
+  } finally {
+    paused.resume();
+    await ticking;
+  }
+  // The late activity result must not resurrect a lease released during its read.
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+});
+
+it("coalesces concurrent timer and census ticks instead of queueing native probes ahead of release", async () => {
+  const f = await fixture();
+  await f.manager.acquire(f.request);
+  const before = f.observations.length;
+  const paused = f.pauseSeatProof();
+  const ticking = f.manager.tick();
+  await paused.waiting;
+  const redundant = Array.from({ length: 20 }, () => f.manager.tick());
+  paused.resume();
+  await Promise.all([ticking, ...redundant]);
+  expect(f.observations.length - before).toBe(1);
 });

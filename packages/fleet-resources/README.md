@@ -309,6 +309,12 @@ confer no lease authority or time. Long quiet Claude root turns and a general no
 process-held simulator path remain open. Supported native activity and the remaining root API requirement
 are documented in the [simulator reference](../../.agents/skills/fleet-resources/reference/simulators.md).
 
+Timer and seat-census ticks share one pending observation round. Native activity
+reads run outside the simulator mutation queue, so a slow holder observation
+cannot queue repeated rounds ahead of another request's release. Applying a
+result rechecks the reservation, current policy and owner process births; a late
+result cannot restore a released lease. Native simulator effects still serialize.
+
 Simulator reservations remain durable when request processes die. Only the
 simulator manager can settle native receipts and release them after confirmed
 shutdown of the exact device. It appends each settlement's reason to
