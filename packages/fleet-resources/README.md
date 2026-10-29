@@ -292,17 +292,20 @@ retain the root’s process proof and idle timeout, so a parent exit cleans them
 
 Idle expiry uses freshly verified exact-holder native activity or a matching
 queued/held heavy request whose recorded process descends from that native owner.
-The task label alone cannot renew time. Native prompt idle starts the timeout;
+Pane and terminal labels may differ; the exact task holder and live ancestry,
+not the seat label, establish the association. Native prompt idle starts the timeout;
 repeated idle observations do not extend it. Unknown evidence expires from the
 last proven activity. Explicit touch remains independent, as do reservation and
 runaway cleanup. The manager does not persist activity as authority across its
-restart. Finite Claude root hook events instead advance the exact holder's durable
+restart: Codex activity is re-read from the observed dedicated native socket,
+including surviving local seats after a service restart, without resuming a thread.
+Finite Claude root hook events instead advance the exact holder's durable
 explicit-use clock to their event time, giving one idle window with no permanent
 working state. Ordinary async hooks first check a local socket/pane lease hint,
 without Node or HTTP on the no-hint path. A claimed hint is restored after transient
 failures or non-renewing reports, and retired only by an admitted explicit absence
 response. Release/expiry keeps it until the last matching reservation ends. Hints
-confer no lease authority or time. Long quiet root turns and a general non-heavy
+confer no lease authority or time. Long quiet Claude root turns and a general non-heavy
 process-held simulator path remain open. Supported native activity and the remaining root API requirement
 are documented in the [simulator reference](../../.agents/skills/fleet-resources/reference/simulators.md).
 

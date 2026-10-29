@@ -1501,7 +1501,10 @@ export function createResourceGovernor(
             entry.kind === "heavy" ? [{ ...entry, process: entry.claimOwner }] : [],
           ),
         ])
-        .filter((entry) => entry.seatId === owner.seatId && entry.holderId === owner.holderId);
+        // CLI permits may name the pane while simulator admission canonicalizes
+        // it to a terminal ID. Labels are not authority; the exact holder and
+        // freshly rechecked native process ancestry below establish ownership.
+        .filter((entry) => entry.holderId === owner.holderId);
       for (const entry of candidates) {
         if (
           "state" in entry &&

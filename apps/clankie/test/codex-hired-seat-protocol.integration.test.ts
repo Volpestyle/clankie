@@ -1361,3 +1361,50 @@ it("reads exact root and descendant resource activity through native RPC without
     await f.close();
   }
 });
+
+it("reads a surviving Codex holder after host restart and returns idle without resuming or borrowing another thread", async () => {
+  const f = await hiredFixture({ socketPath: `/tmp/cr-${randomUUID()}.sock` });
+  const restored = new HerdrWatchStore(f.watchPath, {
+    ...f.storeOptions,
+    seatAdapters: [],
+    remoteSeatAdapters: () => [],
+  });
+  try {
+    f.store.close();
+    const before = f.native.requests.length;
+    const status = async (id = f.native.threadId) =>
+      (await restored.nativeTaskObservation(f.pane.terminal_id, `codex:${id}`))?.status;
+    expect(await status()).toBe("working");
+    f.native.resourceThread("active-child", f.native.threadId, "active");
+    f.native.resourceThread("idle-sibling", f.native.threadId, "idle");
+    f.native.resourceThread("foreign", null, "active");
+    f.native.resourceThread("cycle", "cycle", "active");
+    expect(await status("active-child")).toBe("working");
+    expect(await status("idle-sibling")).toBe("idle");
+    expect(await status("foreign")).toBe("unknown");
+    expect(await status("cycle")).toBe("unknown");
+    f.native.finish("completed", "Done");
+    expect(await status()).toBe("idle");
+    const held = f.native.holdNextRead();
+    const pending = status();
+    await held.entered;
+    const original = f.pane.agent_session;
+    f.pane.agent_session = { ...original, value: "replaced-thread" };
+    held.release();
+    expect(await pending).toBeUndefined();
+    f.pane.agent_session = original;
+    f.native.nextLoadedInventory({ data: [], nextCursor: null });
+    expect(await status()).toBeUndefined();
+    expect(
+      f.native.requests
+        .slice(before)
+        .every((request) =>
+          ["initialize", "initialized", "thread/loaded/list", "thread/read"].includes(request.method),
+        ),
+    ).toBe(true);
+    expect(f.fallback).not.toHaveBeenCalled();
+  } finally {
+    restored.close();
+    await f.close();
+  }
+});

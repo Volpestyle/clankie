@@ -524,11 +524,12 @@ it.skipIf(process.platform !== "darwin")(
   30_000,
 );
 
-it.skipIf(process.platform !== "darwin").each(["root", "child"])(
+it.skipIf(process.platform !== "darwin").each(["root", "child", "codex"])(
   "exact native holder heavy queue and permit retain the lease; copied labels outside its process ancestry do not (%s)",
   async (scope) => {
     const f = await fixture();
     if (scope === "child") f.owner.holderId += ":agent:a3333333333333333";
+    if (scope === "codex") f.owner.holderId = "codex:fixture-original-session";
     await f.send({ event: "session.start", input: { isInteractive: true } });
     const lease = await f.acquire();
     const busyReceipt = join(f.root, "busy-ready"),
@@ -549,7 +550,13 @@ it.skipIf(process.platform !== "darwin").each(["root", "child"])(
       await busy;
     });
     await vi.waitFor(async () => expect(await readFile(busyReceipt, "utf8")).toBe("ready"));
-    await f.send({ heavy: "start", directory: f.directory, release, holderId: f.owner.holderId });
+    await f.send({
+      heavy: "start",
+      directory: f.directory,
+      release,
+      holderId: f.owner.holderId,
+      seatId: "w1:p1",
+    });
     cleanups.push(() => f.send({ heavy: "stop" }));
     expect((await f.governor.snapshot()).queue).toContainEqual(
       expect.objectContaining({ kind: "heavy", holderId: f.owner.holderId }),
@@ -588,6 +595,38 @@ it.skipIf(process.platform !== "darwin").each(["root", "child"])(
     // End only the governed command allocated by this proof.
     await f.governor.close();
     await copied;
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "a pane-labelled Codex server permit retains its simulator, then idle still expires",
+  async () => {
+    const f = await fixture();
+    f.owner.holderId = "codex:fixture-original-session";
+    const lease = await f.acquire();
+    await f.send({
+      heavy: "start",
+      directory: f.directory,
+      release: join(f.root, "server-release"),
+      holderId: f.owner.holderId,
+      seatId: "w1:p1",
+      server: true,
+    });
+    cleanups.push(() => f.send({ heavy: "stop" }));
+    await f.send({ heavy: "ready" });
+    expect((await f.governor.snapshot()).serverLeases).toContainEqual(
+      expect.objectContaining({ holderId: f.owner.holderId, seatId: "w1:p1" }),
+    );
+    f.advance(600_001);
+    await f.resources.simulators.tick();
+    expect((await f.governor.simulatorReservations())[0]?.id).toBe(lease.id);
+    await f.send({ heavy: "stop" });
+    f.advance(599_999);
+    await f.resources.simulators.tick();
+    expect(await f.governor.simulatorReservations()).toHaveLength(1);
+    f.advance(2);
+    await f.resources.simulators.tick();
+    expect(await f.governor.simulatorReservations()).toHaveLength(0);
   },
 );
 

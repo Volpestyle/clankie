@@ -118,7 +118,8 @@ process.on("message", (message) => {
             heavyRelease,
           ],
           {
-            seatId: "fixture-seat",
+            seatId: message.seatId ?? "fixture-seat",
+            server: message.server,
             holderId: message.holderId,
             signal: heavyAbort.signal,
             stdout: new Writable({

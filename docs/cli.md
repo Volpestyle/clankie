@@ -4547,7 +4547,11 @@ same-holder queued/held heavy work with proven native process ancestry. Idle
 expiry counts from returning to the prompt; repeated idle readings do not renew
 it. Explicit touch still works. Unknown/stale observations cannot preserve a
 cached working state. Native turn coverage is Codex roots/children and Claude
-local children with the original-native activity mod. Worker 0.6.22 also reports
+local children with the original-native activity mod. Surviving local Codex seats
+reconnect read-only through their observed dedicated socket after service restart;
+renewal never starts or resumes a thread. Heavy requests may use pane aliases
+while leases name terminal IDs: exact holder and live native ancestry establish
+the association. Worker 0.6.22 also reports
 Claude root UserPromptSubmit, PreToolUse and PostToolUse events: ordinary tool
 renewal runs asynchronously, with a shell-only lease-hint check that skips Node
 and HTTP when no root lease is hinted. A hint grants no authority; missing hints
@@ -4555,7 +4559,7 @@ lose renewal and leave the normal finite deadline intact. Each event extends onl
 its session's leases to one idle window from the event, without an ongoing
 working bit. Stop, StopFailure and SessionEnd renew nothing. New registrations
 require a plugin reload or new session; shipping does not reload existing seats.
-A single non-heavy tool call or quiet thinking past one window still lacks a
+For Claude roots, a single non-heavy tool call or quiet thinking past one window still lacks a
 positive current-root-turn API. Use exact-holder heavy retention for long heavy
 work and run waits as blocking harness background tasks. A plain background
 process does not retain a simulator lease; a general process-held simulator path

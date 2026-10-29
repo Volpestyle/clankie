@@ -612,6 +612,20 @@ export function createFleetSeatControl(
       };
     },
     attach,
+    // Surviving local Codex seats reconnect through their observed original
+    // socket after a service restart; no launch, resume or dispatch is allowed.
+    async observeNativeTask(agent: HerdrAgentSnapshot, holderId?: string) {
+      const attached = await attach(agent);
+      const control = attached ?? (await attachQuestion(agent));
+      if (!control) return undefined;
+      return {
+        status:
+          holderId === undefined
+            ? await control.status()
+            : ((await control.holderStatus?.(holderId)) ?? "unknown"),
+        queueSupported: agent.agent === "claude" || attached?.deliveryModes?.includes("steer") === true,
+      };
+    },
     attachQuestion,
     locateDelivery,
     reconcileDelivery,

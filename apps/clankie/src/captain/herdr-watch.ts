@@ -1534,12 +1534,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed) return undefined;
     const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) return undefined;
-    const control = await this.seatControl.attach(agent);
-    if (!control) return undefined;
-    const status =
-      holderId === undefined
-        ? await control.status().catch(() => "offline")
-        : ((await control.holderStatus?.(holderId).catch(() => "unknown")) ?? "unknown");
+    const observation = await this.seatControl.observeNativeTask(agent, holderId).catch(() => undefined);
+    if (!observation) return undefined;
+    const { status } = observation;
     const current = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (
       !current?.session ||
@@ -1552,9 +1549,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return {
       binding: JSON.stringify([agent.paneId, agent.terminalId, agent.agent, agent.session]),
       status,
-      queueSupported:
-        agent.agent === "claude" ||
-        (agent.agent === "codex" && control.deliveryModes?.includes("steer") === true),
+      queueSupported: observation.queueSupported,
     };
   }
 

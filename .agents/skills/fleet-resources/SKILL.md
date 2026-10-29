@@ -154,11 +154,14 @@ themselves. Never drive a sibling's device because its UDID is visible in
 status, and never use your lead's or a sibling's holder identity. The ten-minute idle deadline starts when a verified holder returns to its prompt.
 Fresh exact-holder native activity or a live queued/held heavy permit retains the
 lease without model-driven touches. Heavy association requires both the task
-holder and native process ancestry; a sibling or copied label cannot renew it.
+holder and native process ancestry (pane and terminal aliases may differ); a
+sibling or copied label cannot renew it.
 Unknown/stale activity never renews time. Explicit touch remains available.
 
-Codex roots/children use read-only native ancestry; Claude children use finite
-original-native renewals. Claude root UserPromptSubmit, PreToolUse and PostToolUse
+Codex roots/children use read-only native thread state and ancestry, including
+after a service restart through the exact observed local native socket. No
+Codex hook or plugin reload is needed. Claude children use finite original-native
+renewals. Claude root UserPromptSubmit, PreToolUse and PostToolUse
 hooks extend only that exact session's leases to one idle window from the event.
 Ordinary tool renewal runs asynchronously behind a local lease-hint check; no
 hint means no Node/HTTP work and no renewal. Hints grant no lease authority.
@@ -169,8 +172,9 @@ session; workers must not reload existing seats to obtain them.
 A long wait must retain its lease through an owned process: use exact-holder
 `clankie heavy --` for heavy work, and run that blocking command as a harness
 background task. A background process alone does not retain a simulator lease;
-there is no general simulator process-holder command yet. A non-heavy tool or
-quiet thinking beyond one window still needs a positive native root-turn API.
+there is no general simulator process-holder command yet. For Claude roots, a
+non-heavy tool or quiet thinking beyond one window still needs a positive native
+root-turn API.
 Keep that gap explicit; never replace it with model sleep/touch loops. Explicit
 touch remains available for a deliberate extension. Release when finished.
 Details and source-proof limits are in the simulator reference.

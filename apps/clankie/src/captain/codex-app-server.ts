@@ -401,6 +401,46 @@ export class CodexAppServerClient {
   }
 }
 
+/** Fresh exact-holder state with a complete native parent chain to this seat. Read-only. */
+export async function codexHolderStatus(
+  client: CodexAppServerClient,
+  rootThreadId: string,
+  target: string,
+): Promise<"working" | "idle" | "blocked" | "unknown"> {
+  const seen = new Set<string>();
+  let current = target,
+    status: "working" | "idle" | "blocked" | "unknown" = "unknown";
+  try {
+    for (let depth = 0; depth < 64; depth++) {
+      if (!current || seen.has(current)) return "unknown";
+      seen.add(current);
+      const thread = record(
+        record(await client.request("thread/read", { threadId: current, includeTurns: false }, 2_000)).thread,
+      );
+      if (thread.id !== current) return "unknown";
+      if (current === target) {
+        const native = record(thread.status);
+        status =
+          native.type === "idle"
+            ? "idle"
+            : native.type === "active"
+              ? !Array.isArray(native.activeFlags)
+                ? "unknown"
+                : native.activeFlags.length > 0
+                  ? "blocked"
+                  : "working"
+              : "unknown";
+      }
+      if (current === rootThreadId) return status;
+      if (typeof thread.parentThreadId !== "string") return "unknown";
+      current = thread.parentThreadId;
+    }
+  } catch {
+    // A lost native observation never renews a cached working state.
+  }
+  return "unknown";
+}
+
 export interface CodexAppServerSeat {
   threadId: string;
   transcriptPath?: string;
@@ -1308,37 +1348,8 @@ export async function startCodexAppServerSeat(options: {
       checkTools,
       async holderStatus(target) {
         if (closed || stopped || !threadId) return "unknown";
-        const seen = new Set<string>();
-        let current = target,
-          status: "working" | "idle" | "blocked" | "unknown" = "unknown";
-        try {
-          for (let depth = 0; depth < 64; depth++) {
-            if (!current || seen.has(current)) return "unknown";
-            seen.add(current);
-            const thread = record(
-              record(await client!.request("thread/read", { threadId: current, includeTurns: false }, 2_000))
-                .thread,
-            );
-            if (closed || stopped || thread.id !== current) return "unknown";
-            if (current === target) {
-              const native = record(thread.status);
-              status =
-                native.type === "idle"
-                  ? "idle"
-                  : native.type === "active"
-                    ? Array.isArray(native.activeFlags) && native.activeFlags.length > 0
-                      ? "blocked"
-                      : "working"
-                    : "unknown";
-            }
-            if (current === threadId) return status;
-            if (typeof thread.parentThreadId !== "string") return "unknown";
-            current = thread.parentThreadId;
-          }
-        } catch {
-          // A lost native observation never renews a cached working state.
-        }
-        return "unknown";
+        const status = await codexHolderStatus(client!, threadId, target);
+        return closed || stopped ? "unknown" : status;
       },
       pendingQuestion: (requestId) => client!.pendingQuestion(threadId!, requestId),
       async answerQuestion(answer, guard) {

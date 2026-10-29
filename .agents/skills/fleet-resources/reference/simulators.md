@@ -96,10 +96,15 @@ The lease remains owned by its exact native occupant/processes and task holder.
 The service re-proves that identity before granting activity time. A live heavy
 request with the same holder keeps it alive while queued or holding a permit
 (full, light or server lane); its recorded request process must descend from the
-lease's exact native process. Matching labels or reused PIDs alone are insufficient.
+lease's exact native process. Pane/terminal aliases need not match: native ancestry
+and holder identity establish the association. Matching labels or reused PIDs alone
+are insufficient.
 
 Codex roots and children use fresh native `thread/read` state, with complete
-parent-thread ancestry back to the seat's root. Claude local children use the
+parent-thread ancestry back to the seat's root. After a service restart, local
+Codex seats reconnect read-only to their observed dedicated socket, verify the
+root is still loaded, and recheck the occupant/socket after the read. They never
+resume or start a thread for renewal. Claude local children use the
 original-native mod's five-second timer and exact `agent.list()` IDs/states.
 Reports expire after fifteen seconds, keep original state-change timestamps,
 and reject stale/future timestamps, replayed sequences, changed sessions and

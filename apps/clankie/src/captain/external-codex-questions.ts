@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { SeatControl, SeatRef, SeatQuestionResult, SeatQuestionAnswer } from "@clankie/agent-hosts";
 import type WebSocket from "ws";
-import { CodexAppServerClient } from "./codex-app-server.ts";
+import { CodexAppServerClient, codexHolderStatus } from "./codex-app-server.ts";
 import { codexAsyncQuestionAnswer, recordedCodexAsyncAnswer } from "./codex-user-input.ts";
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
 
@@ -25,9 +25,10 @@ const heldAnswer = (fence: DeliveryFence, key: string): SeatQuestionResult | und
 export function guardedCodexQuestions(
   control: SeatControl,
   fence: DeliveryFence,
-): Pick<SeatControl, "pendingQuestion" | "answerQuestion" | "status"> {
+): Pick<SeatControl, "pendingQuestion" | "answerQuestion" | "status" | "holderStatus"> {
   return {
     status: () => control.status(),
+    ...(control.holderStatus ? { holderStatus: (id: string) => control.holderStatus!(id) } : {}),
     pendingQuestion: (id) => control.pendingQuestion!(id),
     async answerQuestion(answer, guard) {
       const key = questionKey(control.ref, answer);
@@ -64,7 +65,7 @@ export function externalCodexQuestions(
   connect: () => Promise<WebSocket | undefined>,
   assertCurrent: () => Promise<void>,
   fence: DeliveryFence,
-): Pick<SeatControl, "pendingQuestion" | "answerQuestion" | "status"> {
+): Pick<SeatControl, "pendingQuestion" | "answerQuestion" | "status" | "holderStatus"> {
   const connected = async <T>(run: (client: CodexAppServerClient) => Promise<T>): Promise<T> => {
     await assertCurrent();
     const socket = await connect();
@@ -91,6 +92,13 @@ export function externalCodexQuestions(
     return { value, thread };
   };
   return {
+    holderStatus: (holderId) =>
+      connected(async (client) => {
+        if (!holderId.startsWith("codex:")) return "unknown";
+        const status = await codexHolderStatus(client, ref.sessionId, holderId.slice("codex:".length));
+        await assertCurrent();
+        return status;
+      }),
     pendingQuestion: (requestId) =>
       connected(async (client) => {
         await read(client);
