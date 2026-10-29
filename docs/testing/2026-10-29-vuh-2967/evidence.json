@@ -54,6 +54,12 @@
       "size": 27648,
       "sha256": "02b21c5f9c49028d3c2fd9a314ebf36cc62cd8a35802807c3e3a1e5e25655405",
       "url": "clankie://evidence/sha256/02b21c5f9c49028d3c2fd9a314ebf36cc62cd8a35802807c3e3a1e5e25655405"
+    },
+    {
+      "path": "r4-preflight-proof.tar",
+      "size": 46080,
+      "sha256": "02a74669edb5ad2fe0f22e35f1a5333ccf6cadc3f4c5107c6027ee713d5f86be",
+      "url": "clankie://evidence/sha256/02a74669edb5ad2fe0f22e35f1a5333ccf6cadc3f4c5107c6027ee713d5f86be"
     }
   ]
 }
