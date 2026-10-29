@@ -8,6 +8,12 @@
       "url": "clankie://evidence/sha256/77c0fa57df844659c16befae95eeabc4ebb4be886cc69caf8811812a192ca62c"
     },
     {
+      "path": "cli-clankie-review-final.json",
+      "size": 376029,
+      "sha256": "cb2ac9961cfc7e1333c615828cfc04ed57115af5bb077e6db591c2640976a036",
+      "url": "clankie://evidence/sha256/cb2ac9961cfc7e1333c615828cfc04ed57115af5bb077e6db591c2640976a036"
+    },
+    {
       "path": "cli-clankie-review.json",
       "size": 376029,
       "sha256": "9fa73ce4bc00dc68744282decae4316adb1029651166c62d259ed6ddd220e997",
@@ -20,6 +26,12 @@
       "url": "clankie://evidence/sha256/ac367891e73a734339f699f5f77045b2d3b76444e12503944c0abc3c1bf30ec1"
     },
     {
+      "path": "cli-last-14-days-final.json",
+      "size": 450979,
+      "sha256": "16112f843ef5cdbbca7fb8c87ee3a395229f19752357e5c60e4753ff80ffa831",
+      "url": "clankie://evidence/sha256/16112f843ef5cdbbca7fb8c87ee3a395229f19752357e5c60e4753ff80ffa831"
+    },
+    {
       "path": "cli-last-14-days.json",
       "size": 450969,
       "sha256": "a61ed5e48fe9be2b096aea2c9cdfbba5385586986f287b225ee95b8432a6d7f9",
@@ -30,6 +42,12 @@
       "size": 442199,
       "sha256": "4a138e3595da8a0f896f25c21860b631de27ce7dc14b042274b032015cf38888",
       "url": "clankie://evidence/sha256/4a138e3595da8a0f896f25c21860b631de27ce7dc14b042274b032015cf38888"
+    },
+    {
+      "path": "final-boundary-proof.tar",
+      "size": 842752,
+      "sha256": "5782dd6e0c683fc1d019408a80f56c2b8c9a896d547932312267d6f1c6ae732e",
+      "url": "clankie://evidence/sha256/5782dd6e0c683fc1d019408a80f56c2b8c9a896d547932312267d6f1c6ae732e"
     },
     {
       "path": "proof-bundle.tar",
