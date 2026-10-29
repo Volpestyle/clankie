@@ -86,7 +86,7 @@ async function reportOverLink(link, pane) {
   }
   const lastMessage =
     typeof hook.last_assistant_message === "string" ? hook.last_assistant_message.trim() : "";
-  const body = {
+  let body = {
     schemaVersion: 1,
     event,
     sessionId: hook.session_id,
@@ -152,7 +152,9 @@ async function reportOverLink(link, pane) {
     ) {
       if (event === "PostToolUse") return;
       const { occurredAt: _at, agentId: _agent, ...legacy } = body;
-      response = await sendHook(legacy);
+      // Receipts must use the same schema the host accepted for this invocation.
+      body = legacy;
+      response = await sendHook(body);
     }
     if (response.ok && (event === "PermissionRequest" || event === "PreToolUse")) {
       const result = await response.json();

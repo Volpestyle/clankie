@@ -192,3 +192,24 @@ native session/process defense-in-depth guards lack dedicated mutation failures.
 Quiet thinking or a long non-heavy call beyond the idle window still requires a
 positive interrupt-aware native signal. The lead owns rollout, fresh-session
 verification and the before/after fleet waiting measurement.
+
+Revision 10 fixes a rollout bug found by the payload audit. R9's full gate
+passed static checks and typechecks, including the split native-child suite
+(10/10, 74.866s), then failed on an old exact UserPromptSubmit body expectation.
+The new tests validate the canonical observation time and its reuse for receipts.
+
+A strict older host accepted the initial legacy fallback but rejected receipts
+that still contained the original metadata, leaving owner questions unconfirmed.
+Both helpers now retain the accepted body for message/question receipts. Four
+real-HTTP legacy cases fail before the fix; the focused check then passes 19/19.
+An old plugin without an observation timestamp remains admitted by the new
+service, without renewing its root lease. The new metadata remains optional.
+
+The audit searched all hook event bodies across apps, integrations and packages
+(158 files, 55 direct tests), then ran their union with the fresh changed-file
+selection and filesystem consumers: 918 files, with bail disabled. All 55 direct
+hook consumers pass. The full audit remains red: 880 files pass, 37 skip and one
+file fails; 7,845 tests pass, 102 skip and two fail. Both failures are integrate
+scratch/reclaim assertions outside hooks, under isolated base investigation.
+TUI typecheck passes in 86.75s and service typecheck in 309.14s. This audit is
+not a green landing gate. R10 review and its root gate remain pending.

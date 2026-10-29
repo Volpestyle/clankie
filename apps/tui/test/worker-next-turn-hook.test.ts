@@ -7,18 +7,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-it.each(["local-process", "remote-token"])(
-  "%s hook writes context then acknowledges exact IDs",
-  async (authentication) => {
+it.each(
+  ["local-process", "remote-token"].flatMap((authentication) =>
+    [false, true].map((legacy) => ({ authentication, legacy })),
+  ),
+)(
+  "$authentication hook writes context then acknowledges exact IDs (legacy host: $legacy)",
+  async ({ authentication, legacy }) => {
     const root = await mkdtemp(join(tmpdir(), "worker-next-turn-"));
     const requests: Record<string, unknown>[] = [];
+    const rejected: Record<string, unknown>[] = [];
     const messageId = "10000000-0000-4000-8000-000000000001";
     const server = createServer(async (req, res) => {
       let input = "";
       for await (const chunk of req) input += chunk;
       const body = JSON.parse(input) as Record<string, unknown>;
-      requests.push(body);
       res.setHeader("content-type", "application/json");
+      if (legacy && (body.occurredAt !== undefined || body.agentId !== undefined)) {
+        rejected.push(body);
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "invalid_request" }));
+        return;
+      }
+      requests.push(body);
       res.end(
         JSON.stringify(
           body.deliveredMessageIds
@@ -49,6 +60,7 @@ it.each(["local-process", "remote-token"])(
           url: `http://127.0.0.1:${address.port}`,
         }),
       );
+      const startedAt = Date.now();
       const child = spawn(
         process.execPath,
         [join(import.meta.dirname, "../../../integrations/claude-plugin/worker/bin/seat-hook.mjs")],
@@ -56,6 +68,7 @@ it.each(["local-process", "remote-token"])(
           env: {
             ...process.env,
             HOME: root,
+            CLANKIE_STATE: join(root, ".clankie"),
             HERDR_PANE_ID: "w3:p8",
             HERDR_SOCKET_PATH: "/tmp/test-herdr.sock",
           },
@@ -72,12 +85,21 @@ it.each(["local-process", "remote-token"])(
       expect(JSON.parse(output)).toEqual({
         hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "Clankie's answer" },
       });
+      const occurredAt = (legacy ? rejected : requests)[0]?.occurredAt;
+      expect(occurredAt).toEqual(expect.any(String));
+      const eventAt = Date.parse(String(occurredAt));
+      expect(new Date(eventAt).toISOString()).toBe(occurredAt);
+      expect(eventAt).toBeGreaterThanOrEqual(startedAt);
+      expect(eventAt).toBeLessThanOrEqual(Date.now());
+      expect(rejected).toHaveLength(legacy ? 1 : 0);
+      const metadata = legacy ? {} : { occurredAt };
       expect(requests).toEqual([
-        { schemaVersion: 1, event: "UserPromptSubmit", sessionId: "session-1" },
+        { schemaVersion: 1, event: "UserPromptSubmit", sessionId: "session-1", ...metadata },
         {
           schemaVersion: 1,
           event: "UserPromptSubmit",
           sessionId: "session-1",
+          ...metadata,
           deliveredMessageIds: [messageId],
         },
       ]);

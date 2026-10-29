@@ -1,5 +1,8 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { Readable } from "node:stream";
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { runSeatHookCommand } from "../../tui/src/command/seat-hook.ts";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -23,6 +26,7 @@ async function commandRoundTrip(
   input: Record<string, unknown>,
   selections: readonly string[],
   route: "owned" | "unowned" | "failed" = "owned",
+  options: { legacy?: boolean; transport?: "worker" | "cli" } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "claude-hook-command-"));
   const registry = new ClaudeHookQuestions(join(root, "used.json"));
@@ -73,6 +77,7 @@ async function commandRoundTrip(
       });
     expect(prompt).toContain("<seat-question>");
   });
+  const attempts: Record<string, unknown>[] = [];
   let observedHook: FleetSeatHook | undefined;
   let announce!: (value: { question: SeatQuestion; hook: FleetSeatHook }) => void;
   let rejectAnnouncement!: (error: unknown) => void;
@@ -88,7 +93,14 @@ async function commandRoundTrip(
         expect(request.headers.authorization).toBe(`Bearer ${token}`);
         let body = "";
         for await (const chunk of request) body += String(chunk);
-        const hook = FleetSeatHookSchema.parse(JSON.parse(body));
+        const raw = JSON.parse(body) as Record<string, unknown>;
+        attempts.push(raw);
+        if (options.legacy && (raw.occurredAt !== undefined || raw.agentId !== undefined)) {
+          response.writeHead(400, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: "invalid_request" }));
+          return;
+        }
+        const hook = FleetSeatHookSchema.parse(raw);
         if (hook.deliveredQuestionId) {
           expect(registry.acknowledge(ref, hook.deliveredQuestionId)).toBe(true);
           response.writeHead(200, { "content-type": "application/json" });
@@ -127,23 +139,48 @@ async function commandRoundTrip(
         token,
       }),
     );
-    child = spawn(process.execPath, [command], {
-      env: { ...process.env, CLANKIE_STATE: root, HERDR_PANE_ID: ref.paneId, HERDR_SOCKET_PATH: socket },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
     let stdout = "";
     let stderr = "";
-    child.stdout!.setEncoding("utf8").on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr!.setEncoding("utf8").on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    const exited = new Promise<number | null>((resolve, reject) => {
-      child!.once("error", reject);
-      child!.once("exit", resolve);
-    });
-    child.stdin!.end(JSON.stringify({ session_id: ref.sessionId, ...input }));
+    let exited: Promise<number | null>;
+    const hookInput = { session_id: ref.sessionId, ...input };
+    if (options.transport === "cli") {
+      exited = runSeatHookCommand([], {
+        host: `http://127.0.0.1:${port}`,
+        env: { HOME: root, HERDR_PANE_ID: ref.paneId, CLANKIE_OPERATOR_TOKEN: token },
+        operatorCredentialStore: new FileCredentialStore(join(root, "credentials.json")),
+        stdin: Readable.from([JSON.stringify(hookInput)]),
+        stdout: {
+          write(text) {
+            stdout += text;
+          },
+        },
+      }).catch((error) => {
+        stderr += String(error);
+        return 1;
+      });
+    } else {
+      child = spawn(process.execPath, [command], {
+        env: {
+          ...process.env,
+          HOME: root,
+          CLANKIE_STATE: root,
+          HERDR_PANE_ID: ref.paneId,
+          HERDR_SOCKET_PATH: socket,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      child.stdout!.setEncoding("utf8").on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr!.setEncoding("utf8").on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      exited = new Promise<number | null>((resolve, reject) => {
+        child!.once("error", reject);
+        child!.once("exit", resolve);
+      });
+      child.stdin!.end(JSON.stringify(hookInput));
+    }
     if (route !== "owned") {
       expect(await exited).toBe(0);
       expect(stderr).toBe("");
@@ -179,7 +216,7 @@ async function commandRoundTrip(
     expect(await registry.answer(ref, { requestId: question.requestId, answers })).toMatchObject({
       outcome: "refused",
     });
-    return { output: JSON.parse(stdout) as Record<string, unknown>, hook, question };
+    return { output: JSON.parse(stdout) as Record<string, unknown>, hook, question, attempts };
   } finally {
     watches.close();
     if (child?.exitCode === null && child.signalCode === null) child.kill();
@@ -342,3 +379,44 @@ it("writes the bounded redacted notify cause to the real service stderr as well 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it.each(["worker", "cli"] as const)(
+  "%s preserves question receipts after an older host rejects new hook metadata",
+  async (transport) => {
+    const { output, hook, attempts } = await commandRoundTrip(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "AskUserQuestion",
+        tool_use_id: "legacy-question",
+        tool_input: {
+          questions: [
+            {
+              question: "Which framework?",
+              header: "Framework",
+              options: [
+                { label: "React", description: "Component library" },
+                { label: "Vue", description: "Progressive framework" },
+              ],
+              multiSelect: false,
+            },
+          ],
+        },
+      },
+      ["React"],
+      "owned",
+      { legacy: true, transport },
+    );
+    expect(hook.occurredAt).toBeUndefined();
+    expect(attempts).toHaveLength(3);
+    expect(attempts![0]).toMatchObject({ occurredAt: expect.any(String) });
+    expect(attempts![1]!.occurredAt).toBeUndefined();
+    expect(attempts![2]!.occurredAt).toBeUndefined();
+    expect(attempts![2]!.deliveredQuestionId).toEqual(expect.any(String));
+    expect(output).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: "allow",
+        updatedInput: { answers: { "Which framework?": "React" } },
+      },
+    });
+  },
+);

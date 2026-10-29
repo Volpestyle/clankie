@@ -78,7 +78,7 @@ export async function runSeatHookCommand(
     const last = entries.findLast((entry) => entry.type === "message" && entry.role === "agent");
     lastMessage = last?.type === "message" ? last.text : undefined;
   }
-  const body = FleetSeatHookSchema.parse({
+  let body = FleetSeatHookSchema.parse({
     schemaVersion: 1,
     event,
     sessionId: hook.session_id,
@@ -138,7 +138,9 @@ export async function runSeatHookCommand(
   ) {
     if (event === "PostToolUse") return 0;
     const { occurredAt: _at, agentId: _agent, ...legacy } = body;
-    response = await sendHook(legacy);
+    // Receipts must use the same schema the host accepted for this invocation.
+    body = legacy;
+    response = await sendHook(body);
   }
   // An unknown seat is a pane Clankie is not driving; nothing to report.
   if (response.status === 404) return 0;

@@ -111,6 +111,8 @@ not move the original deadline; future/stale events and changed ownership confer
 no time. This is the hook helper's wall clock at invocation, not a timestamp
 emitted by Claude. A linked machine whose clock runs ahead confers no time until
 the clock mismatch is resolved; future observations fail closed.
+Older plugin hooks without this timestamp remain accepted, but do not renew
+root leases. Existing question and message delivery remains available.
 Stop, StopFailure and SessionEnd renew nothing. There is no permanent
 open-until-Stop state: Esc and a blocked prompt can omit Stop.
 

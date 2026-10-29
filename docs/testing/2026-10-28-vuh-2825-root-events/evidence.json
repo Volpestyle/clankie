@@ -14,6 +14,12 @@
       "url": "clankie://evidence/sha256/3766d4deb6eb2f80266b88640c74773aac7ee224f5942275c8a88c0ccc8a49a0"
     },
     {
+      "path": "review-r10-evidence.json",
+      "size": 1968773,
+      "sha256": "b6179078c110957609ce74baef7f24123b6aeed1bf0d824905d4b4525f1fc6ac",
+      "url": "clankie://evidence/sha256/b6179078c110957609ce74baef7f24123b6aeed1bf0d824905d4b4525f1fc6ac"
+    },
+    {
       "path": "review-r3-evidence.json",
       "size": 158910,
       "sha256": "9444e2bb29f5716a996dbb5b87a72b4e9523dbddc7a74263281fa1aa141279c9",

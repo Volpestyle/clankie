@@ -696,6 +696,10 @@ quiet thinking past that window still require a positive current-root-turn API.
 New hook registrations apply after `/reload-plugins` or a new session, never by
 silently reloading a running worker. A strict older service receives the legacy
 body after a definite HTTP400 rejection and gains no renewal behavior.
+Message and question receipts reuse that accepted legacy body, so a host that
+refused the metadata can still confirm delivery. A new service also accepts an
+old plugin's missing observation timestamp; the hook remains functional but
+grants no root lease renewal without that evidence.
 Ordinary Pre/Post renewal hooks are async. Their shell-only lease-hint check
 exits before Node or HTTP when this socket/pane has no Claude root lease hint.
 The journal writes that exact holder's hint on grant/update, and removes it on

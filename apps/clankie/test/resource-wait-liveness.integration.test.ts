@@ -608,6 +608,14 @@ it.skipIf(process.platform !== "darwin")(
     const lease = await f.acquire();
     f.advance(590_000);
     const eventAt = f.now();
+    const originalDeadline = (await f.governor.simulatorReservations())[0]!.lastUsedAtMs;
+    // An old plugin remains admitted but missing event time never buys renewal.
+    for (const event of ["UserPromptSubmit", "PreToolUse"]) {
+      const oldHook = { schemaVersion: 1, event, sessionId: "fixture-original-session" };
+      await f.send({ hook: oldHook });
+      expect(f.hooks().at(-1)).toEqual(oldHook);
+      expect((await f.governor.simulatorReservations())[0]!.lastUsedAtMs).toBe(originalDeadline);
+    }
     expect(existsSync(f.hint)).toBe(true);
     const held = f.holdHooks();
     const pending = hook("UserPromptSubmit");
