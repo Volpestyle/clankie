@@ -6,6 +6,12 @@ import { writeFile } from "node:fs/promises";
 import { createResourceGovernor } from "../../../../packages/fleet-resources/src/governor.ts";
 import { resolve, relative } from "node:path";
 const scratch = resolve(process.env.ACTIVITY_FIXTURE_ROOT);
+const trace = (stage, data = {}) => {
+  if (process.env.ACTIVITY_TRACE === "1")
+    process.stderr.write(`${JSON.stringify({ stage, utc: new Date().toISOString(), ...data })}\n`);
+};
+// Observe a native pipe failure without changing its normal fatal behavior.
+process.on("uncaughtExceptionMonitor", (error) => trace("uncaught-exception", { error: String(error) }));
 for (const name of [
   "HOME",
   "XDG_CONFIG_HOME",
@@ -46,21 +52,27 @@ const api = {
   process: {
     run: async (args, options) =>
       new Promise((resolve, reject) => {
+        const started = performance.now();
         const child = spawn(args[0], args.slice(1), {
           env: process.env,
           stdio: ["pipe", "pipe", "pipe"],
           timeout: options.timeoutMs,
         });
+        trace("helper:start", { pid: child.pid, file: args.at(-1) });
         let stdout = "",
           stderr = "";
         child.stdout.on("data", (data) => (stdout += data));
         child.stderr.on("data", (data) => (stderr += data));
-        child.once("error", reject);
+        child.once("error", (error) => {
+          trace("helper:error", { pid: child.pid, error: String(error) });
+          reject(error);
+        });
         child.once("close", (code) => {
+          trace("helper:end", { pid: child.pid, code, durationMs: Math.round(performance.now() - started) });
           if (args.at(-1).endsWith("/activity.mjs")) activityExitCode = code;
           resolve({ exitCode: code ?? -1, stdout, stderr });
         });
-        child.stdin.end(options.stdin);
+        child.stdin.end(options.stdin, () => trace("helper-stdin:written", { pid: child.pid }));
       }),
   },
 };
@@ -82,6 +94,7 @@ let heavy, heavyGovernor, heavyReady, heavyRelease, heavyAbort;
 process.on("message", (message) => {
   chain = chain.then(async () => {
     try {
+      trace("ipc:start", { id: message.id });
       now = message.now ?? now;
       if (message.sessionId) sessionId = message.sessionId;
       if (message.children) children = message.children;
@@ -163,6 +176,7 @@ process.on("message", (message) => {
       if (message.event) await emit(message.event, message.input);
       if (message.tick) for (const entry of timers) if (!entry.cancelled) await entry.callback();
       await drain();
+      trace("ipc:end", { id: message.id });
       process.send({ id: message.id, ok: true, activityExitCode, workerHookResult });
     } catch (error) {
       process.send({ id: message.id, error: String(error) });

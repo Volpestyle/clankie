@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import type { Socket } from "node:net";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi, type TestContext } from "vitest";
 import {
   createResourceGovernor,
   createSimctlAdapter,
@@ -43,7 +43,25 @@ async function stop(child: ChildProcess) {
   await closed;
 }
 
-async function fixture() {
+async function fixture(context?: TestContext) {
+  const stages: unknown[] = [];
+  const trace = (stage: string, data: Record<string, unknown> = {}) => {
+    if (!context) return;
+    stages.push({ stage, utc: new Date().toISOString(), elapsedMs: Math.round(performance.now()), ...data });
+    if (stages.length > 64) stages.shift();
+  };
+  const observed = async <T>(stage: string, work: () => Promise<T>): Promise<T> => {
+    if (!context) return work();
+    const started = performance.now();
+    trace(`${stage}:start`);
+    try {
+      return await work();
+    } finally {
+      trace(`${stage}:end`, { durationMs: Math.round(performance.now() - started) });
+    }
+  };
+  context?.onTestFailed(() => console.error("Resource wait liveness failure stages", JSON.stringify(stages)));
+  trace("fixture:start");
   const root = await mkdtemp(join(tmpdir(), "wait-liveness-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   let now = Date.now();
@@ -80,10 +98,12 @@ async function fixture() {
       adapter: createSimctlAdapter({
         run: async (args, timeout) =>
           (
-            await execute(
-              process.execPath,
-              [resolve("packages/fleet-resources/test/fixtures/simctl.mjs"), statePath, log, ...args],
-              { env, timeout },
+            await observed("simctl", () =>
+              execute(
+                process.execPath,
+                [resolve("packages/fleet-resources/test/fixtures/simctl.mjs"), statePath, log, ...args],
+                { env, timeout },
+              ),
             )
           ).stdout,
       }),
@@ -103,7 +123,9 @@ async function fixture() {
     admitted = true;
   const session = () => ({ source: "herdr:claude", kind: "id" as const, value: sessionId });
   const native = async () => {
-    const identity = child?.pid ? await processIdentity(child.pid) : undefined;
+    const identity = child?.pid
+      ? await observed("native-process-proof", () => processIdentity(child.pid!))
+      : undefined;
     if (!identity) throw Error("Fixture native process unavailable");
     return {
       fleet: "default",
@@ -142,9 +164,11 @@ async function fixture() {
     let pid = socketOwners.get(socket);
     if (!pid) {
       const args = ["-nP", "-iTCP", "-Fpn"];
-      const output = measureAdmissionCpu
-        ? await execute("/usr/bin/time", ["-p", "/usr/sbin/lsof", ...args])
-        : await execute("/usr/sbin/lsof", args);
+      const output = await observed("admission-lsof", () =>
+        measureAdmissionCpu
+          ? execute("/usr/bin/time", ["-p", "/usr/sbin/lsof", ...args])
+          : execute("/usr/sbin/lsof", args),
+      );
       if (measureAdmissionCpu)
         for (const match of output.stderr.matchAll(/^(?:user|sys) ([0-9.]+)$/gm))
           admissionCpuMs += Number(match[1]) * 1000;
@@ -245,21 +269,29 @@ async function fixture() {
       ACTIVITY_PLUGIN_ROOT: resolve("integrations/claude-plugin/worker"),
       CLAUDE_PLUGIN_ROOT: resolve("integrations/claude-plugin/worker"),
       ACTIVITY_MOD_PATH: resolve("integrations/claude-plugin/worker/mods/tool-catalog.mjs"),
+      ...(context ? { ACTIVITY_TRACE: "1" } : {}),
       HERDR_PANE_ID: "w1:p1",
       HERDR_SOCKET_PATH: join(root, "fixture.sock"),
     },
     stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
   let errors = "";
-  child.stderr!.on("data", (data) => (errors += data));
+  child.stderr!.on("data", (data) => {
+    errors += data;
+    if (context) trace("engine-stderr", { text: String(data).slice(-4000) });
+  });
   cleanups.push(() => stop(child));
+  trace("engine-ready:start", { pid: child.pid });
   expect((await once(child, "message"))[0], errors).toEqual({ ready: true });
+  trace("engine-ready:end", { pid: child.pid });
   let nextId = 0;
   const send = async (message: Record<string, unknown>) => {
     const id = ++nextId;
+    trace("engine-ipc:start", { id, event: message.event, tick: message.tick });
     const reply = once(child, "message");
     child.send!({ ...message, id, now });
     const received = (await reply)[0];
+    trace("engine-ipc:end", { id });
     expect(received, errors).toMatchObject({ id, ok: true });
     if (received.activityExitCode !== undefined || message.expectedActivityExit !== undefined)
       expect(received.activityExitCode, errors).toBe(message.expectedActivityExit ?? 0);
@@ -273,7 +305,9 @@ async function fixture() {
     });
   const owner = { seatId: "fixture-seat", holderId: `claude:${sessionId}` };
   const acquire = async (holderId = owner.holderId) => {
-    const result = (await cli("acquire", { ...owner, holderId, deviceType, runtime })) as SimulatorResult;
+    const result = (await observed("simulator-acquire", () =>
+      cli("acquire", { ...owner, holderId, deviceType, runtime }),
+    )) as SimulatorResult;
     if (result.outcome !== "acquired") throw Error(JSON.stringify(result));
     return result.lease;
   };
@@ -336,9 +370,9 @@ async function fixture() {
 }
 
 it.skipIf(process.platform !== "darwin")(
-  "original-native mod renews exact quiet child turns through kernel-authenticated admission and the public simulator CLI; replay/loss/prompt/session fences expire",
-  async () => {
-    const f = await fixture();
+  "original-native child retention crosses the old-evidence and idle windows; root and prompt deadlines still expire",
+  async (context) => {
+    const f = await fixture(context);
     await f.send({ event: "session.start", input: { isInteractive: true } });
     // Generated root turn IDs have no verified root discriminator. This source
     // deliberately refuses to renew root leases from child or generic turns.
@@ -386,6 +420,19 @@ it.skipIf(process.platform !== "darwin")(
     expect((await f.devices()).devices[runtime][0].state).toBe("Shutdown");
 
     const next = await f.acquire(childHolder);
+    expect(next.id).not.toBe(lease.id);
+  },
+  30_000,
+);
+
+it.skipIf(process.platform !== "darwin")(
+  "original-native child refusal, replay, session replacement and process exit cannot retain a lease",
+  async (context) => {
+    const f = await fixture(context);
+    await f.send({ event: "session.start", input: { isInteractive: true } });
+    const childId = "a1111111111111111";
+    const childHolder = `${f.owner.holderId}:agent:${childId}`;
+    await f.acquire(childHolder);
     await f.send({
       children: [{ id: childId, type: "general-purpose", status: "running" }],
       event: "turn.start",
@@ -394,6 +441,9 @@ it.skipIf(process.platform !== "darwin")(
     });
     f.deny();
     await f.send({ tick: true, expectedActivityExit: 1 });
+    // This manual report starts a fresh producer instance, as it did after the
+    // long retention phase before these independent scenarios were split.
+    f.advance(1);
     const proof = await f.native();
     const activity = {
       instanceStartedAt: new Date(f.now()).toISOString(),
@@ -431,7 +481,6 @@ it.skipIf(process.platform !== "darwin")(
     expect(await f.resources.recordNativeActivity("w1:p1", hook, proof)).toBe(false);
     await f.resources.simulators.tick();
     expect(await f.governor.simulatorReservations()).toHaveLength(0);
-    expect(next.id).not.toBe(lease.id);
     f.setSession("replacement-session");
     expect(
       await f.resources.recordNativeActivity(
@@ -472,6 +521,7 @@ it.skipIf(process.platform !== "darwin")(
         .state,
     ).toBe("Shutdown");
   },
+  30_000,
 );
 
 it.skipIf(process.platform !== "darwin").each(["root", "child"])(

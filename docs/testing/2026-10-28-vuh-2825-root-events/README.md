@@ -159,3 +159,36 @@ Service typecheck passes (178.20s) and fleet-resources passes (0.99s), with scop
 lint, plugin generation and shell syntax also passing. The first service typecheck
 reported optional-field types in the new fixture; those were annotated before the
 passing run. Both typecheck logs are retained, without calling the first green.
+
+Revision 9 repairs the test design exposed by R8's full landing gate: all static
+checks and 24 typecheck tasks passed, then the original native-child case hit its
+30-second limit. A lower-load diagnostic copy completed in 16.71s: 52 IPC replies,
+50 helpers (246.5ms median, 378ms maximum) and 144 parent subprocesses (76ms median,
+88ms maximum). Nested timings overlap. The untraced failing run does not establish
+whether a specific boundary stalled. An R8 rerun was interrupted on the lead's
+decision and is not a green result.
+
+The case is split into retention/cadence and refusal/lifecycle, each still limited
+to 30 seconds. All 19 assertions and all 44 heartbeat iterations remain. The
+replacement fixture advances one logical millisecond before its manual producer
+report, preserving the original new-instance ordering independently of the long
+retention scenario. Failure-only diagnostics retain a bounded phase history with
+real UTC and elapsed time, helper PID, stdin completion, admission and simulator
+boundaries. The latency/CPU scenario does not enable tracing.
+
+The normal suite passes 10/10 (64.06s test time). Two deliberate diagnostic copies
+withheld helper stdin; both failed at the unchanged 30-second test limit and
+reported the pending exchange/helper/withheld-input stage. Their executable copies
+were removed; the exact sources and red logs remain in the R9 evidence bundle.
+The latest no-lease check is 7ms median / 8ms maximum with zero HTTP/Node work;
+held-lease CPU is 338ms in this sample, not a claimed improvement over earlier
+host-load measurements. Root gate and R9 independent review remain pending.
+
+Delivery gaps remain: SIGKILL can orphan a claim; held-lease hooks consume real
+background CPU (about 430ms per pair in independent review); live Claude async
+scheduling and EPIPE need a fresh session after deploy. The documented registry
+root mismatch fails closed, orphan claims/directories are not pruned, and the
+native session/process defense-in-depth guards lack dedicated mutation failures.
+Quiet thinking or a long non-heavy call beyond the idle window still requires a
+positive interrupt-aware native signal. The lead owns rollout, fresh-session
+verification and the before/after fleet waiting measurement.
