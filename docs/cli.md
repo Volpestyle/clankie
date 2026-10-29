@@ -7021,8 +7021,8 @@ results do not spend the projection budget. `--project` filters worker histories
 by the exact project ID saved in hire records (for example `clankie`); histories
 without that attribution are excluded. Lead measurements retain their fleet scope.
 Saved Claude `clankieBrief` assignments are read only from the retained service
-brief directory, through a bounded no-follow file descriptor. Symlinked brief
-files are refused. Unavailable or ambiguous sources remain explicit coverage warnings.
+brief directory, through a bounded nonblocking no-follow file descriptor. Symlinked
+brief files and nonregular files (including FIFOs) are refused. Unavailable or ambiguous sources remain explicit coverage warnings.
 
 ```sh
 clankie metrics --issue VUH-1608 --since 2026-10-04T00:00:00Z --until 2026-10-05T00:00:00Z

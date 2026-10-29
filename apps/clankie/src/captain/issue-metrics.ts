@@ -27,13 +27,15 @@ const obj = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 const identifiers = (text: string) => [...new Set(text.match(/\b(?:LOCAL-)?[A-Z][A-Z0-9]*-\d+\b/gu) ?? [])];
 type WorkerBase = IssueMetricsReport["issues"][number]["workers"][number];
-type Worker = WorkerBase &
-  Required<
-    Pick<
-      WorkerBase,
-      "landedAt" | "wallTimeToLandedMs" | "workerWaitMs" | "waitCount" | "exchanges" | "reviewChangeRequests"
-    >
-  >;
+type Worker = WorkerBase & {
+  [K in
+    | "landedAt"
+    | "wallTimeToLandedMs"
+    | "workerWaitMs"
+    | "waitCount"
+    | "exchanges"
+    | "reviewChangeRequests"]-?: Exclude<WorkerBase[K], undefined>;
+};
 type Episode = Worker & { issueId: string; lastAt: string; source: string };
 type NativeRecord = {
   at: string;
@@ -1170,7 +1172,7 @@ async function* nativeLines(stream: ReturnType<typeof createReadStream>): AsyncG
  * A canonical-looking final-component symlink must never select an assignment. */
 async function readBrief(path: string): Promise<string> {
   if (typeof constants.O_NOFOLLOW !== "number") throw new Error("No-follow brief reads unavailable");
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | (constants.O_NONBLOCK ?? 0));
   try {
     const info = await handle.stat();
     if (!info.isFile() || info.size > 1024 * 1024) throw new Error("Brief is not a bounded regular file");

@@ -91,7 +91,12 @@ and a canonical brief filename could follow an outside symlink. The final
 journey exercises real local bare-Git `--dry-run`, `-n`, quoted variants and a
 real redirected push; it checks the origin ref and report together. Brief reads
 use one no-follow descriptor, validate a bounded regular file, and reject an
-outside-symlink fixture while accepting the regular-file control. The optional
+outside-symlink fixture while accepting the regular-file control. A further review
+probe found a FIFO could block before the regular-file check: final opens also
+use the supported nonblocking flag, with a prompt FIFO-refusal regression and
+safe writer-based cleanup for the failing old implementation. The internal
+required-field type explicitly excludes undefined while public additions remain
+optional for older service responses. The optional
 starvation journey reads five bound histories totaling over 256 MiB and verifies
 both the issue-specific and fleet-wide report remain populated without budget
 starvation. It runs only when explicitly requested:

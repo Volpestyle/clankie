@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { InboundReportStore } from "../src/captain/conversations/inbound-report-store.ts";
 import { InboundAcceptanceSchema } from "../src/captain/conversations/constants.ts";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, rm, appendFile, stat, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir, userInfo } from "node:os";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual, promisify } from "node:util";
@@ -930,6 +932,37 @@ it("serves the real VUH-1608 golden through the production service, client and C
       JSON.stringify({ clankieBrief: "You're Odalys, on VUH-2967. Fix the metrics report." }),
     );
     expect((await client.readIssueMetrics(currentQuery)).issues[0]).toMatchObject({ landedAt: at(15) });
+    if (process.platform !== "win32") {
+      await rm(brief);
+      await exec("mkfifo", [brief]);
+      const reading = client.readIssueMetrics(currentQuery);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const fifoReport = await Promise.race([
+          reading,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error("FIFO brief blocked metrics")), 3000);
+          }),
+        ]);
+        expect(fifoReport.issues).toEqual([]);
+        expect(fifoReport.coverage.warnings).toContain(
+          `Saved assignment brief unavailable: ${brief.split("/").at(-1)}`,
+        );
+      } finally {
+        if (timeout) clearTimeout(timeout);
+        // Safely unblock an old blocking implementation before removing the
+        // FIFO or stopping the fixture. No reader means ENXIO, never a wait.
+        const writer = await open(brief, constants.O_WRONLY | constants.O_NONBLOCK).catch(() => undefined);
+        await writer?.close();
+        await reading.catch(() => undefined);
+        await rm(brief);
+        await writeFile(
+          brief,
+          JSON.stringify({ clankieBrief: "You're Odalys, on VUH-2967. Fix the metrics report." }),
+        );
+      }
+      expect((await client.readIssueMetrics(currentQuery)).issues[0]).toMatchObject({ landedAt: at(15) });
+    }
     if (process.env.CLANKIE_METRICS_EVIDENCE !== undefined) {
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "metrics-cli.json"), cli.stdout);
       await writeFile(join(process.env.CLANKIE_METRICS_EVIDENCE, "loopback-service.log"), output);
