@@ -1,7 +1,8 @@
 # Detached Codex server renewal — VUH-2969
 
 Baseline: `0f78a463ad889ac2a1ced0a912014b4887eaa1a2`.
-Captures: `private-server-captures.tar` in [the manifest](./evidence.json).
+Original captures: `private-server-captures.tar` in [the manifest](./evidence.json).
+The corrected review candidate adds `private-server-r2-captures.tar` there.
 
 ## Cause
 
@@ -27,8 +28,9 @@ command ancestry edge and the foreground's live birth are rechecked afterward.
 No alternate authority is persisted in a lease or supplied by a caller.
 
 The host registry read runs outside simulator mutation serialization. A heavy
-sample has a ten-second apply bound and retains its observation timestamp, so a
-late result cannot extend activity from its later application time.
+sample's timestamp is pinned **before** the asynchronous governor read, so its
+ten-second validity bound includes time inside that observation. A delayed result
+cannot start a fresh activity clock when it returns or is applied.
 
 ## Source checks
 
@@ -47,6 +49,19 @@ All checks used `clankie heavy` and scratch HOME.
   simulator integration, existing private-Codex registry controls and service
   fixture isolation. Includes the paused-membership release boundary and the
   prior native-read release/coalescing controls.
+
+Sable found a stale-read boundary in the first candidate `8111d6626`: it stamped
+heavy activity after the awaited membership observation. `detached-delay-red.log`
+retains the failing regression: pause membership, finish the matching heavy job,
+confirm the journal entry is gone, advance 600001 ms, then resume. That stale
+result incorrectly retained the lease. The correction pins the timestamp before
+the read and retains this regression. Original registration and ancestry logic
+are unchanged.
+
+`detached-focused-r2.log`: **84/84** across the same four suites, including the
+new stopped-heavy/paused-proof regression. `detached-delay-red.log` fails on
+`8111d6626`; the timestamp-before-read correction passes it and the existing
+queued/held retention, idle, copied-label and pending-release controls.
 
 HTTP, process births, command ancestry, durable registry and governor state are
 real. Native harness discovery and simctl are surrogates. The fixture backend

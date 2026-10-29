@@ -702,6 +702,39 @@ it.skipIf(process.platform !== "darwin")(
 );
 
 it.skipIf(process.platform !== "darwin")(
+  "a delayed membership result cannot renew heavy work that already completed",
+  async () => {
+    const f = await fixture(undefined, true);
+    await f.acquire();
+    await f.send({
+      heavy: "start",
+      directory: f.directory,
+      release: join(f.root, "delayed-private-release"),
+      holderId: f.owner.holderId,
+      seatId: "w48:p5F",
+    });
+    cleanups.push(() => f.send({ heavy: "stop" }));
+    await f.send({ heavy: "ready" });
+    const paused = f.pausePrivateProof();
+    const ticking = f.resources.simulators.tick();
+    await paused.waiting;
+    try {
+      await f.send({ heavy: "stop" });
+      expect(
+        (await f.governor.snapshot()).leases.filter(
+          (row) => row.kind === "heavy" && row.holderId === f.owner.holderId,
+        ),
+      ).toEqual([]);
+      f.advance(600_001);
+    } finally {
+      paused.resume();
+      await ticking;
+    }
+    expect(await f.governor.simulatorReservations()).toEqual([]);
+  },
+);
+
+it.skipIf(process.platform !== "darwin")(
   "a pane-labelled Codex server permit retains its simulator, then idle still expires",
   async () => {
     const f = await fixture();

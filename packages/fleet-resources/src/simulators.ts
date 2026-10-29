@@ -1473,9 +1473,10 @@ export function createSimulatorManager(input: {
             if (observed && "owner" in observed && matchesOwner(candidate, observed.owner)) {
               // The host may need a fresh original-server/occupant observation.
               // Keep it outside mutations just like native task reads.
+              const sampledAt = now();
               // allow-swallowed-rejection -- Unavailable native membership grants no heavy activity.
               if (await input.governor.simulatorHolderHasHeavyWork(candidate).catch(() => false))
-                heavyAt = now();
+                heavyAt = sampledAt;
             }
             await serial(async () => {
               const lease = await find(candidate.id);
