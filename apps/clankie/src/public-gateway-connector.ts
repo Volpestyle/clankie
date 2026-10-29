@@ -1,8 +1,4 @@
 import { isMachineJoinTransportRoute } from "@clankie/protocol/machine-join";
-import { DISCORD_INGRESS_PATH } from "@clankie/protocol/discord-ingress";
-import { HOSTED_OPERATOR_PATH } from "@clankie/protocol/hosted-operator";
-import { HOSTED_SUPPORT_PATH } from "@clankie/protocol/support-access";
-import { HostedDiscordEnvelopeSchema } from "@clankie/protocol/hosted-discord";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
@@ -21,7 +17,6 @@ import {
   type PublicGatewayRequestFrame,
   type PublicGatewayStreamOpenFrame,
   type PublicGatewayTunnelFrame,
-  type PublicGatewayRoute,
 } from "@clankie/protocol/public-gateway";
 import type { PublicGatewayPushWakeFrame } from "@clankie/protocol";
 import { WebSocket, type RawData } from "ws";
@@ -33,7 +28,6 @@ import {
 } from "@clankie/protocol/gateway-encryption";
 import { VOICE_CALL_PATH } from "@clankie/protocol";
 import { GatewayEncryptionHost, type GatewayStream } from "./gateway-encryption.ts";
-import { validateRuntimeGatewayRoutes } from "./runtime-provider.ts";
 import { pairingOfferWire, type StoredPairingOffer } from "./pairing.ts";
 import type { PairingOfferWire } from "@clankie/protocol";
 import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
@@ -63,13 +57,9 @@ export interface PublicGatewayConnectorOptions {
   readonly encryptionKey?: Uint8Array;
   /** Work classification only; decrypted request content stays inside the public body. */
   readonly onAuthenticatedRequest?: (isWork: boolean) => void;
-  readonly gatewayRoutes?: readonly PublicGatewayRoute[];
-  /**
-   * Whether this body carries a phone's call (VUH-2761). A hosted body says
-   * false: its voice is metered through the Discord edge (VUH-2766).
-   */
+  /** Whether this body carries a phone's call (VUH-2761). */
   readonly carriesCalls?: boolean;
-  /** Managed bodies stop after a forbidden host upgrade as well as a failed renewal. */
+  /** Called when the gateway refuses this host for good. */
   readonly onHostRejected?: () => void;
   readonly installationId?: string;
   readonly resolveHostToken?: () => Promise<{
@@ -85,7 +75,7 @@ export interface PublicGatewayConnectorOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly reconnectMinimumMs?: number;
   readonly reconnectMaximumMs?: number;
-  /** Each doorway transition, for the hosted body's telemetry. Metadata only. */
+  /** Each doorway transition. Metadata only. */
   readonly onDoorwayChange?: (change: PublicGatewayDoorwayChange) => void;
 }
 
@@ -153,7 +143,6 @@ export class PublicGatewayConnector {
   private readonly connectUrl: string;
   private readonly encryption: GatewayEncryptionHost | undefined;
   private readonly carriesCalls: boolean;
-  private readonly gatewayRoutes: readonly PublicGatewayRoute[];
   private readonly hostId: string;
   private readonly hostToken: string | undefined;
   private readonly resolveHostToken:
@@ -186,18 +175,12 @@ export class PublicGatewayConnector {
   private started = false;
 
   public constructor(options: PublicGatewayConnectorOptions) {
-    this.gatewayRoutes = validateRuntimeGatewayRoutes(options.gatewayRoutes);
     const gatewayOrigin = requireHttpOrigin(options.gatewayUrl, "Gateway URL");
     this.hostId = PublicGatewayHostIdSchema.parse(options.hostId);
     this.encryption =
       options.encryptionKey === undefined
         ? undefined
-        : new GatewayEncryptionHost(
-            this.hostId,
-            options.encryptionKey,
-            options.onAuthenticatedRequest,
-            this.gatewayRoutes,
-          );
+        : new GatewayEncryptionHost(this.hostId, options.encryptionKey, options.onAuthenticatedRequest);
     this.carriesCalls = this.encryption !== undefined && options.carriesCalls !== false;
     if ((options.hostToken === undefined) === (options.resolveHostToken === undefined)) {
       throw new Error("Configure one static or renewable gateway host token source");
@@ -547,7 +530,7 @@ export class PublicGatewayConnector {
     // A route this body doesn't serve (a newer gateway or fleet calling an
     // older body) is refused on its own: closing the tunnel would also drop
     // every other exchange in flight (VUH-1830).
-    if (publicGatewayTargetFor(frame.method, frame.path, this.gatewayRoutes) !== frame.target) {
+    if (publicGatewayTargetFor(frame.method, frame.path) !== frame.target) {
       void sendJsonError(socket, frame.requestId, "route_unavailable", 404).catch(() => undefined);
       return;
     }
@@ -573,24 +556,8 @@ export class PublicGatewayConnector {
     headers.set(GATEWAY_FORWARDED_HEADER, "1");
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
-      let discordWebEnvelope = false;
-      if (frame.path === HOSTED_OPERATOR_PATH) {
-        try {
-          discordWebEnvelope = HostedDiscordEnvelopeSchema.safeParse(
-            JSON.parse(body?.toString("utf8") ?? "null"),
-          ).success;
-        } catch {
-          /* Other envelopes remain on the ordinary encrypted transport. */
-        }
-      }
       const response =
-        isMachineJoinTransportRoute(frame.method, frame.path) ||
-        frame.path === "/v1/hooks/linear" ||
-        frame.path === "/v1/hosted/pair-offer" ||
-        frame.path === HOSTED_SUPPORT_PATH ||
-        frame.path === DISCORD_INGRESS_PATH ||
-        frame.path === "/v1/activity/viewer" ||
-        discordWebEnvelope
+        isMachineJoinTransportRoute(frame.method, frame.path) || frame.path === "/v1/hooks/linear"
           ? await this.fetcher(new URL(frame.path, baseUrl), {
               method: frame.method,
               headers,
@@ -631,7 +598,7 @@ export class PublicGatewayConnector {
         ) {
           const chunk = item.value.subarray(offset, offset + PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX);
           responseBytes += chunk.byteLength;
-          if (responseBytes > (frame.path === "/v1/activity/viewer" ? 256 * 1024 * 1024 : RESPONSE_BYTES_MAX))
+          if (responseBytes > RESPONSE_BYTES_MAX)
             throw new Error("Local gateway response exceeded its limit");
           await sendFrame(socket, {
             schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,

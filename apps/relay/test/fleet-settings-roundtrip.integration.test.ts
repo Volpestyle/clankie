@@ -11,7 +11,7 @@ import {
   HostSettingsSnapshotSchema,
 } from "../../../packages/protocol/src/owner-settings.ts";
 import { PersonaAttentionSnapshotSchema } from "../../../packages/protocol/src/discord-attention.ts";
-import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -49,9 +49,6 @@ import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain, type CaptainPort } from "../../clankie/src/captain/port.ts";
 import { RoutineStore } from "../../clankie/src/captain/routines.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../../clankie/src/device-session.ts";
-import { HostedBodyClient } from "../../clankie/src/hosted-body.ts";
-import { HostedPairing } from "../../clankie/src/hosted-pairing.ts";
-import { hostedFixture } from "../../clankie/test/fixtures/hosted-body.ts";
 import { ControlPlaneDeviceAuthorizer } from "../src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../src/operator-conversations.ts";
 import { createDeviceConversationDispatch } from "../src/conversation-upstream.ts";
@@ -95,25 +92,25 @@ async function fixture(
     ...current,
     projects: ProjectsSettingsSchema.parse({ projects: [{ id: "garden", name: "Garden" }] }),
   }));
-  const hf = hostedFixture();
+  const now = 1_790_000_000_000;
   const key = randomBytes(32),
     signer = new DeviceSessionSigner(key);
-  const names = ["control", "hosted", "hosted-read", "chat", "steer"] as const;
+  const names = ["control", "other", "chat", "steer"] as const;
   const tokens = Object.fromEntries(
     names.map((deviceId) => [
       deviceId,
       signer.issue(
-        mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(hf.now / 1000), ttlSeconds: 600 }),
+        mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 600 }),
       ),
     ]),
   ) as Record<(typeof names)[number], string>;
   const events = names.flatMap((deviceId) => {
     const grants =
-      deviceId === "control" || deviceId === "hosted"
+      deviceId === "control" || deviceId === "other"
         ? TAKE_CONTROL_GRANTS
         : { chat: true, steer: deviceId !== "chat", terminalObserve: true, terminalControl: false };
     const base = {
-      occurredAt: new Date(hf.now).toISOString(),
+      occurredAt: new Date(now).toISOString(),
       missionId: `device:${deviceId}`,
       correlationId: "fixture",
       profileHash: "fixture",
@@ -130,8 +127,8 @@ async function fixture(
           name: deviceId,
           platform: "ios",
           offeredGrants: grants,
-          mintedBy: deviceId.startsWith("hosted") ? "hosted-account-operator" : "local-owner",
-          pendingExpiresAt: new Date(hf.now + 600_000).toISOString(),
+          mintedBy: "local-owner",
+          pendingExpiresAt: new Date(now + 600_000).toISOString(),
         },
       },
       {
@@ -142,7 +139,7 @@ async function fixture(
           schemaVersion: 1,
           deviceId,
           grants,
-          sessionExpiresAt: new Date(hf.now + 600_000).toISOString(),
+          sessionExpiresAt: new Date(now + 600_000).toISOString(),
         },
       },
     ];
@@ -180,7 +177,7 @@ async function fixture(
     }),
     settings,
     ...(captainSeats ? { captainSeats } : {}),
-    views: new ViewStore(join(root, "views"), () => hf.now),
+    views: new ViewStore(join(root, "views"), () => now),
     ...(options.workItems ? { workItems: options.workItems } : {}),
     ...(options.unavailableAwakeRegistry
       ? {
@@ -191,18 +188,13 @@ async function fixture(
       : {}),
     eventLogPath,
     deviceSessionKey: key,
-    clock: () => new Date(hf.now),
-    hostedPairing: new HostedPairing(
-      new HostedBodyClient(hf.bootstrap, { clock: () => hf.now }),
-      generateKeyPairSync("ed25519").privateKey,
-      { clock: () => hf.now },
-    ),
+    clock: () => new Date(now),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
     workerAccounts: async (fleet) => ({
       machine: fleet ?? "local",
       shell: "posix",
-      observedAt: new Date(hf.now).toISOString(),
+      observedAt: new Date(now).toISOString(),
       accounts: [
         {
           harness: "codex",
@@ -289,7 +281,7 @@ async function fixture(
     revoke,
     relayUrl,
     controlUrl,
-    now: hf.now,
+    now,
     captainCalls: () => captainCalls,
     seatEffects: () => seatEffects,
   };
@@ -297,7 +289,7 @@ async function fixture(
 
 it("round-trips owner settings through real relay/device/service HTTP and persistence using only the original device identity", async () => {
   const f = await fixture();
-  for (const device of ["control", "hosted"] as const) {
+  for (const device of ["control", "other"] as const) {
     const client = new ClankieApiClient({ baseUrl: f.relayUrl, operatorToken: f.tokens[device] });
     const fleet = await client.fleetSettings();
     expect(fleet.workingPreferences).toBe(true);
@@ -335,10 +327,10 @@ it("round-trips owner settings through real relay/device/service HTTP and persis
   );
 });
 
-it("refuses chat and steer devices before any settings or captain hop, and denies hosted operator elevation without its mint and terminalControl proof", async () => {
+it("refuses chat and steer devices before any settings or captain hop", async () => {
   const f = await fixture();
   const before = await f.settings.load();
-  for (const device of ["chat", "steer", "hosted-read"] as const) {
+  for (const device of ["chat", "steer"] as const) {
     const client = new ClankieApiClient({ baseUrl: f.relayUrl, operatorToken: f.tokens[device] });
     await expect(client.fleetSettings()).rejects.toThrow("403");
     await expect(
@@ -355,14 +347,6 @@ it("refuses chat and steer devices before any settings or captain hop, and denie
         changes: { autonomy: { fleet: { closure: "owner" } } },
       }),
     ).rejects.toThrow("403");
-  }
-  for (const device of ["control", "hosted-read"] as const) {
-    const result = await fetch(`${f.controlUrl}/v1/hosted/operator`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
-      body: JSON.stringify({ method: "GET", path: "/v1/operator/fleet-settings" }),
-    });
-    expect(result.status).toBe(403);
   }
   expect(f.forwarded).toEqual([]);
   expect(f.captainCalls()).toBe(0);
@@ -383,9 +367,9 @@ it("revalidates real revocation during relay work and keeps unknown queries and 
   ).rejects.toThrow("401");
   expect((await f.settings.load()).autonomy.fleet.closure).toBe("lead");
   f.hooks.before = undefined;
-  f.hooks.after = () => f.revoke("hosted");
-  const hosted = new ClankieApiClient({ baseUrl: f.relayUrl, operatorToken: f.tokens.hosted });
-  await expect(hosted.fleetSettings()).rejects.toThrow("401");
+  f.hooks.after = () => f.revoke("other");
+  const other = new ClankieApiClient({ baseUrl: f.relayUrl, operatorToken: f.tokens.other });
+  await expect(other.fleetSettings()).rejects.toThrow("401");
   f.hooks.after = undefined;
   const count = f.forwarded.length;
   for (const path of [
@@ -480,7 +464,7 @@ it("carries talkativeness, hire defaults and worker-account holds for a control 
   expect(f.forwarded.every((entry) => entry.token === f.tokens.control)).toBe(true);
 
   const forwarded = f.forwarded.length;
-  for (const device of ["chat", "steer", "hosted-read"] as const) {
+  for (const device of ["chat", "steer"] as const) {
     expect((await call(OPERATOR_PERSONA_PATH, undefined, device)).status).toBe(403);
     expect(
       (await call(WORKER_ACCOUNT_HOLDS_PATH, { harness: "codex", label: "work", held: false }, device))
@@ -622,31 +606,6 @@ it("lets a control device name a view's tracker only by its registered repo id, 
       detail: "sources.open.repo: a device names a registered repo id, not a path",
     });
   }
-  // A device paired through the hosted account reaches the same route inside the
-  // hosted operator envelope, where the service authenticates it as the operator.
-  const hosted = (repoRef: string) =>
-    fetch(`${f.controlUrl}/v1/hosted/operator`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${f.tokens.hosted}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        method: "POST",
-        path: VIEWS_PATH,
-        body: JSON.stringify({
-          action: "create",
-          spec: {
-            title: "Open work",
-            sources: { open: { kind: "tracker_issues", repo: repoRef } },
-            panels: [{ source: "open", show: "issues" }],
-          },
-        }),
-      }),
-    });
-  const hostedRefused = await hosted(elsewhere);
-  expect(hostedRefused.status).toBe(400);
-  expect(await hostedRefused.json()).toEqual({
-    error: "invalid_view_request",
-    detail: "sources.open.repo: a device names a registered repo id, not a path",
-  });
   // Nothing was kept, so nothing can enroll a path when it renders.
   expect(
     ViewListSchema.parse(
@@ -656,7 +615,6 @@ it("lets a control device name a view's tracker only by its registered repo id, 
     ).views,
   ).toEqual([]);
   expect((await repos()).map((entry) => entry.id)).toEqual([repo.id]);
-  expect((await hosted(repo.id)).status).toBe(201);
 
   // The registered id works, and the view reads that repo's issues.
   const created = await create(repo.id);
@@ -711,18 +669,18 @@ it("lets a Take Control device manage routines through the relay as the owner, a
     target: { kind: "turn", conversationId: "global-default" },
     nextRunAt: "2026-10-12T14:00:00.000Z",
   });
-  const listed = await call("hosted");
+  const listed = await call("other");
   expect(RoutinesStatusSchema.parse(await listed.json()).routines.map((entry) => entry.id)).toEqual([
     routine.id,
   ]);
   // A refused command keeps its status; the service's words stay behind the relay.
   expect((await call("control", { action: "pause", id: "rt_missing00" })).status).toBe(404);
   expect(
-    f.forwarded.every((entry) => entry.token === f.tokens.control || entry.token === f.tokens.hosted),
+    f.forwarded.every((entry) => entry.token === f.tokens.control || entry.token === f.tokens.other),
   ).toBe(true);
 
   const forwarded = f.forwarded.length;
-  for (const device of ["chat", "steer", "hosted-read"] as const) {
+  for (const device of ["chat", "steer"] as const) {
     expect((await call(device)).status).toBe(403);
     expect((await call(device, { action: "remove", id: routine.id })).status).toBe(403);
   }
@@ -732,7 +690,7 @@ it("lets a Take Control device manage routines through the relay as the owner, a
   expect(f.captainCalls()).toBe(0);
 });
 
-it("carries the fleet room to the hosted owner's device, live, and to no chat, steer, borrowed or anonymous caller (VUH-2184)", async () => {
+it("carries the fleet room to the owner's device, live, and to no chat, steer or anonymous caller (VUH-2184)", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "fleet-room-relay-"));
   cleanups.push(() => rm(stateDir, { recursive: true, force: true }));
   const journal = new FleetRoomJournal(stateDir);
@@ -748,9 +706,8 @@ it("carries the fleet room to the hosted owner's device, live, and to no chat, s
     thread: { conversationId: "global-default" },
     delivery: { stage: "delivered" },
   });
-  // This body is hosted, so its relay forwards every device through the hosted envelope.
   const f = await fixture({ fleetRoom: (request, signal) => journal.read(request, signal) });
-  const call = (body: unknown, device: keyof typeof f.tokens = "hosted") =>
+  const call = (body: unknown, device: keyof typeof f.tokens = "control") =>
     fetch(`${f.relayUrl}/operator/v1/dispatch`, {
       method: "POST",
       headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
@@ -766,7 +723,7 @@ it("carries the fleet room to the hosted owner's device, live, and to no chat, s
     { kind: "lead_message", from: lead, to: worker, links: { issues: ["VUH-2184"] } },
   ]);
   // The owner's device forwarded its own bearer; the captain's never stood in for it.
-  expect(f.forwarded.at(-1)?.token).toBe(f.tokens.hosted);
+  expect(f.forwarded.at(-1)?.token).toBe(f.tokens.control);
 
   // Following the room: a waiting read hears the next entry as it is recorded.
   const waiting = call({ ...read, direction: "newer", cursor: result.result.newer, waitMs: 5000 });
@@ -795,12 +752,10 @@ it("carries the fleet room to the hosted owner's device, live, and to no chat, s
   });
   expect(operator.status).toBe(200);
 
-  // Chat and steer devices are refused at the relay, before any hop. A device this hosted body
-  // did not mint for its account owner is refused by the service, exactly as owner questions are.
+  // Chat and steer devices are refused at the relay, before any hop.
   const forwarded = f.forwarded.length;
   for (const device of ["chat", "steer"] as const) expect((await call(read, device)).status).toBe(403);
   expect(f.forwarded).toHaveLength(forwarded);
-  expect((await call(read, "control")).status).toBe(403);
   const anonymous = await fetch(`${f.controlUrl}/operator/v1/dispatch`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -822,7 +777,7 @@ it("round-trips own-seat control with the paired device bearer and refuses weake
   expect(snapshot).toMatchObject({ seat: "app", supported: true });
   const requestId = randomUUID();
   const input = { expectedRevision: snapshot.revision, requestId };
-  for (const device of ["chat", "steer", "hosted-read"] as const)
+  for (const device of ["chat", "steer"] as const)
     expect((await call(CAPTAIN_SEAT_START_PATH, input, device)).status).toBe(403);
   expect((await call(CAPTAIN_SEAT_START_PATH, { ...input, paneId: "w1:pExisting" })).status).toBe(400);
   expect(f.seatEffects()).toBe(0);

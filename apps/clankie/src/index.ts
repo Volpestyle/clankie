@@ -25,7 +25,6 @@ import { ComputerBody } from "./computer-body.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
 import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
-import { startHostedActivityRuntime } from "./activity-runtime.ts";
 import { ActivityPlaySource } from "./activity-play-source.ts";
 import { createActivityArtifactSources } from "./activity-artifact-source.ts";
 import { createBrokeredActivityFrameSink } from "@clankie/rendered-surface-client";
@@ -42,7 +41,6 @@ import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.
 import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createBodyDiagnostics } from "./account-diagnostics.ts";
 import { FleetProjectMembership } from "./fleet-project-membership.ts";
 import { fleetMembershipNative, remoteFleetMembershipNative } from "./fleet-project-membership-native.ts";
 import { RemoteCodexSeats } from "./remote-codex-seats.ts";
@@ -79,9 +77,6 @@ import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
 import { createServiceFleetResourceRuntime } from "./service-fleet-resources.ts";
-import { HostedDeviceSecurity } from "./hosted-device-security.ts";
-import { createHostedDiscordIngress, createHostedDiscordVoiceCallback } from "./discord-ingress.ts";
-import { OfficialDiscordControl, OfficialDiscordIngress } from "./official-discord.ts";
 import { CaptainSeats, captainSeatSnapshot } from "./captain-seat.ts";
 import { createCaptainSeatLauncher } from "./captain-seat-launcher.ts";
 import { createModelKeys } from "./model-keys.ts";
@@ -172,7 +167,7 @@ import {
   reconcileDiscordVoice,
 } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
-import { accountMailbox, bodyMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
+import { accountMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LOCAL_FLEET_KEEP_ALIVE_MS, LocalFleetLink } from "./local-fleet-link.ts";
 import { NativeFixtureAdmissions } from "./native-fixture-admissions.ts";
@@ -226,7 +221,6 @@ import { DeliveredFileStore } from "./delivered-files.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { readDiscordBodyDirectory } from "./discord-directory.ts";
-import { ManagedDiscord } from "./managed-discord.ts";
 import { readDiscordBodyPermissions, postDiscordBodyTest } from "./discord-setup-body.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { createFileMemory, defaultMemoryDir } from "./memory.ts";
@@ -238,11 +232,9 @@ import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
 import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { connectBodyToGateway, openHostedBody } from "./body-doorway.ts";
-import { applyHostedAccountApps, readHostedBodyBootstrap } from "./hosted-body.ts";
+import { connectBodyToGateway } from "./body-doorway.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
-import { loadRuntimeProvider } from "./runtime-provider.ts";
-import { bodyIdleCheck, startScheduledUpdates, withBodyActivity } from "./scheduled-update.ts";
+import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
 import { integrationSafeUpdates } from "./integration-update.ts";
 import { ownerCheckoutSyncReport, startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
@@ -251,8 +243,6 @@ import {
   harnessAccountIdentities,
   harnessAccountIdentityPath,
 } from "./captain/harness-account-identities.ts";
-import { BrokerCredentialStore } from "./captain/model.ts";
-import { ComposerTranscriptions } from "./composer-transcription.ts";
 import { EvidenceStore } from "./evidence-store.ts";
 import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
 import {
@@ -272,15 +262,8 @@ import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts
 import { CLANKIE_VERSION } from "./app/log.ts";
 
 const logger = createLogger({ service: "clankie", version: CLANKIE_VERSION });
-/** Hosted bodies only: `clankie-body` names the spool; a Mac never does. */
-const rawBodyTelemetry = bodyTelemetryFromEnv(process.env, "service");
-const accountDiagnostics = createBodyDiagnostics({
-  telemetry: rawBodyTelemetry,
-  ...(process.env.CLANKIE_BODY_TELEMETRY_DIR ? { spoolDir: process.env.CLANKIE_BODY_TELEMETRY_DIR } : {}),
-  read: async () =>
-    hostedBody === undefined ? { diagnosticsDefault: true } : hostedBody.readAccountSettings(),
-});
-const bodyTelemetry = rawBodyTelemetry === undefined ? undefined : accountDiagnostics;
+/** Only when the environment names a telemetry spool; a Mac never does. */
+const bodyTelemetry = bodyTelemetryFromEnv(process.env, "service");
 const onDoorwayChange =
   bodyTelemetry === undefined
     ? undefined
@@ -375,67 +358,14 @@ const operatorCredentialStore = createDefaultCredentialStore();
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore, protectedFirst: true });
 const discordBodyInLoadout =
   serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);
-const hostedBootstrap = readHostedBodyBootstrap(process.env);
-if (hostedBootstrap !== undefined && !process.env.CLANKIE_RUNTIME_PROVIDER_MODULE?.trim())
-  throw new Error("runtime_provider_required");
-if (hostedBootstrap !== undefined) await applyHostedAccountApps(hostedBootstrap, settingsStore);
-const { hostedBody, hostedPairing } = await openHostedBody(
-  hostedBootstrap,
-  operatorCredentialStore,
-  stateRoot,
-);
-await accountDiagnostics.refresh();
-const managedDiscord =
-  hostedBody === undefined
-    ? undefined
-    : new ManagedDiscord({
-        client: hostedBody,
-        settings: settingsStore,
-        statePath: join(stateRoot, "managed-discord-policy.json"),
-        environment: captainDiscordEnvironment,
-      });
-if (hostedBody !== undefined) {
-  const timer = setInterval(() => void accountDiagnostics.refresh(), 60_000);
-  timer.unref();
-}
-const loadedRuntimeProvider = await loadRuntimeProvider({
-  env: process.env,
-  store: operatorCredentialStore,
-  modelCredentials: new BrokerCredentialStore(operatorCredentialStore, {
-    env: process.env,
-    ...(hostedBody === undefined ? {} : { hosted: true }),
-  }),
-  ...(hostedBody === undefined ? {} : { body: hostedBody }),
-  stateRoot,
-  herdrAvailable: herdr.available,
-  logger,
-  ...(bodyTelemetry === undefined
-    ? {}
-    : { onHeartbeatReport: (report) => bodyTelemetry.emit({ event: "body.heartbeat", ...report }) }),
-});
-// The same turn hooks feed managed policy and the idle check for scheduled installs.
-const {
-  provider: runtimeProvider,
-  activity: bodyActivity,
-  stopAdmissionWhenIdle,
-} = withBodyActivity(loadedRuntimeProvider);
-let runtimeProviderClosing: Promise<void> | undefined;
-function closeRuntimeProvider(): Promise<void> {
-  return (runtimeProviderClosing ??= (async () => {
-    try {
-      runtimeProvider.heartbeat?.close();
-    } finally {
-      await runtimeProvider.model?.close();
-    }
-  })());
-}
+// Captain turns and activity shares, for the idle check scheduled installs wait on.
+const { heartbeat: bodyHeartbeat, activity: bodyActivity, stopAdmissionWhenIdle } = createBodyActivity();
 // A sleeping host is a normal condition (ADR 0203): report it, never treat it as a fault.
 const hostPower = createHostPowerMonitor({
   keepAwakeRequested: async () => keepAwakeEnabled(await settingsStore.load()),
   onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
 });
 const bodyConnection = await connectBodyToGateway({
-  hostedBody,
   publicGateway: startupSettings.publicGateway,
   store: operatorCredentialStore,
   env: process.env,
@@ -443,24 +373,9 @@ const bodyConnection = await connectBodyToGateway({
   relayPort,
   logger,
   ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
-  ...(runtimeProvider.quota?.gatewayRoutes === undefined
-    ? {}
-    : { gatewayRoutes: runtimeProvider.quota.gatewayRoutes }),
-  onAuthenticatedRequest: (isWork) => runtimeProvider.heartbeat?.authenticatedWork(isWork),
 });
 const publicGatewayConnector = bodyConnection.connector;
-const accountGatewayRoute = bodyConnection.accountGatewayRoute;
 const publicGatewaySignInRequiredSince = bodyConnection.signInRequiredSince;
-if (hostedBody !== undefined) {
-  hostedBody.onDenied = () => {
-    publicGatewayConnector?.close();
-    void closeRuntimeProvider().catch(() =>
-      logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
-    );
-  };
-  hostedBody.onSignatureInvalid = () =>
-    logger.warn({ event: "body_signature_invalid" }, "hosted fleet signature rejected");
-}
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -511,10 +426,6 @@ const deviceSessionKeyPath = process.env.CLANKIE_DEVICE_SESSION_KEY_PATH
   ? resolve(process.env.CLANKIE_DEVICE_SESSION_KEY_PATH)
   : join(stateRoot, "device-session.key");
 const deviceSessionKey = await loadOrCreateDeviceSessionKey(deviceSessionKeyPath);
-const supportDeviceRefKey =
-  hostedBody?.bootstrap.tenantTelemetryKey === undefined
-    ? await loadOrCreateDeviceSessionKey(join(stateRoot, "telemetry-device.key"))
-    : Uint8Array.from(Buffer.from(hostedBody.bootstrap.tenantTelemetryKey, "base64url"));
 if (deviceSessionKey === undefined) {
   logger.warn(
     { deviceSessionKeyPath },
@@ -529,7 +440,7 @@ const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 // that serves the bytes back resolves the same directory this wrote them to.
 const attachmentRoot = discordAttachmentRoot(process.env);
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
-const skinDraftOwner = hostedBody?.bootstrap.accountId ?? process.env.CLANKIE_OPERATOR_ID ?? "local-operator";
+const skinDraftOwner = process.env.CLANKIE_OPERATOR_ID ?? "local-operator";
 const skinMediaRoot = join(
   stateRoot,
   "skin-drafts-media",
@@ -620,36 +531,22 @@ const playSight = new PlaySightProjection({ journalRootDir: defaultGbaPlayJourna
 const hostedWorld = new HostedWorldSession();
 const activityPlay = new ActivityPlaySource();
 const activityArtifacts = createActivityArtifactSources({ files: deliveredFiles });
-const activityRuntime = hostedBody === undefined ? undefined : await startHostedActivityRuntime();
 const activitySharing = new ActivitySharing({
   files: deliveredFiles,
-  token: activityRuntime ? async () => activityRuntime.token : () => resolveActivityProducerCredential(),
-  url:
-    activityRuntime?.url ??
-    (process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer")
-      .replace(/^ws/u, "http")
-      .replace(/\/producer$/u, ""),
+  token: () => resolveActivityProducerCredential(),
+  url: (process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer")
+    .replace(/^ws/u, "http")
+    .replace(/\/producer$/u, ""),
   sources: {
     resolve: async (sourceId) =>
       activityPlay.resolve(sourceId) ?? (await activityArtifacts.resolve(sourceId)),
   },
-  ...(hostedBody === undefined
-    ? {}
-    : {
-        tenantId: hostedBody.bootstrap.tenantId,
-        installationId: hostedBody.bootstrap.installationId,
-        authorizeDestination: (scope) => hostedBody.authorizeActivityDestination(scope),
-        launch: (session, requestId) => hostedBody.launchActivity(session, requestId),
-        stop: (session, requestId) => hostedBody.stopActivity(session, requestId),
-        onBusyChange: (active) => runtimeProvider.heartbeat?.activitySharing(active),
-      }),
+  onBusyChange: (active) => bodyHeartbeat.activitySharing(active),
 });
 
-// A self-hosted official bot admits Activity participants itself (VUH-2833);
-// hosted bodies admit through the gateway instead.
+// A self-hosted official bot admits Activity participants itself (VUH-2833).
 const activityApplicationId = process.env.DISCORD_ACTIVITY_APPLICATION_ID_GBA?.trim();
-const activityLaunches =
-  hostedBody === undefined && activityApplicationId ? createActivityLaunches(activitySharing) : undefined;
+const activityLaunches = activityApplicationId ? createActivityLaunches(activitySharing) : undefined;
 const activityAdmission =
   activityLaunches === undefined || !activityApplicationId
     ? undefined
@@ -688,10 +585,7 @@ const boundApp = (): ClankieApp => {
 const linearWrites = new LinearWriteReceipts(join(stateRoot, "linear-writes.json"));
 // The built-in tracker; its event stream drives the in-process owner loop (VUH-1917).
 // A run's seat, pane and hire are read live from the hire records (VUH-1918).
-const evidenceStorageOptions = {
-  managedEvidence: hostedBody !== undefined,
-  ...(runtimeProvider.evidence ? { evidenceCredentials: runtimeProvider.evidence } : {}),
-};
+const evidenceStorageOptions = { managedEvidence: false };
 const { evidenceS3Client } = await import("./evidence-storage.ts");
 const evidenceStore =
   startupSettings.evidence.backend === "local"
@@ -877,16 +771,14 @@ const discordTracking = new DiscordTracking({
   serverPermissions: async (serverId) => {
     const current = await settingsStore.load();
     const body = resolveDiscordSettings(current.discord, captainDiscordEnvironment).settings.activeBody;
-    return managedDiscord
-      ? managedDiscord.permissions({ guildId: serverId }, body)
-      : readDiscordBodyPermissions(
-          { guildId: serverId },
-          {
-            body,
-            env: process.env,
-            token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-          },
-        );
+    return readDiscordBodyPermissions(
+      { guildId: serverId },
+      {
+        body,
+        env: process.env,
+        token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+      },
+    );
   },
   serverAction: async (action) => {
     const current = await settingsStore.load();
@@ -898,34 +790,27 @@ const discordTracking = new DiscordTracking({
   onError: () => logger.warn("Discord project tracking retained an unavailable or uncertain delivery"),
 });
 
-// His Clankie address (ADR 0242): a managed body signs with its host credential;
-// a self-hosted install reaches the same service with its Clankie account.
+// His Clankie address (ADR 0242), reached with his Clankie account.
 const selfHostedMailGateway = async () =>
   (await settingsStore.load()).publicGateway.url ?? DEFAULT_CLANKIE_GATEWAY_URL;
 const mailAccountTokens = new Map<string, ReturnType<typeof createClankieAccountTokenProvider>>();
 const email = createEmailPort({
   credentials: operatorCredentialStore,
   settings: settingsStore,
-  hosted:
-    hostedBody !== undefined
-      ? bodyMailbox((path, request) => hostedBody.signedPost(path, request))
-      : accountMailbox({
-          gatewayUrl: selfHostedMailGateway,
-          signedIn: async () =>
-            (await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID))?.type === "oauth",
-          token: async () => {
-            const gatewayUrl = await selfHostedMailGateway();
-            let tokens = mailAccountTokens.get(gatewayUrl);
-            if (tokens === undefined) {
-              tokens = createClankieAccountTokenProvider({ gatewayUrl, store: operatorCredentialStore });
-              mailAccountTokens.set(gatewayUrl, tokens);
-            }
-            return tokens();
-          },
-        }),
+  hosted: accountMailbox({
+    gatewayUrl: selfHostedMailGateway,
+    signedIn: async () => (await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID))?.type === "oauth",
+    token: async () => {
+      const gatewayUrl = await selfHostedMailGateway();
+      let tokens = mailAccountTokens.get(gatewayUrl);
+      if (tokens === undefined) {
+        tokens = createClankieAccountTokenProvider({ gatewayUrl, store: operatorCredentialStore });
+        mailAccountTokens.set(gatewayUrl, tokens);
+      }
+      return tokens();
+    },
+  }),
 });
-// A managed body learns its address at boot so the captain can say it.
-if (hostedBody !== undefined) void email.status().catch(() => undefined);
 
 let proofFleetLinks: FleetLinks | undefined;
 const runtimes = new ExecutionConnections({
@@ -969,32 +854,31 @@ const stopDeployHoldExpiry = deployHolds.watch(
     ),
   (error) => logger.warn({ event: "deploy_hold.expiry_failed", error }, "Deploy hold expiry sweep failed"),
 );
-const integration =
-  hostedBody === undefined && existsSync(join(repoRoot, ".git"))
-    ? new IntegrationQueue({
-        review: async (directory, patchId) => {
-          if (!captain.reviews) throw Error("Review service is unavailable; landing held");
-          return captain.reviews.landing(directory, patchId);
-        },
-        directory: integrationDirectory,
-        holds: deployHolds,
-        deployPending: () => runtimeUpdater?.status().pending !== undefined,
-        notify: (text) => captain.notifyRuntimeHealthAlert(text),
-        governor: () => fleetResources.governor,
-        ...(await integrationSources(repoRoot)),
-        // A saturated Mac may gate on a linked machine's fleet workspace (VUH-2066).
-        placeGate: async (batch, signal) =>
-          placeRemoteGate({
-            batch,
-            ...(signal ? { signal } : {}),
-            settings: await settingsStore.load(),
-            local: fleetResources.status(),
-            fleets: await runtimes.fleets(),
-            stream: (fleet) => runtimes.fleetStream(fleet),
-            bundle: gitBundle,
-          }),
-      })
-    : undefined;
+const integration = existsSync(join(repoRoot, ".git"))
+  ? new IntegrationQueue({
+      review: async (directory, patchId) => {
+        if (!captain.reviews) throw Error("Review service is unavailable; landing held");
+        return captain.reviews.landing(directory, patchId);
+      },
+      directory: integrationDirectory,
+      holds: deployHolds,
+      deployPending: () => runtimeUpdater?.status().pending !== undefined,
+      notify: (text) => captain.notifyRuntimeHealthAlert(text),
+      governor: () => fleetResources.governor,
+      ...(await integrationSources(repoRoot)),
+      // A saturated Mac may gate on a linked machine's fleet workspace (VUH-2066).
+      placeGate: async (batch, signal) =>
+        placeRemoteGate({
+          batch,
+          ...(signal ? { signal } : {}),
+          settings: await settingsStore.load(),
+          local: fleetResources.status(),
+          fleets: await runtimes.fleets(),
+          stream: (fleet) => runtimes.fleetStream(fleet),
+          bundle: gitBundle,
+        }),
+    })
+  : undefined;
 const stopIntegrationReclamation = integration?.watchReclamation((error) =>
   logger.warn(
     { event: "integration.reclamation_unavailable", error },
@@ -1017,8 +901,8 @@ const agentSessions = createAgentSessions(
   remoteOpenCodeWorkers,
 );
 // Work items in each repo's own convention (ADR 0191): Linear rides his
-// connected account, GitHub the owner's GitHub connection or gh login (a
-// hosted body has only the connection, ADR 0196), files the repo itself.
+// connected account, GitHub the owner's GitHub connection or gh login, files
+// the repo itself.
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
   projects: async () => (await settingsStore.read()).projects,
@@ -1035,54 +919,50 @@ const workItems = createWorkItemsService({
       : createLocalTracker({ ...builtInTrackerOptions, assertIssueWrite }),
   mcpHost,
   githubToken: () => githubConnectionToken(operatorCredentialStore),
-  hosted: hostedBody !== undefined,
 });
 // Read-only capability discovery on this host and registered Windows fleets.
-const computerUseHarnesses =
-  hostedBody === undefined
-    ? cachedComputerUseHarnesses(async () => {
-        const local =
-          process.platform === "darwin"
-            ? detectComputerUseHarnesses()
-            : process.platform === "win32"
-              ? detectWindowsComputerUseHarnesses(async (command, timeoutMs) => {
-                  const encoded = command.split(" ").at(-1)!;
-                  return (
-                    await promisify(execFile)(
-                      "powershell.exe",
-                      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-                      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
-                    )
-                  ).stdout;
-                })
-              : Promise.resolve([]);
-        const remote = runtimes.fleets().then((fleets) =>
-          Promise.all(
-            fleets
-              .filter((fleet) => fleet.ssh.shell === "powershell")
-              .map(async (fleet) => {
-                try {
-                  return await detectWindowsComputerUseHarnesses(runtimes.fleetShell(fleet), fleet.id);
-                } catch {
-                  return [
-                    {
-                      harness: "codex" as const,
-                      signedIn: false,
-                      surfaces: [],
-                      chromeNeedsHireFlag: false,
-                      platform: "win32" as const,
-                      machineId: fleet.id,
-                      missing: "Windows capability probe unavailable; re-check the fleet link",
-                    },
-                  ];
-                }
-              }),
-          ),
-        );
-        const [localFound, remoteFound] = await Promise.all([local, remote]);
-        return [...localFound, ...remoteFound.flat()];
-      })
-    : undefined;
+const computerUseHarnesses = cachedComputerUseHarnesses(async () => {
+  const local =
+    process.platform === "darwin"
+      ? detectComputerUseHarnesses()
+      : process.platform === "win32"
+        ? detectWindowsComputerUseHarnesses(async (command, timeoutMs) => {
+            const encoded = command.split(" ").at(-1)!;
+            return (
+              await promisify(execFile)(
+                "powershell.exe",
+                ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+              )
+            ).stdout;
+          })
+        : Promise.resolve([]);
+  const remote = runtimes.fleets().then((fleets) =>
+    Promise.all(
+      fleets
+        .filter((fleet) => fleet.ssh.shell === "powershell")
+        .map(async (fleet) => {
+          try {
+            return await detectWindowsComputerUseHarnesses(runtimes.fleetShell(fleet), fleet.id);
+          } catch {
+            return [
+              {
+                harness: "codex" as const,
+                signedIn: false,
+                surfaces: [],
+                chromeNeedsHireFlag: false,
+                platform: "win32" as const,
+                machineId: fleet.id,
+                missing: "Windows capability probe unavailable; re-check the fleet link",
+              },
+            ];
+          }
+        }),
+    ),
+  );
+  const [localFound, remoteFound] = await Promise.all([local, remote]);
+  return [...localFound, ...remoteFound.flat()];
+});
 const localFleetBinding = async () => {
   const current = (await settingsStore.load()).herdr;
   const original = startupSettings.herdr;
@@ -1188,11 +1068,9 @@ const minecraftRuntime: MinecraftExtensionRuntime = gameExtensions.register(
       createSink: async () =>
         activityPlay.createSink(
           "Clankie's Minecraft",
-          hostedBody === undefined
-            ? await createBrokeredActivityFrameSink({
-                url: process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer",
-              })
-            : undefined,
+          await createBrokeredActivityFrameSink({
+            url: process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer",
+          }),
         ),
       onError: () => logger.warn({ event: "minecraft.capture_unavailable" }, "Minecraft capture unavailable"),
     },
@@ -1267,7 +1145,7 @@ const externalGames = await loadGameExtensionModules({
 // A checkout follows origin/main; an installed release (`<root>/releases/<version>`)
 // follows official releases. A release run from elsewhere, like an image's seed
 // tree, is replaced by its deployment instead.
-const checkoutRuntime = hostedBody === undefined && existsSync(join(repoRoot, ".git"));
+const checkoutRuntime = existsSync(join(repoRoot, ".git"));
 const installedUpdater = checkoutRuntime
   ? createRuntimeUpdater({
       repoRoot,
@@ -1284,17 +1162,14 @@ function releaseUpdaterOrNone() {
   try {
     return createReleaseUpdater({
       releaseRoot: repoRoot,
-      ...(runtimeProvider.apis === undefined ? {} : { providerApis: runtimeProvider.apis }),
-      // A managed body installs only what its fleet approves (ADR 0237).
-      ...(hostedBody === undefined ? {} : { approvedRelease: () => hostedBody.approvedRelease() }),
     });
   } catch (error) {
     logger.warn({ event: "runtime.update.unavailable", error }, "Release updates are unavailable");
     return undefined;
   }
 }
-// A hosted image opts its body into idle official-release installs (ADR 0237).
-// A managed body always takes them; a self-run owner can turn them off.
+// An image opts its body into idle official-release installs (ADR 0237); the
+// owner can turn them off.
 // Worker harnesses sign in with their own logins, as this service's user.
 const harnessLogins = new HarnessSignIns({
   env: process.env,
@@ -1308,8 +1183,7 @@ const harnessLogins = new HarnessSignIns({
       key,
     ),
 });
-const scheduledUpdateEnabled = async () =>
-  hostedBody !== undefined || (await settingsStore.load()).host.autoUpdate;
+const scheduledUpdateEnabled = async () => (await settingsStore.load()).host.autoUpdate;
 const scheduledUpdateIdle = bodyIdleCheck({
   activity: bodyActivity,
   voiceHeld: () => bodyLeaseStore.status("voice") !== undefined,
@@ -1563,18 +1437,6 @@ const captain = createCaptain(
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
     ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses: computerUseHarnesses.current }),
-    ...(hostedBody === undefined
-      ? {}
-      : {
-          localNativeHireRefusal:
-            "Managed Clankie uses AI credits only. Local Claude and Codex hires are unavailable until a credit-backed native adapter exists. Hire on linked self-hosted hardware instead.",
-        }),
-    ...(runtimeProvider.model?.piSeatModel === undefined
-      ? {}
-      : { piSeatModel: () => runtimeProvider.model!.piSeatModel!() }),
-    ...(runtimeProvider.quota?.hireCapacity === undefined
-      ? {}
-      : { hireCapacity: () => runtimeProvider.quota!.hireCapacity!() }),
     ...(bodyTelemetry === undefined
       ? {}
       : { onTurnSettled: (metrics) => bodyTelemetry.emit(turnTelemetry(metrics)) }),
@@ -1583,11 +1445,6 @@ const captain = createCaptain(
       logger.info({ ...delivery, event: "fleet.seat_delivery" }, "seat channel delivery settled"),
     onSeatBridgeState: (change) =>
       logger.info({ event: "seat.bridge.state", ...change }, "seat bridge state changed"),
-    ...(hostedBody === undefined
-      ? {}
-      : {
-          modelCredentialsOperatorManaged: true,
-        }),
     herdrAvailable: herdr.available,
     agentSessions,
     runtimes,
@@ -1786,7 +1643,7 @@ const captain = createCaptain(
         processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
       }),
     ),
-    runtimeProvider,
+    bodyActivity: bodyHeartbeat,
     repoRoot,
     ...(startupSettings.captain.workingDirectory === undefined
       ? {}
@@ -1813,38 +1670,6 @@ const captain = createCaptain(
 );
 fleetResources.start();
 
-const hostedDiscord =
-  hostedBody === undefined
-    ? undefined
-    : await createHostedDiscordIngress({
-        client: hostedBody,
-        store: operatorCredentialStore,
-        statePath: join(stateRoot, "discord-ingress.json"),
-        captain,
-        onWork: () => runtimeProvider.heartbeat?.interactive(),
-        voice: createHostedDiscordVoiceCallback(
-          (request) => boundApp().app.fetch(request),
-          discordVoiceBridgeToken,
-        ),
-      });
-// VUH-1766: the official bot through the signed-in account, beside any bring-your-own bot.
-// The control turns it on and off without a restart (`/v1/discord/official`).
-const officialDiscord =
-  hostedBody === undefined
-    ? new OfficialDiscordControl({
-        settings: settingsStore,
-        ...(accountGatewayRoute === undefined ? {} : { account: accountGatewayRoute }),
-        open: (account) =>
-          new OfficialDiscordIngress({
-            ...account,
-            store: operatorCredentialStore,
-            statePath: join(stateRoot, "discord-official-ingress.json"),
-            captain,
-            onCode: (code) => logger.info({ event: "discord.official", code }, "official Discord route"),
-          }),
-      })
-    : undefined;
-await officialDiscord?.start();
 async function linearFollowing(): Promise<boolean> {
   const current = await settingsStore.load();
   const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
@@ -2282,21 +2107,11 @@ const modelKeys = createModelKeys({
   store: operatorCredentialStore,
   cwd: repoRoot,
   ...(bodyTelemetry === undefined ? {} : { telemetry: bodyTelemetry }),
-  ...(runtimeProvider.model === undefined
-    ? {}
-    : {
-        onModelChanged: () => runtimeProvider.model!.onChanged(),
-        includedMappings: runtimeProvider.model.includedMappings,
-      }),
 });
 const captainSeats = new CaptainSeats({
   directory: join(stateRoot, "captain-seat-starts"),
-  supported: process.platform === "darwin" && hostedBody === undefined,
-  snapshot: async () =>
-    captainSeatSnapshot(
-      await settingsStore.load(),
-      process.platform === "darwin" && hostedBody === undefined,
-    ),
+  supported: process.platform === "darwin",
+  snapshot: async () => captainSeatSnapshot(await settingsStore.load(), process.platform === "darwin"),
   cwd: async () => captain.seatContext()?.cwd ?? homedir(),
   createConversation: async (cwd, seat) => {
     const result = await captain.serveOperatorConversation({
@@ -2361,32 +2176,23 @@ const clankie = await createClankieApp({
   // The captain writes this record under its stateDir; the route only reads it.
   autoRounds: new AutoRoundRecord(join(stateRoot, "captain", "auto-rounds")),
   discordPermissions: (query, body) =>
-    managedDiscord
-      ? managedDiscord.permissions(query, body)
-      : readDiscordBodyPermissions(query, {
-          body,
-          env: process.env,
-          token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-        }),
-  ...(hostedBody === undefined
-    ? {
-        discordTestPost: (query, body) =>
-          postDiscordBodyTest(query, {
-            body,
-            env: process.env,
-            token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-          }),
-      }
-    : {}),
+    readDiscordBodyPermissions(query, {
+      body,
+      env: process.env,
+      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+    }),
+  discordTestPost: (query, body) =>
+    postDiscordBodyTest(query, {
+      body,
+      env: process.env,
+      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+    }),
   discordDirectory: (query, body) =>
-    managedDiscord
-      ? managedDiscord.directory(query, body)
-      : readDiscordBodyDirectory(query, {
-          body,
-          env: process.env,
-          token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
-        }),
-  ...(managedDiscord === undefined ? {} : { managedDiscord }),
+    readDiscordBodyDirectory(query, {
+      body,
+      env: process.env,
+      token: body === "user_session" ? discordUserBridgeToken : discordBridgeToken,
+    }),
   fleetProjectMembership,
   projectWorktreeRoot,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
@@ -2537,22 +2343,7 @@ const clankie = await createClankieApp({
     }
     return inventory;
   },
-  runtimeProvider,
-  ...(runtimeProvider.quota?.composer === undefined
-    ? {}
-    : {
-        composerTranscriptions: new ComposerTranscriptions({
-          root: join(stateRoot, "composer-transcription"),
-          cloud: runtimeProvider.quota.composer,
-        }),
-      }),
-  ...(hostedDiscord === undefined
-    ? officialDiscord === undefined
-      ? {}
-      : { discordIngress: officialDiscord, officialDiscord }
-    : { discordIngress: hostedDiscord.ingress, hostedDiscordOperator: hostedDiscord.operator }),
   accounts: createAccounts({
-    hosted: hostedBody !== undefined,
     store: operatorCredentialStore,
     mailbox: email,
     apps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env),
@@ -2565,26 +2356,10 @@ const clankie = await createClankieApp({
     if (ports === undefined) return { ok: false, reason: "peer_unknown" };
     return verifyCompanionApp(ports, (await settingsStore.load()).localCompanion.trustedApps);
   },
-  modelDeviceSetup: { platform: process.platform, hosted: hostedBody !== undefined },
+  modelDeviceSetup: { platform: process.platform, hosted: false },
   harnessLogins,
   modelKeys,
   captainSeats,
-  ...(hostedPairing === undefined
-    ? {}
-    : { hostedPairing, onHostedPairing: () => runtimeProvider.heartbeat?.interactive() }),
-  ...(rawBodyTelemetry === undefined ? {} : { supportTelemetry: rawBodyTelemetry }),
-  ...(supportDeviceRefKey === undefined ? {} : { supportDeviceRefKey }),
-  ...(hostedBody === undefined
-    ? {}
-    : {
-        hostedBody,
-        supportGrantSync: hostedBody,
-        ...(process.env.CLANKIE_SUPPORT_GRANTS_FILE
-          ? { supportGrantsFile: process.env.CLANKIE_SUPPORT_GRANTS_FILE }
-          : {}),
-        accountSettings: hostedBody,
-        hostedDeviceSecurity: new HostedDeviceSecurity(hostedBody, `${deviceSessionKeyPath}.hosted.json`),
-      }),
   agentSessions,
   workItems,
   workerMcp,
@@ -2649,7 +2424,6 @@ const clankie = await createClankieApp({
   activitySharing,
   ...(activityAdmission === undefined ? {} : { activityAdmission }),
   ...(activityLaunches === undefined ? {} : { activityLaunches }),
-  ...(hostedBody === undefined ? {} : { hostedActivity: hostedBody }),
   herdrBinding: herdr.binding,
   runtimes,
   memory,
@@ -2670,7 +2444,7 @@ const clankie = await createClankieApp({
   joinedComputer: new JoinedComputer(machineJoins, settingsStore),
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
-  autoUpdateManaged: hostedBody !== undefined,
+  autoUpdateManaged: false,
   applyKeepAwake: () => applySavedKeepAwake({ repoRoot, settings: settingsStore }),
   keepAwakeStatus: () => savedKeepAwakeStatus({ repoRoot, settings: settingsStore }),
   publicGatewayDoorway: () => {
@@ -2728,7 +2502,6 @@ const clankie = await createClankieApp({
 });
 clankieRef = clankie;
 minecraftRuntime.activate();
-runtimeProvider.heartbeat?.start();
 
 // Asked embodiment (ADR 0063): the play host lives in this process now, so its
 // "client" is the embodiment manager itself — the loopback died with the split.
@@ -2778,7 +2551,7 @@ const server = serve({
 });
 let localCompanionIssuer: Awaited<ReturnType<typeof startLocalCompanionIssuer>> | undefined;
 const publishLocalCompanionIssuer = async () => {
-  if (process.platform !== "darwin" || hostedBody) return;
+  if (process.platform !== "darwin") return;
   const address = server.address();
   if (!address || typeof address !== "object") return;
   try {
@@ -2811,7 +2584,7 @@ const deviceDoorwayHost = process.env.CLANKIE_DEVICE_HOST?.trim();
 const deviceDoorwayPort = parsePositiveInt(process.env.CLANKIE_DEVICE_PORT, DEFAULT_DEVICE_DOORWAY_PORT);
 const deviceDoorway = deviceDoorwayHost
   ? serve({
-      fetch: deviceDoorwayFetch(clankie.app.fetch, runtimeProvider.quota?.gatewayRoutes),
+      fetch: deviceDoorwayFetch(clankie.app.fetch),
       port: deviceDoorwayPort,
       hostname: deviceDoorwayHost,
     })
@@ -2888,9 +2661,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     );
   runtimeHealth.stop();
   fleetProgress.stop();
-  void closeRuntimeProvider().catch(() =>
-    logger.warn({ event: "runtime.provider.close_failed" }, "runtime provider cleanup failed"),
-  );
   publicGatewayConnector?.close();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
@@ -2910,8 +2680,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   const bodyRequestsStopped = clankie.stopBodyRequests();
   void minecraftRuntime.deactivate();
   const closeServerConnections = drainHttpServer(server);
-  hostedDiscord?.close();
-  officialDiscord?.close();
   void (async () => {
     const result = await playHost.stopAndWait({ deadlineMs: playShutdownDeadlineMs, reason: signal });
     await discordTracking.close();
@@ -2958,7 +2726,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     }
     await closeNativeProcessObservers();
     clankie.close();
-    await activityRuntime?.close();
     if (result.status === "deadline_expired") {
       logger.error(
         { signal, sessionId: result.sessionId, deadlineMs: playShutdownDeadlineMs, exitCode: 1 },
@@ -2998,11 +2765,9 @@ function createConfiguredPlayExecution(): PlayExecution {
       createActivitySink: async () =>
         activityPlay.createSink(
           "Clankie's live play",
-          hostedBody === undefined
-            ? await createBrokeredActivityFrameSink({
-                url: process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer",
-              })
-            : undefined,
+          await createBrokeredActivityFrameSink({
+            url: process.env.CLANKIE_ACTIVITY_PRODUCER_URL ?? "ws://127.0.0.1:4322/producer",
+          }),
         ),
       rememberWorldSession: (sessionId, target, state) =>
         bodyPlaySessions.rememberWorldSession(sessionId, target, state),

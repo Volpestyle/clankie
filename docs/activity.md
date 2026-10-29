@@ -6,8 +6,7 @@ it has no authority to capture files, browse the machine, or control the source.
 
 Use `clankie share list` and `clankie share request JSON`, or `/share` in either
 console. The same `POST /v1/activity/shares` contract reaches the local service
-with the operator bearer or the hosted service over the current encrypted paired
-device connection. `ClankieApiClient.activityShares(request)` exposes its typed
+with the operator bearer. `ClankieApiClient.activityShares(request)` exposes its typed
 request and response schemas. [The CLI reference](cli.md#activity-shares) gives
 complete examples.
 
@@ -23,11 +22,8 @@ pair. `stop` names the current share ID and generation. The service assigns the
 tenant and current installation; a caller cannot pass a source URL, arbitrary
 path or capture permission. Shares last 30 minutes by default, at most two hours.
 
-Where an official launch/stop adapter is configured, controls return a receipt
-with confirmed, refused or uncertain outcome, request identity and exact session.
-A confirmed launch may include its Discord invite. Receipt uncertainty does not
-authorize a retry: list active metadata and reconcile before deciding another
-action. A local stream without the adapter makes no claim that Discord launched.
+Owner controls stream media without a launch adapter and make no claim that
+Discord launched.
 
 Discord room turns refuse `start`, `image` and `switch` with
 `activity_official_bot_required` when no launch adapter is available. A
@@ -65,27 +61,6 @@ the launch. The first admission while play is running opens that channel's play
 share. Grants last five minutes; the viewer renews before expiry, and each
 renewal re-reads the instance, so a viewer who leaves keeps media for at most
 about five minutes ([VUH-2834](https://linear.app/vuhlp/issue/VUH-2834)).
-
-## Official hosted viewer
-
-The locally bundled Embedded App SDK performs ready, authorize and authenticate.
-The browser exchanges its code and instance ID through
-`POST /.proxy/activity/admit`; the server determines the authenticated user's
-current Activity, guild, channel, tenant and installation. The returned
-read-only grant admits the media socket in its first message. The browser uses
-neither SDK guild/channel claims nor fragments to select a hosted destination.
-This follows [Discord's supported Activity handshake](https://github.com/discord/discord-api-docs/blob/main/developers/activities/building-an-activity.mdx).
-
-The initial socket admission has a short, one-use deadline. Ongoing viewing is
-bounded by the share's expiry, with audience authority revalidated at most every
-15 seconds; the initial deadline does not end an already admitted viewer.
-Permission revocation has an approximately 15-second window while verified
-audience evidence expires. Each hosted media stream is capped at 256 MiB.
-The gateway ends media on failed proof, revocation or installation replacement. Configuration,
-authentication and admission errors open no media connection. Official mode has
-no anonymous legacy fallback. The SDK uses only the viewer's ephemeral user
-OAuth token; bot, client-secret and media-control credentials stay server-side.
-Customers do not register an application, configure a tunnel or handle bot keys.
 
 ## Local delegated viewer
 

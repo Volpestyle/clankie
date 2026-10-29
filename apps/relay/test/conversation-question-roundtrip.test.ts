@@ -2,7 +2,7 @@ import { ClankieSettingsSchema } from "../../../packages/settings/src/index.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPairSync, randomUUID, randomBytes } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
@@ -12,9 +12,6 @@ import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { QuestionDraftSchema } from "../../clankie/src/captain/conversation-questions.ts";
 import { AutonomyStore } from "../../clankie/src/captain/autonomy.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../../clankie/src/device-session.ts";
-import { HostedPairing } from "../../clankie/src/hosted-pairing.ts";
-import { HostedBodyClient } from "../../clankie/src/hosted-body.ts";
-import { hostedFixture } from "../../clankie/test/fixtures/hosted-body.ts";
 import {
   GatewayEncryptionHost,
   openGatewayValue,
@@ -69,7 +66,7 @@ async function listen(handler: (request: IncomingMessage, response: ServerRespon
   return `http://127.0.0.1:${address.port}`;
 }
 
-async function fixture(hosted = false, text = false) {
+async function fixture(text = false) {
   const root = mkdtempSync(join(tmpdir(), "relay-question-"));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
@@ -77,7 +74,7 @@ async function fixture(hosted = false, text = false) {
   const clock = () => now;
   const key = randomBytes(32),
     signer = new DeviceSessionSigner(key);
-  const names = ["control", "other", "read", "unminted"];
+  const names = ["control", "other", "read"];
   const tokens = Object.fromEntries(
     names.map((id) => [
       id,
@@ -110,7 +107,7 @@ async function fixture(hosted = false, text = false) {
           name: "Same label",
           platform: "ios",
           offeredGrants: grants,
-          mintedBy: hosted && deviceId !== "unminted" ? "hosted-account-operator" : "local-owner",
+          mintedBy: "local-owner",
           pendingExpiresAt: new Date(clock() + 600_000).toISOString(),
         },
       },
@@ -162,7 +159,6 @@ async function fixture(hosted = false, text = false) {
   const writeSettings = vi.fn(async () => {
     throw new Error("Settings forbidden");
   });
-  const hf = hostedFixture();
   // Clankie's real master switch; turning it on asks the presented owner, as the captain does.
   const autonomy = new AutonomyStore(join(root, "autonomy.json"));
   const service = await createClankieApp({
@@ -193,15 +189,6 @@ async function fixture(hosted = false, text = false) {
         : undefined,
     authenticateOperator: async (r) =>
       r.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "owner" } : undefined,
-    ...(hosted
-      ? {
-          hostedPairing: new HostedPairing(
-            new HostedBodyClient(hf.bootstrap, { clock }),
-            generateKeyPairSync("ed25519").privateKey,
-            { clock },
-          ),
-        }
-      : {}),
   });
   cleanups.push(async () => {
     await store.close();
@@ -336,44 +323,39 @@ async function fixture(hosted = false, text = false) {
   };
 }
 
-it.each([false, true])(
-  "actual signed owner roundtrip with hosted=%s preserves exact receipt and one continuation",
-  async (hosted) => {
-    const f = await fixture(hosted);
-    await f.send();
-    expect(f.issuers).toEqual([{ kind: "device", id: "control" }]);
-    const target = await f.target();
-    const invalid = await f.client().inputAnswer!({
-      ...target,
-      answer: { kind: "choice", optionId: randomUUID() },
-    });
-    expect(invalid.reason).toBe("invalid_answer");
-    const [answer, duplicate] = await Promise.all([
-      f.client().inputAnswer!(target),
-      f.client(f.tokens.other!).inputAnswer!(target),
-    ]);
-    const runId = answer.question!.continuation!.runId;
-    expect(duplicate.question!.continuation!.runId).toBe(runId);
-    await f.store.awaitRun(runId);
-    expect(f.continuation).toHaveBeenCalledTimes(1);
-    const recovered = await f.client(f.tokens.other!).inputGet!(f.id, target.requestId);
-    expect(recovered.question).toMatchObject({
-      requestId: target.requestId,
-      status: "submitted",
-      continuation: { runId, state: "completed" },
-    });
-    const writes = f.seen.filter((r) => r.path !== "/v1/devices/self");
-    expect(writes.every((r) => r.path === (hosted ? "/v1/hosted/operator" : "/operator/v1/dispatch"))).toBe(
-      true,
-    );
-    expect(writes.every((r) => r.token !== "Bearer fixture-captain-token")).toBe(true);
-    expect(JSON.stringify(f.messages)).not.toContain(f.tokens.control);
-    expect(JSON.stringify(f.messages)).not.toContain("Which size");
-  },
-);
+it("actual signed owner roundtrip preserves exact receipt and one continuation", async () => {
+  const f = await fixture();
+  await f.send();
+  expect(f.issuers).toEqual([{ kind: "device", id: "control" }]);
+  const target = await f.target();
+  const invalid = await f.client().inputAnswer!({
+    ...target,
+    answer: { kind: "choice", optionId: randomUUID() },
+  });
+  expect(invalid.reason).toBe("invalid_answer");
+  const [answer, duplicate] = await Promise.all([
+    f.client().inputAnswer!(target),
+    f.client(f.tokens.other!).inputAnswer!(target),
+  ]);
+  const runId = answer.question!.continuation!.runId;
+  expect(duplicate.question!.continuation!.runId).toBe(runId);
+  await f.store.awaitRun(runId);
+  expect(f.continuation).toHaveBeenCalledTimes(1);
+  const recovered = await f.client(f.tokens.other!).inputGet!(f.id, target.requestId);
+  expect(recovered.question).toMatchObject({
+    requestId: target.requestId,
+    status: "submitted",
+    continuation: { runId, state: "completed" },
+  });
+  const writes = f.seen.filter((r) => r.path !== "/v1/devices/self");
+  expect(writes.every((r) => r.path === "/operator/v1/dispatch")).toBe(true);
+  expect(writes.every((r) => r.token !== "Bearer fixture-captain-token")).toBe(true);
+  expect(JSON.stringify(f.messages)).not.toContain(f.tokens.control);
+  expect(JSON.stringify(f.messages)).not.toContain("Which size");
+});
 
 it("TUI-started text can be answered by a paired device without interpreting slash text", async () => {
-  const f = await fixture(false, true);
+  const f = await fixture(true);
   const response = await f.service.app.request("/operator/v1/dispatch", {
     method: "POST",
     headers: { authorization: "Bearer fixture-owner", "content-type": "application/json" },
@@ -446,25 +428,10 @@ it.each(["captain", "wrong-signer", "expired", "revoked"])(
   },
 );
 
-it("hosted unminted control device cannot fall back around the bridge", async () => {
-  const f = await fixture(true);
-  const response = await f.raw(
-    { op: "input_get", schemaVersion: 1, conversationId: f.id },
-    f.tokens.unminted!,
-  );
-  expect(response.status).toBe(403);
-  expect(await response.json()).toEqual({ error: "conversation_owner_upstream_refused" });
-  expect(f.seen.some((r) => r.path === "/v1/hosted/operator")).toBe(true);
-  expect(f.seen.some((r) => r.path === "/operator/v1/dispatch")).toBe(false);
-  expect(
-    (await f.raw({ op: "reset", schemaVersion: 1, conversationId: f.id, expectedRevision: 0 })).status,
-  ).toBe(403);
-});
-
 it("known revoke between relay admission and actual service hop denies owner work", async () => {
-  const f = await fixture(true);
+  const f = await fixture();
   f.hooks.before = async (request) => {
-    if (new URL(request.url).pathname === "/v1/hosted/operator") await f.revoke("control");
+    if (new URL(request.url).pathname === "/operator/v1/dispatch") await f.revoke("control");
   };
   expect((await f.raw({ op: "input_get", schemaVersion: 1, conversationId: f.id })).status).toBe(401);
   expect(f.continuation).not.toHaveBeenCalled();
@@ -697,8 +664,8 @@ it("disconnect during finite authorizer await never starts a unary dispatch", as
   expect(f.seen.every((r) => r.path === "/v1/devices/self")).toBe(true);
 });
 
-it("encrypted public transport reaches the real hosted relay/bridge without exposing the bearer outside", async () => {
-  const f = await fixture(true);
+it("encrypted public transport reaches the real relay without exposing the bearer outside", async () => {
+  const f = await fixture();
   const hostId = "fixture_host_identity_1234",
     wrappingKey = randomBytes(32),
     encryptionKey = randomBytes(32).toString("base64");
@@ -774,7 +741,7 @@ it("encrypted public transport reaches the real hosted relay/bridge without expo
   expect(outer.join("\n")).not.toContain(f.tokens.control);
   expect(outer.join("\n")).not.toContain("Which size");
   expect(
-    f.seen.filter((r) => r.path !== "/v1/devices/self").every((r) => r.path === "/v1/hosted/operator"),
+    f.seen.filter((r) => r.path !== "/v1/devices/self").every((r) => r.path === "/operator/v1/dispatch"),
   ).toBe(true);
 });
 
@@ -786,15 +753,6 @@ it("control loss while reading the request refuses input before any owner dispat
   };
   expect((await f.raw({ op: "input_get", schemaVersion: 1, conversationId: f.id })).status).toBe(403);
   expect(f.seen.every((r) => r.path === "/v1/devices/self")).toBe(true);
-});
-
-it("expiry between relay admission and hosted bridge fails with no direct fallback", async () => {
-  const f = await fixture(true);
-  f.hooks.before = async (request) => {
-    if (new URL(request.url).pathname === "/v1/hosted/operator") f.expire();
-  };
-  expect((await f.raw({ op: "input_get", schemaVersion: 1, conversationId: f.id })).status).toBe(401);
-  expect(f.seen.some((r) => r.path === "/operator/v1/dispatch")).toBe(false);
 });
 
 it("same-label wrong subject at publication cannot receive a question snapshot", async () => {
@@ -852,70 +810,64 @@ it("disconnect after stored answer never cancels or retries its accepted continu
   );
 });
 
-it.each([false, true])(
-  "native message controls retain original device authority (hosted=%s)",
-  async (hosted) => {
-    const f = await fixture(hosted);
-    for (const request of [
-      { op: "pending_messages", schemaVersion: 1, conversationId: f.id, command: { action: "list" } },
-      { op: "stop_task", schemaVersion: 1, conversationId: f.id },
-    ] as const) {
-      const response = await f.raw(request);
-      expect(response.status).toBe(200);
-      expect((await response.json()).result.outcome).toBe("unsupported");
-      const hop = f.seen.filter((read) => read.path !== "/v1/devices/self").at(-1)!;
-      expect(hop.token).toBe(`Bearer ${f.tokens.control}`);
-      const before = f.seen.filter((read) => read.path !== "/v1/devices/self").length;
-      expect((await f.raw(request, f.tokens.read!)).status).toBe(403);
-      expect(f.seen.filter((read) => read.path !== "/v1/devices/self")).toHaveLength(before);
-    }
-  },
-);
-
-it.each([false, true])(
-  "Stop schema 400 is pre-dispatch; post-dispatch failures stay uncertain through relay (hosted=%s)",
-  async (hosted) => {
-    const f = await fixture(hosted);
-    const created = await f.store.serve({
-      op: "create",
-      schemaVersion: 1,
-      title: "Stop compatibility",
-      scope: { kind: "seat", seatId: "stop-fixture" },
-    });
-    if (created.op !== "create") throw new Error("Expected a native conversation");
-    const conversationId = created.conversation.conversationId;
-    let stops = 0;
-    f.store.nativeMessageHost = {
-      inspect: async () => ({ binding: "stop-fixture", status: "working" }),
-      send: async () => {
-        throw new Error("No message send expected");
-      },
-      stop: async (_seat, _binding, guard) => {
-        await guard();
-        stops++;
-        // Hono's HTTP error contract, without adding Hono to the relay's dependencies.
-        throw Object.assign(new Error("Failure after Esc"), {
-          getResponse: () => new Response(null, { status: 400 }),
-        });
-      },
-    };
-    const invalid = await f.raw({
-      op: "stop_task",
-      schemaVersion: 1,
-      conversationId,
-      includeReason: "invalid",
-    } as unknown as OperatorConversationServiceRequest);
-    expect(invalid.status).toBe(400);
-    expect(stops).toBe(0);
-    expect(
-      f.seen.filter((read) => (read.body as { op?: string } | undefined)?.op === "stop_task"),
-    ).toHaveLength(0);
-    const response = await f.raw({ op: "stop_task", schemaVersion: 1, conversationId, includeReason: true });
+it("native message controls retain original device authority", async () => {
+  const f = await fixture();
+  for (const request of [
+    { op: "pending_messages", schemaVersion: 1, conversationId: f.id, command: { action: "list" } },
+    { op: "stop_task", schemaVersion: 1, conversationId: f.id },
+  ] as const) {
+    const response = await f.raw(request);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ op: "stop_task", result: { outcome: "uncertain" } });
-    expect(stops).toBe(1);
-  },
-);
+    expect((await response.json()).result.outcome).toBe("unsupported");
+    const hop = f.seen.filter((read) => read.path !== "/v1/devices/self").at(-1)!;
+    expect(hop.token).toBe(`Bearer ${f.tokens.control}`);
+    const before = f.seen.filter((read) => read.path !== "/v1/devices/self").length;
+    expect((await f.raw(request, f.tokens.read!)).status).toBe(403);
+    expect(f.seen.filter((read) => read.path !== "/v1/devices/self")).toHaveLength(before);
+  }
+});
+
+it("Stop schema 400 is pre-dispatch; post-dispatch failures stay uncertain through relay", async () => {
+  const f = await fixture();
+  const created = await f.store.serve({
+    op: "create",
+    schemaVersion: 1,
+    title: "Stop compatibility",
+    scope: { kind: "seat", seatId: "stop-fixture" },
+  });
+  if (created.op !== "create") throw new Error("Expected a native conversation");
+  const conversationId = created.conversation.conversationId;
+  let stops = 0;
+  f.store.nativeMessageHost = {
+    inspect: async () => ({ binding: "stop-fixture", status: "working" }),
+    send: async () => {
+      throw new Error("No message send expected");
+    },
+    stop: async (_seat, _binding, guard) => {
+      await guard();
+      stops++;
+      // Hono's HTTP error contract, without adding Hono to the relay's dependencies.
+      throw Object.assign(new Error("Failure after Esc"), {
+        getResponse: () => new Response(null, { status: 400 }),
+      });
+    },
+  };
+  const invalid = await f.raw({
+    op: "stop_task",
+    schemaVersion: 1,
+    conversationId,
+    includeReason: "invalid",
+  } as unknown as OperatorConversationServiceRequest);
+  expect(invalid.status).toBe(400);
+  expect(stops).toBe(0);
+  expect(
+    f.seen.filter((read) => (read.body as { op?: string } | undefined)?.op === "stop_task"),
+  ).toHaveLength(0);
+  const response = await f.raw({ op: "stop_task", schemaVersion: 1, conversationId, includeReason: true });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ op: "stop_task", result: { outcome: "uncertain" } });
+  expect(stops).toBe(1);
+});
 
 it("turns Auto on as the paired owner device over the relay; chat-only and identity-less requests change nothing (VUH-2029)", async () => {
   const f = await fixture();

@@ -49,7 +49,7 @@ const health = (body: unknown): typeof fetch =>
       : new Response("{}", { status: 401 })) as typeof fetch;
 
 describe("doctor host power", () => {
-  it("names a Mac on battery with sleep allowed, how to keep it awake, and the hosted alternative", async () => {
+  it("names a Mac on battery with sleep allowed and how to keep it awake", async () => {
     const report = await doctor(
       pmset("Battery Power", { battery: 1, ac: 0 }),
       health({ doorway: { state: "connected" } }),
@@ -63,8 +63,8 @@ describe("doctor host power", () => {
     });
     const advice = report.remediations.find((line) => line.startsWith("On battery"));
     expect(advice).toContain("keep-awake only holds while plugged in");
-    expect(advice).toContain("Plug in");
-    expect(advice).toContain("hosted Clankie");
+    expect(advice).toContain("Plug it in");
+    expect(advice).not.toContain("hosted");
   });
 
   it("carries the service's last observed sleep, read from the one /health probe", async () => {

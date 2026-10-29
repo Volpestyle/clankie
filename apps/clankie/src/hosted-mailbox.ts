@@ -1,12 +1,10 @@
 /**
- * His address on Clankie's own mail service (ADR 0242). A managed body reaches
- * it with its signed host credential; a self-hosted install with its Clankie
- * account. Either way no app password or mail server is involved, and the
+ * His address on Clankie's own mail service (ADR 0242), reached with the
+ * owner's Clankie account. No app password or mail server is involved, and the
  * service enforces the outbound limits, so a refusal here names the limit.
  */
 import {
   HOSTED_MAIL_ACCOUNT_PATH,
-  HOSTED_MAIL_BODY_PATH,
   HostedMailFolderSchema,
   HostedMailListResultSchema,
   HostedMailReadResultSchema,
@@ -25,19 +23,9 @@ export const DEFAULT_CLANKIE_GATEWAY_URL = "https://api.clankie.bot";
 type HostedMailTransport = (request: HostedMailRequest) => Promise<unknown>;
 
 export interface HostedMailbox {
-  /** False when this install has neither a hosted body nor a signed-in Clankie account. */
+  /** False when this install has no signed-in Clankie account. */
   available(): Promise<boolean>;
   request: HostedMailTransport;
-}
-
-/** A managed body: the fleet's signed body route. */
-export function bodyMailbox(
-  post: (path: string, body: HostedMailRequest) => Promise<Response>,
-): HostedMailbox {
-  return {
-    available: async () => true,
-    request: async (request) => decode(await post(HOSTED_MAIL_BODY_PATH, request)),
-  };
 }
 
 /** A self-hosted install: the same service, authorized by the owner's Clankie account. */

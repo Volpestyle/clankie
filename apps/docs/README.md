@@ -1,10 +1,10 @@
 # Public docs
 
 This app builds [docs.clankie.bot](https://docs.clankie.bot), the shared field
-guide for hosted customers and people running Clankie themselves. The
+guide for people running Clankie on their own machines. The
 [repository README](../../README.md) speaks directly to DIY users. The landing
 page at [clankie.bot](https://clankie.bot) leads with everyday usefulness and
-owns hosted plans, app availability, privacy, and support.
+owns app availability, privacy, and support.
 
 ## Reader paths and voice
 

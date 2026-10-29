@@ -129,14 +129,10 @@ explains discovery.
 
 “Hang out in our server, but only jump in when we address you.” `/discord`
 edits each joined server with a **Participant** or **Admin** role, owners and options.
-The quickest way in is the free **official Clankie bot**: sign in with
-`clankie remote-access on`, run `clankie discord official on` (or turn it on in
-the app's Discord settings), then choose **Add to Discord** on your account page. No
-developer portal, bot token or intents setup; Clankie still runs on your
-machine with your own keys. The official bot has fair-use limits per account
-and per server, and `clankie discord official` shows them. Creating your own
-bot remains the advanced path, in the
-[Discord connection guide](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md#configure-discord).
+Clankie joins Discord as your own bot, created in Discord's developer portal and
+running on your machine; the
+[Discord connection guide](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md#configure-discord)
+walks through it.
 
 Reply policy `addressed` shows him messages that @mention him or use his name,
 plus the next few after he replies (`--live-message-window`, default 5).
@@ -282,4 +278,4 @@ configuration and authorized tools to scripts and other agents. Start at the
 [architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md).
 
 The service is Apache-2.0, except the AGPL Discord media executable; the app and
-hosted service are private ([license](https://github.com/Volpestyle/clankie#license)).
+public gateway are private ([license](https://github.com/Volpestyle/clankie#license)).

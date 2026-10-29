@@ -2,7 +2,7 @@ import { SettingsStore } from "@clankie/settings";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -10,9 +10,6 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { projectOnboarding } from "../src/captain/project-onboarding.ts";
 import { ProjectProposalDraftSchema } from "@clankie/protocol/projects";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
-import { HostedPairing } from "../src/hosted-pairing.ts";
-import { HostedBodyClient } from "../src/hosted-body.ts";
-import { hostedFixture } from "./fixtures/hosted-body.ts";
 import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
@@ -28,7 +25,7 @@ afterEach(() => {
   services.splice(0).forEach((s) => s.close());
   roots.splice(0).forEach((r) => rmSync(r, { recursive: true, force: true }));
 });
-async function fixture(hosted = false) {
+async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "question-auth-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -37,7 +34,7 @@ async function fixture(hosted = false) {
     operatorValid = true;
   const key = Buffer.alloc(32, 4),
     signer = new DeviceSessionSigner(key);
-  const events = ["control", "read", "hosted", "other"].flatMap((deviceId) => {
+  const events = ["control", "read", "other"].flatMap((deviceId) => {
     const grants = deviceId === "read" ? SUPERVISE_GRANTS : TAKE_CONTROL_GRANTS;
     const base = {
       occurredAt: new Date(now).toISOString(),
@@ -57,7 +54,7 @@ async function fixture(hosted = false) {
           name: deviceId,
           platform: "ios",
           offeredGrants: grants,
-          mintedBy: deviceId === "hosted" ? "hosted-account-operator" : "local-operator",
+          mintedBy: "local-operator",
           pendingExpiresAt: new Date(now + 600_000).toISOString(),
         },
       },
@@ -72,7 +69,7 @@ async function fixture(hosted = false) {
   const log = join(root, "events.jsonl");
   writeFileSync(log, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
   const tokens = Object.fromEntries(
-    ["control", "read", "hosted", "other"].map((deviceId) => [
+    ["control", "read", "other"].map((deviceId) => [
       deviceId,
       signer.issue(mintDeviceSessionClaims({ deviceId, nowEpochSeconds: now / 1000, ttlSeconds: 60 })),
     ]),
@@ -101,7 +98,6 @@ async function fixture(hosted = false) {
   });
   if (made.op !== "create") throw new Error("unexpected");
   const id = made.conversation.conversationId;
-  const f = hostedFixture();
   const settings = new SettingsStore(join(root, "settings.json"));
   const writeSettings = vi.fn(settings.update.bind(settings));
   store.projectOnboarding = projectOnboarding({ load: () => settings.load(), update: writeSettings });
@@ -135,15 +131,6 @@ async function fixture(hosted = false) {
       operatorValid && r.headers.get("authorization") === "Bearer owner"
         ? { operatorId: "operator" }
         : undefined,
-    ...(hosted
-      ? {
-          hostedPairing: new HostedPairing(
-            new HostedBodyClient(f.bootstrap, { clock: () => now }),
-            generateKeyPairSync("ed25519").privateKey,
-            { clock: () => now },
-          ),
-        }
-      : {}),
   });
   services.push(service);
   const post = (request: OperatorConversationServiceRequest, token: string) =>
@@ -151,12 +138,6 @@ async function fixture(hosted = false) {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(request),
-    });
-  const bridge = (request: OperatorConversationServiceRequest, token: string) =>
-    service.app.request("/v1/hosted/operator", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ method: "POST", path: "/operator/v1/dispatch", body: JSON.stringify(request) }),
     });
   const fetchImpl: typeof fetch = async (input, init) => service.app.fetch(new Request(input, init));
   const client = (token: string) =>
@@ -182,7 +163,6 @@ async function fixture(hosted = false) {
     client,
     send,
     post,
-    bridge,
     tokens,
     continuation,
     writeSettings,
@@ -216,22 +196,19 @@ async function proposal(f: Awaited<ReturnType<typeof fixture>>, token: string) {
     })
   ).proposal!;
 }
-it.each([false, true])(
-  "actual signed Take Control confirms with hosted=%s; fresh receipt needs no live issuer",
-  async (hosted) => {
-    const f = await fixture(hosted);
-    await f.send(f.tokens.control!);
-    const p = await proposal(f, f.tokens.control!);
-    const result = await f.client(f.tokens.control!).projectProposalConfirm!(p.target);
-    expect(result.status).toBe("created");
-    expect(f.writeSettings).toHaveBeenCalledTimes(1);
-    f.expire();
-    const token = f.refresh();
-    expect(await f.client(token).projectProposalConfirm!(p.target)).toEqual(result);
-    expect(f.writeSettings).toHaveBeenCalledTimes(1);
-    await f.store.close();
-  },
-);
+it("actual signed Take Control confirms; fresh receipt needs no live issuer", async () => {
+  const f = await fixture();
+  await f.send(f.tokens.control!);
+  const p = await proposal(f, f.tokens.control!);
+  const result = await f.client(f.tokens.control!).projectProposalConfirm!(p.target);
+  expect(result.status).toBe("created");
+  expect(f.writeSettings).toHaveBeenCalledTimes(1);
+  f.expire();
+  const token = f.refresh();
+  expect(await f.client(token).projectProposalConfirm!(p.target)).toEqual(result);
+  expect(f.writeSettings).toHaveBeenCalledTimes(1);
+  await f.store.close();
+});
 it("chat-only, captain, wrong signer and different original owner cannot create", async () => {
   const f = await fixture();
   await f.send(f.tokens.control!);

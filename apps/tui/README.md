@@ -1,8 +1,8 @@
 # Clankie TUI (`@clankie/tui`)
 
 The terminal console is a full client for Clankie: conversation, project work,
-configuration, and inspection of connected agents. It can reach a local service
-or an existing hosted Clankie. The app reaches the same service through
+configuration, and inspection of connected agents. It talks to the Clankie
+service on this machine. The app reaches the same service through
 Messages, Commons, and Terminal. For first setup, use
 [Get started](https://docs.clankie.bot/get-started/); this README owns terminal
 interaction, workspace selection, and launcher behavior.
@@ -19,7 +19,7 @@ the banner, slash-command typeahead, guided setup flows, and the `Ctrl+/`
 command workbench — dressed in pi's dark palette
 ([ADR 0137](../../docs/adr/0137-the-face-wears-pis-chat-surface.md)).
 
-In local mode it talks to the Clankie service on port `4310`. Plain prompts use
+It talks to the Clankie service on port `4310`. Plain prompts use
 the shared operator-conversation dispatch contract at
 `POST /operator/v1/dispatch`; lane observation uses
 `GET /captain/v1/lanes`; health, devices, pairing, presence, embodiment,
@@ -27,10 +27,6 @@ activity, and memory use the operator APIs in the
 [HTTP catalog](../clankie/openapi.yaml). `CLANKIE_CONTROL_PLANE_URL` overrides
 the default `http://127.0.0.1:4310`; `CLANKIE_CAPTAIN_URL` remains a
 compatibility alias.
-
-Hosted mode uses the paired-device transport and a smaller command set; see
-[local and hosted modes](../../docs/cli.md#local-and-hosted-connection-modes).
-The following process and workspace details describe local mode unless noted.
 
 ## Run
 
@@ -251,7 +247,7 @@ credential holder.
   with one identity produce one account. `add HOME --label LABEL` is an optional
   discovery override; `remove LABEL` forgets the override without changing sign-in.
   Re-signs produce one notice; saved choices stay with the original identity.
-- `/share [list | request JSON]` controls owner-only local Activity artifact shares; see [the CLI](../../docs/cli.md#activity-shares). Hosted launch/admission remains pending.
+- `/share [list | request JSON]` controls owner-only local Activity artifact shares; see [the CLI](../../docs/cli.md#activity-shares).
 - `/games` opens a toggle dialog for PokeAgent play; press Enter to enable or
   disable it. `/games on|off` remains available for direct use. Restart Clankie
   to apply a change. Saves live with the world server, not here.
@@ -397,19 +393,12 @@ node apps/tui/bench/transcript-render.ts 1000     # a specific scrollback size
 The launcher runs TypeScript through Node's native type stripping; the repo's
 `erasableSyntaxOnly` setting enforces the supported syntax.
 
-## Hosted mode
+## Remote access
 
-The first launch offers This Mac or hosted; hosted mode starts no local body.
-`clankie login`, `logout`, and `whoami` sign in, forget this device, or show its
-machine/access status. `connect hosted` and `disconnect` remain aliases.
-`/settings` and `/connection` expose modes. The footer names the machine and
-reports Asleep/Waking, Sign-in expired, Access revoked, or Unavailable.
-
-Account pairing is private fleet work; the Node-free shared client is in
-`@clankie/protocol/hosted-pairing`. The current fleet model has one optional
-tenant per account. Chat, fleet, terminal, model, keys, persona and connections
-are device capabilities; restart/reset/deprovision remain account/control-plane
-operations. A paired Mac uses the app's signed wake protocol. `/remote-access`
-means self-hosted Remote access for this Mac; `/gateway` is an alias.
-See [connection modes](../../docs/cli.md#local-and-hosted-connection-modes) for
-commands, secret handling and live-verification limits.
+Clankie runs only on the owner's own machines. `clankie login` (or
+`/login`) signs this Mac in for remote access through the public gateway;
+`clankie remote-access off` takes it off. `clankie whoami` always reports This
+Mac, and `logout` points at `remote-access off`. `/remote-access` means Remote
+access for this Mac; `/gateway` is an alias. See
+[remote access and account sign-in](../../docs/cli.md#remote-access-and-account-sign-in)
+for commands, secret handling and live-verification limits.

@@ -100,7 +100,7 @@ flowchart TD
 OpenCode and Grok use whatever release is installed (VUH-2417). A hire probes
 the exact surfaces Clankie calls and refuses, naming the found version and what
 it lacks, only when that probe fails. A version floor remains only for semantics
-no probe can observe, and each floor's code comment says which. Hosted images
+no probe can observe, and each floor's code comment says which. The Linux image
 may still pin a version in their image build; that is a build choice, not an
 adapter refusal. Several of these surfaces are harness internals:
 
@@ -125,17 +125,17 @@ the distinction between automated checks and live evidence are recorded in the
 
 Pi uses the original process-bound extension and causal native custom-message
 receipts. The service registers this local adapter only with
-`CLANKIE_PI_NATIVE_ENABLED=1`; owner-run defaults remain off until live acceptance.
-Managed body images opt in, using the matching CLI pin. The account/usability
+`CLANKIE_PI_NATIVE_ENABLED=1`; defaults remain off until live acceptance.
+The account/usability
 view admits Pi only with verified native capability and an authenticated worker
 model; automatic choice respects holds and falls back to Pi after eligible
 Claude/Codex accounts. Linux process proof uses the original kernel PID/birth,
 executable/cwd and socket ownership, and fails closed when observation fails.
 Local fleet-MCP admission supports Linux only in the initial host PID namespace.
-Containers explicitly refuse; the future hosted containment receipt is VUH-2120.
+Containers explicitly refuse; container admission is a follow-up, VUH-2120.
 See [the kernel proof boundary](../../integrations/fleet-proof/README.md#linux-host-boundary).
-Without opt-in, ordinary unbriefed Pi launches preserve their hosted model/provider
-preparation and automated briefs remain unavailable. Opt-in uses whatever Pi is
+Without opt-in, ordinary unbriefed Pi launches preserve their existing
+model/provider preparation and automated briefs remain unavailable. Opt-in uses whatever Pi is
 installed, with no pin: a release of at least 0.87.1 with the expected CLI bundle
 that passes the [release probe](../../integrations/pi-plugin/README.md#release-probe)
 of every native surface a hire relies on. Anything else is refused with a reason
@@ -144,9 +144,7 @@ so an upgrade stays visible ([ADR 0250](../../docs/adr/0250-pi-workers-use-the-s
 A live Mac hire on Pi 1.3.0 delivered its brief, reported through
 `message_clankie` and completed
 ([evidence](../../docs/testing/2026-10-17-vuh-2417-pi-latest/README.md)).
-Hosted model preparation has fixture coverage; native hosted/billing
-remain unverified. See the
-[Pi acceptance boundary](../../docs/testing/2026-10-04-pi-workers/README.md).
+See the [Pi acceptance boundary](../../docs/testing/2026-10-04-pi-workers/README.md).
 
 Work records stay in the repo's [tracker or files](../work-items/README.md).
 Remote agents use the per-fleet link and native adapters.

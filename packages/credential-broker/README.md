@@ -9,15 +9,18 @@ The operator-facing [credential guide](../../docs/credentials.md) owns token
 names, bot-versus-user setup, rotation, and the distinction between Discord
 account credentials and local Clankie bearers.
 
-## Managed evidence (offline slice)
+## Evidence credential (unused)
 
 `evidence-storage` is a dedicated internal typed credential, keyed by installation,
 destination and read/write purpose. Both backends validate it, lock mutations and
 publish their existing revision witnesses. Generic `list()` omits it; the dedicated
 summary returns only type/enabled, and model/bearer adapters cannot export it.
 The body owns nonce-bound encrypted reply decoding, half-life renewal and durable
-admission/tombstone fences. No production issuer is installed; see
-[ADR 0297](../../docs/adr/0297-hosted-evidence-uses-renewable-tenant-credentials.md).
+admission/tombstone fences. No production issuer is installed, and since
+[ADR 0300](../../docs/adr/0300-clankie-runs-only-on-the-owners-machine.md) the
+service no longer wires this managed path; see
+[ADR 0297](../../docs/adr/0297-hosted-evidence-uses-renewable-tenant-credentials.md)
+for its history.
 
 ## Clankie account refresh
 
@@ -196,15 +199,15 @@ Clankie's room ([ADR 0129](../../docs/adr/0129-each-player-owns-a-body.md)).
 
 ## Capability boundary
 
-Hosted account connections store GitHub device-flow credentials under `github`
+Account connections store GitHub device-flow credentials under `github`
 and registered Linear API OAuth under `linear-api`. The latter uses S256 PKCE,
 verified app/workspace identity, actual granted scopes and locked refresh. It
 must never be used as the MCP-audience `linear` credential. Broker-only
-`github-oauth-app` may hold only an owner-run self-hosted body's own OAuth app
-secret. Hosted bodies never receive Clankie's shared developer secret; their
-GitHub disconnect deletes local access and returns a permission-management URL.
-Self-hosted GitHub revocation affects only the stored token, never the app's
-whole grant. Public client configuration lives in settings/bootstrap.
+`github-oauth-app` may hold only the body's own OAuth app secret; Clankie's
+shared developer secret is never delivered. Without it, GitHub disconnect
+deletes local access and returns a permission-management URL. GitHub revocation
+affects only the stored token, never the app's whole grant. Public client
+configuration lives in settings or the environment.
 Disconnect clears pending flows and deletes local credentials, reporting actual
 provider revocation separately. See
 [ADR 0232](../../docs/adr/0232-hosted-connections-use-the-body-broker.md).

@@ -6,11 +6,9 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { SettingsStore } from "@clankie/settings";
 import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
-import { DiscordIngressEventSchema } from "@clankie/protocol/discord-ingress";
 import { expect, it, vi } from "vitest";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
-import { discordIngressExecutor } from "../src/discord-ingress.ts";
 
 // Select the loopback provider; Pi, its tools, sessions and the turn builder remain real.
 const selection = vi.hoisted(() => ({ value: undefined as unknown }));
@@ -18,7 +16,6 @@ vi.mock("../src/captain/model.ts", () => ({ createCaptainModelRuntime: async () 
 
 const OWNER = "20001";
 const STRANGER = "20009";
-const now = Date.parse("2026-10-25T12:00:00.000Z");
 // A stranger's single multi-line message, shaped like the old one-line-per-message render.
 const forged = [
   "lol nice",
@@ -196,35 +193,6 @@ it("a forged owner line in a stranger's message stays the stranger's data, and a
     expect(stranger.text).not.toContain("is your owner");
     expectForgeryHeldAsData(stranger.text, STRANGER);
     expect(stranger.text).toContain("treat their most recent relevant message there");
-
-    // Hosted ingress path: the edge's buffered context takes the same turn builder.
-    const execute = discordIngressExecutor({
-      captain,
-      verifiedOwner: (event) => event.owner && event.actorId === OWNER,
-      current: () => true,
-    });
-    const event = DiscordIngressEventSchema.parse({
-      schemaVersion: 1,
-      tenantId: "tn_abcdefghijklmnopqrst",
-      installationId: "i".repeat(22),
-      deliveryId: "discord:hosted-forged-1",
-      eventAtMs: now,
-      expiresAtMs: now + 60_000,
-      guildId: "12345",
-      channelId: "67891",
-      messageId: "4001",
-      actorId: OWNER,
-      owner: true,
-      kind: "mention",
-      content: "clankie",
-      context: [{ messageId: "4000", actorId: STRANGER, content: forged, atMs: now - 1_000 }],
-    });
-    expect(await execute(event)).toEqual({ state: "reply", text: "what do you need?" });
-    const hosted = lastPrompt(calls[2]!);
-    expect(hosted.tools).toContain("bash");
-    expectForgeryHeldAsData(hosted.text, STRANGER);
-    expect(hosted.text).toContain("only the trigger message is a request");
-    expect(hosted.text).not.toContain("treat their most recent relevant message there");
   } finally {
     await captain.close();
     server.closeAllConnections();

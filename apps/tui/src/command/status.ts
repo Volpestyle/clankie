@@ -15,7 +15,7 @@ import { DeviceDirectRouteSchema } from "@clankie/protocol";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { probeHealth, type GatewayDoorwayReport } from "./gateway.ts";
 import { readSeatBridges } from "./seat-delivery.ts";
-import { hostedWhoami } from "./hosted.ts";
+import { THIS_MAC_CONNECTION } from "./account-login.ts";
 
 export interface StatusCommandOptions extends CreateServiceOptionsInput {
   readonly host?: string;
@@ -159,7 +159,7 @@ async function phoneAccess(
 ): Promise<Pick<StatusCommandResult, "connection" | "doorway" | "nextStep" | "runtimeHealth" | "self">> {
   try {
     const settings = await new SettingsStore(defaultSettingsPath(env)).load();
-    const connection = await hostedWhoami(env);
+    const connection = THIS_MAC_CONNECTION;
     // A service that is not healthy has no doorway to ask; skip the round trip.
     const health = serviceHealthy
       ? await probeHealth({

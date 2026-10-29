@@ -345,12 +345,7 @@ refreshing is appropriate after membership or permissions change.
 `clankie discord directory` and `clankie discord directory channels --server ID`
 read the same authenticated API. Use `roles` or `people` for those pickers.
 The active official-bot or user-session body supplies its own gateway view over
-its existing loopback control server using its brokered bridge bearer. The API
-uses the authenticated managed provider instead on hosted bodies, scoped to
-the customer's bound tenant/server and current installation. Changing `guildId`
-cannot read another tenant's cache, and replacing the installation invalidates
-the old body's reads. The hosted dashboard uses its narrow owner permit for the
-same schema and pagination.
+its existing loopback control server using its brokered bridge bearer.
 The ordinary paired API reuses room Observe authorization, retains the original paired bearer through
 the relay, and rechecks authority and active body before returning data.
 

@@ -40,19 +40,15 @@ separate v2 stream for game, image, animation and demo sources. Each finite shar
 has its own scope, generation, hub and producer capability. Scoped media never
 appears on public legacy `/frames`. Self-host launcher/tunnel transport stays.
 
-The owner's `clankie share` / `/share` controls use the same request on local
-and hosted connections. `sourceId:"play"` selects the existing authorized game
+The owner's `clankie share` / `/share` controls use the same request.
+`sourceId:"play"` selects the existing authorized game
 producer. An image names its delivered conversation/artifact exactly;
 `artifact:<conversationId>:<artifact48hex>` also registers PNG, GIF animation
 or finite MP4 demo sources. No URL, path or new capture permission is accepted.
 See [Activity sharing](../../docs/activity.md) and the
 [CLI](../../docs/cli.md#activity-shares).
 
-The hosted path uses the existing encrypted paired-device transport and the
-official bot's server-owned launch/audience adapter. Launch/stop receipts remain
-confirmed, refused or uncertain; neither client replays an uncertain effect.
-Hosted customers do not configure bot keys, app registrations or tunnels.
-Local self-hosting retains delegated fragment grants. A self-hosted bot admits
+Local self-hosting uses delegated fragment grants. A self-hosted bot admits
 participants of its own `/activity` launch and of room `activity_share` launches
 (see Self-hosted official admission and [Activity sharing](../../docs/activity.md)).
 
@@ -140,9 +136,7 @@ The private HTTP viewer projection releases its bounded registry slot on
 response cancellation. Its grant form keeps the delegated grant's expiry;
 the controller-authenticated `mode:"live"` form lasts until the share expires.
 The latter requires the private producer bearer; public viewer routes cannot
-request it. The hosted body verifies current scope and audience authority before
-opening it. The gateway revalidates that authority at most every 15 seconds and
-terminates on failure. Initial
+request it. Initial
 public admission has a short one-use deadline, separate from the admitted
 viewer lifetime. Source switches preserve already admitted viewers within
 their applicable lifetime. No bot or control credential reaches the browser,

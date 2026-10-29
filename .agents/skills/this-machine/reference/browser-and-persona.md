@@ -57,5 +57,5 @@ the current Grok adapter supports one reference. Do not combine with `sourceRef`
 The Claude seat receives only the description through its text prompt hook,
 though its image tool can still use appearance references.
 
-Paths belong to Clankie's host (including `--hosted`); this command does not upload
+Paths belong to Clankie's host; this command does not upload
 local files. Settings stay owner-authored; do not edit their JSON directly.

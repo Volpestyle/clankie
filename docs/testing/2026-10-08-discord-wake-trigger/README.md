@@ -25,7 +25,7 @@ audience privacy and bounded room skills still follow
   and the unset persona's restarted follow-up/catch-up behavior. The database,
   scanner, ingress and schema boundaries are production code; Discord history
   and captain/reply ports are fixture providers, not a live gateway or model.
-- [Sealed hosted handoff](../../../apps/clankie/test/hosted-room-handoff.integration.test.ts)
+- Sealed hosted handoff (removed by ADR 0300)
   sends recent context through real encryption, authenticated HTTP admission,
   durable delivery and captain request projection, preserving author/time and
   the triggering event's verified-owner proof. Buffered context stays context,

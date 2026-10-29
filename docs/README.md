@@ -10,14 +10,14 @@ This directory and the module READMEs hold the technical references.
 
 | Reference                                                | Canonical scope                                                             |
 | -------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [CLI](cli.md)                                            | Headless commands, flags, output, and local/hosted modes                    |
+| [CLI](cli.md)                                            | Headless commands, flags, output, and remote-access sign-in                 |
 | [Integration](integration.md)                            | Approved commit batches, isolated gates, landing evidence and deploy holds  |
 | [Console](../apps/tui/README.md)                         | Terminal interaction, workspaces, and launcher behavior                     |
 | [Distribution](distribution.md)                          | Installed layout, runtime ownership, release build and verification         |
 | [Fleet resources](../packages/fleet-resources/README.md) | Shared heavy permits, pressure admission and simulator ownership            |
 | [Credentials](credentials.md)                            | Secret identities, setup, rotation, and authority                           |
 | [Settings inventory](settings-inventory.md)              | Every owner setting, its API and which surfaces set it (VUH-1813)           |
-| [Always on](always-on.md)                                | Host sleep, the keep-awake default, and the hosted-body alternative         |
+| [Always on](always-on.md)                                | Host sleep, the keep-awake default, and moving to another machine           |
 | [Memory](memory.md)                                      | Episodes, person facts, visibility, retention, and operator control         |
 | [Bundled skills](bundled-skills.md)                      | Skill sources, discovery, and worker distribution                           |
 | [Local companion](local-companion.md)                    | Same-UID Mac pairing handoff and native loopback device session             |
@@ -28,8 +28,7 @@ This directory and the module READMEs hold the technical references.
 | [Tracker identity](worker-tracker-identity.md)           | Connected-account enforcement and remaining isolation work                  |
 | [Worker posts](linear-worker-posts.md)                   | One Linear app, worker names and portraits, compact handoffs                |
 | [Discord media](discord-media.md)                        | Voice, music, Activity, Go Live, and screen-share differences               |
-| [Activity sharing](activity.md)                          | Existing media, local/hosted controls, viewer admission and receipts        |
-| [Remote Discord ingress](discord-ingress.md)             | Authenticated sealed text and voice callbacks, independent of rollout       |
+| [Activity sharing](activity.md)                          | Existing media, share controls and viewer admission                         |
 | [Desktop control](desktop-control.md)                    | Native computer-use workflow and evidence limits                            |
 | [Rivals integration](rivals.md)                          | External game extension: where it lives, how to install it, disabled status |
 | [Minecraft](minecraft.md)                                | Approved offline Java worlds, action evidence, play ownership and viewing   |
@@ -59,7 +58,7 @@ and retained diagnostics.
 | Images and video                  | [Media connector](../packages/media-connector/README.md)                                                                                                             |
 | Game play                         | [Play mind](../packages/play/README.md), [rendered contract](../packages/interactive-environment/README.md)                                                          |
 | Gameplay commentary               | [Play voice](../packages/play-voice/README.md)                                                                                                                       |
-| Discord                           | [Official bot](../apps/discord-bridge/README.md), [shared behavior](../packages/discord-presence-core/README.md), [lab body](../apps/discord-user-session/README.md) |
+| Discord                           | [Bot body](../apps/discord-bridge/README.md), [shared behavior](../packages/discord-presence-core/README.md), [lab body](../apps/discord-user-session/README.md)     |
 | Native Discord media              | [Vox](../apps/vox/README.md), [client boundary](../packages/vox-client/README.md)                                                                                    |
 | Activity media surface            | [Discord Activity](../apps/discord-activity/README.md)                                                                                                               |
 | Remote device access              | [Relay](../apps/relay/README.md), [public network](https://docs.clankie.bot/network/)                                                                                |

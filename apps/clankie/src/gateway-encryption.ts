@@ -17,10 +17,9 @@ import {
   type GatewayPlainRequest,
   type GatewayPlainResponse,
 } from "@clankie/protocol/gateway-encryption";
-import { publicGatewayTargetFor, type PublicGatewayRoute } from "@clankie/protocol/public-gateway";
+import { publicGatewayTargetFor } from "@clankie/protocol/public-gateway";
 import type { StoredPairingOffer } from "./pairing.ts";
 import { OperatorConversationServiceRequestSchema, VOICE_CALL_PATH } from "@clankie/protocol";
-import { validateRuntimeGatewayRoutes } from "./runtime-provider.ts";
 
 const INTERACTIVE_OPERATIONS = new Set([
   "create",
@@ -44,16 +43,6 @@ const INTERACTIVE_OPERATIONS = new Set([
 /** Classify after successful authenticated dispatch; decrypted content stays public. */
 function authenticatedWork(method: string, path: string, body: string): boolean {
   if (method !== "POST") return false;
-  if (path === "/v1/hosted/operator") {
-    try {
-      const inner = z
-        .object({ method: z.enum(["GET", "POST"]), path: z.string(), body: z.string().optional() })
-        .parse(JSON.parse(body));
-      return inner.path !== path && authenticatedWork(inner.method, inner.path, inner.body ?? "");
-    } catch {
-      return false;
-    }
-  }
   if (path === "/v1/pairing/redeem" || path === "/v1/pairing/complete") return true;
   if (path !== "/operator/v1/dispatch") return false;
   try {
@@ -138,17 +127,14 @@ export class GatewayEncryptionHost {
   private readonly hostId: string;
   private readonly wrappingKey: Uint8Array;
   private readonly onAuthenticatedRequest: ((isWork: boolean) => void) | undefined;
-  private readonly gatewayRoutes: readonly PublicGatewayRoute[];
   public constructor(
     hostId: string,
     wrappingKey: Uint8Array,
     onAuthenticatedRequest?: (isWork: boolean) => void,
-    gatewayRoutes: readonly PublicGatewayRoute[] = [],
   ) {
     this.onAuthenticatedRequest = onAuthenticatedRequest;
     this.hostId = hostId;
     this.wrappingKey = wrappingKey;
-    this.gatewayRoutes = validateRuntimeGatewayRoutes(gatewayRoutes);
   }
 
   public pairingCredential(offer: StoredPairingOffer): GatewayEncryptionCredential {
@@ -267,7 +253,7 @@ export class GatewayEncryptionHost {
         (ticket.stage !== "device" || request.path !== "/v1/devices/self" || request.method !== "GET")
       )
         throw new Error("Invalid push proof");
-      const target = publicGatewayTargetFor(request.method, request.path, this.gatewayRoutes);
+      const target = publicGatewayTargetFor(request.method, request.path);
       if (
         target === undefined ||
         request.path.startsWith("/v1/gateway/") ||

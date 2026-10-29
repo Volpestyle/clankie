@@ -34,12 +34,11 @@ type Event = {
   body?: string;
 };
 
-async function fixture(options: { readonly hosted?: boolean } = {}) {
+async function fixture() {
   let evidence: ReturnType<typeof trackerEvidence> | undefined;
-  const f = await syncFixture(
-    { validateEvidence: (issueKey, references) => evidence!.validateEvidence(issueKey, references) },
-    options,
-  );
+  const f = await syncFixture({
+    validateEvidence: (issueKey, references) => evidence!.validateEvidence(issueKey, references),
+  });
   evidence = trackerEvidence(f.root);
   cleanups.push(async () => {
     evidence!.store.close();
@@ -383,30 +382,4 @@ it("refuses every hosted and support pairing, which can otherwise write; only th
     result: { outcome: "applied" },
   });
   expect(await stage(issue.id)).toBe("owner-verified");
-});
-
-it("refuses both verdicts from a device the owner paired through their hosted account", async () => {
-  const f = await fixture({ hosted: true });
-  const hosted = await f.pairHosted();
-  const { issue, bundle } = await f.finished("Paired from the hosted account");
-  expect(
-    await f.sync(
-      hosted.deviceToken,
-      f.transaction("hosted-comment", "save_comment", { issueId: issue.id, body: "Seen" }),
-    ),
-  ).toMatchObject({ outcome: "applied" });
-  for (const verdict of ["works", "send_back"] as const)
-    expect(
-      await f.sync(
-        hosted.deviceToken,
-        f.transaction(`hosted-${verdict}`, "post_owner_verdict", {
-          issueId: issue.id,
-          bundleId: bundle.id,
-          verdict,
-          note: "From the hosted account",
-        }),
-      ),
-      verdict,
-    ).toMatchObject({ outcome: "refused", reason: "owner_app_required" });
-  expect(await f.issue(issue.id)).toMatchObject({ stage: "landed" });
 });

@@ -12,7 +12,7 @@ import { type FleetProjectMembership } from "../fleet-project-membership.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import { type PersonaImageSource } from "../persona-images.ts";
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
-import type { RuntimeProvider } from "../runtime-provider.ts";
+import type { BodyHeartbeat } from "../scheduled-update.ts";
 import type { FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import type { EvalSessionBoundary } from "./eval-session-boundary.ts";
 import type { GrokNativeHost } from "./grok-native-host.ts";
@@ -47,7 +47,7 @@ export interface CaptainOptions {
   }) => void;
   /** Native room child execution, selected before admission under the original room ceiling. */
   readonly runNativeRoomHandoff?: NativeRoomHandoffExecutor;
-  readonly runtimeProvider?: Pick<RuntimeProvider, "heartbeat">;
+  readonly bodyActivity?: Pick<BodyHeartbeat, "begin">;
   /** Explicit controller-created eval boundary; ordinary sessions remain unchanged. */
   readonly evalSessionBoundary?: EvalSessionBoundary;
   /** Override local harness control adapters (including deterministic test adapters). */

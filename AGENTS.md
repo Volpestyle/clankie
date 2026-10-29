@@ -17,9 +17,9 @@ This repository is public. Both neighbors are private and consume
 
 - `~/dev/clankie-app` holds the React Native app built on top of Clankie's
   foundation.
-- `~/dev/clankie-ops` holds the hosted service: the public gateway behind
-  `api.clankie.bot`, Cognito accounts, their AWS templates and deploys, and
-  production, App Store and launch records.
+- `~/dev/clankie-ops` holds the public gateway behind `api.clankie.bot`,
+  Cognito accounts, their AWS templates and deploys, and production, App Store
+  and launch records.
 
 ## Map
 
@@ -102,14 +102,12 @@ This repository is public. Both neighbors are private and consume
   `node integrations/claude-plugin/build.mjs` and `node integrations/codex-plugin/build.mjs`
   after changing it. Episode memory preserves experiences, not standing
   operating instructions. Keep project-specific procedures in that project's repo.
-- Keep the public/private boundary: code that runs only on Clankie's hosted
-  service (gateway, accounts, managed-hosting control plane), its deployment,
-  and business, App Store or production records go to `clankie-ops`, never here.
-- Managed account services handle their own infrastructure. Free accounts
-  support pairing, awake-Mac phone steering and the official Discord bot.
-  Paid features are fleet-checked account entitlements and never provision a
-  hosted body. Preserve existing
-  hosted-body support without steering new users into hosted sales.
+- Keep the public/private boundary: code that runs only on Clankie's public
+  gateway and accounts, its deployment, and business, App Store or production
+  records go to `clankie-ops`, never here.
+- Clankie runs only on the owner's own machines. There is no hosted or managed
+  body: the gateway is only the phone's encrypted doorway to the owner's Mac
+  (ADR 0300). Do not add code that runs Clankie for a customer.
 - The repository is Apache-2.0 except `apps/vox`, which retains its own
   AGPL-3.0-or-later license and provenance record.
 - The credential broker (Keychain on macOS) is the canonical secret store.

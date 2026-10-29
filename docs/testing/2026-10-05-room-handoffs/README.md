@@ -76,7 +76,7 @@ The new boundary evidence is:
   real HTTP lane MCP and native journals reject forged capabilities, foreign
   ancestry, unrestricted Claude agent types, revoked grants and late completion.
   Child transcripts and approval-shaped completion remain tied to their room.
-- [Hosted ingress](../../../apps/clankie/test/hosted-room-handoff.integration.test.ts):
+- Hosted ingress (removed by ADR 0300):
   generated test Ed25519 keys, real signed/encrypted HTTP and credential files.
   Unsigned owner claims fail; approval prompts use the authenticated-surface
   handoff; exact retries survive restart; closing ingress invalidates host proof.

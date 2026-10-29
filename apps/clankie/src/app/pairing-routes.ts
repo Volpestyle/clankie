@@ -1,9 +1,7 @@
-import { HostedBodyResourceError } from "../hosted-body.ts";
 import { SupportGrantStore, SupportGrantCapacityError } from "../support-access.ts";
 import type { QuestionAuthority } from "../captain/conversation-questions.ts";
 import {
   SUPPORT_GRANTS_PATH,
-  HOSTED_SUPPORT_PATH,
   SUPPORT_DEVICE_GRANTS,
   SupportGrantCreateRequestSchema,
   type SupportAccessCommand,
@@ -17,7 +15,6 @@ import {
   PairingRedeemRequestSchema,
   PairingRunRequestSchema,
   TAKE_CONTROL_GRANTS,
-  type DeviceRecord,
   type DeviceGrantSet,
   type DeviceSelfResponse,
   type DeviceSessionRefreshResponse,
@@ -25,8 +22,6 @@ import {
   type PairingCompleteResponse,
   type PairingRedeemResponse,
 } from "@clankie/protocol";
-import { HOSTED_PAIR_OFFER_PATH } from "@clankie/protocol/public-gateway";
-import { DEVICE_WAKE_KEY_PATH, DeviceWakeKeyRequestSchema } from "@clankie/protocol/wake";
 import { Hono, type Context } from "hono";
 import type { CompanionAppVerdict } from "../companion-app-identity.ts";
 import {
@@ -91,11 +86,6 @@ export interface RegisterPairingRoutesContext {
   readonly authenticateDevice: (
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
-  readonly publishHostedSupportDevice: (
-    record: DeviceRecord,
-    grants?: DeviceGrantSet,
-    authorizedByBrowserSession?: string,
-  ) => Promise<void>;
   readonly deviceDenialResponse: (context: Context, denial: DeviceAuthDenial) => Response;
   readonly deviceLocks: Map<string, Promise<unknown>>;
   readonly devices: DeviceRegistry;
@@ -339,57 +329,6 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     };
   };
 
-  ctx.app.post(HOSTED_PAIR_OFFER_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
-    if (ctx.dependencies.hostedBody !== undefined && ctx.deviceSessionSigner === undefined)
-      return context.json({ error: "device_authentication_unavailable" }, 503);
-    if (ctx.dependencies.hostedPairing === undefined) return context.json({ error: "not_found" }, 404);
-    return ctx.dependencies.hostedPairing.offer(
-      await readJson(context.req.raw),
-      async (purpose, browser, authorizedByBrowserSession) => {
-        const publisher = ctx.dependencies.pairingOfferPublisher;
-        if (publisher?.protectPairingOffer === undefined) throw new Error("Encrypted pairing unavailable");
-        const now = ctx.clock();
-        ctx.pairingOffers.prune(now);
-        const offer = mintPairingOffer({
-          now,
-          mintedBy: purpose === "operator" ? "hosted-account-operator" : "hosted-account",
-          idFactory: ctx.idFactory,
-          ...(browser === undefined ? {} : { browser }),
-          ...(authorizedByBrowserSession === undefined ? {} : { authorizedByBrowserSession }),
-        });
-        await publisher.publishPairingOffer(offer);
-        const protectedOffer = publisher.protectPairingOffer(offer);
-        ctx.pairingOffers.add(pairingOfferRecord(offer));
-        ctx.recordEvent("pairing.offer.minted", `pairing:${offer.offerId}`, offer.createdAt, {
-          offerId: offer.offerId,
-          operatorId: offer.mintedBy,
-          expiresAt: offer.expiresAt,
-        });
-        ctx.dependencies.onHostedPairing?.();
-        return { link: protectedOffer.deepLink, expiresAtMs: Date.parse(offer.expiresAt) };
-      },
-    );
-  });
-
-  ctx.app.post(DEVICE_WAKE_KEY_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
-    if (ctx.dependencies.hostedBody === undefined) return context.json({ error: "not_found" }, 404);
-    const identity = await ctx.authenticateDevice(context.req.raw);
-    if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
-    if ("denied" in identity) return ctx.deviceDenialResponse(context, identity);
-    const parsed = DeviceWakeKeyRequestSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "malformed" }, 400);
-    return withSerializedLock(ctx.deviceLocks, identity.deviceId, async () => {
-      const record = ctx.devices.get(identity.deviceId);
-      if (record?.status !== "active") return context.json({ error: "revoked" }, 401);
-      try {
-        await ctx.dependencies.hostedBody!.registerWakeKey(record.deviceId, parsed.data.publicKey);
-      } catch {
-        return context.json({ error: "wake_unavailable" }, 503);
-      }
-      return context.json({ deviceId: record.deviceId });
-    });
-  });
-
   ctx.app.post("/v1/pairing/offer", async (context) => {
     const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
     if (operator === "unavailable")
@@ -519,12 +458,6 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
           (existing.browserSessionId !== browser.sessionId || existing.supportGrantId !== undefined)
         )
           return context.json({ error: "browser_binding_denied" }, 403);
-        try {
-          if (await ctx.dependencies.hostedDeviceSecurity?.isRevoked?.(deviceId))
-            return context.json({ error: "revoked" }, 403);
-        } catch {
-          return context.json({ error: "device_authentication_unavailable" }, 503);
-        }
       }
       if (existing?.status === "revoked") return context.json({ error: "revoked" }, 403);
       const offered =
@@ -634,26 +567,6 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         return context.json({ error: "malformed" }, 400);
       const current = ctx.completionTokens.get(tokenHash);
       if (current === undefined || current.consumed) return context.json({ error: "consumed" }, 409);
-      try {
-        await ctx.publishHostedSupportDevice(record, accepted, pending.authorizedByBrowserSession);
-        if (await ctx.dependencies.hostedDeviceSecurity?.isRevoked?.(record.deviceId))
-          return context.json({ error: "revoked" }, 403);
-      } catch (error) {
-        if (
-          error instanceof HostedBodyResourceError &&
-          [
-            "browser_session_revoked",
-            "device_revoked",
-            "browser_binding_denied",
-            "browser_grant_escalation",
-            "not_owner_device",
-          ].includes(error.code)
-        ) {
-          current.consumed = true;
-          return context.json({ error: "revoked" }, 403);
-        }
-        return context.json({ error: "device_authentication_unavailable" }, 503);
-      }
       now = ctx.clock();
       if (ctx.devices.get(pending.deviceId)?.status !== record.status)
         return context.json({ error: "revoked" }, 403);
@@ -848,42 +761,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
             supportScope: ctx.supportGrants.active(record.supportGrantId)?.scope,
           }),
       sessionExpiresAt: identity.sessionExpiresAt,
-      ...(ctx.dependencies.hostedPairing !== undefined || ctx.dependencies.hostedBody !== undefined
-        ? { controlScope: "hosted" as const }
-        : {}),
     } satisfies DeviceSelfResponse);
   });
-
-  const pendingWakeRevocations = new Set(
-    [...ctx.devices.values()]
-      .filter((device) => device.status === "revoked")
-      .map((device) => device.deviceId),
-  );
-  const revokeWakeKey = async (deviceId: string): Promise<boolean> => {
-    try {
-      if (ctx.dependencies.hostedBody !== undefined) {
-        if (ctx.dependencies.hostedDeviceSecurity === undefined)
-          throw new Error("Hosted security unavailable");
-        await ctx.dependencies.hostedDeviceSecurity.revokeDevice(deviceId);
-      }
-      await ctx.dependencies.hostedBody?.revokeWakeKey(deviceId);
-      pendingWakeRevocations.delete(deviceId);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const retryWakeRevocations = async (): Promise<void> => {
-    for (const deviceId of pendingWakeRevocations) await revokeWakeKey(deviceId);
-  };
-  const wakeRevocationTimer =
-    ctx.dependencies.hostedBody === undefined
-      ? undefined
-      : setInterval(() => {
-          void retryWakeRevocations();
-        }, 60_000);
-  wakeRevocationTimer?.unref();
-  if (ctx.dependencies.hostedBody !== undefined) void retryWakeRevocations();
 
   // Shared teardown path: only explicitly marked records are eligible for automatic revocation.
   const revokeRunDevice = async (deviceId: string, revokedBy: string) =>
@@ -899,10 +778,6 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         }),
       );
       ctx.dependencies.captain.invalidateQuestionPrincipal?.(deviceId);
-      if (ctx.dependencies.hostedBody !== undefined) {
-        pendingWakeRevocations.add(deviceId);
-        await revokeWakeKey(deviceId);
-      }
     });
   const expireRuns = async () => {
     for (const record of ctx.devices.values()) {
@@ -928,10 +803,6 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       (record) => record.run?.runId === runId && record.mintedBy === operator.operatorId,
     );
     for (const record of records) await revokeRunDevice(record.deviceId, operator.operatorId);
-    for (const record of records) {
-      if (pendingWakeRevocations.has(record.deviceId) && !(await revokeWakeKey(record.deviceId)))
-        return context.json({ error: "wake_unavailable" }, 503);
-    }
     return context.json({ revokedDeviceIds: records.map((record) => record.deviceId) });
   });
 
@@ -1004,10 +875,6 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         if (event.type === "device.revoked" && typeof event.data.deviceId === "string")
           ctx.dependencies.captain.invalidateQuestionPrincipal?.(event.data.deviceId);
         logger.info({ deviceId, operatorId: revokedBy }, "device revoked");
-      }
-      if (ctx.dependencies.hostedBody !== undefined) {
-        pendingWakeRevocations.add(deviceId);
-        if (!(await revokeWakeKey(deviceId))) return context.json({ error: "wake_unavailable" }, 503);
       }
       const updated = ctx.devices.get(deviceId);
       return context.json(deviceListItem(updated ?? record));
@@ -1099,11 +966,5 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
   ctx.app.post(`${SUPPORT_GRANTS_PATH}/:id/pairing-offer`, (context) =>
     serveSupportCommand(context.req.raw, { action: "pairing-offer", grantId: context.req.param("id") }),
   );
-  ctx.app.post(HOSTED_SUPPORT_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
-    if (ctx.dependencies.hostedPairing === undefined) return context.json({ error: "not_found" }, 404);
-    return ctx.dependencies.hostedPairing.support(await readJson(context.req.raw), async (command) =>
-      (await supportCommand(command, () => Promise.resolve(true))).json(),
-    );
-  });
-  return { wakeRevocationTimer, runRevocationTimer };
+  return { runRevocationTimer };
 }

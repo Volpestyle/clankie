@@ -4,7 +4,6 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
-import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import {
   BODY_TRANSFER_ABORT_PATH,
   BODY_TRANSFER_APPLY_PATH,
@@ -27,9 +26,9 @@ import {
 import { commandHost, outputJson, type Writable } from "./io.ts";
 
 const USAGE = `Usage:
-  clankie transfer --to hosted|URL|local [--from hosted|URL|local] [--to-token-file FILE] [--from-token-file FILE]
+  clankie transfer --to URL|local [--from URL|local] [--to-token-file FILE] [--from-token-file FILE]
                    [--destination-machine ID] [--replace] [--transfer-id UUID]
-  clankie transfer status [--at hosted|URL|local] [--token-file FILE]
+  clankie transfer status [--at URL|local] [--token-file FILE]
   clankie transfer abort --transfer-id UUID --to URL|local [--from URL|local] [token files]
   clankie transfer reclaim --force --reason TEXT [--at URL|local] [--token-file FILE]
   clankie transfer rebind --transfer-id UUID --machine ID [--at URL|local] [--token-file FILE]`;
@@ -47,8 +46,7 @@ export interface TransferCommandOptions {
 interface Endpoint {
   readonly label: string;
   readonly url: string;
-  /** Absent for the hosted transport, which signs each request as this device. */
-  readonly token?: string;
+  readonly token: string;
   readonly fetch: typeof fetch;
 }
 
@@ -100,18 +98,6 @@ export async function runTransferCommand(
         fetch: fetcher,
       };
     }
-    if (target === "hosted") {
-      // The signed-in hosted device, through the gateway's encrypted envelope (VUH-2582).
-      const env = options.env ?? process.env;
-      const hosted = await import("./hosted.ts");
-      const transport = await hosted.hostedTransportFor(env, options.fetchImpl);
-      const client = (await new SettingsStore(defaultSettingsPath(env)).load()).client;
-      return {
-        label: `hosted:${client?.mode === "hosted" ? client.hostId : "unknown"}`,
-        url: transport.host,
-        fetch: transport.fetchImpl,
-      };
-    }
     const url = new URL(target);
     if (tokenFile === undefined) throw new Error(`${target} needs a token file with its operator credential`);
     const token = (await readFile(tokenFile, "utf8")).trim();
@@ -122,7 +108,7 @@ export async function runTransferCommand(
     const response = await at.fetch(new URL(path, at.url), {
       ...init,
       headers: {
-        ...(at.token === undefined ? {} : { authorization: `Bearer ${at.token}` }),
+        authorization: `Bearer ${at.token}`,
         "content-type": "application/json",
         ...init.headers,
       },
@@ -242,7 +228,7 @@ export async function runTransferCommand(
     const directory = await mkdtemp(join(tmpdir(), "clankie-transfer-"));
     try {
       const bundle = join(directory, "bundle");
-      // Chunks fit the gateway's encrypted envelope, so the same steps reach a hosted body.
+      // Chunks fit the gateway's encrypted envelope.
       const output = await open(bundle, "w", 0o600);
       let expected: { size: number; sha256: string } | undefined;
       try {

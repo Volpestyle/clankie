@@ -25,52 +25,6 @@ including renewable temporary credentials. Local remains the default.
 `clankie evidence storage` saves only backend, bucket, region and prefix; it
 reports configured versus active and never restarts or activates the adapter.
 
-The default-off managed evidence seam uses a dedicated `evidence-storage`
-broker entry, not model OAuth. A trusted runtime provider must admit an exact
-installation, destination, purpose and grant revision. Both active writes and
-recorded historical reads consult it; missing admission or a failed managed
-exchange refuses without the ambient provider chain. The generic auth list
-omits these entries, and their dedicated summary contains only type and enabled
-state, with no access-key prefix. Secrets never belong in settings, receipts,
-logs, argv, worker auth or evidence.
-
-Renewal starts on demand at half-life, with a ten-second deadline, coalesced
-broker claims and bounded retry backoff. An uncertain exchange retains its
-original nonce, timestamp and body digest for transport reconciliation. An
-identical authenticated nonce/digest inside the original five-minute nonce
-window returns the identical sealed reply with unchanged issue/expiry times;
-a different digest or admission binding is an explicit denial. The private
-handler requires durable atomic replay storage, not a fixture-only map.
-Transport implementations use `EvidenceSessionDenied` only for explicit issuer
-denial; every other exchange exception, including unknown network errors and
-HTTP 5xx, is transient. Completed payloads reach the decoder, including invalid
-JSON as an invalid input; received malformed/unbound replies still withdraw
-authority. A ten-second attempt deadline does not discard an otherwise valid
-original reply; decoding checks its original request window and session expiry.
-Once the five-minute window expires, a pending identity is abandoned and replaced
-with a new nonce, this provider instance and the current timestamp
-(`reconcile:false`). Results arriving after their request window are discarded
-without withdrawing admission; a later call starts fresh. An unobserved old
-session expires on its own within 15 minutes. After restart, reconciliation alone
-does not replace fresh live admission.
-Only a previously admitted process may use its existing session during a transient outage, and only with more than
-60 seconds left. Invalid or denied replies withdraw local authority immediately;
-revocation/replacement fences prevent late publication. Restart requires fresh
-fleet admission before any persisted session is used. Signed GET expiry is
-bounded by the session and 15 minutes. The offline retry delay is one second;
-escalating backoff and issuance limits remain activation checks.
-
-This is an offline implementation seam, not an available hosted storage service.
-The private injected issuer is unmounted; no production issuer transport, STS
-adapter, bootstrap, bucket, IAM, rollout or activation is installed. Its local
-signed fixture and owned MinIO proof exercise protocol/provider behavior, not
-real STS renewal, IAM isolation, S3 HEAD 403/404 behavior or cloud revocation.
-Hosted proof and production startup/activation remain separately owner-gated
-([ADR 0297](adr/0297-hosted-evidence-uses-renewable-tenant-credentials.md)).
-Issued S3 sessions and URLs can admit new requests until absolute expiry, up to
-15 minutes after revocation; a direct transfer started before expiry can
-continue afterward. No hard transfer cutoff is promised.
-
 Phase A captures only a private non-secret destination alongside each pending
 upload and record; no bearer, SDK credential, endpoint or signed URL is persisted
 there. Historical reads use that destination, not current settings. Unknown legacy
@@ -79,7 +33,7 @@ unchanged verified local reads remain available. Preparation is bounded to 100
 identifiers, 256 MiB and 30 seconds for association progress per batch and preserves originals and partial
 progress. The manual Phase A proof uses a freshly minted disposable file-broker
 operator credential and dedicated loopback MinIO SDK credentials. It does not prove
-full service startup, tenant credential delivery or hosted acceptance. The existing
+full service startup. The existing
 authorized presigned GET URL still names its object location; private destination
 columns never enter receipts, records/details, device responses or logs.
 An unknown pending upload can receive a bounded private local-only continuation
@@ -307,7 +261,7 @@ readable only for migration and local development; new users never enter it.
 
 ### Who holds which secret
 
-Self-hosted remote access uses account credentials to connect the Mac and device
+Remote access uses account credentials to connect the Mac and device
 credentials to authorize the phone. Device application traffic is encrypted
 between those endpoints, in addition to TLS on each network connection.
 
@@ -357,8 +311,6 @@ routes are refused. There is no forward secrecy: a later endpoint-key compromise
 can expose recorded traffic from that key's lifetime. Push routing metadata,
 Cognito sign-in and signed Linear webhooks have separate contracts.
 
-Managed bodies use fleet-issued host credentials and additional pairing and
-restore protections described in the [hosted guide](../infra/hosted/README.md).
 [ADR 0173](adr/0173-the-gateway-cannot-read-device-traffic.md) records the device
 encryption boundary and recovery procedure. Matching gateway, host and app
 versions and deployment evidence are required before external release; source

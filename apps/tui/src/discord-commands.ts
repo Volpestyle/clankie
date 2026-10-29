@@ -34,7 +34,6 @@ import type { RedactedCredential } from "@clankie/credential-broker";
 import type { DiscordUserSessionOptIn } from "@clankie/protocol";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 import { discordStatus, formatDiscordSettings } from "./command/discord.ts";
-import { formatDiscordOfficial, runDiscordOfficialCommand } from "./command/discord-official.ts";
 
 interface DiscordUserSessionOptInClient {
   inspectDiscordUserSessionOptIn(): Promise<DiscordUserSessionOptIn | undefined>;
@@ -558,13 +557,6 @@ export async function runDiscordAdvancedWizard(
         message: "Advanced Discord settings",
         options: [
           {
-            value: "official",
-            label: "Official Clankie bot (free)",
-            hint: settings.officialBotEnabled ? "on" : "off",
-            description:
-              "Add the official bot from your Clankie account page: no developer portal, bot token or intents. Needs clankie login.",
-          },
-          {
             value: "primer",
             label: "How to create the bot (advanced)",
             hint: "Discord developer portal",
@@ -638,10 +630,6 @@ export async function runDiscordAdvancedWizard(
         await showDiscordStatus(shell, services);
         continue;
       }
-      if (choice === "official") {
-        await editOfficialBot(shell);
-        continue;
-      }
       if (choice === "primer") {
         shell.insertCommandResult("/discord", DISCORD_BOT_PRIMER, "success");
         continue;
@@ -669,36 +657,6 @@ export async function runDiscordAdvancedWizard(
     // Leave the shell usable even if a step throws.
     flow.end();
   }
-}
-
-/** The free official bot through the Clankie account (VUH-1766); same API as `clankie discord official`. */
-async function editOfficialBot(shell: ClankieFaceShell): Promise<void> {
-  const show = async (args: string[]) => {
-    try {
-      const result = await runDiscordOfficialCommand(args);
-      shell.insertCommandResult("/discord", formatDiscordOfficial(result).join("\n"), "success");
-      return result;
-    } catch (error) {
-      shell.insertCommandResult("/discord", error instanceof Error ? error.message : String(error), "error");
-      return undefined;
-    }
-  };
-  const current = await show(["status"]);
-  if (current === undefined) return;
-  const choice = await shell.setupFlow.readSelect({
-    message: "Official Clankie bot",
-    options: current.enabled
-      ? [
-          { value: "keep", label: "Keep it on" },
-          { value: "off", label: "Turn it off", hint: "removes the server connection" },
-        ]
-      : [
-          { value: "on", label: "Turn it on", hint: "then Add to Discord" },
-          { value: "keep", label: "Leave it off" },
-        ],
-    allowBack: true,
-  });
-  if (choice === "on" || choice === "off") await show([choice]);
 }
 
 type Patch = (current: DiscordSettings) => DiscordSettings;

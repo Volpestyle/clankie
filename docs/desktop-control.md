@@ -195,9 +195,9 @@ joined screens. [CLI example](cli.md#computer-body). Raw Peekaboo invocations
 outside this contract are not fenced by its driver lease; overlapping drivers
 must still be avoided.
 
-Hosted bodies can implement the same `ComputerAdapter` seam with their own
+Other hosts can implement the same `ComputerAdapter` seam with their own
 inventory, capture bounds and host-confirmed input/recovery. The service registers its local macOS adapter; Windows can explicitly attach
-the native computer host below. Hosted Linux displays and separate provider
+the native computer host below. Linux displays and separate provider
 reasoning routes are not implemented. The explicit
 [manual comparison harness](../scripts/manual/computer-use/README.md) freezes the
 tasks and grades artifacts independently. James starts that comparison and picks
@@ -396,7 +396,7 @@ native UIA formatting is available; do not weaken its manifest to pass.
 
 ## Lend a joined screen
 
-A hosted or self-hosted Clankie can select an owner-approved joined Mac or
+Clankie can select an owner-approved joined Mac or
 Windows computer through the same computer API and CLI. Add its exact
 `machineId: "join-UUID"` to `conversationId` and `command`. Omit machineId for
 the existing local computer. An unavailable or unapproved selection refuses;
@@ -460,7 +460,7 @@ after creating its owned `libexec` directory. The Windows checkout carries
 native helper in its interactive console. A missing helper is unavailable, with
 no fallback to a harness. Build commands do not grant permissions or drive a screen.
 
-**Live gaps:** a hosted Clankie completing a short task on a lent Mac and Windows
+**Live gaps:** a Clankie completing a short task on a lent Mac and Windows
 PC, capture with the visible pet, local input opt-in, person takeover and Stop.
 The isolated encrypted HTTP/native-process fixtures and native compiler results
 prove source boundaries, not real desktop readiness. Native input sessions

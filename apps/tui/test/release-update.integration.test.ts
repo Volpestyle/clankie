@@ -28,7 +28,7 @@ import { runUpdateCommand } from "../src/command/update.ts";
 import {
   bodyIdleCheck,
   startScheduledUpdates,
-  withBodyActivity,
+  createBodyActivity,
 } from "../../clankie/src/scheduled-update.ts";
 import { SettingsStore } from "@clankie/settings";
 
@@ -126,7 +126,7 @@ async function fixture(
   const home = realpathSync(mkdtempSync(join(tmpdir(), "clankie-release-update-")));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const settings = new SettingsStore(join(home, "settings.json"));
-  const body = withBodyActivity({});
+  const body = createBodyActivity();
   const idle = bodyIdleCheck({ activity: body.activity, voiceHeld: () => false, agentPanes: async () => 0 });
   const enabled = async () => (await settings.load()).host.autoUpdate;
   await settings.update((current) => ({ ...current, host: { ...current.host, autoUpdate: true } }));
@@ -329,7 +329,7 @@ async function fixture(
     publishNext,
     idle,
     enabled,
-    startTurn: () => body.provider.heartbeat.begin(undefined),
+    startTurn: () => body.heartbeat.begin(),
     downloads: () => archiveDownloads,
     setEnabled: (autoUpdate: boolean) =>
       settings.update((current) => ({ ...current, host: { ...current.host, autoUpdate } })),

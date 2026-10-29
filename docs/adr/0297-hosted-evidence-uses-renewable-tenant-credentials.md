@@ -317,9 +317,9 @@ commits are `a0b33c03` and `7864dc6b` in the private app. Their historical proof
 is not rerun or promoted to hosted acceptance here. Relevant implementation:
 [S3 adapter](../../apps/clankie/src/evidence-s3.ts),
 [destination resolver](../../apps/clankie/src/evidence-storage.ts),
-[host identity renewal](../../apps/clankie/src/hosted-body.ts),
+host identity renewal (removed by ADR 0300),
 [credential store](../../packages/credential-broker/src/credential-store.ts) and
-[runtime provider](../../apps/clankie/src/runtime-provider.ts).
+runtime provider (removed by ADR 0300).
 VUH-1913 lives in the built-in tracker at
 `clankie-work://local/issue/bcd5580c-6a77-4287-b357-dc0377a12407`.
 

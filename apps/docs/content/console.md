@@ -5,12 +5,10 @@ work on a project, configure his connections, or inspect an agent's progress.
 For the first installation, follow [Get started](/get-started/); for models,
 skills, and worker setup, use [Customize Clankie](/diy/).
 
-In local mode, `clankie` starts the service if needed and opens the console; in
-hosted mode it connects to your remote Clankie through the paired-device
-transport, with a [smaller command set](/cli/#local-and-hosted-connection-modes).
-First launch asks which. `/` opens command suggestions, `Ctrl+/` the workbench.
-Any terminal works; Herdr is optional. This page describes the local console;
-the [CLI](/cli/) is the headless equivalent.
+`clankie` starts the service on this machine if needed and opens the console.
+`/` opens command suggestions, `Ctrl+/` the workbench.
+Any terminal works; Herdr is optional. The [CLI](/cli/) is the headless
+equivalent.
 
 ## Live agents
 

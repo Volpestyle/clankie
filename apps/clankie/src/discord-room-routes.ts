@@ -26,18 +26,11 @@ import {
   DiscordSetupTestPostRequestSchema,
   DISCORD_SETUP_TEST_POST_PATH,
 } from "@clankie/protocol";
-import {
-  OFFICIAL_DISCORD_BODY_PATH,
-  OfficialDiscordBodyUpdateSchema,
-  type OfficialDiscordBodyRefusal,
-  type OfficialDiscordBodyStatus,
-} from "@clankie/protocol/official-discord";
 import type { ClankieSettings } from "@clankie/settings";
 import { resolveDiscordSettings } from "@clankie/settings";
 import type { CaptainPort } from "./captain/port.ts";
 import type { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { discordSetupChecks } from "./discord-setup.ts";
-import type { ManagedDiscord } from "./managed-discord.ts";
 
 export type RoomAccess = "observe" | "guidance" | "settings";
 // Current writers send every defaulted setting they know. Omitting one means an
@@ -65,15 +58,6 @@ export interface DiscordRoomRoutesOptions {
   environment?: NodeJS.ProcessEnv;
   /** Whether a built-in tracker project exists, for a new forum view binding (VUH-2531). */
   trackerProjectExists?(projectId: string): Promise<boolean>;
-  policy?: Pick<ManagedDiscord, "sync" | "status" | "invitationApplicationId">;
-  /** The free official bot on a self-hosted machine (VUH-1766); absent on a hosted body. */
-  officialBot?: {
-    status(): Promise<OfficialDiscordBodyStatus>;
-    setEnabled(
-      enabled: boolean,
-      guard: () => Promise<void>,
-    ): Promise<OfficialDiscordBodyStatus | OfficialDiscordBodyRefusal>;
-  };
   authorize(request: Request, access: RoomAccess): Promise<RoomAuthorization | undefined>;
   captain: Pick<CaptainPort, "serveOperatorConversation">;
   observations: DiscordRoomObservations;
@@ -113,9 +97,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
   const setup = async (settings: ClankieSettings["discord"]) => {
     const effective = resolveDiscordSettings(settings, options.environment ?? {}).settings;
     const body = effective.activeBody;
-    const applicationId = options.policy
-      ? await options.policy.invitationApplicationId()
-      : effective.applicationId;
+    const applicationId = effective.applicationId;
     return options.machineName
       ? {
           setup: {
@@ -219,10 +201,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
     const authority = await options.authorize(context.req.raw, "observe");
     if (!authority) return context.json({ error: "room_observe_required" }, 403);
     const settings = (await options.settings.load()).discord;
-    const metadata = {
-      ...(await setup(settings)),
-      ...(options.policy ? { managedPolicy: await options.policy.status() } : {}),
-    };
+    const metadata = await setup(settings);
     if (
       discordSettingsRevision((await options.settings.load()).discord) !== discordSettingsRevision(settings)
     )
@@ -234,39 +213,6 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
       revision: discordSettingsRevision(settings),
       ...metadata,
     });
-  });
-  app.get(OFFICIAL_DISCORD_BODY_PATH, async (context) => {
-    const authority = await options.authorize(context.req.raw, "observe");
-    if (!authority) return context.json({ error: "room_observe_required" }, 403);
-    if (!options.officialBot) return context.json({ error: "official_bot_unavailable" }, 404);
-    const status = await options.officialBot.status();
-    await authority.guard();
-    if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
-    context.header("cache-control", "no-store");
-    return context.json(status);
-  });
-  app.post(OFFICIAL_DISCORD_BODY_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
-    const authority = await options.authorize(context.req.raw, "settings");
-    if (!authority) return context.json({ error: "operator_required" }, 403);
-    if (!options.officialBot) return context.json({ error: "official_bot_unavailable" }, 404);
-    const parsed = OfficialDiscordBodyUpdateSchema.safeParse(await context.req.json().catch(() => undefined));
-    if (!parsed.success) return context.json({ error: "invalid_official_bot_request" }, 400);
-    const guard = async () => {
-      await authority.guard();
-      if (!authority.current()) throw new Error("operator_revoked");
-    };
-    let result: OfficialDiscordBodyStatus | OfficialDiscordBodyRefusal;
-    try {
-      await guard();
-      result = await options.officialBot.setEnabled(parsed.data.enabled, guard);
-    } catch (error) {
-      if (error instanceof Error && /revoked/u.test(error.message))
-        return context.json({ error: "operator_revoked" }, 403);
-      throw error;
-    }
-    context.header("cache-control", "no-store");
-    if ("error" in result) return context.json(result, result.error === "fleet_unavailable" ? 502 : 409);
-    return context.json(result);
   });
   app.get(DISCORD_DIRECTORY_PATH, async (context) => {
     const authority = await options.authorize(context.req.raw, "observe");
@@ -370,11 +316,7 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
         if (!authority.current()) throw new Error("operator_revoked");
       },
     );
-    await options.policy?.sync();
-    const metadata = {
-      ...(await setup(updated.discord)),
-      ...(options.policy ? { managedPolicy: await options.policy.status() } : {}),
-    };
+    const metadata = await setup(updated.discord);
     if (
       discordSettingsRevision((await options.settings.load()).discord) !==
       discordSettingsRevision(updated.discord)

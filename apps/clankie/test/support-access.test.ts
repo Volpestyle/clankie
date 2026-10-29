@@ -1,25 +1,5 @@
-import {
-  createECDH,
-  createHash,
-  createHmac,
-  createDecipheriv,
-  generateKeyPairSync,
-  hkdfSync,
-  randomBytes,
-  randomUUID,
-  verify,
-} from "node:crypto";
-import { execFileSync } from "node:child_process";
-import {
-  chmodSync,
-  lstatSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -27,24 +7,10 @@ import { createServer, type Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { afterEach, expect, it } from "vitest";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
-import { createGatewayEncryptedFetch } from "../../../packages/api-client/src/gateway-encryption.ts";
-import { GatewayEncryptionHost, sealGatewayValue, openGatewayValue } from "../src/gateway-encryption.ts";
-import { PairingOfferWireSchema, TAKE_CONTROL_GRANTS } from "@clankie/protocol";
-import { pairingOfferWire } from "../src/pairing.ts";
-import type { GatewayEncryptionCredential } from "@clankie/protocol/gateway-encryption";
-import { createBodyTelemetry } from "@clankie/observability/body-telemetry";
-import {
-  SUPPORT_DEVICE_GRANTS,
-  HOSTED_SUPPORT_DOMAIN,
-  type SupportAccessCommand,
-} from "@clankie/protocol/support-access";
+import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
-import { HostedPairing } from "../src/hosted-pairing.ts";
-import { HostedBodyClient } from "../src/hosted-body.ts";
-import { loadOrCreateDeviceSessionKey } from "../src/device-session.ts";
-import { hostedFixture } from "./fixtures/hosted-body.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createCaptainConversationDispatch } from "../../relay/src/conversation-upstream.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
@@ -71,21 +37,12 @@ function latch() {
   });
   return { promise, resolve };
 }
-async function fixture(
-  hosted = false,
-  history?: { count: number; ended: boolean; restoredActive?: boolean },
-  realTime = false,
-) {
+async function fixture(history?: { count: number; ended: boolean; restoredActive?: boolean }) {
   const root = mkdtempSync(join(tmpdir(), "support-access-"));
   cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
-  const f = hostedFixture(realTime ? Math.floor(Date.now() / 1000) * 1000 : undefined);
-  let now = f.now;
+  let now = 1_790_000_000_000;
   const key = randomBytes(32),
-    log = join(root, "events.jsonl"),
-    spool = join(root, "telemetry"),
-    deviceRefKeyPath = join(root, "telemetry-device.key"),
-    grantsFile = join(root, "state", "support-grants.json");
-  const telemetry = createBodyTelemetry({ dir: spool, writer: "service", clock: () => now });
+    log = join(root, "events.jsonl");
   const historicalIds: string[] = [];
   if (history !== undefined) {
     const events = [];
@@ -156,17 +113,9 @@ async function fixture(
   let tailStarted = latch();
   const nextTail = latch();
   let tailCalls = 0;
-  const bodySigning = generateKeyPairSync("ed25519");
-  const gatewayHost = new GatewayEncryptionHost(f.hostId, randomBytes(32));
-  const pairing = new HostedPairing(
-    new HostedBodyClient(f.bootstrap, { clock: () => now }),
-    bodySigning.privateKey,
-    { clock: () => now, replayPath: join(root, "tickets.json") },
-  );
   let body: ClankieApp;
-  const makeBody = async () => {
-    const supportDeviceRefKey = await loadOrCreateDeviceSessionKey(deviceRefKeyPath);
-    return createClankieApp({
+  const makeBody = async () =>
+    createClankieApp({
       captain: createStubCaptain({
         serveOperatorConversation: (request, authority) => {
           if (request.op === "tail") {
@@ -178,9 +127,6 @@ async function fixture(
       }),
       deviceSessionKey: key,
       eventLogPath: log,
-      supportTelemetry: telemetry,
-      supportGrantsFile: grantsFile,
-      ...(supportDeviceRefKey === undefined ? {} : { supportDeviceRefKey }),
       clock: () => new Date(now),
       authenticateOperator: async (r) =>
         r.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "owner" } : undefined,
@@ -188,22 +134,7 @@ async function fixture(
         r.headers.get("authorization") === "Bearer fixture-captain-token"
           ? { captainId: "captain", steerSourceLane: "api" }
           : undefined,
-      ...(hosted
-        ? {
-            hostedPairing: pairing,
-            pairingOfferPublisher: {
-              publishPairingOffer: async () => {},
-              protectPairingOffer: (offer: Parameters<typeof pairingOfferWire>[0]) => {
-                const wire = pairingOfferWire(offer),
-                  credential = gatewayHost.pairingCredential(offer);
-                const deepLink = `${wire.deepLink}#${new URLSearchParams(credential).toString()}`;
-                return { ...wire, deepLink, code: deepLink, gateway: true };
-              },
-            },
-          }
-        : {}),
     });
-  };
   body = await makeBody();
   cleanups.push(async () => body.close());
   const server = serve({
@@ -261,15 +192,6 @@ async function fixture(
     expect(complete.status).toBe(200);
     return complete.json() as Promise<{ deviceToken: string; deviceId: string; sessionExpiresAt: string }>;
   };
-  const audit = () =>
-    readdirSync(join(spool, "support-audit"))
-      .filter((name) => name.endsWith(".jsonl"))
-      .flatMap((name) =>
-        readFileSync(join(spool, "support-audit", name), "utf8")
-          .trim()
-          .split("\n")
-          .map((line) => JSON.parse(line)),
-      );
   return {
     root,
     historicalIds,
@@ -284,12 +206,6 @@ async function fixture(
     conversationId,
     post,
     pair,
-    audit,
-    f,
-    gatewayHost,
-    bodySigning,
-    deviceRefKeyPath,
-    grantsFile,
     tail: () => tailStarted.promise,
     nextTail: () => nextTail.promise,
     resetTail: () => {
@@ -302,7 +218,7 @@ async function fixture(
   };
 }
 
-it("enforces owner grant lifecycle, readonly pairing, durable restart and content-free per-request audit over real HTTP", async () => {
+it("enforces owner grant lifecycle, readonly pairing and durable restart over real HTTP", async () => {
   const f = await fixture();
   expect(
     (
@@ -381,77 +297,6 @@ it("enforces owner grant lifecycle, readonly pairing, durable restart and conten
   expect((await f.owner.revokeSupportGrant(grant.grantId)).status).toBe("revoked");
   expect((await read()).status).toBe(401);
   expect((await relay("list")).status).toBe(401);
-  const events = f.audit();
-  expect(events.map((event) => event.action)).toEqual(
-    expect.arrayContaining(["granted", "accessed", "revoked"]),
-  );
-  expect(
-    events
-      .filter((event) => event.action === "accessed")
-      .every((event) => ["device-state", "device-session", "body-state", "other"].includes(event.routeClass)),
-  ).toBe(true);
-  expect(JSON.stringify(events)).not.toContain("CUSTOMER PRIVATE REFERENCE");
-  expect(JSON.stringify(events)).not.toContain("/operator/v1");
-  expect(JSON.stringify(events)).not.toContain(device.deviceToken);
-});
-
-it("projects revoke and expiry to the host shell watcher's file without the support reference, across restart and tampering", async () => {
-  const f = await fixture(true);
-  const projected = () =>
-    JSON.parse(readFileSync(f.grantsFile, "utf8")) as {
-      schemaVersion: number;
-      revision: number;
-      grants: { grantId: string; scope: string; status: string; expiresAt: string }[];
-    };
-  expect(projected()).toEqual({ schemaVersion: 1, revision: 0, grants: [] });
-  const shell = await f.owner.createSupportGrant({
-    scope: "shell",
-    durationSeconds: 120,
-    supportRef: "PRIVATE SHELL REFERENCE",
-  });
-  const kept = await f.owner.createSupportGrant({ scope: "shell", durationSeconds: 60, supportRef: "kept" });
-  expect(projected().grants).toContainEqual(
-    expect.objectContaining({
-      grantId: shell.grantId,
-      scope: "shell",
-      status: "active",
-      expiresAt: shell.expiresAt,
-    }),
-  );
-  await f.owner.revokeSupportGrant(shell.grantId);
-  // The owner's revoke reaches the host file before any fleet sync could.
-  expect(projected().grants.find((grant) => grant.grantId === shell.grantId)?.status).toBe("revoked");
-  expect(readFileSync(f.grantsFile, "utf8")).not.toMatch(/PRIVATE|kept"/u);
-  await f.restart();
-  expect(projected().grants.find((grant) => grant.grantId === shell.grantId)?.status).toBe("revoked");
-  expect(projected().grants.find((grant) => grant.grantId === kept.grantId)?.status).toBe("active");
-  // A copy rewritten on disk is restored on the next tick.
-  const genuine = readFileSync(f.grantsFile, "utf8");
-  writeFileSync(f.grantsFile, genuine.replace('"revoked"', '"active"'));
-  await expect.poll(() => readFileSync(f.grantsFile, "utf8"), { timeout: 5000 }).toBe(genuine);
-  // A planted FIFO neither blocks the body nor survives the next tick.
-  rmSync(f.grantsFile);
-  execFileSync("mkfifo", [f.grantsFile]);
-  await expect
-    .poll(() => (lstatSync(f.grantsFile).isFile() ? readFileSync(f.grantsFile, "utf8") : ""), {
-      timeout: 5000,
-    })
-    .toBe(genuine);
-  // A write that cannot land truncates the record rather than leave a revoked shell listed active.
-  chmodSync(join(f.root, "state"), 0o555);
-  try {
-    await f.owner.revokeSupportGrant(kept.grantId);
-    expect(readFileSync(f.grantsFile, "utf8")).toBe("");
-  } finally {
-    chmodSync(join(f.root, "state"), 0o755);
-  }
-  await expect.poll(() => readFileSync(f.grantsFile, "utf8"), { timeout: 5000 }).not.toBe("");
-  expect(projected().grants.find((grant) => grant.grantId === kept.grantId)?.status).toBe("revoked");
-  const live = await f.owner.createSupportGrant({ scope: "shell", durationSeconds: 60, supportRef: "live" });
-  expect(projected().grants.find((grant) => grant.grantId === live.grantId)?.status).toBe("active");
-  f.advance(121_000);
-  await f.owner.listSupportGrants();
-  expect(projected().grants).toEqual([]);
 });
 
 it("refuses shell pairing and closes terminal and file reads for support, including restored shell devices", async () => {
@@ -554,80 +399,8 @@ it("refuses shell pairing and closes terminal and file reads for support, includ
   ).toBe(401);
 });
 
-it("derives audit route classes on the server and uses durable keyed device references", async () => {
-  const f = await fixture();
-  const grant = await f.owner.createSupportGrant({
-    scope: "read-state",
-    durationSeconds: 120,
-    supportRef: "private-ref",
-  });
-  const device = await f.pair(grant.grantId);
-  const headers = { authorization: `Bearer ${device.deviceToken}`, "x-clankie-support-route-class": "other" };
-  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
-  const expected = `dv1_${createHmac("sha256", Buffer.from(readFileSync(f.deviceRefKeyPath, "utf8"), "hex"))
-    .update(`clankie-device-v1\0${device.deviceId}`)
-    .digest("base64url")
-    .slice(0, 22)}`;
-  expect(f.audit().at(-1)).toMatchObject({
-    action: "accessed",
-    routeClass: "device-state",
-    deviceRef: expected,
-  });
-  expect(expected).toMatch(/^dv1_[A-Za-z0-9_-]{22}$/u);
-  expect(expected).not.toBe(
-    `dv1_${createHash("sha256").update(device.deviceId).digest("base64url").slice(0, 22)}`,
-  );
-  await f.restart();
-  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
-  expect(f.audit().at(-1).deviceRef).toBe(expected);
-  const refresh = await fetch(`${f.url}/v1/devices/self/session/refresh`, {
-    method: "POST",
-    headers: { ...headers, "x-clankie-support-route-class": "body-state" },
-  });
-  expect(refresh.status).toBe(200);
-  expect(f.audit().at(-1)).toMatchObject({
-    action: "accessed",
-    routeClass: "device-session",
-    deviceRef: expected,
-  });
-  expect(JSON.stringify(f.audit())).not.toContain(device.deviceId);
-
-  const secondDevice = await f.pair(grant.grantId);
-  expect(
-    (
-      await fetch(`${f.url}/v1/devices/self`, {
-        headers: { authorization: `Bearer ${secondDevice.deviceToken}` },
-      })
-    ).status,
-  ).toBe(200);
-  expect(f.audit().at(-1).deviceRef).not.toBe(expected);
-
-  writeFileSync(f.deviceRefKeyPath, randomBytes(32).toString("hex"));
-  await f.restart();
-  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
-  expect(f.audit().at(-1).deviceRef).not.toBe(expected);
-});
-
-it("fails support reads closed when the durable device reference key is unavailable", async () => {
-  const f = await fixture();
-  const grant = await f.owner.createSupportGrant({
-    scope: "read-state",
-    durationSeconds: 120,
-    supportRef: "private-ref",
-  });
-  const device = await f.pair(grant.grantId);
-  const headers = { authorization: `Bearer ${device.deviceToken}` };
-  chmodSync(f.deviceRefKeyPath, 0o644);
-  await f.restart();
-  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(503);
-  expect(f.audit().filter((event) => event.action === "accessed")).toEqual([]);
-  chmodSync(f.deviceRefKeyPath, 0o600);
-  await f.restart();
-  expect((await fetch(`${f.url}/v1/devices/self`, { headers })).status).toBe(200);
-});
-
 it("bounds open windows while keeping more than 1024 ended durable grants and rejecting restored expired authority", async () => {
-  const historical = await fixture(false, { count: 1025, ended: true, restoredActive: true });
+  const historical = await fixture({ count: 1025, ended: true, restoredActive: true });
   const grant = await historical.owner.createSupportGrant({
     scope: "shell",
     durationSeconds: 60,
@@ -646,7 +419,7 @@ it("bounds open windows while keeping more than 1024 ended durable grants and re
     ).status,
   ).toBe(410);
   expect(listed.find((item) => item.grantId === grant.grantId)?.status).toBe("active");
-  const full = await fixture(false, { count: 1024, ended: false });
+  const full = await fixture({ count: 1024, ended: false });
   const refused = await full.post(
     "/v1/support/grants",
     { scope: "shell", durationSeconds: 60, supportRef: "too many" },
@@ -654,42 +427,6 @@ it("bounds open windows while keeping more than 1024 ended durable grants and re
   );
   expect(refused.status).toBe(409);
   expect(await refused.json()).toEqual({ error: "support_window_capacity" });
-});
-
-it("fails support admission when durable audit storage fails, retains revocation and retries its audit after restart", async () => {
-  const f = await fixture();
-  const grant = await f.owner.createSupportGrant({
-    scope: "read-state",
-    durationSeconds: 120,
-    supportRef: "private-ref",
-  });
-  const device = await f.pair(grant.grantId);
-  const path = join(f.root, "telemetry", "support-audit"),
-    previous = `${path}.saved`;
-  renameSync(path, previous);
-  writeFileSync(path, "fixture storage failure");
-  const read = () =>
-    fetch(`${f.url}/v1/devices/self`, { headers: { authorization: `Bearer ${device.deviceToken}` } });
-  expect((await read()).status).toBe(503);
-  expect(
-    (
-      await f.post(
-        "/v1/support/grants",
-        { scope: "shell", durationSeconds: 120, supportRef: "another-ref" },
-        "fixture-owner",
-      )
-    ).status,
-  ).toBe(503);
-  expect((await f.owner.revokeSupportGrant(grant.grantId)).status).toBe("revoked");
-  await f.restart();
-  expect((await read()).status).toBe(401);
-  rmSync(path);
-  renameSync(previous, path);
-  expect((await f.owner.listSupportGrants()).grants).toHaveLength(1);
-  expect(f.audit().filter((event) => event.action === "revoked")).toHaveLength(1);
-  await f.restart();
-  await f.owner.listSupportGrants();
-  expect(f.audit().filter((event) => event.action === "revoked")).toHaveLength(1);
 });
 
 it("stops an established history stream after authority expires or is revoked", async () => {
@@ -748,7 +485,6 @@ it("stops an established history stream after authority expires or is revoked", 
       after += new TextDecoder().decode(chunk.value);
     }
     expect(after).toContain("auth_failure");
-    expect(f.audit().every((event) => !JSON.stringify(event).includes("PRIVATE HISTORY FIRST"))).toBe(true);
   }
 });
 
@@ -788,207 +524,5 @@ it("suppresses a parked history page after revoke or expiry, including an alread
     expect(text).toContain("auth_failure");
     expect(text).not.toContain('"kind":"event"');
     expect((await f.owner.listSupportGrants()).grants[0]?.status).toBe(expire ? "expired" : "revoked");
-    expect(f.audit().some((event) => event.action === (expire ? "expired" : "revoked"))).toBe(true);
   }
-});
-
-it("binds web support authority to account, command, browser and one-use durable tickets; seals customer references", async () => {
-  const f = await fixture(true),
-    browser = createECDH("prime256v1"),
-    publicKey = browser.generateKeys().toString("base64url"),
-    nonce = randomBytes(16).toString("base64url");
-  const command: SupportAccessCommand = {
-    action: "create",
-    scope: "read-state",
-    durationSeconds: 120,
-    supportRef: "PRIVATE WEB REF",
-  };
-  const ticket = f.f.support(command, publicKey, nonce);
-  const request = { version: 1, supportTicket: ticket, browserPublicKey: publicKey, nonce, command };
-  expect(
-    (await f.post("/v1/hosted/support", { ...request, command: { ...command, scope: "shell" } })).status,
-  ).toBe(401);
-  expect(
-    (
-      await f.post("/v1/hosted/support", {
-        ...request,
-        supportTicket: f.f.support(command, publicKey, nonce, { sub: "another-account" }),
-      })
-    ).status,
-  ).toBe(401);
-  const response = await f.post("/v1/hosted/support", request);
-  expect(response.status).toBe(200);
-  const answer = await response.json();
-  expect(JSON.stringify(answer)).not.toContain("PRIVATE WEB REF");
-  const jti = JSON.parse(Buffer.from(ticket.split(".")[1]!, "base64url").toString()).jti;
-  expect(
-    verify(
-      null,
-      Buffer.from(
-        [
-          HOSTED_SUPPORT_DOMAIN,
-          f.f.hostId,
-          jti,
-          publicKey,
-          nonce,
-          answer.ephemeralPublicKey,
-          answer.iv,
-          answer.ciphertext,
-        ].join("\n"),
-      ),
-      f.bodySigning.publicKey,
-      Buffer.from(answer.signature, "base64url"),
-    ),
-  ).toBe(true);
-  const info = `${HOSTED_SUPPORT_DOMAIN}\n${f.f.hostId}`,
-    key = hkdfSync(
-      "sha256",
-      browser.computeSecret(Buffer.from(answer.ephemeralPublicKey, "base64url")),
-      Buffer.from(nonce, "base64url"),
-      info,
-      32,
-    );
-  const ciphertext = Buffer.from(answer.ciphertext, "base64url"),
-    decipher = createDecipheriv("aes-256-gcm", Buffer.from(key), Buffer.from(answer.iv, "base64url"));
-  decipher.setAAD(Buffer.from(info));
-  decipher.setAuthTag(ciphertext.subarray(-16));
-  const grant = JSON.parse(
-    Buffer.concat([decipher.update(ciphertext.subarray(0, -16)), decipher.final()]).toString(),
-  );
-  expect(grant.supportRef).toBe("PRIVATE WEB REF");
-  expect((await f.post("/v1/hosted/support", request)).status).toBe(401);
-  await f.restart();
-  expect((await f.post("/v1/hosted/support", request)).status).toBe(401);
-  expect((await f.owner.listSupportGrants()).grants[0]?.grantId).toBe(grant.grantId);
-});
-
-it("issues and revokes support through a genuine encrypted Take Control device and the hosted owner bridge", async () => {
-  const f = await fixture(true, undefined, true),
-    browser = createECDH("prime256v1"),
-    browserPublicKey = browser.generateKeys().toString("base64url"),
-    nonce = randomBytes(16).toString("base64url");
-  const pairTicket = f.f.pair({
-    purpose: "operator",
-    non: nonce,
-    bkh: createHash("sha256").update(Buffer.from(browserPublicKey, "base64url")).digest("base64url"),
-  });
-  const answer = await (
-    await f.post("/v1/hosted/pair-offer", { version: 2, pairTicket, browserPublicKey, nonce })
-  ).json();
-  expect(
-    verify(
-      null,
-      Buffer.from(
-        [
-          "clankie-hosted-pair-v2",
-          f.f.hostId,
-          "j".repeat(22),
-          browserPublicKey,
-          nonce,
-          answer.ephemeralPublicKey,
-          answer.iv,
-          answer.ciphertext,
-        ].join("\n"),
-      ),
-      f.bodySigning.publicKey,
-      Buffer.from(answer.signature, "base64url"),
-    ),
-  ).toBe(true);
-  const info = `clankie-hosted-pair-v2\n${f.f.hostId}`,
-    key = hkdfSync(
-      "sha256",
-      browser.computeSecret(Buffer.from(answer.ephemeralPublicKey, "base64url")),
-      Buffer.from(nonce, "base64url"),
-      info,
-      32,
-    );
-  const ciphertext = Buffer.from(answer.ciphertext, "base64url"),
-    decipher = createDecipheriv("aes-256-gcm", Buffer.from(key), Buffer.from(answer.iv, "base64url"));
-  decipher.setAAD(Buffer.from(info));
-  decipher.setAuthTag(ciphertext.subarray(-16));
-  const offer = JSON.parse(
-    Buffer.concat([decipher.update(ciphertext.subarray(0, -16)), decipher.final()]).toString(),
-  );
-  const link = new URL(offer.link),
-    fragment = new URLSearchParams(link.hash.slice(1));
-  const credential: GatewayEncryptionCredential = {
-    hostId: fragment.get("hostId")!,
-    key: fragment.get("key")!,
-    ticket: fragment.get("ticket")!,
-  };
-  const outside: string[] = [];
-  const gateway = await listen(
-    serve({
-      port: 0,
-      hostname: "127.0.0.1",
-      fetch: async (request) => {
-        const body = await request.text();
-        outside.push(body);
-        return f.gatewayHost.handle(
-          new URL(request.url).pathname.slice(`/h/${f.f.hostId}`.length),
-          body,
-          request.signal,
-          (inner) => fetch(new Request(`${f.url}${new URL(inner.url).pathname}`, inner)),
-        );
-      },
-    }) as Server,
-  );
-  const encrypted = createGatewayEncryptedFetch({
-    credential: () => credential,
-    crypto: {
-      randomBytes,
-      seal: async (key, value, aad) => sealGatewayValue(Buffer.from(key, "base64"), value, aad),
-      open: async (key, value, aad) => openGatewayValue(Buffer.from(key, "base64"), value, aad),
-    },
-  });
-  const pairStep = async (path: string, body: unknown) => {
-    const response = await encrypted(`${gateway}/h/${f.f.hostId}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    expect(response.status).toBe(200);
-    credential.ticket = response.headers.get("x-clankie-encryption-ticket")!;
-    credential.key = response.headers.get("x-clankie-encryption-key")!;
-    return response.json();
-  };
-  const pending = await pairStep("/v1/pairing/redeem", {
-    offerSecret: link.searchParams.get("offer"),
-    device: { name: "Customer control phone", platform: "ios" },
-  });
-  const control = await pairStep("/v1/pairing/complete", {
-    completionToken: pending.completionToken,
-    acceptedGrants: TAKE_CONTROL_GRANTS,
-  });
-  const bridge: typeof fetch = async (input, init) => {
-    const request = new Request(input, init);
-    return encrypted(`${gateway}/h/${f.f.hostId}/v1/hosted/operator`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${control.deviceToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        method: request.method,
-        path: new URL(request.url).pathname,
-        ...(request.method === "GET" ? {} : { body: await request.text() }),
-      }),
-    });
-  };
-  const owner = new ClankieApiClient({
-    baseUrl: gateway,
-    operatorToken: control.deviceToken,
-    fetchImpl: bridge,
-  });
-  const grant = await owner.createSupportGrant({
-    scope: "read-state",
-    durationSeconds: 120,
-    supportRef: "ENCRYPTED CUSTOMER SUPPORT REF",
-  });
-  expect((await owner.listSupportGrants()).grants).toEqual([grant]);
-  expect(
-    PairingOfferWireSchema.parse(await owner.createSupportPairingOffer(grant.grantId)).deepLink,
-  ).toContain("clankie://");
-  expect((await owner.revokeSupportGrant(grant.grantId)).status).toBe("revoked");
-  expect((await owner.listSupportGrants()).grants[0]?.status).toBe("revoked");
-  const wire = outside.join("\n");
-  expect(wire).not.toContain(control.deviceToken);
-  expect(wire).not.toContain("ENCRYPTED CUSTOMER SUPPORT REF");
 });

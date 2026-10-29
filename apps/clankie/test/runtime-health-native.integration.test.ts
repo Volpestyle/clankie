@@ -125,14 +125,12 @@ it.skipIf(process.platform !== "darwin")(
         repoRoot: join(import.meta.dirname, "../../.."),
         stateDir: join(herdr.root, "captain"),
         settings,
-        runtimeProvider: {
-          heartbeat: {
-            begin: () => {
-              modelTurns++;
-              return () => {};
-            },
+        bodyActivity: {
+          begin: () => {
+            modelTurns++;
+            return () => {};
           },
-        } as never,
+        },
         onHealthAlertDelivery: (result) => results.push(result),
       },
     );

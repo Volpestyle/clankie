@@ -434,10 +434,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     options.requireMachineAccess ??
     ((fleet, required) => requireRuntimeMachineAccess(settingsStore, fleet, required));
   function trackConversationRunner(runner: ConversationRunner): ConversationRunner {
-    const heartbeat = options.runtimeProvider?.heartbeat;
+    const heartbeat = options.bodyActivity;
     if (heartbeat === undefined) return runner;
     return async (...args) => {
-      const finish = heartbeat.begin(args[3].origin);
+      const finish = heartbeat.begin();
       try {
         await runner(...args);
       } finally {
@@ -7199,9 +7199,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   messageId: normalized.messageId,
                   transportKind: request.identity.transportKind,
                 };
-                const finish = options.runtimeProvider?.heartbeat?.begin(
-                  request.trigger.unprompted === true ? "wake" : undefined,
-                );
+                const finish = options.bodyActivity?.begin();
                 try {
                   conversations.updateRoomHandoff(child.conversationId, {
                     state: "running",

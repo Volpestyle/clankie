@@ -4,10 +4,10 @@ Clankie is a persistent agent with a personality, implemented as one service
 plus the clients and connections around it. The service owns his built-in pi runtime,
 conversations, Auto, memory, tools, credentials, and authority. The React Native
 app in the private `clankie-app` repository reaches this service; the public
-gateway, accounts, and managed provisioning live in private `clankie-ops`.
-The service can run on
-an owner's machine or a hosted machine. The app and console are clients of
-that service; a worker runtime and a work tracker are independent connections.
+gateway and accounts live in private `clankie-ops`. The service runs only on
+machines the owner controls: their Mac, or a Linux host they run themselves
+([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)). The app and
+console are clients of that service; a worker runtime and a work tracker are independent connections.
 
 For a product overview, read [How he works](https://docs.clankie.bot/how-it-works/).
 For source setup and the subsystem map, use [Contributing](../CONTRIBUTING.md)
@@ -22,7 +22,7 @@ flowchart LR
     Head["Optional native head<br/>Claude · Codex seat"]
   end
   Gateway["Public gateway<br/>api.clankie.bot"]
-  subgraph Host["One host: owner Mac or managed Linux"]
+  subgraph Host["One host: owner Mac or owner-run Linux"]
     Relay["Relay<br/>device grants · tails · terminal lease"]
     Service["Clankie's service<br/>pi · conversations · Auto · tools · body leases"]
     State["Host-owned state<br/>memory · conversations · settings"]
@@ -46,33 +46,25 @@ flowchart LR
   Service --> Bodies["Bodies: PokeAgents seat ·<br/>Minecraft motor · browser"]
 ```
 
-Capabilities are configured per host. A managed Linux deployment does not
+Capabilities are configured per host. A Linux container deployment does not
 implicitly provide desktop input, Discord media, or a game world.
 The [Linux guide](../infra/hosted/README.md) owns that deployment's capability
 set; the [agent-host guide](../packages/agent-hosts/README.md) owns native
 worker support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
 records the separation between Clankie and his connections.
 
-## Customer support authority
+## Support authority
 
-The body owns customer-issued support grants, durable revocation and mandatory
+The body owns owner-issued support grants, durable revocation and mandatory
 audit. An owner operator or paired device with terminal control can create a
 referenced Read state or Shell window of at most 72 hours through
 [`clankie support`](cli.md). Read-state pairing carries no ordinary device
 grants: the relay admits only a closed state/history read allowlist and rechecks
 the live window before each disclosure, including streams. Shell windows refuse
-pairing; hosted shell enforcement belongs to private `clankie-ops`.
-
-Hosted account tickets bind the exact command, account, tenant, installation,
-browser key and nonce. The body durably fences replay before executing and seals
-the response. The gateway connector forwards these signed support exchanges to
-the body's verifier, just as it forwards signed pairing offers. Neither account
-metadata nor captain authority creates a grant.
+pairing. Captain authority never creates a grant.
 Support audit uses keyed device references and a separate durable spool;
 disclosure fails closed without it. Independent sink acknowledgements govern
-spool pruning, regardless of diagnostic consent. Public/private artifacts and
-hosted rollout must be coordinated; source integration alone does not prove
-production enforcement.
+spool pruning, regardless of diagnostic consent.
 
 ## Approved commit integration
 
@@ -137,30 +129,18 @@ Optional push delivery has a separate metadata store and authorization contract.
 The [network reference](https://docs.clankie.bot/network/) owns the public
 host-route table and transport boundary.
 
-On a self-managed Mac, account sign-in enrolls the host at that doorway. On a
-managed machine, signed bootstrap and pairing contracts supply the host identity.
-The service-side contracts are documented in [credentials](credentials.md) and
-[Linux deployment](../infra/hosted/README.md). Account, gateway deployment, and
-managed provisioning implementation belong in the private operations repository
-([ADR 0183](adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
-
-The public service also defines optional host-selected
-[`runtime-provider` hooks](../apps/clankie/src/runtime-provider.ts), empty by
-default. Private managed-body composition supplies quotas, credit routes,
-heartbeat accounting and model-plan policy through those hooks. The accepted
-[continuous hosted presence](adr/0285-hosted-presence-has-no-idle-clock.md)
-lifecycle removes idle/hour sleeps in the managed service; its rollout remains
-pending, and paid work stays subject to credit limits. Generic service
-lifecycle, transport, signed pairing and device-security recovery stay public.
-The [Linux guide](../infra/hosted/README.md#optional-runtime-provider) documents
-module selection across launcher restarts.
+Account sign-in (`clankie login` or `clankie remote-access on`) enrolls the host
+at that doorway. The service-side contracts are documented in
+[credentials](credentials.md) and [Linux deployment](../infra/hosted/README.md).
+Account and gateway deployment belong in the private operations repository
+([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)).
 
 One body holds Clankie at a time
 ([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). The self record
 (`<state>/self.json`) is read first at boot. A body that is frozen or released
 starts dormant ([`dormant-body.ts`](../apps/clankie/src/dormant-body.ts)). It keeps
-its doorway ([`body-doorway.ts`](../apps/clankie/src/body-doorway.ts): hosted
-identity, gateway connection and device authority, shared with active bodies)
+its doorway ([`body-doorway.ts`](../apps/clankie/src/body-doorway.ts): gateway
+connection and device authority, shared with active bodies)
 and admits only health, the owner's transfer routes and device session upkeep,
 which `clankie transfer` drives between two bodies.
 
@@ -263,8 +243,8 @@ OpenAI/xAI realtime and the optional Claude text brain share that same floor and
 voice tools. Claude uses the existing per-speaker OpenAI transcription and
 ElevenLabs speech wrapper; it receives attributed text, and interruptions abort
 its request and retire the mouth's output. Native owner voice-setting changes
-persist public settings and require a body restart. Hosted provider selection is
-separate; [the manual Sonnet trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
+persist public settings and require a body restart.
+[The manual Sonnet trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
 owns live latency and quality proof.
 
 ### Operator conversations and fleet views
@@ -559,7 +539,7 @@ Clankie deliberately sends chosen results/media through `mail_owner_update`.
 The disk-backed update store is independent of answer/claim receipts and keeps
 bounded per-source records. There is no automatic event feed. Owner-authenticated
 `owner_update_list`, `owner_update_read` and `owner_update_dismiss` expose the
-same news through API, CLI and TUI, including hosted transport. Reading/dismissing
+same news through API, CLI and TUI. Reading/dismissing
 is idempotent and never wakes a conversation. The app mailbox consumes these
 contracts. See [ADR 0245](adr/0245-one-owner-ask-across-surfaces.md) and the
 [CLI contract](cli.md#owner-asks-conversations-questions-id-and-conversations-answer).
@@ -748,8 +728,8 @@ call-time revocation checks still apply.
   outbox over join, not terminal typing. Every request rechecks current consent;
   reset and home restart revoke grants without terminating panes. Legacy SSH
   chat migration and Windows installer/production-gateway proof remain follow-ups.
-  A joined screen is selected explicitly through `/v1/computer`'s `machineId`;
-  hosted Clankie can borrow it without a local desktop. Encrypted join traffic
+  A joined screen is selected explicitly through `/v1/computer`'s `machineId`,
+  so a body without a local desktop can borrow it. Encrypted join traffic
   carries strict commands and bounded frame chunks. The host intersects its
   original screen ceiling with fresh policy, asks locally for session consent,
   defaults to observation, and shows a pet with Stop. Authored macOS/Windows
@@ -1133,14 +1113,7 @@ Command syntax belongs in [CLI](cli.md), HTTP operations in
 owning package. This architecture document links to those contracts rather
 than keeping a second catalog.
 
-## Hosted Mac console
-
-The launcher resolves local/hosted mode before starting services. Hosted mode
-pairs a revocable operator device through account sign-in and carries requests
-inside the existing encrypted device envelope. No local body or operator bearer
-is started or exported. See the [ADR 0173 amendment](adr/0173-the-gateway-cannot-read-device-traffic.md#amendment-the-mac-can-be-a-hosted-operator-device-2026-09-27-vuh-1110)
-for authority and the [CLI contract](cli.md#local-and-hosted-connection-modes)
-for supported commands and recovery. Fleet ticket issuance stays private.
+## Owner checkout maintenance
 
 Owner checkout maintenance uses `packages/settings/src/checkouts.ts` for native
 Git observations, safe fast-forward, and new-hire freshness admission.

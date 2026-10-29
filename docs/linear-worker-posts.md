@@ -8,9 +8,9 @@ assignees, or mentionable Linear users. Regular updates use the app identity.
 
 ## Connect the application
 
-Hosted Connections uses the registered S256 PKCE app-actor flow in
+Account connections use the registered S256 PKCE app-actor flow in
 [ADR 0232](adr/0232-hosted-connections-use-the-body-broker.md). The app or
-account page handles customer consent; the body verifies the app/workspace
+console handles the owner's consent; the body verifies the app/workspace
 and keeps rotating credentials under `linear-api`. Tracker reads, writes and
 worker appearances use the in-process GraphQL adapter. The API credential is
 never forwarded to the separate MCP connection.
