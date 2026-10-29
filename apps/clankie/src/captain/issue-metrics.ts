@@ -208,7 +208,8 @@ function nativeRecords(raw: string, harness: "codex" | "claude", sessionId?: str
                 .join("\n")
             : "";
       const channel =
-        /<channel source="(?:plugin:clankie-worker|clankie)/u.test(text) || text.startsWith("[Lead message #");
+        /<channel source="(?:plugin:clankie-worker|clankie)/u.test(text) ||
+        text.startsWith("[Lead message #");
       records.push({
         at,
         id: `activity:${id}`,
