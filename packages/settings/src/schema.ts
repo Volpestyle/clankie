@@ -81,14 +81,14 @@ export type HostSettings = z.infer<typeof HostSettingsSchema>;
 
 /**
  * Whether this host keeps itself awake: the owner's stored choice, or by
- * default yes on a self-hosted Mac and no anywhere else (Linux, or a Mac that
- * only reaches a hosted Clankie).
+ * default yes on a Mac and no on Linux. A saved hosted client mode no longer
+ * changes the default: that Mac now runs Clankie itself (ADR 0300).
  */
 export function keepAwakeEnabled(
-  settings: { readonly host: HostSettings; readonly client?: { readonly mode: string } | undefined },
+  settings: { readonly host: HostSettings },
   platform: NodeJS.Platform = process.platform,
 ): boolean {
-  return settings.host.keepAwake ?? (platform === "darwin" && settings.client?.mode !== "hosted");
+  return settings.host.keepAwake ?? platform === "darwin";
 }
 
 /** Public AWS doorway used by App Store builds; the host bearer stays in Keychain. */
