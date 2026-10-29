@@ -1534,6 +1534,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed) return undefined;
     const agent = await this.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) return undefined;
+    // allow-swallowed-rejection -- A failed native read grants no activity or lease renewal.
     const observation = await this.seatControl.observeNativeTask(agent, holderId).catch(() => undefined);
     if (!observation) return undefined;
     const { status } = observation;
