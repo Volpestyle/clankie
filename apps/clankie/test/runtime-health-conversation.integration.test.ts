@@ -47,14 +47,12 @@ it("slow health records exactly one alarm and one recovery in the default conver
     repoRoot: root,
     stateDir: root,
     settings: new SettingsStore(join(root, "settings.json")),
-    runtimeProvider: {
-      heartbeat: {
-        begin: () => {
-          modelTurns++;
-          return () => {};
-        },
+    bodyActivity: {
+      begin: () => {
+        modelTurns++;
+        return () => {};
       },
-    } as never,
+    },
     onHealthAlertDelivery: (result) => deliveries.push(result),
   });
   cleanup.push(() => captain.close());

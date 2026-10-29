@@ -98,7 +98,7 @@ compiled service, Activity asset, generated-validator runtime modules, Vox
 IPC, and Herdr's native lifecycle. Use a short temporary state root: Unix
 socket paths must fit macOS's 103-byte limit, including `herdr-client.sock`.
 `pnpm herdr:linux:smoke` proves the native boundary in Docker; it does not prove
-the complete hosted service image. If another checkout owns Clankie's singleton service, do not stop it for a
+the complete Linux container image. If another checkout owns Clankie's singleton service, do not stop it for a
 test: run the non-owning local smoke and leave the full launcher-owned branch
 to a clean host or CI. Report that distinction explicitly.
 

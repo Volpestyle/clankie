@@ -1,19 +1,16 @@
 /**
- * Scheduled official-release installs for hosted bodies (ADR 0237). A check
- * installs only while the body is idle, through the same updater, approval cap
- * and health rollback as `clankie update`. A hold, a refusal or a failed lookup
- * just waits for the next check.
+ * Scheduled official-release installs (ADR 0237). A check installs only while
+ * the body is idle, through the same updater, approval cap and health rollback
+ * as `clankie update`. A hold, a refusal or a failed lookup just waits for the
+ * next check.
  */
 import type { RuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
-import type { RuntimeProvider } from "./runtime-provider.ts";
-
-type Heartbeat = NonNullable<RuntimeProvider["heartbeat"]>;
 
 const IN_FLIGHT = new Set(["scheduled", "installing", "stopping", "activating", "restarting"]);
 
 export interface ScheduledUpdateOptions {
   readonly updater: RuntimeUpdater;
-  /** The owner's choice; a managed body passes a constant `true`. */
+  /** The owner's choice. */
   readonly enabled: () => Promise<boolean>;
   /** No captain turn, activity share, voice call or hired worker is running. */
   readonly idle: () => Promise<boolean>;
@@ -107,53 +104,45 @@ export function bodyIdleCheck(deps: {
   };
 }
 
-/** Running captain turns and live activity shares, counted at the provider's own hooks. */
+/** Running captain turns and live activity shares. */
 export interface BodyActivity {
   readonly turns: number;
   readonly sharing: boolean;
 }
 
-/**
- * Always supplies turn hooks, delegating to an installed provider's heartbeat,
- * so a body without managed policy can still tell when it is idle.
- */
-export function withBodyActivity<P extends { readonly heartbeat?: Heartbeat }>(
-  provider: P,
-): {
-  readonly provider: P & { readonly heartbeat: Heartbeat };
+/** The hooks a captain turn and an activity share call, so the body can tell when it is idle. */
+export interface BodyHeartbeat {
+  begin(): () => void;
+  activitySharing(active: boolean): void;
+}
+
+export function createBodyActivity(): {
+  readonly heartbeat: BodyHeartbeat;
   readonly activity: () => BodyActivity;
   /** Synchronous final turn/share check, immediately followed by service shutdown. */
   readonly stopAdmissionWhenIdle: () => boolean;
 } {
-  const inner = provider.heartbeat;
   let turns = 0;
   let sharing = false;
   let stopping = false;
-  const heartbeat: Heartbeat = {
-    begin(origin) {
+  const heartbeat: BodyHeartbeat = {
+    begin() {
       if (stopping) throw new Error("Scheduled release cutover is stopping the body");
       turns += 1;
-      const finish = inner?.begin(origin);
       let done = false;
       return () => {
         if (done) return;
         done = true;
         turns -= 1;
-        finish?.();
       };
     },
-    interactive: () => inner?.interactive(),
-    authenticatedWork: (isWork) => inner?.authenticatedWork(isWork),
     activitySharing: (active) => {
       if (active && stopping) throw new Error("Scheduled release cutover is stopping the body");
       sharing = active;
-      inner?.activitySharing(active);
     },
-    start: () => inner?.start(),
-    close: () => inner?.close(),
   };
   return {
-    provider: { ...provider, heartbeat },
+    heartbeat,
     activity: () => ({ turns, sharing }),
     stopAdmissionWhenIdle: () => {
       if (turns > 0 || sharing) return false;

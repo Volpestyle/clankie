@@ -71,8 +71,7 @@ The console's `/question list` collects pending asks; answering wakes the source
 conversation. The app mailbox is a later addition. See the [ask reference](/cli/#owner-asks-conversations-questions-id-and-conversations-answer).
 
 DIY helpers use the harnesses you install and sign in to
-([bring your own team](/diy/#bring-your-own-team)). Hosted helper limits follow
-your [plan](https://clankie.bot/#plans).
+([bring your own team](/diy/#bring-your-own-team)).
 
 ## The app
 
@@ -94,16 +93,15 @@ On a configured Mac, Clankie can chat in Discord, talk in voice channels, play
 requested YouTube music, and play Pokémon from his own seat in a PokeAgents
 world. None of this is part of basic setup.
 
-The official bot handles text, voice, and a watch-me-play Activity. Sharing
+His bot handles text, voice, and a watch-me-play Activity. Sharing
 art, animations, and demos through the Activity is built but still awaiting its
 live Discord check. Watching someone's screen share and going Live need the
 separate personal-lab body. Start with [Discord and play setup](/diy/#hang-out-and-play).
 
 ## Leaving work running
 
-Closing a window does not stop the service. A local Mac must stay awake and
-online (by default it does while plugged in); hosted availability follows your
-plan.
+Closing a window does not stop the service. The Mac must stay awake and
+online (by default it does while plugged in).
 
 <a id="give-him-ongoing-work"></a>
 

@@ -138,7 +138,6 @@
         "test/fixtures/seat-pump-stdio.ts",
         "test/fixtures/inbound-receipt-0.6.2.d.mts",
         "src/computer-windows-host.ts",
-        "src/hosted-body.ts",
         "test/fixtures/fleet-ssh-recovery/*.mjs",
         "test/helpers/project-native-proof/bridge-harness.mjs",
         "test/helpers/project-native-proof/client.mjs",

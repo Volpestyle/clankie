@@ -226,7 +226,7 @@ export function noHarnessReady(report: MachineWorkerAccounts): string | undefine
 }
 
 /** Explicit owner choice; cancellation never writes a level or advances onboarding. */
-export async function runAutonomySetup(
+async function runAutonomySetup(
   shell: ClankieFaceShell,
   autonomy: SetupCommandServices["autonomy"],
 ): Promise<boolean> {

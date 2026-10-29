@@ -45,7 +45,7 @@ export interface ComposerTranscriptionPrincipal {
   support: false;
 }
 /** A confirmed admission refusal; transport or provider uncertainty is never a refusal. */
-export const ComposerTranscriptionAdmissionRefusalSchema = z
+const ComposerTranscriptionAdmissionRefusalSchema = z
   .object({
     refused: z.enum([
       "authentication_required",

@@ -139,11 +139,11 @@ export function assessHostPower(input: HostPowerInput): HostPowerReport {
   const advice =
     input.source === "battery"
       ? input.keepAwakeRequested
-        ? `On battery this Mac sleeps after ${after}, so Discord and the app go quiet; keep-awake only holds while plugged in. Plug in, or use a hosted Clankie.`
-        : `On battery this Mac sleeps after ${after}, so Discord and the app go quiet. Plug in and run \`clankie awake on\` to keep it awake while plugged in, or use a hosted Clankie.`
+        ? `On battery this Mac sleeps after ${after}, so Discord and the app go quiet; keep-awake only holds while plugged in. Plug it in to keep it awake.`
+        : `On battery this Mac sleeps after ${after}, so Discord and the app go quiet. Plug in and run \`clankie awake on\` to keep it awake while plugged in.`
       : input.keepAwakeRequested
         ? "Keep-awake is on but nothing is holding this Mac awake; run `clankie restart awake`."
-        : `This Mac is plugged in but sleeps after ${after}, so Discord and the app go quiet. Run \`clankie awake on\` to keep it awake while plugged in, or use a hosted Clankie.`;
+        : `This Mac is plugged in but sleeps after ${after}, so Discord and the app go quiet. Run \`clankie awake on\` to keep it awake while plugged in.`;
   return { state: "sleep_allowed", ...base, advice };
 }
 

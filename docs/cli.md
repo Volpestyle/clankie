@@ -11,9 +11,8 @@ interactive forms and navigation
 
 Live operator work stays on the service HTTP catalog already shared by the TUI,
 phone and relay: chat, play, memory, pairing, and conversations are
-not separate copies of the service's state. The commands below describe local
-mode unless noted. [Hosted mode](#local-and-hosted-connection-modes) connects to
-an existing remote service with a smaller supported set.
+not separate copies of the service's state. The commands below run against
+this machine's service unless noted.
 
 `clankie help` prints the same command index. On every install the file lives
 at `{repoRoot}/docs/cli.md` — `clankie doctor` names `repoRoot`.
@@ -67,7 +66,7 @@ Use `--chat ID` for another retained conversation, `/new` for a fresh chat,
 or `/cd PATH` to select a project conversation.
 The console opens on a blank page with the latest messages just above it;
 scrolling up loads older retained history in pages without moving the text you are reading. Live messages continue
-to arrive while older history loads. This applies to local and hosted consoles.
+to arrive while older history loads.
 An unknown command exits 1 without starting anything. Common near-misses name
 the real command: `clankie up` suggests `clankie start`.
 
@@ -146,10 +145,9 @@ without retrying or writing a local fallback. The TUI uses the same path. Start
 the service and authenticate as its owner before changing these settings.
 
 `GET`/`POST /v1/operator/host-settings` carries `host {keepAwake, autoUpdate}`,
-its revision and support/managed-state metadata. Writes use
+its revision and support metadata. Writes use
 `{schemaVersion: 1, expectedRevision, changes: {keepAwake?, autoUpdate?}}`.
-Keep-awake is supported only on a self-hosted Mac; managed hosting keeps automatic
-updates enabled. These routes, voice, account holds and Linear follow/wake are
+Keep-awake is supported only on a Mac. These routes, voice, account holds and Linear follow/wake are
 forwarded to devices with current Take Control authority.
 
 `awake --local-setup on|off` explicitly prepares this Mac when the service is
@@ -232,7 +230,7 @@ status retries ordinary presence without current activity. See [ADR 0294](adr/02
 
 Service ids appear in dependency order: `clankie`, `relay`, `discord-bridge`,
 `discord-user-session`, `activity`, `tunnel`, `awake`. `awake` is the
-keep-awake ([`awake`](#awake)), on by default on a self-hosted Mac; it reads
+keep-awake ([`awake`](#awake)), on by default on a Mac; it reads
 healthy and "off" when the owner chose to let the Mac sleep.
 
 `status` and `doctor --json` include `runtimeHealth` when the service exposes it:
@@ -288,7 +286,7 @@ outcome and fixed routing reason; they omit the alert text and provider errors.
 `submitted` includes a retained uncertain native dispatch and does not prove
 the recipient read the alert. Inspect its original native acknowledgment.
 
-The public `/health` observation and consented hosted `body.runtime_health`
+The public `/health` observation and consented `body.runtime_health`
 events contain fixed numeric and enum metadata only. Conversation text, worker
 reports, credentials, and command output never enter this projection.
 
@@ -446,7 +444,7 @@ not establish acceptance.
     "sleepAfterMinutes": 1,
     "heldAwakeBy": [],
     "keepAwakeRequested": false,
-    "advice": "On battery this Mac sleeps after 1 min idle, so Discord and the app go quiet. Plug in and run `clankie awake on` to keep it awake while plugged in, or use a hosted Clankie."
+    "advice": "On battery this Mac sleeps after 1 min idle, so Discord and the app go quiet. Plug in and run `clankie awake on` to keep it awake while plugged in."
   },
   "remediations": ["Pick a captain model with `clankie model set provider/model` or `/setup`."]
 }
@@ -466,17 +464,14 @@ the rejected assistant reply from active context while retaining the append-only
 failure record; the owner's message, attachments and completed tools are not
 replayed. A second credential rejection is terminal and does not force another
 refresh. Cancellation prevents continuation. A self-wake retains its existing
-one-time recovery. Failed local refresh asks the operator to reconnect with
-`/auth PROVIDER`; hosted credentials instead require service operator repair,
-with an operator diagnostic and the existing failed-turn telemetry, never a
-customer `/auth` step. `credentialRejections` (present only when there is one)
+one-time recovery. Failed refresh asks the operator to reconnect with
+`/auth PROVIDER`. `credentialRejections` (present only when there is one)
 records `{ "state": "refreshed" | "reconnect_required" | "operator_required",
 "at", "detail" }` per provider from a real failure, never a new paid probe.
 Doctor distinguishes local reconnect from service operator repair; the next
 successful turn on that provider clears the entry. The service log retains
 `model.credential_rejected` with `providerId` and the recovery `outcome`, followed
-by `model.credential_accepted` when a recorded rejection clears. These local and
-hosted diagnostics contain fixed metadata, without upstream errors or credentials.
+by `model.credential_accepted` when a recorded rejection clears. These diagnostics contain fixed metadata, without upstream errors or credentials.
 A later successful turn alone does not prove a forced refresh occurred.
 `commands` currently probes
 `herdr`, `ffmpeg`, `yt-dlp` (version strings) and `herdr-lead`, `codex`, `claude`
@@ -492,7 +487,7 @@ a remediation, because until they clear no app reaches him at all.
 it is down ([always-on guide](always-on.md)). `state` is `always_on` (power
 settings never sleep, or something holds a sleep assertion), `sleep_allowed`
 (with `advice`, which is also a remediation), or `unknown` (no `pmset`, as on a
-hosted Linux body; no warning). `source` is `ac` or `battery`,
+Linux body; no warning). `source` is `ac` or `battery`,
 `sleepAfterMinutes` is the `pmset` idle sleep for that source (`0` never), and
 `heldAwakeBy` names processes holding a sleep assertion that applies on that
 source. `lastSleep` appears once the running service has noticed the host sleep
@@ -518,21 +513,18 @@ Legacy per-hold flags remain available:
 `--override-hold UUID [--actor NAME] --reason TEXT`; the server derives the
 audit actor from authentication regardless of the supplied name.
 
-What `clankie update` installs depends on the install. A hosted body runs a
-release under `/state/install` seeded from its image and updates like a release
-install; a managed body installs nothing newer than its fleet-approved release
-(`POST /fleet/v1/body/release`), and refuses with "holding releases" or "not
-approved" otherwise. The hosted image also checks hourly and installs while the
-body is idle; `clankie update auto [status|on|off]` (TUI `/update` → Automatic
-installs) switches that for a self-run body, and managed bodies keep scheduled
-checks enabled. Scheduling rechecks this setting and idle state after release
+What `clankie update` installs depends on the install. A Linux container body
+([self-hosted Linux](../infra/hosted/README.md)) runs a release under
+`/state/install` seeded from its image and updates like a release install. That
+image also checks hourly and installs while the body is idle;
+`clankie update auto [status|on|off]` (TUI `/update` → Automatic installs)
+switches that. Scheduling rechecks this setting and idle state after release
 lookup, before accepting the helper, and again after download and staging just
 before stopping services. If work starts or automatic installs are disabled,
 the verified release stays staged for the next enabled idle check; it is reused
 without another archive download. Cutover closes turn admission before shutdown,
 so it cannot interrupt a turn. Hourly checks keep a newer image seed when
-the approved release is older; an explicit `--ref vX.Y.Z` can still roll back
-within the fleet's approval cap.
+the latest release is older; an explicit `--ref vX.Y.Z` can still roll back.
 
 The release helper uses `clankie update cutover --operation UUID --instance UUID`
 (`POST /v1/runtime-update/cutover`) for that final check. Operator authentication
@@ -1749,8 +1741,8 @@ from a systemd user timer (or cron) every 30 seconds for the same behaviour.
 
 Keep this Mac awake while it is plugged in, so Discord and the app stay reachable
 ([always-on guide](always-on.md), [ADR 0203](adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
-A self-hosted Mac does this by default; `host.keepAwake` unset means on there and
-off on Linux or a Mac that only reaches a hosted Clankie (VUH-2393).
+A Mac does this by default; `host.keepAwake` unset means on there and off on
+Linux (VUH-2393).
 `on` and `off` store the choice through the revision-fenced owner host-settings
 API, which reports the effective value; a stored choice always wins over the
 default. `on` starts a launcher-supervised `caffeinate -s` now; `off` stops it.
@@ -1758,8 +1750,7 @@ macOS holds a `-s` assertion only on AC power, so unplugging lets the Mac sleep 
 its own settings say. The choice survives a restart: the launcher restarts
 `awake` with the clankie service, so [`autostart`](#service-lifecycle)
 brings it back at login. It never runs `pmset` with anything but `-g` and never
-changes a power setting. Local only; hosted mode and non-macOS hosts refuse
-`on`. The console has the same command as `/awake [on|off]`.
+changes a power setting. Non-macOS hosts refuse `on`. The console has the same command as `/awake [on|off]`.
 
 ```json
 {
@@ -1921,7 +1912,7 @@ enabled delivery reference, otherwise `off`. This is the host's registration
 state, not proof that Apple delivered a notification. JSON includes the optional
 `push` object with `registrationId`, `sequence`, and `enabled`; disabled records
 retain their last version. The phone authorizes delivery and controls notification
-permission. The hosted gateway holds the APNs signing key and delivery registrations.
+permission. The public gateway holds the APNs signing key and delivery registrations.
 
 ### `devices revoke <id> [--json]`
 
@@ -2231,8 +2222,7 @@ native sends retain their original receipt and never fall back to a second send.
 
 The owner's paired devices read the same projection with encrypted dispatch
 `POST /operator/v1/dispatch`, body `{ "op": "lead_chats", "schemaVersion": 1 }`.
-Hosted devices use their existing `/v1/hosted/operator` wrapper. The protocol
-client exposes optional `leadChats()`; existing operations and old devices are
+The protocol client exposes optional `leadChats()`; existing operations and old devices are
 unchanged. The response has `op: "lead_chats"`, `schemaVersion: 1` and `result`:
 
 ```json
@@ -2248,8 +2238,8 @@ Each chat has `conversationId`, `title`, `projects: [{id, name}]`, `workspace`,
 `@clankie/protocol`. An unavailable observation returns
 `{outcome: "unavailable", message}`; it is distinct from an empty ready roster.
 
-Only active owner-paired devices with `terminalControl` can read it. Hosted
-visitor, guest and support devices are refused, as are operator/captain bearer
+Only active owner-paired devices with `terminalControl` can read it. Visitor,
+guest and support devices are refused, as are operator/captain bearer
 tokens and Discord. Denial is HTTP 403 `{error: "owner_device_required"}`.
 Device identity, grants and revocation are rechecked before releasing a read.
 
@@ -2428,9 +2418,7 @@ accounts (request, role or fleet) and owner holds always win.
 
 The local Pi `default` profile uses the same report and holds. It is usable only
 when the native adapter is enabled, its pinned files and executable verify, and
-the worker has a configured authenticated model. Managed bodies derive that
-model from their existing included/customer provider route; no owner account
-setup is needed. On owner-run bodies, the opt-in is
+the worker has a configured authenticated model. The opt-in is
 `CLANKIE_PI_NATIVE_ENABLED=1` in the service environment, followed by an
 owner-authorized service restart, for example
 `CLANKIE_PI_NATIVE_ENABLED=1 clankie restart`; the disabled report names that
@@ -2684,8 +2672,7 @@ of the last real exchange, re-checked when older than a minute: `connected`,
 the stored password (or the Clankie account sign-in lapsed), or `unavailable`
 when it could not be reached. The mailbox is his Clankie address on Clankie's
 mail service ([ADR 0242](adr/0242-every-clankie-has-a-mailbox-we-run.md)), or
-the owner's own IMAP/SMTP server. A hosted body has the Clankie address with no
-setup. On a self-hosted install signed in to a Clankie account,
+the owner's own IMAP/SMTP server. On an install signed in to a Clankie account,
 `accounts connect email` (or `/connect email` → Clankie mailbox, or the app's
 Connect Email) chooses it in one step through `POST /v1/accounts/email/connect`
 and returns the row. It asks the mail service first: without a Clankie account,
@@ -2758,20 +2745,16 @@ Changing the active app identity requires new worker grants. Setup and scope:
 reads or writes the public OAuth client settings
 (`oauthApps` in `settings.json`); they apply without a restart.
 `CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
-`CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them, which is how a hosted body
-is configured. An owner-run self-hosted body may revoke its own GitHub token
-using its own OAuth app's secret as broker entry `github-oauth-app`.
-Explicit owner provisioning on that self-hosted body uses
+`CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them. A body may revoke its own
+GitHub token using its own OAuth app's secret as broker entry `github-oauth-app`.
+Explicit owner provisioning uses
 `accounts apps github-secret --client-id ID --secret-stdin`; it stores the secret
-only in the broker and returns a closed outcome. It requires operator access
-and refuses hosted bodies. Clankie's shared developer secret is never delivered
-to customer bodies. Hosted GitHub disconnect removes local access and returns
-the GitHub permission-management URL with `revoked: false`. Self-hosted
-revocation deletes only the selected token, preserving other body tokens.
-Hosted public app
-IDs and the exact gateway `/account/connections/callback` arrive through body
-bootstrap; developer secrets are excluded. Provider app registration and terms
-acceptance remain owner actions.
+only in the broker and returns a closed outcome. It requires operator access.
+Clankie's shared developer secret is never delivered to an owner's body.
+Revocation deletes only the selected token, preserving other body tokens.
+Without the app's secret, GitHub disconnect removes local access and returns
+the GitHub permission-management URL with `revoked: false`. Provider app
+registration and terms acceptance remain owner actions.
 
 For a local development Google web OAuth client, set its public client ID and
 registered redirect URI through `accounts apps set`. The callback path is
@@ -2779,7 +2762,7 @@ registered redirect URI through `accounts apps set`. The callback path is
 loopback HTTP development. Store the matching developer secret with
 `accounts apps google-secret --client-id ID --secret-stdin`. This is a local
 operator command, writes broker entry `google-oauth-app` with its client ID,
-and refuses hosted bodies and remote transports. The secret never enters argv,
+and refuses remote transports. The secret never enters argv,
 environment variables, settings, output or device responses. Google public
 settings also support `CLANKIE_GOOGLE_OAUTH_CLIENT_ID` and
 `CLANKIE_GOOGLE_OAUTH_REDIRECT_URI` overrides; neither variable accepts a secret.
@@ -2830,7 +2813,7 @@ retained model. If its speech output was native OpenAI, select that stack again
 with `/voice`; returning from Anthropic to OpenAI preserves ElevenLabs output.
 Then use the same restart after arranging an interruption of active calls.
 Environment overrides still win: check `effectiveVoice` before restarting.
-This command is local-only; hosted mode refuses it. See the
+This command is local-only. See the
 [voice operating guide](../apps/discord-bridge/README.md) for verification limits.
 
 ### `work sync --json COMMAND`
@@ -3460,8 +3443,7 @@ SQLite are not one atomic commit.
 The manual `apps/clankie/test/evidence-storage.integration.test.ts` check exercises
 real SQLite/files, production credential-backed authentication against a real
 disposable file broker, production SDK/owned loopback MinIO and actual HTTP. It is
-fixture destination proof, not owner activation, full service startup, tenant
-credential delivery or real-hosted acceptance.
+fixture destination proof, not owner activation or full service startup.
 
 Moves raw evidence out of git into Clankie's evidence store
 ([ADR 0258](adr/0258-evidence-lives-in-the-evidence-store.md)). Git keeps each
@@ -3489,7 +3471,7 @@ and `Cache-Control: no-store`, with separate `configured` and `active` values an
 `restartRequired`. Saving does not apply, restart or activate storage. Current
 writes keep the captured adapter; historical reads and pending receipts retain
 recorded destinations. A separately authorized startup may use the saved config;
-full startup-selection and hosted proof remain open. Invalid existing settings
+full startup-selection remains open. Invalid existing settings
 fail closed with `evidence_settings_invalid` (503), preserving the file bytes;
 these controls do not accept unknown fields or infer legacy locations.
 
@@ -3499,22 +3481,9 @@ bearer. The relay validates the canonical update and snapshot schemas. Saving
 changes only `configured`; `active` and `restartRequired` report the captured
 backend until a separately authorized restart.
 
-Self-hosted S3 uses the standard AWS SDK credential provider chain; credentials
-are never settings. Managed evidence has an optional default-off runtime-provider
-hook: active and historical adapters require an exact scoped broker grant and
-refuse without it. It does not expose a credential-entry command or enable a
-tenant. The private issuer is injectable and unmounted; production transport,
-STS, startup and activation are not provided by the offline slice. Existing
-settings, TUI and device authority are unchanged. Records and receipts remain
-in SQLite, and switching backends does not migrate blobs.
-
-Managed sessions renew on demand at half-life and are capped at 900 seconds and
-host identity expiry. Restart requires fresh admission. Invalid or denied replies
-invalidate the cache; transient failure may retain a previously admitted session
-only with more than 60 seconds left. Signed GETs are capped at session expiry
-and 15 minutes. Revocation does not end an already-started direct-S3 transfer.
-Hosted proof, bucket/IAM/lifecycle/backups, startup and owner activation remain
-gated separately; see [ADR 0297](adr/0297-hosted-evidence-uses-renewable-tenant-credentials.md).
+S3 uses the standard AWS SDK credential provider chain; credentials are never
+settings. Records and receipts remain in SQLite, and switching backends does
+not migrate blobs.
 
 The manual `evidence-credentials-s3.integration.test.ts` offline check starts an
 owned MinIO child inside its governed test lifetime, with scratch HOME/XDG and
@@ -3535,7 +3504,7 @@ private JSON binding (`endpoint`, `accessKeyId`, `secretAccessKey`), then run th
 named test through `clankie heavy -- pnpm exec vitest run`. Without the binding
 the check is skipped; it never starts infrastructure during ordinary CI. Stop
 the owned server and remove its credentials/data afterward. This local check
-does not establish hosted acceptance or exercise AWS credential renewal.
+does not exercise AWS credentials.
 
 Uploads still use the service's signed PUT and JSON receipt API. The service
 checks the full size and SHA256 before uploading to S3. Fetch resolves recorded
@@ -3634,8 +3603,7 @@ routes. The store accepts a blob only after its sha256 and size match the
 upload. Self-hosted blobs live under `~/.clankie/evidence/blobs`, keyed by
 sha256, with records in `~/.clankie/evidence/evidence.sqlite`. `clankie doctor`
 reports both as `evidenceStore`. The operator seat's `clankie mcp` exposes the
-same operations as `evidence_push`, `evidence_fetch` and `evidence_list`. Hosted
-Clankie does not offer these commands yet.
+same operations as `evidence_push`, `evidence_fetch` and `evidence_list`.
 
 `pnpm testing:view [docs/testing/FOLDER] [PORT]` serves the archive locally
 (default port 4173). Open `/?recent` for the day-grouped feed, or
@@ -3752,7 +3720,7 @@ disconnect. See [Minecraft setup and limitations](minecraft.md).
 
 ### `model [status]`
 
-Paired apps, including hosted bodies without a terminal, use the same catalog,
+Paired apps use the same catalog,
 credential broker and captain selection through the [owner model-key API](model-keys.md).
 
 Captain model and every config-declared provider. JSON:
@@ -3834,7 +3802,7 @@ Select an eligible preference through the running service's authenticated
 contain slashes). Changes apply to new turns; restore the previous ref with the
 same command. JSON: `{ "ok": true, "model": "xai/grok-4.6", "restart": "applies to new turns" }`.
 `model status` includes the shared `settings` response with actual identity,
-funding, availability and automatic routing targets. Missing hosted identity
+funding, availability and automatic routing targets. Missing identity
 remains unknown. See [model settings](model-keys.md) for compatibility and open
 provider/credit policy.
 
@@ -3861,7 +3829,7 @@ start. Provider/transport errors return fixed codes, without raw error text.
 Claude subscription sign-in remains unsupported. To talk to Clankie on the owner's
 Claude plan, use [`clankie claude`](#seat-commands), which runs Claude Code under
 its own sign-in. See [model keys](model-keys.md)
-for the API, hosted policy and first-run Mac key-entry guard.
+for the API and first-run Mac key-entry guard.
 
 ### `model refresh`
 
@@ -3957,7 +3925,7 @@ escalation is on and `--model` names a model other than the captain model, but
 only when he calls `escalate`: never on the turn limit or a provider error, since
 long work is normal there. This works without a routine model. Effort is per
 model ref, so `clankie effort set LEVEL --model REF` sets the routine model's
-effort. Hosted bodies receive routing from the fleet at start. The console's
+effort. The console's
 `/routing` takes the same arguments.
 
 These compatibility controls configure eligible targets; Clankie makes the
@@ -3971,7 +3939,7 @@ selected targets are intent, never proof of the served model. See
 ### `model compaction [status]` / `model compaction set TOKENS` / `model compaction default`
 
 When a long captain session compacts ([ADR 0195](adr/0195-hosted-requests-fit-the-model-proxy.md)).
-Unset, included usage (the hosted `clankie/*` models) compacts at 250,000 tokens
+Unset, included usage (the `clankie/*` models) compacts at 250,000 tokens
 and every other model at its own context window. Set, the threshold applies to
 every model (at least 16,384 tokens, Pi's reserve). A live session picks the
 change up on its next turn. JSON:
@@ -4053,7 +4021,7 @@ is ignored. Read sheets left to right, then top to bottom. Appearance loads firs
 then vibe, filename-sorted: eight source slots and eight references total. Stills
 fit within a 1024-pixel edge, sheets within 2000×800; both cap base64 at 128 KiB. The TUI `/persona` → Persona images
 uses the same writer. The authenticated `/v1/operator/persona` API accepts
-`imagesDir`; an empty string clears it. Hosted paths name folders on the body.
+`imagesDir`; an empty string clears it.
 See [persona images](persona-images.md) for caching, voice, model support and A/B evaluation.
 
 ### `persona set [flags]`
@@ -4240,8 +4208,8 @@ computer and browser work
 which re-probes on every read: `codex login status` and `codex features list`
 plus Codex's plugin config for Codex computer use and Chrome, and
 `claude auth status` plus `~/.claude.json` and Chrome's native host for Claude
-in Chrome. Nothing is started or driven. JSON contains `detected` (false on a
-hosted body, where owner-machine probes are not configured), `harnesses` (each
+in Chrome. Nothing is started or driven. JSON contains `detected` (false when
+owner-machine probes are not configured), `harnesses` (each
 with `harness`, `signedIn`, `surfaces` of `desktop` and/or `chrome`,
 `chromeNeedsHireFlag`, and `missing` saying what the owner does when it is not
 ready), optional `platform` and fleet `machineId`, and `harnessDelegation`.
@@ -4973,8 +4941,7 @@ wake.
 First-run `/setup` explicitly asks for Off, Low, High or Full using the same
 descriptions and API. The choice is confirmed before model setup can become
 ready; cancelling leaves the saved leaves untouched and does not advance setup.
-A ready console's `/setup` also asks before pairing or hiring. The hosted
-console's `/setup` opens this choice before its settings menu.
+A ready console's `/setup` also asks before pairing or hiring.
 
 <a id="auto-switch"></a>
 
@@ -5181,7 +5148,7 @@ worker, peer, room or tool can set it. The command prints
 `{"ok":true,"enabled":…,"description":…}`, plus `warning` while on and
 `seatsOnOtherMode` when the service could observe its seats. In the console,
 `/maximum-trust-mode` opens the switch, and `/maximum-trust-mode on|off|status`
-sets or reads it; the hosted console lists it under `/settings`.
+sets or reads it.
 Settings presents Maximum trust as the top autonomy choice. The existing CLI switch
 and its stored value remain available. API clients can request
 `GET /v1/operator/fleet-settings?includeMaximumTrust=true`; the returned revision
@@ -5298,24 +5265,20 @@ clankie fleet set --commit lead --push lead --release owner
 ### `transfer`
 
 ```bash
-clankie transfer --to hosted [--transfer-id UUID] [--replace]
-clankie transfer --from hosted --to local --destination-machine JOIN_ID
 clankie transfer --to URL --to-token-file FILE [--transfer-id UUID] [--replace]
 clankie transfer --from URL --from-token-file FILE --to local --destination-machine JOIN_ID
-clankie transfer status [--at hosted | --at URL --token-file FILE]
+clankie transfer status [--at URL --token-file FILE]
 clankie transfer rebind --transfer-id UUID --machine JOIN_ID [--at URL --token-file FILE]
 clankie transfer abort --transfer-id UUID --to URL --to-token-file FILE
 clankie transfer reclaim --force --reason TEXT
 ```
 
-Moves Clankie to another body and back. One body holds him at a time
-([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). `local` (the default
-`--from`) is this machine's service with its operator credential. `hosted` is
-the managed body this terminal is signed in to (`clankie connect hosted`). It is
-reached as the paired hosted device through the gateway's encrypted envelope, so
-no token leaves the Mac. Any other body is a URL plus a file holding that body's
-operator bearer; tokens are never command arguments. Through the gateway, a
-paired device needs Take Control. Supervise is refused.
+Moves Clankie to another of the owner's machines and back. One body holds him
+at a time ([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). `local`
+(the default `--from`) is this machine's service with its operator credential.
+Any other body is a URL plus a file holding that body's operator bearer; tokens
+are never command arguments. Through the gateway, a paired device needs Take
+Control. Supervise is refused.
 
 Bundles move in chunks that fit the envelope: 384 KiB per upload request and
 4 MiB per download response. The destination verifies the whole bundle's size
@@ -5327,8 +5290,8 @@ destination to restart as Clankie. Only then is the source released.
 
 - **Freeze** waits for no running turn, voice stay or activity share. Worker
   panes keep running.
-- **Restarts** need a supervisor (autostart's recover pass or the hosted
-  launcher). Without one, the command says which body to `clankie start`.
+- **Restarts** need a supervisor (autostart's recover pass or the Linux
+  image's launcher). Without one, the command says which body to `clankie start`.
 
 Each step is repeatable: rerun with the printed `--transfer-id` after any failure.
 The source stays frozen until the destination reports itself active with the same
@@ -5377,18 +5340,15 @@ that admits only:
 
 - `/health`;
 - the transfer routes;
-- the hosted-operator envelope, whose inner request is gated again;
 - device session refresh.
 
-Its gateway connection, hosted security and device authority are the active
-body's. So a frozen managed body can export its bundle and be released by the
-owner's Take Control device, and `--from hosted` brings Clankie back. A frozen
-body builds its bundle at boot, before anything else opens. `dormant` in status
+Its gateway connection and device authority are the active body's, so the
+owner's Take Control device can still reach a frozen body. A frozen body builds its bundle at boot, before anything else opens. `dormant` in status
 means the process booted dormant: a body that froze itself and is still shutting
 down reports `frozen` but not dormant, so nothing exports from it. The real-model
 proof between two private bodies is `apps/clankie/scripts/prove-body-transfer.ts`
-([evidence](testing/2026-10-21-vuh-2577-body-transfer/README.md)). The hosted CLI
-and gateway proofs are in
+([evidence](testing/2026-10-21-vuh-2577-body-transfer/README.md)). The gateway
+proofs are in
 [VUH-2582 evidence](testing/2026-10-21-vuh-2582-transfer-gateway/README.md) and
 [VUH-2583 evidence](testing/2026-10-21-vuh-2583-dormant-doorway/README.md).
 
@@ -6896,7 +6856,7 @@ Local native workers on Linux use the same kernel-backed admission route as
 Darwin. Linux v1 requires the initial host PID namespace and genuine, visible
 procfs; containers refuse with the fixed reason `unsupported_pid_namespace`.
 Read that reason here or in doctor instead of supplying a PID or token to bypass
-the refusal. Hosted container admission remains a separate follow-up, VUH-2120.
+the refusal. Container admission remains a separate follow-up, VUH-2120.
 See [the native proof boundary](../integrations/fleet-proof/README.md#linux-host-boundary).
 
 Read operator-only `GET /v1/fleet/metrics` for proof attempts and refusals, worker
@@ -7180,7 +7140,7 @@ card. An unchanged hook turn can print nothing, which is not an error.
 
 ### `support [list | create read-state|shell --hours 1..72 --ref REFERENCE | revoke ID | offer ID]`
 
-Manage a customer-issued support grant through the owner-authenticated body API.
+Manage an owner-issued support grant through the owner-authenticated body API.
 `list` (the default) returns active and terminal grants. `create` requires a
 support reference, defaults to 24 hours and accepts at most 72 hours. Read state
 permits a support device to inspect conversation history and Clankie state;
@@ -7190,16 +7150,13 @@ commands and the content those commands can read during the grant window.
 `offer ID` requires a Read state grant and returns a short-lived, read-only
 pairing offer attached to it. The resulting device loses access on grant expiry
 or revocation. Shell grants refuse pairing with
-`support_pairing_requires_read_state` and authorize only the hosted Systems
-Manager `StartSession` path. `revoke ID`
-closes the grant. Responses are JSON. This command requires the operator
+`support_pairing_requires_read_state`. `revoke ID` closes the grant. Responses are JSON. This command requires the operator
 credential; a captain bearer cannot issue support access. `/support` exposes
-the same command in the console. The hosted app and web account page provide
-the customer controls without requiring a CLI.
+the same command in the console.
 
 ### `telemetry ship --spool DIR --cursor FILE --log-group NAME [--audit-log-group NAME] [--once] [--interval SECONDS]`
 
-Hosted infrastructure only. Ships a body's metadata telemetry spool (what
+For a Linux body run on an EC2 host. Ships a body's metadata telemetry spool (what
 `CLANKIE_BODY_TELEMETRY_DIR` collects) to a CloudWatch Logs group, stream
 `<tenantId>/<instanceId>`, each event at its own time. It must run on the EC2
 host with instance metadata reachable, not inside the body: the tenant and
@@ -7209,8 +7166,8 @@ anything else is counted as `dropped`. The cursor file records how far each
 spool file has shipped and advances only after CloudWatch accepts.
 
 Support grants and accesses use the mandatory `support-audit/` child spool,
-independent of diagnostic consent and diagnostic pruning. Hosted installations
-pass `--audit-log-group clankie-obs-<stage>-audit`: each support record goes to
+independent of diagnostic consent and diagnostic pruning. With
+`--audit-log-group NAME`, each support record goes to
 both the body and audit groups, with a separate acknowledgement cursor for
 each destination. A failed destination retries without suppressing the other.
 The host needs a writable mount for the support child directory so it can
@@ -7222,7 +7179,7 @@ ingestion time and the payload retains the original `atMs`.
 `--interval` is 10–3600 seconds (default 60). Without `--once` it runs until
 `SIGTERM`, printing `{"ok":true,"shipped":N,"dropped":N,"files":N}` per pass
 and `{"ok":false,"error":…}` on stderr when a pass fails; a failed pass is
-retried from the same cursor. See [hosted bodies](../infra/hosted/README.md#body-telemetry).
+retried from the same cursor. See [body telemetry](../infra/hosted/README.md#body-telemetry).
 
 <a id="skill-setup"></a>
 
@@ -8318,8 +8275,7 @@ Pending asks and uncertain native claims are protected; creation refuses at
 `input_get`, `input_answer` and
 `input_cancel` keep their existing immutable target. All four operations require
 an authenticated operator or an active device with `terminalControl`; a captain
-bearer alone cannot read the owner mailbox or answer. Hosted devices use the same
-contract without additional owner setup. The app mailbox consumes this API for
+bearer alone cannot read the owner mailbox or answer. The app mailbox consumes this API for
 owner answers and informational updates.
 
 Native seat attachment and polling leave unanswered questions pending in their
@@ -8359,8 +8315,7 @@ clankie conversations dismiss-update UPDATE_UUID
 
 TUI: `/updates list`, `/updates list unread`, `/updates read UUID`, and
 `/updates dismiss UUID`. Cards show title/body, source, optional worker, issue,
-links/media, ID/time and read state. The same commands work in the hosted
-console through its authenticated owner transport.
+links/media, ID/time and read state.
 
 HTTP uses `POST /operator/v1/dispatch`, `schemaVersion: 1`, and
 `owner_update_list` with optional `conversationId` and `state`
@@ -8851,53 +8806,6 @@ Removing a binding affects future reconsiderations, not recorded history. See
 `discord` is the stored value. `effectiveDiscord` includes environment
 overrides, whose variable names appear in `overriddenByEnvironment`.
 
-### `discord official [status|on|off]`
-
-The free official Clankie bot through the signed-in Clankie account
-(VUH-1766). The command calls the running service's `/v1/discord/official`
-route, the same one the app uses, so on and off take effect without a restart.
-`on` requires `clankie remote-access on`, refuses when this machine's own bot is
-the official application, sets `discord.officialBotEnabled` and registers an
-ingress key with the account; the owner then chooses Add to Discord at
-`installUrl`. `status` returns the setting, whether this service is
-`running` the route, and the fleet's report (`registered`, `discord`, `usage`
-per named limit, and `blocked` with its scope and reason). `off` clears the
-setting, stops the route and removes it from the account, which disconnects the
-server.
-
-```json
-{
-  "ok": true,
-  "schemaVersion": 1,
-  "enabled": true,
-  "running": true,
-  "signedIn": true,
-  "installUrl": "https://api.clankie.bot/fleet/account/?discord=self-hosted",
-  "official": {
-    "registered": true,
-    "installUrl": "https://api.clankie.bot/fleet/account/?discord=self-hosted",
-    "discord": { "connected": true, "guildName": "Studio" },
-    "usage": [{ "limit": "account_messages_per_day", "used": 12, "max": 500, "resetsAtMs": 1791417600000 }]
-  }
-}
-```
-
-`GET /v1/discord/official` (observe access) returns that status without `ok`;
-`POST /v1/discord/official` with `{"enabled": true|false}` (operator access,
-Take Control in the app) changes it and returns the new status. A refused `on`
-changes nothing and answers 409 `{error, detail}` with `not_signed_in` or
-`official_application_is_local_bot`, or 502 `fleet_unavailable`. The app reads
-through the encrypted gateway to the service's observe-authorized route and
-writes through the hosted operator bridge. A hosted body answers 404
-`official_bot_unavailable`; it already uses the official bot. Contracts are in
-`@clankie/protocol/official-discord`.
-
-When the account report cannot be read, `fleetError` and `next` explain the
-unavailable report. The local `enabled`/`running` values remain local facts,
-not proof that the bot is connected to a server. Refresh `status` after fixing
-account availability; a refused `on` changes no settings, and `off` can stop the
-local route while the report is unavailable.
-
 ### `discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]`
 
 Read the names, IDs and kinds the active Discord account can see. The default
@@ -8907,8 +8815,6 @@ most 200 entries (default 100); pass the returned `nextCursor` as `--after`.
 failed read from a complete empty list. People and channel/thread coverage may
 be partial. No account is connected or configured by this command. Requires
 operator authentication. See [the directory contract](discord-rooms.md#discord-directory-for-settings-pickers).
-Hosted bodies obtain this view from the managed provider, restricted to their
-bound server and current installation, without a local Discord control port.
 
 ### `discord definition`
 
@@ -8965,15 +8871,8 @@ text, thread and voice grants. Channel overwrites still control Participant's
 actual access. Reading setup and saving controls never post to Discord.
 
 Each control saves through the authenticated host API. A stale edit fails rather
-than overwriting someone else's changes. Hosted consoles and CLI use their
-existing encrypted transport. Raw local fields and credentials are not written
-through a hosted connection. Body settings retain their existing restart
-requirement; a save does not claim the running gateway has applied it.
-Managed edge policy synchronization is reported in `managedPolicy`: a saved
-body revision can be pending while the edge retries. Only `synced` identifies
-the revision the edge acknowledged. The hosted dashboard edits the same role
-model using a Discord-only signed owner bridge; disconnect/reinstall revokes
-that account connection grant and refuses later admissions.
+than overwriting someone else's changes. Body settings retain their existing
+restart requirement; a save does not claim the running gateway has applied it.
 
 The explicit diagnostic `clankie discord setup test-post --channel general`
 remains available. It requires settings-level operator authority, a current
@@ -9029,14 +8928,14 @@ values.
 @mention, a DM, a reply to him or `/clankie ask`; writing his name without an
 @mention does not count), `name` (also his name or an alias in plain text), or
 `any` (every admitted message; he decides whether to answer). `clear
---wake-trigger` restores the body's default: self-hosted follows the persona
-`--reply-policy` (`all` → `any`, `addressed` → `name`), hosted uses `mention`.
+--wake-trigger` restores the body's default, which follows the persona
+`--reply-policy` (`all` → `any`, `addressed` → `name`).
 `addressed` is the earlier spelling of `mention` and is saved as `mention`.
 An explicit `mention` or `name` trigger also applies after he replies: ordinary
 follow-ups do not wake him through the persona's live-message window. Clearing
-the trigger preserves that window and the existing self-hosted reply policy.
-`ambient-channel-ids` (hosted and official bot only) lists channels whose recent
-chat is kept briefly, encrypted, as context for his next wake; empty means none.
+the trigger preserves that window and the existing reply policy.
+`ambient-channel-ids` is still accepted but has no effect: only the retired
+hosted Discord ingress buffered channel context.
 How readily he joins in once something reaches him is the persona
 `--chattiness`. In the TUI, `/discord` → **What wakes him / how much he talks**
 edits the wake trigger, chattiness and reply policy together.
@@ -9235,7 +9134,7 @@ restarting or reconnecting never replays the request.
 | `all`           | every service, in order              | (default)                                                              |
 | `clankie`       | captain + HTTP API on :4310          | `captain`, `captain-eve`, `eve`, `control-plane`, `controlplane`, `cp` |
 | `relay`         | remote operator relay                | `app-relay`, `phone`                                                   |
-| `discord`       | official bot                         | `discord-bridge`, `bridge`                                             |
+| `discord`       | Discord bot                          | `discord-bridge`, `bridge`                                             |
 | `user-session`  | personal-lab Discord body            | `discord-user-session`, `lab`                                          |
 | `activity`      | watch-me-play surface                | `watch`, `viewer`                                                      |
 | `tunnel`        | cloudflared in front of the activity | `cloudflared`                                                          |
@@ -9281,16 +9180,12 @@ servers are not supervised.
 `/auth anthropic` opens API-key entry directly. Clankie no longer offers Claude
 subscription login or refresh; replace any legacy token with an Anthropic API
 key (or remove it through `/auth`). Doctor/setup do not count that legacy OAuth
-entry as usable authentication. Self-hosted native Claude Code and Codex retain
+entry as usable authentication. Native Claude Code and Codex retain
 their own login, and [`clankie claude`](#seat-commands) seats Clankie in Claude
 Code on that login.
 
-Managed Clankie uses AI credits only. Model and native subscription sign-in,
-customer-key entry and customer-model selection are refused with an explanatory
-message. Local Claude/Codex hires are also refused until a credit-backed native
-adapter exists; hire those harnesses on linked self-hosted hardware instead.
-Local/self-hosted ChatGPT sign-in and supported API-key model paths remain
-available. Existing credential stores are preserved. See
+ChatGPT sign-in and supported API-key model paths are available. Existing
+credential stores are preserved. See
 [ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md).
 
 One credential store backs both surfaces: `/auth <providerId>` writes it, and
@@ -9349,69 +9244,32 @@ Revert with `clankie model set <provider>/<model>` and another
 
 Managed pi workers use OpenRouter `moonshotai/kimi-k3`; the runtime harness selector chooses that explicit model instead of inheriting pi’s personal default.
 
-## Local and hosted connection modes
+## Remote access and account sign-in
 
-A fresh `clankie` launch offers **This Mac** or a hosted connection before starting
-a service. Existing installations remain local. Hosted startup never starts a
-local body. Its footer identifies **Hosted · <machine>** and reports Connected,
-Asleep/Waking, Sign-in expired, Access revoked, or Unavailable.
+Clankie runs only on the owner's own machines
+([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)). The console
+and the CLI always talk to this machine's service; the phone reaches it through
+the public gateway's encrypted doorway or directly on the LAN.
 
 ```sh
 clankie login
 clankie login --email you@example.com --code-stdin
 clankie whoami
-clankie conversations list
-clankie --chat global-default
-clankie logout
+clankie remote-access off
 ```
 
-`login` is the one account sign-in (email code). If the account has a hosted
-Clankie it lists the account's hosted machines and pairs a revocable device;
-otherwise it signs **this Mac** in for remote access, which is also how a
-signed-out Mac signs back in (restart the captain afterwards; the JSON output
-says so). `connect hosted` asks for a hosted body specifically, so an account
-without one gets an explanation instead of a doorway. `logout` only forgets the
-hosted client; on a Mac that is not a hosted client it changes nothing and
-points at `clankie remote-access off`. The current fleet model permits one machine per
-account, so it is selected automatically. The list contract supports a picker
-if that changes; headless selection uses `--machine ID`. `--url ORIGIN` selects
-a compatible deployment (HTTPS, or loopback HTTP for development). Account
-credentials exist only during login; the broker retains the device session,
-encryption material and a separate device wake key. `whoami` shows the selected
-machine and checks access without revealing secrets. `connect hosted` and
-`disconnect` remain aliases for `login` and `logout`.
+`login` is the one account sign-in (email code). It signs **this Mac** in for
+remote access, which is also how a signed-out Mac signs back in; restart the
+captain afterwards (the JSON output says so). Headless sign-in needs
+`--email EMAIL --code-stdin`. `--url ORIGIN` selects a compatible deployment
+(HTTPS, or loopback HTTP for development). Account credentials exist only
+during login; the broker keeps the doorway's host credential and encryption
+material. `whoami` always reports **This Mac**. `logout` and `disconnect` change
+nothing and point at `clankie remote-access off`. `clankie connect` explains that
+Clankie runs on the owner's own machine and changes nothing.
 
-`/connection`, `/settings` and local `/setup` expose the mode choice. Reopen the
-console after changing modes. Hosted `/conversation [ID]` selects a retained
-thread; `/reconnect` retries the saved selection. `/persona`, `/model set
-provider/model`, `/keys [PROVIDER]` and `/connect github|linear` change the
-hosted body. `/fleet` and `/terminal` show its fleet and terminal catalog.
-
-Headless `conversations`, `send`, `model`, `persona`, `accounts`, `fleet`,
-`terminal` and `keys` address the selected machine. `keys set PROVIDER
---key-stdin` accepts a secret only on stdin. `fleet spawn|move|close --json-stdin`
-and `terminal tail|control|input --json-stdin` accept the corresponding protocol
-request fields from stdin; the verb fixes the operation. Terminal input keeps
-the existing exclusive-control lease validation. Unknown operations fail closed.
-
-The single hosted-device authority policy allows chat, fleet, terminal, model,
-keys, persona and connections. **Restart, reset and deprovision require the
-account page/control plane**, including when attempted through the old device
-relay. The API policy does not inspect shell commands typed under terminal
-control. Local lifecycle, autostart, sockets, native harness commands
-(`claude[N]`, `codex[N]`, `opencode`), `mcp` and shell escapes refuse in hosted mode.
-
-Closing the client leaves accepted work running. `logout` forgets this Mac's
-device credential and wake key and selects This Mac for the next launch;
-account-side device revocation invalidates a lost Mac. Expired or revoked
-access requires `login`. After pairing, an asleep host is woken using the app's
-device-signed P-256 challenge protocol; status shows the wait and wake failures.
-First login can wake the selected machine using the signed-in account. A legacy
-body without wake registration needs account-page wake and a fresh login.
-There is no local fallback.
-
-`/remote-access` means **Remote access for this Mac**, for self-hosted use only;
-`/gateway` remains its alias. When the Mac is signed out, its menu opens on
+`/remote-access` means **Remote access for this Mac**; `/gateway` remains its
+alias. When the Mac is signed out, its menu opens on
 **Sign this Mac back in** (email + one-time code) and its status text starts with
 that step; the same menu reads **Sign this Mac in to enable remote access** before
 first setup. Headless: `clankie remote-access [status]`, `on [--email EMAIL
@@ -9421,7 +9279,7 @@ and `direct --control-plane-url URL --relay-url URL`; `gateway` and the older
 
 `clankie status` also carries what `whoami` reports (`connection`), the live
 `doorway`, and one `nextStep` line for phone access; `clankie doctor` carries the
-same `nextStep`. `whoami` keeps working. In the console, `/login` is the account
+same `nextStep`. In the console, `/login` is the account
 sign-in (it skips the `/remote-access` menu; the model-provider `/auth` no longer
 answers to `/login`), `/pair` adds a sign-in note when a code lacks the gateway
 route because remote access is signed out, and `/devices` lists or revokes
@@ -9431,9 +9289,8 @@ paired devices and opens an empty list on `/pair`.
 refuses an offer because remote access is signed out, it exits 1 with "No pairing
 code was made" and names `/remote-access` → **Sign this Mac back in** as the fix
 (JSON `status: "unavailable"`, same text in `error`).
-It detects an existing hosted tenant and offers connection instead of creating
-another doorway. Matching fleet, body and relay deployments plus a real
-Mac/phone rehearsal remain separate from source verification.
+Matching gateway and relay deployments plus a real Mac/phone rehearsal remain
+separate from source verification.
 
 ## Bundled working skills
 
@@ -9599,10 +9456,8 @@ The owner API exposes `GET /v1/operator/projects` and revision-guarded
 
 `clankie harness login [status | accounts | claude|codex [--add [LABEL] | --profile LABEL] | remove claude|codex LABEL [--yes] | cancel SESSION_ID]` signs the
 Claude Code or Codex worker harness into the owner's own account with that
-harness's official login on self-hosted bodies ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
-Managed bodies return an empty harness list and refuse login with
-`managed_credits_only` and an explanatory message; use AI credits there.
-On self-hosted bodies, `status` prints JSON for both harnesses (`installed`, `signedIn`, `method`).
+harness's official login ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
+`status` prints JSON for both harnesses (`installed`, `signedIn`, `method`).
 `codex` prints a link and one-time code on stderr and waits for the device
 sign-in; `claude` prints the authorization link and prompts for the code the
 page shows (it needs a terminal; a wrong code prompts again). Stdout gets only
@@ -9839,7 +9694,7 @@ unanswered owner ask appears as `pendingOwnerItem`, with the conversation
 and question IDs needed to open it. `since` is a source start timestamp, or null
 when that source has no known start. An unreachable service has no mood; clients
 show that connection failure separately. The same read passes through the relay
-and hosted paired-device authority seam.
+and paired-device authority seam.
 
 The opt-in `includeFace: true` read adds an optional `face` field that drives
 the desktop pet's screen independently of his
@@ -9929,16 +9784,14 @@ stop evidence; fixtures do not prove native interrupt behavior. Windows
 setup is in [desktop control](desktop-control.md#windows-observation-host).
 A host without an attached adapter returns `computer_body_unavailable`.
 The attached native harness supplies its own app grants and turn stops; no second
-reasoning loop starts. Hosted displays are not implemented. [Desktop control](desktop-control.md#shared-computer-body)
+reasoning loop starts. [Desktop control](desktop-control.md#shared-computer-body)
 explains capture freshness, coordinate mapping and the provider's recovery
 limitation.
 
 ## Activity shares
 
-`clankie share [list | request JSON]` and `/share` control Activity shares on
-the current connection. Local commands use the owner operator bearer; hosted
-commands use the existing encrypted paired-device transport, including the
-hosted console. Requests use `POST /v1/activity/shares`. The typed API client
+`clankie share [list | request JSON]` and `/share` control Activity shares
+with the owner operator bearer. Requests use `POST /v1/activity/shares`. The typed API client
 exposes `activityShares(request)` with the same canonical request/response
 schemas. Output retains the service's session and launch/stop receipt.
 
@@ -9977,21 +9830,9 @@ accept optional `ttlMs` (default 30 minutes, at most two hours). Start and switc
 return `{session,receipt?}`, list returns `{sessions}`, and stop returns
 `{stopped:true,receipt?}`. Use the returned generation on later controls.
 
-A hosted launch/stop receipt reports `outcome:"confirmed"|"refused"|"uncertain"`,
-a request-bound `receiptId`, its exact session, and an invite URL when confirmed.
-An unavailable or lost external reply stays uncertain. Commands never replay an
-uncertain effect; use list and the receipt to reconcile before deciding another
-action. Self-hosted sessions without a configured official launch adapter can
-stream media but do not claim a Discord launch receipt.
+Sessions stream media but do not claim a Discord launch receipt.
 
-The official hosted viewer performs Discord's SDK ready/authorize/authenticate
-handshake and obtains scoped admission from the server. SDK query parameters and
-URL fragments do not choose a tenant or room. Admission/configuration failure
-opens no media socket; there is no anonymous legacy fallback. Audience access is
-revalidated during viewing and revocation is terminal. Hosted customers do not
-configure applications, bot credentials or tunnels.
-
-For local self-hosted delegated viewing, `action:"grant"` returns
+For delegated viewing, `action:"grant"` returns
 `{grant,expiresAt}`. On the configured viewer origin use
 `/#share=SHARE_ID&grant=GRANT`; keep the read-only grant in the fragment and never
 put an operator/producer bearer in a viewer URL. Grants are delegated access,
@@ -10399,7 +10240,7 @@ use `POST /v1/operator/work-tracker` with `action: preview|apply`,
 optional `projectId`, and `selection` on preview/apply. Apply carries the preview's
 `expectedRevision` and `confirmRetainItems: true` for projects. The response
 reports the selection, default, source, connection status and item retention
-policy. It is owner-only, including through the hosted encrypted bridge.
+policy. It is owner-only, including through the encrypted gateway.
 The default affects new projects without an existing saved convention; existing
 repo conventions and owner-reviewed project proposals take precedence.
 The TUI accepts the same review/apply arguments through `/fleet tracker` and

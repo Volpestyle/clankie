@@ -1,10 +1,6 @@
 # Model keys from a paired app
 
-Hosted and self-hosted bodies expose the same owner model setup API. Managed
-bodies expose only credit-funded provider choices and no subscription methods.
-They refuse key entry, validation, removal, subscription interactions and
-customer-model selection with `403 managed_credits_only` and an explanatory
-`message`, preserving existing credentials. Self-hosted setup is unchanged. Use
+Every body exposes the same owner model setup API. Use
 `@clankie/protocol/model-keys` for the schemas and route constants. The catalog
 comes from the same Pi runtime, models.dev fill, configured local providers,
 and enabled/disabled provider policy as the console's `/model` picker. Selection
@@ -72,7 +68,7 @@ publishes no invented rates.
 
 Every route requires the local operator bearer or an active paired device whose
 current grant includes `terminalControl` (Take Control). Chat, steer, terminal
-observation, captain and worker credentials cannot manage keys. Hosted pairing
+observation, captain and worker credentials cannot manage keys. Pairing
 offers Take Control; the app must accept it when completing pairing. Revocation
 takes effect on subsequent requests. All public gateway calls use the existing
 device-to-body encrypted envelope; plaintext application requests are refused.
@@ -189,7 +185,7 @@ On a self-hosted Mac, device key entry (`POST /v1/model-keys/set`) is allowed
 while `/v1/captain/readiness` is false. When readiness is true, including an
 active operator seat, it returns `forbidden` (403). Readiness is checked at the
 serialized credential write, alongside authorization. Operator CLI key
-management keeps its existing authority; managed bodies refuse customer keys. Setup
+management keeps its existing authority. Setup
 writes and model selection share one service lock. Completing `/setup` in the
 console updates the same broker/config that a paired device reads, without a
 restart or an app-owned setup flag.
@@ -208,8 +204,7 @@ Populate providers/methods from `methods` and models from the catalog. Current
 policy permits local ChatGPT browser/device sign-in and SuperGrok device-code
 sign-in on self-hosted bodies. Claude subscription sign-in is removed; on a
 self-hosted Mac, [`clankie claude`](cli.md#seat-commands) seats Clankie in
-Claude Code on the owner's own plan instead. Managed
-bodies refuse all subscription sign-in and customer API keys; use AI credits.
+Claude Code on the owner's own plan instead.
 These APIs reuse `/auth`'s sign-in helpers; self-hosted API-key setup remains available.
 
 Start returns `{ "ok": true, "sessionId": "…", "providerId": "…",

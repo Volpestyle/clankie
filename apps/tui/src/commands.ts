@@ -58,7 +58,6 @@ import type { BrowserSettings, GameplaySettings, SettingsStore } from "@clankie/
 import { DEFAULT_POKEMON_PLAY_MAX_TOKENS } from "@clankie/protocol";
 import { formatActivityObservation, type ActivityObservationClient } from "./activity-command.ts";
 import { runShareCommand, shareConsoleCommand } from "./command/share.ts";
-import { hostedTransportFor } from "./command/hosted.ts";
 import {
   formatLaneListing,
   laneKey,
@@ -1449,14 +1448,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         }
       },
     },
-    shareConsoleCommand(async (args) =>
-      runShareCommand(
-        args,
-        (await settings?.load())?.client?.mode === "hosted"
-          ? { request: (await hostedTransportFor(process.env)).request }
-          : {},
-      ),
-    ),
+    shareConsoleCommand(async (args) => runShareCommand(args, {})),
     {
       name: "games",
       aliases: ["gameplay"],
@@ -1466,11 +1458,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       async run(argument, shell): Promise<void> {
         if (argument.trim() === "extensions") {
           try {
-            const catalog = await runGameExtensionsCommand(
-              (await settings?.load())?.client?.mode === "hosted"
-                ? { request: (await hostedTransportFor(process.env)).request }
-                : {},
-            );
+            const catalog = await runGameExtensionsCommand({});
             shell.insertCommandResult(
               "/games",
               catalog.extensions

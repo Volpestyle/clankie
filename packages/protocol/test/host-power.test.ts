@@ -85,7 +85,7 @@ describe("assessHostPower", () => {
     expect(report.state).toBe("sleep_allowed");
     expect(report.advice).toContain("On battery");
     expect(report.advice).toContain("clankie awake on");
-    expect(report.advice).toContain("hosted");
+    expect(report.advice).not.toContain("hosted");
   });
 
   it("warns when plugged in but allowed to sleep", () => {

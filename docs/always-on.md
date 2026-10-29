@@ -58,7 +58,7 @@ can say why he went quiet. It answers three questions:
 
 - **`state`**: `always_on`, `sleep_allowed` or `unknown`. `sleep_allowed` means
   the Mac will idle-sleep on its current power source and nothing is holding it
-  awake. `unknown` (no `pmset`, as on a hosted body) raises no warning.
+  awake. `unknown` (no `pmset`, as on a Linux body) raises no warning.
 - **`source` and `sleepAfterMinutes`**: plugged in or on battery, and the
   `pmset` idle sleep for that source (`0` is never). A laptop is often set to
   never sleep on AC and sleep after a minute on battery: on battery it is
@@ -108,36 +108,25 @@ something this guide promises. It does not survive a power cut, a restart, or
 the Mac being unplugged. For a free self-operated route, use your own always-on
 machine and network access.
 
-## Existing hosted bodies
+## Another always-on machine
 
-A hosted body already on your account runs independently of your Mac's power.
-Its actual deployed lifecycle, billing suspension and data limits determine
-availability; a free account does not provision one. See
-[hosted support](../infra/hosted/README.md) for the retained deployment and recovery details.
-Sign in with `clankie login`, or `clankie connect hosted` to require an existing
-hosted body, then pair the app; see
-[local and hosted connection modes](cli.md#local-and-hosted-connection-modes).
-Self-hosting on your own Linux host is in [Linux self-hosting](../infra/hosted/README.md).
+Clankie runs only on machines you control
+([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)). To keep him up
+without your Mac, run him on another machine of yours, such as a desktop that
+never sleeps or a Linux host ([Linux self-hosting](../infra/hosted/README.md)).
 
-### Moving an existing Clankie to a hosted body
+[`clankie transfer`](cli.md#transfer) moves your Mac's Clankie to that machine
+as the same one: identity, memory, conversations, projects and tracker. It moves
+him back the same way ([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)).
+One body holds him at a time. The Mac freezes before the copy, comes back dormant
+even after a crash, and afterwards answers only `/health`, which names where he
+went. Credentials stay in each body's own broker, so the Mac keeps its sign-ins
+for his return. The Mac can then [join](cli.md#join) the new body as a machine,
+so workers keep running in its checkouts while it is awake. A dormant body keeps
+its doorway ([VUH-2583](https://linear.app/vuhlp/issue/VUH-2583)), so paired
+devices stay signed in to it.
 
-An existing unclaimed hosted body can receive your Clankie.
-[`clankie transfer`](cli.md#transfer) moves your Mac's Clankie there as the same
-one: identity, memory, conversations, projects and tracker. It moves him back the same way
-([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). One body holds him at
-a time. The Mac freezes before the copy, comes back dormant even after a crash,
-and afterwards answers only `/health`, which names where he went. Credentials stay
-in each body's own broker, so the hosted body stays credits-only and the Mac
-keeps its sign-ins for his return. The Mac can then
-[join](cli.md#join) the hosted body as a machine, so workers keep running in its
-checkouts while it is awake. The gateway carries
-transfers both ways: `clankie transfer --to hosted` (VUH-2582) and `--from hosted`,
-because a dormant managed body keeps its doorway
-([VUH-2583](https://linear.app/vuhlp/issue/VUH-2583)). Both are proven against a
-local gateway stack, not yet on a production body.
-
-`awake` is local only: it refuses in hosted mode and on non-macOS hosts, and a
-hosted loadout never runs it.
+`awake` refuses on non-macOS hosts, and the Linux image's loadout never runs it.
 
 ## Why `caffeinate -s`
 

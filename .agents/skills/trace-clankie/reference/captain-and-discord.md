@@ -186,7 +186,7 @@ list` and `clankie doctor` show each with its age (legacy entries have none).
   history: a cleared entry or later provider success alone does not prove forced
   refresh. Retained Pi assistant records prove provider acceptance or rejection;
   distinguish that from evidence of a refresh grant. Inspect existing failed-turn
-  telemetry too. Never tell a hosted customer to run `/auth`; no dedicated
-  credential-escalation acknowledgment is implied. Local `reconnect_required`
+  telemetry too. No dedicated credential-escalation acknowledgment is implied.
+  Local `reconnect_required`
   retains the console reconnect path. See `docs/cli.md` under doctor for the
   states. Do not run a paid model probe just to refresh diagnostics.

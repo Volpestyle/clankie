@@ -64,16 +64,6 @@ for checksums, pinning, and the installed layout,
 to run from source, or the
 [Linux deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md).
 
-## Existing hosted accounts
-
-If your account already has a hosted body, open its secure app link on your
-phone (or scan its QR), review the access, and connect. Open **Messages**, choose
-**Clankie**, and say hello. To reach that existing body from a terminal, use
-`clankie connect hosted` ([connection modes](/cli/#local-and-hosted-connection-modes)).
-See [hosted support](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)
-for its limits and recovery. Signing into a free account does not create a
-hosted body.
-
 ## Linux release path
 
 Linux bundles support **Ubuntu 24.04 LTS or newer**, with glibc, on arm64 or x64.
@@ -90,7 +80,7 @@ This path requires an official release containing `clankie-linux-arm64` or
 `clankie-linux-x64`; a release without Linux assets cannot install on Linux.
 See [distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md#linux)
 for prerequisites and lifecycle details. The
-[hosted Linux deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)
+[Linux container deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)
 remains available separately.
 
 ## Bring your Mac's Clankie into the app
@@ -125,11 +115,6 @@ sign-ins and paired devices stay where they are: pair your devices with the
 new body and connect accounts there. Your Mac can then join the new body as a
 machine, so his workers still run on it
 ([ADR 0286](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0286-one-body-holds-clankie-at-a-time.md)).
-With a hosted Clankie connected (`clankie connect hosted`),
-`clankie transfer --to hosted` moves your Mac's Clankie there, and
-`clankie transfer --from hosted --to local` brings him back. Hosted transfer is
-not available yet: it is proven against a test gateway and waits for the hosted
-service update.
 
 ## Your first conversation
 
@@ -146,7 +131,7 @@ Next: [using Clankie](/using-clankie/), or [customize him](/diy/).
 | Local console cannot answer   | `clankie doctor` and `clankie status`; `/setup` fixes a missing model.     |
 | App cannot reach your Mac     | Is the Mac awake and online? Then check remote access or the direct route. |
 | Pairing offer expired or used | Make a new offer and use its full link or QR.                              |
-| Hosted account or connection  | Check your account, then [support](https://clankie.bot/support/).          |
+| Account or remote access      | Check your account, then [support](https://clankie.bot/support/).          |
 | A feature is unavailable      | Ask Clankie what is configured, or see [the reference](/reference/).       |
 
 Share error messages and versions with support, never pairing links, keys, or

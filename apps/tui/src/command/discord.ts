@@ -2,7 +2,6 @@ import { ownerSettingsApi } from "./owner-settings-api.ts";
 import { DISCORD_SETTINGS_PATH, DiscordSettingsSnapshotSchema } from "@clankie/protocol";
 import { ClankieApiClient } from "@clankie/api-client";
 import { runDiscordSetupCommand } from "./discord-setup.ts";
-import { runDiscordOfficialCommand, type DiscordOfficialResult } from "./discord-official.ts";
 import { DISCORD_SETTING_GROUPS, discordServerSettings, discordWakeTrigger } from "@clankie/protocol";
 import { DiscordDirectoryRequestSchema, type DiscordDirectorySnapshot } from "@clankie/protocol";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
@@ -46,7 +45,6 @@ const DISCORD_USAGE = [
   "       clankie discord setup test-post --channel NAME",
   "       clankie discord guide CONVERSATION_ID TEXT|--clear",
   "       clankie discord transcripts [--cursor CURSOR] [--limit N]",
-  "       clankie discord official [status|on|off]   (free official bot via your Clankie account)",
   "       clankie discord set --field value [--field value ...]",
   "       clankie discord clear --field [--field ...]",
   "Fields are the settings.json Discord keys in kebab-case; lists are comma-separated.",
@@ -127,7 +125,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     showList("  ingress channels", settings.ingressChannelIds),
     `  dm policy: ${settings.ingressDmPolicy}`,
     `  context messages: ${String(settings.ingressContextMessages)}`,
-    `  what wakes him: ${discordWakeTrigger(settings.wakeTrigger) ?? "this body's default (self-hosted: persona reply policy; hosted: mention)"}`,
+    `  what wakes him: ${discordWakeTrigger(settings.wakeTrigger) ?? "this body's default (the persona reply policy)"}`,
     showList("  followed between wakes (hosted/official)", settings.ambientChannelIds),
     showList("  tool progress channels", settings.toolProgressChannelIds),
     "",
@@ -296,7 +294,6 @@ export async function runDiscordCommand(
   | DiscordSetupSnapshot
   | DiscordDirectorySnapshot
   | Awaited<ReturnType<typeof runDiscordSetupCommand>>
-  | DiscordOfficialResult
 > {
   const verb = args[0];
   if (verb === "server") {
@@ -508,15 +505,6 @@ export async function runDiscordCommand(
       options,
     );
   }
-  if (verb === "official")
-    return await runDiscordOfficialCommand(args.slice(1), {
-      ...(options.env === undefined ? {} : { env: options.env }),
-      ...(options.host === undefined ? {} : { host: options.host }),
-      ...(options.operatorCredentialStore === undefined
-        ? {}
-        : { credentials: options.operatorCredentialStore }),
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-    });
   if (
     verb === "rooms" ||
     verb === "guide" ||

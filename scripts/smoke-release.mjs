@@ -36,7 +36,7 @@ try {
     join(extracted, "node_modules/@browser_use/pi/dist/worker.js"),
     join(extracted, ".agents/skills/browser-use/SKILL.md"),
     join(extracted, "integrations/claude-plugin/skills/lead/SKILL.md"),
-    ...["cli.md", "worker-access.md", "model-keys.md", "rivals.md", "discord-ingress.md"].map((name) =>
+    ...["cli.md", "worker-access.md", "model-keys.md", "rivals.md"].map((name) =>
       join(extracted, "docs", name),
     ),
     join(extracted, "infra/hosted/README.md"),

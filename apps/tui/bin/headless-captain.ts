@@ -1,5 +1,4 @@
 import type { CaptainRouteFetcher } from "../src/session/operator-conversations.ts";
-import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import type { CredentialStore } from "@clankie/credential-broker";
 import type { ServiceRegistryOptions } from "./services.ts";
 import type { ExecFileImpl } from "../src/command/doctor.ts";
@@ -64,8 +63,7 @@ export async function runHeadlessCaptainCommand(
       ).runJoinedSeatHook(command, rest, options);
       if (joined !== undefined) return joined;
     }
-    // Joined installs launch locally even when their home is hosted. The
-    // hosted portal dispatcher must not turn their native seat into a home action.
+    // Joined installs launch their native seat locally, never as a home action.
     if (/^claude\d*$/u.test(command ?? "")) {
       const joined = await (
         await import("../src/command/joined-seat.ts")
@@ -92,81 +90,29 @@ export async function runHeadlessCaptainCommand(
         env,
         ...(options.resourceGovernor === undefined ? {} : { governor: options.resourceGovernor }),
       });
-    if (command === "connect" || command === "login") {
-      await (
-        await import("../src/command/hosted.ts")
-      ).connectHostedCli(
-        command === "login" ? ["hosted", ...rest] : rest,
-        env,
-        stdout,
-        command === "login" ? { target: "auto" } : {},
+    if (command === "connect")
+      throw new Error(
+        "Clankie runs on your own machine. Run `clankie login` to sign this Mac in for remote access.",
       );
+    if (command === "login") {
+      await (await import("../src/command/account-login.ts")).loginThisMac(rest, env, stdout);
       return 0;
     }
     if ((command === "gateway" || command === "remote-access") && rest[0] === "on") {
-      await (
-        await import("../src/command/hosted.ts")
-      ).connectHostedCli(["hosted", ...rest.slice(1)], env, stdout, { target: "this-mac" });
+      await (await import("../src/command/account-login.ts")).loginThisMac(rest.slice(1), env, stdout);
       return 0;
     }
-    // A transfer names both bodies itself, so it never takes the hosted transport.
     if (command === "transfer")
       return (await import("../src/command/transfer.ts")).runTransferCommand(rest, stdout, options);
-    // Joining/resuming is a local foreground transport even when the CLI talks to hosted Clankie.
+    // Joining/resuming is a local foreground transport.
     if (command === "join" && rest[0] !== "approve")
       return (await import("../src/command/join.ts")).runJoinCommand(rest, options);
     if (command === "whoami") {
-      outputJson(stdout, await (await import("../src/command/hosted.ts")).hostedWhoami(env));
+      outputJson(stdout, (await import("../src/command/account-login.ts")).THIS_MAC_CONNECTION);
       return 0;
     }
     if (command === "disconnect" || command === "logout") {
-      outputJson(stdout, await (await import("../src/command/hosted.ts")).disconnectHostedCli(env));
-      return 0;
-    }
-    if (
-      !options.host &&
-      !options.fetchImpl &&
-      (await new SettingsStore(defaultSettingsPath(env)).load()).client?.mode === "hosted" &&
-      !["help", "--help", "-h"].includes(command ?? "")
-    ) {
-      const discordHttp =
-        command === "discord" &&
-        ["setup", "definition", "directory", "rooms", "guide", "call"].includes(rest[0] ?? "");
-      if (
-        ((await import("../src/command/hosted.ts")).HOSTED_LOCAL_ONLY.has(command ?? "") &&
-          !discordHttp &&
-          !(command === "update" && rest[0] === "auto")) ||
-        (await import("../src/command/harness-command.ts")).operatorHarness(command) !== undefined
-      )
-        throw new Error(`${command} is managed by the hosted service; no local action was taken.`);
-      const transport = await (await import("../src/command/hosted.ts")).hostedTransportFor(env);
-      if (command === "games" && rest.length === 1 && rest[0] === "extensions") {
-        outputJson(
-          stdout,
-          (await import("@clankie/protocol")).GameExtensionCatalogSchema.parse(
-            await transport.request((await import("@clankie/protocol")).GAME_EXTENSIONS_PATH),
-          ),
-        );
-        return 0;
-      }
-      // These existing commands are HTTP-only. The transport replaces their local
-      // bearer inside the envelope; no Mac credential is read or transmitted.
-      if (
-        ["conversations", "conversation", "send", "runtime-health", "join", "auto", "skin"].includes(
-          command ?? "",
-        ) ||
-        discordHttp
-      )
-        return runHeadlessCaptainCommand(args, {
-          ...options,
-          ...transport,
-          env: {
-            ...env,
-            CLANKIE_CAPTAIN_TOKEN: "hosted-device-transport",
-            CLANKIE_OPERATOR_TOKEN: "hosted-device-transport",
-          },
-        });
-      outputJson(stdout, await (await import("../src/command/hosted.ts")).hostedCommand(args, transport));
+      outputJson(stdout, (await import("../src/command/account-login.ts")).logoutMessage());
       return 0;
     }
     if (command === "skin" && rest[0] === "draft") {

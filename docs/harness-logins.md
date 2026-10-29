@@ -1,18 +1,11 @@
 # Worker harness sign-in
 
 Sign the Claude Code and Codex worker harnesses into the owner's own accounts
-(a Claude subscription, a ChatGPT plan) from a paired app or the CLI on a
-self-hosted body, with no shell on the body ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
+(a Claude subscription, a ChatGPT plan) from a paired app or the CLI, with no
+shell on the body ([ADR 0239](adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
 Each harness runs its own official login; credentials stay in that harness's
 own store. This is separate from [model keys](model-keys.md), which configure
 Clankie's own model.
-
-Managed bodies use AI credits only. Their listing returns `harnesses: []` so
-clients hide native sign-in; start, status, code and cancel return
-`403 managed_credits_only` with a user-facing `message`. The service refuses
-before inspecting native auth or spawning a login process. Stored self-hosted
-credentials are preserved. This policy uses managed bootstrap identity, not OS
-or whether a machine happens to be remote.
 
 Every route requires the local operator bearer or a paired device whose grant
 includes `terminalControl` (Take Control); support access cannot call them.
@@ -107,8 +100,3 @@ clankie harness login remove codex work [--yes] # confirms unless --yes
 
 `/harness-login` in the console runs the same flow. Ctrl-C cancels the sign-in
 on the service.
-
-Managed bodies also refuse local Claude/Codex hires, including native-session
-reuse and named local fleets, until a credit-backed native adapter exists.
-Hire those harnesses on linked self-hosted hardware instead. Existing native
-credential stores are retained. The adapter is a follow-up on VUH-2576.

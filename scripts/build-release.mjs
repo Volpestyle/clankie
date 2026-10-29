@@ -272,7 +272,6 @@ async function copyRuntimeAssets(targetRoot) {
     ["integrations/minecraft-mcp/LICENSE", "integrations/minecraft-mcp/LICENSE"],
     ["integrations/minecraft-mcp/NOTICE", "integrations/minecraft-mcp/NOTICE"],
     ["integrations/minecraft-mcp/README.md", "integrations/minecraft-mcp/README.md"],
-    ["docs/discord-ingress.md", "docs/discord-ingress.md"],
     ["infra/hosted/README.md", "infra/hosted/README.md"],
     ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
     ["apps/vox/LICENSE", "apps/vox/LICENSE"],

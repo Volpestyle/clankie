@@ -102,7 +102,7 @@ unchanged. An older relay refuses it, and an older client never sees it.
 This additive service contract supports the separate VUH-1882 composer work and
 VUH-1883 Send-to-Stop UI. No app UI is changed in this repository.
 
-The private companion-app and managed-service repositories consume this package
+The private companion-app and gateway repositories consume this package
 from a sibling checkout. A contract change here can affect both. Keep wire
 identifiers stable, validate at trust boundaries, and coordinate incompatible
 changes with every consumer. A legacy field such as `missionId` or a
@@ -138,14 +138,10 @@ but withholds that metadata until those clients update or negotiate a view.
 [Architecture](../../docs/architecture.md) explains the service boundaries.
 [OpenAPI](../../apps/clankie/openapi.yaml) catalogs HTTP operations.
 The [public network reference](https://docs.clankie.bot/network/) renders the
-host-route allowlist from [public-gateway.ts](src/public-gateway.ts); the hosted
-account service has separate routes and implementation.
-
-Managed credit schemas and route declarations live in private
-`clankie-ops/packages/hosted-protocol`, outside this package. The public service
-accepts exact optional route declarations from its installed runtime provider;
-ordinary installations add none. The private companion app keeps its consumed
-credits decoder locally and does not require the operations repo in CI.
+host-route allowlist from [public-gateway.ts](src/public-gateway.ts); the
+account service has separate routes and implementation. The `hosted-*` modules
+remain only while the app and gateway still import them
+([ADR 0300](../../docs/adr/0300-clankie-runs-only-on-the-owners-machine.md)).
 
 ```sh
 pnpm --filter @clankie/protocol typecheck
@@ -153,7 +149,7 @@ pnpm --filter @clankie/protocol test
 ```
 
 This package is Apache-2.0. The [public/private boundary](../../docs/adr/0183-the-harness-is-public-the-hosted-service-is-private.md)
-keeps client and managed-service implementation in their respective repositories.
+keeps client and gateway implementation in their respective repositories.
 
 `@clankie/protocol/skin-drafts` defines owner-scoped briefs, native key poses,
 revision-fenced edits and exact-artifact approval. The [draft API and CLI](../../docs/skin-drafts.md)

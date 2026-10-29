@@ -2,7 +2,6 @@ import { ownerUpdateConsoleCommand } from "./owner-update-commands.ts";
 import { questionConsoleCommand } from "./question-commands.ts";
 import { runUpdateCommand } from "./command/update.ts";
 import { runHarnessLoginCommand } from "./command/harness-login.ts";
-import { buildHostedConnectionCommands } from "./hosted-console.ts";
 import { gatewayStatus } from "./command/gateway.ts";
 import {
   readHerdrBinding,
@@ -524,7 +523,6 @@ const connectServices = {
     }),
 };
 const commands = [
-  ...buildHostedConnectionCommands(settingsStore, true),
   ...buildSetupCommands(setupServices),
   ...buildConsoleCommands({
     repoRoot,

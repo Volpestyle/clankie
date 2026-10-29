@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,41 +9,15 @@ import { TAKE_CONTROL_GRANTS, type TrackerSyncCommand } from "@clankie/protocol"
 import { createLocalTracker, type LocalTrackerOptions } from "@clankie/work-items";
 import { createClankieApp } from "../../src/app.ts";
 import { createStubCaptain } from "../../src/captain/port.ts";
-import { HostedBodyClient } from "../../src/hosted-body.ts";
-import { HostedPairing } from "../../src/hosted-pairing.ts";
-import { hostedFixture } from "../fixtures/hosted-body.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../../relay/src/device-auth.ts";
 import { createDeviceConversationDispatch } from "../../../relay/src/conversation-upstream.ts";
 import { createOperatorConversationRelayHandler } from "../../../relay/src/operator-conversations.ts";
 
-/**
- * Real journal, pairing, signed sessions, HTTP host and relay; the conversation port is unused.
- * `hosted` adds a signed hosted-account pairing door for `pairHosted`.
- */
-export async function syncFixture(
-  trackerOptions: Omit<LocalTrackerOptions, "directory"> = {},
-  { hosted: withHosted = false }: { readonly hosted?: boolean } = {},
-) {
+/** Real journal, pairing, signed sessions, HTTP host and relay; the conversation port is unused. */
+export async function syncFixture(trackerOptions: Omit<LocalTrackerOptions, "directory"> = {}) {
   const root = await mkdtemp(join(tmpdir(), "tracker-sync-"));
   const tracker = createLocalTracker({ directory: root, ...trackerOptions });
-  const hosted = hostedFixture(Math.floor(Date.now() / 1000) * 1000);
-  let hostedLink = "";
   const host = await createClankieApp({
-    ...(withHosted
-      ? {
-          hostedPairing: new HostedPairing(
-            new HostedBodyClient(hosted.bootstrap),
-            generateKeyPairSync("ed25519").privateKey,
-          ),
-          pairingOfferPublisher: {
-            publishPairingOffer: async () => {},
-            protectPairingOffer: (offer) => {
-              hostedLink = `clankie://connect?v=1&offer=${offer.offerSecret}`;
-              return { version: 1, deepLink: hostedLink, code: offer.code, expiresAt: offer.expiresAt };
-            },
-          },
-        }
-      : {}),
     captain: createStubCaptain(),
     builtInTracker: tracker,
     deviceSessionKey: randomBytes(32),
@@ -167,32 +141,5 @@ export async function syncFixture(
   const revoke = (deviceId: string) => post(origin, `/v1/devices/${deviceId}/revoke`, {}, "owner");
   /** A direct host request, for routes other than the relay's sync dispatch. */
   const request = (path: string, body: unknown, token: string) => post(origin, path, body, token);
-  /** A device the owner pairs from their hosted account (`hosted-account-operator`). */
-  const pairHosted = async (): Promise<{ deviceId: string; deviceToken: string }> => {
-    const offer = await post(
-      origin,
-      "/v1/hosted/pair-offer",
-      {
-        version: 2,
-        pairTicket: hosted.pair({ purpose: "operator" }),
-        browserPublicKey: hosted.browserPublicKey,
-        nonce: hosted.nonce,
-      },
-      "owner",
-    );
-    if (!offer.ok) throw new Error(`Hosted pairing failed: ${await offer.text()}`);
-    const redeem = {
-      offerSecret: new URL(hostedLink).searchParams.get("offer"),
-      device: { name: "Hosted", platform: "macos" },
-    };
-    const pending = (await (await post(origin, "/v1/pairing/redeem", redeem, "owner")).json()) as {
-      completionToken: string;
-    };
-    const complete = { completionToken: pending.completionToken, acceptedGrants: TAKE_CONTROL_GRANTS };
-    return (await (await post(origin, "/v1/pairing/complete", complete, "owner")).json()) as {
-      deviceId: string;
-      deviceToken: string;
-    };
-  };
-  return { root, tracker, pair, pairHosted, sync, stream, revoke, close, request };
+  return { root, tracker, pair, sync, stream, revoke, close, request };
 }

@@ -2,7 +2,7 @@ import { SettingsStore } from "../../../packages/settings/src/index.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPairSync, randomUUID, randomBytes } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
@@ -12,9 +12,6 @@ import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { projectOnboarding } from "../../clankie/src/captain/project-onboarding.ts";
 import { ProjectProposalDraftSchema } from "../../../packages/protocol/src/projects.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../../clankie/src/device-session.ts";
-import { HostedPairing } from "../../clankie/src/hosted-pairing.ts";
-import { HostedBodyClient } from "../../clankie/src/hosted-body.ts";
-import { hostedFixture } from "../../clankie/test/fixtures/hosted-body.ts";
 import {
   TAKE_CONTROL_GRANTS,
   SUPERVISE_GRANTS,
@@ -54,14 +51,14 @@ async function listen(handler: (request: IncomingMessage, response: ServerRespon
   return `http://127.0.0.1:${address.port}`;
 }
 
-async function fixture(hosted = false) {
+async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "relay-question-"));
   const workspace = join(root, "workspace");
   mkdirSync(workspace);
   let now = Date.now();
   const key = randomBytes(32),
     signer = new DeviceSessionSigner(key);
-  const names = ["control", "other", "read", "unminted"];
+  const names = ["control", "other", "read"];
   const tokens = Object.fromEntries(
     names.map((id) => [
       id,
@@ -90,7 +87,7 @@ async function fixture(hosted = false) {
           name: "Same label",
           platform: "ios",
           offeredGrants: grants,
-          mintedBy: hosted && deviceId !== "unminted" ? "hosted-account-operator" : "local-owner",
+          mintedBy: "local-owner",
           pendingExpiresAt: new Date(now + 600_000).toISOString(),
         },
       },
@@ -133,7 +130,6 @@ async function fixture(hosted = false) {
   const settings = new SettingsStore(join(root, "settings.json"));
   const writeSettings = vi.fn(settings.update.bind(settings));
   store.projectOnboarding = projectOnboarding({ load: () => settings.load(), update: writeSettings });
-  const hf = hostedFixture();
   const service = await createClankieApp({
     settings: { load: () => settings.load(), update: writeSettings },
     captain: createStubCaptain({
@@ -150,15 +146,6 @@ async function fixture(hosted = false) {
         : undefined,
     authenticateOperator: async (r) =>
       r.headers.get("authorization") === "Bearer fixture-owner" ? { operatorId: "owner" } : undefined,
-    ...(hosted
-      ? {
-          hostedPairing: new HostedPairing(
-            new HostedBodyClient(hf.bootstrap, { clock: () => now }),
-            generateKeyPairSync("ed25519").privateKey,
-            { clock: () => now },
-          ),
-        }
-      : {}),
   });
   cleanups.push(async () => {
     await store.close();
@@ -284,25 +271,20 @@ async function fixture(hosted = false) {
   };
 }
 
-it.each([false, true])(
-  "explicit original-device proposal and CREATE roundtrip hosted=%s never uses captain identity",
-  async (hosted) => {
-    const f = await fixture(hosted);
-    await f.send();
-    const target = await f.target();
-    expect(f.writeSettings).not.toHaveBeenCalled();
-    const result = await f.client().projectProposalConfirm!(target);
-    expect(result.status).toBe("created");
-    expect(await f.client().projectProposalConfirm!(target)).toEqual(result);
-    expect(f.writeSettings).toHaveBeenCalledTimes(1);
-    const dispatches = f.seen.filter(
-      (s) => s.path === "/operator/v1/dispatch" || s.path === "/v1/hosted/operator",
-    );
-    expect(dispatches.every((d) => d.token === `Bearer ${f.tokens.control}`)).toBe(true);
-    expect(JSON.stringify(f.messages)).not.toContain(f.tokens.control!);
-    expect(f.continuation).not.toHaveBeenCalled();
-  },
-);
+it("explicit original-device proposal and CREATE roundtrip never uses captain identity", async () => {
+  const f = await fixture();
+  await f.send();
+  const target = await f.target();
+  expect(f.writeSettings).not.toHaveBeenCalled();
+  const result = await f.client().projectProposalConfirm!(target);
+  expect(result.status).toBe("created");
+  expect(await f.client().projectProposalConfirm!(target)).toEqual(result);
+  expect(f.writeSettings).toHaveBeenCalledTimes(1);
+  const dispatches = f.seen.filter((s) => s.path === "/operator/v1/dispatch");
+  expect(dispatches.every((d) => d.token === `Bearer ${f.tokens.control}`)).toBe(true);
+  expect(JSON.stringify(f.messages)).not.toContain(f.tokens.control!);
+  expect(f.continuation).not.toHaveBeenCalled();
+});
 it("relay refuses chat-only/different owner/wrong signer and never substitutes captain for missing owner upstream", async () => {
   const f = await fixture();
   await f.send();
@@ -325,39 +307,34 @@ it("relay refuses chat-only/different owner/wrong signer and never substitutes c
   expect(f.writeSettings).not.toHaveBeenCalled();
 });
 
-it.each([false, true])(
-  "single-field tweak roundtrip preserves original device authority hosted=%s",
-  async (hosted) => {
-    const f = await fixture(hosted);
-    await f.send();
-    const before = await f.target();
-    const result = await f.client().projectProposalTweak!({
-      ...before,
-      change: { field: "name", value: "Reviewed name" },
-    });
-    expect(result.status).toBe("pending");
-    expect(result.proposal!.command.name).toBe("Reviewed name");
-    expect(result.proposal!.target.proposalId).not.toBe(before.proposalId);
-    expect(f.writeSettings).not.toHaveBeenCalled();
-    const denied = await f.raw(
-      {
-        op: "project_proposal_tweak",
-        schemaVersion: 1,
-        ...result.proposal!.target,
-        change: { field: "name", value: "Other" },
-      },
-      f.tokens.read!,
-    );
-    expect(denied.status).toBe(403);
-    expect((await f.client().projectProposalConfirm!(before)).status).toBe("refused");
-    expect((await f.client().projectProposalConfirm!(result.proposal!.target)).status).toBe("created");
-    expect(f.writeSettings).toHaveBeenCalledTimes(1);
-    const dispatches = f.seen.filter(
-      (s) => s.path === "/operator/v1/dispatch" || s.path === "/v1/hosted/operator",
-    );
-    expect(dispatches.every((d) => d.token === `Bearer ${f.tokens.control}`)).toBe(true);
-  },
-);
+it("single-field tweak roundtrip preserves original device authority", async () => {
+  const f = await fixture();
+  await f.send();
+  const before = await f.target();
+  const result = await f.client().projectProposalTweak!({
+    ...before,
+    change: { field: "name", value: "Reviewed name" },
+  });
+  expect(result.status).toBe("pending");
+  expect(result.proposal!.command.name).toBe("Reviewed name");
+  expect(result.proposal!.target.proposalId).not.toBe(before.proposalId);
+  expect(f.writeSettings).not.toHaveBeenCalled();
+  const denied = await f.raw(
+    {
+      op: "project_proposal_tweak",
+      schemaVersion: 1,
+      ...result.proposal!.target,
+      change: { field: "name", value: "Other" },
+    },
+    f.tokens.read!,
+  );
+  expect(denied.status).toBe(403);
+  expect((await f.client().projectProposalConfirm!(before)).status).toBe("refused");
+  expect((await f.client().projectProposalConfirm!(result.proposal!.target)).status).toBe("created");
+  expect(f.writeSettings).toHaveBeenCalledTimes(1);
+  const dispatches = f.seen.filter((s) => s.path === "/operator/v1/dispatch");
+  expect(dispatches.every((d) => d.token === `Bearer ${f.tokens.control}`)).toBe(true);
+});
 it("revocation between relay admission and owner dispatch prevents CREATE", async () => {
   const f = await fixture();
   await f.send();

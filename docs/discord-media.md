@@ -93,12 +93,10 @@ video-only surface.
 
 [Activity sharing](activity.md) publishes existing game play and exact delivered
 PNG/GIF/MP4/WAV/MP3 artifacts with finite sessions and separate producer/viewer
-credentials. Owner controls work through the CLI, TUI and paired hosted device.
-The hosted gateway and edge verify SDK audiences and stream over the body's
-existing outbound connection; customers configure no Discord app or tunnel.
-Official Activity app selection, verification and live Discord checks remain
-James's decisions. Self-hosted local delegated grants keep working; a local
-official-bot admission adapter is outside this batch.
+credentials. Owner controls work through the CLI and TUI. Delegated viewer
+grants and a self-hosted bot's own Activity admission
+([ADR 0295](adr/0295-a-self-hosted-bot-admits-its-own-activity-viewers.md))
+cover viewing. Live Discord checks remain James's decisions.
 
 The existing public watch-me-play transport below remains separate. Scoped
 sources never fall back to it or publish private artifacts there.

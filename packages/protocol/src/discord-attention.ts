@@ -66,7 +66,7 @@ export const DISCORD_ATTENTION = {
       },
       default: {
         label: "Default",
-        description: "On your own computer he follows the reply policy; hosted Clankie wakes on an @mention.",
+        description: "He follows the reply policy.",
       },
     } satisfies Record<"mention" | "name" | "any" | "default", Choice>,
   },

@@ -58,7 +58,7 @@ flow from here outward, never back.
 ## Amendment: optional managed runtime composition (2026-10-05, VUH-1664)
 
 The public service defines an optional
-[`RuntimeProvider`](../../apps/clankie/src/runtime-provider.ts). With no
+`RuntimeProvider` (removed by ADR 0300). With no
 `CLANKIE_RUNTIME_PROVIDER_MODULE`, it loads an empty provider: no managed quota
 routes, credit accounting, plan model routing or hire limits. A host can select
 an installed module by its absolute path. The service loads its
@@ -99,7 +99,7 @@ retries. An uncertain answer can be reconciled through a receipt read; it never
 authorizes another audio upload.
 
 Signed body requests, credential renewal, pairing and
-[`hosted-device-security`](../../apps/clankie/src/hosted-device-security.ts)
+`hosted-device-security` (removed by ADR 0300)
 remain public remote-access client code. The generic body module is an explicit
 external entry for dependency analysis because the private provider imports its
 bootstrap schema and transport; those contracts remain checked by the composed

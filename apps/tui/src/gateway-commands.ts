@@ -1,4 +1,3 @@
-import { accountHasHostedClankie, pairHostedAccount } from "./hosted-session.ts";
 import {
   beginClankieAccountLogin,
   completeClankieAccountLogin,
@@ -211,30 +210,6 @@ async function runWizard(
     if (code === undefined) return;
     flow.setStatus("signing this Mac in…");
     const credential = await completeClankieAccountLogin({ challenge, code });
-
-    // Only a convenience: a failed lookup (401, outage) must not stop this Mac signing in.
-    const hasHosted = await accountHasHostedClankie(gatewayUrl, credential, services.fetchImpl).catch(
-      () => false,
-    );
-    if (hasHosted) {
-      const action = await flow.readSelect({
-        message: "Your account already has a hosted Clankie",
-        options: [
-          { value: "hosted", label: "Connect to it" },
-          { value: "cancel", label: "Cancel" },
-        ],
-      });
-      if (action === "hosted") {
-        await pairHostedAccount({
-          gatewayUrl,
-          credential,
-          store: services.credentials,
-          settings: services.settings,
-        });
-        flow.renderLine("Hosted connection saved. Exit this console and run clankie again.", "success");
-      }
-      return;
-    }
 
     await gatewayEnableWithAccount({ gatewayUrl, credential }, services);
     flow.setStatus("starting remote access…");

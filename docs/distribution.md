@@ -9,7 +9,7 @@ executable; the launcher keeps the existing process boundaries behind it.
 ## Install
 
 Follow the [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-mac)
-for requirements, installation, local/hosted selection, and first model setup.
+for requirements, installation, and first model setup.
 This reference covers the installer and runtime layout. `clankie --version`
 reports the installed release.
 
@@ -62,7 +62,7 @@ Chrome, FFmpeg and cloudflared are optional external tools.
 the installed release's Linux target and keeps settings, credentials and history
 outside the immutable release. Automatic startup after logout/reboot is not
 installed by this script; rerun `clankie` or `clankie start clankie` after login.
-The hosted deployment image remains a separate path.
+The [Linux container image](../infra/hosted/README.md) remains a separate path.
 
 ## Mac companion app
 
@@ -180,7 +180,7 @@ refuses local admission; it never falls back to an expensive socket scan.
 The shared fleet resource governor also ships `packages/fleet-resources/src/native.py`.
 It uses Python 3's standard library for kernel file locks, process birth observations
 and command groups; macOS uses `/usr/bin/python3`, Linux uses `python3` on PATH.
-The hosted Linux image installs that interpreter. For self-hosted installations
+The Linux container image installs that interpreter. For other installations
 it is an explicit host prerequisite. On macOS, `/usr/bin/python3` is only an
 installer stub until Apple's Command Line Tools are installed (the Keychain lock
 check needs it too), so the installer stops on a Mac without them, opens Apple's
@@ -197,7 +197,7 @@ is retained for license inventory; no fork or Rust/Zig build is needed for Herdr
 The bundled `herdr` skill is a loader for that executable's `--skill` output.
 The build checks that the pinned binary serves `--skill` and that both Claude
 plugin copies carry the same loader; `pnpm herdr:skill:check` (part of
-`pnpm check`) runs the same checks in a checkout. The hosted image repeats them
+`pnpm check`) runs the same checks in a checkout. The Linux image repeats them
 with the pinned version as its runtime user, so a fresh body needs no globally
 installed Herdr skill.
 The service checks `https://herdr.dev/latest.json` at startup and every six hours,
@@ -223,7 +223,7 @@ the worker is launched from a sibling file and cannot be flattened into the
 service bundle. Chrome and FFmpeg remain external executables. Set
 `CLANKIE_RELEASE_SMOKE_BROWSER=1` to exercise the packaged SDK against local
 Chrome during release smoke.
-The hosted build preserves relative dependency symlinks when moving the assembled
+The Linux image build preserves relative dependency symlinks when moving the assembled
 release and imports Browser Use Pi from its final image location as the runtime
 user. This catches broken package links before an image can pass its build.
 
@@ -241,13 +241,13 @@ are on PATH. The headless command contract is
 skills under `.agents/dev-skills` stay out of the archive. The release also
 ships `docs/bundled-skills.md`, the pinned process-skill manifest and MIT license,
 `docs/worker-access.md`, `docs/model-keys.md`, `docs/rivals.md`,
-`docs/discord-ingress.md`, `docs/minecraft.md` and
+`docs/minecraft.md` and
 `infra/hosted/README.md` for the installed skills' operational references.
 Other repository documentation does not ship.
 
-The public gateway is Clankie's hosted service, not part of the Mac release;
-its source, Cognito accounts, and deployment live in the private `clankie-ops`
-repository ([ADR 0183](adr/0183-the-harness-is-public-the-hosted-service-is-private.md)).
+The public gateway is not part of the Mac release; its source, Cognito accounts,
+and deployment live in the private `clankie-ops` repository
+([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)).
 The release contains the outbound connector, passwordless `/gateway` setup
 wizard, and launch-at-login command. Tailscale remains an optional direct
 development lane and is not required by an App Store client.
@@ -280,13 +280,13 @@ Shared provider registration includes Pi's static OAuth flows in the bundle;
 `pnpm herdr:linux:smoke` builds and exercises the same pinned Herdr runtime
 inside Docker. `pnpm hosted:build` builds the single-owner Linux captain,
 native Herdr worker and relay image; `pnpm hosted:smoke` checks isolated execution
-and persistence. The [hosted deployment guide](../infra/hosted/README.md) owns
-setup, supported capabilities and remaining managed-hosting requirements.
+and persistence. The [Linux self-hosting guide](../infra/hosted/README.md) owns
+setup and supported capabilities.
 
 Pushing a version tag matching `package.json` (for example `v0.4.11`) runs the
 full repository check, builds and smoke-tests the archive on an Apple silicon
-GitHub runner, runs the fleet load gate on a fresh runner of its own, builds the `linux-arm64` and `linux-x64` archives that hosted bodies
-install ([ADR 0237](adr/0237-hosted-bodies-update-themselves-to-official-releases.md)),
+GitHub runner, runs the fleet load gate on a fresh runner of its own, builds the `linux-arm64` and `linux-x64` archives that Linux container bodies
+install,
 and uploads all three archives with their checksums to the matching GitHub Release.
 The load gate warms real worker and endpoint traffic for 30 seconds before its
 unchanged 120-second measurement. A complete failure of only the health or CPU

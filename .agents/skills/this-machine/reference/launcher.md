@@ -33,7 +33,6 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Discord picker directory               | `clankie discord directory [servers\|channels\|roles\|people] --server ID` (omit server for servers; inspect state/reason before claiming coverage)                |
 | Shared Discord settings definition     | `clankie discord definition` (host wording, picker/check kinds, Advanced fields; no credentials)                                                                   |
 | Discord server setup                   | `clankie discord status`, `… server --server ID --role participant\|admin --fleet on\|off --tracking LEVEL` (see `docs/cli.md`)                                    |
-| Free official Clankie bot              | `clankie discord official [status\|on\|off]` (needs `remote-access on`; no restart; Add to Discord on the account page; status names limits and any block)         |
 | Non-secret Discord setup               | `clankie discord status`, `clankie discord set --active-body bot …`                                                                                                |
 | Explicit Discord test post             | `clankie discord setup test-post --channel NAME` only when the owner asks to post; no automatic probe                                                              |
 | Desktop expressions / quiet hours      | `desktop` tool; `clankie desktop status`, `clankie desktop quiet-hours START END TIME_ZONE` / `off`                                                                |
@@ -72,11 +71,8 @@ CORS permits browser transport only and grants nothing.
 ## Updating the runtime
 
 On a release install (`kind: release`), `update_runtime` or `clankie update`
-moves to the latest official release, or `--ref vX.Y.Z`. A hosted body installs
-official releases on its own while idle. A managed body installs nothing newer
-than its fleet-approved release: "holding releases" or "not approved" is the
-fleet's decision, not a fault, so report it and wait. Self-run owners switch
-idle installs with `clankie update auto on|off`.
+moves to the latest official release, or `--ref vX.Y.Z`. Owners switch idle
+installs with `clankie update auto on|off`.
 
 On a source checkout the default target is fetched `origin/main`, never the local
 `main` branch; a failed fetch refuses. Review `resolvedRef`, `newCommit` and any
@@ -158,9 +154,7 @@ landing rules, following doctor's `workingPreferences`. `clankie update --ref
 FULL_SHA` installs a local commit without pushing; update performs the guarded
 restart, so do not also run `clankie restart`. Report `clankie update status` and
 the canary next turn. A Mac release install has no source: update to a newer
-release, or offer your person a source checkout (`CONTRIBUTING.md`). A hosted body
-never changes its own code: give your person the trace evidence; its fix arrives
-as an official release.
+release, or offer your person a source checkout (`CONTRIBUTING.md`).
 
 The service keeps registered owner checkouts synced with `main`; `clankie
 checkouts sync --repository PATH` is the manual route
@@ -190,7 +184,7 @@ yourself.
 Read `settings.effective.actual` from `clankie model status` for provider/model
 identity, `settings.routing` for automatic targets and `settings.choices` before
 selecting. Included aliases are not evidence of the served model, and missing
-hosted metadata is unknown; do not infer historical usage from the current
+metadata is unknown; do not infer historical usage from the current
 preference. Per-turn evidence is conversation replay/tail `activity.modelCall` and
 `activity.routingDecision`; reported tokens are not a charged amount. Do not
 choose an internal tier for the owner.
@@ -205,8 +199,8 @@ and actual Discord audibility separately.
 
 Server owners, room skills, legacy author bindings, main-conversation links and
 failed-delivery recovery are in [Discord rooms](../../../../docs/discord-rooms.md)
-and `docs/cli.md` under `discord`; wake triggers and ambient buffers in
-[Discord ingress](../../../../docs/discord-ingress.md). What to keep in mind:
+and `docs/cli.md` under `discord`, which also covers wake triggers. What to keep
+in mind:
 
 - Outside Discord rooms, the Discord body tools (voice, music,
   `discord_server_action`, tracking and Activity sharing) are listed only once a
@@ -234,10 +228,6 @@ and `docs/cli.md` under `discord`; wake triggers and ambient buffers in
   forum ([the forum view](../../../../docs/proposals/2026-10-21-discord-forum-tracker-view.md)).
 - Do not manually repost an uncertain answer or clear a mouth lease by age.
 - Waking (`discord.wakeTrigger`) and `persona.chattiness` grant no authority.
-- The free official bot (`clankie discord official`) keeps its token at the hosted
-  edge; replies, tools and authority come from this machine's settings. Never run
-  the official application's own token locally. Managed connections:
-  [Hosted Clankie](hosted.md#managed-discord-connection).
 
 Do not edit live settings or the ledger by hand to bypass any of these.
 

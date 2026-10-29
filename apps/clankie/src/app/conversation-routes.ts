@@ -60,12 +60,10 @@ import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceI
 export interface RegisterConversationRoutesContext {
   readonly app: Hono;
   readonly dependencies: ClankieAppDependencies;
-  readonly hostedOriginalRequests: WeakMap<Request, Request>;
   readonly authenticateDevice: (
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly devices: DeviceRegistry;
-  readonly hostedRequests: WeakMap<Request, string>;
   readonly clock: () => Date;
   readonly recordEvent: (
     type: string,
@@ -325,17 +323,12 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   const ownerAppFor = (principal: { readonly kind: string; readonly id: string }) =>
     principal.kind === "device" && ownerAppDevice(principal.id) ? { deviceId: principal.id } : undefined;
   const questionOwnerAuthority = async (request: Request): Promise<QuestionAuthority | undefined> => {
-    const original = ctx.hostedOriginalRequests.get(request);
-    const deviceRequest = original ?? request;
+    const deviceRequest = request;
     const device = await ctx.authenticateDevice(deviceRequest);
     if (device !== "unavailable" && !("denied" in device)) {
       const eligible = () => {
         const record = ctx.devices.get(device.deviceId);
-        return (
-          record?.status === "active" &&
-          record.grants.terminalControl &&
-          (original === undefined || record.mintedBy === "hosted-account-operator")
-        );
+        return record?.status === "active" && record.grants.terminalControl;
       };
       if (!eligible()) return undefined;
       return {
@@ -353,8 +346,6 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         },
       };
     }
-    // An inner hosted request cannot fall back to synthetic operator authority.
-    if (original !== undefined || ctx.hostedRequests.has(request)) return undefined;
     const operator = await authenticateOperator(request, ctx.dependencies);
     if (!operator || operator === "unavailable") return undefined;
     let current = true;
@@ -372,8 +363,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   const workOwnerAuthority = async (request: Request): Promise<WorkWriteAuthority | undefined> => {
     const owner = await questionOwnerAuthority(request);
     if (!owner) return undefined;
-    const original = ctx.hostedOriginalRequests.get(request);
-    const deviceRequest = original ?? request;
+    const deviceRequest = request;
     let expiresAt = Number.POSITIVE_INFINITY;
     if (owner.principal.kind === "device") {
       const device = await ctx.authenticateDevice(deviceRequest);
@@ -582,13 +572,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       const command = parsed.data.command;
       const writing = command.action === "transaction";
       const authority = writing ? await workOwnerAuthority(context.req.raw) : undefined;
-      const original = ctx.hostedOriginalRequests.get(context.req.raw);
-      const deviceRequest = original ?? context.req.raw;
+      const deviceRequest = context.req.raw;
       const allowed = async () => {
         if (writing) return Boolean(authority && (await authority.authorize()));
         const device = await ctx.authenticateDevice(deviceRequest);
         if (device !== "unavailable" && !("denied" in device)) return device.grants.chat;
-        if (original || ctx.hostedRequests.has(context.req.raw)) return false;
         const freshOwner = await authenticateOperator(context.req.raw, ctx.dependencies);
         if (freshOwner && freshOwner !== "unavailable") return true;
         const freshCaptain = await authenticateCaptain(context.req.raw, ctx.dependencies);

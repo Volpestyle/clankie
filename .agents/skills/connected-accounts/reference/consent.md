@@ -44,7 +44,7 @@ client, not a customer credential. For local development, use
 `accounts apps set --google-client-id ID --google-redirect-uri URL` for
 public settings. Store the matching secret only through the local operator
 command `accounts apps google-secret --client-id ID --secret-stdin`.
-It refuses hosted bodies and remote transports. Never put the secret in
+It refuses remote transports. Never put the secret in
 arguments, environment variables, settings or a portal. Developer client
 registration, consent-screen setup and real account consent remain owner
 actions; fixtures do not prove a real Google read.

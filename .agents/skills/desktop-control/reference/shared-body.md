@@ -26,7 +26,7 @@ screens, and never authorizes replaying uncertain input.
 For an explicitly lent computer, pass its registered `machineId: "join-UUID"`
 through `clankie computer request` alongside `conversationId` and `command`.
 Omitting `machineId` uses the local body; failed selection never picks another
-screen. A hosted Clankie can use this body without a local owner desktop.
+screen. A body without a local owner desktop can use this one.
 
 `screen` level only permits asking. The host owner confirms observation for one
 session locally and separately allows input. Keep the visible pet and Stop

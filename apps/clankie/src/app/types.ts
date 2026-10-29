@@ -2,7 +2,6 @@ import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
 import type { InstalledGameExtensions } from "../game-extension-projection.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
 import type { FleetHealthMetrics } from "../fleet-health-metrics.ts";
-import type { BodyTelemetry } from "@clankie/observability/body-telemetry";
 import type { IntegrationQueue } from "../integrate.ts";
 import type { DeployHolds } from "../deploy-holds.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
@@ -39,27 +38,20 @@ import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
 import type { ActivitySharing } from "../activity-sharing.ts";
-import { type DiscordIngressPort } from "../discord-ingress.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
-import type { HostedBodyClient } from "../hosted-body.ts";
 import type { ComposerTranscriptions } from "../composer-transcription.ts";
-import type { HostedDeviceSecurity } from "../hosted-device-security.ts";
-import type { HostedDiscordOperator } from "../hosted-discord.ts";
-import type { HostedPairing } from "../hosted-pairing.ts";
 import { type LinearActivityEvent, type LinearWriteReceipts } from "../linear-webhook.ts";
 import type { MediaGeneratorPort } from "../media-generation.ts";
-import type { ManagedDiscord } from "../managed-discord.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { MinecraftService } from "../minecraft.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
-import type { RuntimeProvider } from "../runtime-provider.ts";
 import { type VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import { type WorkItemsService } from "../work-items.ts";
 import { type WorkerMcp } from "../worker-mcp.ts";
@@ -162,9 +154,6 @@ export interface ClankieAppDependencies {
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
-  discordIngress?: DiscordIngressPort;
-  /** The free official bot on a self-hosted machine (VUH-1766): live status and on/off. */
-  officialDiscord?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["officialBot"];
   /** Durable exact Discord turn receipts; production supplies its state directory. */
   discordTurnReceiptPath?: string;
   /** Durable operator MCP hire/delivery receipts, retained across service restarts. */
@@ -190,18 +179,6 @@ export interface ClankieAppDependencies {
   modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
-  hostedPairing?: HostedPairing;
-  hostedDiscordOperator?: HostedDiscordOperator;
-  managedDiscord?: ManagedDiscord;
-  onHostedPairing?: () => void;
-  hostedBody?: Pick<HostedBodyClient, "registerWakeKey" | "revokeWakeKey">;
-  supportGrantSync?: Pick<HostedBodyClient, "syncSupportGrants">;
-  /** Host-readable grant metadata for the hosted shell watcher (`CLANKIE_SUPPORT_GRANTS_FILE`). */
-  supportGrantsFile?: string;
-  /** Mandatory support audit bypasses ordinary diagnostic consent. */
-  supportTelemetry?: BodyTelemetry;
-  /** Tenant telemetry key or a dedicated random key persisted on this body volume. */
-  supportDeviceRefKey?: Uint8Array;
   composerTranscriptions?: ComposerTranscriptions;
   /** Evidence blobs and records (ADR 0258). */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
@@ -218,11 +195,6 @@ export interface ClankieAppDependencies {
   linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;
   /** Mirror 3 (VUH-1987): owner-run cutover from Linear and its switch-back. */
   linearCutover?: Pick<import("../linear-cutover.ts").LinearCutover, "run">;
-  /** Optional host policy; ordinary installations do not supply a provider. */
-  runtimeProvider?: RuntimeProvider;
-  accountSettings?: Pick<HostedBodyClient, "readAccountSettings">;
-  hostedDeviceSecurity?: Pick<HostedDeviceSecurity, "prepare" | "revokeDevice"> &
-    Partial<Pick<HostedDeviceSecurity, "publishSupportDevice" | "publishOwnerDevice" | "isRevoked">>;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */
@@ -307,7 +279,6 @@ export interface ClankieAppDependencies {
     launched(guildId: string, channelId: string): void;
     stopped(guildId: string, channelId: string): Promise<void>;
   };
-  hostedActivity?: Pick<HostedBodyClient, "bootstrap" | "keys" | "revalidateActivity">;
   memory?: MemoryStores;
   personaImages?: PersonaImageSource;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */

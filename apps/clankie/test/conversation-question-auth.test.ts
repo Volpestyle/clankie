@@ -2,16 +2,13 @@ import { ClankieSettingsSchema } from "@clankie/settings";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { QuestionDraftSchema } from "../src/captain/conversation-questions.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
-import { HostedPairing } from "../src/hosted-pairing.ts";
-import { HostedBodyClient } from "../src/hosted-body.ts";
-import { hostedFixture } from "./fixtures/hosted-body.ts";
 import {
   createCaptainOperatorConversationClient,
   createCaptainRouteClient,
@@ -28,7 +25,7 @@ afterEach(() => {
   services.splice(0).forEach((s) => s.close());
   roots.splice(0).forEach((r) => rmSync(r, { recursive: true, force: true }));
 });
-async function fixture(hosted = false) {
+async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "question-auth-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -37,7 +34,7 @@ async function fixture(hosted = false) {
     operatorValid = true;
   const key = Buffer.alloc(32, 4),
     signer = new DeviceSessionSigner(key);
-  const events = ["control", "read", "hosted", "other"].flatMap((deviceId) => {
+  const events = ["control", "read"].flatMap((deviceId) => {
     const grants = deviceId === "read" ? SUPERVISE_GRANTS : TAKE_CONTROL_GRANTS;
     const base = {
       occurredAt: new Date(now).toISOString(),
@@ -57,7 +54,7 @@ async function fixture(hosted = false) {
           name: deviceId,
           platform: "ios",
           offeredGrants: grants,
-          mintedBy: deviceId === "hosted" ? "hosted-account-operator" : "local-operator",
+          mintedBy: "local-operator",
           pendingExpiresAt: new Date(now + 600_000).toISOString(),
         },
       },
@@ -72,7 +69,7 @@ async function fixture(hosted = false) {
   const log = join(root, "events.jsonl");
   writeFileSync(log, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
   const tokens = Object.fromEntries(
-    ["control", "read", "hosted", "other"].map((deviceId) => [
+    ["control", "read"].map((deviceId) => [
       deviceId,
       signer.issue(mintDeviceSessionClaims({ deviceId, nowEpochSeconds: now / 1000, ttlSeconds: 60 })),
     ]),
@@ -105,7 +102,6 @@ async function fixture(hosted = false) {
   });
   if (made.op !== "create") throw new Error("unexpected");
   const id = made.conversation.conversationId;
-  const f = hostedFixture();
   const writeSettings = vi.fn(async () => {
     throw new Error("Preference flow must not change settings");
   });
@@ -127,15 +123,6 @@ async function fixture(hosted = false) {
       operatorValid && r.headers.get("authorization") === "Bearer owner"
         ? { operatorId: "operator" }
         : undefined,
-    ...(hosted
-      ? {
-          hostedPairing: new HostedPairing(
-            new HostedBodyClient(f.bootstrap, { clock: () => now }),
-            generateKeyPairSync("ed25519").privateKey,
-            { clock: () => now },
-          ),
-        }
-      : {}),
   });
   services.push(service);
   const post = (request: OperatorConversationServiceRequest, token: string) =>
@@ -143,12 +130,6 @@ async function fixture(hosted = false) {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(request),
-    });
-  const bridge = (request: OperatorConversationServiceRequest, token: string) =>
-    service.app.request("/v1/hosted/operator", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ method: "POST", path: "/operator/v1/dispatch", body: JSON.stringify(request) }),
     });
   const fetchImpl: typeof fetch = async (input, init) => service.app.fetch(new Request(input, init));
   const client = (token: string) =>
@@ -174,7 +155,6 @@ async function fixture(hosted = false) {
     client,
     send,
     post,
-    bridge,
     tokens,
     continuation,
     writeSettings,
@@ -290,18 +270,6 @@ it.each(["read", "captain", "expired", "revoked", "rotated"])(
     await f.store.close();
   },
 );
-it("hosted bridge requires its minted operator device and reauthenticates ORIGINAL token on use", async () => {
-  const f = await fixture(true);
-  await f.send();
-  const request = { op: "input_get", schemaVersion: 1, conversationId: f.id } as const;
-  expect((await f.bridge(request, f.tokens.other!)).status).toBe(403);
-  expect((await f.bridge(request, f.tokens.hosted!)).status).toBe(200);
-  f.expire();
-  expect((await f.bridge(request, f.tokens.hosted!)).status).toBeGreaterThanOrEqual(400);
-  expect(f.continuation).not.toHaveBeenCalled();
-  expect(f.writeSettings).not.toHaveBeenCalled();
-  await f.store.close();
-});
 it("captain-only ordinary sends retain no question authority", async () => {
   const f = await fixture();
   await f.send("captain");
@@ -310,8 +278,8 @@ it("captain-only ordinary sends retain no question authority", async () => {
   await f.store.close();
 });
 
-it("owner update HTTP and hosted routes require current owner authority without waking a continuation", async () => {
-  const f = await fixture(true);
+it("owner update HTTP requires current owner authority without waking a continuation", async () => {
+  const f = await fixture();
   try {
     const update = await f.store.mailOwnerUpdate(
       f.id,
@@ -331,7 +299,6 @@ it("owner update HTTP and hosted routes require current owner authority without 
     for (const request of requests) {
       expect((await f.post(request, "captain")).status).toBe(403);
       expect((await f.post(request, f.tokens.read!)).status).toBeGreaterThanOrEqual(400);
-      expect((await f.bridge(request, f.tokens.other!)).status).toBe(403);
     }
     for (const request of requests) {
       const operator = await f.post(request, "owner");
@@ -349,7 +316,6 @@ it("owner update HTTP and hosted routes require current owner authority without 
         });
       }
       expect((await f.post(request, f.tokens.control!)).status).toBe(200);
-      expect((await f.bridge(request, f.tokens.hosted!)).status).toBe(200);
     }
     await f.service.app.request("/v1/devices/control/revoke", {
       method: "POST",
@@ -357,9 +323,6 @@ it("owner update HTTP and hosted routes require current owner authority without 
     });
     for (const request of requests)
       expect((await f.post(request, f.tokens.control!)).status).toBeGreaterThanOrEqual(400);
-    f.expire();
-    for (const request of requests)
-      expect((await f.bridge(request, f.tokens.hosted!)).status).toBeGreaterThanOrEqual(400);
     expect(f.continuation).not.toHaveBeenCalled();
     expect(f.writeSettings).not.toHaveBeenCalled();
   } finally {

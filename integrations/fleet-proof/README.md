@@ -14,9 +14,8 @@ with pidfds (5.3 or newer) and Python 3.9 or newer. Only the **initial PID
 namespace** is supported. The helper authenticates procfs with `fstatfs`, checks
 the PID namespace through its nsfs descriptor and kernel initial-namespace inode,
 and rejects mismatched proc views, `hidepid`, and nested mounts under `/proc`.
-Containers refuse with `unsupported_pid_namespace`; neither a pane label nor a
-hosted account bypasses this boundary. A future trusted hosted containment receipt
-is tracked separately in [VUH-2120](https://linear.app/vuhlp/issue/VUH-2120).
+Containers refuse with `unsupported_pid_namespace`; a pane label does not
+bypass this boundary. Container admission is tracked separately in [VUH-2120](https://linear.app/vuhlp/issue/VUH-2120).
 
 | Guarantee                         | Darwin observation                                | Linux observation                                                                                            |
 | --------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |

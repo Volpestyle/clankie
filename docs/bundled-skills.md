@@ -80,7 +80,7 @@ settings, so an installed body needs no sibling checkout.
 ## Herdr skill
 
 Herdr is both a bundled tool skill and an independently selectable global skill.
-Fresh installs and hosted bodies need its instructions without any owner-global
+Fresh installs and Linux container bodies need its instructions without any owner-global
 skills. The shipped `herdr` skill is a short loader: it tells the reader to run
 `herdr --skill` and follow that output, so the instructions always match the
 runtime in use, including one updated beyond the packaged pin. Release assembly

@@ -41,30 +41,3 @@ export function formatPersonaImages(images: OwnerPersonaSnapshot["images"]): str
     ...failed.map((file) => `  ${file.status} ${file.name}${file.reason ? ` · ${file.reason}` : ""}`),
   ].join("\n");
 }
-
-/** Any JSON result as indented `key: value` lines, for results with no dedicated view. */
-export function formatPlain(value: unknown, indent = ""): string {
-  if (value === null || value === undefined) return `${indent}none`;
-  if (typeof value !== "object") return `${indent}${String(value)}`;
-  if (Array.isArray(value)) {
-    if (!value.length) return `${indent}none`;
-    return value
-      .map((item) =>
-        item !== null && typeof item === "object"
-          ? `${indent}-\n${formatPlain(item, `${indent}  `)}`
-          : `${indent}- ${String(item)}`,
-      )
-      .join("\n");
-  }
-  const entries = Object.entries(value).filter(([, item]) => item !== undefined);
-  if (!entries.length) return `${indent}none`;
-  return entries
-    .map(([key, item]) =>
-      item !== null &&
-      typeof item === "object" &&
-      (Array.isArray(item) ? item.length : Object.keys(item).length)
-        ? `${indent}${key}:\n${formatPlain(item, `${indent}  `)}`
-        : `${indent}${key}: ${formatPlain(item)}`,
-    )
-    .join("\n");
-}

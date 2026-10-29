@@ -1,7 +1,6 @@
 # How Clankie works
 
-Clankie lives in a persistent service on one machine: yours, or a private hosted
-one. The app, the terminal console, and Discord are ways to reach him. The
+Clankie lives in a persistent service on one machine of yours. The app, the terminal console, and Discord are ways to reach him. The
 service owns his conversations, memory, tools, and access, so closing a client
 loses nothing.
 
@@ -12,13 +11,13 @@ customize him, connect a team, or know where your work goes.
   <div class="diagram-col">
     <h4>Talk to him</h4>
     <div class="dnode"><strong>The app</strong><span>Messages · Commons · Terminal</span></div>
-    <div class="dnode"><strong>The console</strong><span>local or hosted connection</span></div>
+    <div class="dnode"><strong>The console</strong><span>on this machine</span></div>
     <div class="dnode"><strong>Optional rooms</strong><span>Discord text · voice</span></div>
   </div>
   <div class="diagram-col diagram-center">
     <h4>His home</h4>
     <div class="dnode dnode-main"><strong>Clankie's service</strong><span>conversations · memory · projects</span><span>tools · credentials · access</span></div>
-    <div class="dnode"><strong>On his host</strong><span>your machine or a managed machine</span></div>
+    <div class="dnode"><strong>On his host</strong><span>your Mac or Linux host</span></div>
   </div>
   <div class="diagram-col">
     <h4>His connections</h4>
@@ -68,8 +67,7 @@ See [memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md).
 
 A model reasons, a tool acts, and a skill explains how to approach a task.
 Choosing a model installs no browser, signs in to no account, and gives no
-Discord room a shell. Chat, images, video, and voice are configured separately;
-hosted availability is listed on [clankie.bot](https://clankie.bot).
+Discord room a shell. Chat, images, video, and voice are configured separately.
 
 ## A team around him
 
@@ -115,20 +113,17 @@ in Terminal. In the console, `/chats`, `/agents`, `/rooms`, `/history`, and
 ([vocabulary](https://github.com/Volpestyle/clankie/blob/main/docs/product-vocabulary.md),
 [console](/console/)).
 
-A joined screen can provide Clankie's computer body, including for a hosted
-Clankie. The owner confirms each session locally and chooses observation or
+A joined screen can provide Clankie's computer body, including for a body
+without a desktop of its own. The owner confirms each session locally and chooses observation or
 input. A visible pet offers Stop; access reduction and loss of consent stop
 queued input. The host supports bounded native input with exact receipts. Observer
 acknowledgments cannot prove queue drain, so Stop retains a post-input lease. Real Mac and Windows driving checks remain open.
 
 ## Where the service and data live
 
-Locally, the service keeps running after the console closes, as long as the Mac
-stays awake and online; by default a self-hosted Mac keeps itself awake while
-plugged in ([`clankie awake`](/cli/#awake)). Hosted, closing
-a client leaves his work running within the plan's limits. The accepted Premium
-lifecycle keeps presence and scheduled Auto rounds running across idle periods;
-its managed-service rollout is pending. Inference still uses AI credits.
+The service keeps running after the console closes, as long as the Mac stays
+awake and online; by default a Mac keeps itself awake while plugged in
+([`clankie awake`](/cli/#awake)).
 
 The host keeps service state and credentials: Keychain on macOS, a private file
 store on Linux. Connected GitHub, Linear, and Google accounts are stored there
