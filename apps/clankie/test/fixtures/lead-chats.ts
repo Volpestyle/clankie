@@ -66,6 +66,8 @@ export async function leadChatFixture(
       readonly createTab: () => Promise<string>;
       /** Herdr's occupant of exactly this allocated pane; undefined keeps the native lead. */
       readonly pane: (paneId: string) => HerdrAgentSnapshot | undefined;
+      /** Herdr's resolution of the hire's own terminal; any other terminal stays gone. */
+      readonly terminal?: (terminalId: string) => HerdrAgentSnapshot | undefined;
       readonly tools: NonNullable<CaptainOptions["projectHireTools"]>;
     };
   } = {},
@@ -238,7 +240,8 @@ export async function leadChatFixture(
     ...(options.paneShell === undefined
       ? {}
       : { paneShell: async (paneId: string) => options.paneShell!(undefined, paneId) }),
-    resolveTerminal: async (id) => (id === head.terminalId ? head : Promise.reject(new Error("gone"))),
+    resolveTerminal: async (id) =>
+      id === head.terminalId ? head : (options.launch?.terminal?.(id) ?? Promise.reject(new Error("gone"))),
     wait: async () => head,
   };
   // Setup's roster check needs only the local lead; the case's own calls meet the slow

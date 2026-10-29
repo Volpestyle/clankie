@@ -344,10 +344,12 @@ receipts freeze accepted report IDs across adoption, handover and restart.
 A service-driven project lead may keep hiring after its original native source
 is gone, but only into its owner-bound or currently Auto-routed project. This
 requires complete, stable inventories from every registered Herdr connection,
-no live head, no seat holding the conversation's lane (a parked poll, its bound
-grace or the later lane hold), no unresolved or unreadable head receipt (the
-outbox is opened from its durable journal, so this holds after a restart without
-a presence file), and no retained allocation on the old pane. A changed occupant,
+the original source's own fleet still registered (an unlinked fleet cannot be
+listed, so absence there is never assumed), no live head, no seat holding the
+conversation's lane (a parked poll, its bound grace or the later lane hold), no
+unresolved or unreadable head receipt (the outbox is opened from its durable
+journal, so this holds after a restart without a presence file), and no retained
+allocation on the old pane. A changed occupant,
 the original session in another pane, an unidentified native session or an
 unavailable inventory refuses. A session-less pane whose agent field Herdr
 omitted (current builds' plain shell) counts only after the original pane,
@@ -362,8 +364,10 @@ An Auto round's hire re-reads its Auto policy at each launch check with the same
 startup occupant, which only the native store derives from that allocation.
 Service absence admits fresh hires only: an existing hire's restart keeps needing
 live native authority for its project, so with the lead's source gone it refuses
-before any handoff, signal or exit. The cached source remains intact; ordinary
-native-source attribution and destination admission are unchanged.
+before any handoff, signal or exit. Moving a worker closes it and re-hires it as
+a fresh hire, so with the lead's source absent that re-hire follows these same
+rules. The cached source remains intact; ordinary native-source attribution and
+destination admission are unchanged.
 
 VUH-2888's preparation release observes binding refusals while retaining legacy
 admission. Doctor inventories live local launchers; the updater refuses a later

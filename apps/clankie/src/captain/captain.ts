@@ -6206,11 +6206,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       candidate.session === undefined &&
       candidate.paneId === startup.pane &&
       (splitFleetQualified(candidate.paneId)?.fleet ?? "default") === startup.fleet;
+    // An unlinked fleet is never listed, so the source's absence there would only be
+    // assumed. Its own fleet must stay registered; bare ids are the local default (ADR 0184).
+    const sourceFleet = splitFleetQualified(native.terminalId)?.fleet;
+    const sourceListed = () => sourceFleet === undefined || fleetIdentities.has(sourceFleet);
     try {
       if (!eligible() || herdrRunner.list === undefined) return false;
       // The fail-soft roster cannot prove absence. Every registered inventory must
       // answer, with the same fleet identities before and after the complete read.
       await refreshFleets();
+      if (!sourceListed()) return false;
       const identities = JSON.stringify([...fleetIdentities]);
       const inventory = (
         await Promise.all([
@@ -6245,7 +6250,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           return false;
       }
       await refreshFleets();
-      return identities === JSON.stringify([...fleetIdentities]) && eligible();
+      return identities === JSON.stringify([...fleetIdentities]) && sourceListed() && eligible();
     } catch {
       // allow-swallowed-rejection -- an unavailable inventory or outbox never proves an absent source; the native guard still refuses.
       return false;

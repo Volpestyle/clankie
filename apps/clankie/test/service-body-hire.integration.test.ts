@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
@@ -265,6 +265,88 @@ it("admits an omitted-agent pane only once its own process read proves a plain s
   });
   expect(spawn).toHaveBeenCalledOnce();
 }, 30_000);
+
+// A source whose own fleet was unlinked is never listed, so its absence is unproven.
+// The stored source is moved onto a fleet between restarts, as a later unlink leaves it.
+it("refuses a service body whose original source fleet is no longer registered", async () => {
+  const changed = {
+    outcome: "failed",
+    reason: "not_ready",
+    detail: expect.stringContaining("original agent has changed"),
+  };
+  const reachedLaunch = {
+    outcome: "failed",
+    reason: "harness_unavailable",
+    control: { reason: "pane_run_unavailable" },
+  };
+  for (const [fleet, expected] of [
+    ["gone", changed],
+    ["pc", reachedLaunch],
+  ] as const) {
+    let gone = false;
+    const f = await leadChatFixture(false, cleanup, {
+      defaultLead: true,
+      nativeSourceProof: true,
+      additionalFleet: true,
+      projectHireIdentity: async () => undefined,
+      // The registered "pc" fleet lists nobody: an echo of the local lead there would make
+      // its session ambiguous, and no native source would be saved.
+      inventoryAgents: (fleet) => (fleet === "pc" || gone ? [] : undefined),
+    });
+    await f.captain.pollSeatEvents(50, undefined, "global-default", capabilities);
+    await mkdir(join(f.root, "clankie"));
+    const directory = await realpath(join(f.root, "clankie"));
+    await f.settings.update((current) => ({
+      ...current,
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "clankie",
+            name: "Clankie",
+            auto: true,
+            workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: directory }],
+          },
+        ],
+      }),
+    }));
+    await f.captain.close();
+    const path = join(f.root, "conversations", "global-default", "meta.json");
+    const meta = JSON.parse(await readFile(path, "utf8")) as {
+      nativeSource: { paneId: string; terminalId: string };
+    };
+    // The real proven native source the first poll saved, never a synthesized one.
+    expect(meta.nativeSource, fleet).toMatchObject({
+      paneId: f.head.paneId,
+      terminalId: f.head.terminalId,
+      session: { value: f.head.session!.value },
+    });
+    meta.nativeSource = {
+      ...meta.nativeSource,
+      paneId: `${fleet}/${meta.nativeSource.paneId}`,
+      terminalId: `${fleet}/${meta.nativeSource.terminalId}`,
+    };
+    await writeFile(path, `${JSON.stringify(meta)}\n`);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    gone = true;
+    const service = f.open();
+    vi.setSystemTime(Date.now() + 60_000);
+    const bank = await service.laneToolBank("operator", "global-default");
+    const result = await bank.tools.find((tool) => tool.name === "hire_agent")!.call({
+      harness: "codex",
+      effort: "medium",
+      effortReason: "A bounded product fix with a current source proof.",
+      title: "Nessa",
+      role: "builder",
+      projectId: "clankie",
+      workingDirectory: directory,
+      brief: "Own the bounded product result.",
+    });
+    const text = result.content.find((part) => part.type === "text");
+    expect(JSON.parse(text?.type === "text" ? text.text : "null"), fleet).toMatchObject(expected);
+    await service.close();
+    vi.useRealTimers();
+  }
+}, 60_000);
 
 it("does not treat a bound or uncertain native outbox as a service-driven source", async () => {
   let gone = false;

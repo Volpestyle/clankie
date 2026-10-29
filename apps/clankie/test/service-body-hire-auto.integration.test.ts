@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
@@ -12,9 +12,11 @@ import type { HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import { capabilities, leadChatFixture } from "./fixtures/lead-chats.ts";
 
 // VUH-2975: an Auto round on a service-driven lead whose native source is gone.
-// Only the model is a stand-in: the round's internal captain turn calls the real
-// hire_agent tool from its own session tools, as a model would. The Auto policy,
-// project policy and launch admission are the service's own.
+// The round's internal captain turn calls the real hire_agent tool from its own
+// session tools, as a model would. The Auto policy, project policy and launch
+// admission are the service's own. Stand-ins: the model, the harness adapter, the
+// Herdr runner, the Auto scheduler's start and the observed worker account. This
+// is no proof of a live native hire.
 type SessionTool = {
   readonly name: string;
   execute(id: string, params: unknown, signal: undefined, onUpdate: undefined, ctx: never): Promise<unknown>;
@@ -153,6 +155,8 @@ async function autoRound(
         return allocate;
       },
       pane: (paneId) => (launched && paneId === allocate ? own : undefined),
+      // Ownership binding resolves the hired terminal after its spawn (herdr-watch spawnAdmittedSeat).
+      terminal: (terminalId) => (launched && terminalId === own.terminalId ? own : undefined),
       tools: async () => [],
     },
   });
@@ -213,14 +217,21 @@ async function autoRound(
   const round = start.mock.calls[0]?.[0];
   if (round === undefined) throw new Error("The restarted service did not start Auto");
   await round("global-default", "Auto round: staff the routed project.");
-  return { hired, steps, launched: () => launched };
+  return { hired, steps, launched: () => launched, root: f.root };
 }
 
 it("lets an Auto round's own hire keep its startup occupant through guard and bound", async () => {
-  const { hired, steps } = await autoRound((own) => [own]);
+  const { hired, steps, root } = await autoRound((own) => [own]);
   expect(steps).toEqual(["guard", "startup guard", "bound"]);
-  expect(hired).toBeDefined();
-  expect(JSON.stringify(hired)).not.toContain("original agent has changed");
+  expect(hired, JSON.stringify(hired)).toMatchObject({ outcome: "spawned" });
+  // The controller's own durable allocation records the hire under the routed project.
+  const ledger = await readFile(join(root, "herdr-watches.json.project-hires.json"), "utf8");
+  const { allocations } = JSON.parse(ledger) as {
+    allocations: { projectId: string; pane?: string; confirmed: boolean }[];
+  };
+  expect(allocations.filter((entry) => entry.pane === "w7:p1")).toEqual([
+    expect.objectContaining({ projectId: "clankie", confirmed: true }),
+  ]);
 }, 30_000);
 
 it("still refuses an Auto round's hire beside an unrelated session-less agent", async () => {
