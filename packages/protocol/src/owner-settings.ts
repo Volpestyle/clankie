@@ -213,9 +213,10 @@ export const NavigationItemsSchema = z
   .min(1)
   .max(5)
   .refine((items) => new Set(items).size === items.length, "Duplicate navigation item");
+/** Sessions by machine (`messages`) is home; an owner's saved order still wins. */
 export const DEFAULT_NAVIGATION_ITEMS: z.infer<typeof NavigationItemSchema>[] = [
-  "world",
   "messages",
+  "world",
   "work",
   "terminal",
 ];

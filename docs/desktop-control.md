@@ -173,8 +173,9 @@ is persisted without typed text or pixels. An identical retry reconciles that
 receipt; a changed payload with the same UUID refuses. Never replay an uncertain
 input with a new UUID. Each lease admits at most 256 input batches; retained
 screenshots are bounded to four, expire after thirty seconds, and have a separate
-16 MiB PNG ceiling. The legacy `/v1/body-leases` projection keeps its original
-resource set; computer status and mutations use `/v1/computer`.
+16 MiB PNG ceiling. The `/v1/body-leases` list keeps its original resource
+set and reports a held computer lease only in its additive `computer` key, for
+status. Computer status detail and mutations use `/v1/computer`.
 
 Today's classic caller-local capture remains read-only. The adapter does not
 bypass Peekaboo's remote-host refusal, change focus to rescue an operation, or
