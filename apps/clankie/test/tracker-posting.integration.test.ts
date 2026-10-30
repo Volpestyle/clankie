@@ -933,6 +933,34 @@ describe("an issue that belongs to another project", () => {
     return { f, moveIssueToMeadow };
   };
 
+  it("meets that project's setting when a write links to it or makes it a parent", async () => {
+    const { f } = await setup();
+    const MEADOW_ISSUE = "00000000-0000-4000-8000-0000000000ef";
+    f.provider.rows.issues!.push({
+      ...f.provider.issue,
+      id: MEADOW_ISSUE,
+      identifier: "VUH-1400",
+      title: "Mow the meadow",
+      project: { id: MEADOW_PROJECT, name: "Meadow" },
+    });
+    await f.setPosting("garden", "allow");
+    await f.setPosting("meadow", "read_only");
+    // A worker in the garden (go ahead) changes the garden's issue, reaching the meadow's.
+    for (const args of [
+      { id: ISSUE_ID, blockedBy: ["VUH-1400"] },
+      { id: ISSUE_ID, relatedTo: [MEADOW_ISSUE] },
+      { id: ISSUE_ID, duplicateOf: "VUH-1400" },
+      { id: ISSUE_ID, parentId: MEADOW_ISSUE },
+    ]) {
+      const result = await f.worker("save_issue", args);
+      expect(result).toMatchObject({ outcome: "refused", reason: "posting_refused" });
+      if (result.outcome !== "refused") throw new Error("expected a refusal");
+      expect(result.detail).toContain("Posting to Linear is read only for Meadow");
+    }
+    expect(f.mutations("issueUpdate")).toBe(0);
+    expect(f.mutations("issueRelation")).toBe(0);
+  });
+
   it("is not posted when it moves into a read only project while the write waits", async () => {
     const { f, moveIssueToMeadow } = await setup();
     await f.setPosting("garden", "lead");

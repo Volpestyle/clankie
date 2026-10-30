@@ -83,6 +83,18 @@ const RouteSchema = z.discriminatedUnion("kind", [
 ]);
 export type PostingRoute = z.infer<typeof RouteSchema>;
 
+/** `save_issue` arguments that name other issues it changes: its parent and its relations. */
+const ISSUE_LINK_KEYS = [
+  "parentId",
+  "blocks",
+  "blockedBy",
+  "relatedTo",
+  "removeBlocks",
+  "removeBlockedBy",
+  "removeRelatedTo",
+  "duplicateOf",
+] as const;
+
 /** Arguments that name an existing Linear record other than an issue. */
 const OTHER_RECORD_KEYS = [
   "commentId",
@@ -341,29 +353,42 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     // could be in any project.
     const otherRecord =
       (!saveIssue && text(args.id) !== undefined) ||
-      (issueRef === undefined && text(args.parentId) !== undefined) ||
+      (!saveIssue && issueRef === undefined && text(args.parentId) !== undefined) ||
       OTHER_RECORD_KEYS.some((key) => text(args[key]) !== undefined);
     if (otherRecord) return everyProject;
-    if (!issueRef) return targeted;
+    // An issue's parent and the issues it relates to change too: their projects meet the write.
+    const related = saveIssue
+      ? ISSUE_LINK_KEYS.flatMap((key) => {
+          const value = args[key];
+          return (Array.isArray(value) ? value : [value]).map(text).filter((ref) => ref !== undefined);
+        })
+      : [];
+    const issueRefs = [...(issueRef === undefined ? [] : [issueRef]), ...related];
+    if (issueRefs.length === 0) return targeted;
     if (!options.readLinear) return everyProject;
     // ...and, for an existing issue, where it is now: moving an issue out of a project
     // meets that project's setting too.
-    let issue: {
-      project?: { id?: unknown; name?: unknown } | null;
-      team?: { id?: unknown; key?: unknown; name?: unknown } | null;
-    };
-    try {
-      issue = (await options.readLinear("get_issue", { id: issueRef })) as typeof issue;
-    } catch {
-      // An issue it can't read could be in any project.
-      return everyProject;
+    const current: string[] = [];
+    for (const ref of new Set(issueRefs)) {
+      let issue: {
+        project?: { id?: unknown; name?: unknown } | null;
+        team?: { id?: unknown; key?: unknown; name?: unknown } | null;
+      };
+      try {
+        issue = (await options.readLinear("get_issue", { id: ref })) as typeof issue;
+      } catch {
+        // An issue it can't read could be in any project.
+        return everyProject;
+      }
+      current.push(
+        ...(await named(
+          [text(issue?.project?.id), text(issue?.project?.name)].filter((value) => value !== undefined),
+          [text(issue?.team?.id), text(issue?.team?.key), text(issue?.team?.name)].filter(
+            (value) => value !== undefined,
+          ),
+        )),
+      );
     }
-    const current = await named(
-      [text(issue?.project?.id), text(issue?.project?.name)].filter((ref) => ref !== undefined),
-      [text(issue?.team?.id), text(issue?.team?.key), text(issue?.team?.name)].filter(
-        (ref) => ref !== undefined,
-      ),
-    );
     return [...new Set([...targeted, ...current])];
   };
 
