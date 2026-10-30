@@ -114,16 +114,18 @@ export function createOwnerFeed(options: {
       for (const ask of asks.result.questions) {
         const question = ask.question;
         if (question?.status !== "pending" || ask.revision === undefined) continue;
+        const named =
+          question.purpose === "verify" && question.issue?.tracker === "clankie-work"
+            ? marked.get(question.issue.key)
+            : undefined;
+        // A check that stands in for a proof keeps the proof's project, wherever the ask was raised.
         const projectId =
           (question.projectId !== undefined && projects.some((project) => project.id === question.projectId)
             ? question.projectId
             : undefined) ??
           projectForPath(question.workspace) ??
-          projectForConversation(question.conversationId);
-        const named =
-          question.purpose === "verify" && question.issue?.tracker === "clankie-work"
-            ? marked.get(question.issue.key)
-            : undefined;
+          projectForConversation(question.conversationId) ??
+          named?.projectId;
         if (named) asked.add(named.key);
         const media = question.evidence
           ? [evidenceMedia(evidenceHash(question.evidence)!)]

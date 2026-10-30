@@ -173,10 +173,11 @@ async function fixture() {
       serveOperatorConversation: (request, authority) =>
         store.serve(request as Parameters<typeof store.serve>[0], authority),
       invalidateQuestionPrincipal: (deviceId) => store.invalidateQuestionPrincipal(deviceId),
-      requestOwnerAsk: (conversationId, draft, publicationId) =>
+      requestOwnerAsk: (conversationId, draft, publicationId, options) =>
         store.requestSurfaceQuestion(conversationId, draft, {
           current: () => store.conversation(conversationId) !== undefined,
           ...(publicationId === undefined ? {} : { publicationId }),
+          ...(options?.exactPublication ? { exactPublication: true } : {}),
         }),
     }),
     builtInTracker: tracker,
@@ -390,6 +391,44 @@ it("an agent asks the owner for a quick check; the feed shows its line, evidence
   expect((await f.feed({ projectId: "garden" })).items.map((item) => item.id)).toEqual([raised.item.id]);
 });
 
+it("two keys asking the same check each get their own ask, so each retry finds it after an answer", async () => {
+  const f = await fixture();
+  const body = { conversationId: f.lead, check: "Tap the shed: its door opens" };
+  const first = (await f.check({ idempotencyKey: "k".repeat(20), ...body })).body
+    .result as FeedCheckResult & {
+    outcome: "raised";
+  };
+  const second = (await f.check({ idempotencyKey: "l".repeat(20), ...body })).body
+    .result as FeedCheckResult & {
+    outcome: "raised";
+  };
+  expect(second).toMatchObject({ outcome: "raised", duplicate: false });
+  expect(second.item.id).not.toBe(first.item.id);
+
+  // The owner answers the second key's check; its caller lost the reply and retries.
+  const question = second.item.check.question;
+  await f.post({
+    op: "input_answer",
+    schemaVersion: 1,
+    conversationId: question.conversationId,
+    requestId: question.requestId,
+    incarnationId: question.incarnationId,
+    expectedRevision: second.item.check.revision,
+    answer: { kind: "choice", optionId: question.options[0]!.optionId },
+  });
+  const retried = (await f.check({ idempotencyKey: "l".repeat(20), ...body })).body
+    .result as FeedCheckResult & {
+    outcome: "raised";
+  };
+  expect(retried).toMatchObject({
+    outcome: "raised",
+    duplicate: true,
+    item: { id: second.item.id, check: { question: { status: "submitted" } } },
+  });
+  // Nothing new was asked: only the first key's check still waits.
+  expect((await f.feed({ projectId: "garden" })).items.map((item) => item.id)).toEqual([first.item.id]);
+});
+
 it("refuses a check line over 140 characters with a 400 naming the limit, at the API and the ask tool", async () => {
   const f = await fixture();
   const long = `Open Garden and ${"look ".repeat(30)}`.trim();
@@ -523,6 +562,33 @@ it("a finished item the lead marked shows as a proof with its clip and screensho
     requestId: ask.question!.requestId,
     incarnationId: ask.question!.incarnationId,
     expectedRevision: ask.revision!,
+  });
+  expect((await f.feed({ projectId: "garden" })).items.map((item) => item.kind)).toEqual(["proof"]);
+
+  // Routed to the main chat with only the issue to go on, the check still belongs to the project.
+  const main = await f.store.requestSurfaceQuestion(
+    "global-default",
+    QuestionDraftSchema.parse({
+      purpose: "verify",
+      kind: "choice",
+      prompt: `${gate.issue.identifier} landed: "Gate latch". Check that it works.`,
+      options: [{ label: "It works" }, { label: "Send it back" }],
+      allowFreeform: true,
+      waitingOn: `${gate.issue.identifier} owner verification`,
+      issue: { tracker: "clankie-work", key: gate.issue.identifier, url: gate.issue.url },
+    }),
+    admission,
+  );
+  expect((await f.feed({ projectId: "garden" })).items).toMatchObject([
+    { kind: "check", id: `check:${main.question!.requestId}`, projectId: "garden" },
+  ]);
+  await f.post({
+    op: "input_cancel",
+    schemaVersion: 1,
+    conversationId: "global-default",
+    requestId: main.question!.requestId,
+    incarnationId: main.question!.incarnationId,
+    expectedRevision: main.revision!,
   });
   expect((await f.feed({ projectId: "garden" })).items.map((item) => item.kind)).toEqual(["proof"]);
 

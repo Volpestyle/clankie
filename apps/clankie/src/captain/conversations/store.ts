@@ -3878,6 +3878,8 @@ export class ConversationStore {
       readonly current: () => boolean;
       readonly authorize?: () => Promise<boolean>;
       readonly publicationId?: string;
+      /** Reuse only this publication's own ask, never another publication's equal one. */
+      readonly exactPublication?: boolean;
     },
   ): Promise<ConversationQuestionResult> {
     if (
@@ -3900,6 +3902,7 @@ export class ConversationStore {
       },
       undefined,
       true,
+      admission.exactPublication === true && admission.publicationId !== undefined,
     );
   }
 

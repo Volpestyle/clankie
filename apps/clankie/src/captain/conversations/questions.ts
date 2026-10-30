@@ -76,6 +76,7 @@ export async function requestQuestion(
   context: ConversationTurnContext,
   projectDraft?: ProjectProposalDraft,
   surface = false,
+  exactPublication = false,
 ): Promise<ConversationQuestionResult> {
   const input = QuestionDraftSchema.parse(draft);
   const workspaceBound = !!projectDraft || input.purpose === "preference";
@@ -103,6 +104,7 @@ export async function requestQuestion(
   };
   const matchingPending = () =>
     meta.questions?.records.find((record) => {
+      if (exactPublication && record.question.originRunId !== context.runId) return false;
       if (record.question.status !== "pending" && !(surface && record.question.originRunId === context.runId))
         return false;
       if (workspaceBound) return !!record.projectCreation || record.question.purpose === "preference";
