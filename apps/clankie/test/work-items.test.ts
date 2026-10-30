@@ -104,6 +104,35 @@ describe("the work-items service", () => {
     expect(await defaultRun("git", ["status", "--porcelain", "--", ".clankie/work"], repo)).toBe("");
   });
 
+  it("keeps a worktree listed when it keeps its issue files in another private folder", async () => {
+    const tracking = (directory: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        backend: "markdown",
+        directory,
+        decidedBy: "owner",
+        decidedAt: "2026-10-30T00:00:00.000Z",
+      });
+    const { repo, worktree, service, repos } = await checkoutWithWorktree({
+      ".clankie/tracking.json": tracking(".clankie/work/garden"),
+    });
+    await writeFile(join(worktree, ".clankie/tracking.json"), tracking(".clankie/work/orchard/"));
+    await service.handle({ action: "create", repo: worktree, title: "Orchard item" }, true);
+    await service.handle({ action: "create", repo, title: "Garden item" }, true);
+    // Both folders live in the checkout, but they hold different items, so both are offered.
+    const offered = await repos();
+    expect(offered.map((entry) => entry.root).sort()).toEqual([repo, worktree].sort());
+    const titles = [];
+    for (const entry of offered) {
+      const listed = await service.handle({ action: "list", repo: entry.id }, false);
+      if ("items" in listed) titles.push(...listed.items.map((item) => item.title));
+    }
+    expect(titles.sort()).toEqual(["Garden item", "Orchard item"]);
+    expect(
+      readdirSync(join(repo, ".clankie/work/orchard")).filter((name) => name.endsWith(".md")),
+    ).toHaveLength(1);
+  });
+
   it("offers a checkout once when its worktree reads the same Linear project (VUH-2848)", async () => {
     const tracking = {
       schemaVersion: 1,

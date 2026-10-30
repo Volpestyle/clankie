@@ -305,6 +305,25 @@ export function trackerIssueStatus(raw: Row): WorkItemStatus {
 }
 
 /**
+ * The issues that block this one, in each tracker's shape: a top-level `blockedBy`
+ * (the built-in tracker), `relations.blockedBy` (a repo tracker read with relations),
+ * or connected Linear's `inverseRelations` of type `blocks`, whose `issue` blocks this one.
+ */
+export function blockerReferences(raw: Row): unknown[] {
+  const list = (value: unknown) => (Array.isArray(value) ? (value as unknown[]) : []);
+  const object = (value: unknown) =>
+    value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Row) : undefined;
+  return [
+    ...list(raw.blockedBy),
+    ...list(object(raw.relations)?.blockedBy),
+    ...list(object(raw.inverseRelations)?.nodes)
+      .map(object)
+      .filter((node) => node?.type === "blocks")
+      .map((node) => node!.issue),
+  ];
+}
+
+/**
  * One tracker issue read (`get_issue` on the built-in tracker, the offline
  * Linear-shaped tracker, or connected Linear) as an export record. `identifierOf`
  * names a related issue by its identifier; a UUID it cannot name is dropped,
@@ -336,7 +355,7 @@ export function exportIssueFromTracker(
   const room = Math.max(0, WORK_ITEM_EVIDENCE_MAX - parsed.evidence.length);
   const milestone = (raw.projectMilestone ?? raw.milestone) as Row | null | undefined;
   const priority = raw.priority as number | { value?: unknown } | undefined;
-  const blockedBy = Array.isArray(raw.blockedBy) ? (raw.blockedBy as unknown[]) : [];
+  const blockedBy = blockerReferences(raw);
   return {
     id,
     title,

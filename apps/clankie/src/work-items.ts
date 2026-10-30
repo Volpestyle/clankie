@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { readFileSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
@@ -28,6 +28,7 @@ import {
   isPrivateWorkDirectory,
   DEFAULT_WORK_DIRECTORY,
   exportedIssueIds,
+  blockerReferences,
   exportIssueFromTracker,
   exportIssuesToFiles,
   trackerIssueStatus,
@@ -538,12 +539,16 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       // allow-swallowed-rejection -- an unreadable convention can't prove a shared tracker, so the worktree stays listed.
       [left, right].map((path) => readConvention(path).catch(() => undefined)),
     );
+    // The private folder both read, normalized, so `.clankie/work/a` never matches `.clankie/work/b`.
     const privateFiles = (convention: typeof a) => {
       const directory = convention === undefined ? undefined : conventionWorkDirectory(convention);
-      return directory !== undefined && isPrivateWorkDirectory(directory);
+      if (directory === undefined || !isPrivateWorkDirectory(directory)) return undefined;
+      return posix.normalize(directory.replace(/\\/gu, "/")).replace(/\/+$/u, "");
     };
-    // The checkout with no saved choice yet discovers the same folder its worktree writes.
-    if (privateFiles(a)) return b === undefined || privateFiles(b);
+    const folder = privateFiles(a);
+    // The checkout with no saved choice yet discovers the default folder its worktree writes.
+    if (folder !== undefined)
+      return b === undefined ? folder === DEFAULT_WORK_DIRECTORY : privateFiles(b) === folder;
     if (a === undefined || b === undefined || a.backend !== b.backend) return false;
     // A built-in binding lives in host settings, not here, so it is never proven shared.
     if (a.backend !== "linear" && a.backend !== "github") return false;
@@ -1723,20 +1728,26 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         const full: Record<string, unknown>[] = [];
         for (const row of wanted)
           full.push(
-            (await tools.call("get_issue", { id: String(row.identifier ?? row.id) })) as Record<
-              string,
-              unknown
-            >,
+            (await tools.call("get_issue", {
+              id: String(row.identifier ?? row.id),
+              // Connected Linear names blockers only among an issue's relations.
+              includeRelations: true,
+            })) as Record<string, unknown>,
           );
         // A parent or blocker outside the project is named by its own read.
         const unknown = new Set<string>();
         for (const issue of full)
-          for (const reference of [
-            issue.parentId,
-            ...(Array.isArray(issue.blockedBy) ? (issue.blockedBy as unknown[]) : []),
-          ])
+          for (const related of [issue.parentId, ...blockerReferences(issue)]) {
+            // A related issue read without its identifier is looked up by its id.
+            const reference =
+              related !== null && typeof related === "object"
+                ? typeof (related as Record<string, unknown>).identifier === "string"
+                  ? undefined
+                  : (related as Record<string, unknown>).id
+                : related;
             if (typeof reference === "string" && !identifiers.has(reference.toLowerCase()))
               unknown.add(reference);
+          }
         for (const reference of unknown) {
           // allow-swallowed-rejection -- an unreadable related issue is left out of the file, never guessed.
           const related = (await tools.call("get_issue", { id: reference }).catch(() => undefined)) as
