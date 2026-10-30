@@ -244,6 +244,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(run: () => Promise<T>): Promise<T> => {
     const next = queue.then(run, run);
+    // allow-swallowed-rejection -- the caller gets `next` and its failure; the queue only keeps order.
     queue = next.catch(() => undefined);
     return next;
   };
@@ -635,7 +636,13 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     };
     const result = await options
       .requestOwnerAsk(conversationId, draft, `tracker-post:${post.id}`, { exactPublication: true })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        options.logger?.warn(
+          { event: "tracker.posting.ask_failed", id: post.id, error },
+          "Owner check not asked; the post is not kept",
+        );
+        return undefined;
+      });
     if (result?.question === undefined) return false;
     post.requestId = result.question.requestId;
     post.leadConversationId = conversationId;
@@ -796,6 +803,10 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       return { post: publicPost(record), changed: true, message };
     });
 
+  /** An answer that couldn't be applied stays waiting; it shows in `clankie work posts`. */
+  const answerFailed = (error: unknown) =>
+    options.logger?.warn({ event: "tracker.posting.answer_failed", error }, "Owner answer not applied");
+
   const answered = async (question: ConversationQuestion) => {
     const record = state.posts.find((entry) => entry.requestId === question.requestId);
     if (record === undefined || record.state !== "waiting" || record.decider !== "owner") return;
@@ -841,7 +852,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     for (const record of state.posts)
       if (record.state === "waiting" && record.requestId !== undefined) {
         const question = options.readOwnerAsk?.(record.requestId);
-        if (question && question.status !== "pending") void answered(question).catch(() => undefined);
+        if (question && question.status !== "pending") void answered(question).catch(answerFailed);
       }
     // A posted drop whose file was not marked, as when Clankie stopped in between.
     for (const record of state.posts)
@@ -858,7 +869,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
           save();
           const question = asked ? options.readOwnerAsk?.(record.requestId!) : undefined;
           // Its answer is applied after this turn of the queue, which deciding waits on.
-          if (question && question.status !== "pending") void answered(question).catch(() => undefined);
+          if (question && question.status !== "pending") void answered(question).catch(answerFailed);
         }).catch((error: unknown) =>
           options.logger?.warn(
             { event: "tracker.posting.reask_failed", error },

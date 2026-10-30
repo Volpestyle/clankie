@@ -249,6 +249,7 @@ export function createFeedDrops(options: FeedDropsOptions) {
         drop: { root: target.root, key: record.key },
         key: `drop:${record.key}`,
       })
+      // allow-swallowed-rejection -- a failed post leaves the drop filed and shown as kept here; a retry with its key posts it.
       .catch(() => undefined);
     return admission?.outcome === "posted"
       ? "posted"
