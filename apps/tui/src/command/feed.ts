@@ -226,8 +226,13 @@ async function runFeedCheckCommand(args: readonly string[], options: FeedCommand
     );
   }
   const stdout = options.stdout ?? process.stdout;
-  if (values.json) outputJson(stdout, result);
-  else stdout.write(`${formatFeedCheck(result)}\n`);
+  // An unavailable check may already be asked: keep the key so a retry finds it.
+  const retry = result.outcome === "unavailable" ? key : undefined;
+  if (values.json) outputJson(stdout, retry === undefined ? result : { ...result, idempotencyKey: retry });
+  else
+    stdout.write(
+      `${formatFeedCheck(result)}${retry === undefined ? "" : `\nRetry with --key ${retry}: it never asks twice.`}\n`,
+    );
   return result.outcome === "raised" ? 0 : 1;
 }
 

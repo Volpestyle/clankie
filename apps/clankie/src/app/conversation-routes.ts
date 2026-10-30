@@ -107,6 +107,9 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   const feedChecks = createFeedChecks({
     ...(ctx.dependencies.settings ? { settings: ctx.dependencies.settings } : {}),
     ...(ctx.dependencies.evidenceStore ? { evidence: ctx.dependencies.evidenceStore } : {}),
+    ...(ctx.dependencies.feedCheckReceiptPath === undefined
+      ? {}
+      : { receiptPath: ctx.dependencies.feedCheckReceiptPath }),
     // A check's key is its identity: an equal check under another key is its own ask,
     // so each key's retry finds the ask it made.
     requestOwnerAsk: (conversationId, draft, publicationId) =>

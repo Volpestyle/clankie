@@ -8529,10 +8529,13 @@ clankie feed check --project garden --longer "Read the onboarding copy aloud: do
   chat), otherwise the main chat. The answer wakes that chat; the check names
   its project so the feed files it there.
 - **Retries.** `idempotencyKey` (16–128 letters, digits, `_` or `-`) is the
-  caller's; the CLI makes one and prints it after an uncertain answer for
-  `--key`. The same key and check answer with the same check and
-  `duplicate: true`; the same key with another check is refused as
-  `idempotency_conflict`.
+  caller's; the CLI makes one and, when an answer is lost or `unavailable`,
+  prints it (`idempotencyKey` in `--json`) for `--key`. The same key and check
+  answer with the same check and `duplicate: true`; the same key with another
+  check is refused as `idempotency_conflict`. Each key's check is its own ask,
+  even when another key asks the same words. The host keeps a receipt for every
+  key, so once a chat's question history has let an old answer go, the same key
+  is refused as `already_asked` and asks nothing.
 
 In a lead chat, the same check is `request_user_input` with `purpose: "verify"`
 and `check` (and optionally `longer`, `evidence`, `projectId`, `issue`). On the
@@ -8544,8 +8547,8 @@ HTTP uses `POST /operator/v1/dispatch` with `schemaVersion: 1`,
 `projectId` or `conversationId` (not both), `evidence`, `issue` and `waitingOn`.
 The result is `{outcome: "raised", item, duplicate}` (`item` is the check as the
 feed shows it), `{outcome: "refused", reason: "unknown_project" |
-"unknown_conversation" | "evidence_missing" | "idempotency_conflict", message}`
-or `{outcome: "unavailable", message}` (retry with the same key). Only this
+"unknown_conversation" | "evidence_missing" | "idempotency_conflict" |
+"already_asked", message}` or `{outcome: "unavailable", message}` (retry with the same key). Only this
 machine's operator credential asks: a paired device, a captain bearer or a
 support grant is refused. The relay does not carry it.
 

@@ -400,7 +400,14 @@ export const FeedCheckResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("refused"),
-      reason: z.enum(["unknown_project", "unknown_conversation", "evidence_missing", "idempotency_conflict"]),
+      reason: z.enum([
+        "unknown_project",
+        "unknown_conversation",
+        "evidence_missing",
+        "idempotency_conflict",
+        /** The key's check was asked and answered long ago; its answer is no longer kept. */
+        "already_asked",
+      ]),
       message: z.string().min(1).max(1000),
     })
     .strict(),

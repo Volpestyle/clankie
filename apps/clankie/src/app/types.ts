@@ -158,6 +158,8 @@ export interface ClankieAppDependencies {
   discordTurnReceiptPath?: string;
   /** Durable operator MCP hire/delivery receipts, retained across service restarts. */
   seatCallReceiptPath?: string;
+  /** Durable quick check key receipts, so an old key never asks the owner twice. */
+  feedCheckReceiptPath?: string;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** Worker harness sign-in with each harness's own login (Claude, Codex). */

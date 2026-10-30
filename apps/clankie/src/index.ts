@@ -2287,6 +2287,7 @@ const clankie = await createClankieApp({
   },
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
+  feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   evidenceStore,
   builtInTracker,
   discordForum: { receive: (event) => discordForum.accept(event, discordForumOwner) },

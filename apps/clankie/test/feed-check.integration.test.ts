@@ -167,18 +167,26 @@ async function fixture() {
     mintDeviceSessionClaims({ deviceId: "phone", nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 600 }),
   );
 
+  // An ask whose store write throws: the answer is lost, though the ask may stand.
+  const faults = { failNextAsk: false };
   const service = await createClankieApp({
     settings: { load: async () => settings },
+    feedCheckReceiptPath: join(root, "state", "feed-check-receipts.json"),
     captain: createStubCaptain({
       serveOperatorConversation: (request, authority) =>
         store.serve(request as Parameters<typeof store.serve>[0], authority),
       invalidateQuestionPrincipal: (deviceId) => store.invalidateQuestionPrincipal(deviceId),
-      requestOwnerAsk: (conversationId, draft, publicationId, options) =>
-        store.requestSurfaceQuestion(conversationId, draft, {
+      requestOwnerAsk: async (conversationId, draft, publicationId, options) => {
+        const asked = store.requestSurfaceQuestion(conversationId, draft, {
           current: () => store.conversation(conversationId) !== undefined,
           ...(publicationId === undefined ? {} : { publicationId }),
           ...(options?.exactPublication ? { exactPublication: true } : {}),
-        }),
+        });
+        if (!faults.failNextAsk) return asked;
+        faults.failNextAsk = false;
+        await asked;
+        throw new Error("The ask's answer was lost");
+      },
     }),
     builtInTracker: tracker,
     evidenceStore: evidence,
@@ -264,6 +272,7 @@ async function fixture() {
     return { issue, bundle, shot, clip };
   };
   return {
+    faults,
     garden,
     lead,
     store,
@@ -427,6 +436,82 @@ it("two keys asking the same check each get their own ask, so each retry finds i
   });
   // Nothing new was asked: only the first key's check still waits.
   expect((await f.feed({ projectId: "garden" })).items.map((item) => item.id)).toEqual([first.item.id]);
+});
+
+it("an old key never asks again after the chat's question history lets its answer go", async () => {
+  const f = await fixture();
+  const body = { conversationId: f.lead, check: "Tap the well: water rises" };
+  const first = (await f.check({ idempotencyKey: "m".repeat(20), ...body })).body
+    .result as FeedCheckResult & {
+    outcome: "raised";
+  };
+  const answer = async (raised: FeedCheckResult & { outcome: "raised" }) => {
+    const question = raised.item.check.question;
+    await f.post({
+      op: "input_answer",
+      schemaVersion: 1,
+      conversationId: question.conversationId,
+      requestId: question.requestId,
+      incarnationId: question.incarnationId,
+      expectedRevision: raised.item.check.revision,
+      answer: { kind: "choice", optionId: question.options[0]!.optionId },
+    });
+  };
+  await answer(first);
+  // More answered checks than the chat keeps push the first one out of its history.
+  for (let index = 0; index < 34; index += 1) {
+    const later = (
+      await f.check({
+        idempotencyKey: `later-${String(index).padStart(14, "0")}`,
+        ...body,
+        check: `Look at stone ${index}`,
+      })
+    ).body.result as FeedCheckResult & { outcome: "raised" };
+    await answer(later);
+  }
+  const kept = await Promise.all(
+    (["pending", "submitted", "cancelled"] as const).map(async (status) => {
+      const listed = OperatorConversationServiceResultSchema.parse(
+        await (await f.post({ op: "input_list", schemaVersion: 1, status })).json(),
+      );
+      return listed.op === "input_list"
+        ? listed.result.questions.map((entry) => entry.question?.requestId)
+        : [];
+    }),
+  );
+  expect(kept.flat()).not.toContain(first.item.check.question.requestId);
+
+  // Retrying the first key asks nothing; another check under it is still a conflict.
+  expect((await f.check({ idempotencyKey: "m".repeat(20), ...body })).body.result).toMatchObject({
+    outcome: "refused",
+    reason: "already_asked",
+  });
+  expect(
+    (await f.check({ idempotencyKey: "m".repeat(20), ...body, check: "Something else" })).body.result,
+  ).toMatchObject({ outcome: "refused", reason: "idempotency_conflict" });
+  expect((await f.feed()).items.filter((item) => item.kind === "check")).toEqual([]);
+});
+
+it("prints the key the CLI made when the answer is unavailable, so its retry asks nothing new", async () => {
+  const f = await fixture();
+  const line = "Tap the bench: it rocks";
+  f.faults.failNextAsk = true;
+  const lost = await f.cli(["check", "--project", "garden", line]);
+  expect(lost.status).toBe(1);
+  const key = /Retry with --key (\S+): it never asks twice\./u.exec(lost.output)?.[1];
+  expect(key).toBeDefined();
+  const retried = await f.cli(["check", "--project", "garden", "--key", key!, line]);
+  expect(retried.status).toBe(0);
+  expect(retried.output).toContain(`Already asked: ${line}`);
+  expect((await f.feed()).items.filter((item) => item.kind === "check")).toHaveLength(1);
+
+  // JSON carries the same key.
+  f.faults.failNextAsk = true;
+  const json = await f.cli(["check", "--project", "garden", "--json", "Tap the gate: it swings"]);
+  expect(JSON.parse(json.output)).toMatchObject({
+    outcome: "unavailable",
+    idempotencyKey: expect.any(String),
+  });
 });
 
 it("refuses a check line over 140 characters with a 400 naming the limit, at the API and the ask tool", async () => {
