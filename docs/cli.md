@@ -10352,7 +10352,7 @@ These commands only preview. Apply the exact preview by adding
 `--confirm-retain-items`. Existing items remain in their original tracker.
 Nothing is migrated or deleted; switching back makes the previous items
 accessible again. To take a project's open items along into issue files, run
-[`work export`](#work-export---project-p---to-markdown---dry-run---json) first. A changed project, convention, workspace or connection
+[`work export`](#work-export-project-p-to-markdown-dry-run-json) first. A changed project, convention, workspace or connection
 invalidates the preview. Review again rather than automatically retrying.
 
 Selections are `{"backend":"builtin"}` (a separate built-in project is created
