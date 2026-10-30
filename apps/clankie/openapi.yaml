@@ -4825,6 +4825,14 @@ paths:
         owner (operator bearer or a Take Control device) read it; the device relay
         requires `chat`. `fleet_room` returns `app_note` entries only with
         `include: ["app_note"]`.
+        `prompt_answer` (ADR 0303) presses named keys or types plain text into an
+        agent pane waiting on input, for a connector app the owner turned on with
+        `clankie connector prompts on APP`. It takes `terminalId`, `expect` (text
+        that must still be on the visible screen) and 1..12 `steps`, each `{key}`
+        or `{text}`; only the relay's captain bearer calls it, carrying the
+        `appDeviceId` it stamped. It answers `result` with `outcome` answered,
+        refused, uncertain or unavailable and a `message`, and records each answer
+        as an `app_note` in that app's name.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

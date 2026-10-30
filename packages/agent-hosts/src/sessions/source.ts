@@ -1,6 +1,7 @@
 // Session sources (ADR 0301): the apps that hold the owner's agent sessions,
 // behind one seam. Herdr is the first; any app that can list its sessions,
-// read one, message one and open one in its own window can be another. The
+// read one, message one and open one in its own window can be another, and
+// one that can answer the prompt open in a session says so with `answer`. The
 // Claude connector talks to this layer, never to a session app directly;
 // Clankie and the phone move onto it next.
 
@@ -52,6 +53,27 @@ export interface SessionOpenResult {
   readonly detail: string;
 }
 
+/** One step at a prompt in a session: a named key, or one line of text typed as it is. */
+export type SessionPromptStep =
+  | { readonly key: "enter" | "esc" | "tab" | "up" | "down" | "left" | "right" | "space" | "backspace" }
+  | { readonly text: string };
+
+export interface SessionPromptAnswer {
+  /** Text the caller saw on the prompt, such as the option it picks; it must still be showing. */
+  readonly expect: string;
+  readonly steps: readonly SessionPromptStep[];
+}
+
+/**
+ * `answered`: the steps went in. `refused` and `unavailable`: nothing went in, and
+ * `detail` says why. `uncertain`: part may have gone in; read the session first.
+ */
+export interface SessionAnswerResult {
+  readonly id: string;
+  readonly status: "answered" | "refused" | "unavailable" | "uncertain";
+  readonly detail: string;
+}
+
 /** Where a new session may start: a known project's checkout on one machine. */
 export interface SessionPlace {
   readonly machine: string;
@@ -88,6 +110,8 @@ export interface SessionSource {
   open(id: string): Promise<SessionOpenResult>;
   /** Start a new session in a known place; a source that can't start any leaves this out. */
   start?(request: SessionStartRequest): Promise<SessionStartResult>;
+  /** Answer the prompt open in a session (a menu, a permission prompt); a source that can't leaves this out. */
+  answer?(id: string, answer: SessionPromptAnswer): Promise<SessionAnswerResult>;
 }
 
 /** A refusal worded for the person or model that asked. */
@@ -143,6 +167,13 @@ export class SessionSources {
   public async send(id: string, message: string): Promise<SessionSendResult> {
     const [source, native] = this.resolve(id);
     return { ...(await source.send(native, message)), id };
+  }
+
+  public async answer(id: string, answer: SessionPromptAnswer): Promise<SessionAnswerResult> {
+    const [source, native] = this.resolve(id);
+    if (source.answer === undefined)
+      throw new SessionRefusal("That session's app can't answer prompts from here.");
+    return { ...(await source.answer(native, answer)), id };
   }
 
   public async open(id: string): Promise<SessionOpenResult> {

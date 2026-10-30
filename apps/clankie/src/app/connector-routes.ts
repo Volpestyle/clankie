@@ -5,13 +5,16 @@ import {
   CONNECTOR_AUTHORIZE_PATH,
   CONNECTOR_AUTHORIZE_STATUS_PATH,
   CONNECTOR_MCP_PATH,
+  CONNECTOR_PROMPT_ANSWERS_PATH,
   CONNECTOR_PUBLIC_BASE_HEADER,
   CONNECTOR_REGISTER_PATH,
   CONNECTOR_SIGN_INS_PATH,
   CONNECTOR_SIGN_IN_APPROVE_PATH,
   CONNECTOR_SIGN_IN_DENY_PATH,
   CONNECTOR_TOKEN_PATH,
+  ConnectorPromptAnswersRequestSchema,
   ConnectorSignInDecisionRequestSchema,
+  type ConnectorPromptAnswersResponse,
   connectorRedirectHost,
   connectorRedirectUriAllowed,
   type ConnectorSignIn,
@@ -23,6 +26,7 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { mintDeviceSessionClaims, type DeviceSessionSigner } from "../device-session.ts";
 import { applyDeviceEvent, type DeviceRegistry } from "../devices.ts";
+import type { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import { ownerAppRecord } from "./conversation-routes.ts";
 import { authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
@@ -70,6 +74,8 @@ export interface RegisterConnectorRoutesContext {
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly deviceLocks: Map<string, Promise<unknown>>;
   readonly devices: DeviceRegistry;
+  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
+  readonly promptAnswers: ConnectorPromptAnswers;
 }
 
 interface PendingSignIn {
@@ -377,6 +383,48 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
       } satisfies ConnectorSignInDecisionResponse);
     });
   }
+
+  // --- Answering prompts in agent panes (ADR 0303) ----------------------------
+
+  const promptAnswerApps = (): ConnectorPromptAnswersResponse => ({
+    apps: [...ctx.devices.values()]
+      .filter((record) => record.status === "active" && record.scope === "connector")
+      .slice(0, 256)
+      .map((record) => ({
+        deviceId: record.deviceId,
+        name: record.name,
+        allowed: ctx.promptAnswers.allowed(record.deviceId),
+      })),
+  });
+
+  ctx.app.get(CONNECTOR_PROMPT_ANSWERS_PATH, async (context) => {
+    context.header("cache-control", "no-store");
+    const authorized = await owner(context);
+    if (authorized instanceof Response) return authorized;
+    return context.json(promptAnswerApps());
+  });
+
+  ctx.app.post(CONNECTOR_PROMPT_ANSWERS_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
+    context.header("cache-control", "no-store");
+    const authorized = await owner(context);
+    if (authorized instanceof Response) return authorized;
+    const parsed = ConnectorPromptAnswersRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    const record = ctx.devices.get(parsed.data.deviceId);
+    // Only a connected app; turning one off works even after it was revoked.
+    if (parsed.data.allowed && (record?.status !== "active" || record.scope !== "connector"))
+      return context.json({ error: "not_found" }, 404);
+    ctx.promptAnswers.set(parsed.data.deviceId, parsed.data.allowed);
+    logger.info(
+      {
+        event: "connector.prompt_answers.changed",
+        deviceId: parsed.data.deviceId,
+        allowed: parsed.data.allowed,
+      },
+      "connector prompt answers changed",
+    );
+    return context.json(promptAnswerApps());
+  });
 
   // --- Token endpoint ----------------------------------------------------------
 

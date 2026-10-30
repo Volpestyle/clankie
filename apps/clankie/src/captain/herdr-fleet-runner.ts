@@ -218,6 +218,11 @@ export function routeHerdrFleets(
       if (!runner.sendKeys) throw new Error("Herdr key presses are unavailable");
       await runner.sendKeys(id, keys);
     },
+    sendText: async (paneId, text) => {
+      const { runner, id } = await route(paneId);
+      if (!runner.sendText) throw new Error("Herdr text input is unavailable");
+      await runner.sendText(id, text);
+    },
     paneProcesses: async (paneId) => {
       const { runner, id } = await route(paneId);
       if (runner.paneProcesses === undefined) throw new Error("Herdr process info is unavailable");

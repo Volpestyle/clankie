@@ -160,6 +160,7 @@ import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
+import { createPromptAnswerer } from "./prompt-answer.ts";
 import {
   autoProjectRounds,
   autoRoundDue,
@@ -7523,6 +7524,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       command.action === "post"
         ? fleetRoom.postAppNote(command.author, command.text)
         : fleetRoom.readAppNotes(command),
+    answerPrompt: createPromptAnswerer({
+      paneAddress: (terminalId) => terminals.paneAddress(terminalId),
+      runner: herdrRunner,
+      ownerAskPending: (seatId) => conversations.ownerAskPendingFor(seatId),
+      record: (app, text) => fleetRoom.postAppNote(app, text),
+    }),
     recordInbound: (arrival) => noteFleetRoom(inboundFleetRoomRecord(arrival)),
     readWorkerAccounts,
     resolveWorkerAccountLabel: (machine, harness, label) =>

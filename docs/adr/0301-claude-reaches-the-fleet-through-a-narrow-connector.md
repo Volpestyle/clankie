@@ -22,7 +22,9 @@ own `/mcp` on a trusted network.
 - **Three tools.** `list_agents` names each agent with its machine and
   project, `read_agent` returns the text on its screen, and `message_agent`
   writes into its own persona thread, which delivers to the native pane. A
-  connector never types into a terminal, closes a seat, writes to a tracker,
+  connector never types into a terminal (except to answer an open prompt, once
+  the owner turns that on for the app:
+  [ADR 0303](0303-connected-apps-answer-agents-prompts.md)), closes a seat, writes to a tracker,
   reads settings, tails Clankie's own thread, or joins a call.
 - **Starting an agent, narrowly.** `start_agent` (added 2026-10-30) starts a
   Claude Code or Codex agent in a known project's checkout on a machine

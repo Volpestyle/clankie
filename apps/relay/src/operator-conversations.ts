@@ -717,6 +717,18 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         return true;
       }
     }
+    // So is the app answering a prompt in an agent's pane; the service checks the
+    // owner turned answering on for that app (ADR 0303).
+    if (serviceRequest.op === "prompt_answer") {
+      if (serviceRequest.appDeviceId !== undefined) {
+        writeJson(response, 400, { error: "prompt_answer_app_is_stamped" });
+        return true;
+      }
+      if (authorization.device.scope !== "connector") {
+        writeJson(response, 403, { error: "connector_device_required" });
+        return true;
+      }
+    }
     if (
       authorization.device.controlScope === "hosted" &&
       !hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify(serviceRequest))
@@ -771,7 +783,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const grant =
       serviceRequest.op === "terminal_tail" ||
       serviceRequest.op === "terminal_catalog" ||
-      serviceRequest.op === "terminal_read"
+      serviceRequest.op === "terminal_read" ||
+      // The owner's per-app switch, checked by the service, is what lets keys through.
+      serviceRequest.op === "prompt_answer"
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -814,6 +828,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const currentAuthorization = await authorizeGrant(options, token, response, grant, serviceRequest.op);
     if (currentAuthorization === undefined) return true;
     if (serviceRequest.op === "app_notes" && serviceRequest.action === "post")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (serviceRequest.op === "prompt_answer")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
@@ -1663,6 +1679,7 @@ const CONNECTOR_OPS = new Set([
   "terminal_read",
   "start_agent",
   "app_notes",
+  "prompt_answer",
   "get",
   "create",
   "send",

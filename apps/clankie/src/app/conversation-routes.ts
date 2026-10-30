@@ -1,4 +1,6 @@
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
+import type { PromptAnswerResult } from "@clankie/protocol/connector";
+import type { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import {
   TRACKER_REQUEST_BUDGET_PATH,
   TrackerRequestBudgetReportSchema,
@@ -77,6 +79,8 @@ export interface RegisterConversationRoutesContext {
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly devices: DeviceRegistry;
+  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
+  readonly promptAnswers?: ConnectorPromptAnswers;
   readonly clock: () => Date;
   readonly recordEvent: (
     type: string,
@@ -656,6 +660,52 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         );
       } catch {
         return reply({ outcome: "unavailable", message: "The note board can’t be reached here." });
+      }
+    }
+    if (parsed.success && parsed.data.op === "prompt_answer") {
+      // Answering a prompt in an agent's pane (ADR 0303). Like a note, it reaches the
+      // service only through the relay's captain bearer, which stamps the connector
+      // device it authenticated; the app is named from that device's own record, and
+      // only an app the owner turned answering on for may press anything.
+      const request = parsed.data;
+      const relay = () =>
+        captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const app = () => {
+        if (request.appDeviceId === undefined) return undefined;
+        const record = ctx.devices.get(request.appDeviceId);
+        return record?.status === "active" && record.scope === "connector" ? record : undefined;
+      };
+      const reply = (result: PromptAnswerResult) =>
+        context.json({ op: "prompt_answer", schemaVersion: 1, result });
+      const named = app();
+      if (!relay() || named === undefined) return context.json({ error: "app_author_required" }, 403);
+      if (ctx.promptAnswers?.allowed(named.deviceId) !== true)
+        return reply({
+          outcome: "refused",
+          message: `The owner hasn't turned on answering prompts for ${named.name}. The owner turns it on at the Mac with: clankie connector prompts on "${named.name}"`,
+        });
+      if (!ctx.dependencies.captain.answerPrompt)
+        return reply({
+          outcome: "unavailable",
+          message: "Answering prompts isn't available on this Clankie.",
+        });
+      try {
+        return reply(
+          await ctx.dependencies.captain.answerPrompt({
+            app: named.name,
+            // Rechecked before the first key: a revoked app or a switch turned off presses nothing.
+            current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
+            terminalId: request.terminalId,
+            expect: request.expect,
+            steps: request.steps,
+          }),
+        );
+      } catch (error) {
+        logger.warn({ error }, "Prompt answer failed");
+        return reply({
+          outcome: "uncertain",
+          message: "The answer may or may not have reached the agent. Read its screen before trying again.",
+        });
       }
     }
     if (parsed.success && parsed.data.op === "evidence_fetch") {
