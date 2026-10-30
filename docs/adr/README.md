@@ -204,3 +204,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0298: Linked repos are read-only sources, never owners](0298-linked-repos-are-read-only-sources.md) — LOCAL-VUH-41. Extends ADR 0270.
 - [0299: The owner's app gives the verdict on finished work](0299-the-owners-app-gives-the-verdict-on-finished-work.md) — LOCAL-VUH-58. Extends ADR 0226 and ADR 0245.
 - [0300: Clankie runs only on the owner's machine](0300-clankie-runs-only-on-the-owners-machine.md) — retires the hosted body of ADR 0183, 0237, 0241 and 0285.
+- [0301: Claude reaches the fleet through a narrow connector](0301-claude-reaches-the-fleet-through-a-narrow-connector.md) — a remote MCP connector that lists, reads and messages agents, signed in by the owner.

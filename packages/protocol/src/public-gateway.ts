@@ -113,6 +113,12 @@ export const HOSTED_PAIR_OFFER_PATH = "/v1/hosted/pair-offer";
 
 import { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 import {
+  CONNECTOR_SIGN_INS_PATH,
+  CONNECTOR_SIGN_IN_APPROVE_PATH,
+  CONNECTOR_SIGN_IN_DENY_PATH,
+  connectorRouteTarget,
+} from "./connector.ts";
+import {
   COMPOSER_TRANSCRIPTION_STATUS_PATH,
   COMPOSER_TRANSCRIPTION_BEGIN_PATH,
   COMPOSER_TRANSCRIPTION_CHUNK_PATH,
@@ -194,6 +200,10 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: DEVICE_PUSH_PATH, target: "control" },
   { method: "POST", path: "/v1/devices/self/session/refresh", target: "control" },
   { method: "POST", path: LINEAR_WEBHOOK_PATH, target: "control" },
+  // The owner approves a Claude connector sign-in from the app (ADR 0301).
+  { method: "GET", path: CONNECTOR_SIGN_INS_PATH, target: "control" },
+  { method: "POST", path: CONNECTOR_SIGN_IN_APPROVE_PATH, target: "control" },
+  { method: "POST", path: CONNECTOR_SIGN_IN_DENY_PATH, target: "control" },
   { method: "POST", path: DEVICE_WAKE_KEY_PATH, target: "control" },
   { method: "POST", path: HOSTED_PAIR_OFFER_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
@@ -275,6 +285,23 @@ export const PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST: readonly string[] = [
   "linear-delivery",
   "linear-event",
   "linear-timestamp",
+  // MCP clients name the protocol revision on every connector call (ADR 0301).
+  "mcp-protocol-version",
+];
+
+/**
+ * Response headers the doorway carries back. A connector's `401` names its
+ * discovery document in `www-authenticate`, which is how Claude starts sign-in;
+ * the sign-in page keeps its own content policy on the shared doorway origin.
+ */
+export const PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST: readonly string[] = [
+  "cache-control",
+  "content-security-policy",
+  "content-type",
+  "referrer-policy",
+  "retry-after",
+  "www-authenticate",
+  "x-content-type-options",
 ];
 
 const PUBLIC_GATEWAY_HEADER_VALUE_MAX = 8 * 1024;
@@ -438,6 +465,8 @@ export function publicGatewayTargetFor(
     path = PROJECT_UPDATE_SETTINGS_PATH;
   if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))
     return "control";
+  const connector = connectorRouteTarget(method, path);
+  if (connector !== undefined) return connector;
   return (
     PUBLIC_GATEWAY_ROUTES.find((route) => route.method === method && route.path === path)?.target ??
     additionalRoutes.find((route) => route.method === method && route.path === path)?.target

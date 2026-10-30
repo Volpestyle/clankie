@@ -223,6 +223,8 @@ export async function runHeadlessCaptainCommand(
       return await (await import("../src/command/pair.ts")).runPairCommand(rest, options);
     if (command === "devices")
       return await (await import("../src/command/devices.ts")).runDevicesCommand(rest, options);
+    if (command === "connector")
+      return await (await import("../src/command/connector.ts")).runConnectorCommand(rest, options);
     if (command === "support")
       return await (await import("../src/command/support.ts")).runSupportCommand(rest, options);
     if (command === "operator-credential")

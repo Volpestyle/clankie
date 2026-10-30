@@ -17,6 +17,7 @@
     "./model-keys": "./src/model-keys.ts",
     "./turn-model": "./src/turn-model.ts",
     "./local-companion": "./src/local-companion.ts",
+    "./connector": "./src/connector.ts",
     "./composer-transcription": "./src/composer-transcription.ts",
     "./hosted-device-security": "./src/hosted-device-security.ts",
     "./accounts": "./src/accounts.ts",

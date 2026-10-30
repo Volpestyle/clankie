@@ -52,6 +52,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Machine access                         | `clankie machines access NAME portal\|workers\|shell\|screen`                                                                                                      |
 | Machines / discovery / sessions        | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                             |
 | Pair a device / list / revoke          | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                                                                              |
+| Claude connector URL / sign-ins        | `clankie connector --json`, `clankie connector approve CODE --json` (only a code the owner sees on their own sign-in page)                                         |
 | Rotate operator credential             | `clankie operator-credential rotate --json`                                                                                                                        |
 | Restart / stop a service               | `clankie start`, `stop` or `restart [service]`                                                                                                                     |
 | Play session                           | `clankie play status` / `clankie play stop`                                                                                                                        |

@@ -130,6 +130,25 @@ call, `upstreamStatus` is the service's own status, or `0` when it could not be
 reached), `connected`, `abandoned`, and `ended` with `closedBy` and the close
 code. The lines carry the device ID but never audio or bearers.
 
+## Claude connector
+
+`POST /mcp` is a remote MCP server Claude adds as a custom connector
+([ADR 0301](../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)),
+stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
+(`machine` optional), `read_agent` (`agent`, `lines` up to 400) and
+`message_agent` (`agent`, `message`). Each call checks the bearer against
+`GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
+this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
+that bearer, so the connector meets the same allowlist a hand-built request
+does: fleet, terminal catalog and tail, and get, create and send on persona
+threads only. Pane frames are rendered to plain text here.
+
+Without a bearer `/mcp` answers `401` with
+`WWW-Authenticate: Bearer resource_metadata=".../.well-known/oauth-protected-resource/mcp"`.
+That RFC 9728 document names this relay's `/mcp` as the resource and the
+service (`CLANKIE_CONTROL_PLANE_URL`) as the authorization server, or, behind
+the doorway, the `x-clankie-public-base` the Mac's gateway connector sets.
+
 ## Run
 
 ```bash

@@ -275,6 +275,13 @@ const HEADLESS_COMMAND_HELP = [
   },
   { nouns: ["devices"], lines: ["  devices [--grouped] [--json]         List paired devices"] },
   {
+    nouns: ["connector"],
+    lines: [
+      "  connector [status] [--json]   The URL to add in Claude and sign-ins waiting",
+      "  connector approve CODE | deny CODE [--json]   Let a Claude sign-in in, or turn it away",
+    ],
+  },
+  {
     nouns: ["support"],
     lines: [
       "  support [list | create read-state|shell --hours 1..72 --ref REFERENCE]",
