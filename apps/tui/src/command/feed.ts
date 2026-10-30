@@ -169,8 +169,13 @@ async function runFeedDropCommand(args: readonly string[], options: FeedCommandO
     );
   }
   const stdout = options.stdout ?? process.stdout;
-  if (values.json) outputJson(stdout, result);
-  else stdout.write(`${formatFeedDrop(result)}\n`);
+  // An unavailable drop may already be written: keep the key so a retry finds it.
+  const retry = result.outcome === "unavailable" ? key : undefined;
+  if (values.json) outputJson(stdout, retry === undefined ? result : { ...result, idempotencyKey: retry });
+  else
+    stdout.write(
+      `${formatFeedDrop(result)}${retry === undefined ? "" : `\nRetry with --key ${retry}: it never files twice.`}\n`,
+    );
   return result.outcome === "filed" ? 0 : 1;
 }
 

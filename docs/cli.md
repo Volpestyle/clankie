@@ -8493,8 +8493,8 @@ TUI: `/drop PROJECT_ID TEXT` files a text drop.
   owner wrote in that section; the bytes never enter
   `.clankie/work`. `clankie evidence fetch` with that link downloads it.
 - **Retries.** `idempotencyKey` (16–128 letters, digits, `_` or `-`) is the
-  client's. The CLI makes one and, when an answer is lost, prints it so
-  `--key KEY` can retry. The same key and request answer with the same item and
+  client's. The CLI makes one and, when an answer is lost or `unavailable`,
+  prints it (`idempotencyKey` in `--json`) so `--key KEY` can retry. The same key and request answer with the same item and
   `duplicate: true`, write nothing and wake no one; the same key with another
   request is refused as `idempotency_conflict`.
 - **The wake.** The lead is the project's lead chat as tracker work routes it:

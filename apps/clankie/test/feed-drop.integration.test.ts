@@ -592,6 +592,30 @@ it("keeps each drop with its own project in a shared folder, and files the same 
   ]);
 });
 
+it("names the generated key when a drop is unavailable, so a retry with it files the drop once", async () => {
+  const f = await fixture();
+  const gauge = join(f.root, "gauge.png");
+  await writeFile(gauge, PNG);
+  const args = ["drop", "--project", "orchard", "--body", "Rain gauge", "--file", gauge];
+  vi.spyOn(f.evidence, "upload").mockRejectedValueOnce(new Error("evidence store offline"));
+  const offline = await f.cli(...args);
+  expect(offline.status).toBe(1);
+  expect(offline.output).toContain("An attachment couldn't be stored, so the drop was not filed.");
+  const key = /Retry with --key (\S+): it never files twice\./u.exec(offline.output)?.[1];
+  if (key === undefined) throw new Error(offline.output);
+  vi.spyOn(f.evidence, "upload").mockRejectedValueOnce(new Error("evidence store offline"));
+  const json = await f.cli(...args, "--json");
+  expect(JSON.parse(json.output)).toMatchObject({
+    outcome: "unavailable",
+    idempotencyKey: expect.stringMatching(/^[\w-]{16,128}$/u),
+  });
+  const filed = await f.cli(...args, "--key", key);
+  expect(filed.output).toContain("Filed: Rain gauge");
+  expect((await f.cli(...args, "--key", key)).output).toContain("Already filed: Rain gauge");
+  const items = (await listing(join(f.orchard.repo, ".clankie/work"))).filter((name) => name.endsWith(".md"));
+  expect(items).toHaveLength(1);
+});
+
 it("refuses projects that keep no private issue files, and a missing upload, writing and waking nothing", async () => {
   const f = await fixture();
   const refused = async (projectId: string) =>
