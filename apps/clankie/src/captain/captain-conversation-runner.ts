@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { materializeOwnerAttachments, modelImagesForOwnerAttachments } from "../owner-attachments.ts";
 import { AutonomyStore, WakeHeldError } from "./autonomy.ts";
+import type { LeadStore } from "./lead.ts";
 import { createDraftPacer } from "./captain-draft.ts";
 import {
   formatOperatorToolDetail,
@@ -81,6 +82,8 @@ export interface CreateConversationRunnerContext {
     request: string,
   ) => void;
   readonly autonomy: AutonomyStore;
+  /** Who leads (ADR 0304); absent in tests that run Clankie's turns only. */
+  readonly lead?: Pick<LeadStore, "holds" | "hold">;
   readonly syncModel: (lane: LaneSession) => Promise<void>;
   readonly laneLog: LaneLog;
   readonly censusFleets: () => Promise<readonly HerdrCensusFleet[]>;
@@ -312,6 +315,19 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
         if (sourceScope?.kind === "workspace" && sourceScope.machineId !== undefined)
           throw new Error("Remote workspace needs its native seat; local captain fallback is forbidden");
         const socialContinuation = sourceScope?.kind === "room" || sourceScope?.kind === "channel";
+        // ADR 0304: while connected apps lead, a turn Clankie would take himself is
+        // held for them instead of running his model. The owner's own messages and
+        // answers still reach him.
+        if (
+          context.internal === true &&
+          context.origin !== "input" &&
+          !socialContinuation &&
+          ctx.lead?.holds(sourceScope) === true
+        ) {
+          ctx.lead.hold({ conversationId, origin: context.origin ?? "message", text: message });
+          context.deliveryReceipt?.("stored");
+          return;
+        }
         // Owner answers carry authentication, never a new room machine grant.
         // A room continuation has no original transport actor proof: run its mind
         // in the source transcript with social tools and no external mouth route.

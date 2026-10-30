@@ -228,9 +228,23 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
       return true;
     case "create":
       return request.scope.kind === "persona";
+    // Who leads is the owner's to set; an app reads the status and what is held (ADR 0304).
+    case "lead":
+      return request.command.action !== "set";
+    // A lead thread's reports, only while the apps lead; the relay checks both.
+    case "worker_reports":
+    case "acknowledge_worker_reports":
+      return true;
     default:
       return false;
   }
+}
+
+/** Ops whose conversation the relay must confirm is a lead thread the apps lead now (ADR 0304). */
+export function connectorLeadThreadOf(request: OperatorConversationServiceRequest): string | undefined {
+  if (request.op === "worker_reports" || request.op === "acknowledge_worker_reports")
+    return request.conversationId;
+  return undefined;
 }
 
 /** Ops whose conversation the relay must confirm is a persona thread. */

@@ -161,6 +161,7 @@ import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { createPromptAnswerer } from "./prompt-answer.ts";
+import { LeadStore } from "./lead.ts";
 import {
   autoProjectRounds,
   autoRoundDue,
@@ -509,6 +510,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const workingDirectory = options.workingDirectory ?? homedir();
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
   const autonomy = new AutonomyStore(join(options.stateDir, "autonomy.json"));
+  const lead = new LeadStore(join(options.stateDir, "lead.json"), join(options.stateDir, "lead-held.json"));
   const terminals = new RuntimeTerminals({
     ...(deps.runtimes ? { connections: deps.runtimes } : {}),
     ...(deps.herdrAvailable ? { defaultAvailable: deps.herdrAvailable } : {}),
@@ -2182,6 +2184,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
         get autonomy() {
           return autonomy;
+        },
+        get lead() {
+          return lead;
         },
         get syncModel() {
           return syncModel;
@@ -6019,6 +6024,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     retireClosedSeatReports,
   } = createWorkerReports({
     observedSeats: () => liveEdgeSeats,
+    leadHeld: (conversationId) => lead.holds(conversations.conversation(conversationId)?.scope),
     retiredReportsPath: join(options.stateDir, "retired-worker-reports.jsonl"),
     get conversations() {
       return conversations;
@@ -7567,6 +7573,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
       get conversations() {
         return conversations;
+      },
+      get lead() {
+        return lead;
       },
       get autonomy() {
         return autonomy;

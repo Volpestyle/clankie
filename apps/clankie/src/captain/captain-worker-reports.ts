@@ -22,6 +22,8 @@ export interface WorkerReportsContext {
   readonly shutdown: AbortController;
   readonly onChange: () => void;
   readonly observedSeats?: () => readonly { readonly paneId: string; readonly seatId: string }[];
+  /** True while connected apps lead this thread (ADR 0304): its reports wait in worker_reports. */
+  readonly leadHeld?: (conversationId: string) => boolean;
   readonly validateConversationOwner: (owner: ConversationOwner) => Promise<boolean>;
   readonly herdrRunner: HerdrWatchRunner;
   readonly herdrWatches: HerdrWatchStore;
@@ -114,6 +116,18 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       });
   }
 
+  /**
+   * While connected apps lead (ADR 0304) a report runs no turn of Clankie's: it is
+   * stored and stays unread, so the apps read it with worker_reports.
+   */
+  const serviceOrHeld: ConversationRunner = (conversationId, content, publish, context) => {
+    if (ctx.leadHeld?.(conversationId) === true) {
+      context.deliveryReceipt?.("stored");
+      return Promise.resolve();
+    }
+    return ctx.conversations.serviceRunner(conversationId, content, publish, context);
+  };
+
   function conversationReportRunner(owner: ConversationOwner, deliveryId: string): ConversationRunner {
     return async (conversationId, prompt, publish, context) => {
       if (context.signal.aborted || !(await ctx.validateConversationOwner(owner)))
@@ -131,8 +145,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       // driver fence rechecks the seat, so a seat that binds meanwhile still wins.
       // Only this report's own unresolved original stays with the seat; another
       // delivery's unresolved receipt never holds it back (VUH-1779).
-      if (!outbox?.routesToSeat(content))
-        return ctx.conversations.serviceRunner(conversationId, content, publish, context);
+      if (!outbox?.routesToSeat(content)) return serviceOrHeld(conversationId, content, publish, context);
       const result = await outbox!.deliver({
         kind: "message",
         conversationId,
@@ -143,8 +156,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       });
       // Nothing was taken: the seat that held the route (a restart's reconnect
       // grace, or a poll gap) never came back, so the service runs it after all.
-      if (result.outcome === "unbound")
-        return ctx.conversations.serviceRunner(conversationId, content, publish, context);
+      if (result.outcome === "unbound") return serviceOrHeld(conversationId, content, publish, context);
       context.deliveryReceipt?.(result.deliveryStage ?? "uncertain");
       if (result.outcome !== "delivered" && result.outcome !== "replied")
         throw new Error("Worker report native delivery remains unavailable");

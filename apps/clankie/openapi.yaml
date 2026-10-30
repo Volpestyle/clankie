@@ -4833,6 +4833,13 @@ paths:
         `appDeviceId` it stamped. It answers `result` with `outcome` answered,
         refused, uncertain or unavailable and a `message`, and records each answer
         as an `app_note` in that app's name.
+        `lead` (ADR 0304) reads or sets who leads Clankie's lead threads:
+        `clankie` or `apps`. `command.action` is `status`, `set` (with `lead`) or
+        `inbox` (optional `after`, `limit` 1..100), and the result carries
+        `status` (`lead`, `held`, optional `error`) plus, for `inbox`, held `items`
+        (seq, at, conversationId, origin, text), `next`, `more` and
+        `unreadReports`. Setting `clankie` needs the owner (operator bearer or a
+        Take Control device); a connector reads status and inbox only.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

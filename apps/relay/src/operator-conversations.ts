@@ -51,6 +51,7 @@ import {
 import { supportReadOperationAllowed } from "../../../packages/protocol/src/support-access.ts";
 import {
   connectorConversationOf,
+  connectorLeadThreadOf,
   connectorOperationAllowed,
 } from "../../../packages/protocol/src/connector.ts";
 import {
@@ -785,7 +786,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "terminal_catalog" ||
       serviceRequest.op === "terminal_read" ||
       // The owner's per-app switch, checked by the service, is what lets keys through.
-      serviceRequest.op === "prompt_answer"
+      serviceRequest.op === "prompt_answer" ||
+      // Reading who leads and what is held for the apps (ADR 0304).
+      (serviceRequest.op === "lead" && serviceRequest.command.action !== "set")
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -805,6 +808,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "readopt_seat" ||
               serviceRequest.op === "worker_reports" ||
               serviceRequest.op === "acknowledge_worker_reports" ||
+              serviceRequest.op === "lead" ||
               serviceRequest.op === "spawn_seat" ||
               serviceRequest.op === "start_agent" ||
               serviceRequest.op === "move_seat" ||
@@ -847,6 +851,34 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
       if (thread.op !== "get" || thread.conversation?.scope.kind !== "persona") {
         writeConnectorDenial(response);
+        return true;
+      }
+    }
+    // A connector reads and clears a lead thread's reports only while the owner has
+    // handed the lead to the apps, and only Clankie's own lead threads (ADR 0304).
+    const connectorLeadThread =
+      currentAuthorization.device.scope === "connector" ? connectorLeadThreadOf(serviceRequest) : undefined;
+    if (connectorLeadThread !== undefined) {
+      let lead: OperatorConversationServiceResult;
+      let thread: OperatorConversationServiceResult;
+      try {
+        lead = publicServiceResult(
+          await options.dispatch({ op: "lead", schemaVersion: 1, command: { action: "status" } }),
+        );
+        thread = publicServiceResult(
+          await options.dispatch({ op: "get", schemaVersion: 1, conversationId: connectorLeadThread }),
+        );
+      } catch {
+        writeJson(response, 502, { error: "conversation_upstream_unavailable" });
+        return true;
+      }
+      const kind = thread.op === "get" ? thread.conversation?.scope.kind : undefined;
+      if (
+        lead.op !== "lead" ||
+        lead.result.status.lead !== "apps" ||
+        (kind !== "global" && kind !== "workspace")
+      ) {
+        writeJson(response, 403, { error: "connector_not_leading" });
         return true;
       }
     }
@@ -1680,6 +1712,9 @@ const CONNECTOR_OPS = new Set([
   "start_agent",
   "app_notes",
   "prompt_answer",
+  "lead",
+  "worker_reports",
+  "acknowledge_worker_reports",
   "get",
   "create",
   "send",
