@@ -4799,7 +4799,10 @@ paths:
         Named terminal addresses pin their endpoint; tail, control and input refuse
         disabled or changed connections with a typed unavailable result, without
         falling back to the default fleet. With `includeMachines`, the catalog also
-        probes each ssh machine and returns `machines` (id, reachable, herdrVersion).
+        probes each ssh machine and returns `machines` (id, reachable, herdrVersion),
+        and lists that machine's panes from the same probe, each named by its seat id
+        (`<connection>/<terminal>`), which `terminal_read` reads there; panes two
+        connections to one Herdr session share are listed once.
         `terminal_read` returns a pane's recent text (256 KiB at most), read by Herdr
         on the pane's own machine, including over ssh; it answers `unavailable` with a
         short detail when that machine or pane doesn't answer. Terminal catalog, read
