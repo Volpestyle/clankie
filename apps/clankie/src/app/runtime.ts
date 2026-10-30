@@ -119,7 +119,12 @@ import { createPushDispatcher, type PushDispatcher } from "../push.ts";
 import { createRuntimeUpdateRoutes } from "../runtime-update-routes.ts";
 import { DiscordStreamWatchProjection } from "../stream-watch-observation.ts";
 import { defaultDiscordLiveReceiptPath, readVoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
-import { WorkHttpRequestSchema, WorkRequestError } from "../work-items.ts";
+import {
+  WORK_EXPORT_PATH,
+  WorkExportRequestSchema,
+  WorkHttpRequestSchema,
+  WorkRequestError,
+} from "../work-items.ts";
 import { WorkerGrantRequestSchema } from "../worker-mcp.ts";
 import { registerConversationRoutes } from "./conversation-routes.ts";
 import { PROFILE_HASH, discordPresenceBindingKey, registerDiscordRoutes } from "./discord-routes.ts";
@@ -2586,6 +2591,31 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           detail: error instanceof Error ? error.message.slice(0, 500) : "failed",
         },
         502,
+      );
+    }
+  });
+
+  // Step 5, C2: a project's open tracker items become the repo's private issue files.
+  // The dry run only reads; a refusal is the same plan with 409, and changes nothing.
+  app.post(WORK_EXPORT_PATH, async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (dependencies.workItems === undefined) return context.json({ error: "work_items_unavailable" }, 503);
+    const input = WorkExportRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!input.success)
+      return context.json({ error: "invalid_work_request", detail: input.error.issues[0]?.message }, 400);
+    try {
+      const result = await dependencies.workItems.exportProject(input.data);
+      return context.json(result, result.ready || input.data.dryRun ? 200 : 409);
+    } catch (error) {
+      return context.json(
+        {
+          error: "work_export_failed",
+          detail: error instanceof Error ? error.message.slice(0, 500) : "failed",
+        },
+        422,
       );
     }
   });

@@ -26,6 +26,13 @@ import {
   conventionWorkDirectory,
   ConventionNeededError,
   isPrivateWorkDirectory,
+  DEFAULT_WORK_DIRECTORY,
+  exportedIssueIds,
+  exportIssueFromTracker,
+  exportIssuesToFiles,
+  trackerIssueStatus,
+  type ExportIssue,
+  type FilesExportResult,
   discoverConvention,
   readConvention,
   resolveTracker,
@@ -180,6 +187,27 @@ export const WorkHttpRequestSchema = z.union([
   z.object({ action: z.literal("write"), request: WorkItemWriteRequestSchema }).strict(),
   z.object({ action: z.literal("write_receipt"), request: WorkItemWriteReceiptRequestSchema }).strict(),
 ]);
+
+/** `clankie work export` (step 5, C2): open items move into the repo's private issue files. */
+export const WORK_EXPORT_PATH = "/v1/work/export";
+export const WorkExportRequestSchema = z
+  .object({
+    project: z.string().trim().min(1).max(64),
+    to: z.literal("markdown"),
+    dryRun: z.boolean().default(false),
+  })
+  .strict();
+export type WorkExportRequest = z.infer<typeof WorkExportRequestSchema>;
+export type WorkExportResult = {
+  readonly action: "export";
+  readonly to: "markdown";
+  readonly dryRun: boolean;
+  readonly ready: boolean;
+  readonly refusals: string[];
+  readonly project?: { readonly id: string; readonly name: string };
+  readonly source?: Record<string, unknown>;
+  readonly next?: string[];
+} & Partial<FilesExportResult>;
 
 const RegistrySchema = z.object({
   repos: z.array(z.object({ id: z.string(), path: z.string(), name: z.string() }).strict()).max(50),
@@ -1576,6 +1604,180 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       };
     },
 
+    /**
+     * `clankie work export` (step 5, C2): a project's open items, read from its built-in
+     * or Linear tracker, become issue files in its repo's private `.clankie/work/`, in the
+     * main checkout. The tracker is only read, and the project's tracker selection is left
+     * as it is: choosing the files is the owner's separate `project settings … tracker`.
+     */
+    async exportProject(request: WorkExportRequest): Promise<WorkExportResult> {
+      const refusals: string[] = [];
+      const project = (await options.projects?.())?.projects.find((entry) => entry.id === request.project);
+      const refused = (message: string, extra: Partial<WorkExportResult> = {}): WorkExportResult => ({
+        action: "export",
+        to: request.to,
+        dryRun: request.dryRun,
+        ready: false,
+        refusals: [...refusals, message],
+        ...(project === undefined ? {} : { project: { id: project.id, name: project.name } }),
+        ...extra,
+      });
+      if (project === undefined) return refused(`No project ${request.project}.`);
+      // Decision 3: a project Clankie runs by himself keeps the built-in tracker for now.
+      if (project.auto === true)
+        return refused(
+          `${project.name} is on Auto: Clankie works its backlog by himself there (rounds, the work queue, runs and leases), and that needs the built-in tracker for now. Turn Auto off first (clankie project settings ${project.id} --auto off), or leave its work where it is.`,
+        );
+      const machine = options.localMachineId ?? "local";
+      const local = project.workspaces.filter((workspace) => workspace.machineId === machine);
+      const tracking =
+        project.trackerRef === undefined
+          ? undefined
+          : project.workspaces.find((workspace) => workspace.id === project.trackerRef!.workspaceId);
+      if (project.trackerRef !== undefined && tracking?.machineId !== machine)
+        return refused(`${project.name}'s tracker workspace is on another machine; export it there.`);
+      let workspace = tracking;
+      let convention: WorkConvention | undefined;
+      if (workspace !== undefined) {
+        try {
+          convention = await readConvention(workspace.path);
+        } catch {
+          return refused(`${project.name}'s saved work tracker (.clankie/tracking.json) can't be read.`);
+        }
+      } else {
+        const saved = (
+          await Promise.all(
+            local.map(async (entry) => ({
+              entry,
+              // allow-swallowed-rejection -- an unreadable convention is no saved tracker; the count below refuses.
+              convention: await readConvention(entry.path).catch(() => undefined),
+            })),
+          )
+        ).filter((entry) => entry.convention !== undefined);
+        if (saved.length === 1) {
+          workspace = saved[0]!.entry;
+          convention = saved[0]!.convention;
+        } else if (saved.length > 1)
+          return refused(
+            `${project.name} has a saved tracker in more than one workspace here; choose one with clankie project settings ${project.id} tracker.`,
+          );
+      }
+      if (workspace === undefined || convention === undefined)
+        return refused(
+          `${project.name} has no saved work tracker on this machine, so there is nothing to export.`,
+        );
+      if (convention.backend !== "builtin" && convention.backend !== "linear")
+        return refused(
+          convention.backend === "github"
+            ? `${project.name} tracks work in GitHub issues; export reads the built-in tracker or Linear.`
+            : `${project.name} already keeps its work in files (${conventionWorkDirectory(convention) ?? ""}).`,
+        );
+      const source = {
+        backend: convention.backend,
+        ...(convention.backend === "builtin" && project.trackerProjectId !== undefined
+          ? { trackerProjectId: project.trackerProjectId }
+          : {}),
+        ...(convention.backend === "linear" && convention.linear !== undefined
+          ? { linear: convention.linear }
+          : {}),
+      };
+      const dependencies = await deps(workspace.path, true);
+      if (convention.backend === "builtin" && dependencies.builtIn === undefined)
+        return refused(
+          `${project.name} tracks work in the built-in tracker, but it is not bound to a tracker project (trackerProjectId).`,
+          { source },
+        );
+      const tools = trackerToolsFor(workspace.path, convention, dependencies);
+      let rows: Record<string, unknown>[];
+      let issues: ExportIssue[];
+      try {
+        rows = [];
+        const cursors = new Set<string>();
+        for (let cursor: string | undefined; ;) {
+          const page = (await tools.call("list_issues", {
+            limit: 100,
+            fields: ["title", "status", "statusType", "parentId", "updatedAt"],
+            ...(cursor === undefined ? {} : { cursor }),
+          })) as { issues?: Record<string, unknown>[]; hasNextPage?: boolean; cursor?: string };
+          rows.push(...(page.issues ?? []));
+          if (page.hasNextPage !== true) break;
+          if (typeof page.cursor !== "string" || cursors.has(page.cursor))
+            throw new Error("The tracker returned another page without a new cursor");
+          cursor = page.cursor;
+          cursors.add(cursor);
+        }
+        const identifiers = new Map<string, string>();
+        const remember = (row: Record<string, unknown>) => {
+          const identifier = typeof row.identifier === "string" ? row.identifier : undefined;
+          if (identifier === undefined) return;
+          for (const key of [row.id, row.uuid, identifier])
+            if (typeof key === "string") identifiers.set(key.toLowerCase(), identifier);
+        };
+        rows.forEach(remember);
+        const existing = await exportedIssueIds(workspace.path);
+        const wanted = rows.filter((row) => {
+          const status = trackerIssueStatus(row);
+          const key = String(row.identifier ?? row.id).toLowerCase();
+          return (status !== "done" && status !== "canceled") || existing.has(key);
+        });
+        const full: Record<string, unknown>[] = [];
+        for (const row of wanted)
+          full.push(
+            (await tools.call("get_issue", { id: String(row.identifier ?? row.id) })) as Record<
+              string,
+              unknown
+            >,
+          );
+        // A parent or blocker outside the project is named by its own read.
+        const unknown = new Set<string>();
+        for (const issue of full)
+          for (const reference of [
+            issue.parentId,
+            ...(Array.isArray(issue.blockedBy) ? (issue.blockedBy as unknown[]) : []),
+          ])
+            if (typeof reference === "string" && !identifiers.has(reference.toLowerCase()))
+              unknown.add(reference);
+        for (const reference of unknown) {
+          // allow-swallowed-rejection -- an unreadable related issue is left out of the file, never guessed.
+          const related = (await tools.call("get_issue", { id: reference }).catch(() => undefined)) as
+            | Record<string, unknown>
+            | undefined;
+          if (related !== undefined) {
+            remember(related);
+            if (typeof related.identifier === "string")
+              identifiers.set(reference.toLowerCase(), related.identifier);
+          }
+        }
+        issues = full.map((issue) =>
+          exportIssueFromTracker(issue, (reference) => identifiers.get(reference.toLowerCase())),
+        );
+      } catch (error) {
+        return refused(
+          `${project.name}'s ${convention.backend === "builtin" ? "built-in tracker" : "Linear project"} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+          { source },
+        );
+      }
+      const written = await exportIssuesToFiles({
+        root: workspace.path,
+        issues,
+        dryRun: request.dryRun,
+        closedSkipped: rows.length - issues.length,
+      });
+      const selection = JSON.stringify({ backend: "markdown", directory: DEFAULT_WORK_DIRECTORY });
+      return {
+        action: "export",
+        to: request.to,
+        ready: true,
+        refusals,
+        project: { id: project.id, name: project.name },
+        source,
+        ...written,
+        next: [
+          `Nothing was written to the ${convention.backend === "builtin" ? "built-in tracker" : "Linear project"}; it stays as the record.`,
+          `To work from these files, select them for ${project.id}: clankie project settings ${project.id} tracker '${selection}', then apply that preview with --revision REVISION --confirm-retain-items.`,
+        ],
+      };
+    },
     /**
      * A repository's shipped versions and the item keys each one's commits name
      * (VUH-1930), for the built-in tracker's release sync. Read-only: git only.
