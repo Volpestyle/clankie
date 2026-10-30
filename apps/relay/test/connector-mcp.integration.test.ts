@@ -390,6 +390,8 @@ describe("Claude connector MCP endpoint", () => {
       "read_inbox",
       "read_reports",
       "acknowledge_reports",
+      "list_issues",
+      "read_issue",
       "clankie_guide",
     ]);
 

@@ -207,7 +207,8 @@ export const ConnectorPromptAnswersRequestSchema = z
 /**
  * What a connector device may ask the relay, whatever its grants: read the
  * fleet and its panes, start an agent in a known project, message an
- * agent's own persona thread, and post and read the app note board. A send or a
+ * agent's own persona thread, post and read the app note board, and read the
+ * owner's projects and their issues. A send or a
  * read of one thread is held to persona threads by the relay, which looks the
  * thread up before dispatching; Clankie's own lead thread is never reachable.
  * A note's author, and the app answering a prompt, is the device the relay
@@ -234,6 +235,11 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     // A lead thread's reports, only while the apps lead; the relay checks both.
     case "worker_reports":
     case "acknowledge_worker_reports":
+      return true;
+    // The owner's projects and their issues, read only; a write is never a connector op.
+    case "work_repos":
+    case "work_items":
+    case "work_item_activity":
       return true;
     default:
       return false;

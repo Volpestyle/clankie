@@ -1715,6 +1715,10 @@ const CONNECTOR_OPS = new Set([
   "lead",
   "worker_reports",
   "acknowledge_worker_reports",
+  // Reading the owner's projects and their issues; writes stay off the connector.
+  "work_repos",
+  "work_items",
+  "work_item_activity",
   "get",
   "create",
   "send",

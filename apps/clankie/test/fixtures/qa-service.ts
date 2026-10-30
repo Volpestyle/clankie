@@ -8,13 +8,19 @@ import { FileCredentialStore } from "@clankie/credential-broker";
 import { createCredentialBackedOperatorAuthenticator } from "../../src/operator-auth.ts";
 import { createStubCaptain, type CaptainPort } from "../../src/captain/port.ts";
 import { createBearerAuthenticator } from "../../src/app/http-auth.ts";
+import type { ClankieAppDependencies } from "../../src/app/types.ts";
 
 /**
  * Real loopback HTTP and durable device state, with no model or operator configuration.
  * A test may hand in captain parts, and a captain bearer the relay dispatches on.
  */
 export async function createQaService(
-  options: { readonly captain?: Partial<CaptainPort>; readonly captainToken?: string } = {},
+  options: {
+    readonly captain?: Partial<CaptainPort>;
+    readonly captainToken?: string;
+    /** The real work service, when a test reads or writes the owner's issues. */
+    readonly workItems?: ClankieAppDependencies["workItems"];
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-qa-"));
   const operatorToken = randomBytes(24).toString("hex");
@@ -24,6 +30,7 @@ export async function createQaService(
   const boot = () =>
     createClankieApp({
       captain: createStubCaptain(options.captain),
+      ...(options.workItems === undefined ? {} : { workItems: options.workItems }),
       ...(options.captainToken === undefined
         ? {}
         : {

@@ -36,6 +36,13 @@ own `/mcp` on a trusted network.
   reach `start_agent` alone; a connector signed in before this change signs in
   again to get it. `list_places` lists the places without starting anything, so an
   app's own permission check can tell a listing from a start.
+- **Reading the owner's issues.** `list_issues` lists the owner's projects with
+  the tracker each keeps its issues in (private issue files, Linear, GitHub
+  Issues or the built-in tracker), and one project's issues; `read_issue` reads
+  one in full with its comments and state changes (added 2026-10-30). They are
+  the same reads the Clankie app makes (`work_repos`, `work_items`,
+  `work_item_activity`) and need only `chat`. A connector still writes nothing
+  to a tracker: every work write stays off its op allowlist.
 - **A note board the apps share.** `post_note` leaves a short note (at most
   2,000 characters) and `read_notes` reads the board, oldest first, after an
   optional cursor (added 2026-10-30, approved by James). Each note is signed
