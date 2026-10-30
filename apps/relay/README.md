@@ -153,7 +153,9 @@ plain text into a pane that is waiting on input; the relay stamps the device
 the same way (`400 prompt_answer_app_is_stamped`, `403
 connector_device_required`) and needs `terminalObserve`. The service answers
 only for an app the owner turned on with `clankie connector prompts on APP`,
-only while the expected text is on screen, and once per prompt.
+only while the expected text is on screen, and once per prompt; it checks
+again before every step on one bound pane and connection, and stops part way
+when anything changed.
 `clankie_guide` reads the skills in `.agents/skills` from this checkout: no
 topic lists each skill and its description, a skill name returns its
 `SKILL.md` and names its other pages, and `skill/page.md` returns that page.

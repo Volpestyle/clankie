@@ -24,6 +24,9 @@ The connector gains one tool, `answer_prompt`, and nothing wider.
   characters). The service sends them only while Herdr reports the pane
   `blocked`, only while `expect` is still on the visible screen (compared with
   whitespace squashed), and only once for the same screen of the same pane.
+  Those checks, the owner's switch and the owner-ask check run again before
+  every step, not only the first, and the pane and its machine connection are
+  bound once for the whole answer (amended 2026-10-30 after cladot's review).
   Messages still go through the persona thread (`message_agent`); this tool is
   never a way to deliver an automated brief (ADR 0207).
 - **Off until the owner turns it on, per app.** `clankie connector prompts on
@@ -57,3 +60,9 @@ send-keys` and types with `herdr pane send-text` on the pane's own machine,
   screen and the owner answers that one.
 - Uncertain sends (a key reached the pane, the next didn't) come back as
   `uncertain` so the app reads the screen before anything else.
+- An answer stops part way when, between steps, the prompt leaves the screen,
+  the agent stops waiting, its terminal moves to another pane, the owner turns
+  answering off, or the linked PC's connection changes (its runner refuses every
+  later call rather than reach the new endpoint). The reply and the note on the
+  board say which steps went in, so `expect` should be text that stays on
+  screen until the answer is in, such as the question.
