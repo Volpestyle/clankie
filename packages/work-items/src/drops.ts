@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import type { WorkEvidence, WorkItemStatus } from "@clankie/protocol/work-items";
 import { DEFAULT_WORK_DIRECTORY } from "./convention.ts";
 import {
+  createFilesBackend,
   ensurePrivateGitignore,
   filesBackendRoot,
   parseFile,
@@ -92,6 +93,9 @@ const folderOf = (root: string) => {
   const main = filesBackendRoot(root, DEFAULT_WORK_DIRECTORY);
   return { main, directory: resolve(main, DEFAULT_WORK_DIRECTORY) };
 };
+/** A worktree's older private items join the shared folder first, as every files-backend read does. */
+const adopt = (root: string) =>
+  createFilesBackend({ root, directory: DEFAULT_WORK_DIRECTORY, kind: "default" }).list({ limit: 1 });
 
 type Receipts = Record<string, DropReceipt>;
 async function readReceipts(directory: string): Promise<Receipts> {
@@ -189,6 +193,7 @@ export async function fileDrop(
 ): Promise<{ readonly created: boolean; readonly drop: DropRecord; readonly receipt: DropReceipt }> {
   if (!KEY.test(draft.key) || !KEY.test(draft.request)) throw new Error("Drop keys are SHA-256 hex");
   const { main, directory } = folderOf(root);
+  await adopt(root);
   await mkdir(directory, { recursive: true });
   return withTrackerStoreLock(join(directory, PRIVATE_WORK_LOCK), async (assertHeld) => {
     await ensurePrivateGitignore(directory);
@@ -265,5 +270,6 @@ export async function recordDropWake(
 /** Every drop in the repo's private folder, read from the files as they are now. */
 export async function readDrops(root: string): Promise<DropRecord[]> {
   const { main, directory } = folderOf(root);
+  await adopt(root);
   return (await readFolder(directory)).flatMap((file) => recordOf(main, file) ?? []);
 }

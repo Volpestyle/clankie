@@ -458,6 +458,12 @@ it("files a drop with a screenshot as a private stub in the main checkout, wakes
 
 it("lists drops newest first beside asks and mail, with their source, and pages them", async () => {
   const f = await fixture();
+  // The garden's worktree kept an item of its own before the folder was shared.
+  await mkdir(join(f.garden.worktree, ".clankie/work"), { recursive: true });
+  await writeFile(
+    join(f.garden.worktree, ".clankie/work/W-old123-older-note.md"),
+    "---\nid: W-old123\ntitle: Older note\nstatus: todo\n---\n\nKept.\n",
+  );
   const dropped: string[] = [];
   for (const [index, [project, token]] of (
     [
@@ -483,6 +489,10 @@ it("lists drops newest first beside asks and mail, with their source, and pages 
     { title: "Gate landed", body: "Try it." },
     "drop-feed-mail",
     { current: () => true },
+  );
+  // The garden's drop brought the worktree's older item into the shared folder first.
+  expect(await listing(join(f.garden.repo, ".clankie/work"))).toEqual(
+    expect.arrayContaining([".adopted", "W-old123-older-note.md"]),
   );
   // A drop with no lead route wakes the main chat.
   await vi.waitFor(() => expect(f.wakes()).toHaveLength(3));
