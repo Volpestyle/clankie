@@ -7,12 +7,16 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import {
+  FEED_CHECK_ONE_SOURCE,
   FEED_DROP_EMPTY,
   FEED_LIST_LIMIT_MAX,
+  FeedCheckRequestSchema,
   FeedDropRequestSchema,
   FeedListRequestSchema,
   OPERATOR_CONVERSATION_ATTACHMENTS_MAX,
+  feedCheckHasOneSource,
   feedDropHasContent,
+  type FeedCheckResult,
   type FeedDropResult,
   type FeedItem,
   type FeedListRequest,
@@ -29,6 +33,7 @@ import { attachmentFile } from "./send.ts";
 export const FEED_USAGE = [
   "Usage: clankie feed [--project ID] [--cursor CURSOR] [--limit N] [--json]   (owner checks, updates and drops, newest first)",
   "       clankie feed drop --project ID [--title TEXT] [--body TEXT | --stdin] [--file PATH]... [--key KEY] [--json]   (file a drop as a private issue file and wake the project's lead)",
+  "       clankie feed check [--project ID | --conversation ID] [--longer] [--evidence clankie://evidence/sha256/HASH] [--waiting-on TEXT] [--key KEY] [--json] LINE   (ask the owner to check one thing: at most 140 characters, about a ten-second look)",
 ].join("\n");
 
 export interface FeedCommandOptions {
@@ -80,6 +85,7 @@ export async function runFeedCommand(
   options: FeedCommandOptions = {},
 ): Promise<number> {
   if (args[0] === "drop") return runFeedDropCommand(args.slice(1), options);
+  if (args[0] === "check") return runFeedCheckCommand(args.slice(1), options);
   const { values, positionals } = parseArgs({
     args: [...args],
     allowPositionals: true,
@@ -179,6 +185,66 @@ async function runFeedDropCommand(args: readonly string[], options: FeedCommandO
   return result.outcome === "filed" ? 0 : 1;
 }
 
+/**
+ * `clankie feed check`: an agent asks the owner to look at one thing. The line is
+ * what the owner reads, so it says exactly what to look at; the host refuses one
+ * over 140 characters. The key makes a retry safe and is printed for that.
+ */
+async function runFeedCheckCommand(args: readonly string[], options: FeedCommandOptions): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: {
+      project: { type: "string" },
+      conversation: { type: "string" },
+      longer: { type: "boolean" },
+      evidence: { type: "string" },
+      "waiting-on": { type: "string" },
+      key: { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  if (positionals.length !== 1) throw new Error(FEED_USAGE);
+  const key = values.key ?? randomBytes(18).toString("base64url");
+  const draft = FeedCheckRequestSchema.refine(feedCheckHasOneSource, FEED_CHECK_ONE_SOURCE).safeParse({
+    idempotencyKey: key,
+    check: positionals[0],
+    ...(values.longer ? { longer: true } : {}),
+    ...(values.project === undefined ? {} : { projectId: values.project }),
+    ...(values.conversation === undefined ? {} : { conversationId: values.conversation }),
+    ...(values.evidence === undefined ? {} : { evidence: values.evidence }),
+    ...(values["waiting-on"] === undefined ? {} : { waitingOn: values["waiting-on"] }),
+  });
+  if (!draft.success) throw new Error(`${FEED_USAGE}\n${draft.error.issues[0]?.message ?? ""}`);
+  const client = await ownerClient(options, "Asking the owner for a check");
+  let result: FeedCheckResult;
+  try {
+    result = await client.feedCheck!(draft.data);
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\nThe check may or may not be asked. Retry with --key ${key}: it never asks twice.`,
+    );
+  }
+  const stdout = options.stdout ?? process.stdout;
+  if (values.json) outputJson(stdout, result);
+  else stdout.write(`${formatFeedCheck(result)}\n`);
+  return result.outcome === "raised" ? 0 : 1;
+}
+
+export function formatFeedCheck(result: FeedCheckResult): string {
+  if (result.outcome !== "raised") return result.message;
+  const { question } = result.item.check;
+  const state =
+    question.status === "pending"
+      ? "The owner sees it in the feed; the answer wakes"
+      : "The owner already answered it in";
+  return [
+    `${result.duplicate ? "Already asked" : "Asked"}: ${result.item.check.line ?? question.prompt}${result.item.check.longer ? " (takes longer)" : ""}`,
+    `${state} conversation ${question.conversationId}.`,
+    `Request: ${question.requestId}`,
+  ].join("\n");
+}
+
 export function formatFeedDrop(result: FeedDropResult): string {
   if (result.outcome !== "filed") return result.message;
   const item = result.item;
@@ -250,10 +316,12 @@ export function formatFeedPage(page: FeedPage, request: FeedListRequest = {}): s
 function formatFeedItem(item: FeedItem): string {
   const project = item.projectId ? ` · ${item.projectId}` : "";
   if (item.kind === "check") {
-    const { question, revision } = item.check;
+    const { question, revision, line, longer, media } = item.check;
     return [
-      `Check${project} · ${item.at}`,
-      question.prompt,
+      `Check${longer ? " (takes longer)" : ""}${project} · ${item.at}`,
+      line ?? question.prompt,
+      line !== undefined && line !== question.prompt ? question.prompt : "",
+      ...(media ?? []).map((entry) => `${entry.alt ?? entry.mimeType ?? "Media"}: ${entry.url}`),
       ...question.options.map((option) => `  - ${option.label} (${option.optionId})`),
       question.recommendation ? `Recommended: ${question.recommendation}` : "",
       question.waitingOn ? `Waiting on it: ${question.waitingOn}` : "",
@@ -275,6 +343,18 @@ function formatFeedItem(item: FeedItem): string {
       ...(update.links ?? []).map((link) => `${link.label}: ${link.url}`),
       ...(update.media ?? []).map((media) => `${media.alt ?? media.mimeType ?? "Media"}: ${media.url}`),
       update.ownerUpdate ? `Dismiss: clankie conversations dismiss-update ${update.ownerUpdate.id}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (item.kind === "proof") {
+    const { proof } = item;
+    return [
+      `Finished, check it${project} · ${item.at}`,
+      proof.line,
+      `${proof.key}: ${proof.title} (${proof.stage})`,
+      ...(proof.media ?? []).map((entry) => `${entry.alt ?? entry.mimeType ?? "Media"}: ${entry.url}`),
+      "Answer: in the Clankie app on your paired phone (It works, or Send it back with a note)",
     ]
       .filter(Boolean)
       .join("\n");
