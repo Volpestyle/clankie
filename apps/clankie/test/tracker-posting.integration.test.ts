@@ -5,7 +5,11 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { FileCredentialStore, OPERATOR_CREDENTIAL_PROVIDER_ID } from "@clankie/credential-broker";
+import {
+  FileCredentialStore,
+  LINEAR_API_PROVIDER_ID,
+  OPERATOR_CREDENTIAL_PROVIDER_ID,
+} from "@clankie/credential-broker";
 import {
   OperatorConversationServiceResultSchema,
   parseProtocolResponse,
@@ -33,7 +37,14 @@ import { createTrackerPosting, trackerPostingExecutor } from "../src/tracker-pos
 import { createWorkItemsService, defaultRun } from "../src/work-items.ts";
 import { runProjectSettingsCommand } from "../../tui/src/command/project-settings.ts";
 import { runWorkCommand } from "../../tui/src/command/work.ts";
-import { createLinearApiProvider, ISSUE_ID, PROJECT_ID } from "./fixtures/linear-api-provider.ts";
+import {
+  API_ACCESS,
+  API_REFRESH,
+  createLinearApiProvider,
+  ISSUE_ID,
+  PROJECT_ID,
+  USER_ID,
+} from "./fixtures/linear-api-provider.ts";
 
 /**
  * "Posting to your tracker" (ADR 0302), through the real service over HTTP: the real MCP
@@ -815,4 +826,50 @@ it("a write through one project that lands in another's Linear project needs tha
     ),
   ).rejects.toThrow("Posting to Linear is read only for Garden");
   expect(f.mutations("issueCreate")).toBe(1);
+});
+
+it("a worker's GraphQL mutation meets the setting of every project on Linear, not only its hire's", async () => {
+  const f = await fixture({ meadow: true });
+  await f.setPosting("meadow", "allow");
+  await f.setPosting("garden", "read_only");
+  // GraphQL runs on the registered Linear API app.
+  await f.credentials.set(LINEAR_API_PROVIDER_ID, {
+    type: "oauth",
+    access: API_ACCESS,
+    refresh: API_REFRESH,
+    expires: 0,
+    linearAuth: "api",
+    account: {
+      provider: "linear",
+      connectionId: randomUUID(),
+      userId: USER_ID,
+      workspaceId: "personal-workspace",
+      actor: "app",
+      name: "Clankie",
+      workspaceName: "Personal",
+      verifiedAt: new Date().toISOString(),
+    },
+  });
+  const binding = (await f.host.account("linear", "operator")).binding;
+  // A worker hired into the meadow (go ahead) comments on the garden's issue through GraphQL.
+  const call = {
+    lane: "operator" as const,
+    server: "linear",
+    tool: "graphql",
+    arguments: {
+      query:
+        'mutation Note($issueId: String!) { commentCreate(input: { issueId: $issueId, body: "Into the garden" }) { success } }',
+      variables: { issueId: ISSUE_ID },
+    },
+    delegation: { binding, grantId: "grant-2", principalId: "project:meadow", workId: "work-2" },
+  };
+  const refused = await f.host.call(call);
+  expect(refused).toMatchObject({ outcome: "refused", reason: "posting_refused", possiblyDispatched: false });
+  if (refused.outcome !== "refused") throw new Error("expected a refusal");
+  expect(refused.detail).toContain("Posting to Linear is read only for Garden");
+  expect(f.mutations("commentCreate")).toBe(0);
+  // Once every project on Linear says go ahead, the same mutation posts.
+  await f.setPosting("garden", "allow");
+  expect(await f.host.call(call)).toMatchObject({ outcome: "ok", isError: false });
+  expect(f.mutations("commentCreate")).toBe(1);
 });

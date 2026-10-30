@@ -19,6 +19,7 @@ import type { WorkConvention } from "@clankie/protocol/work-items";
 import type { ClankieSettings } from "@clankie/settings";
 import { readConvention } from "@clankie/work-items";
 import type { QuestionDraft } from "./captain/conversation-questions.ts";
+import { LINEAR_GRAPHQL_TOOL } from "./linear-graphql.ts";
 
 /**
  * "Posting to your tracker" (ADR 0302): the one check every outward tracker write by
@@ -258,6 +259,10 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
    */
   const linearTargets = async (route: PostingRoute, candidates: readonly Project[]): Promise<string[]> => {
     if (route.kind === "work" || candidates.length === 0) return [];
+    // A GraphQL mutation can touch any record in its document or variables, so it meets
+    // the setting of every project on Linear.
+    if (route.kind === "linear" && route.tool === LINEAR_GRAPHQL_TOOL.name)
+      return candidates.map((project) => project.id);
     const args = route.arguments;
     const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
     let projectRefs = [text(args.project), text(args.projectId)].filter((ref) => ref !== undefined);
