@@ -1,5 +1,11 @@
 import { LeadChatsResultSchema, type LeadChatsResult } from "./lead-chats.ts";
-import { PROMPT_ANSWER_EXPECT_MAX, PromptAnswerResultSchema, PromptAnswerStepSchema } from "./connector.ts";
+import {
+  IssueWriteResultSchema,
+  IssueWriteSchema,
+  PROMPT_ANSWER_EXPECT_MAX,
+  PromptAnswerResultSchema,
+  PromptAnswerStepSchema,
+} from "./connector.ts";
 import {
   AppNotesRequestSchema,
   AppNotesResultSchema,
@@ -552,6 +558,21 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       appDeviceId: z.string().min(1).max(256).optional(),
     })
     .strict(),
+  z
+    .object({
+      /**
+       * A connected app writes an issue in one of the owner's projects (ADR 0305), only
+       * through the relay, which stamps the app's device. Linear and GitHub writes pass
+       * the project's "Posting to your tracker" setting.
+       */
+      op: z.literal("issue_write"),
+      schemaVersion: z.literal(1),
+      repoId: WorkRepoSchema.shape.id,
+      write: IssueWriteSchema,
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
   EvidenceDeviceFetchRequestSchema.extend({
     op: z.literal("evidence_fetch"),
     schemaVersion: z.literal(1),
@@ -975,6 +996,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({ op: z.literal("prompt_answer"), schemaVersion: z.literal(1), result: PromptAnswerResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("issue_write"), schemaVersion: z.literal(1), result: IssueWriteResultSchema })
     .strict(),
   z
     .object({

@@ -685,6 +685,15 @@ const trackerPosting = createTrackerPosting({
   readOwnerAsk: (requestId) => captain.readOwnerAsk(requestId),
   observeQuestionResolutions: (listener) => captain.observeQuestionResolutions(listener),
   wakeConversation: (owner, text) => captain.wakeConversation(owner, text),
+  // A damaged lead setting reads as the apps leading for Clankie's turns; here it holds writes.
+  appsLead: async () => {
+    const lead = await captain.serveOperatorConversation({
+      op: "lead",
+      schemaVersion: 1,
+      command: { action: "status" },
+    });
+    return lead.op === "lead" && lead.result.status.lead === "apps" && lead.result.status.error === undefined;
+  },
   logger,
 });
 const mcpHost = createMcpHost({

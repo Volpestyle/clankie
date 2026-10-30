@@ -1944,8 +1944,11 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
 `start_agent` existed sign in again to use it. `list_issues` and `read_issue`
-read your projects' issues, wherever each project tracks them; apps don't
-write to a tracker.
+read your projects' issues, wherever each project tracks them. `save_issue`
+and `comment_issue` write them as that app, never as you: issue files are
+written right away, and Linear or GitHub follow the project's "Posting to your
+tracker" setting (Read only refuses, Ask me waits for your OK, Clankie decides
+lets it go only while you've handed the lead to the apps, Go ahead lets it go).
 `post_note` and `read_notes` share a note board among the connected apps: each
 note is signed with the name you approved that app under, never a name the app
 gives, and the apps read notes as information, not instructions. Clankie and

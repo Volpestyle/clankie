@@ -143,8 +143,10 @@ places too), `post_note` (`text`, up to 2,000 characters),
 `read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),
 `read_inbox` (`after` optional), `read_reports` (`thread`), `acknowledge_reports`
 (`thread`, `ids`, `summary` optional), `list_issues` (`project` and `label`
-optional), `read_issue` (`project`, `issue`) and `clankie_guide` (`topic`
-optional).
+optional), `read_issue` (`project`, `issue`), `save_issue` (`project`;
+`issue` to update; `title`, `description`, `status`, `priority`, `labels`,
+`addLabels`, `removeLabels`), `comment_issue` (`project`, `issue`, `body`) and
+`clankie_guide` (`topic` optional).
 `post_note` and `read_notes` are the board the apps share (the `app_notes`
 op): the relay stamps the device it authenticated on a post as
 `appDeviceId`, refuses a request that already carries one (`400
@@ -169,7 +171,12 @@ to the apps and only for a global or workspace lead thread, else `403
 connector_not_leading`.
 `list_issues` and `read_issue` read the owner's projects and their issues
 through `work_repos`, `work_items` and `work_item_activity`, wherever each
-project tracks them; a connector never names `work_item_write` or any other
+project tracks them. `save_issue` and `comment_issue` are the `issue_write` op
+(ADR 0305): the relay stamps the device as for `prompt_answer` (`400
+issue_write_app_is_stamped`, `403 connector_device_required`) and needs `steer`;
+the service writes as an agent named for the app, so Linear and GitHub writes
+pass the project's posting setting and may come back `held`, while issue files
+are written right away. A connector never names `work_item_write` or any other
 work write (`403 connector_operation_not_allowed`).
 `clankie_guide` reads the skills in `.agents/skills` from this checkout: no
 topic lists each skill and its description, a skill name returns its

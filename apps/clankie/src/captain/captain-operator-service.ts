@@ -1152,7 +1152,8 @@ export function createOperatorService(
       request.op === "work_media" ||
       request.op === "work_items" ||
       request.op === "work_item_write" ||
-      request.op === "work_item_write_receipt"
+      request.op === "work_item_write_receipt" ||
+      request.op === "issue_write"
     )
       throw new Error("Work items are served by the authenticated app boundary");
     if (request.op === "subagent_replay") {

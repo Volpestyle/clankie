@@ -41,8 +41,10 @@ own `/mcp` on a trusted network.
   Issues or the built-in tracker), and one project's issues; `read_issue` reads
   one in full with its comments and state changes (added 2026-10-30). They are
   the same reads the Clankie app makes (`work_repos`, `work_items`,
-  `work_item_activity`) and need only `chat`. A connector still writes nothing
-  to a tracker: every work write stays off its op allowlist.
+  `work_item_activity`) and need only `chat`. Writes go only through
+  `save_issue` and `comment_issue`, as an agent under the project's posting
+  setting ([ADR 0305](0305-connected-apps-write-issues-as-agents.md)); every
+  other work write stays off its op allowlist.
 - **A note board the apps share.** `post_note` leaves a short note (at most
   2,000 characters) and `read_notes` reads the board, oldest first, after an
   optional cursor (added 2026-10-30, approved by James). Each note is signed
