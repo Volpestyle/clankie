@@ -49,6 +49,7 @@ import { FleetRosterLimitError } from "../captain/herdr-census.ts";
 import { ServiceShuttingDownError } from "../captain/captain-operator-service.ts";
 import { WorkRequestError, type WorkInboxContext } from "../work-items.ts";
 import { createOwnerFeed, FeedCursorError } from "../feed.ts";
+import { createFeedDrops } from "../feed-drops.ts";
 import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
@@ -76,9 +77,25 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  const feedDrops = ctx.dependencies.workItems
+    ? createFeedDrops({
+        workItems: ctx.dependencies.workItems,
+        ...(ctx.dependencies.settings ? { settings: ctx.dependencies.settings } : {}),
+        ...(ctx.dependencies.deliveredFiles?.attachment
+          ? {
+              attachments: {
+                attachment: ctx.dependencies.deliveredFiles.attachment.bind(ctx.dependencies.deliveredFiles),
+              },
+            }
+          : {}),
+        ...(ctx.dependencies.evidenceStore ? { evidence: ctx.dependencies.evidenceStore } : {}),
+        wake: (...args) => ctx.dependencies.captain.wakeConversation(...args),
+      })
+    : undefined;
   const ownerFeed = createOwnerFeed({
     ...(ctx.dependencies.workItems ? { workItems: ctx.dependencies.workItems } : {}),
     ...(ctx.dependencies.settings ? { settings: ctx.dependencies.settings } : {}),
+    ...(feedDrops ? { drops: feedDrops } : {}),
     now: () => ctx.clock().getTime(),
   });
   ctx.app.get(SHIPPING_PATH, async (context) => {
@@ -651,6 +668,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       parsed.data.op === "project_proposal_confirm" ||
       parsed.data.op === "project_proposal_tweak" ||
       parsed.data.op === "feed_list" ||
+      parsed.data.op === "feed_drop" ||
       parsed.data.op === "owner_update_list" ||
       parsed.data.op === "owner_update_read" ||
       parsed.data.op === "owner_update_dismiss" ||
@@ -695,6 +713,48 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             op: "feed_list",
             schemaVersion: 1,
             result: { outcome: "unavailable", message: "The feed can’t be read right now. Read it again." },
+          });
+        }
+      }
+      if (parsed.data.op === "feed_drop") {
+        // A drop writes into the owner's repo, so only the owner drops: this machine's
+        // operator or a device the owner paired, never a support grant or a visitor.
+        const { op: _op, schemaVersion: _version, ...request } = parsed.data;
+        const denied = () => context.json({ error: "question_owner_required" }, 403);
+        const dropper = () => {
+          if (!owner.current()) return undefined;
+          if (owner.principal.kind === "operator") return { source: { kind: "machine" as const } };
+          const record = ctx.devices.get(owner.principal.id);
+          return ownerDeviceRecord(record)
+            ? {
+                deviceId: record.deviceId,
+                source: { kind: "device" as const, name: record.name, platform: record.platform },
+              }
+            : undefined;
+        };
+        const caller = dropper();
+        if (caller === undefined || !(await owner.authorize())) return denied();
+        const reply = (result: import("@clankie/protocol").FeedDropResult) =>
+          context.json({ op: "feed_drop", schemaVersion: 1, result });
+        if (feedDrops === undefined)
+          return reply({ outcome: "unavailable", message: "Drops can’t be filed on this Clankie." });
+        try {
+          const result = await feedDrops.drop(request, {
+            ...caller,
+            serve: (read) => ctx.dependencies.captain.serveOperatorConversation(read, owner),
+            guard: async () => {
+              if (dropper() === undefined || !(await owner.authorize()))
+                throw new Error("question_owner_unavailable");
+            },
+          });
+          if (dropper() === undefined || !(await owner.authorize())) return denied();
+          return reply(result);
+        } catch (error) {
+          if (dropper() === undefined || !(await owner.authorize())) return denied();
+          logger.warn({ error }, "Owner drop failed");
+          return reply({
+            outcome: "unavailable",
+            message: "The drop couldn’t be filed right now. Try again with the same key.",
           });
         }
       }

@@ -18,6 +18,7 @@ import type { Project } from "@clankie/protocol/projects";
 import type { WorkProjectDetails, WorkRepo } from "@clankie/protocol/work-items";
 import type { ClankieSettings } from "@clankie/settings";
 import type { WorkItemsService } from "./work-items.ts";
+import type { createFeedDrops } from "./feed-drops.ts";
 
 /** One read of the existing stores, carrying the caller's owner authority. */
 type FeedServe = (request: OperatorConversationServiceRequest) => Promise<OperatorConversationServiceResult>;
@@ -29,14 +30,16 @@ const PROJECT_UPDATE_READS = 4;
 const UNREADABLE = "This project’s updates can’t be read here right now.";
 
 /**
- * The owner's feed (step 5, slice C1): a newest-first join of pending owner asks,
- * mailed owner updates and project status updates. It keeps no store of its own
- * and adds no write: asks are answered with `input_answer`, mail dismissed with
- * `owner_update_dismiss`. Status updates are model-written text, shown only.
+ * The owner's feed (step 5, slices C1 and C3): a newest-first join of pending
+ * owner asks, mailed owner updates, project status updates and the owner's open
+ * drops. It keeps no store of its own: asks are answered with `input_answer`,
+ * mail dismissed with `owner_update_dismiss`, and drops are the projects' own
+ * issue files. Status updates and refined drops are model-written text, shown only.
  */
 export function createOwnerFeed(options: {
   readonly workItems?: Pick<WorkItemsService, "handle">;
   readonly settings?: { load(): Promise<ClankieSettings> };
+  readonly drops?: Pick<ReturnType<typeof createFeedDrops>, "items" | "enrich">;
   readonly now?: () => number;
 }) {
   const now = options.now ?? Date.now;
@@ -173,12 +176,22 @@ export function createOwnerFeed(options: {
         }
       }
 
+      // Drops: the open stub and refined issue files of each file-backed project.
+      if (options.drops) {
+        const dropped = await options.drops.items(
+          projects.filter((project) => !request.projectId || project.id === request.projectId),
+        );
+        items.push(...dropped.items);
+        unreadable.push(...dropped.unreadable);
+      }
+
       const ordered = items
         .filter((item) => !request.projectId || item.projectId === request.projectId)
         .sort((a, b) => compare(b, a));
       const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor);
       const remaining = after ? ordered.filter((item) => compare(item, after) < 0) : ordered;
-      const page = remaining.slice(0, request.limit ?? FEED_LIST_LIMIT_DEFAULT);
+      const sliced = remaining.slice(0, request.limit ?? FEED_LIST_LIMIT_DEFAULT);
+      const page = options.drops ? await options.drops.enrich(sliced) : sliced;
       const last = page.at(-1);
       return FeedListResultSchema.parse({
         outcome: "ready",
