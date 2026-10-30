@@ -24,6 +24,12 @@ own `/mcp` on a trusted network.
   writes into its own persona thread, which delivers to the native pane. A
   connector never types into a terminal, hires or closes a seat, writes to a
   tracker, reads settings, tails Clankie's own thread, or joins a call.
+- **One server for every agent app.** Claude Code, Codex and any other MCP
+  app that signs in through a loopback callback add the same URL, beside the
+  Claude apps. A fourth, read-only tool, `clankie_guide`, serves the skills
+  Clankie ships in `.agents/skills`, so an app that can't load Clankie's
+  skills still learns how his tools and fleet work. It reads files in this
+  checkout only and calls nothing on the service (added 2026-10-30).
 - **Through session sources, not Herdr.** The tools talk to the session-source
   layer in `packages/agent-hosts/src/sessions/`. A source is any app that holds
   agent sessions and answers four things: list its sessions, read one, send one

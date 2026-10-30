@@ -1,8 +1,10 @@
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 import { assertScratchNetwork, SettingsStore } from "@clankie/settings";
 import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
 import { createVoiceCallUpgrade } from "./voice-call.ts";
+import { ClankieGuide } from "./connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "./connector-mcp.ts";
 import {
   createCaptainConversationDispatch,
@@ -73,6 +75,7 @@ const connectorHandler = createConnectorMcpHandler({
   ),
   localAuthorizationServer: controlPlaneUrl,
   version: "0.1.0",
+  guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
 });
 const server = createServer((request, response) => {
   void handleHttp(request, response);
