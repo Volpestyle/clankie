@@ -4805,6 +4805,12 @@ paths:
         short detail when that machine or pane doesn't answer. Terminal catalog, read
         and tail require the relay's `terminalObserve` grant; control/input require
         `terminalControl`.
+        `herdr_core_list`, `herdr_core_read` (terminal, lines) and `herdr_core_focus`
+        (terminal) reach the Herdr desktop app's terminal server, herdr-core, on this
+        Mac: its agents (terminals that report a status), one agent's screen plus
+        history, and showing one in the app. List and read need `terminalObserve`,
+        focus `terminalControl`. They never send to a terminal or start a core; with
+        no core running, list answers `unavailable` with no agents.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

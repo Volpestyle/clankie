@@ -127,6 +127,7 @@ import {
   ConversationQuestionAnswerSchema,
   OperatorConversationScopeSchema,
   OPERATOR_CONVERSATION_REF_MAX,
+  OPERATOR_CONVERSATION_CODE_MAX,
   OPERATOR_CONVERSATION_TITLE_MAX,
   ReplayOperatorConversationRequestSchema,
   ReplayOperatorSubagentRequestSchema,
@@ -244,6 +245,30 @@ export const OperatorTerminalMachineSchema = z
   })
   .strict();
 export type OperatorTerminalMachine = z.infer<typeof OperatorTerminalMachineSchema>;
+
+/**
+ * A herdr-core terminal address as `terminal.list` gives it: `t7`, or
+ * `<machine>/t7` for one on a machine that core has added.
+ */
+export const HerdrCoreTerminalSchema = z
+  .string()
+  .regex(/^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/)?t[0-9a-z]{1,16}$/u);
+
+/** One agent in herdr-core: a terminal whose program reports its status (OSC 7501). */
+export const HerdrCoreAgentSchema = z
+  .object({
+    terminal: HerdrCoreTerminalSchema,
+    /** The program's own name for itself (`claude-code`, `codex`), or its foreground program. */
+    harness: z.string().max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
+    /** The machine's name when it runs on a machine that core has added. */
+    machine: z.string().max(64).optional(),
+    workingDirectory: z.string().max(4096).optional(),
+    title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+    /** The program's own word: idle, working, done, blocked or error. */
+    status: z.string().max(32).optional(),
+  })
+  .strict();
+export type HerdrCoreAgent = z.infer<typeof HerdrCoreAgentSchema>;
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
@@ -647,6 +672,30 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("terminal_read"),
       schemaVersion: z.literal(1),
       terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      /** The agents herdr-core runs on this Mac, the Herdr desktop app's among them. Read-only. */
+      op: z.literal("herdr_core_list"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
+  z
+    .object({
+      /** The text on one herdr-core agent's screen, with `lines` of history above it. Read-only. */
+      op: z.literal("herdr_core_read"),
+      schemaVersion: z.literal(1),
+      terminal: HerdrCoreTerminalSchema,
+      lines: z.number().int().min(0).max(2_000).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /** Show one herdr-core agent in the Herdr desktop app. */
+      op: z.literal("herdr_core_focus"),
+      schemaVersion: z.literal(1),
+      terminal: HerdrCoreTerminalSchema,
     })
     .strict(),
   z
@@ -1327,6 +1376,35 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
       status: z.enum(["focused", "unavailable"]),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("herdr_core_list"),
+      schemaVersion: z.literal(1),
+      /** `unavailable` when no herdr-core answers on this Mac; `agents` is then empty. */
+      status: z.enum(["listed", "unavailable"]),
+      agents: z.array(HerdrCoreAgentSchema).max(OPERATOR_TERMINAL_CATALOG_MAX),
+      detail: z.string().max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("herdr_core_read"),
+      schemaVersion: z.literal(1),
+      terminal: HerdrCoreTerminalSchema,
+      status: z.enum(["read", "unavailable"]),
+      text: z.string().max(OPERATOR_TERMINAL_READ_MAX).optional(),
+      detail: z.string().max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("herdr_core_focus"),
+      schemaVersion: z.literal(1),
+      terminal: HerdrCoreTerminalSchema,
+      status: z.enum(["focused", "unavailable"]),
+      detail: z.string().max(1024).optional(),
     })
     .strict(),
   z

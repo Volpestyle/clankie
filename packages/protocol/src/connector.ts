@@ -155,6 +155,8 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "terminal_catalog":
     case "terminal_tail":
     case "terminal_read":
+    case "herdr_core_list":
+    case "herdr_core_read":
     case "get":
     case "send":
     case "send_receipt":
