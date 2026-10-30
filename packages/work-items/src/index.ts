@@ -15,6 +15,7 @@ export * from "./linear-mirror.ts";
 export * from "./outcomes.ts";
 export { createFilesBackend, PRIVATE_WORK_GITIGNORE } from "./backends/files.ts";
 export * from "./files-export.ts";
+export * from "./drops.ts";
 export {
   createGithubBackend,
   ghCliApi,
