@@ -463,3 +463,101 @@ async function signIn(baseUrl: string, operatorToken: string): Promise<string> {
   ).json()) as { access_token: string };
   return accessToken;
 }
+
+it("lands a status in a Linear team's own state, and leaves account-only Linear projects read only", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "connector-issue-linear-")));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const meadow = await projectRepo(root, "meadow", {
+    ...decided,
+    backend: "linear",
+    linear: { team: "MEA" },
+  });
+  const settings = await projectSettings(root, [{ id: "meadow", name: "Meadow", path: meadow }]);
+  await settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: current.projects.projects.map((project) => ({
+        ...project,
+        trackerPosting: "allow" as const,
+      })),
+    },
+  }));
+  // Linear, as the MCP host answers for the connected account: a team that names its own
+  // states, and one project in the account that isn't one of the owner's.
+  const saved: Record<string, unknown>[] = [];
+  const answers: Record<string, (args: Record<string, unknown>) => unknown> = {
+    list_projects: () => ({
+      projects: [{ id: "4b0c3d1e-2f6a-4d8b-9c1e-5a7f3b2d6e90", name: "Lake", leadTeam: { id: "team-lake" } }],
+      hasNextPage: false,
+    }),
+    get_team: (args) =>
+      args.query === "MEA" ? { id: "7d2e9a41-5c3b-4f68-8e1a-2b9c6d4f0a17", key: "MEA" } : undefined,
+    list_issue_statuses: (args) =>
+      args.team === "MEA"
+        ? [
+            { id: "s1", name: "Someday", type: "backlog" },
+            { id: "s2", name: "Ready", type: "unstarted" },
+            { id: "s3", name: "Doing", type: "started" },
+            { id: "s4", name: "Peer review", type: "started" },
+            { id: "s5", name: "Complete", type: "completed" },
+            { id: "s6", name: "Dropped", type: "canceled" },
+          ]
+        : [],
+    save_issue: (args) => {
+      saved.push(args);
+      return { id: "issue-uuid", identifier: `MEA-${String(saved.length)}`, title: args.title };
+    },
+  };
+  const workItems = createWorkItemsService({
+    stateDirectory: join(root, "work-state"),
+    projects: async () => (await settings.load()).projects,
+    localMachineId: "local",
+    run: defaultRun,
+    mcpHost: {
+      binding: async () => ({ binding: "linear-account" }),
+      call: async (request: { server: string; tool: string; arguments?: Record<string, unknown> }) => {
+        const answer = request.server === "linear" ? answers[request.tool] : undefined;
+        if (answer === undefined) return { outcome: "ok", isError: true, content: `No ${request.tool} here` };
+        return { outcome: "ok", isError: false, content: JSON.stringify(answer(request.arguments ?? {})) };
+      },
+    } as unknown as NonNullable<Parameters<typeof createWorkItemsService>[0]["mcpHost"]>,
+    posting: createTrackerPosting({
+      statePath: join(root, "posts.json"),
+      settings,
+      localMachineId: "local",
+      leadConversation: async () => undefined,
+      requestOwnerAsk: async () => {
+        throw new Error("Nothing here asks the owner");
+      },
+      observeQuestionResolutions: () => () => {},
+      wakeConversation: async () => false,
+    }),
+  });
+  const { call } = await connectedApp(workItems);
+  const meadowId = await repoIdOf(workItems, "meadow");
+  const doing = JSON.parse(
+    (await call("save_issue", { project: meadowId, title: "Mow the meadow", status: "in_progress" })).text,
+  );
+  expect(doing).toMatchObject({ outcome: "written", issue: "MEA-1" });
+  const review = await call("save_issue", {
+    project: meadowId,
+    title: "Check the fence",
+    status: "in_review",
+  });
+  expect(JSON.parse(review.text)).toMatchObject({ outcome: "written" });
+  expect(saved.map((args) => [args.title, args.state, args.team])).toEqual([
+    ["Mow the meadow", "Doing", "MEA"],
+    ["Check the fence", "Peer review", "MEA"],
+  ]);
+
+  // The account's own Lake project lists and stays read only.
+  const listed = JSON.parse((await call("list_issues", {})).text) as { projects: { project: string }[] };
+  const lake = listed.projects.find((project) => project.project.startsWith("linear-"));
+  expect(lake).toBeDefined();
+  expect(await call("save_issue", { project: lake!.project, title: "Stock the lake" })).toEqual({
+    error: true,
+    text: expect.stringContaining("apps only read it"),
+  });
+  expect(saved).toHaveLength(2);
+});

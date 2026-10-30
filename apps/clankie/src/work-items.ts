@@ -1939,6 +1939,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (tracker === undefined) return undefined;
       return { tracker, projectIds: await projectIdsAt(path) };
     },
+    /** The Linear team a registered repo's issues live in, so a status lands in that team's own state. */
+    async linearTeam(repo: string): Promise<string | undefined> {
+      if (/^project-[a-f0-9]{48}$/u.test(repo))
+        return projectReader ? (await projectReader.prepare(repo)).convention.linear?.team : undefined;
+      return (await readConvention((await locate(repo, true)).path))?.linear?.team;
+    },
     /** Files one drop in a target `dropTarget` returned ready; see `fileDrop`. */
     fileDrop: (
       target: Extract<DropTarget, { ready: true }>,

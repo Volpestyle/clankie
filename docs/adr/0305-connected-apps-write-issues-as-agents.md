@@ -42,6 +42,12 @@ onBehalfOf: [owner]}`. The owner's own writes (his app, `clankie work owner`)
 - **Private issue files are written right away.** They never leave the Mac, so
   ADR 0302 leaves them writable. Issue files hold no comments; `comment_issue`
   on them is refused with a pointer to the issue's description.
+- **Only the owner's projects.** A Linear project `list_issues` shows only because
+  it is in the connected account (`linear-<uuid>`) belongs to none of the owner's
+  projects, so no posting setting covers it; apps read it and never write there.
+- **A status lands in the team's own state.** For Linear, the service reads the
+  team's states and picks one by type, as the Linear backend does, so a team that
+  calls its states Ready, Doing or Complete still gets the right one.
 - **Small, typed writes.** `save_issue` creates (`title`, optional
   `description`, `status`, `priority`, `labels`) or updates (`issue` plus any
   of `title`, `description`, `status`, `priority`, `addLabels`,
