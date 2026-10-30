@@ -4,6 +4,7 @@ import {
   FEED_LIST_LIMIT_MAX,
   FeedListRequestSchema,
   type FeedItem,
+  type FeedListRequest,
   type FeedPage,
   type OperatorConversationServiceClient,
 } from "@clankie/protocol";
@@ -67,7 +68,7 @@ export async function runFeedCommand(
   const page = await createCaptainOperatorConversationClient(owner, owner).feedList!(request.data);
   const stdout = options.stdout ?? process.stdout;
   if (values.json) outputJson(stdout, page);
-  else stdout.write(`${formatFeedPage(page)}\n`);
+  else stdout.write(`${formatFeedPage(page, request.data)}\n`);
   return page.outcome === "ready" ? 0 : 1;
 }
 
@@ -78,16 +79,21 @@ export function feedConsoleCommand(client: OperatorConversationServiceClient) {
     const request = FeedListRequestSchema.safeParse(projectId ? { projectId } : {});
     if (extra.length || !request.success) throw new Error("Usage: /feed [PROJECT_ID]");
     if (!client.feedList) throw new Error("The feed is unavailable");
-    return formatFeedPage(await client.feedList(request.data));
+    return formatFeedPage(await client.feedList(request.data), request.data);
   };
 }
 
-export function formatFeedPage(page: FeedPage): string {
+/** The continuation repeats the filter, since the cursor only marks a place in the page. */
+export function formatFeedPage(page: FeedPage, request: FeedListRequest = {}): string {
   if (page.outcome !== "ready") return page.message;
   const lines = page.items.map(formatFeedItem);
   for (const missing of page.unreadable ?? [])
     lines.push(`Not included: ${missing.projectId ?? missing.repoId}: ${missing.message}`);
-  if (page.nextCursor) lines.push(`More: clankie feed --cursor ${page.nextCursor}`);
+  if (page.nextCursor) {
+    const project = request.projectId === undefined ? "" : ` --project ${request.projectId}`;
+    const limit = request.limit === undefined ? "" : ` --limit ${request.limit}`;
+    lines.push(`More: clankie feed${project}${limit} --cursor ${page.nextCursor}`);
+  }
   return lines.length ? lines.join("\n\n") : "Nothing in the feed";
 }
 

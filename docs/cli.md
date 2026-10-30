@@ -8375,11 +8375,12 @@ nothing:
 ```sh
 clankie feed
 clankie feed --project garden --limit 10
-clankie feed --cursor CURSOR --json
+clankie feed --project garden --cursor CURSOR --json
 ```
 
 TUI: `/feed [PROJECT_ID]`. Text output names the exact answer and dismiss
-commands; `--json` prints the page.
+commands, and its next-page command repeats `--project` and `--limit`, since a
+cursor marks only a place in the page; `--json` prints the page.
 
 An item belongs to a project when its ask's workspace, or its source
 conversation's local workspace, lies inside one of the project's local

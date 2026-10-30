@@ -265,6 +265,17 @@ it("joins asks, owner mail and project updates into one owner feed, pages it and
     all.items.filter((item) => item.projectId === "garden").map((item) => item.id),
   );
   expect((await f.post({ op: "feed_list", schemaVersion: 1, cursor: "bm90LWEtY3Vyc29y" })).status).toBe(400);
+  // The CLI's next-page command keeps the filter, so following it stays in the garden.
+  const firstPage: string[] = [];
+  await runFeedCommand(["--project", "garden", "--limit", "2"], {
+    host: "http://fixture",
+    env: { CLANKIE_OPERATOR_TOKEN: OWNER },
+    fetchImpl: async (input, init) => f.service.app.fetch(new Request(input, init)),
+    stdout: { write: (chunk) => firstPage.push(chunk) },
+  });
+  expect(firstPage.join("")).toContain(
+    `More: clankie feed --project garden --limit 2 --cursor ${one.nextCursor}`,
+  );
 
   // A check is answered with the existing op, against the target the feed carried.
   const check = all.items[0]!;
