@@ -83,6 +83,16 @@ const RouteSchema = z.discriminatedUnion("kind", [
 ]);
 export type PostingRoute = z.infer<typeof RouteSchema>;
 
+/** Arguments that name an existing Linear record other than an issue. */
+const OTHER_RECORD_KEYS = [
+  "commentId",
+  "statusUpdateId",
+  "documentId",
+  "milestoneId",
+  "initiativeId",
+  "attachmentId",
+] as const;
+
 export interface PostingWrite {
   readonly tracker: OutwardTracker;
   readonly route: PostingRoute;
@@ -255,14 +265,14 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
 
   /**
    * Which projects a Linear write lands in, read from its target (a Linear tool's or a
-   * Linear repo's tool arguments); empty when it can't tell.
+   * Linear repo's tool arguments). When its target is a record it can't place in a project,
+   * every project on Linear, so the strictest setting applies.
    */
   const linearTargets = async (route: PostingRoute, candidates: readonly Project[]): Promise<string[]> => {
     if (candidates.length === 0) return [];
-    // A GraphQL mutation can touch any record in its document or variables, so it meets
-    // the setting of every project on Linear.
-    if (route.kind === "linear" && route.tool === LINEAR_GRAPHQL_TOOL.name)
-      return candidates.map((project) => project.id);
+    const everyProject = candidates.map((project) => project.id);
+    // A GraphQL mutation can touch any record in its document or variables.
+    if (route.kind === "linear" && route.tool === LINEAR_GRAPHQL_TOOL.name) return everyProject;
     // A `clankie work update|attach` changes an existing issue and names no destination.
     const args: Record<string, unknown> =
       route.kind !== "work"
@@ -296,11 +306,17 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       [text(args.project), text(args.projectId)].filter((ref) => ref !== undefined),
       [text(args.team), text(args.teamId)].filter((ref) => ref !== undefined),
     );
-    const issueRef =
-      (route.kind !== "work" && route.tool === "save_issue" ? text(args.id) : undefined) ??
-      text(args.issueId) ??
-      text(args.issue);
-    if (!issueRef || !options.readLinear) return targeted;
+    const saveIssue = route.kind !== "work" && route.tool === "save_issue";
+    const issueRef = (saveIssue ? text(args.id) : undefined) ?? text(args.issueId) ?? text(args.issue);
+    // Any other existing record (a comment, a reply's parent, a project update, a document)
+    // could be in any project.
+    const otherRecord =
+      (!saveIssue && text(args.id) !== undefined) ||
+      (issueRef === undefined && text(args.parentId) !== undefined) ||
+      OTHER_RECORD_KEYS.some((key) => text(args[key]) !== undefined);
+    if (otherRecord) return everyProject;
+    if (!issueRef) return targeted;
+    if (!options.readLinear) return everyProject;
     // ...and, for an existing issue, where it is now: moving an issue out of a project
     // meets that project's setting too.
     let issue: {
@@ -311,7 +327,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       issue = (await options.readLinear("get_issue", { id: issueRef })) as typeof issue;
     } catch {
       // An issue it can't read could be in any project.
-      return candidates.map((project) => project.id);
+      return everyProject;
     }
     const current = await named(
       [text(issue?.project?.id), text(issue?.project?.name)].filter((ref) => ref !== undefined),

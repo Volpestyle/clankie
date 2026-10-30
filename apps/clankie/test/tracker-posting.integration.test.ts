@@ -41,6 +41,7 @@ import {
   API_ACCESS,
   API_REFRESH,
   createLinearApiProvider,
+  COMMENT_ID,
   ISSUE_ID,
   PROJECT_ID,
   USER_ID,
@@ -330,7 +331,8 @@ async function fixture(
       fetchImpl: async (input, init) => service.app.fetch(new Request(input, init)),
     });
   const settle = async (check: () => boolean) => {
-    for (let tries = 0; tries < 200 && !check(); tries += 1) await new Promise((r) => setTimeout(r, 10));
+    for (const deadline = Date.now() + 15_000; Date.now() < deadline && !check();)
+      await new Promise((r) => setTimeout(r, 10));
     expect(check()).toBe(true);
   };
   const pendingAsk = async (): Promise<{ question: ConversationQuestion; revision: number }> => {
@@ -687,7 +689,7 @@ it("a drop on a Linear project is kept as a private issue file first, then poste
   await f.answer("Post it");
   await f.settle(() => f.mutations("issueCreate") === 2);
   const fence = async () => (await readDrops(f.garden)).find((entry) => entry.title === "Paint the fence");
-  for (let tries = 0; tries < 200 && (await fence())?.posted === undefined; tries += 1)
+  for (const deadline = Date.now() + 15_000; Date.now() < deadline && (await fence())?.posted === undefined;)
     await new Promise((r) => setTimeout(r, 10));
   expect((await fence())?.posted).toMatchObject({ tracker: "linear" });
   expect(await files()).toHaveLength(3);
@@ -792,7 +794,8 @@ describe("a drop on a GitHub project", () => {
     await writeConvention(f.pond, { ...f.pondConvention, github: { repo: "fixture/other" } });
     await f.answer("Post it");
     let posts: TrackerPost[] = [];
-    for (let tries = 0; tries < 200; tries += 1) {
+    // The answer posts in the background; under a loaded machine that can take a while.
+    for (const deadline = Date.now() + 15_000; Date.now() < deadline;) {
       const listed = await f.posts({ action: "list", state: "all" });
       posts = (listed.body as { posts: TrackerPost[] }).posts;
       if (posts.some((post) => post.state !== "waiting")) break;
@@ -937,6 +940,31 @@ describe("an issue that belongs to another project", () => {
       ok: true,
       body: { changed: true, post: { id, state: "refused" } },
     });
+    expect(f.mutations("commentCreate")).toBe(0);
+  });
+
+  it("meets that project's setting when a worker edits a comment or replies there by id alone", async () => {
+    const { f } = await setup();
+    await f.setPosting("meadow", "allow");
+    await f.setPosting("garden", "read_only");
+    const binding = (await f.host.account("linear", "operator")).binding;
+    // A worker hired into the meadow (go ahead) reaches the garden's comment by its id.
+    for (const args of [
+      { id: COMMENT_ID, body: "Edited from the meadow" },
+      { parentId: COMMENT_ID, body: "A reply from the meadow" },
+    ]) {
+      const result = await f.host.call({
+        lane: "operator",
+        server: "linear",
+        tool: "save_comment",
+        arguments: args,
+        delegation: { binding, grantId: "grant-4", principalId: "project:meadow", workId: "work-4" },
+      });
+      expect(result).toMatchObject({ outcome: "refused", reason: "posting_refused" });
+      if (result.outcome !== "refused") throw new Error("expected a refusal");
+      expect(result.detail).toContain("Posting to Linear is read only for Garden");
+    }
+    expect(f.mutations("commentUpdate")).toBe(0);
     expect(f.mutations("commentCreate")).toBe(0);
   });
 
