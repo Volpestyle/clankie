@@ -12,7 +12,14 @@ it("reports installed, enabled, version, bridge, hook and skill gaps independent
   const named = join(home, ".claude-james");
   const root = join(home, "plugin");
   try {
-    for (const path of [join(named, "plugins"), active, join(root, ".claude-plugin"), join(root, "hooks")])
+    // A lock directory beside a profile is not a profile of its own.
+    for (const path of [
+      join(named, "plugins"),
+      `${named}.lock`,
+      active,
+      join(root, ".claude-plugin"),
+      join(root, "hooks"),
+    ])
       await mkdir(path, { recursive: true });
     await writeFile(
       join(named, "settings.json"),
