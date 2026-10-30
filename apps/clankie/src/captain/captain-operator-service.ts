@@ -656,6 +656,14 @@ export function createOperatorService(
         sessions: await ctx.terminals.catalog(),
       };
     }
+    if (request.op === "terminal_focus") {
+      return {
+        op: "terminal_focus",
+        schemaVersion: 1,
+        terminalId: request.terminalId,
+        status: await ctx.terminals.focus(request.terminalId),
+      };
+    }
     if (request.op === "seat_bridges") {
       return {
         op: "seat_bridges",

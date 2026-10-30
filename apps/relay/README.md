@@ -141,7 +141,9 @@ stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request
 does: fleet, terminal catalog and tail, and get, create and send on persona
-threads only. Pane frames are rendered to plain text here.
+threads only. The tools go through the session-source layer of
+`@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids
+read `herdr:<id>`; that layer renders pane frames to plain text.
 
 Without a bearer `/mcp` answers `401` with
 `WWW-Authenticate: Bearer resource_metadata=".../.well-known/oauth-protected-resource/mcp"`.

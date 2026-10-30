@@ -1,6 +1,6 @@
-import type { OperatorTerminalFrame } from "../../../packages/protocol/src/operator-terminal.ts";
+import type { OperatorTerminalFrame } from "@clankie/protocol";
 
-// Plain text for a Herdr pane, for the Claude connector's read_agent (ADR 0301).
+// Plain text for a Herdr pane, for the Herdr session source's `read` (ADR 0301).
 // Herdr sends a full ANSI redraw and then diffs; this applies them to a grid
 // the way a terminal would, closely enough to read: cursor moves, erases,
 // inserts and scrolls. Colour and modes are dropped.
@@ -14,7 +14,10 @@ export function renderTerminalText(frames: readonly OperatorTerminalFrame[]): st
   for (const frame of frames.slice(frames.indexOf(first))) {
     if (frame.scrollback !== undefined) history.push(...plainLines(decode(frame.scrollback.data)));
     if (frame.full) screen.reset(frame.columns, frame.rows);
-    screen.write(decode(frame.data));
+    // The service seeds a pane's existing history ahead of the first redraw, so
+    // rows that scroll off the top there are history; later rows arrive as scrollback.
+    if (frame === first) history.push(...screen.write(decode(frame.data), true));
+    else screen.write(decode(frame.data));
   }
   const lines = [...history, ...screen.lines()];
   while (lines.length > 0 && lines.at(-1)!.length === 0) lines.pop();
@@ -46,6 +49,7 @@ class Screen {
   private column = 0;
   private saved = { row: 0, column: 0 };
   private pendingWrap = false;
+  private scrolledOff: string[] | undefined;
   private top = 0;
   private bottom = 0;
 
@@ -73,7 +77,10 @@ class Screen {
     return this.grid.map((cells) => cells.join("").trimEnd());
   }
 
-  public write(input: string): void {
+  /** Writes `input`; with `keepScrolled`, returns the rows it scrolled off the top. */
+  public write(input: string, keepScrolled = false): string[] {
+    const scrolledOff: string[] = [];
+    this.scrolledOff = keepScrolled ? scrolledOff : undefined;
     const chars = [...input];
     for (let index = 0; index < chars.length; index += 1) {
       const char = chars[index]!;
@@ -92,6 +99,8 @@ class Screen {
         this.column = Math.min(this.columns - 1, (Math.floor(this.column / 8) + 1) * 8);
       else if (char.codePointAt(0)! >= 0x20 && char !== "\u007f") this.print(char);
     }
+    this.scrolledOff = undefined;
+    return scrolledOff;
   }
 
   private print(char: string): void {
@@ -112,7 +121,8 @@ class Screen {
 
   private scrollUp(count: number): void {
     for (let step = 0; step < count; step += 1) {
-      this.grid.splice(this.top, 1);
+      const [removed] = this.grid.splice(this.top, 1);
+      if (this.top === 0 && removed !== undefined) this.scrolledOff?.push(removed.join("").trimEnd());
       this.grid.splice(this.bottom, 0, this.blank());
     }
   }

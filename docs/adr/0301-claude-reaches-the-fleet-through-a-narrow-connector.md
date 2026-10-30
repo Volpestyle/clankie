@@ -24,6 +24,15 @@ own `/mcp` on a trusted network.
   writes into its own persona thread, which delivers to the native pane. A
   connector never types into a terminal, hires or closes a seat, writes to a
   tracker, reads settings, tails Clankie's own thread, or joins a call.
+- **Through session sources, not Herdr.** The tools talk to the session-source
+  layer in `packages/agent-hosts/src/sessions/`. A source is any app that holds
+  agent sessions and answers four things: list its sessions, read one, send one
+  a message, and open one in its own app. Herdr is the first source; Orca or
+  another app becomes a second one without changing the tools. Session ids
+  carry their source (`herdr:<seat or terminal id>`), and callers pass them
+  back unchanged. Clankie and the phone move onto the same layer next. The
+  Herdr source's open is the `terminal_focus` operator op, which runs
+  `herdr agent focus` on the pane's machine; the connector doesn't offer it.
 - **Signing in pairs a device.** The service is the OAuth authorization server
   (RFC 8414 metadata, RFC 7591 registration, PKCE S256). Registration is
   stateless: the client id carries its name and callbacks under the Mac's key.

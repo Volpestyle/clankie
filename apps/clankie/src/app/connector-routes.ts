@@ -530,7 +530,7 @@ function tokenError(context: Context, error: string, status: 400 | 401 = 400): R
 }
 
 /** The public base a request arrived at: the doorway's, when this Mac forwarded it. */
-export function publicBase(request: Request): string {
+function publicBase(request: Request): string {
   const forwarded = request.headers.get(CONNECTOR_PUBLIC_BASE_HEADER);
   if (forwarded !== null) {
     try {

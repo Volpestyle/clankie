@@ -114,6 +114,7 @@ import {
   ConversationQuestionTargetSchema,
   ConversationQuestionAnswerSchema,
   OperatorConversationScopeSchema,
+  OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_CONVERSATION_TITLE_MAX,
   ReplayOperatorConversationRequestSchema,
   ReplayOperatorSubagentRequestSchema,
@@ -598,6 +599,14 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("terminal_catalog"),
       schemaVersion: z.literal(1),
+    })
+    .strict(),
+  z
+    .object({
+      /** Bring one terminal to the front in Herdr on its machine (a session source's open). */
+      op: z.literal("terminal_focus"),
+      schemaVersion: z.literal(1),
+      terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     })
     .strict(),
   z
@@ -1245,6 +1254,14 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("terminal_catalog"),
       schemaVersion: z.literal(1),
       sessions: z.array(OperatorTerminalSessionSchema).max(OPERATOR_TERMINAL_CATALOG_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("terminal_focus"),
+      schemaVersion: z.literal(1),
+      terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+      status: z.enum(["focused", "unavailable"]),
     })
     .strict(),
   z

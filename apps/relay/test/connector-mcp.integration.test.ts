@@ -58,6 +58,8 @@ const thread = (
 const SCREEN =
   "\u001b[2J\u001b[H\u001b[1mBuilding kh2\u001b[0m\r\n\u001b[32m> cargo build\u001b[0m\r\n\u001b[3;1HCompiling...  ok\u001b[3;13Hdone\u001b[K";
 
+const HISTORY = Array.from({ length: 10 }, (_, index) => `\u001b[2mline ${index + 1}\u001b[0m\r\n`).join("");
+
 const servers: Server[] = [];
 afterEach(async () => {
   await Promise.all(
@@ -149,6 +151,9 @@ async function startConnectorRelay(
             runId: "run-1",
             revision: request.turn.expectedRevision + 1,
             safeCursor: "c2",
+            ...(request.turn.message === "after your goal"
+              ? { seatDelivery: { state: "queued" as const, detail: "Bram is mid-goal; the message waits." } }
+              : {}),
           },
         } as OperatorConversationServiceResult;
       case "terminal_tail":
@@ -168,7 +173,10 @@ async function startConnectorRelay(
                 terminalId: request.observation.terminalId,
                 sequence: 1,
                 encoding: "base64",
-                data: Buffer.from(SCREEN).toString("base64"),
+                // The service seeds a pane's existing history ahead of its first redraw.
+                data: Buffer.from(
+                  request.observation.terminalId === "term-loose" ? `${HISTORY}${SCREEN}` : SCREEN,
+                ).toString("base64"),
                 columns: 40,
                 rows: 6,
                 full: true,
@@ -233,7 +241,7 @@ describe("Claude connector MCP endpoint", () => {
     expect(listed).toEqual({
       agents: [
         {
-          agent: "seat-kh2",
+          agent: "herdr:seat-kh2",
           name: "Bram",
           harness: "claude",
           machine: "PC1",
@@ -243,25 +251,51 @@ describe("Claude connector MCP endpoint", () => {
           title: "kh2 netcode",
           canMessage: true,
         },
-        { agent: "term-loose", harness: "codex", machine: "this Mac", title: "scratch", canMessage: false },
+        {
+          agent: "herdr:term-loose",
+          harness: "codex",
+          machine: "this Mac",
+          title: "scratch",
+          canMessage: false,
+        },
       ],
       machines: ["PC1", "this Mac"],
     });
 
     const read = JSON.parse(
-      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "seat-kh2" } })),
+      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr:seat-kh2" } })),
     );
-    expect(read).toEqual({ agent: "seat-kh2", text: "Building kh2\n> cargo build\nCompiling...done" });
+    expect(read).toEqual({ agent: "herdr:seat-kh2", text: "Building kh2\n> cargo build\nCompiling...done" });
+    // History that scrolled off before the first redraw is still read.
+    const loose = JSON.parse(
+      textOf(
+        await client.callTool({ name: "read_agent", arguments: { agent: "herdr:term-loose", lines: 5 } }),
+      ),
+    );
+    expect(loose.text).toBe("line 4\nline 5\nBuilding kh2\n> cargo build\nCompiling...done");
 
     const sent = JSON.parse(
       textOf(
         await client.callTool({
           name: "message_agent",
-          arguments: { agent: "seat-kh2", message: "run the tests" },
+          arguments: { agent: "herdr:seat-kh2", message: "run the tests" },
         }),
       ),
     );
-    expect(sent).toMatchObject({ agent: "seat-kh2", status: "delivered" });
+    expect(sent).toMatchObject({ agent: "herdr:seat-kh2", status: "delivered" });
+    const queued = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "message_agent",
+          arguments: { agent: "herdr:seat-kh2", message: "after your goal" },
+        }),
+      ),
+    );
+    expect(queued).toEqual({
+      agent: "herdr:seat-kh2",
+      status: "queued",
+      detail: "Bram is mid-goal; the message waits.",
+    });
     const send = relay.seen.find((request) => request.op === "send");
     expect(send).toMatchObject({
       turn: {

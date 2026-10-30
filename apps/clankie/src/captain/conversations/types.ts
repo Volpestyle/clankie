@@ -67,6 +67,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "update_persona" }
   | { op: "set_persona_role" }
   | { op: "terminal_catalog" }
+  | { op: "terminal_focus" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }
@@ -112,6 +113,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "update_persona" }
   | { op: "set_persona_role" }
   | { op: "terminal_catalog" }
+  | { op: "terminal_focus" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }

@@ -13,23 +13,19 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
 } from "../../../packages/protocol/src/operator-service.ts";
-import {
-  OperatorTerminalTailItemSchema,
-  type OperatorTerminalFrame,
-} from "../../../packages/protocol/src/operator-terminal.ts";
+import { SessionRefusal, SessionSources, createHerdrSessionSource } from "@clankie/agent-hosts/sessions";
 import type { RelayDeviceAuthorizer } from "./device-auth.ts";
-import { renderTerminalText } from "./terminal-text.ts";
 
-// The Claude connector's MCP endpoint (ADR 0301). Three tools, each a thin
-// wrapper over operator ops the app already uses, sent back through this
-// relay's own dispatch with the connector's bearer, so the device check, the
-// connector allowlist, the revision fence and send dedupe all apply unchanged.
+// The Claude connector's MCP endpoint (ADR 0301). Three tools over the session
+// sources layer, never a session app directly. Herdr's source speaks operator
+// ops back through this relay's own dispatch with the connector's bearer, so
+// the device check, the connector allowlist, the revision fence and send
+// dedupe all apply unchanged. Opening a session in its own app is the layer's
+// fourth operation; the connector doesn't offer it.
 
 const SURFACE_CLIENT_ID = "claude-connector";
 const READ_LINES_DEFAULT = 80;
 const READ_LINES_MAX = 400;
-const READ_SETTLE_MS = 400;
-const READ_DEADLINE_MS = 8_000;
 const MESSAGE_MAX = 16_000;
 
 export interface ConnectorOperatorPort {
@@ -54,7 +50,7 @@ export interface ConnectorMcpOptions {
   readonly version: string;
 }
 
-export class ConnectorRefusal extends Error {
+class ConnectorRefusal extends Error {
   public readonly status: number;
   public readonly code: string;
 
@@ -189,216 +185,53 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
       },
     ],
   }));
+  const sessions = connectorSessions(options.operator, bearer);
   server.setRequestHandler(CallToolRequestSchema, async (call) => {
     const args = (call.params.arguments ?? {}) as Record<string, unknown>;
     try {
-      if (call.params.name === "list_agents")
-        return text(await listAgents(options.operator, bearer, optionalString(args.machine)));
-      if (call.params.name === "read_agent")
-        return text(
-          await readAgent(options.operator, bearer, requiredString(args.agent, "agent"), lines(args.lines)),
+      if (call.params.name === "list_agents") {
+        const listed = await sessions.list(optionalString(args.machine));
+        return text({
+          agents: listed.sessions.map(({ id, source: _source, ...session }) => ({ agent: id, ...session })),
+          machines: listed.machines,
+        });
+      }
+      if (call.params.name === "read_agent") {
+        const { id, text: screen } = await sessions.read(
+          requiredString(args.agent, "agent"),
+          lines(args.lines),
         );
-      if (call.params.name === "message_agent")
-        return text(
-          await messageAgent(
-            options.operator,
-            bearer,
-            requiredString(args.agent, "agent"),
-            requiredString(args.message, "message", MESSAGE_MAX),
-          ),
+        return text({ agent: id, text: screen });
+      }
+      if (call.params.name === "message_agent") {
+        const { id, ...sent } = await sessions.send(
+          requiredString(args.agent, "agent"),
+          requiredString(args.message, "message", MESSAGE_MAX),
         );
+        return text({ agent: id, ...sent });
+      }
       return failure(`There's no tool called ${call.params.name}.`);
     } catch (error) {
-      return failure(error instanceof ConnectorRefusal ? refusalText(error) : (error as Error).message);
+      if (error instanceof ConnectorRefusal) return failure(refusalText(error));
+      if (error instanceof SessionRefusal) return failure(error.message);
+      return failure((error as Error).message);
     }
   });
   return server;
 }
 
-interface ListedAgent {
-  readonly agent: string;
-  readonly name?: string;
-  readonly harness?: string;
-  readonly machine: string;
-  readonly project?: string;
-  readonly workingDirectory?: string;
-  readonly status?: string;
-  readonly title?: string;
-  readonly doing?: string;
-  readonly canMessage: boolean;
-}
-
-async function listAgents(operator: ConnectorOperatorPort, bearer: string, machine: string | undefined) {
-  const [fleet, catalog] = await Promise.all([
-    operator.dispatch({ op: "fleet", schemaVersion: 1, view: "home" }, bearer),
-    operator.dispatch({ op: "terminal_catalog", schemaVersion: 1 }, bearer).catch(() => undefined),
+/** The session sources this connector reaches, bound to its own bearer. */
+function connectorSessions(operator: ConnectorOperatorPort, bearer: string): SessionSources {
+  return new SessionSources([
+    createHerdrSessionSource(
+      {
+        dispatch: (request) => operator.dispatch(request, bearer),
+        terminalTail: (request, signal) => operator.terminalTail(request, bearer, signal),
+        tailRefusal: async (response) => new ConnectorRefusal(response.status, await errorCode(response)),
+      },
+      { surfaceClientId: SURFACE_CLIENT_ID },
+    ),
   ]);
-  if (fleet.op !== "fleet") throw new Error("The fleet answered with something else.");
-  const names = new Map(fleet.snapshot.personas.map((persona) => [persona.personaId, persona.name]));
-  const agents: ListedAgent[] = fleet.snapshot.seats.map((seat) => ({
-    agent: seat.seatId,
-    ...(names.get(seat.personaId) === undefined ? {} : { name: names.get(seat.personaId)! }),
-    harness: seat.harness,
-    machine: seat.machine ?? seat.fleet ?? "this Mac",
-    ...(seat.workingDirectory === undefined
-      ? {}
-      : { project: lastSegment(seat.workingDirectory), workingDirectory: seat.workingDirectory }),
-    status: seat.status,
-    ...(seat.title.length === 0 ? {} : { title: seat.title }),
-    ...((seat.stance?.note ?? seat.summary) === undefined
-      ? {}
-      : { doing: (seat.stance?.note ?? seat.summary)! }),
-    canMessage: true,
-  }));
-  const seated = new Set(agents.map((agent) => agent.agent));
-  // Agent panes Clankie hasn't seated (started by hand) can still be read.
-  if (catalog?.op === "terminal_catalog")
-    for (const session of catalog.sessions) {
-      if (session.agent === undefined || seated.has(session.terminalId)) continue;
-      agents.push({
-        agent: session.terminalId,
-        harness: session.agent,
-        machine: session.runtime?.id ?? "this Mac",
-        ...(session.label.length === 0 ? {} : { title: session.label }),
-        canMessage: false,
-      });
-    }
-  const shown = machine === undefined ? agents : agents.filter((agent) => agent.machine === machine);
-  return { agents: shown, machines: [...new Set(agents.map((agent) => agent.machine))] };
-}
-
-async function readAgent(operator: ConnectorOperatorPort, bearer: string, agent: string, count: number) {
-  const abort = new AbortController();
-  const deadline = setTimeout(() => abort.abort(), READ_DEADLINE_MS);
-  const frames: OperatorTerminalFrame[] = [];
-  try {
-    const response = await operator.terminalTail(
-      {
-        op: "terminal_tail",
-        schemaVersion: 1,
-        observation: { schemaVersion: 1, terminalId: agent, surfaceClientId: SURFACE_CLIENT_ID },
-      },
-      bearer,
-      abort.signal,
-    );
-    if (!response.ok || response.body === null)
-      throw new ConnectorRefusal(response.status, await errorCode(response));
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffered = "";
-    let settle: ReturnType<typeof setTimeout> | undefined;
-    // A full redraw arrives first; diffs that follow it within a moment finish the screen.
-    const settled = new Promise<void>((resolve) =>
-      abort.signal.addEventListener("abort", () => resolve(), { once: true }),
-    );
-    const read = (async () => {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) return;
-        buffered += chunk.value;
-        let newline = buffered.indexOf("\n");
-        while (newline >= 0) {
-          const line = buffered.slice(0, newline);
-          buffered = buffered.slice(newline + 1);
-          newline = buffered.indexOf("\n");
-          if (line.trim().length === 0) continue;
-          const item = OperatorTerminalTailItemSchema.parse(JSON.parse(line));
-          if (item.kind === "unavailable") throw new Error(unavailableText(item.unavailable.reason));
-          if (item.kind === "auth_failure") throw new ConnectorRefusal(403, item.failure.reason);
-          if (item.kind === "reset") {
-            frames.length = 0;
-            continue;
-          }
-          if (item.frame.full) frames.length = 0;
-          if (item.frame.full || frames.length > 0) frames.push(item.frame);
-          if (frames.length > 0) {
-            clearTimeout(settle);
-            settle = setTimeout(() => abort.abort(), READ_SETTLE_MS);
-          }
-        }
-      }
-    })();
-    await Promise.race([
-      read.catch((error: unknown) => {
-        if (!abort.signal.aborted) throw error;
-      }),
-      settled,
-    ]);
-    clearTimeout(settle);
-  } catch (error) {
-    if (!(abort.signal.aborted && frames.length > 0)) {
-      if (abort.signal.aborted) throw new Error("The pane didn't send its screen in time. Try again.");
-      throw error;
-    }
-  } finally {
-    clearTimeout(deadline);
-    abort.abort();
-  }
-  if (frames.length === 0) throw new Error("The pane didn't send its screen in time. Try again.");
-  const screen = renderTerminalText(frames).split("\n");
-  return { agent, text: screen.slice(-count).join("\n") };
-}
-
-async function messageAgent(operator: ConnectorOperatorPort, bearer: string, agent: string, message: string) {
-  const fleet = await operator.dispatch({ op: "fleet", schemaVersion: 1, view: "home" }, bearer);
-  if (fleet.op !== "fleet") throw new Error("The fleet answered with something else.");
-  const seat = fleet.snapshot.seats.find((candidate) => candidate.seatId === agent);
-  if (seat === undefined)
-    throw new Error(
-      "That agent isn't one Clankie seats, so it can't be messaged here. Use list_agents and pick one with canMessage true.",
-    );
-  const name =
-    fleet.snapshot.personas.find((persona) => persona.personaId === seat.personaId)?.name ?? seat.title;
-  // Persona threads are created once and found again after; this is how the app opens a DM.
-  const created = await operator.dispatch(
-    {
-      op: "create",
-      schemaVersion: 1,
-      scope: { kind: "persona", personaId: seat.personaId },
-      title: name || "Agent",
-    },
-    bearer,
-  );
-  if (created.op !== "create") throw new Error("Couldn't open the agent's thread.");
-  let revision = created.conversation.revision;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const sent = await operator.dispatch(
-      {
-        op: "send",
-        schemaVersion: 1,
-        turn: {
-          schemaVersion: 1,
-          conversationId: created.conversation.conversationId,
-          surfaceClientId: SURFACE_CLIENT_ID,
-          expectedRevision: revision,
-          kind: "message",
-          message,
-        },
-      },
-      bearer,
-    );
-    if (sent.op !== "send") throw new Error("The send answered with something else.");
-    const result = sent.result;
-    if (result.status === "revision_conflict") {
-      revision = result.currentRevision;
-      continue;
-    }
-    if (result.status === "accepted")
-      return { agent, status: "delivered", detail: `Sent to ${name}. Read the agent to see it respond.` };
-    if (result.status === "seat_offline")
-      return {
-        agent,
-        status: "offline",
-        detail: `${name} isn't running in a pane right now. Nothing was sent.`,
-      };
-    if (result.status === "seat_undelivered")
-      return { agent, status: "not_delivered", detail: `Nothing was sent: ${result.detail}` };
-    return {
-      agent,
-      status: "unconfirmed",
-      detail: `The message may have reached ${name} but wasn't confirmed. Read the agent before sending it again.`,
-    };
-  }
-  throw new Error("The agent's thread kept changing. Try again.");
 }
 
 /** Dispatch and terminal tails through this relay's own boundary, as the connector. */
@@ -486,13 +319,6 @@ function refusalText(refusal: ConnectorRefusal): string {
   return `Clankie couldn't do that right now (${refusal.code}).`;
 }
 
-function unavailableText(reason: string): string {
-  if (reason === "terminal_unavailable")
-    return "That pane isn't open any more. Use list_agents for current agents.";
-  if (reason === "herdr_unavailable") return "Herdr isn't reachable on that machine right now.";
-  return "The pane can't be read right now.";
-}
-
 async function errorCode(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: unknown };
@@ -516,13 +342,4 @@ function lines(value: unknown): number {
   if (value === undefined) return READ_LINES_DEFAULT;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1) return READ_LINES_DEFAULT;
   return Math.min(value, READ_LINES_MAX);
-}
-
-function lastSegment(path: string): string {
-  return (
-    path
-      .replace(/[\\/]+$/u, "")
-      .split(/[\\/]/u)
-      .at(-1) ?? path
-  );
 }

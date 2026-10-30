@@ -755,7 +755,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             serviceRequest.op === "fleet_room" ||
             autoOnOp ||
             serviceRequest.op === "terminal_control" ||
-            serviceRequest.op === "terminal_input"
+            serviceRequest.op === "terminal_input" ||
+            serviceRequest.op === "terminal_focus"
           ? "terminalControl"
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||

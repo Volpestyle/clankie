@@ -339,6 +339,9 @@ importers:
 
   apps/relay:
     dependencies:
+      '@clankie/agent-hosts':
+        specifier: workspace:*
+        version: link:../../packages/agent-hosts
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker

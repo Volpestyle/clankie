@@ -9,7 +9,7 @@ import type {
   OperatorTerminalInputResult,
 } from "@clankie/protocol";
 import { pinHerdrEnvironment, type ExecutionConnections } from "../herdr-session.ts";
-import { readTerminalCatalog } from "./herdr-census.ts";
+import { focusHerdrTerminal, readTerminalCatalog } from "./herdr-census.ts";
 import { HerdrTerminalStore } from "./herdr-terminal.ts";
 import { HerdrTerminalControlStore } from "./herdr-terminal-control.ts";
 
@@ -141,8 +141,20 @@ export class RuntimeTerminals {
     return nativeId === undefined ? undefined : { runtime, nativeId };
   }
 
+  /**
+   * A seat on a named fleet is `<fleet>/<native>` (ADR 0184), so its seat id can
+   * be watched directly. Only for observation: control and input keep the
+   * endpoint-bound `rt:` address, so a lease never follows a changed endpoint.
+   */
+  private async resolveSeat(terminalId: string) {
+    const seat = /^([a-z][a-z0-9-]{0,63})\/([^/]+)$/u.exec(terminalId);
+    if (!seat || seat[1] === "default") return this.resolve(terminalId);
+    const runtime = await this.runtime(seat[1]!);
+    return runtime ? { runtime, nativeId: seat[2]! } : undefined;
+  }
+
   async tail(request: OperatorTerminalObservationRequest): Promise<OperatorTerminalObservationResult> {
-    const target = await this.resolve(request.terminalId);
+    const target = await this.resolveSeat(request.terminalId);
     const unavailable = {
       schemaVersion: 1,
       status: "unavailable",
@@ -160,6 +172,14 @@ export class RuntimeTerminals {
         ? { frames: result.frames.map((frame) => ({ ...frame, terminalId: request.terminalId })) }
         : {}),
     };
+  }
+
+  /** Bring a terminal to the front in its own Herdr; a seat id on a named fleet works as for `tail`. */
+  async focus(terminalId: string): Promise<"focused" | "unavailable"> {
+    const target = await this.resolveSeat(terminalId);
+    if (!target) return "unavailable";
+    const focused = await focusHerdrTerminal(target.nativeId, { env: target.runtime.env });
+    return focused && (await this.current(target.runtime)) ? "focused" : "unavailable";
   }
 
   async control(request: OperatorTerminalControlRequest): Promise<OperatorTerminalControlResult> {

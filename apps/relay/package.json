@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@clankie/agent-hosts": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/settings": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
