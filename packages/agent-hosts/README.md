@@ -63,7 +63,17 @@ allowlist still applies: list is the fleet plus agent panes Clankie didn't
 seat, on this Mac or a linked PC (readable, not messageable), read is a terminal tail rendered by
 `terminal-text.ts`, send writes into the agent's persona thread, and open is the
 `terminal_focus` op. The Claude connector in `apps/relay` uses this layer; a
-second session app (Orca next) is another source, not another set of tools.
+further session app (Orca next) is another source, not another set of tools.
+
+`createHerdrCoreSessionSource` is the second: the agents the Herdr desktop app
+runs in its own terminal server, herdr-core (`hc`), on Clankie's Mac. It speaks
+the `herdr_core_list`, `herdr_core_read` and `herdr_core_focus` operator ops,
+which the service answers from the core's socket (`HC_SOCKET`, else
+`$XDG_STATE_HOME/herdr-core/<HC_SESSION or default>/…sock`). List is the
+terminals whose program reports a status (hc's own definition of an agent),
+read is the screen plus history, open asks `herdr-app` to focus the pane. Send
+always refuses: herdr-core's only way to message an agent is pasting into its
+terminal (ADR 0207). No core running lists nothing; nothing starts one.
 
 ## Seat adapters
 

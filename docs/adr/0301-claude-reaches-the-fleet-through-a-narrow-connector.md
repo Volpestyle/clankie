@@ -70,6 +70,13 @@ own `/mcp` on a trusted network.
   `unreachable` rather than showing their last status, and says in a notice
   when a machine's Herdr is older than the one Clankie ships (added
   2026-10-30).
+- **The Herdr desktop app is a second source.** It runs agents in its own
+  terminal server, herdr-core (`hc`), not in the terminal Herdr. The service
+  reads that server's socket on the Mac (`herdr_core_list`, `herdr_core_read`
+  and `herdr_core_focus` ops) and the `herdr-core` source lists and reads its
+  agents beside Herdr's, with ids like `herdr-core:t3`. Its agents can't be
+  messaged: herdr-core's only way in is typing into the terminal, which ADR
+  0207 rules out (added 2026-10-30).
 - **Through session sources, not Herdr.** The tools talk to the session-source
   layer in `packages/agent-hosts/src/sessions/`. A source is any app that holds
   agent sessions and answers four things: list its sessions, read one, send one

@@ -77,6 +77,9 @@ export type ConversationServiceRequest = Exclude<
   | { op: "terminal_focus" }
   | { op: "terminal_read" }
   | { op: "start_agent" }
+  | { op: "herdr_core_list" }
+  | { op: "herdr_core_read" }
+  | { op: "herdr_core_focus" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }
@@ -129,6 +132,9 @@ export type ConversationServiceResult = Exclude<
   | { op: "terminal_focus" }
   | { op: "terminal_read" }
   | { op: "start_agent" }
+  | { op: "herdr_core_list" }
+  | { op: "herdr_core_read" }
+  | { op: "herdr_core_focus" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }
