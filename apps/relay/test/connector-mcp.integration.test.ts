@@ -608,8 +608,8 @@ describe("Claude connector MCP endpoint", () => {
     await Promise.all([claude.close(), grok.close()]);
   });
 
-  it("lets only a connector app post a note", async () => {
-    // The owner's own app reads the board through the relay, but a note is an app's.
+  it("lets only a connector app post a note, and another device read only as the owner", async () => {
+    // A note is an app's; the owner's own app reads the board as the owner.
     const { scope: _connector, ...phone } = connectorDevice;
     const relay = await startConnectorRelay({
       authorized: true,
@@ -627,10 +627,10 @@ describe("Claude connector MCP endpoint", () => {
       headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
       body: JSON.stringify({ op: "app_notes", schemaVersion: 1, action: "read" }),
     });
-    expect(read.status).toBe(200);
-    expect(relay.seen.filter((request) => request.op === "app_notes")).toEqual([
-      { op: "app_notes", schemaVersion: 1, action: "read", limit: 20 },
-    ]);
+    // Any other device reads the board only as the owner, like the fleet room, never on
+    // the relay's own bearer: without Take Control nothing is read.
+    expect(read.status).toBe(403);
+    expect(relay.seen.filter((request) => request.op === "app_notes")).toEqual([]);
   });
 
   it("says plainly when a machine's Herdr isn't answering or is too old", async () => {

@@ -758,6 +758,12 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // identity carries it. Status and off stay on chat, as the CLI's do.
     const autoOnOp =
       serviceRequest.op === "autonomy" && operatorAutonomyCommandRequiresOwner(serviceRequest.command);
+    // Only a connector reads the app note board on the relay's own bearer; any other
+    // device reads it as the owner's coordination record, like the fleet room.
+    const ownerNoteRead =
+      serviceRequest.op === "app_notes" &&
+      serviceRequest.action === "read" &&
+      authorization.device.scope !== "connector";
     const workWriteOp =
       serviceRequest.op === "work_item_write" ||
       serviceRequest.op === "work_item_write_receipt" ||
@@ -773,6 +779,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             workWriteOp ||
             // The fleet room is the owner's coordination record (VUH-2184).
             serviceRequest.op === "fleet_room" ||
+            ownerNoteRead ||
             autoOnOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input" ||
@@ -893,6 +900,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "tracker_sync" ||
       serviceRequest.op === "evidence_fetch" ||
       serviceRequest.op === "fleet_room" ||
+      ownerNoteRead ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
       if (abort.signal.aborted) return true;
@@ -916,6 +924,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "tracker_sync" ||
           serviceRequest.op === "evidence_fetch" ||
           serviceRequest.op === "fleet_room" ||
+          (serviceRequest.op === "app_notes" && ownerNoteRead) ||
           (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||

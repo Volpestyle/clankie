@@ -97,6 +97,7 @@ export type DeviceConversationRequest = Extract<
       | "tracker_sync"
       | "evidence_fetch"
       | "fleet_room"
+      | "app_notes"
       | "presence"
       | "autonomy";
   }
@@ -148,6 +149,7 @@ export function createDeviceConversationDispatch(options: {
         "tracker_sync",
         "evidence_fetch",
         "fleet_room",
+        "app_notes",
         "presence",
         "autonomy",
       ].includes(request.op)
@@ -155,6 +157,9 @@ export function createDeviceConversationDispatch(options: {
       throw new Error("Unsupported device conversation operation");
     if (request.op === "presence" && request.includeCurrentActivity !== true)
       throw new Error("Private presence requires the current-activity opt-in");
+    // A note is posted only by a connector app on the relay's own route; devices only read.
+    if (request.op === "app_notes" && request.action !== "read")
+      throw new Error("Only a connector app posts a note");
     const hosted = authority.controlScope === "hosted";
     const requestSignal = dispatchSignal(signal);
     requestSignal.throwIfAborted();
