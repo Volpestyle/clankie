@@ -3,9 +3,11 @@ import { MailIssueReferenceSchema } from "./mail-reference.ts";
 import { DevicePlatformSchema } from "./devices.ts";
 import {
   ConversationQuestionSchema,
+  EvidenceLinkSchema,
   OPERATOR_CONVERSATION_ATTACHMENTS_MAX,
   OperatorConversationAttachmentRefSchema,
   OperatorConversationIdSchema,
+  OwnerCheckLineSchema,
 } from "./operator-conversations.ts";
 import { ProjectIdSchema } from "./projects.ts";
 import { additiveEnum } from "./response.ts";
@@ -16,11 +18,14 @@ import { WorkItemStatusSchema, WorkRepoSchema } from "./work-items.ts";
  * that already exist. Pending owner asks are checks; mailed owner updates and
  * project status updates are updates. Drops are what the owner threw at
  * Clankie (`feed_drop`): a screenshot of a bug, an idea, a note, each filed as a
- * private issue file labelled `drop` that the project's lead refines.
+ * private issue file labelled `drop` that the project's lead refines. Proofs
+ * are finished built-in tracker items the lead marked with an owner check
+ * (ADR 0299), waiting on the owner's verdict.
  *
- * The feed is display only. A check is answered with `input_answer` and an owner
- * update dismissed with `owner_update_dismiss`, against the ids each item
- * carries; the feed adds no second answer or dismiss path and grants nothing.
+ * The feed is display only. A check is answered with `input_answer`, an owner
+ * update dismissed with `owner_update_dismiss`, and a proof given its verdict
+ * with `post_owner_verdict` from the owner's paired app, against the ids each
+ * item carries; the feed adds no second answer or dismiss path and grants nothing.
  */
 export const FEED_LIST_LIMIT_DEFAULT = 20;
 export const FEED_LIST_LIMIT_MAX = 50;
@@ -53,15 +58,55 @@ export const FeedMediaSchema = z
   .strict();
 export type FeedMedia = z.infer<typeof FeedMediaSchema>;
 
-/** A pending owner ask. `question` and `revision` form the exact `input_answer` target. */
+/**
+ * A check line as the feed shows it. New lines are at most `OWNER_CHECK_LINE_MAX`
+ * (140) characters; a built-in owner check saved before that limit may run to 160.
+ */
+export const FEED_CHECK_LINE_READ_MAX = 160;
+const FeedCheckLineSchema = z.string().trim().min(1).max(FEED_CHECK_LINE_READ_MAX);
+
+/**
+ * A pending owner ask. `question` and `revision` form the exact `input_answer` target.
+ *
+ * `line` is what to look at: the ask's own check line, or the owner check of the
+ * built-in item a verify ask names. `longer` says the asker marked it as taking
+ * longer than a ten-second look. `media` is the one thing to look at: the ask's
+ * evidence, or the named item's current proof (a clip before a screenshot), as a
+ * `clankie://evidence` link with its type. All three are absent from older hosts.
+ */
 export const FeedCheckSchema = z
   .object({
     question: ConversationQuestionSchema,
     revision: z.number().int().nonnegative(),
+    line: FeedCheckLineSchema.optional(),
+    longer: z.literal(true).optional(),
     media: z.array(FeedMediaSchema).max(1).optional(),
   })
   .strict();
 export type FeedCheck = z.infer<typeof FeedCheckSchema>;
+
+/**
+ * A finished built-in tracker item the lead marked with an owner check (ADR 0299):
+ * landed or delivered, not Done, with a current evidence bundle and no pending
+ * verify ask (that ask is the item's check instead). Only the owner's paired app
+ * answers it: `post_owner_verdict {issueId, bundleId, verdict, note?}` on the
+ * built-in tracker (`tracker_sync` or `POST /v1/tracker/call`), naming this
+ * `bundleId` so the verdict covers exactly the proof shown. `media` is the
+ * bundle's clips, then its screenshots.
+ */
+export const FeedProofSchema = z
+  .object({
+    issueId: z.string().trim().min(1).max(256),
+    key: z.string().trim().min(1).max(256),
+    title: z.string().trim().min(1).max(500),
+    line: FeedCheckLineSchema,
+    bundleId: z.string().trim().min(1).max(256),
+    stage: z.enum(["landed", "delivered"]),
+    url: FeedUrlSchema.optional(),
+    media: z.array(FeedMediaSchema).max(16).optional(),
+  })
+  .strict();
+export type FeedProof = z.infer<typeof FeedProofSchema>;
 
 const body = {
   body: z.string().max(FEED_BODY_MAX),
@@ -145,14 +190,14 @@ export type FeedDrop = z.infer<typeof FeedDropSchema>;
  * A newer host may add a kind: a reader using `parseProtocolResponse` drops
  * that entry and keeps the rest. The payload key matches `kind`.
  */
-export const FeedItemKindSchema = additiveEnum(["check", "update", "drop"]);
+export const FeedItemKindSchema = additiveEnum(["check", "update", "drop", "proof"]);
 export type FeedItemKind = z.infer<typeof FeedItemKindSchema>;
 export const FeedItemSchema = z
   .object({
     kind: FeedItemKindSchema,
     /**
      * Stable across reads: `check:<requestId>`, `owner-update:<id>`,
-     * `project-update:<id>`, `drop:<repoId>/<itemId>`.
+     * `project-update:<id>`, `drop:<repoId>/<itemId>`, `proof:<issueId>`.
      */
     id: z.string().min(1).max(600),
     at: z.string().datetime(),
@@ -161,10 +206,11 @@ export const FeedItemSchema = z
     check: FeedCheckSchema.optional(),
     update: FeedUpdateSchema.optional(),
     drop: FeedDropSchema.optional(),
+    proof: FeedProofSchema.optional(),
   })
   .strict()
   .superRefine((item, context) => {
-    for (const kind of ["check", "update", "drop"] as const)
+    for (const kind of ["check", "update", "drop", "proof"] as const)
       if ((item[kind] !== undefined) !== (item.kind === kind))
         context.addIssue({
           code: "custom",
@@ -176,7 +222,8 @@ type FeedItemFields = z.infer<typeof FeedItemSchema>;
 export type FeedCheckItem = FeedItemFields & { kind: "check"; check: FeedCheck };
 export type FeedUpdateItem = FeedItemFields & { kind: "update"; update: FeedUpdate };
 export type FeedDropItem = FeedItemFields & { kind: "drop"; drop: FeedDrop };
-export type FeedItem = FeedCheckItem | FeedUpdateItem | FeedDropItem;
+export type FeedProofItem = FeedItemFields & { kind: "proof"; proof: FeedProof };
+export type FeedItem = FeedCheckItem | FeedUpdateItem | FeedDropItem | FeedProofItem;
 
 /** Opaque; it names the last item of a page, so newer items never shift a later page. */
 export const FeedCursorSchema = z
@@ -305,3 +352,62 @@ type FeedDropResultFields = z.infer<typeof FeedDropResultSchema>;
 export type FeedDropResult =
   | Exclude<FeedDropResultFields, { outcome: "filed" }>
   | (Omit<Extract<FeedDropResultFields, { outcome: "filed" }>, "item"> & { item: FeedDropItem });
+
+/**
+ * `feed_check`: an agent asks the owner to check something, as a pending owner
+ * ask (ADR 0245, purpose `verify`) with the answers "It works" and "Send it back"
+ * and room for a note. It shows in the feed as a `check`.
+ *
+ * `check` is the one line the owner reads: exactly what to look at, answerable in
+ * about ten seconds, at most `OWNER_CHECK_LINE_MAX` (140) characters; a longer
+ * line is refused with 400. Set `longer` when it takes more than a ten-second
+ * look: it still shows, marked. `evidence` is one evidence-store record to look
+ * at. The answer wakes the source conversation: `conversationId` when given,
+ * otherwise the lead chat of `projectId`, otherwise the main chat.
+ *
+ * `idempotencyKey` is the caller's: a retry with the same key and request answers
+ * with the same check and never asks twice; the same key with another request is
+ * refused. The check line is the asker's words, shown to the owner, never run.
+ */
+export const FeedCheckRequestSchema = z
+  .object({
+    idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u),
+    check: OwnerCheckLineSchema,
+    longer: z.boolean().optional(),
+    projectId: ProjectIdSchema.optional(),
+    conversationId: OperatorConversationIdSchema.optional(),
+    evidence: EvidenceLinkSchema.optional(),
+    issue: MailIssueReferenceSchema.optional(),
+    waitingOn: z.string().trim().min(1).max(2000).optional(),
+  })
+  .strict();
+export type FeedCheckRequest = z.infer<typeof FeedCheckRequestSchema>;
+export const FEED_CHECK_ONE_SOURCE = "Name a project or a conversation for the answer, not both";
+export function feedCheckHasOneSource(request: Pick<FeedCheckRequest, "projectId" | "conversationId">) {
+  return request.projectId === undefined || request.conversationId === undefined;
+}
+
+export const FeedCheckResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("raised"),
+      /** The check as `feed_list` shows it; its question is already answered when `duplicate` found it so. */
+      item: FeedItemSchema,
+      /** True when this key, or the same pending check, was already asked: nothing new was asked. */
+      duplicate: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("refused"),
+      reason: z.enum(["unknown_project", "unknown_conversation", "evidence_missing", "idempotency_conflict"]),
+      message: z.string().min(1).max(1000),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("unavailable"), message: z.string().min(1).max(1000) }).strict(),
+]);
+type FeedCheckResultFields = z.infer<typeof FeedCheckResultSchema>;
+/** A check answer whose raised item is narrowed to a check, as the host guarantees. */
+export type FeedCheckResult =
+  | Exclude<FeedCheckResultFields, { outcome: "raised" }>
+  | (Omit<Extract<FeedCheckResultFields, { outcome: "raised" }>, "item"> & { item: FeedCheckItem });

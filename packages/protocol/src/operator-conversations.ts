@@ -1691,6 +1691,22 @@ export type ConversationQuestionAnswer = z.infer<typeof ConversationQuestionAnsw
 const QuestionResolutionActorSchema = z
   .object({ kind: z.enum(["operator", "device", "service"]), id: z.string().min(1).max(256) })
   .strict();
+/**
+ * A quick check (step 5, C4): one line saying exactly what the owner looks at,
+ * answerable in about ten seconds. The asker writes it; it is shown, never run.
+ */
+export const OWNER_CHECK_LINE_MAX = 140;
+export const OWNER_CHECK_LINE_LIMIT = `A check line is at most ${String(OWNER_CHECK_LINE_MAX)} characters: say exactly what to look at`;
+export const OwnerCheckLineSchema = z
+  .string()
+  .trim()
+  .min(1, "A check line says what to look at")
+  .max(OWNER_CHECK_LINE_MAX, OWNER_CHECK_LINE_LIMIT)
+  .regex(/^[^\r\n]*$/u, "A check line is one line");
+/** An evidence-store record (ADR 0258) by its blob hash; only these links become an ask's media. */
+export const EvidenceLinkSchema = z
+  .string()
+  .regex(/^clankie:\/\/evidence\/sha256\/[0-9a-f]{64}$/u, "Expected a clankie://evidence/sha256/HASH link");
 /** Decision defaults are instructions to the lead, never owner answers or gate authority. */
 export const ConversationDecisionPolicySchema = z
   .object({
@@ -1713,6 +1729,12 @@ export const ConversationQuestionSchema = z
     issue: MailIssueReferenceSchema.optional(),
     kind: z.enum(["text", "choice"]),
     prompt: z.string().trim().min(1).max(2000),
+    /** The quick check's one line: exactly what the owner looks at. Absent from older asks. */
+    check: OwnerCheckLineSchema.optional(),
+    /** The asker says this takes longer than a ten-second look. */
+    longer: z.literal(true).optional(),
+    /** One evidence-store record the owner looks at to answer. */
+    evidence: EvidenceLinkSchema.optional(),
     options: z
       .array(
         z
