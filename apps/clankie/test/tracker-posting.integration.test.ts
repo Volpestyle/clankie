@@ -1234,6 +1234,29 @@ it("a new issue from this repo's tracker meets the setting of a whole-team proje
   expect(f.mutations("issueCreate")).toBe(0);
 });
 
+it("a write whose target the gate can't read, such as a new project, meets every project's setting", async () => {
+  const f = await fixture({ meadow: true });
+  // Clankie's chat is bound to the garden (go ahead); the meadow tracks the whole team.
+  await f.setPosting("garden", "allow");
+  await f.setPosting("meadow", "read_only");
+  for (const [tool, args] of [
+    ["save_project", { name: "New in the meadow", setTeams: ["VUH"] }],
+    ["save_document", { title: "Notes", content: "Kept on the team" }],
+  ] as const)
+    expect(
+      await f.posting.admit({
+        tracker: "linear",
+        route: { kind: "linear", tool, arguments: { ...args } },
+        asker: { kind: "lead" },
+        projectIds: ["garden"],
+      }),
+    ).toMatchObject({
+      outcome: "refused",
+      message: expect.stringContaining("Posting to Linear is read only for Meadow"),
+    });
+  expect(f.mutations("projectCreate") + f.mutations("documentCreate")).toBe(0);
+});
+
 it("an owner check cut off before its question was saved is asked again on restart", async () => {
   const id = randomUUID();
   const body = "Cut off mid-ask.";

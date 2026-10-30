@@ -19,7 +19,6 @@ import type { WorkConvention } from "@clankie/protocol/work-items";
 import type { ClankieSettings } from "@clankie/settings";
 import { readConvention } from "@clankie/work-items";
 import type { QuestionDraft } from "./captain/conversation-questions.ts";
-import { LINEAR_GRAPHQL_TOOL } from "./linear-graphql.ts";
 
 /**
  * "Posting to your tracker" (ADR 0302): the one check every outward tracker write by
@@ -82,6 +81,17 @@ const RouteSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 export type PostingRoute = z.infer<typeof RouteSchema>;
+
+/**
+ * The Linear tools whose target the gate reads from their arguments. Any other write (a
+ * project, document, initiative or anything new) could land in any project on Linear.
+ */
+const TARGETED_TOOLS = new Set([
+  "save_issue",
+  "save_comment",
+  "create_attachment",
+  "create_attachment_from_upload",
+]);
 
 /** `save_issue` arguments that name other issues it changes: its parent and its relations. */
 const ISSUE_LINK_KEYS = [
@@ -292,8 +302,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
   ): Promise<string[]> => {
     if (candidates.length === 0) return [];
     const everyProject = candidates.map((project) => project.id);
-    // A GraphQL mutation can touch any record in its document or variables.
-    if (route.kind === "linear" && route.tool === LINEAR_GRAPHQL_TOOL.name) return everyProject;
+    // A GraphQL mutation can touch any record in its document or variables, and a tool
+    // whose target isn't read here could land anywhere.
+    if (route.kind !== "work" && !TARGETED_TOOLS.has(route.tool)) return everyProject;
     const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
     const refsIn = (value: unknown) =>
       (Array.isArray(value) ? value : [value]).map(text).filter((ref) => ref !== undefined);
