@@ -184,6 +184,14 @@ it("exports a built-in project's open items into private issue files every workt
       "",
       "- image: [Board on iPhone](https://files.example/board.png)",
       "",
+      "Seen on the owner's phone after the second run:",
+      "",
+      "![Feed on iPad](https://files.example/feed-ipad.png)",
+      "",
+      "```",
+      "exported 4, kept 0",
+      "```",
+      "",
       "## Notes",
       "",
       "Owner-authored section stays.",
@@ -271,6 +279,20 @@ it("exports a built-in project's open items into private issue files every workt
     location: expect.stringMatching(new RegExp(`^\\.clankie/work/${parent.identifier}-`, "u")),
   });
   expect(parentFile?.summary).toContain("Owner-authored section stays.");
+  // The tracker's link is added after what the owner wrote under Evidence, which stays as written.
+  const parentText = await readFile(join(folder, parentFile!.location.split("/").at(-1)!), "utf8");
+  expect(parentText).toContain(
+    [
+      "Seen on the owner's phone after the second run:",
+      "",
+      "![Feed on iPad](https://files.example/feed-ipad.png)",
+      "",
+      "```",
+      "exported 4, kept 0",
+      "```",
+      "- log: [Export run log](https://files.example/run.log)",
+    ].join("\n"),
+  );
   expect(await files.readIssue?.(parent.identifier)).toMatchObject({
     ownerCheck: "Open Work, tap a file: it opens",
   });

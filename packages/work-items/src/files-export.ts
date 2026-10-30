@@ -19,7 +19,7 @@ import {
   type FileItem,
 } from "./backends/files.ts";
 import { linearStatusOf } from "./backends/linear.ts";
-import { inferEvidenceKind, parseBody, patchBody, slugify } from "./format.ts";
+import { appendEvidence, inferEvidenceKind, parseBody, slugify } from "./format.ts";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 
 /**
@@ -363,9 +363,7 @@ export function exportIssueFromTracker(
     priority: typeof priority === "number" ? priority : Number(priority?.value ?? 0),
     labels: labelNames(raw),
     description:
-      extra.length === 0 || room === 0
-        ? description
-        : patchBody(description, { evidence: [...parsed.evidence, ...extra.slice(0, room)] }),
+      extra.length === 0 || room === 0 ? description : appendEvidence(description, extra.slice(0, room)),
     ...(parent === undefined || parent === id ? {} : { parent }),
     dependsOn: [
       ...new Set([

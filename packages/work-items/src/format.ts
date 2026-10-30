@@ -179,6 +179,24 @@ export function patchBody(body: string, patch: BodyPatch): string {
   return `${text.replace(/\n{3,}/gu, "\n\n").trim()}\n`;
 }
 
+/**
+ * Adds evidence lines at the end of the body's evidence section, or in a new one,
+ * leaving everything already written there (prose, pictures, code) as it was.
+ */
+export function appendEvidence(body: string, evidence: readonly WorkEvidence[]): string {
+  if (evidence.length === 0) return body;
+  const parts = sections(body);
+  const index = parts.findIndex((part) => isEvidence(part.heading));
+  if (index < 0) return patchBody(body, { evidence });
+  const lines = [...parts[index]!.lines];
+  while (lines.length > 0 && lines.at(-1)!.trim() === "") lines.pop();
+  parts[index] = { heading: parts[index]!.heading, lines: [...lines, ...renderEvidence(evidence), ""] };
+  const text = parts
+    .map((part) => (part.heading === undefined ? part.lines : [part.heading, ...part.lines]).join("\n"))
+    .join("\n");
+  return `${text.replace(/\n{3,}/gu, "\n\n").trim()}\n`;
+}
+
 export function isWorkItemStatus(value: string): value is WorkItemStatus {
   return (WORK_ITEM_STATUSES as readonly string[]).includes(value);
 }
