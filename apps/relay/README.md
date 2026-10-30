@@ -135,8 +135,13 @@ code. The lines carry the device ID but never audio or bearers.
 `POST /mcp` is a remote MCP server Claude adds as a custom connector
 ([ADR 0301](../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)),
 stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
-(`machine` optional), `read_agent` (`agent`, `lines` up to 400) and
-`message_agent` (`agent`, `message`). Each call checks the bearer against
+(`machine` optional), `read_agent` (`agent`, `lines` up to 400),
+`message_agent` (`agent`, `message`) and `clankie_guide` (`topic` optional).
+`clankie_guide` reads the skills in `.agents/skills` from this checkout: no
+topic lists each skill and its description, a skill name returns its
+`SKILL.md` and names its other pages, and `skill/page.md` returns that page.
+It serves only Markdown inside the skill roots, at most 128 KiB a page, and
+calls nothing on the service. Each fleet call checks the bearer against
 `GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request

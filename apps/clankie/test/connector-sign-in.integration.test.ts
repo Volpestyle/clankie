@@ -10,6 +10,8 @@ import type {
   OperatorConversationServiceResult,
 } from "@clankie/protocol";
 import { expect, it } from "vitest";
+import { resolve } from "node:path";
+import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../relay/src/connector-mcp.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
@@ -113,6 +115,11 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     expect(signIn.page.status).toBe(200);
     expect(signIn.page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(signIn.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/u);
+    // The command to run is copyable, and both color schemes set the code's own text color.
+    expect(signIn.html).toContain(
+      `<code id="command">clankie connector approve ${signIn.code}</code><button id="copy"`,
+    );
+    expect(signIn.html).toContain("prefers-color-scheme:dark");
     expect(await status(host.baseUrl, signIn.request!)).toEqual({ status: "pending" });
 
     const owner = cli(host);
@@ -271,6 +278,7 @@ it("a token from the owner's approval opens the relay's tools, and revoking the 
     ),
     localAuthorizationServer: host.baseUrl,
     version: "test",
+    guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
   });
   const relay = createServer((request, response) => {
     void (async () => {

@@ -1935,6 +1935,21 @@ sign-in waits with that code, or `already_decided`. Approve only a code you see
 on a page you opened. An approved connector is a device in `clankie devices`
 with `scope: "connector"`; `clankie devices revoke ID` disconnects it.
 
+The same URL works in Claude Code and Codex, which sign in through a loopback
+callback and show the same code to approve. Each app is its own device. The
+connector also offers `clankie_guide`, which reads the skills Clankie ships.
+
+```bash
+claude mcp add --transport http clankie "$(clankie connector --json | jq -r .connectorUrl)"
+```
+
+```bash
+codex mcp add clankie --url "$(clankie connector --json | jq -r .connectorUrl)"
+codex mcp login clankie
+```
+
+In Claude Code, `/mcp` starts the sign-in.
+
 ### `gateway [status]` / `gateway set --url URL --host-id ID` / `gateway disable`
 
 `clankie gateway rotate-encryption-key` replaces the broker key wrapping device
