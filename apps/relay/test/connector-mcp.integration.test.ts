@@ -383,6 +383,7 @@ describe("Claude connector MCP endpoint", () => {
       "read_agent",
       "message_agent",
       "start_agent",
+      "answer_prompt",
       "post_note",
       "read_notes",
       "clankie_guide",
