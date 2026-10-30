@@ -92,7 +92,8 @@ async function startConnectorRelay(
   // Like the service's terminal store: a tail without a cursor replaces that surface's stream.
   const streams = new Map<string, number>();
   let resets = 0;
-  const authorizeDevice = { authorize: async () => device };
+  let authorization = device;
+  const authorizeDevice = { authorize: async () => authorization };
   let selfUrl = "";
   const dispatch = async (
     request: OperatorConversationServiceRequest,
@@ -196,6 +197,11 @@ async function startConnectorRelay(
           return { op: "start_agent", schemaVersion: 1, status: "places", places };
         // The hire outlives a lost answer, as when Clankie's own deadline passes mid-start.
         if (request.workingDirectory === "C:\\code\\slow") throw new Error("upstream deadline passed");
+        // The sign-in ends while the agent starts: the relay's recheck refuses a hire that happened.
+        if (request.workingDirectory === "C:\\code\\revoked") {
+          authorization = { authorized: false, denial: "revoked" };
+          return { op: "start_agent", schemaVersion: 1, status: "started", places, seatId: "pc1/term_late" };
+        }
         return request.machine === "volpe@pc1" && request.workingDirectory === "C:\\code\\kh2"
           ? { op: "start_agent", schemaVersion: 1, status: "started", places, seatId: "pc1/term_new" }
           : {
@@ -501,6 +507,13 @@ describe("Claude connector MCP endpoint", () => {
     expect(textOf(lost)).toContain(
       "Call list_agents and look for a new agent in that place before you try again",
     );
+    const revoked = await client.callTool({
+      name: "start_agent",
+      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\revoked" },
+    });
+    expect(revoked.isError).toBe(true);
+    expect(textOf(revoked)).toContain("sign-in has ended");
+    expect(textOf(revoked)).toContain("Call list_agents");
     await client.close();
   });
 

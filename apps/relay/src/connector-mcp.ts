@@ -55,10 +55,25 @@ export interface ConnectorMcpOptions {
   readonly guide: ClankieGuide;
 }
 
-/** Answers that prove nothing started; anything else leaves a start uncertain. */
-const START_REFUSED_STATUSES = new Set([400, 401, 403, 404, 409, 429]);
+/**
+ * Only a malformed request or an op the connector may never call proves nothing started. The
+ * relay rechecks sign-in after a dispatch too, so even a 401 or 403 can follow a started hire.
+ */
+function startNeverRan(error: unknown): boolean {
+  return (
+    error instanceof ConnectorRefusal &&
+    (error.status === 400 || error.code === "connector_operation_not_allowed")
+  );
+}
 
-class StartUncertain extends Error {}
+class StartUncertain extends Error {
+  public readonly refusal: ConnectorRefusal | undefined;
+
+  public constructor(refusal?: ConnectorRefusal) {
+    super("start_uncertain");
+    this.refusal = refusal;
+  }
+}
 
 class ConnectorRefusal extends Error {
   public readonly status: number;
@@ -290,8 +305,8 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         });
         // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).
         const { id, ...started } = await starting.catch((error: unknown) => {
-          if (error instanceof ConnectorRefusal && START_REFUSED_STATUSES.has(error.status)) throw error;
-          throw new StartUncertain();
+          if (startNeverRan(error)) throw error;
+          throw new StartUncertain(error instanceof ConnectorRefusal ? error : undefined);
         });
         if (started.status === "refused")
           return failure(`${started.detail ?? "Nothing started."} Places: ${JSON.stringify(started.places)}`);
@@ -314,7 +329,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
     } catch (error) {
       if (error instanceof StartUncertain)
         return failure(
-          "I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.",
+          `${error.refusal === undefined ? "" : `${refusalText(error.refusal)} `}I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
         );
       if (error instanceof ConnectorRefusal) return failure(refusalText(error));
       if (error instanceof SessionRefusal) return failure(error.message);
