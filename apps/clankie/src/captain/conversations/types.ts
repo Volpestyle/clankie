@@ -38,6 +38,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "connections" }
   | { op: "lead_chats" }
   | { op: "fleet_room" }
+  | { op: "app_notes" }
   | { op: "feed_list" }
   | { op: "feed_drop" }
   | { op: "work_repos" }
@@ -89,6 +90,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "connections" }
   | { op: "lead_chats" }
   | { op: "fleet_room" }
+  | { op: "app_notes" }
   | { op: "work_repos" }
   | { op: "work_items" }
   | { op: "work_project" }

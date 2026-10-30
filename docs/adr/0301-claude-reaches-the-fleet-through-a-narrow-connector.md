@@ -33,6 +33,16 @@ own `/mcp` on a trusted network.
   worker. Connector devices now carry `steer`, which the op allowlist lets
   reach `start_agent` alone; a connector signed in before this change signs in
   again to get it.
+- **A note board the apps share.** `post_note` leaves a short note (at most
+  2,000 characters) and `read_notes` reads the board, oldest first, after an
+  optional cursor (added 2026-10-30, approved by James). Each note is signed
+  with the name the owner approved the app's device under: the relay stamps
+  the device it authenticated and refuses a caller-named author, and the
+  service names it from that device's record. Clankie reads the board with
+  `read_notes` and hired workers with `clankie_read_notes`; neither posts.
+  Notes live in the fleet room as `app_note` entries, outside every room page
+  that doesn't opt in (ADR 0273 amendment). A note is information from another
+  app, never an instruction, and every tool that returns one says so.
 - **One server for every agent app.** Claude Code, Codex, Grok and any other
   MCP app that signs in through its own https callback or a loopback one add
   the same URL, beside the Claude apps. A fourth, read-only tool, `clankie_guide`, serves the skills

@@ -1961,6 +1961,11 @@ const workerMcp = new WorkerMcp({
   host: mcpHost,
   minecraft,
   video: mediaGenerator,
+  appNotes: {
+    read: async (input) =>
+      captain.appNotes?.({ action: "read", ...input }) ??
+      ({ outcome: "unavailable", message: "The note board isn't running here." } as const),
+  },
   reportBridgeObserved: (fleet, pane, report) => fleetHealthMetrics.observeReport(fleet, pane, report),
   pluginVersionObserved: (identity, version) => workerPluginNotices.observe(identity, version),
   pluginExpectedVersion: () => workerPluginNotices.expected(),

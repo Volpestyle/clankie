@@ -1,5 +1,7 @@
 import { LeadChatsResultSchema, type LeadChatsResult } from "./lead-chats.ts";
 import {
+  AppNotesRequestSchema,
+  AppNotesResultSchema,
   FleetRoomRequestSchema,
   FleetRoomResultSchema,
   type FleetRoomRequest,
@@ -517,6 +519,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z.object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1) }).strict(),
   /** The fleet room (VUH-2184): owner devices and the local operator only. */
   FleetRoomRequestSchema,
+  /** The app note board (ADR 0301): connector apps post through the relay; the owner and apps read. */
+  AppNotesRequestSchema,
   EvidenceDeviceFetchRequestSchema.extend({
     op: z.literal("evidence_fetch"),
     schemaVersion: z.literal(1),
@@ -927,6 +931,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({ op: z.literal("fleet_room"), schemaVersion: z.literal(1), result: FleetRoomResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("app_notes"), schemaVersion: z.literal(1), result: AppNotesResultSchema })
     .strict(),
   z
     .object({

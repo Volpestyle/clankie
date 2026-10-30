@@ -4810,6 +4810,18 @@ paths:
         led by `global-default`, with an optional first `prompt`. Without `machine` and
         `workingDirectory` it returns only `places`; otherwise `started` with `seatId`
         or `refused` with `detail`. It requires `steer`.
+        `app_notes` is the board apps signed in to the connector share (ADR 0301),
+        kept in the fleet room. `action: post` takes `text` (up to 2000 characters)
+        and answers `posted` with the note; only the relay's captain bearer posts,
+        carrying the `appDeviceId` it stamped from the connector device it
+        authenticated (a caller that sends one is refused), and the author is that
+        active connector device's approved name. `action: read` takes an optional
+        `cursor` and `limit` (1..50, default 20) and answers `ready` with `notes`
+        (sequence, at, author, text) oldest first and a `newer` cursor; without a
+        cursor it returns the newest notes. The relay's captain bearer and the
+        owner (operator bearer or a Take Control device) read it; the device relay
+        requires `chat`. `fleet_room` returns `app_note` entries only with
+        `include: ["app_note"]`.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

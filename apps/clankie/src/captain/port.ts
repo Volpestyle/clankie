@@ -352,6 +352,19 @@ export interface CaptainPort {
     request: Omit<import("@clankie/protocol").FleetRoomRequest, "op" | "schemaVersion">,
     signal?: AbortSignal,
   ): Promise<import("@clankie/protocol").FleetRoomResult>;
+  /**
+   * The app note board (ADR 0301), kept in the fleet room. A post's author is the
+   * name the app boundary read from the connector device's own record.
+   */
+  appNotes?(
+    command:
+      | { readonly action: "post"; readonly author: string; readonly text: string }
+      | {
+          readonly action: "read";
+          readonly cursor?: string | undefined;
+          readonly limit?: number | undefined;
+        },
+  ): Promise<import("@clankie/protocol").AppNotesResult>;
   /** Records a verified outside delivery in the fleet room (VUH-2403); never blocks or alters its handling. */
   recordInbound?(arrival: import("./fleet-room.ts").InboundArrival): void;
   serveOperatorConversation(

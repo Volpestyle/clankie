@@ -22,7 +22,8 @@ export interface FleetRoomCommandOptions {
 /**
  * `clankie fleet room` (VUH-2184): one page of the fleet room as JSON, oldest
  * first, with the `older` cursor for the page before it. `--follow` prints that
- * page's entries and then each new one as a JSON line until interrupted.
+ * page's entries and then each new one as a JSON line until interrupted. It
+ * opts into `app_note` entries, so the notes connected apps leave show here too.
  */
 export async function runFleetRoomCommand(
   args: readonly string[],
@@ -59,6 +60,7 @@ export async function runFleetRoomCommand(
   };
   const page = await client.fleetRoom!({
     direction: "older",
+    include: ["app_note"],
     ...(values.older === undefined ? {} : { cursor: values.older }),
     ...(limit === undefined ? {} : { limit }),
   });
@@ -70,7 +72,12 @@ export async function runFleetRoomCommand(
   for (const entry of page.entries) stdout.write(`${JSON.stringify(entry)}\n`);
   let cursor = page.newer;
   while (!options.signal?.aborted) {
-    const next = await client.fleetRoom!({ direction: "newer", cursor, waitMs: FLEET_ROOM_WAIT_MAX_MS });
+    const next = await client.fleetRoom!({
+      direction: "newer",
+      include: ["app_note"],
+      cursor,
+      waitMs: FLEET_ROOM_WAIT_MAX_MS,
+    });
     if (unavailable(next) || next.outcome !== "ready") return 1;
     for (const entry of next.entries) stdout.write(`${JSON.stringify(entry)}\n`);
     cursor = next.newer;

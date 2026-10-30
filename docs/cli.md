@@ -1943,6 +1943,11 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead. Apps signed in before `start_agent` existed sign in again to use it.
+`post_note` and `read_notes` share a note board among the connected apps: each
+note is signed with the name you approved that app under, never a name the app
+gives, and the apps read notes as information, not instructions. Clankie and
+his hired agents read the board too, and `clankie fleet room` shows the notes
+among the room's entries.
 
 ```bash
 claude mcp add --transport http clankie "$(clankie connector --json | jq -r .connectorUrl)"
@@ -4701,7 +4706,8 @@ one time-ordered feed of how the fleet coordinates. It holds lead briefs and
 messages to workers, worker reports, peer and lead-to-lead messages, delivered
 Auto rounds, owner questions with their answered or withdrawn state, and
 `inbound` arrivals: a followed Linear activity or a Discord text message that
-reached him (VUH-2403). The
+reached him (VUH-2403), and `app_note` entries, the notes apps signed in to the
+connector leave on their shared board (`clankie connector`). The
 host records each one as it happens, and only the owner reads it: this machine's
 operator credential, or a paired device holding Take Control through the service
 op `fleet_room`.
@@ -4710,8 +4716,10 @@ The JSON page is oldest first. Each entry has:
 
 - `id` (the source's own id), `sequence` and `at`;
 - `kind`;
-- `from`/`to` (`{kind: lead|worker|clankie|owner|external, label, conversationId?, seatId?, personaId?}`;
-  `external` is a person outside the fleet who is not the owner);
+- `from`/`to` (`{kind: lead|worker|clankie|owner|external|app, label, conversationId?, seatId?, personaId?}`;
+  `external` is a person outside the fleet who is not the owner, and `app` is a
+  connector app, labeled with the name you approved it under; an `app_note` has
+  no `to`);
 - bounded `text`, with credentials scrubbed (an `inbound` excerpt is at most 280 characters);
 - `links` (the issue keys and commit SHAs the text names);
 - `thread`, when one exists;
@@ -4729,7 +4737,12 @@ The page also carries:
 (default 50). `--follow` prints the page's entries and then each new one as a
 JSON line until interrupted. It waits up to 20 seconds per read, so it adds
 almost no load. Device op: `{op: "fleet_room", schemaVersion: 1, direction:
-"older"|"newer", cursor?, limit?, waitMs?}`.
+"older"|"newer", cursor?, limit?, waitMs?, include?: ["app_note"]}`. A page
+leaves `app_note` entries out unless `include` names them, so an app built
+before the board keeps reading the room it knows; the CLI always includes them.
+The board alone is the op `{op: "app_notes", schemaVersion: 1, action: "read",
+cursor?, limit?}` (up to 50 notes, oldest first, the newest without a cursor),
+which the owner reads here too; only a connector app posts, through the relay.
 
 The room keeps the newest 2,000 entries, none older than 14 days. History from
 before the host recorded the room is not reconstructed. An owner's answer text

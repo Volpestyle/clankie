@@ -82,6 +82,7 @@ async function fixture(
     unavailableAwakeRegistry?: boolean;
     routineCommand?: CaptainPort["routineCommand"];
     fleetRoom?: CaptainPort["fleetRoom"];
+    appNotes?: CaptainPort["appNotes"];
     workItems?: ReturnType<typeof createWorkItemsService>;
   } = {},
 ) {
@@ -174,6 +175,7 @@ async function fixture(
       },
       ...(options.routineCommand ? { routineCommand: options.routineCommand } : {}),
       ...(options.fleetRoom ? { fleetRoom: options.fleetRoom } : {}),
+      ...(options.appNotes ? { appNotes: options.appNotes } : {}),
     }),
     settings,
     ...(captainSeats ? { captainSeats } : {}),
@@ -762,6 +764,42 @@ it("carries the fleet room to the owner's device, live, and to no chat, steer or
     body: JSON.stringify(read),
   });
   expect(anonymous.status).toBe(403);
+  expect(f.captainCalls()).toBe(0);
+});
+
+it("reads the app note board on the owner's own bearer, and to no chat or steer device (ADR 0301)", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "app-notes-relay-"));
+  cleanups.push(() => rm(stateDir, { recursive: true, force: true }));
+  const journal = new FleetRoomJournal(stateDir);
+  journal.postAppNote("Grok", "Rebased the garden branch");
+  const f = await fixture({
+    appNotes: async (command) =>
+      command.action === "read"
+        ? journal.readAppNotes(command)
+        : journal.postAppNote(command.author, command.text),
+  });
+  const call = (body: unknown, device: keyof typeof f.tokens = "control") =>
+    fetch(`${f.relayUrl}/operator/v1/dispatch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const read = { op: "app_notes", schemaVersion: 1, action: "read" };
+  const page = await call(read);
+  expect(page.status).toBe(200);
+  const result = OperatorConversationServiceResultSchema.parse(await page.json());
+  if (result.op !== "app_notes" || result.result.outcome !== "ready")
+    throw new Error("Note board unavailable");
+  expect(result.result.notes).toMatchObject([{ author: "Grok", text: "Rebased the garden branch" }]);
+  // The owner's device carried its own bearer; the relay's captain never stood in for it.
+  expect(f.forwarded.at(-1)?.token).toBe(f.tokens.control);
+
+  // A device that isn't the owner's controller is refused at the relay, before any hop,
+  // and a device never posts: a note is a connector app's.
+  const forwarded = f.forwarded.length;
+  for (const device of ["chat", "steer"] as const) expect((await call(read, device)).status).toBe(403);
+  expect((await call({ op: "app_notes", schemaVersion: 1, action: "post", text: "hi" })).status).toBe(403);
+  expect(f.forwarded).toHaveLength(forwarded);
   expect(f.captainCalls()).toBe(0);
 });
 
