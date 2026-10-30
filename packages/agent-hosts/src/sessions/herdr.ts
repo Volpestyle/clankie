@@ -152,6 +152,24 @@ export function createHerdrSessionSource(
       }
     },
 
+    async start(request) {
+      const result = await port.dispatch({
+        op: "start_agent",
+        schemaVersion: 1,
+        ...(request.machine === undefined ? {} : { machine: request.machine }),
+        ...(request.workingDirectory === undefined ? {} : { workingDirectory: request.workingDirectory }),
+        ...(request.harness === undefined ? {} : { harness: request.harness }),
+        ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+      });
+      if (result.op !== "start_agent") throw new Error("Clankie answered with something else.");
+      return {
+        status: result.status,
+        places: result.places,
+        ...(result.seatId === undefined ? {} : { id: result.seatId }),
+        ...(result.detail === undefined ? {} : { detail: result.detail }),
+      };
+    },
+
     async send(id, message) {
       const fleet = await port.dispatch({ op: "fleet", schemaVersion: 1, view: "home" });
       if (fleet.op !== "fleet") throw new Error("The fleet answered with something else.");

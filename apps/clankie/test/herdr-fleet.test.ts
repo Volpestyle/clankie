@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SettingsStore } from "@clankie/settings";
+import { ClankieSettingsSchema, SettingsStore, emptySettings } from "@clankie/settings";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import {
   assertRemoteHerdrArgs,
   createHerdrFleetRun,
@@ -339,6 +340,117 @@ describe("fleet routing", () => {
         { id: "box", reachable: false },
       ],
     });
+  });
+
+  it("starts a connected app's agent only in a granted project checkout, led by Clankie's own thread", async () => {
+    const settings = ClankieSettingsSchema.parse({
+      ...emptySettings(),
+      machines: [{ id: "pc", ssh: "volpe@supedupsilly", shell: "powershell" }],
+      execution: {
+        ...emptySettings().execution,
+        connections: [
+          // A second Herdr session on the same PC, listed first, never granted the checkout.
+          {
+            id: "pc-work",
+            machine: "pc",
+            session: "work",
+            ssh: { host: "volpe@supedupsilly", shell: "powershell" },
+          },
+          {
+            id: "pc",
+            machine: "pc",
+            session: "default",
+            ssh: { host: "volpe@supedupsilly", shell: "powershell" },
+          },
+        ],
+      },
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "kh2",
+            name: "kh2",
+            workspaces: [
+              { id: "pc", machineId: "pc", platform: "windows", path: "C:\\code\\kh2" },
+              // Registered to the project, but the owner never granted it on that machine.
+              { id: "pc-old", machineId: "pc", platform: "windows", path: "C:\\old\\kh2" },
+            ],
+          },
+        ],
+      }),
+    });
+    const hires: { seat: Record<string, unknown>; brief?: string; lead: string }[] = [];
+    let leading = true;
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: {
+          list: [pc],
+          run: () => async () => "{}",
+          remoteWorkspace: async (fleet: string, directory: string) =>
+            fleet === "pc" && directory === "C:\\code\\kh2",
+        },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      settings: async () => settings,
+      conversations: { runsCaptainTurns: (id: string) => leading && id === "global-default" },
+      hireSeat: async (
+        seat: Record<string, unknown>,
+        brief: string | undefined,
+        authority: { owner: { conversationId: string } },
+      ) => {
+        hires.push({ seat, ...(brief === undefined ? {} : { brief }), lead: authority.owner.conversationId });
+        return { outcome: "spawned", seat: { seatId: "pc/term_new" } };
+      },
+    } as unknown as CreateOperatorServiceContext);
+
+    const place = { machine: "volpe@supedupsilly", project: "kh2", workingDirectory: "C:\\code\\kh2" };
+    expect(await serve({ op: "start_agent", schemaVersion: 1 })).toEqual({
+      op: "start_agent",
+      schemaVersion: 1,
+      status: "places",
+      places: [place],
+    });
+    // The ungranted checkout and any other directory are refused before anything starts.
+    for (const workingDirectory of ["C:\\old\\kh2", "C:\\Windows"])
+      expect(
+        await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory }),
+      ).toMatchObject({ status: "refused" });
+    expect(hires).toEqual([]);
+
+    expect(
+      await serve({
+        op: "start_agent",
+        schemaVersion: 1,
+        machine: "volpe@supedupsilly",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "codex",
+        prompt: "fix the netcode desync",
+      }),
+    ).toMatchObject({ status: "started", seatId: "pc/term_new" });
+    expect(hires).toEqual([
+      {
+        seat: expect.objectContaining({
+          harness: "codex",
+          workingDirectory: "C:\\code\\kh2",
+          fleet: "pc",
+          projectId: "kh2",
+          hireKind: "worker",
+          // A work hire must name its effort, and this project sets none.
+          effort: "medium",
+          effortReason: expect.any(String),
+        }),
+        brief: "fix the netcode desync",
+        lead: "global-default",
+      },
+    ]);
+    // With nobody to lead it, nothing starts.
+    leading = false;
+    expect(
+      await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
+    ).toMatchObject({ status: "refused" });
+    expect(hires).toHaveLength(1);
   });
 
   it("finds a pane made since the shared poll, such as a seat just hired (VUH-1527)", async () => {

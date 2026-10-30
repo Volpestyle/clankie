@@ -4805,6 +4805,11 @@ paths:
         short detail when that machine or pane doesn't answer. Terminal catalog, read
         and tail require the relay's `terminalObserve` grant; control/input require
         `terminalControl`.
+        `start_agent` starts a claude or codex seat in a known project's workspace on
+        a machine Clankie reaches (a linked machine's also needs its directory grant),
+        led by `global-default`, with an optional first `prompt`. Without `machine` and
+        `workingDirectory` it returns only `places`; otherwise `started` with `seatId`
+        or `refused` with `detail`. It requires `steer`.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

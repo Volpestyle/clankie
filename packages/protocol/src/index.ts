@@ -388,6 +388,9 @@ export {
   type OperatorConversationServiceClient,
   createOperatorConversationServiceClient,
   OPERATOR_TERMINAL_READ_MAX,
+  START_AGENT_HARNESSES,
+  StartAgentPlaceSchema,
+  type StartAgentPlace,
   OperatorTerminalMachineSchema,
   type OperatorTerminalMachine,
 } from "./operator-service.ts";

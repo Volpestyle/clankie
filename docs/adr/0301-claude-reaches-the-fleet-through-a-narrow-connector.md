@@ -22,8 +22,17 @@ own `/mcp` on a trusted network.
 - **Three tools.** `list_agents` names each agent with its machine and
   project, `read_agent` returns the text on its screen, and `message_agent`
   writes into its own persona thread, which delivers to the native pane. A
-  connector never types into a terminal, hires or closes a seat, writes to a
-  tracker, reads settings, tails Clankie's own thread, or joins a call.
+  connector never types into a terminal, closes a seat, writes to a tracker,
+  reads settings, tails Clankie's own thread, or joins a call.
+- **Starting an agent, narrowly.** `start_agent` (added 2026-10-30) starts a
+  Claude Code or Codex agent in a known project's checkout on a machine
+  Clankie reaches, with an optional first prompt, and nothing wider: the
+  places are the projects' registered workspaces, and a linked machine's also
+  need the owner's exact-directory grant (ADR 0193). Clankie's own thread
+  leads the new seat, as it leads his own hires, so a connector never owns a
+  worker. Connector devices now carry `steer`, which the op allowlist lets
+  reach `start_agent` alone; a connector signed in before this change signs in
+  again to get it.
 - **One server for every agent app.** Claude Code, Codex, Grok and any other
   MCP app that signs in through its own https callback or a loopback one add
   the same URL, beside the Claude apps. A fourth, read-only tool, `clankie_guide`, serves the skills

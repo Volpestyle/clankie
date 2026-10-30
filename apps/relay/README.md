@@ -136,7 +136,9 @@ code. The lines carry the device ID but never audio or bearers.
 ([ADR 0301](../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)),
 stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
 (`machine` optional), `read_agent` (`agent`, `lines` up to 400),
-`message_agent` (`agent`, `message`) and `clankie_guide` (`topic` optional).
+`message_agent` (`agent`, `message`), `start_agent` (`machine`,
+`workingDirectory`, `harness` claude or codex, `prompt`; with no machine and
+directory it lists the places) and `clankie_guide` (`topic` optional).
 `clankie_guide` reads the skills in `.agents/skills` from this checkout: no
 topic lists each skill and its description, a skill name returns its
 `SKILL.md` and names its other pages, and `skill/page.md` returns that page.
@@ -145,8 +147,9 @@ calls nothing on the service. Each fleet call checks the bearer against
 `GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request
-does: fleet, terminal catalog, read and tail, and get, create and send on persona
-threads only. The tools go through the session-source layer of
+does: fleet, terminal catalog, read and tail, `start_agent`, and get, create
+and send on persona threads only. `start_agent` needs `steer`, which connector
+devices carry for that op alone. The tools go through the session-source layer of
 `@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids
 read `herdr:<id>`. `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.

@@ -9,6 +9,7 @@ import {
   type OperatorFleetSeat,
   OPERATOR_TERMINAL_READ_MAX,
   type OperatorTerminalMachine,
+  type StartAgentPlace,
 } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import { logger } from "../app/log.ts";
@@ -40,6 +41,8 @@ import { captainIsThinking, captainNativeSubagents, pollPresence, projectPresenc
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { waitForConversationRun } from "./conversation-run.ts";
 import { setTimeout as delay } from "node:timers/promises";
+import { hostname } from "node:os";
+import { remoteHireMachine } from "./project-hire-context.ts";
 import { type SeatLedger } from "./seat-ledger.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import { warnSeatIssueUnavailable } from "./seat-issue-status.ts";
@@ -695,6 +698,90 @@ export function createOperatorService(
         );
       }
     }
+    if (request.op === "start_agent") {
+      const settings = await ctx.settings();
+      // A linked machine also needs the owner's grant for that exact directory (ADR 0193).
+      const granted = (
+        await Promise.all(
+          startAgentPlaces(settings).map(async (entry) =>
+            entry.fleet === undefined ||
+            (await ctx.deps.fleets?.remoteWorkspace(entry.fleet, entry.place.workingDirectory)) === true
+              ? [entry]
+              : [],
+          ),
+        )
+      ).flat();
+      // The first granted connection per project checkout stands for it.
+      const seen = new Set<string>();
+      const places = granted
+        .filter((entry) => {
+          const key = JSON.stringify([entry.projectId, entry.machineKey, entry.place.workingDirectory]);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, 256);
+      const answer = (
+        status: "places" | "started" | "refused",
+        extra: { seatId?: string; detail?: string } = {},
+      ) =>
+        ({
+          op: "start_agent",
+          schemaVersion: 1,
+          status,
+          places: places.map(({ place }) => place),
+          ...extra,
+        }) as const;
+      if (request.machine === undefined || request.workingDirectory === undefined) return answer("places");
+      const machine = request.machine.toLowerCase();
+      const chosen = places.find(
+        ({ place, names }) => names.has(machine) && place.workingDirectory === request.workingDirectory,
+      );
+      if (chosen === undefined)
+        return answer("refused", {
+          detail:
+            "That isn't one of the places an agent can start. Pick a machine and directory from the list.",
+        });
+      // Clankie's own thread leads it, as his own hires are led; the caller only chose where and what to ask.
+      const lead = "global-default";
+      if (!ctx.conversations.runsCaptainTurns(lead))
+        return answer("refused", {
+          detail: "Clankie isn't running his own thread right now, so nobody would lead it.",
+        });
+      const harness = request.harness ?? "claude";
+      const title = /discord|clyde/iu.test(chosen.place.project)
+        ? harness
+        : chosen.place.project.slice(0, 80);
+      // Every work hire states its effort. Keep the project's own worker effort; otherwise the
+      // everyday level both harnesses share, since a connected app can't size the job.
+      const projectEffort = settings.projects.projects.find((project) => project.id === chosen.projectId)
+        ?.hiring?.worker?.effort;
+      const effort =
+        projectEffort === undefined
+          ? { effort: "medium", effortReason: "Started from a connected app; medium is the everyday level" }
+          : { effortReason: "Started from a connected app; the project sets this worker effort" };
+      const hired = await ctx.hireSeat(
+        {
+          schemaVersion: 1,
+          harness,
+          title,
+          workingDirectory: chosen.place.workingDirectory,
+          ...(chosen.fleet === undefined ? {} : { fleet: chosen.fleet }),
+          projectId: chosen.projectId,
+          hireKind: "worker",
+          ...effort,
+        },
+        request.prompt,
+        {
+          owner: { conversationId: lead },
+          current: () => ctx.conversations.runsCaptainTurns(lead),
+          authorize: async () => ctx.conversations.runsCaptainTurns(lead),
+        },
+      );
+      return hired.outcome === "spawned"
+        ? answer("started", { seatId: hired.seat.seatId })
+        : answer("refused", { detail: startAgentRefusal(hired.reason) });
+    }
     if (request.op === "terminal_focus") {
       return {
         op: "terminal_focus",
@@ -1253,4 +1340,79 @@ async function linkedMachines(ctx: CreateOperatorServiceContext): Promise<Operat
       }
     }),
   );
+}
+
+/** Every known project's checkout on a machine Clankie reaches, by the names agents list it under. */
+function startAgentPlaces(settings: ClankieSettings): {
+  place: StartAgentPlace;
+  names: ReadonlySet<string>;
+  fleet?: string;
+  projectId: string;
+  /** One machine however many connections reach it. */
+  machineKey: string;
+}[] {
+  const local = hostname().slice(0, 200);
+  const fleets = settings.execution.connections.flatMap((connection) => {
+    if (!connection.enabled || connection.ssh === undefined) return [];
+    const machine = remoteHireMachine(settings, connection.id);
+    return machine === undefined ? [] : [{ connection, machine }];
+  });
+  return settings.projects.projects.flatMap((project) =>
+    project.workspaces.flatMap((workspace) => {
+      if (workspace.machineId === "local" && workspace.platform === "posix")
+        return [
+          {
+            place: { machine: local, project: project.name, workingDirectory: workspace.path },
+            names: new Set(["local", "this mac", local.toLowerCase()]),
+            projectId: project.id,
+            machineKey: "local",
+          },
+        ];
+      // Every connection to that machine, the one the workspace names first; the caller keeps
+      // the first one granted this directory, so a directory isn't offered twice.
+      return fleets
+        .filter(
+          ({ machine }) => machine.ids.has(workspace.machineId) && machine.platform === workspace.platform,
+        )
+        .sort(
+          (a, b) =>
+            Number(b.connection.id === workspace.machineId) - Number(a.connection.id === workspace.machineId),
+        )
+        .map((reached) => {
+          const host = reached.connection.ssh!.host.slice(0, 200);
+          return {
+            place: { machine: host, project: project.name, workingDirectory: workspace.path },
+            names: new Set([
+              host.toLowerCase(),
+              reached.connection.id,
+              reached.machine.machine,
+              ...reached.machine.ids,
+            ]),
+            fleet: reached.connection.id,
+            projectId: project.id,
+            machineKey: `remote:${reached.machine.machine}`,
+          };
+        });
+    }),
+  );
+}
+
+function startAgentRefusal(reason: string): string {
+  switch (reason) {
+    case "unknown_directory":
+      return "That directory isn't there, or isn't one Clankie may start agents in on that machine.";
+    case "harness_unavailable":
+      return "That agent app isn't installed or signed in on that machine.";
+    case "herdr_unreachable":
+      return "Herdr on that machine isn't answering.";
+    case "at_capacity":
+      return "That machine already runs as many agents as it allows.";
+    case "trust_required":
+      return "The agent app needs the folder trusted on that machine first.";
+    case "delivery_unconfirmed":
+    case "start_unconfirmed":
+      return "The agent may have started but didn't confirm. List the agents before trying again.";
+    default:
+      return "Clankie couldn't start it right now.";
+  }
 }

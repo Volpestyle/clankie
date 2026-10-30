@@ -43,13 +43,15 @@ export const TAKE_CONTROL_GRANTS: DeviceGrantSet = {
 };
 
 /**
- * The Claude connector preset: list agents, read panes and message seats, never
- * steer, hire or type raw keys. A device with `scope: "connector"` is further
- * held to the connector op allowlist by the relay, whatever its grants say.
+ * The connector preset: list agents, read panes, message seats and start an
+ * agent in a known project, never type raw keys. A device with
+ * `scope: "connector"` is further held to the connector op allowlist by the
+ * relay, whatever its grants say, so `steer` reaches `start_agent` alone.
  */
 export const CONNECTOR_GRANTS: DeviceGrantSet = {
   chat: true,
-  steer: false,
+  // Only for `start_agent`: the connector op allowlist still refuses every other steer op.
+  steer: true,
   terminalObserve: true,
   terminalControl: false,
 };

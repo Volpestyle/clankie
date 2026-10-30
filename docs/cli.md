@@ -1939,7 +1939,10 @@ The same URL works in Claude Code and Codex, which sign in through a loopback
 callback, and in hosted apps such as Grok, which return to their own https
 address; each shows the same kind of code to approve, and the sign-in names the
 host its access goes to. Each app is its own device. The
-connector also offers `clankie_guide`, which reads the skills Clankie ships.
+connector also offers `clankie_guide`, which reads the skills Clankie ships, and
+`start_agent`, which starts a Claude Code or Codex agent in a known project's
+checkout (on a linked machine, only a directory granted there) for Clankie to
+lead. Apps signed in before `start_agent` existed sign in again to use it.
 
 ```bash
 claude mcp add --transport http clankie "$(clankie connector --json | jq -r .connectorUrl)"
