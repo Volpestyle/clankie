@@ -25,8 +25,12 @@ export async function claudeProfileDirectories(env = process.env) {
         join(home, ".claude"),
         env.CLAUDE_CONFIG_DIR,
         // Named Claude profiles are owner directories, never discovered from untrusted pane claims.
+        // A lock directory beside a profile (.claude-name.lock) is not a profile.
         ...(await readdir(home, { withFileTypes: true }).catch(() => []))
-          .filter((entry) => entry.isDirectory() && entry.name.startsWith(".claude-"))
+          .filter(
+            (entry) =>
+              entry.isDirectory() && entry.name.startsWith(".claude-") && !entry.name.endsWith(".lock"),
+          )
           .map((entry) => join(home, entry.name)),
       ].filter(Boolean),
     ),

@@ -192,7 +192,12 @@ async function installHarnessBridges(options) {
           ...(options.codexHomes ?? []),
           ...remembered.filter((entry) => entry.harness === "codex").map((entry) => entry.profile),
           ...(await readdir(home, { withFileTypes: true }).catch(() => []))
-            .filter((entry) => entry.isDirectory() && /^\.codex(?:-.*|\d+)$/u.test(entry.name))
+            .filter(
+              (entry) =>
+                entry.isDirectory() &&
+                /^\.codex(?:-.*|\d+)$/u.test(entry.name) &&
+                !entry.name.endsWith(".lock"),
+            )
             .map((entry) => join(home, entry.name)),
         ]),
       ]
