@@ -9,7 +9,7 @@ import { WorkRequestError, type WorkItemsService } from "./work-items.ts";
 // never the owner: a write to Linear or GitHub passes the project's "Posting to your
 // tracker" setting, and private issue files are written as they are for Clankie.
 
-export function connectedAppActor(deviceId: string, name: string): TrackerActor {
+function connectedAppActor(deviceId: string, name: string): TrackerActor {
   return {
     type: "agent-worker",
     id: `${CONNECTED_APP_ACTOR_PREFIX}${deviceId}`,
