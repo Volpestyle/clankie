@@ -182,6 +182,18 @@ export const FeedDropSchema = z
     media: z.array(FeedMediaSchema).max(16).optional(),
     status: WorkItemStatusSchema.optional(),
     source: FeedDropSourceSchema.optional(),
+    /**
+     * On a project whose tracker is Linear or GitHub (ADR 0302), where the drop was
+     * posted once it went: the file stays the source, and this says where it is now.
+     */
+    posted: z
+      .object({
+        tracker: additiveEnum(["linear", "github"]),
+        key: z.string().trim().min(1).max(256).optional(),
+        url: FeedUrlSchema.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type FeedDrop = z.infer<typeof FeedDropSchema>;
@@ -336,6 +348,12 @@ export const FeedDropResultSchema = z.discriminatedUnion("outcome", [
       duplicate: z.boolean(),
       wake: FeedDropWakeSchema,
       leadConversationId: OperatorConversationIdSchema.optional(),
+      /**
+       * On a project whose tracker is Linear or GitHub (ADR 0302): `posted` (it went),
+       * `waiting` (for the owner's OK in the feed, or Clankie's), `kept_local` (posting
+       * there is read only, or it couldn't go: the file keeps it). Absent on file projects.
+       */
+      posting: additiveEnum(["posted", "waiting", "kept_local"]).optional(),
     })
     .strict(),
   z

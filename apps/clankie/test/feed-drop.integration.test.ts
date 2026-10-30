@@ -648,13 +648,6 @@ it("refuses projects that keep no private issue files, and a missing upload, wri
   const f = await fixture();
   const refused = async (projectId: string) =>
     f.drop({ projectId, idempotencyKey: `refusal-${projectId}-key`, body: "Lost?" });
-  expect(await refused("linear-app")).toEqual({
-    outcome: "refused",
-    reason: "not_file_backed",
-    message: expect.stringContaining(
-      "Linear App tracks work in Linear, and drops are filed only as private issue files. Move its open work with clankie work export --project linear-app --to markdown, then select the files with clankie project settings linear-app tracker",
-    ),
-  });
   expect(await refused("auto-app")).toMatchObject({
     reason: "not_file_backed",
     message: expect.stringContaining("Auto App is on Auto, so its work stays in the built-in tracker"),
@@ -697,13 +690,31 @@ it("refuses projects that keep no private issue files, and a missing upload, wri
       })
     ).status,
   ).toBe(400);
-  for (const checkout of [f.linear, f.auto, f.committed, f.bare, f.bugs, f.garden])
+  for (const checkout of [f.auto, f.committed, f.bare, f.bugs, f.garden])
     expect(existsSync(join(checkout.repo, ".clankie/work"))).toBe(false);
   expect(f.wakes()).toHaveLength(0);
   // The CLI exits non-zero with the same words.
-  const cli = await f.cli("drop", "--project", "linear-app", "--body", "Lost?");
+  const cli = await f.cli("drop", "--project", "docs-app", "--body", "Lost?");
   expect(cli.status).toBe(1);
-  expect(cli.output).toContain("clankie work export --project linear-app --to markdown");
+  expect(cli.output).toContain("Docs App keeps its work in committed files (docs/tasks)");
+});
+
+it("keeps a drop on a Linear project as a private issue file in its checkout, posting nothing without the posting check", async () => {
+  const f = await fixture();
+  // ADR 0302: a Linear project's drop is kept locally first; this service has no posting set up.
+  const kept = await f.drop({
+    projectId: "linear-app",
+    idempotencyKey: "linear-app-drop-key",
+    body: "Lost?",
+  });
+  expect(kept).toMatchObject({
+    outcome: "filed",
+    posting: "kept_local",
+    item: { kind: "drop", projectId: "linear-app", drop: { title: "Lost?" } },
+  });
+  expect(
+    (await listing(join(f.linear.repo, ".clankie/work"))).filter((name) => name.endsWith(".md")),
+  ).toHaveLength(1);
 });
 
 it("takes drops only from the owner: a paired phone through the relay, never a Supervise device or a captain", async () => {

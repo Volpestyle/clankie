@@ -1,4 +1,4 @@
-# ADR 0302: Connected apps answer the prompts open in agents' panes
+# ADR 0303: Connected apps answer the prompts open in agents' panes
 
 Status: Accepted by James, 2026-10-30. Amends
 [ADR 0301](0301-claude-reaches-the-fleet-through-a-narrow-connector.md); keeps

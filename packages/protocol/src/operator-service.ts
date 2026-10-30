@@ -535,7 +535,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({
       /**
-       * Answer the prompt open in an agent's pane (ADR 0302): a menu, a permission
+       * Answer the prompt open in an agent's pane (ADR 0303): a menu, a permission
        * prompt or a question. Only an app signed in to the connector, through the
        * relay, once the owner turned it on for that app. The steps run only while
        * the agent waits on input and `expect` is still on its screen.

@@ -8,7 +8,7 @@ const PersistedSchema = z
 
 /**
  * The apps signed in to the connector that the owner lets answer a prompt open
- * in an agent's pane (ADR 0302). Off for every app until the owner turns it on
+ * in an agent's pane (ADR 0303). Off for every app until the owner turns it on
  * on his Mac; an unreadable file reads as off for all. Without a path (tests)
  * the switch lives in memory.
  */

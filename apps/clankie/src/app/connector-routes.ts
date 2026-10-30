@@ -74,7 +74,7 @@ export interface RegisterConnectorRoutesContext {
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly deviceLocks: Map<string, Promise<unknown>>;
   readonly devices: DeviceRegistry;
-  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0302). */
+  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   readonly promptAnswers: ConnectorPromptAnswers;
 }
 
@@ -384,7 +384,7 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
     });
   }
 
-  // --- Answering prompts in agent panes (ADR 0302) ----------------------------
+  // --- Answering prompts in agent panes (ADR 0303) ----------------------------
 
   const promptAnswerApps = (): ConnectorPromptAnswersResponse => ({
     apps: [...ctx.devices.values()]

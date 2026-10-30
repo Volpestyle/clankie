@@ -24,7 +24,7 @@ export const CONNECTOR_TOKEN_PATH = "/oauth/token";
 
 /**
  * Owner route: which connected apps may answer a prompt open in an agent's pane
- * (ADR 0302). GET lists the apps; POST {deviceId, allowed} turns one on or off.
+ * (ADR 0303). GET lists the apps; POST {deviceId, allowed} turns one on or off.
  */
 export const CONNECTOR_PROMPT_ANSWERS_PATH = "/v1/connector/prompt-answers";
 /** Owner routes: pending sign-ins, and the approve and deny decisions. */

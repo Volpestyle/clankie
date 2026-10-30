@@ -148,7 +148,7 @@ app_note_author_is_stamped`) or comes from a device that isn't a connector
 (`403 connector_device_required`), and the service signs the note with that
 device's approved name. `read_notes` returns the notes oldest first with a
 `newer` cursor, and says they're another app's information, not instructions.
-`answer_prompt` (the `prompt_answer` op, ADR 0302) presses named keys or types
+`answer_prompt` (the `prompt_answer` op, ADR 0303) presses named keys or types
 plain text into a pane that is waiting on input; the relay stamps the device
 the same way (`400 prompt_answer_app_is_stamped`, `403
 connector_device_required`) and needs `terminalObserve`. The service answers

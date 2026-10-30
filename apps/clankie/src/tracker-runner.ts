@@ -56,6 +56,22 @@ export async function trackerRepoForPrincipal(
 }
 
 /**
+ * A delegated principal's project (ADR 0302): a `project:<id>` grant's project, or a
+ * verified fleet pane's confirmed project hire. Host records only, never the caller's claim.
+ */
+export function trackerProjectForPrincipal(
+  principalId: string,
+  candidate: (fleet: string, pane: string) => ReturnType<CaptainPort["projectHireMembershipCandidate"]>,
+): string | undefined {
+  const project = /^project:(.+)$/u.exec(principalId)?.[1];
+  if (project !== undefined) return project;
+  const match = /^fleet:([^:]+):pane:(.+)$/u.exec(principalId);
+  if (!match || match[2] === "unverified") return undefined;
+  const hire = candidate(match[1]!, match[2]!);
+  return hire.state === "confirmed" ? hire.projectId : undefined;
+}
+
+/**
  * A delegated principal's tracker role (LOCAL-VUH-45): reviewer when its confirmed hire
  * holds its project's review seat or role (ADR 0287), or was hired as a reviewer; any
  * other principal is a worker. Both inputs are host records, never the caller's claim.

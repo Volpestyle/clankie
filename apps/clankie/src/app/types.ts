@@ -160,7 +160,7 @@ export interface ClankieAppDependencies {
   seatCallReceiptPath?: string;
   /** Durable quick check key receipts, so an old key never asks the owner twice. */
   feedCheckReceiptPath?: string;
-  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0302). */
+  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   connectorPromptAnswersPath?: string;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
@@ -203,6 +203,8 @@ export interface ClankieAppDependencies {
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */
   workItems?: WorkItemsService;
+  /** "Posting to your tracker" (ADR 0302): waiting writes and their decisions. */
+  trackerPosting?: import("../tracker-posting.ts").TrackerPostingGate;
   /** Media embedded in returned work items, resolved to evidence blobs (VUH-2666). */
   workMedia?: Pick<import("../work-media.ts").WorkMedia, "observe" | "resolve">;
   workerMcp?: WorkerMcp;

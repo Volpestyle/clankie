@@ -718,7 +718,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
     }
     // So is the app answering a prompt in an agent's pane; the service checks the
-    // owner turned answering on for that app (ADR 0302).
+    // owner turned answering on for that app (ADR 0303).
     if (serviceRequest.op === "prompt_answer") {
       if (serviceRequest.appDeviceId !== undefined) {
         writeJson(response, 400, { error: "prompt_answer_app_is_stamped" });

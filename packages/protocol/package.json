@@ -24,6 +24,7 @@
     "./wake": "./src/wake.ts",
     "./host-power": "./src/host-power.ts",
     "./work-items": "./src/work-items.ts",
+    "./tracker-posting": "./src/tracker-posting.ts",
     "./views": "./src/views.ts",
     "./work-item-write": "./src/work-item-write.ts",
     "./app-telemetry": "./src/app-telemetry.ts",

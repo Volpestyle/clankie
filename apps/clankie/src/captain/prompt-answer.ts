@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { PromptAnswerResult, PromptAnswerStep } from "@clankie/protocol/connector";
 import type { HerdrWatchRunner } from "./herdr-watch.ts";
 
-/** Screens already answered, so one prompt is never answered twice (ADR 0302). */
+/** Screens already answered, so one prompt is never answered twice (ADR 0303). */
 const ANSWERED_MAX = 512;
 
 export interface PromptAnswerDeps {
@@ -31,7 +31,7 @@ function describe(steps: readonly PromptAnswerStep[]): string {
 
 /**
  * A connected app answers the prompt open in an agent's pane: a menu, a
- * permission prompt, a question (ADR 0302). Keys go in only while the agent
+ * permission prompt, a question (ADR 0303). Keys go in only while the agent
  * waits on input, the text the app expects is still on the screen, no owner ask
  * holds the same question, and that screen was not answered before.
  */

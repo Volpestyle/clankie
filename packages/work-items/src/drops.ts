@@ -81,6 +81,15 @@ export interface DropRecord {
   /** The file's text outside its criteria and evidence sections. */
   readonly summary: string;
   readonly evidence: readonly WorkEvidence[];
+  /** Where the drop was posted, on a project whose tracker is Linear or GitHub (ADR 0302). */
+  readonly posted?: DropPosted;
+}
+
+/** A drop posted to its project's outward tracker: which one, and the item it became there. */
+export interface DropPosted {
+  readonly tracker: "linear" | "github";
+  readonly key?: string | undefined;
+  readonly url?: string | undefined;
 }
 
 export class DropConflictError extends Error {
@@ -149,6 +158,9 @@ function recordOf(main: string, file: ReturnType<typeof parseFile>): DropRecord 
   const device = file.fields.get("drop_device");
   const platform = file.fields.get("drop_platform");
   const project = file.fields.get("drop_project");
+  const postedTo = file.fields.get("posted_to");
+  const postedKey = file.fields.get("posted_key");
+  const postedUrl = file.fields.get("posted_url");
   return {
     id,
     title: file.fields.get("title") ?? id,
@@ -171,6 +183,15 @@ function recordOf(main: string, file: ReturnType<typeof parseFile>): DropRecord 
         : {}),
     summary: parsed.summary,
     evidence: parsed.evidence,
+    ...(postedTo === "linear" || postedTo === "github"
+      ? {
+          posted: {
+            tracker: postedTo,
+            ...(postedKey ? { key: postedKey } : {}),
+            ...(postedUrl ? { url: postedUrl } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -271,6 +292,27 @@ export async function recordDropWake(
     const { lead: _previous, ...rest } = held;
     const next: DropReceipt = { ...rest, wake, ...(lead === undefined ? {} : { lead }) };
     await writeAtomic(join(directory, RECEIPTS), JSON.stringify({ ...receipts, [key]: next }));
+  });
+}
+
+/**
+ * Records in a drop's issue file where it was posted (ADR 0302): `posted_to`, and the
+ * item's key and link there. The file stays the owner's local copy.
+ */
+export async function recordDropPosted(root: string, key: string, posted: DropPosted): Promise<void> {
+  const { main, directory } = folderOf(root);
+  await withTrackerStoreLock(join(directory, PRIVATE_WORK_LOCK), async (assertHeld) => {
+    for (const file of await readFolder(directory)) {
+      if (recordOf(main, file)?.key !== key) continue;
+      const fields = new Map(file.fields);
+      fields.set("posted_to", posted.tracker);
+      if (posted.key) fields.set("posted_key", posted.key.replace(/[\r\n]+/gu, " ").slice(0, 256));
+      if (posted.url) fields.set("posted_url", posted.url.replace(/[\r\n]+/gu, "").slice(0, 2048));
+      assertHeld();
+      await writeAtomic(file.path, serializeFile(fields, file.body));
+      return;
+    }
+    throw new Error("No drop is filed under that key");
   });
 }
 

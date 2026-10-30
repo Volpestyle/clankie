@@ -367,7 +367,7 @@ export interface CaptainPort {
   ): Promise<import("@clankie/protocol").AppNotesResult>;
   /**
    * Answer the prompt open in an agent's pane for a connected app the owner turned
-   * answering on for (ADR 0302): only while the agent waits on input and the text
+   * answering on for (ADR 0303): only while the agent waits on input and the text
    * the app expects is still on its screen, once per screen, recorded on the note board.
    */
   answerPrompt?(input: {

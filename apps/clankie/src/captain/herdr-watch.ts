@@ -277,7 +277,7 @@ export interface HerdrWatchRunner {
   sendKeys?(paneId: string, keys: readonly string[]): Promise<void>;
   /**
    * `herdr pane send-text`: one line typed into the pane, no Enter. Only a
-   * connected app answering an open prompt the owner let it answer (ADR 0302);
+   * connected app answering an open prompt the owner let it answer (ADR 0303);
    * never a channel for automated messages (ADR 0207).
    */
   sendText?(paneId: string, text: string): Promise<void>;

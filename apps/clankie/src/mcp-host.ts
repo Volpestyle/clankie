@@ -104,6 +104,7 @@ import {
   type LinearRequestPriority,
 } from "./linear-request-budget.ts";
 import { TrackerRequestBudgetRefused, type TrackerRequestBudget } from "./tracker-request-budget.ts";
+import { isTrackerWriteTool, TRACKER_POSTING_ADMITTED, type TrackerPostingGate } from "./tracker-posting.ts";
 
 /** Matches the browser host's ceiling; pi truncates again on the way out. */
 const MAX_RESULT_CHARACTERS = 50_000;
@@ -222,7 +223,11 @@ type McpRefusalReason =
   | "role_not_allowed"
   | "body_owned"
   | "invalid_arguments"
-  | "confirmation_required";
+  | "confirmation_required"
+  /** Posting to this project's tracker refused the write (ADR 0302); nothing was written. */
+  | "posting_refused"
+  /** The write waits for the owner's or the lead's OK (ADR 0302); nothing was written yet. */
+  | "posting_held";
 
 /** In-process service capability; HTTP/model arguments can never construct this symbol. */
 export const MINECRAFT_BODY_ACCESS = Symbol("minecraft-body-access");
@@ -289,6 +294,11 @@ export interface McpHost extends WorkerReadReceiptHost {
     readonly signal?: AbortSignal;
     /** Only MinecraftMcpPort holds Clankie's motor; raw and delegated routes are denied. */
     readonly bodyAccess?: typeof MINECRAFT_BODY_ACCESS;
+    /**
+     * Host-only, for "Posting to your tracker" (ADR 0302): a write the check already let
+     * through, or the project a host caller writes for. Never a model argument.
+     */
+    readonly posting?: typeof TRACKER_POSTING_ADMITTED | { readonly projectId: string };
     readonly delegation?: { binding: string; grantId: string; principalId: string; workId: string };
     /** Async admission may return a synchronous revocation check run after the final host reads. */
     readonly fence?: () => Promise<void | (() => void)>;
@@ -441,6 +451,8 @@ export interface McpHostOptions {
   readonly trackerRoleForWorker?: (principalId: string) => Promise<"worker" | "reviewer">;
   /** Per-worker budget on Clankie's own trackers (LOCAL-VUH-45); the owner and Clankie are unlimited. */
   readonly trackerRequestBudget?: TrackerRequestBudget;
+  /** The check every outward tracker write passes (ADR 0302); absent, writes are not checked. */
+  readonly trackerPosting?: Pick<TrackerPostingGate, "admit" | "repoTarget">;
   /** Shipped lazy motor, reserved for the service's MinecraftPort rather than raw catalogs. */
   readonly minecraftMotor?: {
     readonly command: string;
@@ -1616,6 +1628,58 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                 detail: error.message,
               };
             }
+          }
+        }
+        // "Posting to your tracker" (ADR 0302): an outward write by Clankie or a worker passes
+        // its project's setting first. A repo on private issue files or the built-in tracker,
+        // and the built-in tracker standing in for Linear, stay on this Mac and pass freely.
+        if (
+          options.trackerPosting &&
+          server.id === "linear" &&
+          input.posting !== TRACKER_POSTING_ADMITTED &&
+          (graphqlPlan ? graphqlPlan.mutation : isTrackerWriteTool(input.tool))
+        ) {
+          const repoTarget = repositoryCall
+            ? await options.trackerPosting.repoTarget(trackerRepo as string)
+            : undefined;
+          if (!repositoryCall ? !isLocalTracker(server) : repoTarget !== undefined) {
+            const args = Object.fromEntries(
+              Object.entries(input.arguments).filter(([key]) => key !== "repo"),
+            );
+            const admission = await options.trackerPosting.admit({
+              tracker: repoTarget?.tracker ?? "linear",
+              route: repositoryCall
+                ? {
+                    kind: "repo",
+                    repo: trackerRepo as string,
+                    local: input.lane === "operator" && input.delegation === undefined && !inferredRepo,
+                    tool: input.tool,
+                    arguments: structuredClone(args),
+                  }
+                : { kind: "linear", tool: input.tool, arguments: structuredClone(input.arguments) },
+              asker: input.delegation
+                ? {
+                    kind: "worker",
+                    principalId: input.delegation.principalId,
+                    ...(workerName === undefined ? {} : { name: workerName }),
+                  }
+                : {
+                    kind: "lead",
+                    ...(providedSource ? { conversationId: providedSource.owner.conversationId } : {}),
+                  },
+              ...(repoTarget?.projectIds.length
+                ? { projectIds: repoTarget.projectIds }
+                : input.posting !== undefined
+                  ? { projectIds: [input.posting.projectId] }
+                  : {}),
+            });
+            if (admission.outcome !== "post")
+              return {
+                outcome: "refused",
+                reason: admission.outcome === "refused" ? "posting_refused" : "posting_held",
+                possiblyDispatched: false,
+                detail: admission.message,
+              };
           }
         }
         let state: ServerState | undefined;

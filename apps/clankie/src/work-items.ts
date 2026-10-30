@@ -93,6 +93,13 @@ import {
   type WorkProjectFence,
 } from "./work-write-target.ts";
 import { deliveryFingerprint } from "./captain/delivery-fence.ts";
+import {
+  assertAdmitted,
+  isTrackerWriteTool,
+  TRACKER_POSTING_ADMITTED,
+  type PostingAsker,
+  type TrackerPostingGate,
+} from "./tracker-posting.ts";
 
 /**
  * The work-item layer every agent and the app go through (ADR 0191). It owns
@@ -103,6 +110,17 @@ const execFileAsync = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 30_000;
 /** Clankie (the lead) acting for the owner: how operator-bearer tracker writes are attributed. */
 const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+
+/** The owner speaking as himself, or his own app: his writes are never held (ADR 0302). */
+function ownerActor(actor: TrackerActor | undefined): boolean {
+  return actor?.type === TRACKER_OWNER.type || actor?.type === "app";
+}
+/** Who asks to post: a hired worker by its principal, otherwise Clankie himself. */
+function postingAsker(actor: TrackerActor | undefined): PostingAsker {
+  return actor?.type === "agent-worker" && actor.id !== TRACKER_LEAD.id
+    ? { kind: "worker", principalId: actor.id, ...(actor.name === undefined ? {} : { name: actor.name }) }
+    : { kind: "lead" };
+}
 
 /** A provider's settled tool error. On a read it is that provider's definite answer. */
 function providerToolError(tool: string, content: string): Error {
@@ -170,6 +188,9 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       owner: z.string().trim().min(1).max(128).nullable().optional(),
       title: z.string().trim().min(1).max(200).optional(),
       dependsOn: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
+      addDependsOn: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
+      addLabels: z.array(z.string().trim().min(1).max(128)).max(50).optional(),
+      removeLabels: z.array(z.string().trim().min(1).max(128)).max(50).optional(),
       check: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       uncheck: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       addCriteria: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
@@ -205,6 +226,25 @@ export const WorkExportRequestSchema = z
   .strict();
 export type WorkExportRequest = z.infer<typeof WorkExportRequestSchema>;
 /** Where a project's drops go, or why they can't. */
+/**
+ * Where a convention's outward writes land (ADR 0302). A held post records it and goes only
+ * while it is unchanged, so an approval never sends the write somewhere it was not asked for.
+ */
+function postingDestination(convention: WorkConvention | undefined): string | undefined {
+  if (convention?.backend === "github") return `github:${convention.github?.repo ?? ""}`;
+  if (convention?.backend === "linear")
+    return `linear:${convention.linear?.team ?? ""}/${convention.linear?.project ?? ""}`;
+  return undefined;
+}
+
+const assertDestination = (convention: WorkConvention, destination: string | undefined) => {
+  if (destination !== undefined && postingDestination(convention) !== destination)
+    throw new WorkRequestError(
+      "posting_refused",
+      "This project's tracker changed after the post was asked for, so it would land somewhere else. Nothing was posted; ask again.",
+    );
+};
+
 export type DropTarget =
   | {
       readonly ready: true;
@@ -212,6 +252,16 @@ export type DropTarget =
       /** The tracker workspace; its private folder resolves to the main checkout. */
       readonly root: string;
       readonly repoId: string;
+      /**
+       * The project's outward tracker, when it has one (ADR 0302): the drop is kept as a
+       * private issue file here first, then posted there as the project's posting setting says.
+       */
+      readonly tracker?: "linear" | "github";
+      /**
+       * Where that tracker's writes land (`postingDestination`), while they leave this Mac:
+       * without it (Linear disconnected) the drop is only kept here.
+       */
+      readonly destination?: string;
     }
   | {
       readonly ready: false;
@@ -278,6 +328,8 @@ export interface WorkItemsServiceOptions {
   readonly fetch?: typeof fetch;
   readonly githubApiBase?: string;
   readonly clock?: () => Date;
+  /** The check every outward tracker write passes (ADR 0302); absent, writes are not checked. */
+  readonly posting?: Pick<TrackerPostingGate, "admit">;
 }
 
 export type WorkResult =
@@ -301,6 +353,9 @@ const workPatch = (request: Extract<WorkRequest, { action: "update" }>): WorkIte
   ...(request.owner === undefined ? {} : { owner: request.owner }),
   ...(request.title === undefined ? {} : { title: request.title }),
   ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
+  ...(request.addDependsOn === undefined ? {} : { addDependsOn: request.addDependsOn }),
+  ...(request.addLabels === undefined ? {} : { addLabels: request.addLabels }),
+  ...(request.removeLabels === undefined ? {} : { removeLabels: request.removeLabels }),
   ...(request.check === undefined ? {} : { check: request.check }),
   ...(request.uncheck === undefined ? {} : { uncheck: request.uncheck }),
   ...(request.addCriteria === undefined ? {} : { addCriteria: request.addCriteria }),
@@ -313,7 +368,10 @@ export class WorkRequestError extends Error {
     | "needs_decision"
     | "backend_unavailable"
     | "invalid"
-    | "result_too_large";
+    | "result_too_large"
+    /** Posting to the project's tracker stopped this write (ADR 0302); nothing was written. */
+    | "posting_refused"
+    | "posting_held";
   readonly question: string | undefined;
   readonly signals: WorkSignal[] | undefined;
   constructor(
@@ -472,6 +530,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             tool,
             arguments: args,
             resultMode: "data",
+            // `handle` checks posting before any write reaches here (ADR 0302).
+            posting: TRACKER_POSTING_ADMITTED,
           });
           if (result.outcome === "refused" && result.reason === "result_too_large")
             throw new WorkRequestError("result_too_large", `Linear ${tool}: ${result.detail}`);
@@ -678,6 +738,24 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     const teamId = view?.leadTeam?.id;
     if (view?.id !== project.trackerProjectId || typeof teamId !== "string") return undefined;
     return { projectId: project.trackerProjectId, teamId, open: openBuiltIn };
+  };
+
+  /**
+   * The tracker a convention's writes reach off this Mac (ADR 0302): GitHub issues, or
+   * Linear while it is connected. A disconnected Linear repo writes to the local
+   * compatibility store, which stays here like issue files.
+   */
+  const outwardTracker = async (
+    convention: WorkConvention | undefined,
+  ): Promise<"linear" | "github" | undefined> => {
+    if (convention?.backend === "github") return "github";
+    if (convention?.backend !== "linear" || linear === undefined) return undefined;
+    return (await options.mcpHost?.trackerStatus?.())?.backend === "local" ? undefined : "linear";
+  };
+
+  const destinationOf = (convention: WorkConvention) => {
+    const destination = postingDestination(convention);
+    return destination === undefined ? {} : { destination };
   };
 
   const deps = async (path: string, local = true, projectId?: string): Promise<TrackerDeps> => {
@@ -986,6 +1064,29 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         );
         if (previous) return previous;
         begun = true;
+        // The operator bearer is any local caller, so on an outward tracker this is Clankie
+        // posting: it meets the project's setting, and a held write goes later as this same
+        // `work update` (ADR 0302). The owner's own app is exempt.
+        if (authority.principal.kind !== "device")
+          await checkWorkPosting(
+            {
+              action: "update",
+              // Its local checkout: a project's reference is read-only to `work update`.
+              repo: target.path,
+              id: request.itemId,
+              ...(request.command.action === "assign"
+                ? { owner: request.command.owner }
+                : request.command.action === "add_label"
+                  ? { addLabels: [request.command.label] }
+                  : request.command.action === "remove_label"
+                    ? { removeLabels: [request.command.label] }
+                    : { addDependsOn: [request.command.id] }),
+            },
+            target.convention,
+            target.path,
+            undefined,
+            undefined,
+          );
         const beforeWrite = () => {
           free?.assertCurrent();
           if (!authority.current()) throw new Error("Owner authority expired or was revoked.");
@@ -1038,6 +1139,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
               tool,
               arguments: args,
               resultMode: "data",
+              // The owner's own write is his (ADR 0302).
+              posting: TRACKER_POSTING_ADMITTED,
               fence,
               ...(writing
                 ? {
@@ -1126,11 +1229,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             : receipt(
                 request.requestId,
                 "refused",
-                error instanceof Error &&
-                  (error.name === "WorkItemScopeError" ||
-                    /^(Owner authority|Saved work|Connected .* account|An item cannot|No work item|Work item .*outside|Role label|This project|Project work|Connect GitHub)/u.test(
-                      error.message,
-                    ))
+                (error instanceof WorkRequestError &&
+                  (error.code === "posting_refused" || error.code === "posting_held")) ||
+                  (error instanceof Error &&
+                    (error.name === "WorkItemScopeError" ||
+                      /^(Owner authority|Saved work|Connected .* account|An item cannot|No work item|Work item .*outside|Role label|This project|Project work|Connect GitHub)/u.test(
+                        error.message,
+                      )))
                   ? error.message
                   : "This saved work tracker cannot accept the write. Read the work again and check its connection.",
               );
@@ -1280,6 +1385,44 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     return result.value;
   };
 
+  /** The projects whose workspaces or worktree roots on this machine hold this checkout (ADR 0302). */
+  const projectIdsAt = async (path: string): Promise<string[]> => {
+    const machine = options.localMachineId ?? "local";
+    const at = resolve(path);
+    const within = (root: string) => at === resolve(root) || at.startsWith(`${resolve(root)}/`);
+    return ((await options.projects?.())?.projects ?? [])
+      .filter(
+        (project) =>
+          project.workspaces.some(
+            (workspace) => workspace.machineId === machine && resolve(workspace.path) === at,
+          ) || project.worktreeRoots.some((root) => root.machineId === machine && within(root.path)),
+      )
+      .map((project) => project.id);
+  };
+
+  /** `clankie work create|update|attach` on an outward tracker is Clankie posting (ADR 0302). */
+  const checkWorkPosting = async (
+    request: WorkRequest,
+    convention: WorkConvention,
+    path: string,
+    posting: typeof TRACKER_POSTING_ADMITTED | undefined,
+    destination: string | undefined,
+  ) => {
+    if (posting === TRACKER_POSTING_ADMITTED) return assertDestination(convention, destination);
+    if (!options.posting) return;
+    const tracker = await outwardTracker(convention);
+    if (tracker === undefined) return;
+    const admission = await options.posting.admit({
+      tracker,
+      ...destinationOf(convention),
+      route: { kind: "work", request: structuredClone(request) as Record<string, unknown> },
+      asker: { kind: "lead" },
+      projectIds: await projectIdsAt(path),
+    });
+    if (admission.outcome === "refused") throw new WorkRequestError("posting_refused", admission.message);
+    if (admission.outcome !== "post") throw new WorkRequestError("posting_held", admission.message);
+  };
+
   /**
    * Where a settings project keeps its work on this machine: its tracker workspace
    * (`trackerRef`), or else the one local workspace with a saved convention.
@@ -1351,20 +1494,27 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
               : `${project.name} has no saved work tracker on this machine. Drops are filed as private issue files: select them with ${select}.`,
       );
     const { workspace, convention } = located;
-    const directory = conventionWorkDirectory(convention);
-    if (directory === undefined) {
-      const tracker =
-        convention.backend === "builtin"
-          ? "the built-in tracker"
-          : convention.backend === "linear"
-            ? "Linear"
-            : "GitHub issues";
-      return refused(
-        convention.backend === "github"
-          ? `${project.name} tracks work in ${tracker}, and drops are filed only as private issue files. Select them with ${select}.`
-          : `${project.name} tracks work in ${tracker}, and drops are filed only as private issue files. Move its open work with clankie work export --project ${project.id} --to markdown, then select the files with ${select}.`,
-      );
+    // Linear or GitHub (ADR 0302): kept as a private issue file in the checkout first, which
+    // the drop creates if needed (it ignores itself), then posted under the posting setting.
+    if (convention.backend === "linear" || convention.backend === "github") {
+      const repo = await register(workspace.path);
+      // A disconnected Linear keeps the drop here: there is nowhere outward to post it.
+      const outward =
+        (await outwardTracker(convention)) === undefined ? undefined : postingDestination(convention);
+      return {
+        ready: true,
+        project: { id: project.id, name: project.name },
+        root: workspace.path,
+        repoId: repo.id,
+        tracker: convention.backend,
+        ...(outward === undefined ? {} : { destination: outward }),
+      };
     }
+    const directory = conventionWorkDirectory(convention);
+    if (directory === undefined)
+      return refused(
+        `${project.name} tracks work in the built-in tracker, and drops are filed only as private issue files. Move its open work with clankie work export --project ${project.id} --to markdown, then select the files with ${select}.`,
+      );
     if (!isPrivateWorkDirectory(directory))
       return refused(
         `${project.name} keeps its work in committed files (${directory}), and drops are private: they go only to ${DEFAULT_WORK_DIRECTORY}. Select that folder with ${select}.`,
@@ -1699,6 +1849,22 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ) => {
           await beforeWrite();
           await assertLinear();
+          // A seat's own issue status is Clankie writing for this project (ADR 0302).
+          const tracker =
+            options.posting && isTrackerWriteTool(name) ? await outwardTracker(convention) : undefined;
+          if (options.posting && tracker !== undefined)
+            assertAdmitted(
+              await options.posting.admit({
+                tracker,
+                ...destinationOf(convention),
+                route:
+                  convention.backend === "linear" || repo === undefined
+                    ? { kind: "linear", tool: name, arguments: structuredClone(args) }
+                    : { kind: "repo", repo, local: false, tool: name, arguments: structuredClone(args) },
+                asker: { kind: "lead" },
+                projectIds: [projectId],
+              }),
+            );
           const tools = trackerToolsFor(path, convention, {
             ...dependencies,
             ...(builtIn ? { builtIn } : {}),
@@ -1716,6 +1882,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                       arguments: arguments_,
                       resultMode: "data",
                       requestPriority,
+                      // `call` below checked posting for this project first (ADR 0302).
+                      posting: TRACKER_POSTING_ADMITTED,
                       fence: async () => {
                         await beforeWrite();
                         await assertLinear();
@@ -1737,6 +1905,33 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     },
 
     dropTarget,
+    /**
+     * A registered repo's outward tracker and the projects that hold it (ADR 0302), or
+     * undefined when its work stays on this Mac (issue files, the built-in tracker).
+     */
+    async postingTarget(
+      repo: string,
+    ): Promise<{ tracker: "linear" | "github"; projectIds: string[] } | undefined> {
+      let path: string;
+      let convention: WorkConvention | undefined;
+      if (/^project-[a-f0-9]{48}$/u.test(repo)) {
+        if (!projectReader) return undefined;
+        const read = await projectReader.prepare(repo);
+        path = read.path;
+        convention = read.convention;
+      } else {
+        // allow-swallowed-rejection -- an unknown repo is refused by the call itself; nothing posts.
+        const entry = await locate(repo, true).catch(() => undefined);
+        if (entry === undefined) return undefined;
+        path = entry.path;
+        convention =
+          (await readConvention(path)) ??
+          ((await discoverConvention(path, run)).suggestion as WorkConvention | undefined);
+      }
+      const tracker = await outwardTracker(convention);
+      if (tracker === undefined) return undefined;
+      return { tracker, projectIds: await projectIdsAt(path) };
+    },
     /** Files one drop in a target `dropTarget` returned ready; see `fileDrop`. */
     fileDrop: (
       target: Extract<DropTarget, { ready: true }>,
@@ -1927,9 +2122,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         readonly repo: string;
         readonly local: boolean;
         readonly inbox?: WorkInboxContext;
+        /** Host-only: the caller's own check already let this write through (ADR 0302). */
+        readonly posting?: typeof TRACKER_POSTING_ADMITTED;
+        /** With `posting`: where the write was let through to; it goes only while unchanged. */
+        readonly destination?: string;
       } & TrackerToolCallOptions,
     ): Promise<unknown> {
-      const { repo, local, inbox, ...callbacks } = callOptions;
+      const { repo, local, inbox, posting, destination, ...callbacks } = callOptions;
       const { repo: _repo, ...toolArgs } = args;
       if (INBOX_TOOLS.has(name)) return inboxPendingQuestions(repo, local, toolArgs, inbox, name, callbacks);
       if (SAVED_ISSUE_VIEW_TOOLS.has(name)) {
@@ -2025,6 +2224,26 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             throw new Error("Saved work repository or tracker changed. Read the work again.");
         };
       }
+      if (posting === TRACKER_POSTING_ADMITTED) assertDestination(convention, destination);
+      // "Posting to your tracker" (ADR 0302): Clankie's and his workers' writes to an
+      // outward tracker pass the project's setting; the owner's own writes are his.
+      const outward =
+        options.posting &&
+        posting !== TRACKER_POSTING_ADMITTED &&
+        isTrackerWriteTool(name) &&
+        !ownerActor(callbacks.actor)
+          ? await outwardTracker(convention)
+          : undefined;
+      if (options.posting && outward !== undefined)
+        assertAdmitted(
+          await options.posting.admit({
+            tracker: outward,
+            ...destinationOf(convention),
+            route: { kind: "repo", repo, local, tool: name, arguments: structuredClone(toolArgs) },
+            asker: postingAsker(callbacks.actor),
+            projectIds: await projectIdsAt(path),
+          }),
+        );
       // Delegated tools use a connected account; the owner's ambient gh login
       // is available only to native local calls.
       const account = !local && convention.backend === "github" ? await accountBinding("github") : undefined;
@@ -2056,6 +2275,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                   tool,
                   arguments: arguments_,
                   resultMode: "data",
+                  // This call already passed posting above (ADR 0302).
+                  posting: TRACKER_POSTING_ADMITTED,
                   fence: async () => {
                     await beforeWrite();
                     return () => {};
@@ -2100,7 +2321,14 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         );
       }
     },
-    async handle(request: WorkRequest, local: boolean): Promise<WorkResult> {
+    async handle(
+      request: WorkRequest,
+      local: boolean,
+      /** Host-only: posting already let this write through (ADR 0302). */
+      posting?: typeof TRACKER_POSTING_ADMITTED,
+      /** With `posting`: where it was let through to; it goes only while unchanged. */
+      destination?: string,
+    ): Promise<WorkResult> {
       if (request.action === "repos") {
         const repos = [
           ...((await projectReader?.repos()) ?? []),
@@ -2317,7 +2545,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "create": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true);
+          await checkWorkPosting(request, convention, entry.path, posting, destination);
           const item = await backend.create({
             title: request.title,
             ...(request.summary === undefined ? {} : { summary: request.summary }),
@@ -2331,7 +2560,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "update": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true);
+          await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return {
               repo: await describe(entry),
@@ -2345,7 +2575,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "attach": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true);
+          await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return { repo: await describe(entry), item: await backend.attach(request.id, request.evidence) };
           } catch (error) {

@@ -18,7 +18,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // in Claude and the sign-ins waiting, and approves or denies one by its code.
 // Connected connectors are devices: `clankie devices revoke ID` ends one.
 // `clankie connector prompts` lists which apps may answer prompts in agent
-// panes, and turns one on or off by its name or device id (ADR 0302).
+// panes, and turns one on or off by its name or device id (ADR 0303).
 
 const CONNECTOR_USAGE =
   "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json]";
