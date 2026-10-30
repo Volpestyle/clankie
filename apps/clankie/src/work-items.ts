@@ -1734,7 +1734,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     dropTarget,
     /** Files one drop in a target `dropTarget` returned ready; see `fileDrop`. */
     fileDrop: (target: Extract<DropTarget, { ready: true }>, draft: DropDraft) =>
-      fileDrop(target.root, draft, { ...(options.clock === undefined ? {} : { clock: options.clock }) }),
+      fileDrop(target.root, draft, options.clock === undefined ? {} : { clock: options.clock }),
     recordDropWake: (
       target: Extract<DropTarget, { ready: true }>,
       key: string,
