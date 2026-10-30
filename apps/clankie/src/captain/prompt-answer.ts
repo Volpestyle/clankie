@@ -73,11 +73,13 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
         sent += 1;
       }
     } catch {
+      // A send can fail after it reached the pane (an ssh link dropping on a linked
+      // PC), so a failed send never proves nothing arrived.
       return {
-        outcome: sent === 0 ? "unavailable" : "uncertain",
+        outcome: "uncertain",
         message:
           sent === 0
-            ? "Nothing reached the agent; its pane couldn't take keys just now."
+            ? "The answer may or may not have reached the agent. Read its screen before doing anything else."
             : "Only part of the answer may have reached the agent. Read its screen before doing anything else.",
       };
     }
@@ -86,9 +88,10 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
     await Promise.resolve()
       .then(() => deps.record(input.app, `Answered a prompt in ${label}: ${describe(input.steps)}.`))
       .catch(() => undefined);
+    const sentTo = `Sent to ${label}: ${describe(input.steps)}`;
     return {
       outcome: "answered",
-      message: `Sent to ${label}: ${describe(input.steps)}. Read its screen to see what it does next.`,
+      message: `${sentTo.length > 900 ? `${sentTo.slice(0, 899)}…` : sentTo}. Read its screen to see what it does next.`,
     };
   };
 }

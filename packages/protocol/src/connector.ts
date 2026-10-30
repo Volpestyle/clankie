@@ -172,9 +172,8 @@ export const PromptAnswerStepSchema = z.union([
         .string()
         .min(1)
         .max(PROMPT_ANSWER_TEXT_MAX)
-        // eslint-disable-next-line no-control-regex -- control characters are exactly what this refuses
         .refine(
-          (value) => !/[\u0000-\u001f\u007f]/u.test(value),
+          (value) => ![...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f),
           "Text is one line with no control characters",
         ),
     })
