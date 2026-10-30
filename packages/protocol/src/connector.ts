@@ -290,6 +290,8 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "start_agent":
     case "app_notes":
     case "prompt_answer":
+    case "herdr_core_list":
+    case "herdr_core_read":
     case "get":
     case "send":
     case "send_receipt":

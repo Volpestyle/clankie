@@ -44,6 +44,7 @@ import {
   type ObservedHeadSeat,
 } from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
+import { createHerdrCore, type HerdrCore } from "./herdr-core.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
 import { PersonaStore } from "./personas.ts";
@@ -106,6 +107,8 @@ export interface CreateOperatorServiceContext {
   readonly hireSeat: HireSeat;
   readonly seatSubjects: Map<string, string>;
   readonly herdrRunner: HerdrWatchRunner;
+  /** The Herdr desktop app's terminal server on this Mac; the default finds it as `hc` does. */
+  readonly herdrCore?: HerdrCore;
   readonly withDriver: (conversation: OperatorConversation) => OperatorConversation;
   readonly conversationGoal: (conversationId: string) =>
     | {
@@ -151,6 +154,8 @@ export function createOperatorService(
 ): CaptainPort["serveOperatorConversation"] {
   let reportCursor: string | undefined;
   let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
+  let defaultHerdrCore: HerdrCore | undefined;
+  const herdrCore = () => ctx.herdrCore ?? (defaultHerdrCore ??= createHerdrCore());
   async function serve(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
@@ -892,6 +897,26 @@ export function createOperatorService(
         terminalId: request.terminalId,
         status: await ctx.terminals.focus(request.terminalId),
       };
+    }
+    if (request.op === "herdr_core_list") {
+      const listed = await herdrCore().list();
+      return listed.status === "listed"
+        ? { op: "herdr_core_list", schemaVersion: 1, status: "listed", agents: [...listed.agents] }
+        : {
+            op: "herdr_core_list",
+            schemaVersion: 1,
+            status: "unavailable",
+            agents: [],
+            detail: listed.detail,
+          };
+    }
+    if (request.op === "herdr_core_read") {
+      const read = await herdrCore().read(request.terminal, request.lines ?? 0);
+      return { op: "herdr_core_read", schemaVersion: 1, terminal: request.terminal, ...read };
+    }
+    if (request.op === "herdr_core_focus") {
+      const focused = await herdrCore().focus(request.terminal);
+      return { op: "herdr_core_focus", schemaVersion: 1, terminal: request.terminal, ...focused };
     }
     if (request.op === "seat_bridges") {
       return {
