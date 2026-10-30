@@ -676,7 +676,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
       ownerCheck: {
         type: ["string", "null"],
         description:
-          "Built-in tracker only. One line the owner can try in the app in about ten seconds, or judge by feel, look, sound or reading; only these reach the owner's Proof deck. Null removes it. Only the owner or the lead sets it; everything else is closed by the lead.",
+          "Built-in tracker only. One line, at most 140 characters, saying exactly what the owner tries in the app in about ten seconds, or judges by feel, look, sound or reading; only these reach the owner's feed and Proof deck. Null removes it. Only the owner or the lead sets it; everything else is closed by the lead.",
       },
       dueDate: nullableString,
       estimate: { type: ["number", "null"] },

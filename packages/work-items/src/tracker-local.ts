@@ -22,6 +22,8 @@ import {
   type WorkInboxPendingQuestion,
 } from "@clankie/protocol/work-items";
 import {
+  OWNER_CHECK_LINE_LIMIT,
+  OWNER_CHECK_LINE_MAX,
   TrackerSyncCommandSchema,
   TrackerSyncResultSchema,
   type TrackerSyncCommand,
@@ -1577,11 +1579,10 @@ function setIssueCycle(
   moveCycle(store, issue, cycle, context, now);
 }
 
-const OWNER_CHECK_MAX = 160;
-
 /**
  * The owner's check as stored: undefined leaves it untouched, null or blank removes it,
- * and anything else is one line of at most 160 characters. Only the owner or the lead asks.
+ * and anything else is one line of at most 140 characters (step 5, C4: the feed's quick
+ * check; lines saved before it may run to 160 and are kept). Only the owner or the lead asks.
  */
 function ownerCheckChange(value: unknown, context: WriteContext): string | null | undefined {
   if (value === undefined) return undefined;
@@ -1595,8 +1596,7 @@ function ownerCheckChange(value: unknown, context: WriteContext): string | null 
   const line = value.trim();
   if (line === "") return null;
   if (/[\r\n]/u.test(line)) throw new Error("ownerCheck must be one line");
-  if (line.length > OWNER_CHECK_MAX)
-    throw new Error(`ownerCheck must be at most ${String(OWNER_CHECK_MAX)} characters`);
+  if (line.length > OWNER_CHECK_LINE_MAX) throw new Error(`ownerCheck: ${OWNER_CHECK_LINE_LIMIT}`);
   return line;
 }
 
