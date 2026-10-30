@@ -10,6 +10,18 @@ import {
   PUBLIC_GATEWAY_ROUTES,
 } from "../../../packages/protocol/src/public-gateway.ts";
 import {
+  CONNECTOR_AUTHORIZATION_SERVER_PATH,
+  CONNECTOR_AUTHORIZE_PATH,
+  CONNECTOR_AUTHORIZE_STATUS_PATH,
+  CONNECTOR_MCP_PATH,
+  CONNECTOR_PROTECTED_RESOURCE_PATH,
+  CONNECTOR_REGISTER_PATH,
+  CONNECTOR_SIGN_INS_PATH,
+  CONNECTOR_SIGN_IN_APPROVE_PATH,
+  CONNECTOR_SIGN_IN_DENY_PATH,
+  CONNECTOR_TOKEN_PATH,
+} from "../../../packages/protocol/src/connector.ts";
+import {
   DEVICE_PUSH_PATH,
   PUBLIC_GATEWAY_PUSH_CLEAR_PATH,
   PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH,
@@ -1176,6 +1188,27 @@ function buildNetworkRows() {
         purpose: "Read terminal frames from the host’s supported Herdr integration.",
       },
     ],
+    [
+      `GET ${CONNECTOR_SIGN_INS_PATH}`,
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "List Claude connector sign-ins waiting for the owner, and the URL to add in Claude.",
+      },
+    ],
+    [
+      `POST ${CONNECTOR_SIGN_IN_APPROVE_PATH}`,
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Approve a Claude connector sign-in by the code its page shows.",
+      },
+    ],
+    [
+      `POST ${CONNECTOR_SIGN_IN_DENY_PATH}`,
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Turn away a Claude connector sign-in by its code.",
+      },
+    ],
   ]);
 
   const rows = [
@@ -1237,6 +1270,53 @@ function buildNetworkRows() {
   if (routeDetails.size > 0) {
     throw new Error(`Public docs describe removed routes: ${[...routeDetails.keys()].join(", ")}`);
   }
+
+  // The Claude connector (ADR 0301) is plaintext through the doorway; its own OAuth guards it.
+  rows.push(
+    {
+      method: "POST",
+      route: `/h/{hostId}${CONNECTOR_MCP_PATH}`,
+      access: "Connector access token from the owner-approved sign-in",
+      purpose: "Claude's MCP tools: list agents, read an agent's screen, message its thread.",
+    },
+    {
+      method: "GET",
+      route: `/h/{hostId}${CONNECTOR_PROTECTED_RESOURCE_PATH}${CONNECTOR_MCP_PATH}`,
+      access: "Anonymous",
+      purpose: "Name the connector's resource and its sign-in server (RFC 9728).",
+    },
+    {
+      method: "GET",
+      route: `/h/{hostId}${CONNECTOR_AUTHORIZATION_SERVER_PATH}`,
+      access: "Anonymous",
+      purpose:
+        "Describe the connector's sign-in endpoints (RFC 8414); also at the origin's root with the host after the suffix.",
+    },
+    {
+      method: "POST",
+      route: `/h/{hostId}${CONNECTOR_REGISTER_PATH}`,
+      access: "Anonymous; only Claude's callback or loopback redirects",
+      purpose: "Register a connector client (RFC 7591) without storing anything.",
+    },
+    {
+      method: "GET",
+      route: `/h/{hostId}${CONNECTOR_AUTHORIZE_PATH}?…`,
+      access: "Anonymous; the owner approves the code the page shows",
+      purpose: "Open the sign-in page Claude sends the owner's browser to.",
+    },
+    {
+      method: "POST",
+      route: `/h/{hostId}${CONNECTOR_AUTHORIZE_STATUS_PATH}`,
+      access: "The sign-in page's own secret request id",
+      purpose: "Poll until the owner approves or denies.",
+    },
+    {
+      method: "POST",
+      route: `/h/{hostId}${CONNECTOR_TOKEN_PATH}`,
+      access: "Authorization code with PKCE, or a rotating refresh token",
+      purpose: "Issue the connector's hour-long access token.",
+    },
+  );
 
   return { rows };
 }

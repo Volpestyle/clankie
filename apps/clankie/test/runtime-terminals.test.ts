@@ -85,9 +85,16 @@ else if (args[0] === 'terminal') {
       if (result.op !== "terminal_tail") throw new Error("Unexpected result");
       return result.result;
     };
+    const focus = async (terminalId: string) => {
+      const result = await dispatch({ op: "terminal_focus", schemaVersion: 1, terminalId });
+      if (result.op !== "terminal_focus") throw new Error("Unexpected result");
+      return result.status;
+    };
     return {
       client,
+      dispatch,
       tail,
+      focus,
       close: async () => {
         app.close();
         await captain.close();
@@ -111,6 +118,17 @@ else if (args[0] === 'terminal') {
     const [alpha, beta] = sessions.map((row) => row.terminalId);
     expect(alpha).not.toBe(beta);
     expect(JSON.stringify(sessions)).not.toMatch(/sock|ambient|unrelated-pane/u);
+    expect(sessions.every((row) => row.seatId === undefined)).toBe(true);
+    // Asked for, each pane names the seat id the census gives it on its fleet.
+    const seated = await service.dispatch({
+      op: "terminal_catalog",
+      schemaVersion: 1,
+      includeSeatIds: true,
+    });
+    expect(seated.op === "terminal_catalog" && seated.sessions.map((row) => row.seatId)).toEqual([
+      "alpha/same-terminal",
+      "beta/same-terminal",
+    ]);
     const granted = await service.client.terminalControl!({
       schemaVersion: 1,
       terminalId: beta!,
@@ -153,6 +171,45 @@ else if (args[0] === 'terminal') {
     expect(page.terminalId).toBe(beta);
     expect(page.frames[0]?.terminalId).toBe(beta);
     expect(Buffer.from(page.frames[0]!.data, "base64").toString()).toContain("/tmp/beta.sock");
+    // A seat id on a named fleet (`<fleet>/<native>`) watches that fleet's pane,
+    // but never controls it: leases keep the endpoint-bound address.
+    const seatObservation = { schemaVersion: 1 as const, terminalId: "alpha/same-terminal", surfaceClientId };
+    let seatCursor: typeof cursor | undefined;
+    const seatPage = await vi.waitUntil(
+      async () => {
+        const next = await service.tail(
+          seatCursor === undefined ? seatObservation : { ...seatObservation, cursor: seatCursor },
+        );
+        if (next.status !== "page") throw new Error(`Expected page, received ${next.status}`);
+        seatCursor = next.cursor;
+        return next.frames.length > 0 ? next : false;
+      },
+      { timeout: 5_000 },
+    );
+    expect(seatPage.frames[0]?.terminalId).toBe("alpha/same-terminal");
+    // Opening a session in its own app focuses its pane in that fleet's Herdr.
+    expect(await service.focus("alpha/same-terminal")).toBe("focused");
+    expect(await service.focus(beta!)).toBe("focused");
+    expect(await service.focus("alpha/no-such-terminal")).toBe("unavailable");
+    expect(
+      (await calls())
+        .filter((row) => row.args[0] === "agent" && row.args[1] === "focus")
+        .map((row) => [row.socket, row.args[2]]),
+    ).toEqual([
+      ["/tmp/alpha.sock", "p1"],
+      ["/tmp/beta.sock", "p1"],
+    ]);
+    expect(Buffer.from(seatPage.frames[0]!.data, "base64").toString()).toContain("/tmp/alpha.sock");
+    expect(
+      (
+        await service.client.terminalControl!({
+          schemaVersion: 1,
+          terminalId: "alpha/same-terminal",
+          surfaceClientId,
+          action: "request",
+        })
+      ).status,
+    ).not.toBe("granted");
     await service.close();
     service = await open();
     // No catalog call needed to recover a device's previously issued address.

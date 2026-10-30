@@ -60,7 +60,12 @@ export function createVoiceCallUpgrade(
       // The pocket chat's own grant; hosting control and support access never speak as the owner.
       const device = authorization.device;
       deviceId = device.deviceId;
-      if (!device.grants.chat || device.controlScope === "hosted" || device.supportGrantId !== undefined)
+      if (
+        !device.grants.chat ||
+        device.controlScope === "hosted" ||
+        device.supportGrantId !== undefined ||
+        device.scope === "connector"
+      )
         return refused(403, "voice_call_grant_required");
       if (options.captainToken === undefined) return refused(503, "voice_call_upstream_unavailable");
       // Opening the call first means a refused or busy service is a status, not a dropped socket.

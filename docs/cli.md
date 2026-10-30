@@ -1918,6 +1918,23 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE`
+
+The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
+a remote MCP server that lets Claude list your agents, read their screens and
+message them, and nothing else. `clankie connector` prints the URL to add in
+Claude (Settings > Connectors > Add custom connector) once remote access is
+signed in, and the sign-ins waiting. JSON: `{ "ok": true, "connectorUrl"?: URL,
+"signIns": [{ "code", "clientName", "redirectHost", "createdAt", "expiresAt" }] }`.
+
+Claude's sign-in page shows a code such as `ABCD-2345`; `clankie connector
+approve CODE` lets that sign-in in (human: `Approved CODE. …`; JSON
+`{ "ok": true, "code", "decision": "approved", "clientName" }`), and `deny`
+turns it away. A code waits ten minutes. Exit 1 with status `not_found` when no
+sign-in waits with that code, or `already_decided`. Approve only a code you see
+on a page you opened. An approved connector is a device in `clankie devices`
+with `scope: "connector"`; `clankie devices revoke ID` disconnects it.
+
 ### `gateway [status]` / `gateway set --url URL --host-id ID` / `gateway disable`
 
 `clankie gateway rotate-encryption-key` replaces the broker key wrapping device

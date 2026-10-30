@@ -3,6 +3,7 @@ import { assertScratchNetwork, SettingsStore } from "@clankie/settings";
 import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
 import { createVoiceCallUpgrade } from "./voice-call.ts";
+import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "./connector-mcp.ts";
 import {
   createCaptainConversationDispatch,
   createCaptainFileDownload,
@@ -64,6 +65,15 @@ const conversationHandler = createOperatorConversationRelayHandler({
       }),
   logger: conversationLogger,
 });
+// The Claude connector rides this relay's own dispatch, as a device would (ADR 0301).
+const connectorHandler = createConnectorMcpHandler({
+  authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: controlPlaneUrl }),
+  operator: createLoopbackConnectorOperator(
+    `http://${host === "0.0.0.0" ? "127.0.0.1" : host === "::" ? "[::1]" : host}:${port}`,
+  ),
+  localAuthorizationServer: controlPlaneUrl,
+  version: "0.1.0",
+});
 const server = createServer((request, response) => {
   void handleHttp(request, response);
 });
@@ -91,6 +101,7 @@ async function handleHttp(
     return;
   }
   try {
+    if (await connectorHandler(request, response)) return;
     if (await conversationHandler(request, response)) return;
   } catch {
     if (!response.headersSent) response.statusCode = 500;

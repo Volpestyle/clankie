@@ -1,8 +1,10 @@
 import { isMachineJoinTransportRoute } from "@clankie/protocol/machine-join";
+import { CONNECTOR_PUBLIC_BASE_HEADER, isConnectorRoute } from "@clankie/protocol/connector";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
   PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
+  PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST,
   PUBLIC_GATEWAY_RESPONSE_CHUNK_BYTES_MAX,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PUBLIC_GATEWAY_STREAMS_HEADER,
@@ -43,7 +45,7 @@ const TOKEN_REFRESH_WINDOW_MS = 5 * 60_000;
 const RESPONSE_BYTES_MAX = 32 * 1024 * 1024;
 const WEBSOCKET_PAYLOAD_BYTES_MAX = 4 * 1024 * 1024;
 const REQUEST_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST);
-const RESPONSE_HEADER_ALLOWLIST = new Set(["cache-control", "content-type", "retry-after"]);
+const RESPONSE_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST);
 
 export interface PublicGatewayConnectorLogger {
   info(fields: Readonly<Record<string, unknown>>, message: string): void;
@@ -554,10 +556,16 @@ export class PublicGatewayConnector {
     // Forwarded over loopback like a local client; the mark keeps gateway
     // traffic out of the same-Mac boundary (LocalCompanionBoundary).
     headers.set(GATEWAY_FORWARDED_HEADER, "1");
+    // Connector routes carry their own OAuth and name their URLs from the
+    // public base the request arrived at (ADR 0301).
+    const connector = isConnectorRoute(frame.method, frame.path);
+    if (connector) headers.set(CONNECTOR_PUBLIC_BASE_HEADER, this.hostBaseUrl);
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
       const response =
-        isMachineJoinTransportRoute(frame.method, frame.path) || frame.path === "/v1/hooks/linear"
+        connector ||
+        isMachineJoinTransportRoute(frame.method, frame.path) ||
+        frame.path === "/v1/hooks/linear"
           ? await this.fetcher(new URL(frame.path, baseUrl), {
               method: frame.method,
               headers,

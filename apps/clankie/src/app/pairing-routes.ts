@@ -754,6 +754,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       platform: record.platform,
       grants: identity.grants,
       host: { name: ctx.hostDisplayName },
+      ...(record.scope === undefined ? {} : { scope: record.scope }),
       ...(record.supportGrantId === undefined
         ? {}
         : {

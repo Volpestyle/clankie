@@ -687,6 +687,24 @@ export async function readTerminalCatalog(
   }
 }
 
+/** Bring one terminal's pane to the front in Herdr. False when Herdr can't find or focus it. */
+export async function focusHerdrTerminal(
+  terminalId: string,
+  options: { readonly runCommand?: HerdrCensusRunner; readonly env?: NodeJS.ProcessEnv } = {},
+): Promise<boolean> {
+  const run = options.runCommand ?? ((command, args) => defaultRunner(command, args, options.env));
+  const pane = (await readTerminalCatalog({ runCommand: run })).find(
+    (session) => session.terminalId === terminalId,
+  )?.pane.id;
+  if (pane === undefined) return false;
+  try {
+    await run("herdr", ["agent", "focus", pane]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Which seat a Herdr pane is, for a caller that can only name the pane it sits
  * in (ADR 0148). This lookup is what makes an agent-reachable op safe: the seat

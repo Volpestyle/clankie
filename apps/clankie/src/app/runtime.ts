@@ -128,6 +128,7 @@ import { authenticateCaptain, authenticateOperator, captainTransportKind, readJs
 import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
+import { registerConnectorRoutes } from "./connector-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
 import { createCaptainSeatRoutes } from "../captain-seat-routes.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
@@ -460,6 +461,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (record.status === "revoked" || isDeviceRunExpired(record, now)) return { denied: "revoked" };
     if (record.status !== "active") return { denied: "invalid" };
     if (claims.expiresAt <= Math.floor(now.getTime() / 1000)) return { denied: "expired" };
+    // A connector reaches the fleet only through the relay's allowlist (ADR 0301).
+    // Here it may read its own record, which is how the relay checks it; it
+    // renews through its OAuth refresh token, never a device refresh.
+    if (
+      record.scope === "connector" &&
+      !(request.method === "GET" && new URL(request.url).pathname === "/v1/devices/self")
+    )
+      return { denied: "invalid" };
     if (record.supportGrantId !== undefined) {
       const grant = supportGrants.active(record.supportGrantId);
       if (grant === undefined) return { denied: "revoked" };
@@ -2750,6 +2759,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     get hostDisplayName() {
       return hostDisplayName;
     },
+  });
+  registerConnectorRoutes({
+    dependencies,
+    app,
+    deviceSessionSigner,
+    clock,
+    idFactory,
+    recordEvent,
+    authenticateDevice,
+    deviceLocks,
+    devices,
   });
   const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
     get app() {

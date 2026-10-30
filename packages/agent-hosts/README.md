@@ -46,6 +46,25 @@ discovery, byte-range reads, and outside-root refusal. Tests do not require that
 Reading never starts or resumes a harness. Continuing a session is the seat's
 job: a hired seat stays the real interactive harness in its Herdr pane (ADR 0203).
 
+## Session sources
+
+`src/sessions/` (exported as `@clankie/agent-hosts/sessions`) is the seam for
+the apps that hold the owner's agent sessions (ADR 0301). A `SessionSource`
+answers four things: `list` its sessions, `read` one as plain text, `send` one
+a message, and `open` one in its own app on its machine. `SessionSources` puts
+every source behind ids qualified by source (`herdr:<id>`), fans `list` out
+across them, and leaves a failing source out of a list rather than failing it.
+Send results say whether the agent took the message, queued it behind its
+current work, or got nothing.
+
+`createHerdrSessionSource` is the first source. It speaks Clankie's operator
+ops through a port bound to the caller's own credential, so the caller's
+allowlist still applies: list is the fleet plus agent panes Clankie didn't
+seat (readable, not messageable), read is a terminal tail rendered by
+`terminal-text.ts`, send writes into the agent's persona thread, and open is the
+`terminal_focus` op. The Claude connector in `apps/relay` uses this layer; a
+second session app (Orca next) is another source, not another set of tools.
+
 ## Seat adapters
 
 `seat.ts` is the harness-adapter seam (ADR 0187 amendment, VUH-1458). A

@@ -86,6 +86,16 @@ export class DeviceSessionSigner {
     return `${payload}.${signature}`;
   }
 
+  /**
+   * A keyed MAC for one named purpose. The key is derived per purpose, so a
+   * value signed for one (a connector client id) never verifies as another (a
+   * refresh token, or a session token).
+   */
+  public mac(purpose: string, payload: string): Buffer {
+    const key = createHmac("sha256", this.signingKey).update(`clankie-derived-key-v1\0${purpose}`).digest();
+    return createHmac("sha256", key).update(payload).digest();
+  }
+
   public verify(token: string, nowEpochSeconds: number): DeviceSessionClaims {
     const [payload, signature, extra] = token.split(".");
     if (!payload || !signature || extra) {

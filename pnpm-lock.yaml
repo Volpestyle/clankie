@@ -339,12 +339,18 @@ importers:
 
   apps/relay:
     dependencies:
+      '@clankie/agent-hosts':
+        specifier: workspace:*
+        version: link:../../packages/agent-hosts
       '@clankie/credential-broker':
         specifier: workspace:*
         version: link:../../packages/credential-broker
       '@clankie/settings':
         specifier: workspace:*
         version: link:../../packages/settings
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(patch_hash=a8e723cb711617c751aa13329e4b9b32c90802be6b797e57a2fb4b9b9c812449)(zod@4.4.3)
       ws:
         specifier: 8.21.0
         version: 8.21.0
