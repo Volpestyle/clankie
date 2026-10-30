@@ -975,6 +975,38 @@ describe("an issue that belongs to another project", () => {
     expect(f.mutations("issueRelation")).toBe(0);
   });
 
+  it("meets that project's setting when a work update adds, sets or drops a dependency on its issue", async () => {
+    const { f } = await setup();
+    const MEADOW_ISSUE = "00000000-0000-4000-8000-0000000000ef";
+    f.provider.rows.issues!.push({
+      ...f.provider.issue,
+      id: MEADOW_ISSUE,
+      identifier: "VUH-1400",
+      title: "Mow the meadow",
+      project: { id: MEADOW_PROJECT, name: "Meadow" },
+    });
+    await f.setPosting("garden", "allow");
+    await f.setPosting("meadow", "read_only");
+    const update = (change: Record<string, unknown>) =>
+      f.workItems.handle({ action: "update", repo: f.garden, id: "VUH-1383", ...change }, true);
+    for (const change of [{ addDependsOn: ["VUH-1400"] }, { dependsOn: ["VUH-1400"] }])
+      await expect(update(change)).rejects.toThrow("Posting to Linear is read only for Meadow");
+    // The garden's issue already waits on the meadow's: replacing its dependencies drops that.
+    const relation = {
+      id: "00000000-0000-4000-8000-0000000000f0",
+      type: "blocks",
+      issue: { id: MEADOW_ISSUE, identifier: "VUH-1400" },
+      relatedIssue: { id: ISSUE_ID, identifier: "VUH-1383" },
+    };
+    f.provider.issue.inverseRelations = {
+      nodes: [relation],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    };
+    await expect(update({ dependsOn: [] })).rejects.toThrow("Posting to Linear is read only for Meadow");
+    expect(f.mutations("issueUpdate")).toBe(0);
+    expect(f.mutations("issueRelation")).toBe(0);
+  });
+
   it("is not posted when it moves into a read only project while the write waits", async () => {
     const { f, moveIssueToMeadow } = await setup();
     await f.setPosting("garden", "lead");
@@ -1183,6 +1215,23 @@ it("a team-wide project's setting covers that team's issues that sit in another 
     expect(result.detail).toContain("Posting to Linear is read only for Meadow");
   }
   expect(f.mutations("issueCreate") + f.mutations("issueUpdate")).toBe(0);
+});
+
+it("a new issue from this repo's tracker meets the setting of a whole-team project on its team", async () => {
+  const f = await fixture({ meadow: true });
+  // The garden (go ahead) saves new issues to its own Linear project; the meadow tracks the team.
+  await f.setPosting("garden", "allow");
+  await f.setPosting("meadow", "read_only");
+  const cli = await f.work("create", "Named by neither team nor project");
+  expect(cli.ok).toBe(false);
+  expect(cli.body).toMatchObject({
+    error: "posting_refused",
+    detail: expect.stringContaining("Posting to Linear is read only for Meadow"),
+  });
+  await expect(
+    f.workItems.callTracker("save_issue", { title: "Through the repo" }, { repo: f.garden, local: true }),
+  ).rejects.toThrow("Posting to Linear is read only for Meadow");
+  expect(f.mutations("issueCreate")).toBe(0);
 });
 
 it("an owner check cut off before its question was saved is asked again on restart", async () => {

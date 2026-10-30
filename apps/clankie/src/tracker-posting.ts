@@ -285,19 +285,38 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
    * Linear repo's tool arguments). When its target is a record it can't place in a project,
    * every project on Linear, so the strictest setting applies.
    */
-  const linearTargets = async (route: PostingRoute, candidates: readonly Project[]): Promise<string[]> => {
+  const linearTargets = async (
+    route: PostingRoute,
+    candidates: readonly Project[],
+    destination?: string,
+  ): Promise<string[]> => {
     if (candidates.length === 0) return [];
     const everyProject = candidates.map((project) => project.id);
     // A GraphQL mutation can touch any record in its document or variables.
     if (route.kind === "linear" && route.tool === LINEAR_GRAPHQL_TOOL.name) return everyProject;
-    // A `clankie work update|attach` changes an existing issue and names no destination.
+    const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+    const refsIn = (value: unknown) =>
+      (Array.isArray(value) ? value : [value]).map(text).filter((ref) => ref !== undefined);
+    const workUpdate = route.kind === "work" && route.request.action === "update";
+    // A `clankie work update|attach` changes an existing issue; an update's dependencies
+    // change the issues it depends on too.
     const args: Record<string, unknown> =
       route.kind !== "work"
-        ? route.arguments
-        : route.request.action === "update" || route.request.action === "attach"
+        ? { ...route.arguments }
+        : workUpdate || route.request.action === "attach"
           ? { issueId: route.request.id }
           : {};
-    const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+    const changesIssue =
+      text(args.id) !== undefined || text(args.issueId) !== undefined || text(args.issue) !== undefined;
+    // A new issue from a repo's tracker or `clankie work create` lands where the repo's saved
+    // tracker puts it (its team and project) unless the write names a team or project itself.
+    const saved = /^linear:([^/]*)\/(.*)$/u.exec(destination ?? "");
+    if (route.kind !== "linear" && saved && !changesIssue) {
+      if (text(args.team) === undefined && text(args.teamId) === undefined && text(saved[1]))
+        args.team = saved[1];
+      if (text(args.project) === undefined && text(args.projectId) === undefined && text(saved[2]))
+        args.project = saved[2];
+    }
     const same = (left: string | undefined, refs: readonly string[]) =>
       left !== undefined && refs.some((ref) => ref.toLowerCase() === left.toLowerCase());
     /**
@@ -370,14 +389,29 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     if (otherRecord) return everyProject;
     // An issue's parent and the issues it relates to change too: their projects meet the write.
     const related = saveIssue
-      ? ISSUE_LINK_KEYS.flatMap((key) => {
-          const value = args[key];
-          return (Array.isArray(value) ? value : [value]).map(text).filter((ref) => ref !== undefined);
-        })
-      : [];
+      ? ISSUE_LINK_KEYS.flatMap((key) => refsIn(args[key]))
+      : workUpdate
+        ? [...refsIn(route.request.dependsOn), ...refsIn(route.request.addDependsOn)]
+        : [];
     const issueRefs = [...(issueRef === undefined ? [] : [issueRef]), ...related];
     if (issueRefs.length === 0) return targeted;
     if (!options.readLinear) return everyProject;
+    // Replacing an update's dependencies drops the ones it has now: those issues change too.
+    if (workUpdate && route.request.dependsOn !== undefined && issueRef !== undefined) {
+      type Relation = { issue?: { id?: unknown } | null; relatedIssue?: { id?: unknown } | null };
+      type Relations = Relation[] | { nodes?: Relation[] } | null | undefined;
+      const nodes = (value: Relations) => (Array.isArray(value) ? value : (value?.nodes ?? []));
+      try {
+        const issue = (await options.readLinear("get_issue", { id: issueRef, includeRelations: true })) as {
+          relations?: Relations;
+          inverseRelations?: Relations;
+        } | null;
+        for (const relation of [...nodes(issue?.relations), ...nodes(issue?.inverseRelations)])
+          issueRefs.push(...refsIn([relation.issue?.id, relation.relatedIssue?.id]));
+      } catch {
+        return everyProject;
+      }
+    }
     // ...and, for an existing issue, where it is now: moving an issue out of a project
     // meets that project's setting too.
     const current: string[] = [];
@@ -424,7 +458,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     const known = write.projectIds?.length ? write.projectIds : hired === undefined ? undefined : [hired];
     if (known !== undefined && write.tracker !== "linear") return projectsOf(settings, known);
     const candidates = await candidatesFor(write.tracker, settings);
-    const targeted = await linearTargets(write.route, candidates);
+    const targeted = await linearTargets(write.route, candidates, write.destination);
     // A write from one project may name another's Linear project on the same team: the
     // setting of every project it touches applies, and the strictest one wins.
     if (known !== undefined) return projectsOf(settings, [...new Set([...known, ...targeted])]);
@@ -683,7 +717,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     const settings = await options.settings.load();
     const current =
       record.tracker === "linear"
-        ? await linearTargets(record.route, await candidatesFor(record.tracker, settings))
+        ? await linearTargets(record.route, await candidatesFor(record.tracker, settings), record.destination)
         : [];
     const ids = [...new Set([...record.projectIds, ...current])];
     return ids.length ? postingOf(projectsOf(settings, ids)) : postingOf([]);
