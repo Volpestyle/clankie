@@ -99,6 +99,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "input_get",
         "input_list",
         "owner_update_list",
+        "feed_list",
         "owner_update_read",
         "owner_update_dismiss",
         "input_answer",
