@@ -15,6 +15,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FleetRoomJournal } from "../src/captain/fleet-room.ts";
+import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
+import type { HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { createPromptAnswerer } from "../src/captain/prompt-answer.ts";
 import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../relay/src/connector-mcp.ts";
@@ -581,9 +583,10 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
   const boardRoot = await mkdtemp(join(tmpdir(), "connector-prompts-"));
   const board = new FleetRoomJournal(boardRoot);
   const captainToken = randomBytes(24).toString("hex");
-  // Herdr's side of three panes, as the routed runner sees them: Bram waits on a Claude
-  // Code permission prompt, Ivy's menu redraws the same after a key, and Pip's question
-  // Clankie already sent to the owner.
+  // Herdr's side of the panes on a linked PC, reached through Clankie's real fleet
+  // router. Bram waits on a Claude Code permission prompt, Ivy's menu redraws the same
+  // after a key, Clankie already sent Pip's question to the owner; Kai, Rex, Zed and
+  // Ada each change mid-answer.
   const permission = [
     "Bash command",
     "  git push origin main",
@@ -592,31 +595,73 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     "  2. Yes, and don't ask again for git push commands",
     "  3. No, and tell Claude what to do differently (esc)",
   ].join("\n");
-  const panes = new Map([
+  const panes = new Map<string, { status: string; screen: string; paneId?: string }>([
     ["term-bram", { status: "blocked", screen: permission }],
     ["term-ivy", { status: "blocked", screen: "Pick a layout\n❯ 1. Grid\n  2. Stack\n  3. Type something" }],
     ["term-pip", { status: "blocked", screen: "Which branch?\n❯ 1. main\n  2. dev" }],
+    ["term-kai", { status: "blocked", screen: "Allow this edit?\n❯ 1. Yes\n  2. No" }],
+    ["term-rex", { status: "blocked", screen: "Run the migration?\n❯ 1. Yes\n  2. No" }],
+    ["term-zed", { status: "blocked", screen: "Pick a theme\n❯ 1. Dark\n  2. Light" }],
+    ["term-ada", { status: "blocked", screen: "Delete the branch?\n❯ 1. Yes\n  2. No" }],
   ]);
+  const paneOf = (id: string) => panes.get(id)!.paneId ?? `p-${id}`;
   const sent: string[][] = [];
-  const answerPrompt = createPromptAnswerer({
-    paneAddress: async (terminalId) => (panes.has(terminalId) ? terminalId : undefined),
-    runner: {
-      resolveTerminal: async (id) => {
+  let revoke = async () => undefined as unknown;
+  // What each pane does once a key reaches it.
+  const reactions: Record<string, () => Promise<unknown>> = {
+    // Bram and Kai go to work on their answers.
+    "p-term-bram": async () => panes.set("term-bram", { status: "working", screen: "⏺ Bash(git push)" }),
+    "p-term-kai": async () => panes.set("term-kai", { status: "working", screen: "⏺ Update(app.ts)" }),
+    // The owner turns answering off for Claude while Rex's answer is under way.
+    "p-term-rex": () => revoke(),
+    // Zed's terminal moves to another pane.
+    "p-term-zed": async () => panes.set("term-zed", { ...panes.get("term-zed")!, paneId: "p-term-zed-2" }),
+    // The PC's connection changes to a new endpoint.
+    "p-term-ada": async () => void (endpoint = "pc-b"),
+  };
+  // Each connection refuses calls once the PC's connection changed, as Clankie's fleet
+  // runners do; only what binding a pane uses is here.
+  let endpoint = "pc-a";
+  const connection = (name: string) => {
+    const live = () => {
+      if (endpoint !== name) throw new Error("Machine connection pc changed or disconnected");
+    };
+    const after = async (paneId: string) => reactions[paneId]?.();
+    return {
+      resolveTerminal: async (id: string) => {
+        live();
         const pane = panes.get(id);
         return pane === undefined
           ? undefined
-          : { paneId: `p-${id}`, terminalId: id, agent: "claude", status: pane.status, title: id };
+          : { paneId: paneOf(id), terminalId: id, name: id, agent: "claude", status: pane.status, title: id };
       },
-      readPane: async (paneId) => panes.get(paneId.slice(2))!.screen,
-      sendKeys: async (paneId, keys) => void sent.push(["keys", paneId, ...keys]),
-      sendText: async (paneId, text) => {
-        sent.push(["text", paneId, text]);
-        // Bram goes to work on his answer; Ivy's menu looks the same afterwards.
-        if (paneId === "p-term-bram")
-          panes.set("term-bram", { status: "working", screen: "⏺ Bash(git push)" });
+      readPane: async (paneId: string) => {
+        live();
+        return [...panes.keys()].map((id) => (paneOf(id) === paneId ? panes.get(id)!.screen : "")).join("");
       },
-    },
-    ownerAskPending: (seatId) => seatId === "term-pip",
+      sendKeys: async (paneId: string, keys: readonly string[]) => {
+        live();
+        sent.push(["keys", name, paneId, ...keys]);
+        await after(paneId);
+      },
+      sendText: async (paneId: string, text: string) => {
+        live();
+        sent.push(["text", name, paneId, text]);
+        await after(paneId);
+      },
+    } as unknown as HerdrWatchRunner;
+  };
+  const connections = new Map([
+    ["pc-a", connection("pc-a")],
+    ["pc-b", connection("pc-b")],
+  ]);
+  const answerPrompt = createPromptAnswerer({
+    paneAddress: async (terminalId) => (panes.has(terminalId) ? `pc/${terminalId}` : undefined),
+    runner: routeHerdrFleets(
+      {} as HerdrWatchRunner,
+      async () => new Map([["pc", connections.get(endpoint)!]]),
+    ),
+    ownerAskPending: (seatId) => seatId === "pc/term-pip",
     record: (app, text) => board.postAppNote(app, text),
   });
   const host = await createQaService({
@@ -704,6 +749,7 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     expect(await owner.run(["prompts", "on", "Claude"])).toBe(0);
     expect(owner.output().stdout).toContain("Claude: on");
     expect(owner.output().stdout).toContain("Grok: off");
+    revoke = () => owner.run(["prompts", "off", "Claude"]);
     expect(sent).toEqual([]);
 
     // The prompt must still show what the app saw.
@@ -712,7 +758,7 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     const answered = await answer(claude.client, "herdr:term-bram", "1.   Yes", [{ text: "1" }]);
     expect(answered.isError).toBeFalsy();
     expect(JSON.parse(textOf(answered))).toMatchObject({ agent: "herdr:term-bram", status: "answered" });
-    expect(sent).toEqual([["text", "p-term-bram", "1"]]);
+    expect(sent).toEqual([["text", "pc-a", "p-term-bram", "1"]]);
     // Bram went to work: no prompt waits now.
     const working = await answer(claude.client, "herdr:term-bram", "Bash", [{ key: "enter" }]);
     expect(textOf(working)).toContain("isn't waiting on a prompt (it is working)");
@@ -727,9 +773,9 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     const again = await answer(claude.client, "herdr:term-ivy", "3. Type something", [{ key: "enter" }]);
     expect(textOf(again)).toContain("already answered");
     expect(sent.slice(1)).toEqual([
-      ["text", "p-term-ivy", "3"],
-      ["text", "p-term-ivy", "Grid, but two columns"],
-      ["keys", "p-term-ivy", "enter"],
+      ["text", "pc-a", "p-term-ivy", "3"],
+      ["text", "pc-a", "p-term-ivy", "Grid, but two columns"],
+      ["keys", "pc-a", "p-term-ivy", "enter"],
     ]);
 
     // A question Clankie sent to the owner stays the owner's; Grok was never turned on.
@@ -752,6 +798,46 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     expect(notes.outcome === "ready" && notes.notes.map((note) => [note.author, note.text])).toEqual([
       ["Claude", 'Answered a prompt in term-bram: typed "1".'],
       ["Claude", 'Answered a prompt in term-ivy: typed "3", typed "Grid, but two columns", enter.'],
+    ]);
+
+    // Every step waits again for the prompt, in the same pane over the same connection,
+    // with answering still on: an answer stops part way rather than type into whatever
+    // the pane shows next.
+    const kai = await answer(claude.client, "herdr:term-kai", "Allow this edit?", [
+      { text: "1" },
+      { key: "enter" },
+    ]);
+    expect(kai.isError).toBe(true);
+    expect(textOf(kai)).toContain("Stopped after 1 of 2 steps");
+    expect(textOf(kai)).toContain("the agent stopped waiting on the prompt");
+    const zed = await answer(claude.client, "herdr:term-zed", "Pick a theme", [
+      { key: "down" },
+      { key: "enter" },
+    ]);
+    expect(textOf(zed)).toContain("the agent's pane went away");
+    const ada = await answer(claude.client, "herdr:term-ada", "Delete the branch?", [
+      { key: "down" },
+      { key: "enter" },
+    ]);
+    expect(textOf(ada)).toContain("Only part of the answer may have reached the agent");
+    const rex = await answer(claude.client, "herdr:term-rex", "Run the migration?", [
+      { key: "down" },
+      { key: "enter" },
+    ]);
+    expect(textOf(rex)).toContain("answering was turned off for this app");
+    // Ada's enter never went to the PC's new endpoint; a new answer binds to it afresh.
+    expect(sent.slice(4)).toEqual([
+      ["text", "pc-a", "p-term-kai", "1"],
+      ["keys", "pc-a", "p-term-zed", "down"],
+      ["keys", "pc-a", "p-term-ada", "down"],
+      ["keys", "pc-b", "p-term-rex", "down"],
+    ]);
+    const parts = board.readAppNotes({ limit: 20 });
+    expect(parts.outcome === "ready" && parts.notes.slice(2).map((note) => note.text)).toEqual([
+      'Answered part of a prompt in term-kai: typed "1"; stopped because the agent stopped waiting on the prompt.',
+      "Answered part of a prompt in term-zed: down; stopped because the agent's pane went away.",
+      "Answered part of a prompt in term-ada: down; stopped because Clankie lost the pane or its machine.",
+      "Answered part of a prompt in term-rex: down; stopped because answering was turned off for this app.",
     ]);
 
     // By hand: the relay stamps the app, and the service takes the stamp only on the relay's bearer.
@@ -783,7 +869,7 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     expect(textOf(await answer(claude.client, "herdr:term-bram", "1. Yes", [{ text: "1" }]))).toContain(
       "hasn't turned on",
     );
-    expect(sent).toHaveLength(4);
+    expect(sent).toHaveLength(8);
   } finally {
     await Promise.all(clients.map((client) => client.close()));
     relay.closeAllConnections();

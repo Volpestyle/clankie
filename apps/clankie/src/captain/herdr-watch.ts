@@ -257,7 +257,25 @@ export interface HerdrAgentSnapshot {
 
 type SpawnOperatorSeat = HireRequest & { harness: NonNullable<HireRequest["harness"]> };
 
+/**
+ * One pane on one machine connection, held for a whole prompt answer (ADR 0303).
+ * Every call goes through the connection the pane was found on, to the pane it
+ * was found in, so a machine whose connection changes mid-answer refuses the next
+ * call instead of reaching another endpoint.
+ */
+export interface HerdrBoundPane {
+  /** The pane as found when it was bound. */
+  readonly pane: HerdrAgentSnapshot;
+  /** The same terminal as Herdr reports it now, over the same connection. */
+  resolve(): Promise<HerdrAgentSnapshot | undefined>;
+  readScreen(): Promise<string>;
+  sendKeys(keys: readonly string[]): Promise<void>;
+  sendText(text: string): Promise<void>;
+}
+
 export interface HerdrWatchRunner {
+  /** Bind an exact terminal to its pane and connection; undefined when no such terminal. */
+  bindPane?(terminalId: string): Promise<HerdrBoundPane | undefined>;
   /** Fresh complete inventory of exactly one fleet, for native session reuse. */
   list?(fleet?: string): Promise<readonly HerdrAgentSnapshot[]>;
   get(target: string): Promise<HerdrAgentSnapshot>;
