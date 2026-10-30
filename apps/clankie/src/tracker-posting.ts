@@ -252,9 +252,12 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     return read.filter((convention): convention is WorkConvention => convention !== undefined);
   };
 
-  /** Which projects a Linear write lands in, read from its target; empty when it can't tell. */
+  /**
+   * Which projects a Linear write lands in, read from its target (a Linear tool's or a
+   * Linear repo's tool arguments); empty when it can't tell.
+   */
   const linearTargets = async (route: PostingRoute, candidates: readonly Project[]): Promise<string[]> => {
-    if (route.kind !== "linear" || candidates.length === 0) return [];
+    if (route.kind === "work" || candidates.length === 0) return [];
     const args = route.arguments;
     const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
     let projectRefs = [text(args.project), text(args.projectId)].filter((ref) => ref !== undefined);
@@ -298,14 +301,14 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
 
   /** The projects a write belongs to; when unsure, every project that uses that tracker. */
   const projectsFor = async (write: PostingWrite, settings: ClankieSettings): Promise<Project[]> => {
-    if (write.projectIds?.length) return projectsOf(settings, write.projectIds);
-    if (write.asker.kind === "worker") {
-      const hired = await options.workerProject?.(write.asker.principalId);
-      if (hired !== undefined) return projectsOf(settings, [hired]);
-    }
-    const all = settings.projects.projects;
+    const hired =
+      write.projectIds?.length || write.asker.kind !== "worker"
+        ? undefined
+        : await options.workerProject?.(write.asker.principalId);
+    const known = write.projectIds?.length ? write.projectIds : hired === undefined ? undefined : [hired];
+    if (known !== undefined && write.tracker !== "linear") return projectsOf(settings, known);
     const candidates: Project[] = [];
-    for (const project of all) {
+    for (const project of settings.projects.projects) {
       const trackers = (await conventionsOf(project)).map((entry) => entry.backend);
       if (
         trackers.includes(write.tracker) ||
@@ -314,6 +317,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         candidates.push(project);
     }
     const targeted = await linearTargets(write.route, candidates);
+    // A write from one project may name another's Linear project on the same team: the
+    // setting of every project it touches applies, and the strictest one wins.
+    if (known !== undefined) return projectsOf(settings, [...new Set([...known, ...targeted])]);
     if (targeted.length) return projectsOf(settings, targeted);
     const asker = write.asker;
     if (asker.kind === "lead" && asker.conversationId !== undefined) {

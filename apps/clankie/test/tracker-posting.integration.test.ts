@@ -67,7 +67,7 @@ async function repo(root: string, name: string, convention: WorkConvention) {
   return path;
 }
 
-async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}) {
+async function fixture(seed: { posts?: readonly Record<string, unknown>[]; meadow?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tracker-posting-")));
   if (seed.posts !== undefined) {
     await mkdir(join(root, "state"), { recursive: true });
@@ -86,6 +86,10 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}
     directory: ".clankie/work",
   });
   // The pond tracks its work in GitHub issues, on a local stand-in for GitHub's REST API.
+  // When asked for, the meadow tracks its work across the garden's whole Linear team.
+  const meadow = seed.meadow
+    ? await repo(root, "meadow", { ...decided, backend: "linear", linear: { team: "VUH" } })
+    : undefined;
   const pondConvention: WorkConvention = { ...decided, backend: "github", github: { repo: "fixture/pond" } };
   const pond = await repo(root, "pond", pondConvention);
   const github: { method: string; path: string; body: Record<string, unknown> }[] = [];
@@ -167,6 +171,9 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}
         { id: "garden", name: "Garden", workspaces: workspace(garden), trackerRef },
         { id: "orchard", name: "Orchard", workspaces: workspace(orchard), trackerRef },
         { id: "pond", name: "Pond", workspaces: workspace(pond), trackerRef },
+        ...(meadow === undefined
+          ? []
+          : [{ id: "meadow", name: "Meadow", workspaces: workspace(meadow), trackerRef }]),
       ],
     }),
   }));
@@ -338,6 +345,7 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}
     postingOptions,
     pond,
     pondConvention,
+    meadow,
     github,
     provider,
     credentials,
@@ -775,4 +783,36 @@ describe("a drop on a GitHub project", () => {
     expect(posts).toMatchObject([{ state: "failed", note: expect.stringContaining("tracker changed") }]);
     expect(created(f)).toEqual([]);
   });
+});
+
+it("a write through one project that lands in another's Linear project needs that project's setting too", async () => {
+  const f = await fixture({ meadow: true });
+  if (f.meadow === undefined) throw new Error("no meadow");
+  const meadowPath = f.meadow;
+  await f.setPosting("meadow", "allow");
+  await f.setPosting("garden", "read_only");
+  // Register the meadow as this Mac's own CLI would, then write as Clankie through it.
+  await f.workItems.callTracker("list_issues", {}, { repo: meadowPath, local: true });
+  const { repos } = (await f.workItems.handle({ action: "repos" }, true)) as {
+    repos: { id: string; root: string }[];
+  };
+  const meadow = repos.find((entry) => entry.root === meadowPath)!.id;
+  // Go ahead for the meadow's own work still posts.
+  await expect(
+    f.workItems.callTracker(
+      "save_issue",
+      { title: "Mow the meadow", team: "VUH" },
+      { repo: meadow, local: false },
+    ),
+  ).resolves.toBeDefined();
+  expect(f.mutations("issueCreate")).toBe(1);
+  // Naming the garden's project from the meadow meets the garden's read only.
+  await expect(
+    f.workItems.callTracker(
+      "save_issue",
+      { title: "Into the garden", team: "VUH", project: PROJECT_ID },
+      { repo: meadow, local: false },
+    ),
+  ).rejects.toThrow("Posting to Linear is read only for Garden");
+  expect(f.mutations("issueCreate")).toBe(1);
 });
