@@ -22,6 +22,7 @@ import {
   FeedCheckRequestSchema,
   feedCheckHasOneSource,
   operatorAutonomyCommandRequiresOwner,
+  operatorLeadCommandRequiresOwner,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceRequestSchema,
@@ -820,7 +821,9 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     )
       return context.json({ error: "operator_authority_required" }, 403);
     const goalOwnerOp =
-      parsed.data.op === "autonomy" && operatorAutonomyCommandRequiresOwner(parsed.data.command);
+      (parsed.data.op === "autonomy" && operatorAutonomyCommandRequiresOwner(parsed.data.command)) ||
+      // Handing the lead back restarts Clankie's own turns (ADR 0304).
+      (parsed.data.op === "lead" && operatorLeadCommandRequiresOwner(parsed.data.command));
     if (goalOwnerOp && !owner) return context.json({ error: "goal_owner_required" }, 403);
     const ownerHireOp = parsed.data.op === "spawn_seat" && parsed.data.seat.ownerWork !== undefined;
     if (ownerHireOp && !owner) return context.json({ error: "owner_hire_required" }, 403);
@@ -847,6 +850,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         goalOwnerOp ||
         questionOp ||
         workerOwnerOp ||
+        // The owner reads and sets who leads with their own credential.
+        parsed.data.op === "lead" ||
         parsed.data.op === "send" ||
         parsed.data.op === "set_persona_role")
     ) {

@@ -56,6 +56,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
+  | { op: "lead" }
   | { op: "roster" }
   | { op: "fleet" }
   | { op: "readopt_seat" }
@@ -107,6 +108,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
+  | { op: "lead" }
   | { op: "roster" }
   | { op: "fleet" }
   | { op: "readopt_seat" }

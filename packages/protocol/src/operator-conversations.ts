@@ -1633,6 +1633,79 @@ export function operatorAutonomyCommandRequiresOwner(command: OperatorAutonomyCo
 }
 
 /**
+ * Who leads Clankie's lead threads (ADR 0304). "clankie": his own model turns
+ * answer worker reports, wakes and watches when no harness seat is live.
+ * "apps": those turns are held for the apps signed in to the connector, which
+ * read them, the unread worker reports and the worker questions they may
+ * answer. The owner's own messages always reach Clankie.
+ */
+export const OperatorLeadSchema = z.enum(["clankie", "apps"]);
+export type OperatorLead = z.infer<typeof OperatorLeadSchema>;
+
+export const OPERATOR_LEAD_HELD_TEXT_MAX = 16_000;
+/** One turn Clankie would have taken himself, held while connected apps lead. */
+export const OperatorLeadHeldItemSchema = z
+  .object({
+    seq: z.number().int().positive(),
+    at: z.string().datetime(),
+    conversationId: OperatorConversationIdSchema,
+    origin: z.enum(["wake", "watch", "message", "hook"]),
+    text: z.string().max(OPERATOR_LEAD_HELD_TEXT_MAX),
+  })
+  .strict();
+export type OperatorLeadHeldItem = z.infer<typeof OperatorLeadHeldItemSchema>;
+
+export const OperatorLeadStatusSchema = z
+  .object({
+    lead: OperatorLeadSchema,
+    error: z.literal("state_unreadable").optional(),
+    /** Held items still kept; the oldest go first past the cap. */
+    held: z.number().int().nonnegative(),
+  })
+  .strict();
+export type OperatorLeadStatus = z.infer<typeof OperatorLeadStatusSchema>;
+
+export const OperatorLeadCommandSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("status") }).strict(),
+  z.object({ action: z.literal("set"), lead: OperatorLeadSchema }).strict(),
+  z
+    .object({
+      action: z.literal("inbox"),
+      /** Return items after this sequence number. */
+      after: z.number().int().nonnegative().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    })
+    .strict(),
+]);
+export type OperatorLeadCommand = z.infer<typeof OperatorLeadCommandSchema>;
+
+export const OperatorLeadResultSchema = z
+  .object({
+    status: OperatorLeadStatusSchema,
+    items: z.array(OperatorLeadHeldItemSchema).max(100).optional(),
+    /** Pass as `after` to read only what is held after these items. */
+    next: z.number().int().nonnegative().optional(),
+    /** More held items wait after `next`. */
+    more: z.boolean().optional(),
+    /** Unread worker reports per lead thread, for worker_reports. */
+    unreadReports: z
+      .array(
+        z
+          .object({ conversationId: OperatorConversationIdSchema, count: z.number().int().positive() })
+          .strict(),
+      )
+      .max(256)
+      .optional(),
+  })
+  .strict();
+export type OperatorLeadResult = z.infer<typeof OperatorLeadResultSchema>;
+
+/** Handing the lead back to Clankie restarts his own turns: the owner's (ADR 0304). */
+export function operatorLeadCommandRequiresOwner(command: OperatorLeadCommand): boolean {
+  return command.action === "set" && command.lead === "clankie";
+}
+
+/**
  * Strict discriminated public event union. Every app-renderable VUH-745 session
  * event (activity, message, reasoning, context occupancy, tool, typed input,
  * auth/session lifecycle, turn lifecycle, redacted worker transcript) is a named bounded

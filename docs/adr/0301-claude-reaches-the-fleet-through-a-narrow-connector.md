@@ -34,7 +34,8 @@ own `/mcp` on a trusted network.
   leads the new seat, as it leads his own hires, so a connector never owns a
   worker. Connector devices now carry `steer`, which the op allowlist lets
   reach `start_agent` alone; a connector signed in before this change signs in
-  again to get it.
+  again to get it. `list_places` lists the places without starting anything, so an
+  app's own permission check can tell a listing from a start.
 - **A note board the apps share.** `post_note` leaves a short note (at most
   2,000 characters) and `read_notes` reads the board, oldest first, after an
   optional cursor (added 2026-10-30, approved by James). Each note is signed

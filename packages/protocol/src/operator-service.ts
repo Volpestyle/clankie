@@ -146,6 +146,8 @@ import {
   OperatorAgentPersonaIdSchema,
   OperatorConversationEventRefSchema,
   OperatorAutonomyCommandSchema,
+  OperatorLeadCommandSchema,
+  OperatorLeadResultSchema,
   OperatorConversationCursorSchema,
   OPERATOR_FLEET_WAIT_MS_MAX,
   StateOperatorAgentStanceSchema,
@@ -624,6 +626,10 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       conversationId: OperatorConversationIdSchema,
       command: OperatorAutonomyCommandSchema,
     })
+    .strict(),
+  /** Who leads Clankie's lead threads (ADR 0304). */
+  z
+    .object({ op: z.literal("lead"), schemaVersion: z.literal(1), command: OperatorLeadCommandSchema })
     .strict(),
   z
     .object({
@@ -1336,6 +1342,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       status: OperatorAutonomyStatusSchema,
     })
     .strict(),
+  z.object({ op: z.literal("lead"), schemaVersion: z.literal(1), result: OperatorLeadResultSchema }).strict(),
   z
     .object({
       op: z.literal("roster"),

@@ -1918,7 +1918,7 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
-### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]`
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector lead [clankie|apps]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
 a remote MCP server that lets Claude list your agents, read their screens and
@@ -1942,7 +1942,8 @@ host its access goes to. Each app is its own device. The
 connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
-lead. Apps signed in before `start_agent` existed sign in again to use it.
+lead, and `list_places`, which only lists those places. Apps signed in before
+`start_agent` existed sign in again to use it.
 `post_note` and `read_notes` share a note board among the connected apps: each
 note is signed with the name you approved that app under, never a name the app
 gives, and the apps read notes as information, not instructions. Clankie and
@@ -1960,6 +1961,17 @@ when two share the name. An app that is on presses keys only while the agent
 waits on input and the prompt it read is still on screen, once per prompt, and
 never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
+
+`clankie connector lead` says who leads Clankie's lead threads
+([ADR 0304](adr/0304-the-owner-hands-the-lead-to-connected-apps.md)): Clankie
+(the default) or the connected apps. `clankie connector lead apps` hands it to
+the apps: a wake, a watch, or a worker's message or question that Clankie
+would have answered himself is held for them instead of running his model, and
+worker reports to his lead threads stay unread for them. The apps read both with
+`read_inbox`, `read_reports` and `acknowledge_reports`. Your own messages still
+reach Clankie. `clankie connector lead clankie` hands it back, and only you can.
+JSON: `{ "ok": true, "lead": "clankie" | "apps", "held": N, "error"?:
+"state_unreadable" }`.
 
 ```bash
 claude mcp add --transport http clankie "$(clankie connector --json | jq -r .connectorUrl)"
