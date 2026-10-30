@@ -190,6 +190,20 @@ async function startConnectorRelay(
               : {}),
           },
         } as OperatorConversationServiceResult;
+      case "start_agent": {
+        const places = [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }];
+        if (request.machine === undefined || request.workingDirectory === undefined)
+          return { op: "start_agent", schemaVersion: 1, status: "places", places };
+        return request.machine === "volpe@pc1" && request.workingDirectory === "C:\\code\\kh2"
+          ? { op: "start_agent", schemaVersion: 1, status: "started", places, seatId: "pc1/term_new" }
+          : {
+              op: "start_agent",
+              schemaVersion: 1,
+              status: "refused",
+              places,
+              detail: "That isn't one of the places an agent can start.",
+            };
+      }
       case "terminal_read": {
         if (linked.terminalRead === false) throw new Error(`unexpected ${request.op}`);
         const { terminalId } = request;
@@ -333,6 +347,7 @@ describe("Claude connector MCP endpoint", () => {
       "list_agents",
       "read_agent",
       "message_agent",
+      "start_agent",
       "clankie_guide",
     ]);
 
@@ -433,6 +448,50 @@ describe("Claude connector MCP endpoint", () => {
     for (const read of reads) expect(JSON.parse(textOf(read)).text).toContain("Compiling...done");
     expect(relay.resets).toBe(0);
     await Promise.all([first.close(), second.close()]);
+  });
+
+  it("starts an agent only in a known project's place, through the connector's own allowlist", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    const places = JSON.parse(textOf(await client.callTool({ name: "start_agent", arguments: {} })));
+    expect(places).toEqual({
+      status: "places",
+      places: [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }],
+    });
+    const started = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "start_agent",
+          arguments: {
+            machine: "volpe@pc1",
+            workingDirectory: "C:\\code\\kh2",
+            harness: "codex",
+            prompt: "fix the netcode desync",
+          },
+        }),
+      ),
+    );
+    expect(started).toMatchObject({ agent: "herdr:pc1/term_new", status: "started" });
+    expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+      op: "start_agent",
+      schemaVersion: 1,
+      machine: "volpe@pc1",
+      workingDirectory: "C:\\code\\kh2",
+      harness: "codex",
+      prompt: "fix the netcode desync",
+    });
+    const elsewhere = await client.callTool({
+      name: "start_agent",
+      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\Windows" },
+    });
+    expect(elsewhere.isError).toBe(true);
+    expect(textOf(elsewhere)).toContain("isn't one of the places");
+    const other = await client.callTool({
+      name: "start_agent",
+      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", harness: "pi" },
+    });
+    expect(other.isError).toBe(true);
+    await client.close();
   });
 
   it("says plainly when a machine's Herdr isn't answering or is too old", async () => {

@@ -205,6 +205,7 @@ import {
   type OperatorAttachmentChunk,
   type OperatorDeliveredFileDownloadRequest,
   OPERATOR_CONVERSATION_TAIL_WAIT_MS_MAX,
+  OPERATOR_SEAT_DIRECTORY_MAX,
 } from "./operator-conversations.ts";
 import {
   OperatorTerminalObservationRequestSchema,
@@ -244,6 +245,20 @@ export const OperatorTerminalMachineSchema = z
   })
   .strict();
 export type OperatorTerminalMachine = z.infer<typeof OperatorTerminalMachineSchema>;
+
+/** Harnesses a connected app may start; the rest stay with Clankie and the owner's own hires. */
+export const START_AGENT_HARNESSES = ["claude", "codex"] as const;
+
+/** A known project's checkout on one machine, where `start_agent` may start an agent. */
+export const StartAgentPlaceSchema = z
+  .object({
+    /** The machine as agents list it: this Mac's name or a linked machine's ssh host. */
+    machine: z.string().min(1).max(200),
+    project: z.string().min(1).max(100),
+    workingDirectory: z.string().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX),
+  })
+  .strict();
+export type StartAgentPlace = z.infer<typeof StartAgentPlaceSchema>;
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
@@ -647,6 +662,22 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("terminal_read"),
       schemaVersion: z.literal(1),
       terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+    })
+    .strict(),
+  z
+    .object({
+      /**
+       * Start one coding agent in a known project's checkout on a machine
+       * Clankie reaches, led by Clankie's own thread (a session source's start).
+       * Without a machine and directory it only names the places it can start.
+       */
+      op: z.literal("start_agent"),
+      schemaVersion: z.literal(1),
+      machine: z.string().trim().min(1).max(200).optional(),
+      workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX).optional(),
+      harness: z.enum(START_AGENT_HARNESSES).optional(),
+      /** The first thing the agent is asked; information from the caller, delivered as its brief. */
+      prompt: z.string().trim().min(1).max(8_000).optional(),
     })
     .strict(),
   z
@@ -1319,6 +1350,17 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       status: z.enum(["read", "unavailable"]),
       text: z.string().max(OPERATOR_TERMINAL_READ_MAX).optional(),
       detail: z.string().max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("start_agent"),
+      schemaVersion: z.literal(1),
+      /** `places` lists where it can start; `started` names the new seat; `refused` says why not. */
+      status: z.enum(["places", "started", "refused"]),
+      places: z.array(StartAgentPlaceSchema).max(256),
+      seatId: z.string().max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+      detail: z.string().max(1200).optional(),
     })
     .strict(),
   z

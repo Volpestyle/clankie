@@ -29,6 +29,7 @@ const SURFACE_CLIENT_ID = "claude-connector";
 const READ_LINES_DEFAULT = 80;
 const READ_LINES_MAX = 400;
 const MESSAGE_MAX = 16_000;
+const START_PROMPT_MAX = 8_000;
 
 export interface ConnectorOperatorPort {
   /** One `/operator/v1/dispatch` call as this bearer. Throws on a refusal. */
@@ -189,6 +190,40 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         },
       },
       {
+        name: "start_agent",
+        title: "Start an agent",
+        description:
+          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. Call without machine and workingDirectory to see the places an agent can start. It can't stop or close agents.",
+        inputSchema: {
+          type: "object" as const,
+          properties: {
+            machine: { type: "string", description: "A machine from the places list." },
+            workingDirectory: {
+              type: "string",
+              description: "A working directory from the places list, exactly.",
+            },
+            harness: {
+              type: "string",
+              enum: ["claude", "codex"],
+              description: "Which agent app (default claude).",
+            },
+            prompt: {
+              type: "string",
+              minLength: 1,
+              maxLength: START_PROMPT_MAX,
+              description: "The first thing to ask the agent.",
+            },
+          },
+          additionalProperties: false,
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      {
         name: "clankie_guide",
         title: "Read Clankie's guides",
         description:
@@ -232,6 +267,25 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
           requiredString(args.message, "message", MESSAGE_MAX),
         );
         return text({ agent: id, ...sent });
+      }
+      if (call.params.name === "start_agent") {
+        const harness = optionalString(args.harness);
+        if (harness !== undefined && harness !== "claude" && harness !== "codex")
+          return failure("harness is claude or codex.");
+        const machine = optionalString(args.machine);
+        const workingDirectory = optionalString(args.workingDirectory);
+        const prompt = optionalString(args.prompt);
+        if (prompt !== undefined && prompt.length > START_PROMPT_MAX)
+          return failure(`prompt is longer than ${START_PROMPT_MAX} characters.`);
+        const { id, ...started } = await sessions.start({
+          ...(machine === undefined ? {} : { machine }),
+          ...(workingDirectory === undefined ? {} : { workingDirectory }),
+          ...(harness === undefined ? {} : { harness }),
+          ...(prompt === undefined ? {} : { prompt }),
+        });
+        if (started.status === "refused")
+          return failure(`${started.detail ?? "Nothing started."} Places: ${JSON.stringify(started.places)}`);
+        return text({ ...(id === undefined ? {} : { agent: id }), ...started });
       }
       if (call.params.name === "clankie_guide") {
         const answer = await options.guide.answer(optionalString(args.topic));

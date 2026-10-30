@@ -202,7 +202,7 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     };
     expect(self).toMatchObject({
       scope: "connector",
-      grants: { chat: true, steer: false, terminalObserve: true, terminalControl: false },
+      grants: { chat: true, steer: true, terminalObserve: true, terminalControl: false },
     });
     // A connector reaches nothing else here: not refresh, settings, or other sign-ins.
     for (const [method, path] of [

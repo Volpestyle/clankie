@@ -773,6 +773,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "worker_reports" ||
               serviceRequest.op === "acknowledge_worker_reports" ||
               serviceRequest.op === "spawn_seat" ||
+              serviceRequest.op === "start_agent" ||
               serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
               serviceRequest.op === "update_persona" ||
@@ -1637,6 +1638,7 @@ const CONNECTOR_OPS = new Set([
   "terminal_catalog",
   "terminal_tail",
   "terminal_read",
+  "start_agent",
   "get",
   "create",
   "send",
