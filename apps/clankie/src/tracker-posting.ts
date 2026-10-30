@@ -95,6 +95,11 @@ export interface PostingWrite {
    * never posts twice. Drops use it.
    */
   readonly key?: string;
+  /**
+   * Where a repo or `work` write lands (the repo's saved tracker). A held write goes only
+   * while it is unchanged, so approving it never sends it somewhere it was not asked for.
+   */
+  readonly destination?: string;
 }
 
 export type PostingAdmission =
@@ -158,7 +163,7 @@ export interface TrackerPostingOptions {
 
 /** The pieces that exist only once the tracker routes do; bound after construction. */
 export interface TrackerPostingBinding {
-  readonly execute: (route: PostingRoute) => Promise<PostingExecution>;
+  readonly execute: (route: PostingRoute, destination?: string) => Promise<PostingExecution>;
   /** The outward tracker and projects of a registered repo; undefined when it stays on this Mac. */
   readonly repoTarget?: (
     repo: string,
@@ -178,6 +183,7 @@ const StoredSchema = TrackerPostSchema.extend({
   key: z.string().max(256).optional(),
   leadConversationId: z.string().max(256).optional(),
   drop: z.object({ root: z.string(), key: z.string() }).strict().optional(),
+  destination: z.string().max(4200).optional(),
 }).strict();
 type Stored = z.infer<typeof StoredSchema>;
 /** The most records the file keeps; `save` trims to it, so every file it writes loads again. */
@@ -389,6 +395,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       JSON.stringify([
         write.tracker,
         write.route,
+        write.destination ?? null,
         projects.map((project) => project.id).sort(),
         decider,
         write.asker.kind === "worker" ? write.asker.principalId : write.asker.kind,
@@ -501,7 +508,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     save();
     let outcome: PostingExecution;
     try {
-      outcome = await binding.execute(record.route);
+      outcome = await binding.execute(record.route, record.destination);
     } catch (error) {
       outcome = {
         ok: false,
@@ -708,6 +715,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         fingerprint,
         ...(write.key === undefined ? {} : { key: write.key }),
         ...(write.drop === undefined ? {} : { drop: { ...write.drop } }),
+        ...(write.destination === undefined ? {} : { destination: write.destination }),
       };
       state.posts.push(record);
       save();
@@ -832,14 +840,14 @@ function load(path: string): z.infer<typeof StateSchema> {
 export function trackerPostingExecutor(routes: {
   readonly mcpHost: Pick<import("./mcp-host.ts").McpHost, "call">;
   readonly workItems: Pick<import("./work-items.ts").WorkItemsService, "callTracker" | "handle">;
-}): (route: PostingRoute) => Promise<PostingExecution> {
+}): (route: PostingRoute, destination?: string) => Promise<PostingExecution> {
   const lead = {
     type: "agent-worker",
     id: "clankie",
     name: "Clankie",
     onBehalfOf: [{ type: "human", id: "owner", name: "Owner" }],
   } as const;
-  return async (route) => {
+  return async (route, destination) => {
     if (route.kind === "linear") {
       let dispatched = false;
       const result = await routes.mcpHost.call({
@@ -874,6 +882,7 @@ export function trackerPostingExecutor(routes: {
               local: route.local,
               actor: lead,
               posting: TRACKER_POSTING_ADMITTED,
+              ...(destination === undefined ? {} : { destination }),
               onDispatch: () => {
                 dispatched = true;
               },
@@ -882,6 +891,7 @@ export function trackerPostingExecutor(routes: {
               structuredClone(route.request) as unknown as import("./work-items.ts").WorkRequest,
               true,
               TRACKER_POSTING_ADMITTED,
+              destination,
             );
       return {
         ok: true,

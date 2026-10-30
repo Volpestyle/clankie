@@ -223,6 +223,25 @@ export const WorkExportRequestSchema = z
   .strict();
 export type WorkExportRequest = z.infer<typeof WorkExportRequestSchema>;
 /** Where a project's drops go, or why they can't. */
+/**
+ * Where a convention's outward writes land (ADR 0302). A held post records it and goes only
+ * while it is unchanged, so an approval never sends the write somewhere it was not asked for.
+ */
+function postingDestination(convention: WorkConvention | undefined): string | undefined {
+  if (convention?.backend === "github") return `github:${convention.github?.repo ?? ""}`;
+  if (convention?.backend === "linear")
+    return `linear:${convention.linear?.team ?? ""}/${convention.linear?.project ?? ""}`;
+  return undefined;
+}
+
+const assertDestination = (convention: WorkConvention, destination: string | undefined) => {
+  if (destination !== undefined && postingDestination(convention) !== destination)
+    throw new WorkRequestError(
+      "posting_refused",
+      "This project's tracker changed after the post was asked for, so it would land somewhere else. Nothing was posted; ask again.",
+    );
+};
+
 export type DropTarget =
   | {
       readonly ready: true;
@@ -235,6 +254,11 @@ export type DropTarget =
        * private issue file here first, then posted there as the project's posting setting says.
        */
       readonly tracker?: "linear" | "github";
+      /**
+       * Where that tracker's writes land (`postingDestination`), while they leave this Mac:
+       * without it (Linear disconnected) the drop is only kept here.
+       */
+      readonly destination?: string;
     }
   | {
       readonly ready: false;
@@ -721,6 +745,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if (convention?.backend === "github") return "github";
     if (convention?.backend !== "linear" || linear === undefined) return undefined;
     return (await options.mcpHost?.trackerStatus?.())?.backend === "local" ? undefined : "linear";
+  };
+
+  const destinationOf = (convention: WorkConvention) => {
+    const destination = postingDestination(convention);
+    return destination === undefined ? {} : { destination };
   };
 
   const deps = async (path: string, local = true, projectId?: string): Promise<TrackerDeps> => {
@@ -1346,12 +1375,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     convention: WorkConvention,
     path: string,
     posting: typeof TRACKER_POSTING_ADMITTED | undefined,
+    destination: string | undefined,
   ) => {
-    if (!options.posting || posting === TRACKER_POSTING_ADMITTED) return;
+    if (posting === TRACKER_POSTING_ADMITTED) return assertDestination(convention, destination);
+    if (!options.posting) return;
     const tracker = await outwardTracker(convention);
     if (tracker === undefined) return;
     const admission = await options.posting.admit({
       tracker,
+      ...destinationOf(convention),
       route: { kind: "work", request: structuredClone(request) as Record<string, unknown> },
       asker: { kind: "lead" },
       projectIds: await projectIdsAt(path),
@@ -1435,12 +1467,16 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     // the drop creates if needed (it ignores itself), then posted under the posting setting.
     if (convention.backend === "linear" || convention.backend === "github") {
       const repo = await register(workspace.path);
+      // A disconnected Linear keeps the drop here: there is nowhere outward to post it.
+      const outward =
+        (await outwardTracker(convention)) === undefined ? undefined : postingDestination(convention);
       return {
         ready: true,
         project: { id: project.id, name: project.name },
         root: workspace.path,
         repoId: repo.id,
         tracker: convention.backend,
+        ...(outward === undefined ? {} : { destination: outward }),
       };
     }
     const directory = conventionWorkDirectory(convention);
@@ -1789,6 +1825,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             assertAdmitted(
               await options.posting.admit({
                 tracker,
+                ...destinationOf(convention),
                 route:
                   convention.backend === "linear" || repo === undefined
                     ? { kind: "linear", tool: name, arguments: structuredClone(args) }
@@ -2056,9 +2093,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         readonly inbox?: WorkInboxContext;
         /** Host-only: the caller's own check already let this write through (ADR 0302). */
         readonly posting?: typeof TRACKER_POSTING_ADMITTED;
+        /** With `posting`: where the write was let through to; it goes only while unchanged. */
+        readonly destination?: string;
       } & TrackerToolCallOptions,
     ): Promise<unknown> {
-      const { repo, local, inbox, posting, ...callbacks } = callOptions;
+      const { repo, local, inbox, posting, destination, ...callbacks } = callOptions;
       const { repo: _repo, ...toolArgs } = args;
       if (INBOX_TOOLS.has(name)) return inboxPendingQuestions(repo, local, toolArgs, inbox, name, callbacks);
       if (SAVED_ISSUE_VIEW_TOOLS.has(name)) {
@@ -2154,6 +2193,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             throw new Error("Saved work repository or tracker changed. Read the work again.");
         };
       }
+      if (posting === TRACKER_POSTING_ADMITTED) assertDestination(convention, destination);
       // "Posting to your tracker" (ADR 0302): Clankie's and his workers' writes to an
       // outward tracker pass the project's setting; the owner's own writes are his.
       const outward =
@@ -2167,6 +2207,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         assertAdmitted(
           await options.posting.admit({
             tracker: outward,
+            ...destinationOf(convention),
             route: { kind: "repo", repo, local, tool: name, arguments: structuredClone(toolArgs) },
             asker: postingAsker(callbacks.actor),
             projectIds: await projectIdsAt(path),
@@ -2254,6 +2295,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       local: boolean,
       /** Host-only: posting already let this write through (ADR 0302). */
       posting?: typeof TRACKER_POSTING_ADMITTED,
+      /** With `posting`: where it was let through to; it goes only while unchanged. */
+      destination?: string,
     ): Promise<WorkResult> {
       if (request.action === "repos") {
         const repos = [
@@ -2472,7 +2515,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "create": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
           const { backend, convention } = await tracker(entry.path, true);
-          await checkWorkPosting(request, convention, entry.path, posting);
+          await checkWorkPosting(request, convention, entry.path, posting, destination);
           const item = await backend.create({
             title: request.title,
             ...(request.summary === undefined ? {} : { summary: request.summary }),
@@ -2487,7 +2530,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "update": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
           const { backend, convention } = await tracker(entry.path, true);
-          await checkWorkPosting(request, convention, entry.path, posting);
+          await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return {
               repo: await describe(entry),
@@ -2502,7 +2545,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "attach": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
           const { backend, convention } = await tracker(entry.path, true);
-          await checkWorkPosting(request, convention, entry.path, posting);
+          await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return { repo: await describe(entry), item: await backend.attach(request.id, request.evidence) };
           } catch (error) {

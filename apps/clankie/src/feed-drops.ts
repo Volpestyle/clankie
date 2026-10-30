@@ -217,7 +217,8 @@ export function createFeedDrops(options: FeedDropsOptions) {
    */
   async function post(target: ReadyTarget, record: DropRecord): Promise<"posted" | "waiting" | "kept_local"> {
     if (record.posted !== undefined) return "posted";
-    if (options.posting === undefined || target.tracker === undefined) return "kept_local";
+    if (options.posting === undefined || target.tracker === undefined || target.destination === undefined)
+      return "kept_local";
     const pictures = record.evidence.filter(
       (entry) => entry.kind === "image" || entry.kind === "video",
     ).length;
@@ -235,8 +236,14 @@ export function createFeedDrops(options: FeedDropsOptions) {
           repo: target.repoId,
           local: false,
           tool: "save_issue",
-          arguments: { title: record.title, ...(description === "" ? {} : { description }) },
+          arguments: {
+            title: record.title,
+            ...(description === "" ? {} : { description }),
+            // A repo tracker's create names a team as Linear's does; its own is LOCAL.
+            ...(target.tracker === "github" ? { team: "LOCAL" } : {}),
+          },
         },
+        destination: target.destination,
         asker: { kind: "service", what: "Your drop" },
         projectIds: [target.project.id],
         drop: { root: target.root, key: record.key },

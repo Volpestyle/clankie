@@ -1,9 +1,10 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { FileCredentialStore, OPERATOR_CREDENTIAL_PROVIDER_ID } from "@clankie/credential-broker";
 import {
   OperatorConversationServiceResultSchema,
@@ -84,6 +85,46 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}
     backend: "markdown",
     directory: ".clankie/work",
   });
+  // The pond tracks its work in GitHub issues, on a local stand-in for GitHub's REST API.
+  const pondConvention: WorkConvention = { ...decided, backend: "github", github: { repo: "fixture/pond" } };
+  const pond = await repo(root, "pond", pondConvention);
+  const github: { method: string; path: string; body: Record<string, unknown> }[] = [];
+  let issue: Record<string, unknown> | undefined;
+  const githubServer = createServer(async (request, response) => {
+    const path = new URL(request.url ?? "/", "http://fixture").pathname;
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const text = Buffer.concat(chunks).toString();
+    github.push({ method: request.method ?? "", path, body: text ? JSON.parse(text) : {} });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && /^\/repos\/fixture\/[a-z]+\/issues$/u.test(path)) {
+      response.end("[]");
+      return;
+    }
+    if (request.method === "POST" && /^\/repos\/fixture\/[a-z]+\/issues$/u.test(path)) {
+      const body = JSON.parse(text) as { title: string; body?: string };
+      issue = {
+        id: 9001,
+        number: 7,
+        title: body.title,
+        body: body.body ?? "",
+        state: "open",
+        labels: [],
+        html_url: `https://github.com${path.replace("/repos", "")}/7`,
+      };
+      response.writeHead(201).end(JSON.stringify(issue));
+      return;
+    }
+    if (request.method === "GET" && issue !== undefined && path.endsWith("/issues/7")) {
+      response.end(JSON.stringify(issue));
+      return;
+    }
+    response.writeHead(404).end("{}");
+  });
+  await new Promise<void>((resolve) => githubServer.listen(0, "127.0.0.1", resolve));
+  cleanups.push(() => new Promise<void>((resolve) => githubServer.close(() => resolve())));
+  const githubAddress = githubServer.address();
+  if (githubAddress === null || typeof githubAddress === "string") throw new Error("No GitHub port");
 
   // Clankie's connected Linear: the registered OAuth app against the schema-validating provider.
   const provider = await createLinearApiProvider();
@@ -125,6 +166,7 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}
       projects: [
         { id: "garden", name: "Garden", workspaces: workspace(garden), trackerRef },
         { id: "orchard", name: "Orchard", workspaces: workspace(orchard), trackerRef },
+        { id: "pond", name: "Pond", workspaces: workspace(pond), trackerRef },
       ],
     }),
   }));
@@ -194,6 +236,8 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}
     mcpHost: host,
     run: defaultRun,
     posting,
+    githubToken: async () => "fixture-github-token",
+    githubApiBase: `http://127.0.0.1:${String(githubAddress.port)}`,
   });
   posting.bind({
     execute: trackerPostingExecutor({ mcpHost: host, workItems }),
@@ -292,6 +336,9 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}
     orchard,
     accounts,
     postingOptions,
+    pond,
+    pondConvention,
+    github,
     provider,
     credentials,
     settings,
@@ -681,4 +728,51 @@ it("a full record of decided posts drops its oldest, so a waiting post survives 
   // The record loaded whole: nothing was set aside as damaged.
   expect((await readdir(join(f.root, "state"))).filter((name) => name.includes("damaged"))).toEqual([]);
   expect(f.mutations("commentCreate")).toBe(0);
+});
+
+describe("a drop on a GitHub project", () => {
+  const drop = async (f: Awaited<ReturnType<typeof fixture>>, key: string, body: string) => {
+    const result = await f.dispatch({
+      op: "feed_drop",
+      schemaVersion: 1,
+      projectId: "pond",
+      idempotencyKey: key,
+      body,
+    });
+    if (result.op !== "feed_drop") throw new Error("unexpected drop result");
+    return result.result as FeedDropResult;
+  };
+  const created = (f: Awaited<ReturnType<typeof fixture>>) =>
+    f.github.filter((entry) => entry.method === "POST" && entry.path.endsWith("/issues"));
+
+  it("posts on go ahead as a new GitHub issue", async () => {
+    const f = await fixture();
+    await f.setPosting("pond", "allow");
+    const filed = await drop(f, "drop-pond-go-ahead-01", "The pump hums at night");
+    expect(filed).toMatchObject({
+      outcome: "filed",
+      posting: "posted",
+    });
+    expect(created(f)).toMatchObject([
+      { path: "/repos/fixture/pond/issues", body: { title: "The pump hums at night" } },
+    ]);
+  });
+
+  it("is not posted when the project's GitHub repo changes while it waits for the owner", async () => {
+    const f = await fixture();
+    await f.setPosting("pond", "ask");
+    expect(await drop(f, "drop-pond-ask-me-0001", "Net the leaves")).toMatchObject({ posting: "waiting" });
+    // The repo is moved to another GitHub repository before the owner answers.
+    await writeConvention(f.pond, { ...f.pondConvention, github: { repo: "fixture/other" } });
+    await f.answer("Post it");
+    let posts: TrackerPost[] = [];
+    for (let tries = 0; tries < 200; tries += 1) {
+      const listed = await f.posts({ action: "list", state: "all" });
+      posts = (listed.body as { posts: TrackerPost[] }).posts;
+      if (posts.some((post) => post.state !== "waiting")) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(posts).toMatchObject([{ state: "failed", note: expect.stringContaining("tracker changed") }]);
+    expect(created(f)).toEqual([]);
+  });
 });
