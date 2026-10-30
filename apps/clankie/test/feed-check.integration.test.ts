@@ -438,6 +438,22 @@ it("two keys asking the same check each get their own ask, so each retry finds i
   expect((await f.feed({ projectId: "garden" })).items.map((item) => item.id)).toEqual([first.item.id]);
 });
 
+it("two calls racing with one new key and different checks ask only one of them", async () => {
+  const f = await fixture();
+  const results = await Promise.all(
+    ["Tap the gate: it swings", "Tap the shed: its door opens"].map(
+      async (check) =>
+        (await f.check({ idempotencyKey: "n".repeat(20), conversationId: f.lead, check })).body
+          .result as FeedCheckResult,
+    ),
+  );
+  expect(results.map((result) => result.outcome).sort()).toEqual(["raised", "refused"]);
+  expect(results.find((result) => result.outcome === "refused")).toMatchObject({
+    reason: "idempotency_conflict",
+  });
+  expect((await f.feed()).items.filter((item) => item.kind === "check")).toHaveLength(1);
+});
+
 it("an old key never asks again after the chat's question history lets its answer go", async () => {
   const f = await fixture();
   const body = { conversationId: f.lead, check: "Tap the well: water rises" };

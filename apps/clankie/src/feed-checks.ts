@@ -126,20 +126,13 @@ export function createFeedChecks(options: FeedChecksOptions) {
     } as const;
     // The receipt outlives the chat's question history, so an old key never asks twice.
     const fingerprint = sha256(JSON.stringify(checkIdentity(conversationId, draft)));
-    const receipt = receipts.read(publicationId);
+    // Reserve the key with no await between reading and writing its receipt, so a
+    // concurrent call with the same key sees this check before either asks.
+    const reserved = receipts.load();
+    const receipt = reserved.get(publicationId);
     if (receipt !== undefined && receipt.fingerprint !== fingerprint) return conflict;
-    const earlier = await findPublished(serve, publicationId);
-    if (earlier !== undefined && !sameCheck(earlier.question, conversationId, draft)) return conflict;
-    if (earlier === undefined && receipt?.state === "settled")
-      return {
-        outcome: "refused",
-        reason: "already_asked",
-        message:
-          "That key already asked this check, and the answer is no longer kept. Nothing new was asked. Use a new key for a new check.",
-      };
     if (receipt === undefined) {
-      const records = receipts.load();
-      records.set(publicationId, {
+      reserved.set(publicationId, {
         id: publicationId,
         createdAt: Date.now(),
         state: "uncertain",
@@ -148,6 +141,25 @@ export function createFeedChecks(options: FeedChecksOptions) {
       // This write must finish before the ask, so a lost answer can never ask twice.
       receipts.save();
     }
+    const earlier = await findPublished(serve, publicationId);
+    if (earlier !== undefined && !sameCheck(earlier.question, conversationId, draft)) {
+      // An ask from before receipts holds this key: this call's reservation was a mistake.
+      if (receipt === undefined) {
+        const records = receipts.load();
+        if (records.get(publicationId)?.fingerprint === fingerprint) {
+          records.delete(publicationId);
+          receipts.save();
+        }
+      }
+      return conflict;
+    }
+    if (earlier === undefined && receipt?.state === "settled")
+      return {
+        outcome: "refused",
+        reason: "already_asked",
+        message:
+          "That key already asked this check, and the answer is no longer kept. Nothing new was asked. Use a new key for a new check.",
+      };
 
     const result = await options.requestOwnerAsk(conversationId, draft, publicationId);
     const question = result.question;
