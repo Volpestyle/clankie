@@ -302,11 +302,39 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       }
       return matched;
     };
+    /**
+     * Linear takes a project or team by name, slug or key as well as by id: each ref reads
+     * as every name it has. Undefined when one can't be read, since it could be any project.
+     */
+    const aliases = async (kind: "project" | "team", refs: readonly string[]) => {
+      const all = [...refs];
+      for (const ref of refs) {
+        if (!options.readLinear) return undefined;
+        try {
+          const found = (await options.readLinear(kind === "project" ? "get_project" : "get_team", {
+            query: ref,
+          })) as { id?: unknown; name?: unknown; key?: unknown; slugId?: unknown } | null;
+          for (const value of [found?.id, found?.name, found?.key, found?.slugId]) {
+            const alias = text(value);
+            if (alias !== undefined) all.push(alias);
+          }
+        } catch {
+          return undefined;
+        }
+      }
+      return all;
+    };
     // Where the write sends it...
-    const targeted = await named(
+    const projectRefs = await aliases(
+      "project",
       [text(args.project), text(args.projectId)].filter((ref) => ref !== undefined),
+    );
+    const teamRefs = await aliases(
+      "team",
       [text(args.team), text(args.teamId)].filter((ref) => ref !== undefined),
     );
+    if (projectRefs === undefined || teamRefs === undefined) return everyProject;
+    const targeted = await named(projectRefs, teamRefs);
     const saveIssue = route.kind !== "work" && route.tool === "save_issue";
     const issueRef = (saveIssue ? text(args.id) : undefined) ?? text(args.issueId) ?? text(args.issue);
     // Any other existing record (a comment, a reply's parent, a project update, a document)

@@ -1083,3 +1083,33 @@ it("a held write that meets every Linear project's setting survives a restart wi
   expect((await readdir(join(f.root, "state"))).filter((name) => name.includes("damaged"))).toEqual([]);
   expect(f.mutations("commentCreate")).toBe(0);
 });
+
+it("a project or team named by its name or slug meets that project's setting", async () => {
+  const f = await fixture({ meadow: true });
+  const binding = (await f.host.account("linear", "operator")).binding;
+  const hired = (principalId: string, args: Record<string, unknown>) =>
+    f.host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "save_issue",
+      arguments: args,
+      delegation: { binding, grantId: `grant-${principalId}`, principalId, workId: `work-${principalId}` },
+    });
+  // A worker in the meadow (go ahead) names the garden's Linear project by name, then slug.
+  await f.setPosting("meadow", "allow");
+  await f.setPosting("garden", "read_only");
+  for (const project of ["Clankie", "clankie"]) {
+    const result = await hired("project:meadow", { title: "Into the garden", team: "VUH", project });
+    expect(result).toMatchObject({ outcome: "refused", reason: "posting_refused" });
+    if (result.outcome !== "refused") throw new Error("expected a refusal");
+    expect(result.detail).toContain("Posting to Linear is read only for Garden");
+  }
+  // A worker in the garden (go ahead) names the meadow's whole team by its name.
+  await f.setPosting("garden", "allow");
+  await f.setPosting("meadow", "read_only");
+  const result = await hired("project:garden", { title: "Across the team", team: "Clankie" });
+  expect(result).toMatchObject({ outcome: "refused", reason: "posting_refused" });
+  if (result.outcome !== "refused") throw new Error("expected a refusal");
+  expect(result.detail).toContain("Posting to Linear is read only for Meadow");
+  expect(f.mutations("issueCreate")).toBe(0);
+});
