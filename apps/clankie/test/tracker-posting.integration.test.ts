@@ -78,7 +78,9 @@ async function repo(root: string, name: string, convention: WorkConvention) {
   return path;
 }
 
-async function fixture(seed: { posts?: readonly Record<string, unknown>[]; meadow?: boolean } = {}) {
+async function fixture(
+  seed: { posts?: readonly Record<string, unknown>[]; meadow?: boolean | { project: string } } = {},
+) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tracker-posting-")));
   if (seed.posts !== undefined) {
     await mkdir(join(root, "state"), { recursive: true });
@@ -97,9 +99,14 @@ async function fixture(seed: { posts?: readonly Record<string, unknown>[]; meado
     directory: ".clankie/work",
   });
   // The pond tracks its work in GitHub issues, on a local stand-in for GitHub's REST API.
-  // When asked for, the meadow tracks its work across the garden's whole Linear team.
+  // When asked for, the meadow tracks its work across the garden's whole Linear team, or in
+  // its own Linear project on that team.
   const meadow = seed.meadow
-    ? await repo(root, "meadow", { ...decided, backend: "linear", linear: { team: "VUH" } })
+    ? await repo(root, "meadow", {
+        ...decided,
+        backend: "linear",
+        linear: { team: "VUH", ...(seed.meadow === true ? {} : { project: seed.meadow.project }) },
+      })
     : undefined;
   const pondConvention: WorkConvention = { ...decided, backend: "github", github: { repo: "fixture/pond" } };
   const pond = await repo(root, "pond", pondConvention);
@@ -899,4 +906,57 @@ it("moving an issue out of a project meets that project's setting too", async ()
   if (moved.outcome !== "refused") throw new Error("expected a refusal");
   expect(moved.detail).toContain("Posting to Linear is read only for Garden");
   expect(f.mutations("issueUpdate")).toBe(0);
+});
+
+describe("an issue that belongs to another project", () => {
+  const MEADOW_PROJECT = "00000000-0000-4000-8000-0000000000ee";
+  const setup = async () => {
+    const f = await fixture({ meadow: { project: MEADOW_PROJECT } });
+    f.provider.rows.projects!.push({
+      ...f.provider.project,
+      id: MEADOW_PROJECT,
+      name: "Meadow",
+      identifier: "P-VUH-3",
+      slugId: "meadow",
+    });
+    const moveIssueToMeadow = () => {
+      f.provider.issue.project = { id: MEADOW_PROJECT, name: "Meadow" };
+    };
+    return { f, moveIssueToMeadow };
+  };
+
+  it("is not posted when it moves into a read only project while the write waits", async () => {
+    const { f, moveIssueToMeadow } = await setup();
+    await f.setPosting("garden", "lead");
+    await f.setPosting("meadow", "read_only");
+    const held = await f.worker("save_comment", comment("Worker evidence for the garden."));
+    expect(held).toMatchObject({ outcome: "refused", reason: "posting_held" });
+    const id = /post ([0-9a-f-]{36})/u.exec(held.outcome === "refused" ? held.detail : "")![1]!;
+    moveIssueToMeadow();
+    expect(await f.work("posts", "approve", id)).toMatchObject({
+      ok: true,
+      body: { changed: true, post: { id, state: "refused" } },
+    });
+    expect(f.mutations("commentCreate")).toBe(0);
+  });
+
+  it("meets that project's setting through clankie work update and attach", async () => {
+    const { f, moveIssueToMeadow } = await setup();
+    await f.setPosting("garden", "allow");
+    await f.setPosting("meadow", "read_only");
+    moveIssueToMeadow();
+    for (const args of [
+      ["update", "VUH-1383", "--title", "Renamed from the garden"],
+      ["attach", "VUH-1383", "--url", "https://example.com/proof", "--caption", "Proof"],
+    ]) {
+      const result = await f.work(...args);
+      expect(result.ok).toBe(false);
+      expect(result.body).toMatchObject({
+        error: "posting_refused",
+        detail: expect.stringContaining("Posting to Linear is read only for Meadow"),
+      });
+    }
+    expect(f.mutations("issueUpdate")).toBe(0);
+    expect(f.mutations("attachment")).toBe(0);
+  });
 });

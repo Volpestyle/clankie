@@ -258,12 +258,18 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
    * Linear repo's tool arguments); empty when it can't tell.
    */
   const linearTargets = async (route: PostingRoute, candidates: readonly Project[]): Promise<string[]> => {
-    if (route.kind === "work" || candidates.length === 0) return [];
+    if (candidates.length === 0) return [];
     // A GraphQL mutation can touch any record in its document or variables, so it meets
     // the setting of every project on Linear.
     if (route.kind === "linear" && route.tool === LINEAR_GRAPHQL_TOOL.name)
       return candidates.map((project) => project.id);
-    const args = route.arguments;
+    // A `clankie work update|attach` changes an existing issue and names no destination.
+    const args: Record<string, unknown> =
+      route.kind !== "work"
+        ? route.arguments
+        : route.request.action === "update" || route.request.action === "attach"
+          ? { issueId: route.request.id }
+          : {};
     const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
     const same = (left: string | undefined, refs: readonly string[]) =>
       left !== undefined && refs.some((ref) => ref.toLowerCase() === left.toLowerCase());
@@ -291,7 +297,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       [text(args.team), text(args.teamId)].filter((ref) => ref !== undefined),
     );
     const issueRef =
-      (route.tool === "save_issue" ? text(args.id) : undefined) ?? text(args.issueId) ?? text(args.issue);
+      (route.kind !== "work" && route.tool === "save_issue" ? text(args.id) : undefined) ??
+      text(args.issueId) ??
+      text(args.issue);
     if (!issueRef || !options.readLinear) return targeted;
     // ...and, for an existing issue, where it is now: moving an issue out of a project
     // meets that project's setting too.
@@ -314,6 +322,17 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     return [...new Set([...targeted, ...current])];
   };
 
+  /** Every project that uses a tracker. */
+  const candidatesFor = async (tracker: OutwardTracker, settings: ClankieSettings): Promise<Project[]> => {
+    const candidates: Project[] = [];
+    for (const project of settings.projects.projects) {
+      const trackers = (await conventionsOf(project)).map((entry) => entry.backend);
+      if (trackers.includes(tracker) || (tracker === "linear" && project.linearProjectBinding !== undefined))
+        candidates.push(project);
+    }
+    return candidates;
+  };
+
   /** The projects a write belongs to; when unsure, every project that uses that tracker. */
   const projectsFor = async (write: PostingWrite, settings: ClankieSettings): Promise<Project[]> => {
     const hired =
@@ -322,15 +341,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         : await options.workerProject?.(write.asker.principalId);
     const known = write.projectIds?.length ? write.projectIds : hired === undefined ? undefined : [hired];
     if (known !== undefined && write.tracker !== "linear") return projectsOf(settings, known);
-    const candidates: Project[] = [];
-    for (const project of settings.projects.projects) {
-      const trackers = (await conventionsOf(project)).map((entry) => entry.backend);
-      if (
-        trackers.includes(write.tracker) ||
-        (write.tracker === "linear" && project.linearProjectBinding !== undefined)
-      )
-        candidates.push(project);
-    }
+    const candidates = await candidatesFor(write.tracker, settings);
     const targeted = await linearTargets(write.route, candidates);
     // A write from one project may name another's Linear project on the same team: the
     // setting of every project it touches applies, and the strictest one wins.
@@ -459,7 +470,12 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       );
   };
 
-  const readOnlyMessage = (projects: readonly Project[], tracker: OutwardTracker) => {
+  const readOnlyMessage = (touched: readonly Project[], tracker: OutwardTracker) => {
+    // Name the projects that are read only, not every project the write touches.
+    const strict = touched.filter(
+      (project) => (project.trackerPosting ?? DEFAULT_TRACKER_POSTING) === "read_only",
+    );
+    const projects = strict.length ? strict : touched;
     const named = projects.map((project) => project.name).join(", ");
     const settingsHint = projects[0]
       ? ` The owner can change it with clankie project settings ${projects[0].id} --posting ask.`
@@ -562,10 +578,18 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     return record.note;
   };
 
-  /** Re-reads the setting at decision time: a post goes only while the setting still allows it. */
+  /**
+   * Re-reads the setting at decision time: a post goes only while the setting still allows it,
+   * in the projects it was asked for and wherever its Linear target is now.
+   */
   const recheck = async (record: Stored): Promise<TrackerPosting> => {
     const settings = await options.settings.load();
-    return record.projectIds.length ? postingOf(projectsOf(settings, record.projectIds)) : postingOf([]);
+    const current =
+      record.tracker === "linear"
+        ? await linearTargets(record.route, await candidatesFor(record.tracker, settings))
+        : [];
+    const ids = [...new Set([...record.projectIds, ...current])];
+    return ids.length ? postingOf(projectsOf(settings, ids)) : postingOf([]);
   };
 
   const decide = async (
