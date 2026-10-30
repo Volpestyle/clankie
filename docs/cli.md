@@ -9961,7 +9961,12 @@ mismatched or unverified worktree context refuses.
 It enables Claude in each discovered profile. An already enabled, installed Claude
 profile whose settings symlink points to another discovered unmanaged profile
 can update its own plugin cache without installing, enabling, or changing the
-shared settings. Generated sources, disabled/missing plugins, and unknown targets
+shared settings. A Claude profile whose settings symlink points to a source the
+owner manages elsewhere, such as dotfiles, installs only its own plugin cache once
+that source itself sets `enabledPlugins["clankie-worker@clankie"]` to `true` and
+`extraKnownMarketplaces.clankie` to this machine's clankie marketplace directory;
+setup fails if a native step changes that file. Until then the refusal names
+both entries. Generated sources, disabled/missing plugins, and unknown targets
 still require their source manager. Refusals include each profile's setup result.
 Native enable's exact "already enabled at user scope" result (with the observed
 Windows `×` or macOS `✘` marker) is successful only
