@@ -180,7 +180,10 @@ const StoredSchema = TrackerPostSchema.extend({
   drop: z.object({ root: z.string(), key: z.string() }).strict().optional(),
 }).strict();
 type Stored = z.infer<typeof StoredSchema>;
-const StateSchema = z.object({ posts: z.array(StoredSchema).max(2000) }).strict();
+/** The most records the file keeps; `save` trims to it, so every file it writes loads again. */
+const MAX_POSTS = 2000;
+const StateSchema = z.object({ posts: z.array(StoredSchema).max(MAX_POSTS) }).strict();
+const isOpen = (post: Stored) => post.state === "waiting" || post.state === "posting";
 
 const POST_IT = "Post it";
 const SEND_IT_BACK = "Send it back";
@@ -203,11 +206,11 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
   const save = () => {
     const cutoff = now().getTime() - KEEP_DECIDED_MS;
     state.posts = state.posts.filter(
-      (post) =>
-        post.state === "waiting" ||
-        post.state === "posting" ||
-        Date.parse(post.decidedAt ?? post.createdAt) >= cutoff,
+      (post) => isOpen(post) || Date.parse(post.decidedAt ?? post.createdAt) >= cutoff,
     );
+    // Past the cap, the oldest decided records go first; open ones always stay.
+    let over = state.posts.length - MAX_POSTS;
+    if (over > 0) state.posts = state.posts.filter((post) => isOpen(post) || over-- <= 0);
     mkdirSync(dirname(options.statePath), { recursive: true, mode: 0o700 });
     const temporary = `${options.statePath}.${randomUUID()}.tmp`;
     writeFileSync(temporary, `${JSON.stringify(state)}\n`, { mode: 0o600 });
@@ -684,6 +687,11 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         (entry) => entry.state === "waiting" && entry.fingerprint === fingerprint,
       );
       if (same !== undefined) return { outcome: "held", post: publicPost(same), message: heldMessage(same) };
+      if (state.posts.filter(isOpen).length >= MAX_POSTS)
+        return {
+          outcome: "refused" as const,
+          message: `${String(MAX_POSTS)} posts are already waiting. Nothing was posted: decide some of them first.`,
+        };
       const record: Stored = {
         id: randomUUID(),
         ...(projects[0] === undefined ? {} : { projectId: projects[0].id }),

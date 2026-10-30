@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,8 +66,12 @@ async function repo(root: string, name: string, convention: WorkConvention) {
   return path;
 }
 
-async function fixture() {
+async function fixture(seed: { posts?: readonly Record<string, unknown>[] } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tracker-posting-")));
+  if (seed.posts !== undefined) {
+    await mkdir(join(root, "state"), { recursive: true });
+    await writeFile(join(root, "state", "posts.json"), JSON.stringify({ posts: seed.posts }));
+  }
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   // Garden tracks its work in Linear (the provider's project); the orchard in private issue files.
   const garden = await repo(root, "garden", {
@@ -136,7 +141,7 @@ async function fixture() {
       },
     }));
 
-  const posting = createTrackerPosting({
+  const postingOptions: Parameters<typeof createTrackerPosting>[0] = {
     statePath: join(root, "state", "posts.json"),
     settings,
     localMachineId: "local",
@@ -160,7 +165,8 @@ async function fixture() {
       }),
     observeQuestionResolutions: (listener) => store.observeQuestionResolutions(listener),
     wakeConversation: wake,
-  });
+  };
+  const posting = createTrackerPosting(postingOptions);
   cleanups.push(() => posting.close());
   const host = createMcpHost({
     credentials,
@@ -285,6 +291,7 @@ async function fixture() {
     garden,
     orchard,
     accounts,
+    postingOptions,
     provider,
     credentials,
     settings,
@@ -643,4 +650,35 @@ it("with Linear disconnected, the Linear repo's work stays on this Mac and is ne
   const created = await f.work("create", "Kept here while Linear is away");
   expect(created).toMatchObject({ ok: true });
   expect(f.mutations("Create")).toBe(0);
+});
+
+it("a full record of decided posts drops its oldest, so a waiting post survives a restart", async () => {
+  const day = new Date().toISOString();
+  const decided = Array.from({ length: 2000 }, (_, index) => ({
+    id: randomUUID(),
+    projectId: "garden",
+    tracker: "linear",
+    decider: "owner",
+    state: "posted",
+    summary: `Earlier post ${String(index)}`,
+    detail: `Earlier post ${String(index)}`,
+    asker: "Clankie",
+    createdAt: day,
+    decidedAt: day,
+    route: { kind: "linear", tool: "save_comment", arguments: comment(`Earlier ${String(index)}`) },
+    askerRef: { kind: "lead" },
+    projectIds: ["garden"],
+    fingerprint: `earlier-${String(index)}`,
+  }));
+  const f = await fixture({ posts: decided });
+  const held = await f.worker("save_comment", comment("Waits across a restart."));
+  expect(held).toMatchObject({ outcome: "refused", reason: "posting_held" });
+  const id = /post ([0-9a-f-]{36})/u.exec(held.outcome === "refused" ? held.detail : "")![1]!;
+  const restarted = createTrackerPosting(f.postingOptions);
+  cleanups.push(() => restarted.close());
+  const waiting = await restarted.serve({ action: "list", state: "waiting" }, "owner");
+  expect(waiting).toMatchObject({ posts: [{ id, state: "waiting" }] });
+  // The record loaded whole: nothing was set aside as damaged.
+  expect((await readdir(join(f.root, "state"))).filter((name) => name.includes("damaged"))).toEqual([]);
+  expect(f.mutations("commentCreate")).toBe(0);
 });
