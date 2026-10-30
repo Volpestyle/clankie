@@ -550,8 +550,17 @@ it("keeps each drop with its own project in a shared folder, and files the same 
   const sha = createHash("sha256").update(PNG).digest("hex");
   const twice = await f.cli(
     "drop",
-    ...["--project", "grove", "--body", "Same view twice", "--file", first, "--file", second],
-    ...["--key", "same-bytes-two-names", "--json"],
+    "--project",
+    "grove",
+    "--body",
+    "Same view twice",
+    "--file",
+    first,
+    "--file",
+    second,
+    "--key",
+    "same-bytes-two-names",
+    "--json",
   );
   expect(twice.status).toBe(0);
   const grove = JSON.parse(twice.output) as FeedDropResult;
