@@ -1767,7 +1767,7 @@ export function createOperatorConversationServiceClient(
         OperatorConversationServiceRequestSchema.parse({ ...request, op: "feed_drop", schemaVersion: 1 }),
       );
       if (result.op !== "feed_drop") throw new Error(`Unexpected ${result.op} result for feed_drop`);
-      return result.result;
+      return result.result as FeedDropResult;
     },
     async ownerUpdateList(filter = {}) {
       const result = await dispatch({ op: "owner_update_list", schemaVersion: 1, ...filter });

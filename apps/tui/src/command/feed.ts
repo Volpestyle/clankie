@@ -177,7 +177,7 @@ async function runFeedDropCommand(args: readonly string[], options: FeedCommandO
 export function formatFeedDrop(result: FeedDropResult): string {
   if (result.outcome !== "filed") return result.message;
   const item = result.item;
-  const title = item.kind === "drop" && item.drop ? item.drop.title : item.id;
+  const title = item.drop.title;
   const wake =
     result.wake === "woken"
       ? `Woke its lead${result.leadConversationId ? ` (${result.leadConversationId})` : ""} to refine it.`

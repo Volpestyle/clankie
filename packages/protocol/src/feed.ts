@@ -300,4 +300,8 @@ export const FeedDropResultSchema = z.discriminatedUnion("outcome", [
     .strict(),
   z.object({ outcome: z.literal("unavailable"), message: z.string().min(1).max(1000) }).strict(),
 ]);
-export type FeedDropResult = z.infer<typeof FeedDropResultSchema>;
+type FeedDropResultFields = z.infer<typeof FeedDropResultSchema>;
+/** A drop answer whose filed item is narrowed to a drop, as the host guarantees. */
+export type FeedDropResult =
+  | Exclude<FeedDropResultFields, { outcome: "filed" }>
+  | (Omit<Extract<FeedDropResultFields, { outcome: "filed" }>, "item"> & { item: FeedDropItem });

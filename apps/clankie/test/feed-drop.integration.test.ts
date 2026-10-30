@@ -257,7 +257,7 @@ async function fixture() {
   const drop = async (request: Record<string, unknown>, token = OWNER): Promise<FeedDropResult> => {
     const result = await read(await post({ op: "feed_drop", schemaVersion: 1, ...request }, token));
     if (result.op !== "feed_drop") throw new Error("unexpected drop result");
-    return result.result;
+    return result.result as FeedDropResult;
   };
   const feed = async (request: Record<string, unknown> = {}, token = OWNER): Promise<FeedPage> => {
     const result = await read(await post({ op: "feed_list", schemaVersion: 1, ...request }, token));

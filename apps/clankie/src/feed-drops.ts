@@ -5,6 +5,7 @@ import {
   FeedItemSchema,
   FeedMediaSchema,
   type FeedDropRequest,
+  type FeedDropItem,
   type FeedDropResult,
   type FeedDropSource,
   type FeedItem,
@@ -209,7 +210,7 @@ export function createFeedDrops(options: FeedDropsOptions) {
         throw error;
       }
       const wake = await wakeOnce(target, filed.drop, filed.receipt, caller);
-      const item = (await enrich([dropItem(filed.drop, target, request.projectId)]))[0]!;
+      const item = (await enrich([dropItem(filed.drop, target, request.projectId)]))[0] as FeedDropItem;
       return {
         outcome: "filed",
         item,
