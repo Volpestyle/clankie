@@ -680,8 +680,8 @@ const trackerPosting = createTrackerPosting({
         : projectLeadConversation(await settingsStore.load(), projectId, listed.conversations)) ?? main
     );
   },
-  requestOwnerAsk: (conversationId, draft, publicationId) =>
-    captain.requestOwnerAsk(conversationId, draft, publicationId),
+  requestOwnerAsk: (conversationId, draft, publicationId, options) =>
+    captain.requestOwnerAsk(conversationId, draft, publicationId, options),
   readOwnerAsk: (requestId) => captain.readOwnerAsk(requestId),
   observeQuestionResolutions: (listener) => captain.observeQuestionResolutions(listener),
   wakeConversation: (owner, text) => captain.wakeConversation(owner, text),

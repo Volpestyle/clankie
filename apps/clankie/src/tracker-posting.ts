@@ -172,10 +172,12 @@ export interface TrackerPostingOptions {
   readonly readLinear?: (tool: string, args: Record<string, unknown>) => Promise<unknown>;
   /** The project's lead chat, or the main chat. */
   readonly leadConversation: (projectId: string | undefined) => Promise<string | undefined>;
+  /** Each post is its own ask: `exactPublication` reuses only this post's own question. */
   readonly requestOwnerAsk: (
     conversationId: string,
     draft: QuestionDraft,
     publicationId: string,
+    options: { readonly exactPublication: true },
   ) => Promise<ConversationQuestionResult>;
   readonly readOwnerAsk?: (requestId: string) => ConversationQuestion | undefined;
   readonly observeQuestionResolutions?: (listener: (question: ConversationQuestion) => void) => () => void;
@@ -207,6 +209,8 @@ const StoredSchema = TrackerPostSchema.extend({
   key: z.string().max(256).optional(),
   leadConversationId: z.string().max(256).optional(),
   drop: z.object({ root: z.string(), key: z.string() }).strict().optional(),
+  /** The drop's file says where it was posted; until then a restart or a retry marks it. */
+  dropMarked: z.boolean().optional(),
   destination: z.string().max(4200).optional(),
 }).strict();
 type Stored = z.infer<typeof StoredSchema>;
@@ -577,7 +581,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       allowFreeform: true,
     };
     const result = await options
-      .requestOwnerAsk(conversationId, draft, `tracker-post:${post.id}`)
+      .requestOwnerAsk(conversationId, draft, `tracker-post:${post.id}`, { exactPublication: true })
       .catch(() => undefined);
     if (result?.question === undefined) return false;
     post.requestId = result.question.requestId;
@@ -605,6 +609,23 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         { event: "tracker.posting.lead_not_woken", id: post.id },
         "A post waits for the lead; it shows in clankie work posts",
       );
+  };
+
+  /** Marks a posted drop's file with where it went; never posts again. */
+  const markDrop = async (record: Stored) => {
+    if (record.state !== "posted" || !record.drop || record.dropMarked || !binding?.afterPosted) return;
+    try {
+      const { key, url } = record.posted ?? {};
+      await binding.afterPosted(record.drop, {
+        tracker: record.tracker,
+        ...(key === undefined ? {} : { key }),
+        ...(url === undefined ? {} : { url }),
+      });
+      record.dropMarked = true;
+      save();
+    } catch (error) {
+      options.logger?.warn({ event: "tracker.posting.drop_mark_failed", error }, "Drop not marked posted");
+    }
   };
 
   /** Posts a waiting write once; the caller holds the queue. */
@@ -635,15 +656,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       if (posted) record.posted = posted;
       delete record.note;
       save();
-      if (record.drop)
-        await binding
-          .afterPosted?.(record.drop, { tracker: record.tracker, ...posted })
-          .catch((error: unknown) =>
-            options.logger?.warn(
-              { event: "tracker.posting.drop_mark_failed", error },
-              "Drop not marked posted",
-            ),
-          );
+      await markDrop(record);
       return `Posted to ${TRACKER_NAMES[record.tracker]}${posted?.key ? ` as ${posted.key}` : ""}${posted?.url ? ` (${posted.url})` : ""}.`;
     }
     record.state = outcome.dispatched ? "uncertain" : "failed";
@@ -777,6 +790,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         const question = options.readOwnerAsk?.(record.requestId);
         if (question && question.status !== "pending") void answered(question).catch(() => undefined);
       }
+    // A posted drop whose file was not marked, as when Clankie stopped in between.
+    for (const record of state.posts)
+      if (record.state === "posted" && record.drop && !record.dropMarked) void serial(() => markDrop(record));
     // An owner check cut off before its question was saved is asked again: the ask is keyed
     // by the post, so one already raised is found, not raised twice. One that can't be asked
     // is dropped, unposted, so the asker's retry asks afresh.
@@ -808,7 +824,8 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         return earlier.state === "waiting"
           ? { outcome: "held", post: publicPost(earlier), message: heldMessage(earlier) }
           : earlier.state === "posted"
-            ? { outcome: "posted", post: publicPost(earlier), message: "Already posted." }
+            ? (await markDrop(earlier),
+              { outcome: "posted", post: publicPost(earlier), message: "Already posted." })
             : {
                 outcome: "refused",
                 message: `Already ${earlier.state.replace("_", " ")} (post ${earlier.id}); it is not sent again.`,

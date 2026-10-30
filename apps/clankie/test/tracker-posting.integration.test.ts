@@ -81,8 +81,14 @@ async function repo(root: string, name: string, convention: WorkConvention) {
 }
 
 async function fixture(
-  seed: { posts?: readonly Record<string, unknown>[]; meadow?: boolean | { project: string } } = {},
+  seed: {
+    posts?: readonly Record<string, unknown>[];
+    meadow?: boolean | { project: string };
+    /** Marking this many drops posted fails, as when Clankie stops between the post and its file. */
+    failDropMarks?: number;
+  } = {},
 ) {
+  let failDropMarks = seed.failDropMarks ?? 0;
   const root = await realpath(await mkdtemp(join(tmpdir(), "tracker-posting-")));
   if (seed.posts !== undefined) {
     await mkdir(join(root, "state"), { recursive: true });
@@ -227,10 +233,11 @@ async function fixture(
       return JSON.parse(result.content) as unknown;
     },
     leadConversation: async () => main,
-    requestOwnerAsk: (conversationId, draft, publicationId) =>
+    requestOwnerAsk: (conversationId, draft, publicationId, options) =>
       store.requestSurfaceQuestion(conversationId, draft, {
         current: () => store.conversation(conversationId) !== undefined,
         publicationId,
+        ...options,
       }),
     observeQuestionResolutions: (listener) => store.observeQuestionResolutions(listener),
     wakeConversation: wake,
@@ -273,7 +280,13 @@ async function fixture(
   posting.bind({
     execute: trackerPostingExecutor({ mcpHost: host, workItems }),
     repoTarget: (ref) => workItems.postingTarget(ref),
-    afterPosted: (drop, posted) => recordDropPosted(drop.root, drop.key, posted),
+    afterPosted: async (drop, posted) => {
+      if (failDropMarks > 0) {
+        failDropMarks -= 1;
+        throw new Error("stopped before the drop was marked");
+      }
+      await recordDropPosted(drop.root, drop.key, posted);
+    },
   });
   posting.start();
 
@@ -803,7 +816,8 @@ describe("a drop on a GitHub project", () => {
     for (const deadline = Date.now() + 15_000; Date.now() < deadline;) {
       const listed = await f.posts({ action: "list", state: "all" });
       posts = (listed.body as { posts: TrackerPost[] }).posts;
-      if (posts.some((post) => post.state !== "waiting")) break;
+      // "posting" is on its way to an outcome; wait for the outcome itself.
+      if (posts.some((post) => post.state !== "waiting" && post.state !== "posting")) break;
       await new Promise((r) => setTimeout(r, 10));
     }
     expect(posts).toMatchObject([{ state: "failed", note: expect.stringContaining("tracker changed") }]);
@@ -1171,4 +1185,82 @@ it("an owner check cut off before its question was saved is asked again on resta
   await f.answer("Post it");
   await f.settle(() => f.posting.read(id)?.state === "posted");
   expect(f.mutations("commentCreate")).toBe(1);
+});
+
+it("two held posts that read the same each get their own owner check, and an answer decides only its own", async () => {
+  const body = "Said twice, two ways.";
+  const held = (id: string, fingerprint: string) => ({
+    id,
+    projectId: "garden",
+    tracker: "linear",
+    decider: "owner",
+    state: "waiting",
+    summary: `Post a comment on ${ISSUE_ID} to Linear`,
+    detail: `Post a comment on ${ISSUE_ID} to Linear (Garden).\nbody: ${body}`,
+    asker: "Clankie",
+    createdAt: new Date().toISOString(),
+    route: { kind: "linear", tool: "save_comment", arguments: comment(body) },
+    askerRef: { kind: "lead" },
+    projectIds: ["garden"],
+    fingerprint,
+  });
+  const first = randomUUID();
+  const second = randomUUID();
+  // The same comment, held once from the lead tool and once from the repo route: two posts.
+  const f = await fixture({ posts: [held(first, "lead-route"), held(second, "repo-route")] });
+  await f.settle(
+    () => f.posting.read(first)?.requestId !== undefined && f.posting.read(second)?.requestId !== undefined,
+  );
+  expect(f.posting.read(first)!.requestId).not.toBe(f.posting.read(second)!.requestId);
+  expect((await f.feed()).items.filter((item) => item.kind === "check")).toHaveLength(2);
+  await f.answer("Post it");
+  await f.settle(() => [first, second].some((id) => f.posting.read(id)?.state === "posted"));
+  await new Promise((r) => setTimeout(r, 200));
+  expect([first, second].map((id) => f.posting.read(id)?.state).sort()).toEqual(["posted", "waiting"]);
+  expect(f.mutations("commentCreate")).toBe(1);
+});
+
+it("a drop posted before its file was marked is marked on retry and on restart, never posted twice", async () => {
+  const f = await fixture({ failDropMarks: 2 });
+  await f.setPosting("garden", "allow");
+  const drop = async (key: string, body: string) => {
+    const result = await f.dispatch({
+      op: "feed_drop",
+      schemaVersion: 1,
+      projectId: "garden",
+      idempotencyKey: key,
+      body,
+    });
+    if (result.op !== "feed_drop") throw new Error("unexpected drop result");
+    return result.result as FeedDropResult;
+  };
+  const marked = async (title: string) =>
+    (await readDrops(f.garden)).find((entry) => entry.title === title)?.posted;
+  // Posted, but Clankie stopped before the file said where.
+  expect(await drop("drop-unmarked-0001", "The well rope frays")).toMatchObject({ posting: "posted" });
+  expect(await drop("drop-unmarked-0002", "The bell is cracked")).toMatchObject({ posting: "posted" });
+  expect(f.mutations("issueCreate")).toBe(2);
+  expect(await marked("The well rope frays")).toBeUndefined();
+  expect(await marked("The bell is cracked")).toBeUndefined();
+  // A retry with the same key marks the file from the saved receipt.
+  expect(await drop("drop-unmarked-0001", "The well rope frays")).toMatchObject({
+    duplicate: true,
+    posting: "posted",
+  });
+  expect(await marked("The well rope frays")).toMatchObject({ tracker: "linear" });
+  // A restart marks the other one.
+  const restarted = createTrackerPosting(f.postingOptions);
+  cleanups.push(() => restarted.close());
+  restarted.bind({
+    execute: async () => {
+      throw new Error("a restart never posts again");
+    },
+    repoTarget: (ref) => f.workItems.postingTarget(ref),
+    afterPosted: (entry, posted) => recordDropPosted(entry.root, entry.key, posted),
+  });
+  restarted.start();
+  for (const deadline = Date.now() + 15_000; Date.now() < deadline && !(await marked("The bell is cracked"));)
+    await new Promise((r) => setTimeout(r, 10));
+  expect(await marked("The bell is cracked")).toMatchObject({ tracker: "linear" });
+  expect(f.mutations("issueCreate")).toBe(2);
 });
