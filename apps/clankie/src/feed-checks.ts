@@ -27,8 +27,8 @@ export interface FeedChecksOptions {
   ) => Promise<ConversationQuestionResult>;
 }
 
-export const CHECK_WORKS = "It works";
-export const CHECK_SEND_BACK = "Send it back";
+const CHECK_WORKS = "It works";
+const CHECK_SEND_BACK = "Send it back";
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /**
