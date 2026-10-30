@@ -2877,7 +2877,12 @@ private to the owner's Mac:
   `.clankie/work/` resolves to the main checkout's folder (Git's own `commondir`
   link), so every worktree reads and writes the same files and the repo list
   offers the worktree as its checkout. A committed Markdown directory such as
-  `docs/tasks` stays per checkout.
+  `docs/tasks` stays per checkout. A worktree that kept its own `.clankie/work/`
+  before this has its items copied into the shared folder on first use, skipping
+  any id the shared folder already holds; its own files are left as they are, and
+  a marker in `.adopted/` keeps the copy from happening twice.
+- Two private folders (`.clankie/work/a`, `.clankie/work/b`) are different
+  trackers, so a worktree on the other one stays listed on its own.
 - Every write (create, update, attach, export) holds one lock kept in the folder
   (`.writes.lock`), so writers in different worktrees serialize.
 

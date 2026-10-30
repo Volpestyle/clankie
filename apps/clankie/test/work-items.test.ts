@@ -104,6 +104,35 @@ describe("the work-items service", () => {
     expect(await defaultRun("git", ["status", "--porcelain", "--", ".clankie/work"], repo)).toBe("");
   });
 
+  it("brings a worktree's own older issue files into the shared folder once, losing none", async () => {
+    const { repo, worktree, service } = await checkoutWithWorktree();
+    // Before the folder was shared, an agent in the worktree kept its items there.
+    const legacy = join(worktree, ".clankie/work");
+    await mkdir(legacy, { recursive: true });
+    const item = (id: string, title: string) =>
+      `---\nid: ${id}\ntitle: ${title}\nstatus: todo\npriority: 0\n---\n# ${title}\n`;
+    await writeFile(join(legacy, "W-old001-kept-in-worktree.md"), item("W-old001", "Kept in the worktree"));
+    await writeFile(join(legacy, "W-old002-also-older.md"), item("W-old002", "Also older"));
+    const titles = async (path: string) => {
+      const listed = await service.handle({ action: "list", repo: path }, true);
+      return "items" in listed ? listed.items.map((entry) => entry.title).sort() : [];
+    };
+    expect(await titles(worktree)).toEqual(["Also older", "Kept in the worktree"]);
+    expect(await titles(repo)).toEqual(["Also older", "Kept in the worktree"]);
+    // An update reaches the item where it now lives, and the worktree's files are left alone.
+    await service.handle({ action: "update", repo: worktree, id: "W-old001", status: "in_progress" }, true);
+    const shared = readdirSync(join(repo, ".clankie/work")).filter((name) => name.endsWith(".md"));
+    expect(shared).toHaveLength(2);
+    expect(readdirSync(legacy).sort()).toEqual(["W-old001-kept-in-worktree.md", "W-old002-also-older.md"]);
+    // Once is enough: a later read never copies them again.
+    await service.handle({ action: "create", repo: worktree, title: "New in the shared folder" }, true);
+    expect(await titles(worktree)).toEqual([
+      "Also older",
+      "Kept in the worktree",
+      "New in the shared folder",
+    ]);
+  });
+
   it("keeps a worktree listed when it keeps its issue files in another private folder", async () => {
     const tracking = (directory: string) =>
       JSON.stringify({

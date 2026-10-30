@@ -637,11 +637,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       );
     }
   };
-  /** The tracker project the owner bound this workspace's settings project to, if any. */
-  const builtInBinding = async (path: string): Promise<TrackerDeps["builtIn"]> => {
+  /**
+   * The tracker project the owner bound this workspace's settings project to, if any.
+   * A caller acting for one settings project names it, since projects may share a path.
+   */
+  const builtInBinding = async (path: string, projectId?: string): Promise<TrackerDeps["builtIn"]> => {
     const machine = options.localMachineId ?? "local";
     const project = (await options.projects?.())?.projects.find(
       (entry) =>
+        (projectId === undefined || entry.id === projectId) &&
         entry.trackerProjectId !== undefined &&
         entry.workspaces.some(
           (workspace) => workspace.machineId === machine && resolve(workspace.path) === resolve(path),
@@ -656,9 +660,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     return { projectId: project.trackerProjectId, teamId, open: openBuiltIn };
   };
 
-  const deps = async (path: string, local = true): Promise<TrackerDeps> => {
+  const deps = async (path: string, local = true, projectId?: string): Promise<TrackerDeps> => {
     const token = await options.githubToken?.();
-    const builtIn = await builtInBinding(path);
+    const builtIn = await builtInBinding(path, projectId);
     const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
     return {
       run,
@@ -1686,7 +1690,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           ? { linear: convention.linear }
           : {}),
       };
-      const dependencies = await deps(workspace.path, true);
+      // The requested project's own binding: another project may share this workspace.
+      const dependencies = await deps(workspace.path, true, project.id);
       if (convention.backend === "builtin" && dependencies.builtIn === undefined)
         return refused(
           `${project.name} tracks work in the built-in tracker, but it is not bound to a tracker project (trackerProjectId).`,

@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, lstatSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, relative, resolve, sep } from "node:path";
 import {
   WorkItemPrioritySchema,
@@ -44,6 +45,8 @@ const ID_PREFIX = /^([A-Za-z]+-[A-Za-z0-9]+)(?:-|\.md$)/u;
 export const PRIVATE_WORK_GITIGNORE = "# Clankie issue files are private: never committed.\n*\n";
 /** Locked (as `.writes.lock`) for every write to the private folder, export included. */
 export const PRIVATE_WORK_LOCK = ".writes";
+/** Markers, in the shared folder, of each worktree folder whose items were brought in. */
+export const PRIVATE_WORK_ADOPTED = ".adopted";
 
 export interface FileItem {
   readonly path: string;
@@ -249,6 +252,57 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
     });
   };
 
+  /**
+   * A linked worktree that kept its own `.clankie/work` before the folder was shared:
+   * its items are copied once into the shared folder, so none disappears. An item the
+   * shared folder already has (by id) is skipped, and the worktree's files stay as they are.
+   */
+  const legacy = privateFolder ? resolve(options.root, options.directory) : undefined;
+  let adopted: Promise<void> | undefined;
+  const adoptLegacy = () => (adopted ??= adoptLegacyItems());
+  async function adoptLegacyItems(): Promise<void> {
+    if (legacy === undefined || legacy === directory) return;
+    let names: string[];
+    try {
+      names = (await readdir(legacy)).filter(
+        (entry) => entry.endsWith(".md") && !/^readme\.md$/iu.test(entry),
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (names.length === 0) return;
+    const marker = join(
+      directory,
+      PRIVATE_WORK_ADOPTED,
+      createHash("sha256").update(legacy).digest("hex").slice(0, 32),
+    );
+    if (existsSync(marker)) return;
+    await locked(async () => {
+      if (existsSync(marker)) return;
+      const idOf = (file: FileItem) => {
+        try {
+          return toItem(file).id.toLowerCase();
+        } catch {
+          return undefined;
+        }
+      };
+      const ids = new Set((await readAll()).map(idOf));
+      for (const name of names.sort()) {
+        const text = await readFile(join(legacy, name), "utf8");
+        const id = idOf(parseFile(join(legacy, name), text));
+        if (id !== undefined && ids.has(id)) continue;
+        let target = join(directory, name);
+        for (let n = 2; existsSync(target); n++) target = join(directory, name.replace(/\.md$/u, `-${n}.md`));
+        assertScopedPath(target, true);
+        await writeFile(target, text, { encoding: "utf8", flag: "wx" });
+        ids.add(id);
+      }
+      await mkdir(join(directory, PRIVATE_WORK_ADOPTED), { recursive: true });
+      await writeFile(marker, `${legacy}\n`, "utf8");
+    }, true);
+  }
+
   const write = async (path: string, text: string): Promise<void> => {
     assertScopedPath(path);
     // Atomic replace: a reader never sees half an item, and two agents editing
@@ -269,6 +323,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
   return {
     kind: options.kind,
     async readIssue(id) {
+      await adoptLegacy();
       try {
         const file = await find(id);
         const item = toItem(file);
@@ -287,6 +342,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       }
     },
     async list(filter?: WorkListFilter) {
+      await adoptLegacy();
       const { label, ...itemFilter } = filter ?? {};
       const items = (await readAll())
         .filter(
@@ -301,6 +357,7 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
       return sortWorkItems(items).slice(0, filter?.limit ?? items.length);
     },
     async get(id) {
+      await adoptLegacy();
       try {
         return toItem(await find(id));
       } catch (error) {
@@ -310,10 +367,17 @@ export function createFilesBackend(options: FilesBackendOptions): WorkBackend {
     },
     create: async (draft: WorkItemDraft) => {
       WorkItemPrioritySchema.parse(draft.priority ?? 0);
+      await adoptLegacy();
       return locked(() => create(draft), true);
     },
-    update: (id: string, patch: WorkItemPatch) => locked(() => update(id, patch)),
-    attach: (id: string, evidence: WorkEvidence) => locked(() => attach(id, evidence)),
+    update: async (id: string, patch: WorkItemPatch) => {
+      await adoptLegacy();
+      return locked(() => update(id, patch));
+    },
+    attach: async (id: string, evidence: WorkEvidence) => {
+      await adoptLegacy();
+      return locked(() => attach(id, evidence));
+    },
   };
 
   async function create(draft: WorkItemDraft) {

@@ -107,6 +107,14 @@ async function fixture() {
       projects: [
         { id: "app", name: "App", workspaces: workspace(app.repo), trackerRef, trackerProjectId: projectId },
         { id: "linear-app", name: "Linear App", workspaces: workspace(linear.repo), trackerRef },
+        // A second project in the same checkout, bound to another tracker project.
+        {
+          id: "app-side",
+          name: "App Side",
+          workspaces: workspace(app.repo),
+          trackerRef,
+          trackerProjectId: (promote as { id: string }).id,
+        },
         {
           id: "auto-app",
           name: "Auto App",
@@ -140,7 +148,8 @@ async function fixture() {
       fetchImpl: (input, init) => Promise.resolve(host.app.request(String(input), init)),
     }) as Promise<{ ok: boolean; body: Record<string, any> }>;
   const work = (...args: string[]) => workIn(app.worktree, ...args);
-  return { root, app, linear, auto, tracker, projectId, settings, service, work, workIn };
+  const sideProjectId = (promote as { id: string }).id;
+  return { root, app, linear, auto, tracker, projectId, sideProjectId, settings, service, work, workIn };
 }
 
 const mdFiles = async (directory: string) =>
@@ -210,6 +219,13 @@ it("exports a built-in project's open items into private issue files every workt
     ["VUH-1905", "VUH-1907", parent.identifier, child.identifier].sort(),
   );
   expect(existsSync(folder)).toBe(false);
+  // The other project in this checkout reads its own tracker project, which holds nothing.
+  const side = await f.work("export", "--project", "app-side", "--to", "markdown", "--dry-run");
+  expect(side.body).toMatchObject({
+    ready: true,
+    source: { backend: "builtin", trackerProjectId: f.sideProjectId },
+    counts: { create: 0, closedSkipped: 0 },
+  });
 
   // Run from the worktree: the files land once, in the main checkout, and git never sees them.
   const exported = await f.work("export", "--project", "app", "--to", "markdown");
