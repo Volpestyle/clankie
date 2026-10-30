@@ -15,6 +15,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FleetRoomJournal } from "../src/captain/fleet-room.ts";
+import { createPromptAnswerer } from "../src/captain/prompt-answer.ts";
 import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../relay/src/connector-mcp.ts";
 import { createCaptainConversationDispatch } from "../../relay/src/conversation-upstream.ts";
@@ -567,6 +568,222 @@ it("an app's note reaches the real board signed with the name the owner approved
     // The owner reads the board itself.
     const owned = await dispatch(host.operatorToken, { op: "app_notes", schemaVersion: 1, action: "read" });
     expect(((await owned.json()) as { result: { notes: unknown[] } }).result.notes).toHaveLength(2);
+  } finally {
+    await Promise.all(clients.map((client) => client.close()));
+    relay.closeAllConnections();
+    relay.close();
+    await host.close();
+    await rm(boardRoot, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("an app answers an agent's prompt only once the owner turns it on, only while it shows, and once", async () => {
+  const boardRoot = await mkdtemp(join(tmpdir(), "connector-prompts-"));
+  const board = new FleetRoomJournal(boardRoot);
+  const captainToken = randomBytes(24).toString("hex");
+  // Herdr's side of three panes, as the routed runner sees them: Bram waits on a Claude
+  // Code permission prompt, Ivy's menu redraws the same after a key, and Pip's question
+  // Clankie already sent to the owner.
+  const permission = [
+    "Bash command",
+    "  git push origin main",
+    "Do you want to proceed?",
+    "❯ 1. Yes",
+    "  2. Yes, and don't ask again for git push commands",
+    "  3. No, and tell Claude what to do differently (esc)",
+  ].join("\n");
+  const panes = new Map([
+    ["term-bram", { status: "blocked", screen: permission }],
+    ["term-ivy", { status: "blocked", screen: "Pick a layout\n❯ 1. Grid\n  2. Stack\n  3. Type something" }],
+    ["term-pip", { status: "blocked", screen: "Which branch?\n❯ 1. main\n  2. dev" }],
+  ]);
+  const sent: string[][] = [];
+  const answerPrompt = createPromptAnswerer({
+    paneAddress: async (terminalId) => (panes.has(terminalId) ? terminalId : undefined),
+    runner: {
+      resolveTerminal: async (id) => {
+        const pane = panes.get(id);
+        return pane === undefined
+          ? undefined
+          : { paneId: `p-${id}`, terminalId: id, agent: "claude", status: pane.status, title: id };
+      },
+      readPane: async (paneId) => panes.get(paneId.slice(2))!.screen,
+      sendKeys: async (paneId, keys) => void sent.push(["keys", paneId, ...keys]),
+      sendText: async (paneId, text) => {
+        sent.push(["text", paneId, text]);
+        // Bram goes to work on his answer; Ivy's menu looks the same afterwards.
+        if (paneId === "p-term-bram")
+          panes.set("term-bram", { status: "working", screen: "⏺ Bash(git push)" });
+      },
+    },
+    ownerAskPending: (seatId) => seatId === "term-pip",
+    record: (app, text) => board.postAppNote(app, text),
+  });
+  const host = await createQaService({
+    captainToken,
+    captain: {
+      answerPrompt,
+      appNotes: async (command) =>
+        command.action === "post"
+          ? board.postAppNote(command.author, command.text)
+          : board.readAppNotes(command),
+    },
+  });
+  const authorizeDevice = new ControlPlaneDeviceAuthorizer({ baseUrl: host.baseUrl });
+  let relayUrl = "";
+  const operator = createOperatorConversationRelayHandler({
+    authorizeDevice,
+    dispatch: createCaptainConversationDispatch({ baseUrl: host.baseUrl, bearerToken: captainToken }),
+  });
+  const connector = createConnectorMcpHandler({
+    authorizeDevice,
+    operator: createLoopbackConnectorOperator("http://placeholder.invalid", (input, init) =>
+      fetch(new URL(new URL(String(input)).pathname, relayUrl), init),
+    ),
+    localAuthorizationServer: host.baseUrl,
+    version: "test",
+    guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
+  });
+  const relay = createServer((request, response) => {
+    void (async () => {
+      if (await connector(request, response)) return;
+      if (await operator(request, response)) return;
+      response.statusCode = 404;
+      response.end();
+    })();
+  });
+  relay.listen(0, "127.0.0.1");
+  await once(relay, "listening");
+  relayUrl = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+  const clients: Client[] = [];
+  try {
+    const signIn = async (name: string, callback: string) => {
+      const { client_id: clientId } = (await (await register(host.baseUrl, [callback], name)).json()) as {
+        client_id: string;
+      };
+      const started = await startSignIn(host.baseUrl, clientId, callback);
+      expect(await cli(host).run(["approve", started.code!])).toBe(0);
+      const code = new URL((await status(host.baseUrl, started.request!)).redirect!).searchParams.get(
+        "code",
+      )!;
+      const { access_token: accessToken } = (await (
+        await token(host.baseUrl, {
+          grant_type: "authorization_code",
+          client_id: clientId,
+          redirect_uri: callback,
+          code,
+          code_verifier: started.verifier,
+        })
+      ).json()) as { access_token: string };
+      const client = new Client({ name: `${name}-e2e`, version: "1" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL("/mcp", relayUrl), {
+          requestInit: { headers: { authorization: `Bearer ${accessToken}` } },
+        }) as unknown as Transport,
+      );
+      clients.push(client);
+      const self = (await (
+        await fetch(`${host.baseUrl}/v1/devices/self`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+      ).json()) as { deviceId: string };
+      return { client, deviceId: self.deviceId, accessToken };
+    };
+    const claude = await signIn("Claude", CALLBACK);
+    const grok = await signIn("Grok", "https://grok.example/oauth/callback");
+    const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) =>
+      (result.content as Array<{ text: string }>)[0]!.text;
+    const answer = (client: Client, agent: string, expected: string, steps: unknown[]) =>
+      client.callTool({ name: "answer_prompt", arguments: { agent, expect: expected, steps } });
+
+    // Off for every app until the owner turns it on at the Mac.
+    const off = await answer(claude.client, "herdr:term-bram", "1. Yes", [{ text: "1" }]);
+    expect(off.isError).toBe(true);
+    expect(textOf(off)).toContain("hasn't turned on answering prompts for Claude");
+    const owner = cli(host);
+    expect(await owner.run(["prompts", "on", "Claude"])).toBe(0);
+    expect(owner.output().stdout).toContain("Claude: on");
+    expect(owner.output().stdout).toContain("Grok: off");
+    expect(sent).toEqual([]);
+
+    // The prompt must still show what the app saw.
+    const changed = await answer(claude.client, "herdr:term-bram", "4. Always", [{ text: "4" }]);
+    expect(textOf(changed)).toContain("isn't on that agent's screen now");
+    const answered = await answer(claude.client, "herdr:term-bram", "1.   Yes", [{ text: "1" }]);
+    expect(answered.isError).toBeFalsy();
+    expect(JSON.parse(textOf(answered))).toMatchObject({ agent: "herdr:term-bram", status: "answered" });
+    expect(sent).toEqual([["text", "p-term-bram", "1"]]);
+    // Bram went to work: no prompt waits now.
+    const working = await answer(claude.client, "herdr:term-bram", "Bash", [{ key: "enter" }]);
+    expect(textOf(working)).toContain("isn't waiting on a prompt (it is working)");
+
+    // A menu that looks the same afterwards is answered once.
+    const typed = await answer(claude.client, "herdr:term-ivy", "3. Type something", [
+      { text: "3" },
+      { text: "Grid, but two columns" },
+      { key: "enter" },
+    ]);
+    expect(typed.isError).toBeFalsy();
+    const again = await answer(claude.client, "herdr:term-ivy", "3. Type something", [{ key: "enter" }]);
+    expect(textOf(again)).toContain("already answered");
+    expect(sent.slice(1)).toEqual([
+      ["text", "p-term-ivy", "3"],
+      ["text", "p-term-ivy", "Grid, but two columns"],
+      ["keys", "p-term-ivy", "enter"],
+    ]);
+
+    // A question Clankie sent to the owner stays the owner's; Grok was never turned on.
+    expect(textOf(await answer(claude.client, "herdr:term-pip", "1. main", [{ text: "1" }]))).toContain(
+      "the owner's to answer",
+    );
+    expect(textOf(await answer(grok.client, "herdr:term-pip", "1. main", [{ text: "1" }]))).toContain(
+      "for Grok",
+    );
+    // Control characters and unnamed keys never reach a pane.
+    const raw = await answer(claude.client, "herdr:term-pip", "1. main", [{ text: "1\r\u001b[A" }]);
+    expect(raw.isError).toBe(true);
+    expect((await answer(claude.client, "herdr:term-pip", "1. main", [{ key: "ctrl+c" }])).isError).toBe(
+      true,
+    );
+    expect(sent).toHaveLength(4);
+
+    // Each answer is on the note board, signed by the app that gave it.
+    const notes = board.readAppNotes({ limit: 20 });
+    expect(notes.outcome === "ready" && notes.notes.map((note) => [note.author, note.text])).toEqual([
+      ["Claude", 'Answered a prompt in term-bram: typed "1".'],
+      ["Claude", 'Answered a prompt in term-ivy: typed "3", typed "Grid, but two columns", enter.'],
+    ]);
+
+    // By hand: the relay stamps the app, and the service takes the stamp only on the relay's bearer.
+    const prompt = {
+      op: "prompt_answer",
+      schemaVersion: 1,
+      terminalId: "term-pip",
+      expect: "1. main",
+      steps: [{ text: "1" }],
+    };
+    const forged = await fetch(new URL("/operator/v1/dispatch", relayUrl), {
+      method: "POST",
+      headers: { authorization: `Bearer ${grok.accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...prompt, appDeviceId: claude.deviceId }),
+    });
+    expect(forged.status).toBe(400);
+    const direct = (bearer: string, body: unknown) =>
+      fetch(`${host.baseUrl}${OPERATOR_CONVERSATION_DISPATCH_PATH}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await direct(host.operatorToken, { ...prompt, appDeviceId: claude.deviceId })).status).toBe(403);
+    expect((await direct(captainToken, prompt)).status).toBe(403);
+
+    // Turning it off, or revoking the app, stops it at once.
+    expect(await owner.run(["prompts", "off", claude.deviceId])).toBe(0);
+    panes.set("term-bram", { status: "blocked", screen: permission });
+    expect(textOf(await answer(claude.client, "herdr:term-bram", "1. Yes", [{ text: "1" }]))).toContain(
+      "hasn't turned on",
+    );
+    expect(sent).toHaveLength(4);
   } finally {
     await Promise.all(clients.map((client) => client.close()));
     relay.closeAllConnections();

@@ -275,6 +275,12 @@ export interface HerdrWatchRunner {
   readPane?(target: string, source: "visible" | "recent-unwrapped", format: "text" | "ansi"): Promise<string>;
   /** `herdr pane send-keys`: named key presses, never text. Claude's Stop presses one `esc` (VUH-2680). */
   sendKeys?(paneId: string, keys: readonly string[]): Promise<void>;
+  /**
+   * `herdr pane send-text`: one line typed into the pane, no Enter. Only a
+   * connected app answering an open prompt the owner let it answer (ADR 0302);
+   * never a channel for automated messages (ADR 0207).
+   */
+  sendText?(paneId: string, text: string): Promise<void>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `herdr pane process-info --pane` → the pane's own shell and its foreground processes. */
@@ -743,6 +749,7 @@ export function createHerdrWatchRunner(
     readPane: (target, source, format) =>
       runHerdr(["pane", "read", target, "--source", source, "--format", format]),
     sendKeys: (paneId, keys) => runHerdr(["pane", "send-keys", paneId, ...keys]).then(() => undefined),
+    sendText: (paneId, text) => runHerdr(["pane", "send-text", paneId, text]).then(() => undefined),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     paneShell: async (paneId) => {

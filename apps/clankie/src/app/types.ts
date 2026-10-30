@@ -160,6 +160,8 @@ export interface ClankieAppDependencies {
   seatCallReceiptPath?: string;
   /** Durable quick check key receipts, so an old key never asks the owner twice. */
   feedCheckReceiptPath?: string;
+  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0302). */
+  connectorPromptAnswersPath?: string;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** Worker harness sign-in with each harness's own login (Claude, Codex). */

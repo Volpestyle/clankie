@@ -365,6 +365,18 @@ export interface CaptainPort {
           readonly limit?: number | undefined;
         },
   ): Promise<import("@clankie/protocol").AppNotesResult>;
+  /**
+   * Answer the prompt open in an agent's pane for a connected app the owner turned
+   * answering on for (ADR 0302): only while the agent waits on input and the text
+   * the app expects is still on its screen, once per screen, recorded on the note board.
+   */
+  answerPrompt?(input: {
+    readonly app: string;
+    readonly current: () => boolean;
+    readonly terminalId: string;
+    readonly expect: string;
+    readonly steps: readonly import("@clankie/protocol/connector").PromptAnswerStep[];
+  }): Promise<import("@clankie/protocol/connector").PromptAnswerResult>;
   /** Records a verified outside delivery in the fleet room (VUH-2403); never blocks or alters its handling. */
   recordInbound?(arrival: import("./fleet-room.ts").InboundArrival): void;
   serveOperatorConversation(

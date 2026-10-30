@@ -1095,6 +1095,7 @@ export function createOperatorService(
       request.op === "lead_chats" ||
       request.op === "fleet_room" ||
       request.op === "app_notes" ||
+      request.op === "prompt_answer" ||
       request.op === "feed_list" ||
       request.op === "feed_drop" ||
       request.op === "feed_check"

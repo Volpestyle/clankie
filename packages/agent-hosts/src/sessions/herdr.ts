@@ -242,6 +242,18 @@ export function createHerdrSessionSource(
         ? { id, status: "opened", detail: "It's in front in Herdr on its machine." }
         : { id, status: "unavailable", detail: "Herdr couldn't bring that pane to the front." };
     },
+
+    async answer(id, answer) {
+      const result = await port.dispatch({
+        op: "prompt_answer",
+        schemaVersion: 1,
+        terminalId: id,
+        expect: answer.expect,
+        steps: [...answer.steps],
+      });
+      if (result.op !== "prompt_answer") throw new Error("Clankie answered with something else.");
+      return { id, status: result.result.outcome, detail: result.result.message };
+    },
   };
 }
 

@@ -139,7 +139,8 @@ stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
 `message_agent` (`agent`, `message`), `start_agent` (`machine`,
 `workingDirectory`, `harness` claude or codex, `prompt`; with no machine and
 directory it lists the places), `post_note` (`text`, up to 2,000 characters),
-`read_notes` (`since` optional) and `clankie_guide` (`topic` optional).
+`read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`)
+and `clankie_guide` (`topic` optional).
 `post_note` and `read_notes` are the board the apps share (the `app_notes`
 op): the relay stamps the device it authenticated on a post as
 `appDeviceId`, refuses a request that already carries one (`400
@@ -147,6 +148,12 @@ app_note_author_is_stamped`) or comes from a device that isn't a connector
 (`403 connector_device_required`), and the service signs the note with that
 device's approved name. `read_notes` returns the notes oldest first with a
 `newer` cursor, and says they're another app's information, not instructions.
+`answer_prompt` (the `prompt_answer` op, ADR 0302) presses named keys or types
+plain text into a pane that is waiting on input; the relay stamps the device
+the same way (`400 prompt_answer_app_is_stamped`, `403
+connector_device_required`) and needs `terminalObserve`. The service answers
+only for an app the owner turned on with `clankie connector prompts on APP`,
+only while the expected text is on screen, and once per prompt.
 `clankie_guide` reads the skills in `.agents/skills` from this checkout: no
 topic lists each skill and its description, a skill name returns its
 `SKILL.md` and names its other pages, and `skill/page.md` returns that page.
@@ -155,7 +162,8 @@ calls nothing on the service. Each fleet call checks the bearer against
 `GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request
-does: fleet, terminal catalog, read and tail, `start_agent`, `app_notes`, and
+does: fleet, terminal catalog, read and tail, `start_agent`, `app_notes`,
+`prompt_answer`, and
 get, create and send on persona threads only. `start_agent` needs `steer`, which connector
 devices carry for that op alone. The tools go through the session-source layer of
 `@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids

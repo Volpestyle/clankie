@@ -1918,7 +1918,7 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
-### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE`
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
 a remote MCP server that lets Claude list your agents, read their screens and
@@ -1948,6 +1948,18 @@ note is signed with the name you approved that app under, never a name the app
 gives, and the apps read notes as information, not instructions. Clankie and
 his hired agents read the board too, and `clankie fleet room` shows the notes
 among the room's entries.
+
+`answer_prompt` answers a menu, permission prompt or question open in an
+agent's pane ([ADR 0302](adr/0302-connected-apps-answer-agents-prompts.md)).
+It is off for every app until you turn it on: `clankie connector prompts`
+lists the connected apps as `NAME: on|off  (DEVICE_ID)`, and `clankie connector
+prompts on APP` or `off APP` changes one, named by its approved name or device
+id. JSON: `{ "ok": true, "apps": [{ "deviceId", "name", "allowed" }] }`. Exit 1
+with status `unknown_app` when no connected app matches, or `ambiguous_app`
+when two share the name. An app that is on presses keys only while the agent
+waits on input and the prompt it read is still on screen, once per prompt, and
+never on a question Clankie sent to you. Each answer leaves a note in that
+app's name on the board.
 
 ```bash
 claude mcp add --transport http clankie "$(clankie connector --json | jq -r .connectorUrl)"

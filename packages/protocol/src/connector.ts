@@ -22,6 +22,11 @@ export const CONNECTOR_AUTHORIZE_PATH = "/oauth/authorize";
 export const CONNECTOR_AUTHORIZE_STATUS_PATH = "/oauth/authorize/status";
 export const CONNECTOR_TOKEN_PATH = "/oauth/token";
 
+/**
+ * Owner route: which connected apps may answer a prompt open in an agent's pane
+ * (ADR 0302). GET lists the apps; POST {deviceId, allowed} turns one on or off.
+ */
+export const CONNECTOR_PROMPT_ANSWERS_PATH = "/v1/connector/prompt-answers";
 /** Owner routes: pending sign-ins, and the approve and deny decisions. */
 export const CONNECTOR_SIGN_INS_PATH = "/v1/connector/sign-ins";
 export const CONNECTOR_SIGN_IN_APPROVE_PATH = "/v1/connector/sign-ins/approve";
@@ -143,13 +148,71 @@ export function isConnectorRoute(method: string, path: string): boolean {
   return connectorRouteTarget(method, path) !== undefined;
 }
 
+/** Named keys an app may press at a prompt; letters and digits go as text. */
+export const PROMPT_ANSWER_KEYS = [
+  "enter",
+  "esc",
+  "tab",
+  "up",
+  "down",
+  "left",
+  "right",
+  "space",
+  "backspace",
+] as const;
+export const PROMPT_ANSWER_TEXT_MAX = 2_000;
+export const PROMPT_ANSWER_EXPECT_MAX = 500;
+
+/** One step at a prompt: a named key, or text typed as it is (one line, no control characters). */
+export const PromptAnswerStepSchema = z.union([
+  z.object({ key: z.enum(PROMPT_ANSWER_KEYS) }).strict(),
+  z
+    .object({
+      text: z
+        .string()
+        .min(1)
+        .max(PROMPT_ANSWER_TEXT_MAX)
+        // eslint-disable-next-line no-control-regex -- control characters are exactly what this refuses
+        .refine(
+          (value) => !/[\u0000-\u001f\u007f]/u.test(value),
+          "Text is one line with no control characters",
+        ),
+    })
+    .strict(),
+]);
+export type PromptAnswerStep = z.infer<typeof PromptAnswerStepSchema>;
+
+export const PromptAnswerResultSchema = z
+  .object({
+    outcome: z.enum(["answered", "refused", "uncertain", "unavailable"]),
+    message: z.string().min(1).max(1_000),
+  })
+  .strict();
+export type PromptAnswerResult = z.infer<typeof PromptAnswerResultSchema>;
+
+export const ConnectorPromptAnswerAppSchema = z
+  .object({
+    deviceId: z.string().min(1).max(256),
+    name: z.string().min(1).max(64),
+    allowed: z.boolean(),
+  })
+  .strict();
+export const ConnectorPromptAnswersResponseSchema = z
+  .object({ apps: z.array(ConnectorPromptAnswerAppSchema).max(256) })
+  .strict();
+export type ConnectorPromptAnswersResponse = z.infer<typeof ConnectorPromptAnswersResponseSchema>;
+export const ConnectorPromptAnswersRequestSchema = z
+  .object({ deviceId: z.string().min(1).max(256), allowed: z.boolean() })
+  .strict();
+
 /**
  * What a connector device may ask the relay, whatever its grants: read the
  * fleet and its panes, start an agent in a known project, message an
  * agent's own persona thread, and post and read the app note board. A send or a
  * read of one thread is held to persona threads by the relay, which looks the
  * thread up before dispatching; Clankie's own lead thread is never reachable.
- * A note's author is the device the relay authenticated, stamped by the relay.
+ * A note's author, and the app answering a prompt, is the device the relay
+ * authenticated, stamped by the relay; the owner turns prompt answers on per app.
  */
 export function connectorOperationAllowed(request: OperatorConversationServiceRequest): boolean {
   switch (request.op) {
@@ -159,6 +222,7 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "terminal_read":
     case "start_agent":
     case "app_notes":
+    case "prompt_answer":
     case "get":
     case "send":
     case "send_receipt":

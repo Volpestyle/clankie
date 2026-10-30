@@ -3859,6 +3859,21 @@ export class ConversationStore {
     return this.ownerUpdates.publish(conversationId, draft, publicationId);
   }
 
+  /** True while a worker's native question from this seat waits on the owner's answer in the ask store. */
+  public ownerAskPendingFor(seatId: string): boolean {
+    for (const meta of this.metas.values()) {
+      this.validQuestionState(meta);
+      if (
+        meta.questions?.records.some(
+          (record) =>
+            record.question.status === "pending" && record.question.workerQuestion?.seatId === seatId,
+        )
+      )
+        return true;
+    }
+    return false;
+  }
+
   /** Internal receipt read for durable host-raised asks, not a mailbox authorization bypass. */
   public readOwnerAsk(requestId: string): ConversationQuestion | undefined {
     for (const meta of this.metas.values()) {
