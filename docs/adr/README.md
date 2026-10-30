@@ -208,3 +208,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0302: Posting to your tracker is the owner's call](0302-posting-to-your-tracker-is-the-owners-call.md) — per project: read only, ask me, Clankie decides or go ahead for Linear and GitHub writes. Extends ADR 0226 and ADR 0230.
 - [0303: Connected apps answer the prompts open in agents' panes](0303-connected-apps-answer-agents-prompts.md) — `answer_prompt`, off until the owner turns it on per app. Amends ADR 0301.
 - [0304: The owner hands Clankie's lead to the connected apps](0304-the-owner-hands-the-lead-to-connected-apps.md) — `clankie connector lead apps` holds his own turns for the apps' `read_inbox`; only the owner hands it back.
+- [0305: Connected apps write the owner's issues as agents](0305-connected-apps-write-issues-as-agents.md) — `save_issue` and `comment_issue` pass the project's posting setting; issue files are written right away. Amends ADR 0301.

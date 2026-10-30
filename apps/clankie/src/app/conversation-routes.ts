@@ -1,5 +1,6 @@
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
-import type { PromptAnswerResult } from "@clankie/protocol/connector";
+import type { IssueWriteResult, PromptAnswerResult } from "@clankie/protocol/connector";
+import { writeIssueForApp } from "../connector-issue-writes.ts";
 import type { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import {
   TRACKER_REQUEST_BUDGET_PATH,
@@ -706,6 +707,41 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return reply({
           outcome: "uncertain",
           message: "The answer may or may not have reached the agent. Read its screen before trying again.",
+        });
+      }
+    }
+    if (parsed.success && parsed.data.op === "issue_write") {
+      // A connected app writing an issue (ADR 0305): only through the relay's captain
+      // bearer, which stamps the connector device it authenticated. The app is named from
+      // that device's own record, and Linear or GitHub writes pass the project's setting.
+      const request = parsed.data;
+      const relay = () =>
+        captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const app = () => {
+        if (request.appDeviceId === undefined) return undefined;
+        const record = ctx.devices.get(request.appDeviceId);
+        return record?.status === "active" && record.scope === "connector" ? record : undefined;
+      };
+      const reply = (result: IssueWriteResult) =>
+        context.json({ op: "issue_write", schemaVersion: 1, result });
+      const named = app();
+      if (!relay() || named === undefined) return context.json({ error: "app_author_required" }, 403);
+      if (ctx.dependencies.workItems === undefined)
+        return reply({ outcome: "refused", message: "Work tracking is not running on this Clankie." });
+      try {
+        return reply(
+          await writeIssueForApp(ctx.dependencies.workItems, {
+            repoId: request.repoId,
+            write: request.write,
+            app: { deviceId: named.deviceId, name: named.name },
+            current: () => app() !== undefined,
+          }),
+        );
+      } catch (error) {
+        logger.warn({ error }, "Connected app's issue write failed");
+        return reply({
+          outcome: "uncertain",
+          message: "It may or may not have been written. Read the issue before trying again.",
         });
       }
     }

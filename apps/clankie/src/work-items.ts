@@ -95,6 +95,7 @@ import {
 import { deliveryFingerprint } from "./captain/delivery-fence.ts";
 import {
   assertAdmitted,
+  CONNECTED_APP_ACTOR_PREFIX,
   isTrackerWriteTool,
   TRACKER_POSTING_ADMITTED,
   type PostingAsker,
@@ -115,8 +116,14 @@ const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_
 function ownerActor(actor: TrackerActor | undefined): boolean {
   return actor?.type === TRACKER_OWNER.type || actor?.type === "app";
 }
-/** Who asks to post: a hired worker by its principal, otherwise Clankie himself. */
+/** Who asks to post: a connected app, a hired worker by its principal, otherwise Clankie himself. */
 function postingAsker(actor: TrackerActor | undefined): PostingAsker {
+  if (actor?.type === "agent-worker" && actor.id.startsWith(CONNECTED_APP_ACTOR_PREFIX))
+    return {
+      kind: "app",
+      deviceId: actor.id.slice(CONNECTED_APP_ACTOR_PREFIX.length),
+      name: actor.name ?? "A connected app",
+    };
   return actor?.type === "agent-worker" && actor.id !== TRACKER_LEAD.id
     ? { kind: "worker", principalId: actor.id, ...(actor.name === undefined ? {} : { name: actor.name }) }
     : { kind: "lead" };
@@ -1931,6 +1938,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       const tracker = await outwardTracker(convention);
       if (tracker === undefined) return undefined;
       return { tracker, projectIds: await projectIdsAt(path) };
+    },
+    /** The Linear team a registered repo's issues live in, so a status lands in that team's own state. */
+    async linearTeam(repo: string): Promise<string | undefined> {
+      if (/^project-[a-f0-9]{48}$/u.test(repo))
+        return projectReader ? (await projectReader.prepare(repo)).convention.linear?.team : undefined;
+      return (await readConvention((await locate(repo, true)).path))?.linear?.team;
     },
     /** Files one drop in a target `dropTarget` returned ready; see `fileDrop`. */
     fileDrop: (

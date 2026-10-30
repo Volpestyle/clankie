@@ -4833,6 +4833,16 @@ paths:
         `appDeviceId` it stamped. It answers `result` with `outcome` answered,
         refused, uncertain or unavailable and a `message`, and records each answer
         as an `app_note` in that app's name.
+        `issue_write` (ADR 0305) writes an issue in one of the owner's projects for
+        a connector app: `repoId` and `write`, which is `create` (title, optional
+        description, status, priority, labels), `update` (issue plus any of title,
+        description, status, priority, addLabels, removeLabels) or `comment`
+        (issue, body). Only the relay's captain bearer calls it, carrying the
+        `appDeviceId` it stamped. The write goes out as an agent named for the app,
+        so Linear and GitHub writes pass the project's posting setting; issue files
+        are written right away and take no comments. It answers `result` with
+        `outcome` written, held (with the waiting `post`), refused or uncertain, a
+        `message`, and the `issue` when known.
         `lead` (ADR 0304) reads or sets who leads Clankie's lead threads:
         `clankie` or `apps`. `command.action` is `status`, `set` (with `lead`) or
         `inbox` (optional `after`, `limit` 1..100), and the result carries

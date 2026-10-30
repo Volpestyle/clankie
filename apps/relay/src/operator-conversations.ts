@@ -730,6 +730,18 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         return true;
       }
     }
+    // And the app writing an issue; the service names it and passes the write through
+    // the project's posting setting (ADR 0305).
+    if (serviceRequest.op === "issue_write") {
+      if (serviceRequest.appDeviceId !== undefined) {
+        writeJson(response, 400, { error: "issue_write_app_is_stamped" });
+        return true;
+      }
+      if (authorization.device.scope !== "connector") {
+        writeJson(response, 403, { error: "connector_device_required" });
+        return true;
+      }
+    }
     if (
       authorization.device.controlScope === "hosted" &&
       !hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify(serviceRequest))
@@ -811,6 +823,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "lead" ||
               serviceRequest.op === "spawn_seat" ||
               serviceRequest.op === "start_agent" ||
+              // An app's issue write is lead work: what the lead files and moves.
+              serviceRequest.op === "issue_write" ||
               serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
               serviceRequest.op === "update_persona" ||
@@ -834,6 +848,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (serviceRequest.op === "app_notes" && serviceRequest.action === "post")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (serviceRequest.op === "prompt_answer")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (serviceRequest.op === "issue_write")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
@@ -1715,6 +1731,12 @@ const CONNECTOR_OPS = new Set([
   "lead",
   "worker_reports",
   "acknowledge_worker_reports",
+  // Reading the owner's projects and their issues. An app writes only its own
+  // issue_write, through the posting setting; the owner's work writes stay off.
+  "work_repos",
+  "work_items",
+  "work_item_activity",
+  "issue_write",
   "get",
   "create",
   "send",

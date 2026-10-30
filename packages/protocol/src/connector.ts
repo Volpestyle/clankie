@@ -1,5 +1,11 @@
 import { z } from "zod";
 import type { OperatorConversationServiceRequest } from "./operator-service.ts";
+import {
+  WORK_ITEM_LABEL_MAX,
+  WORK_ITEM_TITLE_MAX,
+  WorkItemPrioritySchema,
+  WorkItemStatusSchema,
+} from "./work-items.ts";
 
 // ---------------------------------------------------------------------------
 // The Claude connector (ADR 0301): a remote MCP server Claude can add as a
@@ -189,6 +195,66 @@ export const PromptAnswerResultSchema = z
   .strict();
 export type PromptAnswerResult = z.infer<typeof PromptAnswerResultSchema>;
 
+/** Longest issue description or comment a connected app writes; trackers' own limit. */
+export const ISSUE_WRITE_TEXT_MAX = 20_000;
+const IssueTitleSchema = z.string().trim().min(1).max(WORK_ITEM_TITLE_MAX);
+const IssueLabelsSchema = z.array(z.string().trim().min(1).max(WORK_ITEM_LABEL_MAX)).max(20);
+const IssueIdSchema = z.string().trim().min(1).max(64);
+
+/**
+ * One issue write by a connected app (ADR 0305): a new issue, a change to one, or a
+ * comment. Writes to Linear or GitHub pass the project's "Posting to your tracker"
+ * setting; private issue files are written as they are for Clankie.
+ */
+export const IssueWriteSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("create"),
+      title: IssueTitleSchema,
+      description: z.string().max(ISSUE_WRITE_TEXT_MAX).optional(),
+      status: WorkItemStatusSchema.optional(),
+      priority: WorkItemPrioritySchema.optional(),
+      labels: IssueLabelsSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("update"),
+      issue: IssueIdSchema,
+      title: IssueTitleSchema.optional(),
+      description: z.string().max(ISSUE_WRITE_TEXT_MAX).optional(),
+      status: WorkItemStatusSchema.optional(),
+      priority: WorkItemPrioritySchema.optional(),
+      addLabels: IssueLabelsSchema.optional(),
+      removeLabels: IssueLabelsSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("comment"),
+      issue: IssueIdSchema,
+      body: z.string().trim().min(1).max(ISSUE_WRITE_TEXT_MAX),
+    })
+    .strict(),
+]);
+export type IssueWrite = z.infer<typeof IssueWriteSchema>;
+
+export const IssueWriteResultSchema = z
+  .object({
+    /**
+     * written: it is in the tracker. held: it waits for the owner's or the lead's OK under
+     * the project's setting. refused: nothing was written. uncertain: it may have been.
+     */
+    outcome: z.enum(["written", "held", "refused", "uncertain"]),
+    message: z.string().min(1).max(1_000),
+    /** The issue written, when the tracker said which. */
+    issue: z.string().min(1).max(256).optional(),
+    /** A held write's post, as `clankie work posts` lists it. */
+    post: z.string().min(1).max(64).optional(),
+  })
+  .strict();
+export type IssueWriteResult = z.infer<typeof IssueWriteResultSchema>;
+
 export const ConnectorPromptAnswerAppSchema = z
   .object({
     deviceId: z.string().min(1).max(256),
@@ -207,7 +273,9 @@ export const ConnectorPromptAnswersRequestSchema = z
 /**
  * What a connector device may ask the relay, whatever its grants: read the
  * fleet and its panes, start an agent in a known project, message an
- * agent's own persona thread, and post and read the app note board. A send or a
+ * agent's own persona thread, post and read the app note board, and read the
+ * owner's projects and their issues, and write issues under the project's
+ * posting setting. A send or a
  * read of one thread is held to persona threads by the relay, which looks the
  * thread up before dispatching; Clankie's own lead thread is never reachable.
  * A note's author, and the app answering a prompt, is the device the relay
@@ -234,6 +302,14 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     // A lead thread's reports, only while the apps lead; the relay checks both.
     case "worker_reports":
     case "acknowledge_worker_reports":
+      return true;
+    // The owner's projects and their issues, read only; a write is never a connector op.
+    case "work_repos":
+    case "work_items":
+    case "work_item_activity":
+      return true;
+    // An app's own issue writes, stamped by the relay and passed through posting (ADR 0305).
+    case "issue_write":
       return true;
     default:
       return false;
