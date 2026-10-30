@@ -3609,6 +3609,12 @@ may expire sooner); manifests keep only stable `clankie://evidence` links.
   hash are reported as `present`. A local file whose hash differs is reported
   and left untouched. Every object it cannot fetch or verify is named with its
   reason, and the command exits 1.
+- `clankie evidence fetch clankie://evidence/sha256/HASH` fetches one linked
+  object, such as an issue file's `## Evidence` line or a drop's screenshot,
+  into the repository's `.local/evidence/sha256/HASH.EXT`, with the extension
+  its leading bytes name (`.png`, `.jpg`, `.gif`, `.webp`, `.heic`, `.mp4`,
+  `.mov`), verified the same way, and prints the file's path so a harness can
+  open it. The `evidence_fetch` tool takes the link as its `path`.
 - `clankie evidence list --issue KEY | --commit SHA` returns the records
   (file name, sha256, size, content type, issue, commit, actor, caption,
   created-at, link).
@@ -8413,8 +8419,12 @@ nothing:
   (`projectUpdate`, read-only; `work_project_details` holds the full text and
   its replies). Embedded images become `media`, other attachments `links`;
   links that are not HTTP(S), `clankie://` or `clankie-work://` are left out;
-- a **drop** has its shape defined for the owner's filed screenshots, bugs and
-  ideas; no host emits drops yet.
+- a **drop** is something the owner threw at a project (see
+  [Drops](#drops-feed-drop-project-id-title-text-body-text-stdin-file-path-key-key-json)): an open issue file labelled `drop`,
+  with its `itemId` and `repoId` for the work operations, its current `title`,
+  `status` and text, its screenshots as `media`, and its `source` (a paired
+  device by name and platform, or `machine` for this computer's CLI or
+  console). It leaves the feed once its file is done or canceled.
 
 ```sh
 clankie feed
@@ -8449,6 +8459,75 @@ than 4000 characters are cut and marked `bodyTruncated`. A reader using
 The feed requires the same authority as the mailbox: the owner operator or an
 active device with `terminalControl`. The relay forwards it, like the mailbox
 operations, with the device's own bearer; a captain bearer is refused.
+
+### Drops: `feed drop --project ID [--title TEXT] [--body TEXT | --stdin] [--file PATH]... [--key KEY] [--json]`
+
+A drop is something the owner throws at Clankie from the phone or the Mac: a
+screenshot of a bug, a quick idea, a note. It is never lost: the host writes it
+at once as a stub issue file in the project's private `.clankie/work/` (in the
+main checkout, shared by every linked worktree and ignored by git), whether or
+not any agent is running, then wakes the project's lead once to refine it.
+
+```sh
+clankie feed drop --project garden --body "The gate sticks after rain"
+clankie feed drop --project garden --file ~/Desktop/gate.png --title "Gate latch"
+pbpaste | clankie feed drop --project garden --stdin --json
+```
+
+TUI: `/drop PROJECT_ID TEXT` files a text drop.
+
+- **The file.** The stub has `labels: ["drop"]`, `status: todo`, the owner's
+  title (or the first line of the text, or "Dropped screenshot"), the text
+  kept word for word, and front matter naming the drop: `dropped` (when),
+  `drop_project`, `drop_source` (`device` or `machine`, with `drop_device` and
+  `drop_platform` for a device) and `drop_key`, a hash of the project and the
+  idempotency key. Agents find drops with `clankie work list --label drop`.
+- **Attachments.** Files are owner uploads
+  ([ADR 0209](adr/0209-owner-attachments-reach-agents-as-files.md): PNG, JPEG,
+  HEIC/HEIF, GIF, WebP, MP4 or QuickTime, up to eight). The CLI uploads them to
+  the main conversation with the captain credential, as `send --attach` does.
+  The host copies each into the evidence store
+  ([ADR 0258](adr/0258-evidence-lives-in-the-evidence-store.md)) and links it
+  as an `## Evidence` line such as
+  `- image: [gate.png](clankie://evidence/sha256/HASH)`; the bytes never enter
+  `.clankie/work`. `clankie evidence fetch` with that link downloads it.
+- **Retries.** `idempotencyKey` (16–128 letters, digits, `_` or `-`) is the
+  client's. The CLI makes one and, when an answer is lost, prints it so
+  `--key KEY` can retry. The same key and request answer with the same item and
+  `duplicate: true`, write nothing and wake no one; the same key with another
+  request is refused as `idempotency_conflict`.
+- **The wake.** The lead is the project's lead chat as tracker work routes it:
+  the chat bound to its tracker or Linear project, otherwise the main chat. The
+  wake names the file and asks the lead to refine it; it never quotes the
+  drop, whose words and images are material, not instructions. `wake` is
+  `woken`, `not_woken` (no lead took it; a retry tries again) or `uncertain`
+  (an earlier try may have woken it, so it is never woken again).
+  `.clankie/work/.drops.json` keeps each key's request hash and wake state.
+- **Refusals.** Drops go only to a project whose local tracker is private issue
+  files (`backend: "default"`, or `markdown` with `directory: ".clankie/work"`);
+  nothing is written otherwise, and the message names the way there:
+  - a project on Auto keeps the built-in tracker: turn Auto off
+    (`clankie project settings P --auto off`), then export and select files;
+  - a built-in or Linear tracker: move its open work with
+    `clankie work export --project P --to markdown`
+    ([above](#work-export-project-p-to-markdown-dry-run-json)), then select the
+    files with `clankie project settings P tracker '{"backend":"markdown","directory":".clankie/work"}'`;
+  - GitHub issues, committed issue files (`docs/tasks`) or no saved tracker:
+    select the private files the same way;
+  - a tracker workspace on another machine is refused; drop there.
+
+HTTP uses `POST /operator/v1/dispatch` with `schemaVersion: 1`,
+`op: "feed_drop"`, `projectId`, `idempotencyKey`, and at least one of `title`
+(up to 200 characters), `body` (up to 20,000) or `attachments`
+(`[{conversationId, artifactId}]`, each committed to that conversation). The
+result is `{outcome: "filed", item, file, duplicate, wake, leadConversationId?}`
+(`item` is the drop as the feed shows it, `file` its path in the main checkout),
+`{outcome: "refused", reason: "unknown_project" | "not_file_backed" |
+"attachment_missing" | "idempotency_conflict", message}` or
+`{outcome: "unavailable", message}` (retry with the same key). Only the owner
+drops: this machine's operator credential or an owner-paired device with
+`terminalControl`, never a support grant or a hosted visitor. The relay
+forwards it with the device's own bearer.
 
 ### `project create PROJECT --settings FILE.json --revision REVISION`
 
