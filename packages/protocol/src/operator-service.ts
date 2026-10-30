@@ -219,6 +219,21 @@ import { encodeBase64 } from "./base64.ts";
 /** The authenticated route path that carries the callable service contract. */
 export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
 
+/** One terminal's screen as text; a full screen fits with room to spare. */
+export const OPERATOR_TERMINAL_READ_MAX = 256 * 1024;
+
+/** A linked machine's Herdr, as `terminal_catalog` reports it with `includeMachines`. */
+export const OperatorTerminalMachineSchema = z
+  .object({
+    /** The machine connection's id, as seat ids name it (`<id>/<pane>`). */
+    id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+    reachable: z.boolean(),
+    /** The version its Herdr server reports, when it answered. */
+    herdrVersion: z.string().max(64).optional(),
+  })
+  .strict();
+export type OperatorTerminalMachine = z.infer<typeof OperatorTerminalMachineSchema>;
+
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
   FeedListRequestSchema.extend({ op: z.literal("feed_list"), schemaVersion: z.literal(1) }).strict(),
@@ -604,6 +619,19 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       /** Opt-in keeps older strict response schemas usable. */
       includeSeatIds: z.boolean().optional(),
+      /** Opt-in: whether each linked machine's Herdr answers now, and its version. */
+      includeMachines: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /**
+       * The text on one terminal's screen now, on any machine Clankie reaches,
+       * including linked machines over ssh (a session source's read).
+       */
+      op: z.literal("terminal_read"),
+      schemaVersion: z.literal(1),
+      terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
     })
     .strict(),
   z
@@ -1262,6 +1290,17 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("terminal_catalog"),
       schemaVersion: z.literal(1),
       sessions: z.array(OperatorTerminalSessionSchema).max(OPERATOR_TERMINAL_CATALOG_MAX),
+      machines: z.array(OperatorTerminalMachineSchema).max(64).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("terminal_read"),
+      schemaVersion: z.literal(1),
+      terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+      status: z.enum(["read", "unavailable"]),
+      text: z.string().max(OPERATOR_TERMINAL_READ_MAX).optional(),
+      detail: z.string().max(1024).optional(),
     })
     .strict(),
   z

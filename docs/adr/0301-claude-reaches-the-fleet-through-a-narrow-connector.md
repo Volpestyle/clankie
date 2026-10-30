@@ -30,6 +30,13 @@ own `/mcp` on a trusted network.
   Clankie ships in `.agents/skills`, so an app that can't load Clankie's
   skills still learns how his tools and fleet work. It reads files in this
   checkout only and calls nothing on the service (added 2026-10-30).
+- **Every linked machine, said plainly.** `read_agent` reads a pane through
+  Herdr on that pane's own machine (the `terminal_read` op), so a PC's agents
+  read over ssh like the Mac's. `list_agents` names each linked machine even
+  with no agents on it, marks agents on a machine that isn't answering as
+  `unreachable` rather than showing their last status, and says in a notice
+  when a machine's Herdr is older than the one Clankie ships (added
+  2026-10-30).
 - **Through session sources, not Herdr.** The tools talk to the session-source
   layer in `packages/agent-hosts/src/sessions/`. A source is any app that holds
   agent sessions and answers four things: list its sessions, read one, send one

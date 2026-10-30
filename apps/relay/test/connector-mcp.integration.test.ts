@@ -9,6 +9,7 @@ import {
   defaultOperatorAgentAppearance,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
+  type OperatorTerminalMachine,
 } from "../../../packages/protocol/src/index.ts";
 import { resolve } from "node:path";
 import { ClankieGuide } from "../src/connector-guide.ts";
@@ -60,6 +61,9 @@ const thread = (
 const SCREEN =
   "\u001b[2J\u001b[H\u001b[1mBuilding kh2\u001b[0m\r\n\u001b[32m> cargo build\u001b[0m\r\n\u001b[3;1HCompiling...  ok\u001b[3;13Hdone\u001b[K";
 
+// What `herdr pane read --format text` prints for the same pane: plain text, padded rows.
+const PANE_TEXT = "Building kh2   \r\n> cargo build\r\nCompiling...done\r\n      \r\n\r\n";
+
 const HISTORY = Array.from({ length: 10 }, (_, index) => `\u001b[2mline ${index + 1}\u001b[0m\r\n`).join("");
 
 const servers: Server[] = [];
@@ -75,7 +79,15 @@ afterEach(async () => {
 
 async function startConnectorRelay(
   device: RelayDeviceAuthorization = { authorized: true, device: connectorDevice },
+  linked: {
+    // What the service's probe of each ssh machine found.
+    readonly machines?: readonly OperatorTerminalMachine[];
+    // False for a service from before `terminal_read`, which only streams this Mac's panes.
+    readonly terminalRead?: boolean;
+  } = {},
 ) {
+  const machines = linked.machines ?? [{ id: "pc1", reachable: true, herdrVersion: "0.9.3" }];
+  const onPc1 = (terminalId: string) => terminalId.startsWith("pc1/") || terminalId.startsWith("rt:pc1:");
   const seen: OperatorConversationServiceRequest[] = [];
   // Like the service's terminal store: a tail without a cursor replaces that surface's stream.
   const streams = new Map<string, number>();
@@ -115,6 +127,7 @@ async function startConnectorRelay(
         return {
           op: "terminal_catalog",
           schemaVersion: 1,
+          ...(request.includeMachines === true ? { machines: [...machines] } : {}),
           sessions: [
             // PC1's panes: the seated agent's, then one started there by hand.
             {
@@ -174,8 +187,43 @@ async function startConnectorRelay(
               : {}),
           },
         } as OperatorConversationServiceResult;
+      case "terminal_read": {
+        if (linked.terminalRead === false) throw new Error(`unexpected ${request.op}`);
+        const { terminalId } = request;
+        if (onPc1(terminalId) && machines.find((machine) => machine.id === "pc1")?.reachable === false)
+          return {
+            op: "terminal_read",
+            schemaVersion: 1,
+            terminalId,
+            status: "unavailable",
+            detail: "ssh: connect to host pc1 port 22: Operation timed out",
+          };
+        return {
+          op: "terminal_read",
+          schemaVersion: 1,
+          terminalId,
+          status: "read",
+          text:
+            terminalId === "term-loose"
+              ? `${Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\r\n")}\r\n${PANE_TEXT}`
+              : PANE_TEXT,
+        };
+      }
       case "terminal_tail": {
         const { terminalId, surfaceClientId, cursor } = request.observation;
+        // The stream only reaches panes on this Mac; an ssh machine's never streams.
+        if (onPc1(terminalId))
+          return {
+            op: "terminal_tail",
+            schemaVersion: 1,
+            result: {
+              schemaVersion: 1,
+              status: "unavailable",
+              terminalId,
+              surfaceClientId,
+              reason: "herdr_unavailable",
+            },
+          };
         const key = `${terminalId} ${surfaceClientId}`;
         if (cursor === undefined) streams.set(key, (streams.get(key) ?? 0) + 1);
         const streamId = `s${streams.get(key) ?? 0}`;
@@ -320,14 +368,16 @@ describe("Claude connector MCP endpoint", () => {
     const read = JSON.parse(
       textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } })),
     );
+    // PC1 is an ssh machine: Herdr there reads its own pane, so no stream is needed.
     expect(read).toEqual({ agent: "herdr:pc1/kh2", text: "Building kh2\n> cargo build\nCompiling...done" });
-    // History that scrolled off before the first redraw is still read.
+    expect(relay.seen.some((request) => request.op === "terminal_tail")).toBe(false);
+    // History that scrolled off the screen is still read.
     const loose = JSON.parse(
       textOf(
         await client.callTool({ name: "read_agent", arguments: { agent: "herdr:term-loose", lines: 5 } }),
       ),
     );
-    expect(loose.text).toBe("line 4\nline 5\nBuilding kh2\n> cargo build\nCompiling...done");
+    expect(loose.text).toBe("line 9\nline 10\nBuilding kh2\n> cargo build\nCompiling...done");
 
     const sent = JSON.parse(
       textOf(
@@ -366,17 +416,40 @@ describe("Claude connector MCP endpoint", () => {
     await client.close();
   });
 
-  it("lets two reads of the same pane take turns instead of cutting each other off", async () => {
-    const relay = await startConnectorRelay();
+  it("on a service without pane reads, streams this Mac's panes and lets two reads take turns", async () => {
+    const relay = await startConnectorRelay(undefined, { terminalRead: false });
     const [first, second] = await Promise.all([connect(relay.url), connect(relay.url)]);
     const reads = await Promise.all(
       [first, second].map((client) =>
-        client.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } }),
+        client.callTool({ name: "read_agent", arguments: { agent: "herdr:term-loose" } }),
       ),
     );
     for (const read of reads) expect(JSON.parse(textOf(read)).text).toContain("Compiling...done");
     expect(relay.resets).toBe(0);
     await Promise.all([first.close(), second.close()]);
+  });
+
+  it("says plainly when a machine's Herdr isn't answering or is too old", async () => {
+    const relay = await startConnectorRelay(undefined, {
+      machines: [
+        { id: "pc1", reachable: false },
+        { id: "pc2", reachable: true, herdrVersion: "0.9.1" },
+      ],
+    });
+    const client = await connect(relay.url);
+    const listed = JSON.parse(textOf(await client.callTool({ name: "list_agents", arguments: {} })));
+    // Bram's last known status would read as idle work; the machine is what's wrong.
+    expect(listed.agents[0]).toMatchObject({ agent: "herdr:pc1/kh2", status: "unreachable" });
+    // PC2 runs no agents yet and is still named, so a caller knows it's linked.
+    expect(listed.machines).toEqual(["PC1", "this Mac", "pc2"]);
+    expect(listed.notices).toEqual([
+      "Herdr on PC1 isn't answering, so its agents show what Clankie last saw and can't be read.",
+      "Herdr on pc2 is version 0.9.1 and needs at least 0.9.3.",
+    ]);
+    const read = await client.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } });
+    expect(read.isError).toBe(true);
+    expect(textOf(read)).toContain("Operation timed out");
+    await client.close();
   });
 
   it("serves the shipped skills as guide topics, and nothing outside a skill's own pages", async () => {

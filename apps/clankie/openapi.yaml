@@ -4798,8 +4798,13 @@ paths:
         Each row carries runtime identity separately from Herdr workspace/tab IDs.
         Named terminal addresses pin their endpoint; tail, control and input refuse
         disabled or changed connections with a typed unavailable result, without
-        falling back to the default fleet. Terminal catalog/tail require the relay's
-        `terminalObserve` grant; control/input require `terminalControl`.
+        falling back to the default fleet. With `includeMachines`, the catalog also
+        probes each ssh machine and returns `machines` (id, reachable, herdrVersion).
+        `terminal_read` returns a pane's recent text (256 KiB at most), read by Herdr
+        on the pane's own machine, including over ssh; it answers `unavailable` with a
+        short detail when that machine or pane doesn't answer. Terminal catalog, read
+        and tail require the relay's `terminalObserve` grant; control/input require
+        `terminalControl`.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

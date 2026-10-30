@@ -7,6 +7,8 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
   type OperatorFleetSeat,
+  OPERATOR_TERMINAL_READ_MAX,
+  type OperatorTerminalMachine,
 } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import { logger } from "../app/log.ts";
@@ -650,11 +652,48 @@ export function createOperatorService(
       };
     }
     if (request.op === "terminal_catalog") {
+      const [sessions, machines] = await Promise.all([
+        ctx.terminals.catalog({ seatIds: request.includeSeatIds === true }),
+        request.includeMachines === true ? linkedMachines(ctx) : undefined,
+      ]);
       return {
         op: "terminal_catalog",
         schemaVersion: 1,
-        sessions: await ctx.terminals.catalog({ seatIds: request.includeSeatIds === true }),
+        sessions,
+        ...(machines === undefined ? {} : { machines }),
       };
+    }
+    if (request.op === "terminal_read") {
+      const unavailable = (detail: string) =>
+        ({
+          op: "terminal_read",
+          schemaVersion: 1,
+          terminalId: request.terminalId,
+          status: "unavailable",
+          detail,
+        }) as const;
+      const address = await ctx.terminals.paneAddress(request.terminalId);
+      if (address === undefined) return unavailable("No terminal has that id now.");
+      if (ctx.herdrRunner.readPane === undefined)
+        return unavailable("Herdr pane reads are unavailable here.");
+      try {
+        // Herdr's own pane list names the pane; the routed runner reaches it over ssh when it's on a PC.
+        const pane = await ctx.herdrRunner.resolveTerminal(address);
+        if (pane === undefined) return unavailable("Herdr has no pane with that terminal now.");
+        // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
+        const text = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+        return {
+          op: "terminal_read",
+          schemaVersion: 1,
+          terminalId: request.terminalId,
+          status: "read",
+          text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
+        };
+      } catch (error) {
+        return unavailable(
+          error instanceof Error ? error.message.slice(0, 1024) : String(error).slice(0, 1024),
+        );
+      }
     }
     if (request.op === "terminal_focus") {
       return {
@@ -1189,4 +1228,28 @@ export function createOperatorService(
       throw new ServiceShuttingDownError(error);
     }
   };
+}
+
+const MACHINE_PROBE_MS = 5_000;
+
+/** Whether each linked machine's Herdr answers now, and the version it reports. */
+async function linkedMachines(ctx: CreateOperatorServiceContext): Promise<OperatorTerminalMachine[]> {
+  const fleets = (await ctx.deps.fleets?.current?.()) ?? ctx.deps.fleets?.list ?? [];
+  return Promise.all(
+    fleets.map(async (fleet): Promise<OperatorTerminalMachine> => {
+      try {
+        const stdout = await ctx.deps.fleets!.run(fleet)(["api", "snapshot"], undefined, MACHINE_PROBE_MS);
+        const version = (JSON.parse(stdout) as { result?: { snapshot?: { version?: unknown } } }).result
+          ?.snapshot?.version;
+        return {
+          id: fleet.id,
+          reachable: true,
+          ...(typeof version === "string" && version.length <= 64 ? { herdrVersion: version } : {}),
+        };
+      } catch {
+        // allow-swallowed-rejection -- a machine that doesn't answer is reported unreachable.
+        return { id: fleet.id, reachable: false };
+      }
+    }),
+  );
 }

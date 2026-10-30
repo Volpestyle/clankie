@@ -750,7 +750,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "work_item_write_receipt" ||
       (serviceRequest.op === "tracker_sync" && serviceRequest.command.action === "transaction");
     const grant =
-      serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
+      serviceRequest.op === "terminal_tail" ||
+      serviceRequest.op === "terminal_catalog" ||
+      serviceRequest.op === "terminal_read"
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -1632,6 +1634,7 @@ const CONNECTOR_OPS = new Set([
   "fleet",
   "terminal_catalog",
   "terminal_tail",
+  "terminal_read",
   "get",
   "create",
   "send",
