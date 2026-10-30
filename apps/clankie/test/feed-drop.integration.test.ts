@@ -655,6 +655,7 @@ it("takes drops only from the owner: a paired phone through the relay, never a S
     const request = {
       projectId: "orchard",
       idempotencyKey: "phone-relay-drop-0001",
+      body: "## Evidence\n\nPhoto from the porch.",
       attachments: [{ conversationId: f.main, artifactId: uploaded.file.artifactId }],
     };
     const result = await phone.feedDrop!(request);
@@ -665,7 +666,7 @@ it("takes drops only from the owner: a paired phone through the relay, never a S
       leadConversationId: f.main,
       item: {
         drop: {
-          title: "Dropped screenshot",
+          title: "Photo from the porch.",
           body: "",
           source: { kind: "device", name: "James’s iPhone", platform: "ios" },
           media: [{ alt: "IMG_0042.png", mimeType: "image/png" }],
@@ -673,6 +674,11 @@ it("takes drops only from the owner: a paired phone through the relay, never a S
       },
     });
     expect(seen.at(-1)).toMatchObject({ token: `Bearer ${f.tokens.phone}`, body: { op: "feed_drop" } });
+    // The screenshot follows what the owner already wrote under Evidence.
+    if (result.outcome !== "filed") throw new Error(result.outcome);
+    expect(await readFile(join(f.orchard.repo, result.file), "utf8")).toMatch(
+      /\n\n## Evidence\n\nPhoto from the porch\.\n- image: \[IMG_0042\.png\]\(clankie:\/\/evidence\/sha256\/[0-9a-f]{64}\)\n$/u,
+    );
     // A retry over the relay after a lost answer is the same drop.
     expect(await phone.feedDrop!(request)).toMatchObject({ duplicate: true, wake: "woken" });
     await vi.waitFor(() => expect(f.wakes()).toHaveLength(1));

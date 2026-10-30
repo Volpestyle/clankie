@@ -344,9 +344,11 @@ function dropItem(record: DropRecord, target: ReadyTarget, projectId: string): F
 
 /** A title from the owner's first line, or from what was attached. */
 function dropTitle(request: FeedDropRequest, evidence: readonly WorkEvidence[]): string {
+  // The first line of prose: Markdown markers off, the shared section headings skipped.
   const line = (request.body ?? "")
     .split(/\r?\n/u)
-    .map((text) => text.trim())
+    .filter((text) => !/^\s*#{1,6}\s+(?:evidence|acceptance criteria)\s*$/iu.test(text))
+    .map((text) => text.replace(/^\s*(?:#{1,6}\s+|[-*>]\s+)?/u, "").trim())
     .find((text) => text !== "");
   if (line !== undefined) {
     if (line.length <= 80) return line;

@@ -8477,8 +8477,8 @@ pbpaste | clankie feed drop --project garden --stdin --json
 TUI: `/drop PROJECT_ID TEXT` files a text drop.
 
 - **The file.** The stub has `labels: ["drop"]`, `status: todo`, the owner's
-  title (or the first line of the text, or "Dropped screenshot"), the text
-  kept word for word, and front matter naming the drop: `dropped` (when),
+  title (or the first line of the text, or "Dropped screenshot"), the owner's
+  text, and front matter naming the drop: `dropped` (when),
   `drop_project`, `drop_source` (`device` or `machine`, with `drop_device` and
   `drop_platform` for a device) and `drop_key`, a hash of the project and the
   idempotency key. Agents find drops with `clankie work list --label drop`.
@@ -8489,7 +8489,8 @@ TUI: `/drop PROJECT_ID TEXT` files a text drop.
   The host copies each into the evidence store
   ([ADR 0258](adr/0258-evidence-lives-in-the-evidence-store.md)) and links it
   as an `## Evidence` line such as
-  `- image: [gate.png](clankie://evidence/sha256/HASH)`; the bytes never enter
+  `- image: [gate.png](clankie://evidence/sha256/HASH)`, after anything the
+  owner wrote in that section; the bytes never enter
   `.clankie/work`. `clankie evidence fetch` with that link downloads it.
 - **Retries.** `idempotencyKey` (16–128 letters, digits, `_` or `-`) is the
   client's. The CLI makes one and, when an answer is lost, prints it so

@@ -12,7 +12,7 @@ import {
   serializeFile,
   statusOf,
 } from "./backends/files.ts";
-import { newWorkItemId, parseBody, renderEvidence, slugify } from "./format.ts";
+import { appendEvidence, newWorkItemId, parseBody, slugify } from "./format.ts";
 import { withTrackerStoreLock } from "./tracker-store-lock.ts";
 
 /**
@@ -174,12 +174,13 @@ function recordOf(main: string, file: ReturnType<typeof parseFile>): DropRecord 
   };
 }
 
-/** The stub's text: the owner's words, then their attachments as `## Evidence` lines. */
+/**
+ * The stub's text: the owner's words, then their attachments as `## Evidence`
+ * lines, added after anything the owner already wrote in such a section.
+ */
 export function renderDropBody(body: string, evidence: readonly WorkEvidence[]): string {
   const text = body.replace(/\r\n?/gu, "\n").trim();
-  const lines = evidence.length === 0 ? [] : ["## Evidence", "", ...renderEvidence(evidence)];
-  // Appended, never patched in: the owner's own text is kept byte for byte.
-  return [text, lines.join("\n")].filter((part) => part !== "").join("\n\n");
+  return evidence.length === 0 ? text : appendEvidence(`${text}\n\n`, evidence).trim();
 }
 
 /**
