@@ -145,10 +145,12 @@ calls nothing on the service. Each fleet call checks the bearer against
 `GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request
-does: fleet, terminal catalog, read and tail, and get, create and send on persona
-threads only. The tools go through the session-source layer of
-`@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids
-read `herdr:<id>`. `read_agent` asks the service's `terminal_read` op first:
+does: fleet, terminal catalog, read and tail, the herdr-core list and read,
+and get, create and send on persona threads only. The tools go through the
+session-source layer of `@clankie/agent-hosts/sessions`, so agent ids read
+`herdr:<id>` for Herdr and `herdr-core:<terminal>` for the Herdr desktop app's
+agents on this Mac. Those are read-only: `message_agent` refuses them, because
+herdr-core can only type into their terminal (ADR 0207). `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
 Against an older service it falls back to the tail stream, which reaches this
 Mac's panes only. `list_agents` asks the catalog to probe each linked machine

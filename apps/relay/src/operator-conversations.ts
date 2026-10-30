@@ -753,7 +753,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const grant =
       serviceRequest.op === "terminal_tail" ||
       serviceRequest.op === "terminal_catalog" ||
-      serviceRequest.op === "terminal_read"
+      serviceRequest.op === "terminal_read" ||
+      serviceRequest.op === "herdr_core_list" ||
+      serviceRequest.op === "herdr_core_read"
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -764,7 +766,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             autoOnOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input" ||
-            serviceRequest.op === "terminal_focus"
+            serviceRequest.op === "terminal_focus" ||
+            serviceRequest.op === "herdr_core_focus"
           ? "terminalControl"
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||
@@ -1637,6 +1640,8 @@ const CONNECTOR_OPS = new Set([
   "terminal_catalog",
   "terminal_tail",
   "terminal_read",
+  "herdr_core_list",
+  "herdr_core_read",
   "get",
   "create",
   "send",
