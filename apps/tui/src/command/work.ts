@@ -23,6 +23,7 @@ import {
   type TrackerRequestBudgetReport,
 } from "@clankie/protocol/tracker-request-budget";
 import { commandHost } from "./io.ts";
+import { TRACKER_POSTS_PATH, TrackerPostsRequestSchema } from "@clankie/protocol/tracker-posting";
 
 const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
@@ -49,6 +50,7 @@ const WORK_USAGE = [
   "  | call TOOL [--json ARGS]   (Clankie's call to the built-in tracker, for the owner)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker; agents never use it)",
   "  | export --project P --to markdown [--dry-run] [--json]   (the project's open items become private issue files in .clankie/work/)",
+  "  | posts [list [--project P] [--all]] | posts approve ID | posts send-back ID [--reason TEXT]   (writes waiting under Posting to your tracker)",
   "  | import linear --project UUID --scratch NAME   (read-only Linear mirror into a scratch store)",
   "  | mirror linear --scratch NAME --project UUID enable|disable|status   (Linear webhooks keep that scratch store current)",
   "  | cutover linear --world-project ID --scratch NAME --project UUID [--dry-run]   (that import becomes the live built-in tracker)",
@@ -57,6 +59,8 @@ const WORK_USAGE = [
 ].join("\n");
 
 const EXPORT_USAGE = "Usage: clankie work export --project P --to markdown [--dry-run] [--json]";
+const POSTS_USAGE =
+  "Usage: clankie work posts [list [--project P] [--all]] | posts approve ID | posts send-back ID [--reason TEXT]";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,7 +77,14 @@ interface Parsed {
   readonly flags: Map<string, string[]>;
 }
 
-const BOOLEAN_FLAGS = new Set(["--no-owner", "--canceled", "--release", "--dry-run", "--switch-back"]);
+const BOOLEAN_FLAGS = new Set([
+  "--no-owner",
+  "--canceled",
+  "--release",
+  "--dry-run",
+  "--switch-back",
+  "--all",
+]);
 
 export function parseWorkArgs(args: readonly string[]): Parsed {
   const positional: string[] = [];
@@ -448,6 +459,34 @@ function trackerRequest(
       if (rest.length || one(parsed, "--json") === undefined) throw new Error(WORK_USAGE);
       const command = TrackerSyncCommandSchema.parse(JSON.parse(one(parsed, "--json")!));
       return { path: "/operator/v1/dispatch", body: { op: "tracker_sync", schemaVersion: 1, command } };
+    }
+    case "posts": {
+      // Writes waiting under "Posting to your tracker" (ADR 0302).
+      const [action = "list", id, ...extra] = rest;
+      if (extra.length) throw new Error(POSTS_USAGE);
+      if (action === "list" && id === undefined)
+        return {
+          path: TRACKER_POSTS_PATH,
+          body: TrackerPostsRequestSchema.parse({
+            action: "list",
+            state: one(parsed, "--all") === "true" ? "all" : "waiting",
+            ...(one(parsed, "--project") === undefined ? {} : { projectId: one(parsed, "--project") }),
+          }),
+        };
+      if ((action === "approve" || action === "send-back") && id !== undefined)
+        return {
+          path: TRACKER_POSTS_PATH,
+          body: TrackerPostsRequestSchema.parse(
+            action === "approve"
+              ? { action: "approve", id }
+              : {
+                  action: "send_back",
+                  id,
+                  ...(one(parsed, "--reason") === undefined ? {} : { reason: one(parsed, "--reason") }),
+                },
+          ),
+        };
+      throw new Error(POSTS_USAGE);
     }
     case "export":
       if (rest.length !== 0 || !one(parsed, "--project") || one(parsed, "--to") !== "markdown")

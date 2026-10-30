@@ -176,6 +176,23 @@ Ask only when an action exceeds the mandate, such as a new external commitment o
 a tracker restructuring the user reserved. Tracking authorized work does not
 authorize expanding its scope.
 
+Each project also says how far posting to its Linear or GitHub issues goes, in
+its **Posting to your tracker** setting (`clankie project settings P` shows it):
+
+- **Read only**: nothing you write there goes out. Keep the work in the
+  project's issue files (`.clankie/work`) or your own notes instead.
+- **Ask me**: your post waits in the owner's feed, showing exactly what would go
+  where, and goes out once he says Post it.
+- **Clankie decides**: Clankie's own posts go out; a worker's wait for him.
+- **Go ahead**: posts go out.
+
+A held post comes back as `posting_held`, and a refused one as
+`posting_refused`; the message says which. Do not retry or reword it to get it
+through: the same write while it waits is the same post, and Clankie hears how
+it ended. Carry on with the work and keep the note in the issue file meanwhile.
+Reads are never held, and private issue files and the built-in tracker are always
+writable.
+
 ## Where work state lives
 
 This is the handoff protocol for every agent here, lead and workers alike,

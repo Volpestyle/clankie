@@ -62,6 +62,12 @@ import { RoutineError } from "../captain/routines.ts";
 import { z } from "zod";
 import { TRACKER_LEAD, TRACKER_OWNER, TrackerWriteRefused, type TrackerActor } from "@clankie/work-items";
 import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
+import { TrackerPostingStopped } from "../tracker-posting.ts";
+import {
+  TRACKER_POSTS_PATH,
+  TrackerPostsRequestSchema,
+  TrackerPostsResultSchema,
+} from "@clankie/protocol/tracker-posting";
 import { logger } from "./log.ts";
 import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceIdentity } from "./types.ts";
 export interface RegisterConversationRoutesContext {
@@ -95,6 +101,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           : {}),
         ...(ctx.dependencies.evidenceStore ? { evidence: ctx.dependencies.evidenceStore } : {}),
         wake: (...args) => ctx.dependencies.captain.wakeConversation(...args),
+        ...(ctx.dependencies.trackerPosting ? { posting: ctx.dependencies.trackerPosting } : {}),
       })
     : undefined;
   const ownerFeed = createOwnerFeed({
@@ -1362,12 +1369,43 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             error: "tracker_refused",
             detail: error instanceof Error ? error.message : String(error),
             ...(error instanceof TrackerWriteRefused ? { reason: error.reason } : {}),
+            ...(error instanceof TrackerPostingStopped
+              ? { reason: error.reason, ...(error.post ? { post: error.post } : {}) }
+              : {}),
           },
           422,
         );
       }
     });
   trackerCall(TRACKER_CALL_PATH, CLANKIE_FOR_OWNER);
+  /**
+   * `clankie work posts` (ADR 0302): writes waiting under "Posting to your tracker". The
+   * operator bearer is Clankie (the lead seat, a hire or the owner's terminal): it lets
+   * through or sends back only what waits for Clankie. What waits for the owner goes when
+   * he answers its check in his feed, or from his own paired app here.
+   */
+  ctx.app.post(TRACKER_POSTS_PATH, async (context) => {
+    const posting = ctx.dependencies.trackerPosting;
+    if (posting === undefined) return context.json({ error: "posting_unavailable" }, 503);
+    const authority = await questionOwnerAuthority(context.req.raw);
+    if (authority === undefined) return context.json({ error: "owner_required" }, 401);
+    const parsed = TrackerPostsRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!(await authority.authorize()) || !authority.current())
+      return context.json({ error: "owner_required" }, 401);
+    const owner = authority.principal.kind === "device";
+    if (owner && !ownerAppRecord(ctx.devices.get(authority.principal.id)))
+      return context.json({ error: "owner_app_required" }, 403);
+    try {
+      return context.json(
+        TrackerPostsResultSchema.parse(await posting.serve(parsed.data, owner ? "owner" : "lead")),
+      );
+    } catch (error) {
+      if (error instanceof TrackerPostingStopped)
+        return context.json({ error: error.reason, detail: error.message }, 409);
+      throw error;
+    }
+  });
   trackerCall(TRACKER_OWNER_CALL_PATH, { ...TRACKER_OWNER, onBehalfOf: [] });
   // Hired seats' tracker budgets and role refusals (LOCAL-VUH-45), for doctor and work status.
   ctx.app.get(TRACKER_REQUEST_BUDGET_PATH, async (context) => {

@@ -221,6 +221,16 @@ never a lead-only file. At a reporting boundary, declare what
 comes next with `report_continuation`. Wakes and Auto rounds: [long-horizon work](reference/long-horizon.md);
 records and Linear mapping: [trackers](reference/trackers.md).
 
+Each project's **Posting to your tracker** setting says who decides before
+anything goes to its Linear or GitHub issues: read only, ask me (the owner's
+feed), Clankie decides, or go ahead. Under Clankie decides, a worker's post
+waits for you and wakes your chat with exactly what and where: read it, then
+`clankie work posts approve ID` or `clankie work posts send-back ID --reason
+TEXT`, and tell the worker. `clankie work posts` lists what is waiting. Never
+answer a post that waits for the owner, and never loosen the setting yourself:
+it is the owner's. When a project is read only, keep its record in the issue
+files. Details: `docs/cli.md` under "Posting to your tracker".
+
 ## Other leads and panes
 
 A project lead is Clankie in its own workspace conversation and native head, not
