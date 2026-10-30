@@ -43,7 +43,9 @@ export function createHerdrSessionSource(
     async list() {
       const [fleet, catalog] = await Promise.all([
         port.dispatch({ op: "fleet", schemaVersion: 1, view: "home" }),
-        port.dispatch({ op: "terminal_catalog", schemaVersion: 1 }).catch(() => undefined),
+        port
+          .dispatch({ op: "terminal_catalog", schemaVersion: 1, includeSeatIds: true })
+          .catch(() => undefined),
       ]);
       if (fleet.op !== "fleet") throw new Error("The fleet answered with something else.");
       const names = new Map(fleet.snapshot.personas.map((persona) => [persona.personaId, persona.name]));
@@ -66,15 +68,24 @@ export function createHerdrSessionSource(
         };
       });
       const seated = new Set(sessions.map((session) => session.id));
+      // A fleet's seats name the machine it is; its unseated panes say the same.
+      const machines = new Map(
+        fleet.snapshot.seats.flatMap((seat) =>
+          seat.machine === undefined ? [] : [[seat.fleet ?? "default", seat.machine] as const],
+        ),
+      );
       // Agent panes Clankie hasn't seated (started by hand) can still be read.
       if (catalog?.op === "terminal_catalog")
         for (const terminal of catalog.sessions) {
-          if (terminal.agent === undefined || seated.has(terminal.terminalId)) continue;
+          if (terminal.agent === undefined || seated.has(terminal.seatId ?? terminal.terminalId)) continue;
+          const runtime = terminal.runtime?.id;
           sessions.push({
             id: terminal.terminalId,
             source: "herdr",
             harness: terminal.agent,
-            machine: terminal.runtime?.id ?? localMachine,
+            machine:
+              machines.get(runtime ?? "default") ??
+              (runtime === undefined || runtime === "default" ? localMachine : runtime),
             ...(terminal.label.length === 0 ? {} : { title: terminal.label }),
             canMessage: false,
           });
@@ -83,7 +94,9 @@ export function createHerdrSessionSource(
     },
 
     async read(id, lines) {
-      const frames = await tailScreen(port, id, options.surfaceClientId);
+      const frames = await oneAtATime(`${options.surfaceClientId}\u0000${id}`, () =>
+        tailScreen(port, id, options.surfaceClientId),
+      );
       return { id, text: renderTerminalText(frames).split("\n").slice(-lines).join("\n") };
     },
 
@@ -160,6 +173,21 @@ export function createHerdrSessionSource(
         : { id, status: "unavailable", detail: "Herdr couldn't bring that pane to the front." };
     },
   };
+}
+
+// Clankie keeps one observation per terminal and surface, and a new one
+// replaces the last; two reads of the same pane by this surface take turns.
+const reading = new Map<string, Promise<unknown>>();
+
+async function oneAtATime<T>(key: string, read: () => Promise<T>): Promise<T> {
+  const before = reading.get(key) ?? Promise.resolve();
+  const mine = before.catch(() => undefined).then(read);
+  reading.set(key, mine);
+  try {
+    return await mine;
+  } finally {
+    if (reading.get(key) === mine) reading.delete(key);
+  }
 }
 
 /** The screen as it stands: the first full redraw, and the diffs a moment after it. */

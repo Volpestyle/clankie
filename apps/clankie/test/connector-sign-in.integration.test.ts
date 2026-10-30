@@ -14,6 +14,7 @@ import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../.
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
 import { runConnectorCommand } from "../../tui/src/command/connector.ts";
+import { requestPairingOffer } from "../../tui/bin/pairing-offer.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
 
 // The Claude connector's sign-in (ADR 0301) over real HTTP and durable device
@@ -343,3 +344,42 @@ it("a token from the owner's approval opens the relay's tools, and revoking the 
     await host.close();
   }
 }, 30_000);
+
+it("lets the owner's durable app approve sign-ins, never an automation run's device", async () => {
+  const host = await createQaService();
+  host.advance(Date.now() - host.now());
+  try {
+    const pair = async (run?: NonNullable<NonNullable<Parameters<typeof requestPairingOffer>[0]>["run"]>) => {
+      const offer = await requestPairingOffer({
+        controlPlaneUrl: host.baseUrl,
+        operatorToken: host.operatorToken,
+        ...(run === undefined ? {} : { run }),
+      });
+      const post = async (path: string, body: unknown) =>
+        (await (
+          await fetch(`${host.baseUrl}${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        ).json()) as Record<string, unknown>;
+      const pending = await post("/v1/pairing/redeem", {
+        code: offer.localCode ?? offer.code,
+        device: { name: "Phone", platform: "ios" },
+      });
+      const paired = await post("/v1/pairing/complete", {
+        completionToken: pending.completionToken,
+        acceptedGrants: pending.offeredGrants,
+      });
+      expect(pending.offeredGrants).toMatchObject({ terminalControl: true });
+      return { authorization: `Bearer ${String(paired.deviceToken)}` };
+    };
+    const app = await pair();
+    expect((await fetch(`${host.baseUrl}/v1/connector/sign-ins`, { headers: app })).status).toBe(200);
+    // Its access would end with the run; a connector it approved would not.
+    const automation = await pair({ runId: "capture", purpose: "simulator", ttlSeconds: 900 });
+    expect((await fetch(`${host.baseUrl}/v1/connector/sign-ins`, { headers: automation })).status).toBe(403);
+  } finally {
+    await host.close();
+  }
+});

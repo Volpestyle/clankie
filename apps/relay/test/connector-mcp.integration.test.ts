@@ -75,6 +75,9 @@ async function startConnectorRelay(
   device: RelayDeviceAuthorization = { authorized: true, device: connectorDevice },
 ) {
   const seen: OperatorConversationServiceRequest[] = [];
+  // Like the service's terminal store: a tail without a cursor replaces that surface's stream.
+  const streams = new Map<string, number>();
+  let resets = 0;
   const authorizeDevice = { authorize: async () => device };
   let selfUrl = "";
   const dispatch = async (
@@ -91,7 +94,7 @@ async function startConnectorRelay(
             cursor: "c1",
             seats: [
               {
-                seatId: "seat-kh2",
+                seatId: "pc1/kh2",
                 occupantId: "occ-1",
                 personaId: "p-bram",
                 harness: "claude",
@@ -111,13 +114,26 @@ async function startConnectorRelay(
           op: "terminal_catalog",
           schemaVersion: 1,
           sessions: [
+            // PC1's panes: the seated agent's, then one started there by hand.
             {
-              terminalId: "seat-kh2",
+              terminalId: `rt:pc1:${"a".repeat(64)}`,
+              runtime: { id: "pc1", session: "pc1" },
               label: "kh2",
               workspace: { id: "w1", label: "kh2", number: 1 },
               tab: { id: "t1", label: "main", number: 1 },
               pane: { id: "p1" },
               agent: "claude",
+              ...(request.includeSeatIds === true ? { seatId: "pc1/kh2" } : {}),
+            },
+            {
+              terminalId: `rt:pc1:${"b".repeat(64)}`,
+              runtime: { id: "pc1", session: "pc1" },
+              label: "spike",
+              workspace: { id: "w1", label: "kh2", number: 1 },
+              tab: { id: "t3", label: "spike", number: 3 },
+              pane: { id: "p3" },
+              agent: "claude",
+              ...(request.includeSeatIds === true ? { seatId: "pc1/spike" } : {}),
             },
             {
               terminalId: "term-loose",
@@ -156,7 +172,19 @@ async function startConnectorRelay(
               : {}),
           },
         } as OperatorConversationServiceResult;
-      case "terminal_tail":
+      case "terminal_tail": {
+        const { terminalId, surfaceClientId, cursor } = request.observation;
+        const key = `${terminalId} ${surfaceClientId}`;
+        if (cursor === undefined) streams.set(key, (streams.get(key) ?? 0) + 1);
+        const streamId = `s${streams.get(key) ?? 0}`;
+        if (cursor !== undefined && cursor.streamId !== streamId) {
+          resets += 1;
+          return {
+            op: "terminal_tail",
+            schemaVersion: 1,
+            result: { schemaVersion: 1, status: "reset", terminalId, surfaceClientId, reason: "stream_lost" },
+          };
+        }
         return {
           op: "terminal_tail",
           schemaVersion: 1,
@@ -165,26 +193,31 @@ async function startConnectorRelay(
             status: "page",
             terminalId: request.observation.terminalId,
             surfaceClientId: request.observation.surfaceClientId,
-            cursor: { streamId: "s1", sequence: 1 },
-            frames: [
-              {
-                schemaVersion: 1,
-                type: "terminal.frame",
-                terminalId: request.observation.terminalId,
-                sequence: 1,
-                encoding: "base64",
-                // The service seeds a pane's existing history ahead of its first redraw.
-                data: Buffer.from(
-                  request.observation.terminalId === "term-loose" ? `${HISTORY}${SCREEN}` : SCREEN,
-                ).toString("base64"),
-                columns: 40,
-                rows: 6,
-                full: true,
-              },
-            ],
+            cursor: { streamId, sequence: 1 },
+            // The first page carries the screen; later polls wait for changes, as a quiet pane does.
+            frames:
+              cursor !== undefined
+                ? []
+                : [
+                    {
+                      schemaVersion: 1,
+                      type: "terminal.frame",
+                      terminalId: request.observation.terminalId,
+                      sequence: 1,
+                      encoding: "base64",
+                      // The service seeds a pane's existing history ahead of its first redraw.
+                      data: Buffer.from(
+                        request.observation.terminalId === "term-loose" ? `${HISTORY}${SCREEN}` : SCREEN,
+                      ).toString("base64"),
+                      columns: 40,
+                      rows: 6,
+                      full: true,
+                    },
+                  ],
             hasMore: false,
           },
         };
+      }
       default:
         throw new Error(`unexpected ${request.op}`);
     }
@@ -212,7 +245,13 @@ async function startConnectorRelay(
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no address");
   selfUrl = `http://127.0.0.1:${address.port}`;
-  return { url: selfUrl, seen };
+  return {
+    url: selfUrl,
+    seen,
+    get resets() {
+      return resets;
+    },
+  };
 }
 
 async function connect(url: string, token = CONNECTOR_TOKEN) {
@@ -241,7 +280,7 @@ describe("Claude connector MCP endpoint", () => {
     expect(listed).toEqual({
       agents: [
         {
-          agent: "herdr:seat-kh2",
+          agent: "herdr:pc1/kh2",
           name: "Bram",
           harness: "claude",
           machine: "PC1",
@@ -250,6 +289,13 @@ describe("Claude connector MCP endpoint", () => {
           status: "working",
           title: "kh2 netcode",
           canMessage: true,
+        },
+        {
+          agent: `herdr:rt:pc1:${"b".repeat(64)}`,
+          harness: "claude",
+          machine: "PC1",
+          title: "spike",
+          canMessage: false,
         },
         {
           agent: "herdr:term-loose",
@@ -263,9 +309,9 @@ describe("Claude connector MCP endpoint", () => {
     });
 
     const read = JSON.parse(
-      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr:seat-kh2" } })),
+      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } })),
     );
-    expect(read).toEqual({ agent: "herdr:seat-kh2", text: "Building kh2\n> cargo build\nCompiling...done" });
+    expect(read).toEqual({ agent: "herdr:pc1/kh2", text: "Building kh2\n> cargo build\nCompiling...done" });
     // History that scrolled off before the first redraw is still read.
     const loose = JSON.parse(
       textOf(
@@ -278,21 +324,21 @@ describe("Claude connector MCP endpoint", () => {
       textOf(
         await client.callTool({
           name: "message_agent",
-          arguments: { agent: "herdr:seat-kh2", message: "run the tests" },
+          arguments: { agent: "herdr:pc1/kh2", message: "run the tests" },
         }),
       ),
     );
-    expect(sent).toMatchObject({ agent: "herdr:seat-kh2", status: "delivered" });
+    expect(sent).toMatchObject({ agent: "herdr:pc1/kh2", status: "delivered" });
     const queued = JSON.parse(
       textOf(
         await client.callTool({
           name: "message_agent",
-          arguments: { agent: "herdr:seat-kh2", message: "after your goal" },
+          arguments: { agent: "herdr:pc1/kh2", message: "after your goal" },
         }),
       ),
     );
     expect(queued).toEqual({
-      agent: "herdr:seat-kh2",
+      agent: "herdr:pc1/kh2",
       status: "queued",
       detail: "Bram is mid-goal; the message waits.",
     });
@@ -311,6 +357,19 @@ describe("Claude connector MCP endpoint", () => {
     await client.close();
   });
 
+  it("lets two reads of the same pane take turns instead of cutting each other off", async () => {
+    const relay = await startConnectorRelay();
+    const [first, second] = await Promise.all([connect(relay.url), connect(relay.url)]);
+    const reads = await Promise.all(
+      [first, second].map((client) =>
+        client.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } }),
+      ),
+    );
+    for (const read of reads) expect(JSON.parse(textOf(read)).text).toContain("Compiling...done");
+    expect(relay.resets).toBe(0);
+    await Promise.all([first.close(), second.close()]);
+  });
+
   it("refuses everything outside the allowlist, including Clankie's own thread, by hand-built request", async () => {
     const relay = await startConnectorRelay();
     const post = (path: string, body: unknown) =>
@@ -323,10 +382,10 @@ describe("Claude connector MCP endpoint", () => {
       {
         op: "terminal_input",
         schemaVersion: 1,
-        input: { schemaVersion: 1, terminalId: "seat-kh2", leaseToken: "x", data: "aGk=" },
+        input: { schemaVersion: 1, terminalId: "pc1/kh2", leaseToken: "x", data: "aGk=" },
       },
       { op: "spawn_seat", schemaVersion: 1, seat: { harness: "claude", workingDirectory: "/tmp" } },
-      { op: "close_seat", schemaVersion: 1, seatId: "seat-kh2" },
+      { op: "close_seat", schemaVersion: 1, seatId: "pc1/kh2" },
       { op: "autonomy", schemaVersion: 1, command: { action: "status" } },
       { op: "work_item_write", schemaVersion: 1 },
       { op: "list", schemaVersion: 1 },

@@ -92,7 +92,7 @@ export class RuntimeTerminals {
     return false;
   }
 
-  private async catalogFor(runtime: Runtime): Promise<OperatorTerminalSession[]> {
+  private async catalogFor(runtime: Runtime, seatIds = false): Promise<OperatorTerminalSession[]> {
     const sessions = await readTerminalCatalog({ env: runtime.env });
     if (!(await this.current(runtime))) return [];
     runtime.nativeIds.clear();
@@ -106,11 +106,19 @@ export class RuntimeTerminals {
               .update(JSON.stringify([runtime.key, session.terminalId]))
               .digest("hex")}`;
       runtime.nativeIds.set(terminalId, session.terminalId);
-      return { ...session, terminalId, runtime: { id: runtime.id, session: runtime.session } };
+      return {
+        ...session,
+        terminalId,
+        runtime: { id: runtime.id, session: runtime.session },
+        // The census names a named fleet's seat `<fleet>/<native>` (ADR 0184).
+        ...(seatIds
+          ? { seatId: runtime.id === "default" ? session.terminalId : `${runtime.id}/${session.terminalId}` }
+          : {}),
+      };
     });
   }
 
-  async catalog(): Promise<OperatorTerminalSession[]> {
+  async catalog(options: { readonly seatIds?: boolean } = {}): Promise<OperatorTerminalSession[]> {
     const ids = this.options.connections
       ? (await this.options.connections.list()).filter((row) => row.enabled).map((row) => row.id)
       : ["default"];
@@ -122,7 +130,7 @@ export class RuntimeTerminals {
       await Promise.all(
         ids.map(async (id) => {
           const runtime = await this.runtime(id);
-          return runtime ? this.catalogFor(runtime) : [];
+          return runtime ? this.catalogFor(runtime, options.seatIds === true) : [];
         }),
       )
     ).flat();

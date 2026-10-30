@@ -308,17 +308,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
    * The owner's own app (ADR 0299): an active Take Control device that no hosted account,
    * support grant or automation run minted. Rechecked before every write it authorizes.
    */
-  const ownerAppDevice = (deviceId: string): boolean => {
-    const record = ctx.devices.get(deviceId);
-    return (
-      ownerDeviceRecord(record) &&
-      // A hosted pairing proves the hosted account, not this owner's hands, until ADR 0253's signer.
-      record.mintedBy !== "hosted-account-operator" &&
-      record.status === "active" &&
-      record.grants.terminalControl &&
-      record.run === undefined
-    );
-  };
+  const ownerAppDevice = (deviceId: string): boolean => ownerAppRecord(ctx.devices.get(deviceId));
   /** Host-only ownerApp for a device principal that is the owner's own app; never for the operator bearer. */
   const ownerAppFor = (principal: { readonly kind: string; readonly id: string }) =>
     principal.kind === "device" && ownerAppDevice(principal.id) ? { deviceId: principal.id } : undefined;
@@ -1319,6 +1309,21 @@ const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_
  * session (a support grant or a `support:` mint). One rule for every owner-device route; the
  * verdict also refuses the owner's hosted pairings (ADR 0299).
  */
+/**
+ * The owner's own app (ADR 0299): an active Take Control device that no hosted account,
+ * support grant or automation run minted.
+ */
+export function ownerAppRecord(record: DeviceRecord | undefined): boolean {
+  return (
+    ownerDeviceRecord(record) &&
+    // A hosted pairing proves the hosted account, not this owner's hands, until ADR 0253's signer.
+    record.mintedBy !== "hosted-account-operator" &&
+    record.status === "active" &&
+    record.grants.terminalControl &&
+    record.run === undefined
+  );
+}
+
 export function ownerDeviceRecord(record: DeviceRecord | undefined): record is DeviceRecord {
   return (
     record !== undefined &&

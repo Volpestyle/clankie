@@ -653,7 +653,7 @@ export function createOperatorService(
       return {
         op: "terminal_catalog",
         schemaVersion: 1,
-        sessions: await ctx.terminals.catalog(),
+        sessions: await ctx.terminals.catalog({ seatIds: request.includeSeatIds === true }),
       };
     }
     if (request.op === "terminal_focus") {

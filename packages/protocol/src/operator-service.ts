@@ -599,6 +599,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("terminal_catalog"),
       schemaVersion: z.literal(1),
+      /** Opt-in keeps older strict response schemas usable. */
+      includeSeatIds: z.boolean().optional(),
     })
     .strict(),
   z

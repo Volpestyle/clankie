@@ -23,6 +23,7 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { mintDeviceSessionClaims, type DeviceSessionSigner } from "../device-session.ts";
 import { applyDeviceEvent, type DeviceRegistry } from "../devices.ts";
+import { ownerAppRecord } from "./conversation-routes.ts";
 import { authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { withSerializedLock } from "./request-state.ts";
@@ -309,7 +310,10 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
 
   // --- The owner's decision ---------------------------------------------------
 
-  /** The CLI's operator bearer, or the owner's own app (a Take Control device). */
+  /**
+   * The CLI's operator bearer, or the owner's own app: a durable Take Control
+   * device, never an automation run's, whose access a connector would outlive.
+   */
   const owner = async (context: Context): Promise<{ id: string } | Response> => {
     const operator: TrustedOperatorIdentity | "unavailable" | undefined = await authenticateOperator(
       context.req.raw,
@@ -317,7 +321,7 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
     );
     if (operator !== undefined && operator !== "unavailable") return { id: operator.operatorId };
     const device = await ctx.authenticateDevice(context.req.raw);
-    if (device !== "unavailable" && !("denied" in device) && device.grants.terminalControl)
+    if (device !== "unavailable" && !("denied" in device) && ownerAppRecord(ctx.devices.get(device.deviceId)))
       return { id: device.deviceId };
     if (device !== "unavailable" && !("denied" in device)) return context.json({ error: "forbidden" }, 403);
     return context.json({ error: "authentication_required" }, 401);

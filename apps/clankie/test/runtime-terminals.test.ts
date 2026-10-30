@@ -92,6 +92,7 @@ else if (args[0] === 'terminal') {
     };
     return {
       client,
+      dispatch,
       tail,
       focus,
       close: async () => {
@@ -117,6 +118,17 @@ else if (args[0] === 'terminal') {
     const [alpha, beta] = sessions.map((row) => row.terminalId);
     expect(alpha).not.toBe(beta);
     expect(JSON.stringify(sessions)).not.toMatch(/sock|ambient|unrelated-pane/u);
+    expect(sessions.every((row) => row.seatId === undefined)).toBe(true);
+    // Asked for, each pane names the seat id the census gives it on its fleet.
+    const seated = await service.dispatch({
+      op: "terminal_catalog",
+      schemaVersion: 1,
+      includeSeatIds: true,
+    });
+    expect(seated.op === "terminal_catalog" && seated.sessions.map((row) => row.seatId)).toEqual([
+      "alpha/same-terminal",
+      "beta/same-terminal",
+    ]);
     const granted = await service.client.terminalControl!({
       schemaVersion: 1,
       terminalId: beta!,
