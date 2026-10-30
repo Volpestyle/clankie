@@ -20,9 +20,7 @@ import type { ClankieSettings } from "@clankie/settings";
 import type { WorkItemsService } from "./work-items.ts";
 
 /** One read of the existing stores, carrying the caller's owner authority. */
-type FeedServe = (
-  request: OperatorConversationServiceRequest,
-) => Promise<OperatorConversationServiceResult>;
+type FeedServe = (request: OperatorConversationServiceRequest) => Promise<OperatorConversationServiceResult>;
 
 type ProjectUpdates = { repo: WorkRepo; updates: WorkProjectDetails["updates"] };
 /** Project status updates come from a tracker; paging re-reads the feed, so a short cache spares it. */
