@@ -164,7 +164,8 @@ Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
 Against an older service it falls back to the tail stream, which reaches this
 Mac's panes only. `list_agents` asks the catalog to probe each linked machine
 (`includeMachines`). It names every linked machine, even one running no
-agents, marks a machine that doesn't answer as `unreachable` on its agents, and
+agents, lists agents the owner opened by hand on a PC as well as Clankie's
+hires (readable there, not messageable), marks a machine that doesn't answer as `unreachable` on its agents, and
 adds a plain `notices` line for a machine that isn't answering or runs a Herdr
 older than the one Clankie ships.
 

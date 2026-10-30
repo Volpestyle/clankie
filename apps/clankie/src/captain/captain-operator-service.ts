@@ -7,8 +7,10 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
   type OperatorFleetSeat,
+  OPERATOR_TERMINAL_CATALOG_MAX,
   OPERATOR_TERMINAL_READ_MAX,
   type OperatorTerminalMachine,
+  type OperatorTerminalSession,
   type StartAgentPlace,
 } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
@@ -16,7 +18,7 @@ import { logger } from "../app/log.ts";
 import type { WorkerReportSummary } from "@clankie/protocol";
 import { projectsRevision, SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { FleetMembershipReadError } from "../fleet-project-membership.ts";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import type { createAgentWorkStore } from "./agent-work.ts";
 import { AutonomyStore } from "./autonomy.ts";
@@ -31,7 +33,12 @@ import { authorizeQuestion, type QuestionAuthority } from "./conversation-questi
 import { ConversationRefusedError, ConversationResetError, ConversationStore } from "./conversations.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DesktopExpressions } from "./desktop.ts";
-import { readSeatIdForHerdrPane, type ObservedFleet, type ObservedHeadSeat } from "./herdr-census.ts";
+import {
+  parseHerdrTerminalCatalog,
+  readSeatIdForHerdrPane,
+  type ObservedFleet,
+  type ObservedHeadSeat,
+} from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
@@ -655,15 +662,36 @@ export function createOperatorService(
       };
     }
     if (request.op === "terminal_catalog") {
-      const [sessions, machines] = await Promise.all([
+      const [local, linked] = await Promise.all([
         ctx.terminals.catalog({ seatIds: request.includeSeatIds === true }),
         request.includeMachines === true ? linkedMachines(ctx) : undefined,
       ]);
+      // A linked PC's panes come from the same snapshot that proved it answers. They are
+      // named by seat id (`<fleet>/<terminal>`, ADR 0184), which terminal_read reaches over
+      // ssh; observe and control have no local socket there, so only this catalog lists them.
+      const seen = new Set<string>();
+      const remote = (linked ?? []).flatMap(({ fleet, sessions }) =>
+        sessions.flatMap((session) => {
+          // Two connections to one Herdr session see the same panes; list each once.
+          const key = JSON.stringify([fleet.ssh.host, fleet.session, session.terminalId]);
+          if (seen.has(key)) return [];
+          seen.add(key);
+          const terminalId = `${fleet.id}/${session.terminalId}`;
+          return [
+            {
+              ...session,
+              terminalId,
+              runtime: { id: fleet.id, session: fleet.session },
+              ...(request.includeSeatIds === true ? { seatId: terminalId } : {}),
+            },
+          ];
+        }),
+      );
       return {
         op: "terminal_catalog",
         schemaVersion: 1,
-        sessions,
-        ...(machines === undefined ? {} : { machines }),
+        sessions: [...local, ...remote].slice(0, OPERATOR_TERMINAL_CATALOG_MAX),
+        ...(linked === undefined ? {} : { machines: linked.map(({ machine }) => machine) }),
       };
     }
     if (request.op === "terminal_read") {
@@ -1323,22 +1351,33 @@ export function createOperatorService(
 const MACHINE_PROBE_MS = 5_000;
 
 /** Whether each linked machine's Herdr answers now, and the version it reports. */
-async function linkedMachines(ctx: CreateOperatorServiceContext): Promise<OperatorTerminalMachine[]> {
+/** Each linked machine's Herdr as it answers now, with the panes its snapshot lists. */
+async function linkedMachines(ctx: CreateOperatorServiceContext): Promise<
+  {
+    readonly fleet: HerdrFleet;
+    readonly machine: OperatorTerminalMachine;
+    readonly sessions: readonly OperatorTerminalSession[];
+  }[]
+> {
   const fleets = (await ctx.deps.fleets?.current?.()) ?? ctx.deps.fleets?.list ?? [];
   return Promise.all(
-    fleets.map(async (fleet): Promise<OperatorTerminalMachine> => {
+    fleets.map(async (fleet) => {
       try {
         const stdout = await ctx.deps.fleets!.run(fleet)(["api", "snapshot"], undefined, MACHINE_PROBE_MS);
         const version = (JSON.parse(stdout) as { result?: { snapshot?: { version?: unknown } } }).result
           ?.snapshot?.version;
         return {
-          id: fleet.id,
-          reachable: true,
-          ...(typeof version === "string" && version.length <= 64 ? { herdrVersion: version } : {}),
+          fleet,
+          machine: {
+            id: fleet.id,
+            reachable: true,
+            ...(typeof version === "string" && version.length <= 64 ? { herdrVersion: version } : {}),
+          },
+          sessions: parseHerdrTerminalCatalog(stdout),
         };
       } catch {
         // allow-swallowed-rejection -- a machine that doesn't answer is reported unreachable.
-        return { id: fleet.id, reachable: false };
+        return { fleet, machine: { id: fleet.id, reachable: false }, sessions: [] };
       }
     }),
   );

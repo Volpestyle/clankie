@@ -30,6 +30,7 @@ import {
 } from "../src/captain/captain-operator-service.ts";
 import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
 import { herdrFleetRuntimeArgs } from "../../tui/src/command/herdr.ts";
+import { createHerdrSessionSource } from "@clankie/agent-hosts/sessions";
 
 const pc: HerdrFleet = {
   id: "pc",
@@ -340,6 +341,88 @@ describe("fleet routing", () => {
         { id: "box", reachable: false },
       ],
     });
+  });
+
+  it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {
+    // PC2 is reached by two connections to one Herdr session; Clankie hired nothing on it.
+    const pc2: HerdrFleet = {
+      id: "pc2",
+      session: "default",
+      ssh: { host: "ccroc@bld", shell: "powershell" },
+    };
+    const pc2Again: HerdrFleet = { ...pc2, id: "pc2-alt" };
+    const snapshot = JSON.stringify({
+      result: {
+        snapshot: {
+          version: "0.9.5",
+          workspaces: [{ workspace_id: "w1", label: "kh2", number: 1 }],
+          tabs: [{ tab_id: "t1", label: "Agents", number: 1 }],
+          panes: [
+            {
+              pane_id: "w1:p1",
+              terminal_id: "term_claude",
+              workspace_id: "w1",
+              tab_id: "t1",
+              agent: "claude",
+              title: "kh2 read run",
+            },
+            { pane_id: "w1:p2", terminal_id: "term_shell", workspace_id: "w1", tab_id: "t1", title: "pwsh" },
+          ],
+        },
+      },
+    });
+    const run: HerdrFleetRun = async (args) => {
+      if (args[0] === "api") return snapshot;
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({ result: { panes: [pane("w1:p1", "term_claude", "idle")] } });
+      if (args[0] === "pane" && args[1] === "read") return "Mapped 3 save slots\r\n";
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: { list: [pc2, pc2Again], run: () => run, remoteWorkspace: async () => false },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      herdrRunner: routeHerdrFleets(
+        localRunner(),
+        new Map([
+          ["pc2", createRemoteHerdrRunner(pc2, run, { pollMs: 5 })],
+          ["pc2-alt", createRemoteHerdrRunner(pc2Again, run, { pollMs: 5 })],
+        ]),
+      ),
+    } as unknown as CreateOperatorServiceContext);
+    // The connector's own session source over this service; Clankie's fleet has no seats.
+    const source = createHerdrSessionSource(
+      {
+        dispatch: async (request) =>
+          request.op === "fleet"
+            ? ({ op: "fleet", schemaVersion: 1, snapshot: { personas: [], seats: [] } } as never)
+            : serve(request),
+        terminalTail: async () => {
+          throw new Error("no tail");
+        },
+        tailRefusal: async () => new Error("no tail"),
+      },
+      { surfaceClientId: "connector" },
+    );
+
+    const listed = await source.list();
+    expect(listed.sessions).toEqual([
+      {
+        id: "pc2/term_claude",
+        source: "herdr",
+        harness: "claude",
+        machine: "pc2",
+        title: "kh2 read run",
+        canMessage: false,
+      },
+    ]);
+    expect(listed.machines).toEqual(["pc2", "pc2-alt"]);
+    expect((await source.read("pc2/term_claude", 20)).text).toContain("Mapped 3 save slots");
   });
 
   it("starts a connected app's agent only in a granted project checkout, led by Clankie's own thread", async () => {
