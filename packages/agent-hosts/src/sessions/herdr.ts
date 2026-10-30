@@ -126,6 +126,7 @@ export function createHerdrSessionSource(
       // Herdr reads the screen itself on every machine Clankie reaches, ssh ones included.
       const read = await port
         .dispatch({ op: "terminal_read", schemaVersion: 1, terminalId: id })
+        // allow-swallowed-rejection -- a service from before terminal_read refuses it; the tail below reads instead.
         .catch(() => undefined);
       if (read?.op === "terminal_read" && read.status === "read")
         return {
