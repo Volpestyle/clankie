@@ -115,6 +115,11 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     expect(signIn.page.status).toBe(200);
     expect(signIn.page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(signIn.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/u);
+    // The command to run is copyable, and both color schemes set the code's own text color.
+    expect(signIn.html).toContain(
+      `<code id="command">clankie connector approve ${signIn.code}</code><button id="copy"`,
+    );
+    expect(signIn.html).toContain("prefers-color-scheme:dark");
     expect(await status(host.baseUrl, signIn.request!)).toEqual({ status: "pending" });
 
     const owner = cli(host);
