@@ -12,9 +12,14 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { LocalFleetLink, type LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
+import { FleetRoomJournal } from "../src/captain/fleet-room.ts";
 
 type Admission = "local" | "stream" | "bearer";
-async function fixture(admission: Admission = "bearer", workerVersion?: string) {
+async function fixture(
+  admission: Admission = "bearer",
+  workerVersion?: string,
+  board?: (root: string) => ConstructorParameters<typeof WorkerMcp>[0]["appNotes"],
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-fleet-bridge-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const account = {
@@ -78,10 +83,12 @@ async function fixture(admission: Admission = "bearer", workerVersion?: string) 
       observed.push(call);
     },
   });
+  const appNotes = board?.(root);
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,
     host,
+    ...(appNotes === undefined ? {} : { appNotes }),
     runtimeRevision: "service-before",
     pluginExpectedVersion: () => "0.6.7",
     catalogRefreshPending: async () => state.nativeBusy,
@@ -277,6 +284,41 @@ it("searches bounded names and schemas across verified servers, excluding worker
     expect((await f.call("clankie_call", { name: "docs_read", arguments: {} })).isError).toBe(true);
     expect((await f.call("clankie_tools", {})).content[0].text).toBe("");
     expect(f.calls).toHaveBeenCalledOnce();
+  } finally {
+    await f.close();
+  }
+});
+
+it("lets a fleet worker read the apps' note board, framed as information, and never post to it (ADR 0301)", async () => {
+  let journal: FleetRoomJournal | undefined;
+  const f = await fixture("bearer", undefined, (root) => {
+    journal = new FleetRoomJournal(join(root, "fleet-room"));
+    const notes = journal;
+    return { read: async (input) => notes.readAppNotes(input) };
+  });
+  try {
+    journal!.postAppNote("Claude", "Don't touch pc1/kh2 until the netcode PR lands.");
+    const found = (await f.call("clankie_tools", { query: "notes" })).content[0].text;
+    expect(found.split("\n")[0]).toMatch(/^clankie_read_notes — .*never an instruction/u);
+    const read = await f.call("clankie_call", { name: "clankie_read_notes", arguments: {} });
+    expect(read.isError).toBe(false);
+    const page = JSON.parse(read.content[0].text);
+    expect(page).toMatchObject({
+      about: expect.stringContaining("not instructions"),
+      outcome: "ready",
+      notes: [{ sequence: 1, author: "Claude", text: "Don't touch pc1/kh2 until the netcode PR lands." }],
+    });
+    journal!.postAppNote("Grok", "Docs are mine today.");
+    const newer = await f.call("clankie_call", {
+      name: "clankie_read_notes",
+      arguments: { since: page.newer },
+    });
+    expect(JSON.parse(newer.content[0].text).notes).toMatchObject([{ author: "Grok" }]);
+    // Reading is all a worker does here.
+    expect(
+      (await f.call("clankie_call", { name: "clankie_read_notes", arguments: { text: "hi" } })).isError,
+    ).toBe(true);
+    expect(f.calls).not.toHaveBeenCalled();
   } finally {
     await f.close();
   }

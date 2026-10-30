@@ -47,6 +47,12 @@ export interface CaptainDeps {
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
   readonly activitySharing?: import("../activity-sharing.ts").ActivitySharing;
+  /** The app note board's read (ADR 0301): notes connector apps left, information never orders. */
+  readonly appNotes?: {
+    read(
+      input: import("./fleet-room.ts").AppNotesReadInput,
+    ): Promise<import("@clankie/protocol").AppNotesResult>;
+  };
   /** A self-hosted official bot admits Activity viewers itself, so room turns may launch shares (VUH-2835). */
   readonly activitySelfHostedLaunch?: {
     reserveLaunch(callId: string, guildId: string, channelId: string): void;

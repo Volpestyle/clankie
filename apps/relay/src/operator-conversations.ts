@@ -705,6 +705,18 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeConnectorDenial(response);
       return true;
     }
+    // A note's author is the device this relay authenticated, stamped below; a
+    // caller never names it. Only an app signed in to the connector posts (ADR 0301).
+    if (serviceRequest.op === "app_notes" && serviceRequest.action === "post") {
+      if (serviceRequest.appDeviceId !== undefined) {
+        writeJson(response, 400, { error: "app_note_author_is_stamped" });
+        return true;
+      }
+      if (authorization.device.scope !== "connector") {
+        writeJson(response, 403, { error: "connector_device_required" });
+        return true;
+      }
+    }
     if (
       authorization.device.controlScope === "hosted" &&
       !hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify(serviceRequest))
@@ -794,6 +806,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // before that await is not authority to dispatch after it.
     const currentAuthorization = await authorizeGrant(options, token, response, grant, serviceRequest.op);
     if (currentAuthorization === undefined) return true;
+    if (serviceRequest.op === "app_notes" && serviceRequest.action === "post")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
     const connectorThread =
@@ -1639,6 +1653,7 @@ const CONNECTOR_OPS = new Set([
   "terminal_tail",
   "terminal_read",
   "start_agent",
+  "app_notes",
   "get",
   "create",
   "send",

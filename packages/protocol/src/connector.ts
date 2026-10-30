@@ -145,10 +145,11 @@ export function isConnectorRoute(method: string, path: string): boolean {
 
 /**
  * What a connector device may ask the relay, whatever its grants: read the
- * fleet and its panes, start an agent in a known project, and message an
- * agent's own persona thread. A send or a
+ * fleet and its panes, start an agent in a known project, message an
+ * agent's own persona thread, and post and read the app note board. A send or a
  * read of one thread is held to persona threads by the relay, which looks the
  * thread up before dispatching; Clankie's own lead thread is never reachable.
+ * A note's author is the device the relay authenticated, stamped by the relay.
  */
 export function connectorOperationAllowed(request: OperatorConversationServiceRequest): boolean {
   switch (request.op) {
@@ -157,6 +158,7 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "terminal_tail":
     case "terminal_read":
     case "start_agent":
+    case "app_notes":
     case "get":
     case "send":
     case "send_receipt":

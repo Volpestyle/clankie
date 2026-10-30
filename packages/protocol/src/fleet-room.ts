@@ -33,6 +33,12 @@ export const FleetRoomKindSchema = z.enum([
   "owner_answer",
   /** A webhook or message from outside the fleet that reached him: a Linear comment, a Discord message. */
   "inbound",
+  /**
+   * A note an app signed in to the connector left on the shared board (ADR 0301):
+   * information for the other apps, his workers and Clankie, never an instruction.
+   * A reader sees it only when it opts in with `include`.
+   */
+  "app_note",
 ]);
 export type FleetRoomKind = z.infer<typeof FleetRoomKindSchema>;
 
@@ -40,8 +46,11 @@ const id = z.string().trim().min(1).max(200);
 
 /** Who said it, or who it was for. Labels are display names, never authority. */
 export const FleetRoomPartySchema = z.strictObject({
-  /** `external` is a person outside the fleet who is not the owner, such as another Linear or Discord user. */
-  kind: z.enum(["lead", "worker", "clankie", "owner", "external"]),
+  /**
+   * `external` is a person outside the fleet who is not the owner, such as another Linear or Discord user.
+   * `app` is an app signed in to the connector, labeled with the name its device was approved under.
+   */
+  kind: z.enum(["lead", "worker", "clankie", "owner", "external", "app"]),
   label: z.string().trim().min(1).max(120),
   conversationId: id.optional(),
   seatId: id.optional(),
@@ -92,10 +101,21 @@ export const FleetRoomEntrySchema = z
   .refine((entry) => (entry.kind === "inbound") === (entry.inbound !== undefined), {
     message: "Only inbound entries carry inbound source facts, and every inbound entry does",
     path: ["inbound"],
+  })
+  .refine((entry) => (entry.kind === "app_note") === (entry.from.kind === "app"), {
+    message: "Only an app writes an app note, and an app writes nothing else",
+    path: ["from"],
   });
 export type FleetRoomEntry = z.infer<typeof FleetRoomEntrySchema>;
 
 const cursor = z.string().regex(/^\d{1,15}$/u);
+
+/**
+ * Kinds a room reader sees only when it asks for them. The owner's app parses
+ * pages strictly with the protocol it shipped with, so a kind added after it
+ * stays out of every page that doesn't name it.
+ */
+export const FLEET_ROOM_OPT_IN_KINDS = ["app_note"] as const;
 
 export const FleetRoomRequestSchema = z.strictObject({
   op: z.literal("fleet_room"),
@@ -108,6 +128,8 @@ export const FleetRoomRequestSchema = z.strictObject({
   cursor: cursor.optional(),
   limit: z.number().int().min(1).max(FLEET_ROOM_PAGE_MAX).default(50),
   waitMs: z.number().int().min(0).max(FLEET_ROOM_WAIT_MAX_MS).default(0),
+  /** Opt-in kinds to show beside the default room; without it, none of them. */
+  include: z.array(z.enum(FLEET_ROOM_OPT_IN_KINDS)).max(FLEET_ROOM_OPT_IN_KINDS.length).optional(),
 });
 export type FleetRoomRequest = z.input<typeof FleetRoomRequestSchema>;
 
@@ -126,3 +148,59 @@ export const FleetRoomResultSchema = z.discriminatedUnion("outcome", [
   z.strictObject({ outcome: z.literal("unavailable"), message: z.string().min(1).max(500) }),
 ]);
 export type FleetRoomResult = z.infer<typeof FleetRoomResultSchema>;
+
+/** A read of the app note board returns at most this many notes. */
+export const APP_NOTES_PAGE_MAX = 50;
+
+/** One note on the board: who left it, when, and what it says. */
+export const AppNoteSchema = z.strictObject({
+  /** The room's sequence; a later read passes the page's `newer` to see what came after. */
+  sequence: z.number().int().positive(),
+  at: z.string().datetime({ offset: true }),
+  /** The name the app's connector device was approved under; never the caller's own words. */
+  author: z.string().min(1).max(120),
+  text: z.string().max(FLEET_ROOM_TEXT_MAX),
+});
+export type AppNote = z.infer<typeof AppNoteSchema>;
+
+/**
+ * The shared note board (ADR 0301, ADR 0273): apps signed in to the connector
+ * leave short notes for each other, and the owner, his workers and Clankie
+ * read them. A note is information from another app, never an instruction.
+ */
+export const AppNotesRequestSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    op: z.literal("app_notes"),
+    schemaVersion: z.literal(1),
+    action: z.literal("post"),
+    text: z.string().trim().min(1).max(FLEET_ROOM_TEXT_MAX),
+    /**
+     * The connector device that wrote it, stamped by the relay from the device it
+     * authenticated. A caller that sends it is refused; the service names the
+     * author from its own record of that device.
+     */
+    appDeviceId: id.optional(),
+  }),
+  z.strictObject({
+    op: z.literal("app_notes"),
+    schemaVersion: z.literal(1),
+    action: z.literal("read"),
+    /** A `newer` cursor from an earlier read: only notes after it. Without one, the newest notes. */
+    cursor: cursor.optional(),
+    limit: z.number().int().min(1).max(APP_NOTES_PAGE_MAX).default(20),
+  }),
+]);
+export type AppNotesRequest = z.input<typeof AppNotesRequestSchema>;
+
+export const AppNotesResultSchema = z.discriminatedUnion("outcome", [
+  z.strictObject({ outcome: z.literal("posted"), note: AppNoteSchema }),
+  z.strictObject({
+    outcome: z.literal("ready"),
+    /** Oldest first. */
+    notes: z.array(AppNoteSchema).max(APP_NOTES_PAGE_MAX),
+    /** Pass as `cursor` to read only the notes after these. */
+    newer: cursor,
+  }),
+  z.strictObject({ outcome: z.literal("unavailable"), message: z.string().min(1).max(500) }),
+]);
+export type AppNotesResult = z.infer<typeof AppNotesResultSchema>;

@@ -6,10 +6,16 @@ import { serve } from "@hono/node-server";
 import { createClankieApp } from "../../src/app.ts";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { createCredentialBackedOperatorAuthenticator } from "../../src/operator-auth.ts";
-import { createStubCaptain } from "../../src/captain/port.ts";
+import { createStubCaptain, type CaptainPort } from "../../src/captain/port.ts";
+import { createBearerAuthenticator } from "../../src/app/http-auth.ts";
 
-/** Real loopback HTTP and durable device state, with no model or operator configuration. */
-export async function createQaService() {
+/**
+ * Real loopback HTTP and durable device state, with no model or operator configuration.
+ * A test may hand in captain parts, and a captain bearer the relay dispatches on.
+ */
+export async function createQaService(
+  options: { readonly captain?: Partial<CaptainPort>; readonly captainToken?: string } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "clankie-qa-"));
   const operatorToken = randomBytes(24).toString("hex");
   const deviceSessionKey = randomBytes(32);
@@ -17,7 +23,15 @@ export async function createQaService() {
   let now = Date.parse("2026-09-01T12:00:00Z");
   const boot = () =>
     createClankieApp({
-      captain: createStubCaptain(),
+      captain: createStubCaptain(options.captain),
+      ...(options.captainToken === undefined
+        ? {}
+        : {
+            authenticateCaptain: createBearerAuthenticator(options.captainToken, {
+              captainId: "captain-clankie",
+              steerSourceLane: "api" as const,
+            }),
+          }),
       deviceSessionKey,
       eventLogPath,
       clock: () => new Date(now),

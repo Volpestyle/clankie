@@ -84,3 +84,52 @@ it("shows readers the newest 2000 entries, pages back through them once each, an
   );
   expect(linked?.links).toEqual({ issues: ["VUH-2184", "LOCAL-VUH-18"], commits: ["7d7a4063d"] });
 });
+
+it("keeps app notes out of every page that doesn't opt in, and reads the board after a cursor across restart (ADR 0301)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "fleet-room-"));
+  roots.push(root);
+  const now = new Date("2026-10-30T12:00:00.000Z");
+  const journal = new FleetRoomJournal(root, () => now);
+  journal.record(report("report:a", now));
+  expect(
+    journal.postAppNote("Claude", "Reviewing the kh2 PR; api_key=sk-live-1234567890abcdef"),
+  ).toMatchObject({
+    outcome: "posted",
+    note: { sequence: 2, author: "Claude" },
+  });
+  journal.record(report("report:b", now));
+
+  // An older reader's page: the same room it always read, its cursors stepping over the note.
+  const plain = await journal.read({});
+  if (plain.outcome !== "ready") throw new Error("Fleet room unavailable");
+  expect(plain.entries.map((entry) => entry.id)).toEqual(["report:a", "report:b"]);
+  expect(await journal.read({ cursor: "3", limit: 1 })).toMatchObject({
+    entries: [{ id: "report:a" }],
+    older: null,
+  });
+  const opted = await journal.read({ include: ["app_note"] });
+  if (opted.outcome !== "ready") throw new Error("Fleet room unavailable");
+  expect(opted.entries.map((entry) => entry.kind)).toEqual(["worker_report", "app_note", "worker_report"]);
+  expect(opted.entries[1]).toMatchObject({ from: { kind: "app", label: "Claude" }, to: null });
+  expect(opted.entries[1]!.text).not.toContain("sk-live-1234567890abcdef");
+
+  // A note wakes a follower that didn't ask for notes without ending its wait.
+  const waiting = journal.read({ direction: "newer", cursor: "3", waitMs: 2000 });
+  journal.postAppNote("Grok", "Taking the docs.");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  journal.record(report("report:c", now));
+  expect(await waiting).toMatchObject({ entries: [{ id: "report:c", sequence: 5 }], newer: "5" });
+
+  const restarted = new FleetRoomJournal(root, () => now);
+  expect(restarted.readAppNotes({})).toMatchObject({
+    outcome: "ready",
+    notes: [
+      { sequence: 2, author: "Claude" },
+      { sequence: 4, author: "Grok", text: "Taking the docs." },
+    ],
+    newer: "5",
+  });
+  expect(restarted.readAppNotes({ cursor: "2" })).toMatchObject({ notes: [{ sequence: 4 }], newer: "4" });
+  expect(restarted.readAppNotes({ cursor: "5" })).toEqual({ outcome: "ready", notes: [], newer: "5" });
+  expect(restarted.readAppNotes({ limit: 1 })).toMatchObject({ notes: [{ sequence: 4 }] });
+});

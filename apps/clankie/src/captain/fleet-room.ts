@@ -1,16 +1,29 @@
+import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { redactSensitiveText } from "@clankie/observability";
 import {
+  APP_NOTES_PAGE_MAX,
   FLEET_ROOM_INBOUND_EXCERPT_MAX,
+  FLEET_ROOM_OPT_IN_KINDS,
   FLEET_ROOM_TEXT_MAX,
   FleetRoomEntrySchema,
   FleetRoomRequestSchema,
+  type AppNote,
+  type AppNotesResult,
   type FleetRoomEntry,
   type FleetRoomInbound,
+  type FleetRoomKind,
   type FleetRoomRequest,
   type FleetRoomResult,
 } from "@clankie/protocol";
+
+/** Kinds a page leaves out unless its reader names them (ADR 0273 amendment). */
+const OPT_IN_KINDS: ReadonlySet<FleetRoomKind> = new Set(FLEET_ROOM_OPT_IN_KINDS);
+
+function appNote(entry: FleetRoomEntry): AppNote {
+  return { sequence: entry.sequence, at: entry.at, author: entry.from.label, text: entry.text };
+}
 
 /** Retention (VUH-2184): the newest 2000 entries, and none older than 14 days. */
 const FLEET_ROOM_RETAINED = 2000;
@@ -23,6 +36,12 @@ const ISSUE_KEY = /^[A-Z][A-Z0-9]{1,9}(?:-[A-Z][A-Z0-9]{1,9})?-\d{1,7}$/u;
 const NOT_ISSUES = new Set(["SHA", "UTF", "ISO", "RFC", "MD", "AES", "TLS", "HTTP", "IPV", "X"]);
 
 export type FleetRoomRecord = Omit<FleetRoomEntry, "sequence" | "links" | "text"> & { text: string };
+
+/** A read of the app note board: the notes after `cursor`, or the newest without it. */
+export interface AppNotesReadInput {
+  readonly cursor?: string | undefined;
+  readonly limit?: number | undefined;
+}
 
 /**
  * A delivery from outside the fleet that reached him (VUH-2403): a followed
@@ -100,7 +119,9 @@ function fleetRoomLinks(text: string): FleetRoomEntry["links"] {
  * report or a replayed delivery never duplicates a line; the sequence orders
  * the room and is the only cursor, and it never goes backwards, even after
  * every entry has aged out. Text is scrubbed of credentials the way imported
- * transcripts are. Owner-only: nothing here is mirrored anywhere.
+ * transcripts are. Owner-only: nothing here is mirrored anywhere. The one
+ * exception is the app note board, whose `app_note` entries the connector apps
+ * that wrote them also read (ADR 0301); a room page shows them only on opt-in.
  */
 export class FleetRoomJournal {
   private readonly directory: string;
@@ -154,31 +175,82 @@ export class FleetRoomJournal {
   ): Promise<FleetRoomResult> {
     const request = FleetRoomRequestSchema.parse({ ...input, op: "fleet_room", schemaVersion: 1 });
     const cursor = request.cursor === undefined ? undefined : Number(request.cursor);
+    const include = request.include ?? [];
     if (request.direction === "newer") {
       const after = Math.min(cursor ?? this.sequence, this.sequence);
-      if (request.waitMs > 0 && !this.visible().some((entry) => entry.sequence > after))
-        await this.wait(request.waitMs, signal);
-      const entries = this.visible()
+      // An entry this reader didn't opt into wakes the wait without ending it.
+      const deadline = Date.now() + request.waitMs;
+      while (!this.visible(include).some((entry) => entry.sequence > after) && !signal?.aborted) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        await this.wait(remaining, signal);
+      }
+      const entries = this.visible(include)
         .filter((entry) => entry.sequence > after)
         .slice(0, request.limit);
-      return this.page(entries, after);
+      return this.page(entries, after, include);
     }
     const before = cursor ?? Number.POSITIVE_INFINITY;
-    const entries = this.visible()
+    const entries = this.visible(include)
       .filter((entry) => entry.sequence < before)
       .slice(-request.limit);
-    return this.page(entries, entries.at(-1)?.sequence ?? Math.min(before - 1, this.sequence));
+    return this.page(entries, entries.at(-1)?.sequence ?? Math.min(before - 1, this.sequence), include);
   }
 
-  /** What a reader may see: the newest retained entries within the age limit. */
-  private visible(): FleetRoomEntry[] {
+  /**
+   * Leaves one note from a connector app on the board (ADR 0301). The caller
+   * names the author from the app's device record, never from the note.
+   */
+  postAppNote(author: string, text: string): AppNotesResult {
+    const entry = this.record({
+      id: `app_note:${randomUUID()}`,
+      at: this.clock().toISOString(),
+      kind: "app_note",
+      from: { kind: "app", label: author.trim().slice(0, 120) || "App" },
+      to: null,
+      text,
+    });
+    if (entry === undefined) throw new Error("The note wasn't recorded");
+    return { outcome: "posted", note: appNote(entry) };
+  }
+
+  /** The board, oldest first: the notes after `cursor`, or the newest ones without it. */
+  readAppNotes(input: AppNotesReadInput): AppNotesResult {
+    if (input.cursor !== undefined && !/^\d{1,15}$/u.test(input.cursor))
+      throw new Error("A cursor is the newer value of an earlier read");
+    const limit = Math.min(Math.max(1, input.limit ?? 20), APP_NOTES_PAGE_MAX);
+    const notes = this.visible(["app_note"]).filter((entry) => entry.kind === "app_note");
+    if (input.cursor === undefined) {
+      const page = notes.slice(-limit);
+      return { outcome: "ready", notes: page.map(appNote), newer: String(this.sequence) };
+    }
+    const after = Math.min(Number(input.cursor), this.sequence);
+    const page = notes.filter((entry) => entry.sequence > after).slice(0, limit);
+    return {
+      outcome: "ready",
+      notes: page.map(appNote),
+      newer: String(page.at(-1)?.sequence ?? after),
+    };
+  }
+
+  /** The newest retained entries within the age limit, every kind. */
+  private retained(): FleetRoomEntry[] {
     const cutoff = this.clock().getTime() - FLEET_ROOM_RETENTION_MS;
     return this.entries.filter((entry) => Date.parse(entry.at) >= cutoff).slice(-FLEET_ROOM_RETAINED);
   }
 
-  private page(entries: FleetRoomEntry[], newerFrom: number): FleetRoomResult {
+  /** What a reader may see: the retained entries, less the opt-in kinds it didn't ask for. */
+  private visible(include: readonly FleetRoomKind[]): FleetRoomEntry[] {
+    return this.retained().filter((entry) => !OPT_IN_KINDS.has(entry.kind) || include.includes(entry.kind));
+  }
+
+  private page(
+    entries: FleetRoomEntry[],
+    newerFrom: number,
+    include: readonly FleetRoomKind[],
+  ): FleetRoomResult {
     const first = entries[0]?.sequence;
-    const hasOlder = first !== undefined && this.visible().some((entry) => entry.sequence < first);
+    const hasOlder = first !== undefined && this.visible(include).some((entry) => entry.sequence < first);
     return {
       outcome: "ready",
       entries,
@@ -258,7 +330,7 @@ export class FleetRoomJournal {
     const aged = first !== undefined && Date.parse(first.at) < now - FLEET_ROOM_RETENTION_MS;
     if (this.entries.length < COMPACT_AT && !(aged && now - this.compactedAt >= COMPACT_EVERY_MS)) return;
     this.compactedAt = now;
-    this.entries = this.visible();
+    this.entries = this.retained();
     this.ids.clear();
     for (const entry of this.entries) this.ids.add(entry.id);
     const next = `${this.path}.${process.pid}.tmp`;
