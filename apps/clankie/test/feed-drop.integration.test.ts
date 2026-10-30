@@ -97,6 +97,7 @@ async function fixture() {
     directory: "docs/tasks",
   });
   const bare = await repo(root, "bare-app");
+  const bugs = await repo(root, "bugs-app", { ...files, directory: ".clankie/work/bugs" });
 
   const store = new ConversationStore(
     join(root, "conversations"),
@@ -144,6 +145,8 @@ async function fixture() {
     },
     projects: ProjectsSettingsSchema.parse({
       projects: [
+        // A second project on the garden's main checkout reads the same private folder first.
+        { id: "garden-desk", name: "Garden Desk", workspaces: workspace(garden.repo), trackerRef },
         // The garden is worked from its linked worktree; its drops land in the main checkout.
         {
           id: "garden",
@@ -159,6 +162,7 @@ async function fixture() {
         { id: "auto-app", name: "Auto App", workspaces: workspace(auto.repo), trackerRef, auto: true },
         { id: "docs-app", name: "Docs App", workspaces: workspace(committed.repo), trackerRef },
         { id: "bare-app", name: "Bare App", workspaces: workspace(bare.repo) },
+        { id: "bugs-app", name: "Bugs App", workspaces: workspace(bugs.repo), trackerRef },
       ],
     }),
   }));
@@ -286,6 +290,7 @@ async function fixture() {
     auto,
     committed,
     bare,
+    bugs,
     store,
     gardenLead,
     main,
@@ -658,6 +663,12 @@ it("refuses projects that keep no private issue files, and a missing upload, wri
     reason: "not_file_backed",
     message: expect.stringContaining("Docs App keeps its work in committed files (docs/tasks)"),
   });
+  expect(await refused("bugs-app")).toMatchObject({
+    reason: "not_file_backed",
+    message: expect.stringContaining(
+      "Bugs App keeps its issue files in .clankie/work/bugs, and drops go only to .clankie/work itself",
+    ),
+  });
   expect(await refused("bare-app")).toMatchObject({
     reason: "not_file_backed",
     message: expect.stringContaining("Bare App has no saved work tracker on this machine"),
@@ -686,7 +697,7 @@ it("refuses projects that keep no private issue files, and a missing upload, wri
       })
     ).status,
   ).toBe(400);
-  for (const checkout of [f.linear, f.auto, f.committed, f.bare, f.garden])
+  for (const checkout of [f.linear, f.auto, f.committed, f.bare, f.bugs, f.garden])
     expect(existsSync(join(checkout.repo, ".clankie/work"))).toBe(false);
   expect(f.wakes()).toHaveLength(0);
   // The CLI exits non-zero with the same words.

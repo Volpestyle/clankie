@@ -287,9 +287,10 @@ export function createFeedDrops(options: FeedDropsOptions) {
       for (const record of drops) {
         const place = `${record.root}\0${record.file}`;
         if (DONE.has(record.status) || seen.has(place)) continue;
-        seen.add(place);
         // A drop names its project; one outside the asked projects stays out, never reassigned.
+        // A worktree and its checkout read the same folder, so only a kept drop counts as seen.
         if (record.projectId !== undefined && !projectIds.has(record.projectId)) continue;
+        seen.add(place);
         const item = dropItem(record, target, record.projectId ?? target.project.id);
         if (item !== undefined) found.push(item);
       }

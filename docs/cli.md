@@ -8514,8 +8514,9 @@ answer prints the `/drop --key` line that retries it without filing twice.
     `clankie work export --project P --to markdown`
     ([above](#work-export-project-p-to-markdown-dry-run-json)), then select the
     files with `clankie project settings P tracker '{"backend":"markdown","directory":".clankie/work"}'`;
-  - GitHub issues, committed issue files (`docs/tasks`) or no saved tracker:
-    select the private files the same way;
+  - GitHub issues, committed issue files (`docs/tasks`), a folder inside the
+    private one (`.clankie/work/bugs`) or no saved tracker: select the private
+    files the same way;
   - a tracker workspace on another machine is refused; drop there.
 
 HTTP uses `POST /operator/v1/dispatch` with `schemaVersion: 1`,

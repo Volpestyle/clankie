@@ -1369,6 +1369,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       return refused(
         `${project.name} keeps its work in committed files (${directory}), and drops are private: they go only to ${DEFAULT_WORK_DIRECTORY}. Select that folder with ${select}.`,
       );
+    // Drops are filed and read in the private folder itself, never a folder inside it.
+    if (posix.normalize(directory.replace(/\\/gu, "/")).replace(/\/+$/u, "") !== DEFAULT_WORK_DIRECTORY)
+      return refused(
+        `${project.name} keeps its issue files in ${directory}, and drops go only to ${DEFAULT_WORK_DIRECTORY} itself. Select that folder with ${select}.`,
+      );
     const repo = await register(workspace.path);
     return {
       ready: true,
