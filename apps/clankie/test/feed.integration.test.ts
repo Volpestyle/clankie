@@ -19,7 +19,11 @@ import { QuestionDraftSchema } from "../src/captain/conversation-questions.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
-import { runFeedCommand } from "../../tui/src/command/feed.ts";
+import { feedConsoleCommand, formatFeedPage, runFeedCommand } from "../../tui/src/command/feed.ts";
+import {
+  createCaptainOperatorConversationClient,
+  createCaptainRouteClient,
+} from "../../tui/src/session/operator-conversations.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -295,6 +299,19 @@ it("joins asks, owner mail and project updates into one owner feed, pages it and
   });
   expect(status).toBe(0);
   expect(JSON.parse(output.join(""))).toEqual(after);
+
+  // The console holds a captain transport and an owner transport; `/feed` takes the owner's.
+  const transport = (token: string) =>
+    createCaptainRouteClient({
+      host: "http://fixture",
+      captainToken: token,
+      fetchImpl: async (input, init) => f.service.app.fetch(new Request(input, init)),
+    });
+  const consoleClient = createCaptainOperatorConversationClient(transport("captain"), transport(OWNER));
+  expect(await feedConsoleCommand(consoleClient)("garden")).toBe(formatFeedPage(after));
+  await expect(
+    feedConsoleCommand(createCaptainOperatorConversationClient(transport("captain")))(""),
+  ).rejects.toThrow("Owner authentication required to read the feed.");
 });
 
 it("serves the feed with the mailbox's authority: the owner and Take Control devices, never a captain", async () => {
