@@ -1032,3 +1032,54 @@ it("a local caller's work item write meets the posting setting, and a held one g
   expect(await write({ action: "add_label", label: "Urgent" })).toMatchObject({ outcome: "applied" });
   expect(labelWrites()).toBe(2);
 });
+
+it("a held write that meets every Linear project's setting survives a restart with the most projects", async () => {
+  const f = await fixture();
+  await f.credentials.set(LINEAR_API_PROVIDER_ID, {
+    type: "oauth",
+    access: API_ACCESS,
+    refresh: API_REFRESH,
+    expires: 0,
+    linearAuth: "api",
+    account: {
+      provider: "linear",
+      connectionId: randomUUID(),
+      userId: USER_ID,
+      workspaceId: "personal-workspace",
+      actor: "app",
+      name: "Clankie",
+      workspaceName: "Personal",
+      verifiedAt: new Date().toISOString(),
+    },
+  });
+  // Project settings hold up to 256 projects; every one bound to Linear meets a GraphQL write.
+  await f.settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ...Array.from({ length: 256 - current.projects.projects.length }, (_, index) => ({
+          id: `field-${String(index)}`,
+          name: `Field ${String(index)}`,
+          linearProjectBinding: { provider: "linear", projectId: randomUUID() },
+        })),
+      ],
+    }),
+  }));
+  const held = await f.lead("graphql", {
+    query:
+      'mutation Note($issueId: String!) { commentCreate(input: { issueId: $issueId, body: "Across the fields" }) { success } }',
+    variables: { issueId: ISSUE_ID },
+  });
+  expect(held).toMatchObject({ outcome: "refused", reason: "posting_held" });
+  if (held.outcome !== "refused") throw new Error("expected a hold");
+  const id = /post ([0-9a-f-]{36})/u.exec(held.detail)![1]!;
+  const restarted = createTrackerPosting(f.postingOptions);
+  cleanups.push(() => restarted.close());
+  expect(await restarted.serve({ action: "list", state: "waiting" }, "owner")).toMatchObject({
+    posts: [{ id, state: "waiting" }],
+  });
+  expect((await readdir(join(f.root, "state"))).filter((name) => name.includes("damaged"))).toEqual([]);
+  expect(f.mutations("commentCreate")).toBe(0);
+});

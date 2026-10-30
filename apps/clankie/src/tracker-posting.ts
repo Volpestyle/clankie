@@ -189,7 +189,8 @@ export interface TrackerPostingBinding {
 const StoredSchema = TrackerPostSchema.extend({
   route: RouteSchema,
   askerRef: z.unknown(),
-  projectIds: z.array(z.string()).max(64),
+  // Every project admission can name: project settings hold up to 256.
+  projectIds: z.array(z.string()).max(256),
   fingerprint: z.string(),
   key: z.string().max(256).optional(),
   leadConversationId: z.string().max(256).optional(),
@@ -429,8 +430,14 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         const text = shown(value);
         return text.includes("\n") ? `${key}:\n${text}` : `${key}: ${text}`;
       });
+    // A write that meets every Linear project names a few, so the owner still sees it whole.
+    const names = projects.map((project) => project.name);
+    const named =
+      names.length > 5
+        ? `${names.slice(0, 5).join(", ")} and ${String(names.length - 5)} more`
+        : names.join(", ");
     const detail = [
-      `${summary}${projects.length ? ` (${projects.map((project) => project.name).join(", ")})` : ""}.`,
+      `${summary}${named ? ` (${named})` : ""}.`,
       `Asked by ${askerWords(write.asker)}. Exactly this would be posted:`,
       "",
       ...fields,
