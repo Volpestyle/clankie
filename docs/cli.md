@@ -8460,9 +8460,10 @@ nothing:
   verify ask (that ask is its check instead). It carries `issueId`, `key`,
   `title`, `line` (the owner check), `bundleId`, `stage`, `url` and the bundle's
   clips then screenshots as `media`. Only the owner's paired app answers it,
-  with `post_owner_verdict {issueId, bundleId, verdict: "works" | "send_back",
-  note?}` through `tracker_sync` or the device path of `POST /v1/tracker/call`;
-  it leaves the feed once verified, sent back or Done. The CLI has no verdict.
+  with `post_owner_verdict` (`issueId`, `bundleId`, `verdict` of `works` or
+  `send_back`, and a `note` to send back) through `tracker_sync` or the device
+  path of `POST /v1/tracker/call`; it leaves the feed once verified, sent back
+  or Done. The CLI has no verdict.
 
 ```sh
 clankie feed

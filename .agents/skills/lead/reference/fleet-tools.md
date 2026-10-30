@@ -201,15 +201,16 @@ log: one line, at most 140 characters, saying exactly what to look at and what
 right looks like ("Open Work, tap a house, tap back: the house stays open").
 Never ask him to read logs, diffs, evidence gaps or review records.
 
-- In a lead chat: `request_user_input` with `purpose: "verify"`, `kind:
-  "choice"`, options such as "It works" and "Send it back", `allowFreeform`,
-  `waitingOn`, and `check` (the line). Add `evidence` (one
-  `clankie://evidence/sha256/HASH` link, from `clankie evidence push`) when there
-  is a screenshot or clip to see, `projectId` so his feed files it under the
-  project, and `issue` to link the item.
-- From a shell: `clankie feed check --project P [--evidence LINK] [--longer]
-  "LINE"` asks in the project's lead chat (`--conversation ID` names another).
-  Keep the printed `--key` to retry an uncertain answer; it never asks twice.
+- In a lead chat: `request_user_input` with purpose `verify`, kind `choice`,
+  options such as "It works" and "Send it back", `allowFreeform`, `waitingOn`,
+  and `check` (the line). Add `evidence` (one `clankie://evidence/sha256/HASH`
+  link, from `clankie evidence push`) when there is a screenshot or clip to see,
+  `projectId` so his feed files it under the project, and `issue` to link the
+  item.
+- From a shell: `clankie feed check --project P "LINE"` asks in the project's
+  lead chat; `--conversation ID` names another, `--evidence LINK` adds what to
+  see and `--longer` marks it. Keep the printed `--key` to retry an uncertain
+  answer; it never asks twice.
 - A worker suggests its check line in its report; you decide whether to ask.
 - Mark `longer: true` (CLI `--longer`) when it honestly takes more than a
   ten-second look, such as reading copy aloud or a full flow. It still shows,
