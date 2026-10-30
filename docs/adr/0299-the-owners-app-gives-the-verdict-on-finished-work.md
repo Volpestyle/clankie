@@ -89,3 +89,26 @@ an `ownerCheck`. An item without one never reaches the owner.
   authority and per-action signer (for example Face ID over `{issueId, bundleId,
 verdict}`) would close that gap. This verb is a natural first protected action
   for it.
+
+## Amendment: quick checks in the owner feed (step 5, C4, 2026-10-30)
+
+The owner decided that his feed holds quick checks: something a lead or worker
+needs him to verify, answerable in about ten seconds, each with one line of at
+most 140 characters saying exactly what to look at. Asks that take longer still
+show, marked as longer by their asker.
+
+- `ownerCheck` is now at most 140 characters. Lines saved before, up to 160,
+  are kept and still shown.
+- A marked item that is landed or delivered, not Done, with a current bundle
+  and no pending verify ask shows in `feed_list` as a `proof`: its line, the
+  bundle's clips then screenshots as evidence links, and the `bundleId` the
+  verdict names. It is a new additive kind, so older readers drop it. Its
+  answer is unchanged: this ADR's `post_owner_verdict`, from the owner's app only.
+- A pending verify ask that names a marked item is that item's `check` in the
+  feed, with the item's line and first clip.
+- Owner asks gain an optional check line, `longer` mark, evidence link and
+  project. `feed_check` lets this machine's operator (an agent's shell or the
+  owner's terminal) raise one as a verify ask in the project's lead chat;
+  `clankie feed check` is its CLI. A longer line is refused with HTTP 400 naming
+  the limit. The check line is the asker's words, shown, never run, and grants
+  nothing.

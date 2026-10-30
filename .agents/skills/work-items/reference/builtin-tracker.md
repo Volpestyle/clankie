@@ -54,8 +54,10 @@ Lead closure creates no automatic verification ask. Existing pending and
 resolved asks and genuine owner-only gates retain their identities and authority.
 Ask the owner to check only what he can try in the app in about ten seconds,
 or what only a human can judge (feel, look, reading, sound). The lead marks it
-with `save_issue` `ownerCheck`: one line, at most 160 characters; `null` removes
-it. Only marked items reach his Proof deck. Workers can't set it; put a suggested
+with `save_issue` `ownerCheck`: one line, at most 140 characters, saying exactly
+what to look at; `null` removes it (lines saved before the limit, up to 160, are
+kept). Only marked items reach his Proof deck and his feed, where they show as
+proofs with the bundle's clips and screenshots. Workers can't set it; put a suggested
 one-line check in your report to the lead instead. Never ask him to read
 evidence gaps, logs or review records; the lead closes those items.
 Read `linear_list_issue_events` (resume
