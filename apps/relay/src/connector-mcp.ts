@@ -55,6 +55,11 @@ export interface ConnectorMcpOptions {
   readonly guide: ClankieGuide;
 }
 
+/** Answers that prove nothing started; anything else leaves a start uncertain. */
+const START_REFUSED_STATUSES = new Set([400, 401, 403, 404, 409, 429]);
+
+class StartUncertain extends Error {}
+
 class ConnectorRefusal extends Error {
   public readonly status: number;
   public readonly code: string;
@@ -193,7 +198,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         name: "start_agent",
         title: "Start an agent",
         description:
-          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. Call without machine and workingDirectory to see the places an agent can start. It can't stop or close agents.",
+          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. Call without machine and workingDirectory to see the places an agent can start. If the answer says it couldn't tell whether the agent started, check list_agents before trying again. It can't stop or close agents.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -277,11 +282,16 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         const prompt = optionalString(args.prompt);
         if (prompt !== undefined && prompt.length > START_PROMPT_MAX)
           return failure(`prompt is longer than ${START_PROMPT_MAX} characters.`);
-        const { id, ...started } = await sessions.start({
+        const starting = sessions.start({
           ...(machine === undefined ? {} : { machine }),
           ...(workingDirectory === undefined ? {} : { workingDirectory }),
           ...(harness === undefined ? {} : { harness }),
           ...(prompt === undefined ? {} : { prompt }),
+        });
+        // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).
+        const { id, ...started } = await starting.catch((error: unknown) => {
+          if (error instanceof ConnectorRefusal && START_REFUSED_STATUSES.has(error.status)) throw error;
+          throw new StartUncertain();
         });
         if (started.status === "refused")
           return failure(`${started.detail ?? "Nothing started."} Places: ${JSON.stringify(started.places)}`);
@@ -302,6 +312,10 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
       }
       return failure(`There's no tool called ${call.params.name}.`);
     } catch (error) {
+      if (error instanceof StartUncertain)
+        return failure(
+          "I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.",
+        );
       if (error instanceof ConnectorRefusal) return failure(refusalText(error));
       if (error instanceof SessionRefusal) return failure(error.message);
       return failure((error as Error).message);

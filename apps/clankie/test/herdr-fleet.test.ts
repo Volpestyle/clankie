@@ -349,6 +349,13 @@ describe("fleet routing", () => {
       execution: {
         ...emptySettings().execution,
         connections: [
+          // A second Herdr session on the same PC, listed first, never granted the checkout.
+          {
+            id: "pc-work",
+            machine: "pc",
+            session: "work",
+            ssh: { host: "volpe@supedupsilly", shell: "powershell" },
+          },
           {
             id: "pc",
             machine: "pc",
@@ -379,7 +386,8 @@ describe("fleet routing", () => {
         fleets: {
           list: [pc],
           run: () => async () => "{}",
-          remoteWorkspace: async (_fleet: string, directory: string) => directory === "C:\\code\\kh2",
+          remoteWorkspace: async (fleet: string, directory: string) =>
+            fleet === "pc" && directory === "C:\\code\\kh2",
         },
       },
       shutdown: new AbortController(),

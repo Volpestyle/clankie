@@ -701,7 +701,7 @@ export function createOperatorService(
     if (request.op === "start_agent") {
       const settings = await ctx.settings();
       // A linked machine also needs the owner's grant for that exact directory (ADR 0193).
-      const places = (
+      const granted = (
         await Promise.all(
           startAgentPlaces(settings).map(async (entry) =>
             entry.fleet === undefined ||
@@ -711,6 +711,16 @@ export function createOperatorService(
           ),
         )
       ).flat();
+      // The first granted connection per project checkout stands for it.
+      const seen = new Set<string>();
+      const places = granted
+        .filter((entry) => {
+          const key = JSON.stringify([entry.projectId, entry.machineKey, entry.place.workingDirectory]);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, 256);
       const answer = (
         status: "places" | "started" | "refused",
         extra: { seatId?: string; detail?: string } = {},
@@ -1338,6 +1348,8 @@ function startAgentPlaces(settings: ClankieSettings): {
   names: ReadonlySet<string>;
   fleet?: string;
   projectId: string;
+  /** One machine however many connections reach it. */
+  machineKey: string;
 }[] {
   const local = hostname().slice(0, 200);
   const fleets = settings.execution.connections.flatMap((connection) => {
@@ -1345,25 +1357,30 @@ function startAgentPlaces(settings: ClankieSettings): {
     const machine = remoteHireMachine(settings, connection.id);
     return machine === undefined ? [] : [{ connection, machine }];
   });
-  return settings.projects.projects
-    .flatMap((project) =>
-      project.workspaces.flatMap((workspace) => {
-        if (workspace.machineId === "local" && workspace.platform === "posix")
-          return [
-            {
-              place: { machine: local, project: project.name, workingDirectory: workspace.path },
-              names: new Set(["local", "this mac", local.toLowerCase()]),
-              projectId: project.id,
-            },
-          ];
-        // One place per machine, on its first connection, so a directory isn't offered twice.
-        const reached = fleets.find(
-          ({ machine }) => machine.ids.has(workspace.machineId) && machine.platform === workspace.platform,
-        );
-        if (reached === undefined) return [];
-        const host = reached.connection.ssh!.host.slice(0, 200);
+  return settings.projects.projects.flatMap((project) =>
+    project.workspaces.flatMap((workspace) => {
+      if (workspace.machineId === "local" && workspace.platform === "posix")
         return [
           {
+            place: { machine: local, project: project.name, workingDirectory: workspace.path },
+            names: new Set(["local", "this mac", local.toLowerCase()]),
+            projectId: project.id,
+            machineKey: "local",
+          },
+        ];
+      // Every connection to that machine, the one the workspace names first; the caller keeps
+      // the first one granted this directory, so a directory isn't offered twice.
+      return fleets
+        .filter(
+          ({ machine }) => machine.ids.has(workspace.machineId) && machine.platform === workspace.platform,
+        )
+        .sort(
+          (a, b) =>
+            Number(b.connection.id === workspace.machineId) - Number(a.connection.id === workspace.machineId),
+        )
+        .map((reached) => {
+          const host = reached.connection.ssh!.host.slice(0, 200);
+          return {
             place: { machine: host, project: project.name, workingDirectory: workspace.path },
             names: new Set([
               host.toLowerCase(),
@@ -1373,11 +1390,11 @@ function startAgentPlaces(settings: ClankieSettings): {
             ]),
             fleet: reached.connection.id,
             projectId: project.id,
-          },
-        ];
-      }),
-    )
-    .slice(0, 256);
+            machineKey: `remote:${reached.machine.machine}`,
+          };
+        });
+    }),
+  );
 }
 
 function startAgentRefusal(reason: string): string {

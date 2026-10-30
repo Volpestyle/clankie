@@ -194,6 +194,8 @@ async function startConnectorRelay(
         const places = [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }];
         if (request.machine === undefined || request.workingDirectory === undefined)
           return { op: "start_agent", schemaVersion: 1, status: "places", places };
+        // The hire outlives a lost answer, as when Clankie's own deadline passes mid-start.
+        if (request.workingDirectory === "C:\\code\\slow") throw new Error("upstream deadline passed");
         return request.machine === "volpe@pc1" && request.workingDirectory === "C:\\code\\kh2"
           ? { op: "start_agent", schemaVersion: 1, status: "started", places, seatId: "pc1/term_new" }
           : {
@@ -491,6 +493,14 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", harness: "pi" },
     });
     expect(other.isError).toBe(true);
+    const lost = await client.callTool({
+      name: "start_agent",
+      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\slow" },
+    });
+    expect(lost.isError).toBe(true);
+    expect(textOf(lost)).toContain(
+      "Call list_agents and look for a new agent in that place before you try again",
+    );
     await client.close();
   });
 
