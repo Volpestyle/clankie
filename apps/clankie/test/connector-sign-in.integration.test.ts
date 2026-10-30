@@ -10,6 +10,8 @@ import type {
   OperatorConversationServiceResult,
 } from "@clankie/protocol";
 import { expect, it } from "vitest";
+import { resolve } from "node:path";
+import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../relay/src/connector-mcp.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
@@ -271,6 +273,7 @@ it("a token from the owner's approval opens the relay's tools, and revoking the 
     ),
     localAuthorizationServer: host.baseUrl,
     version: "test",
+    guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
   });
   const relay = createServer((request, response) => {
     void (async () => {

@@ -10,6 +10,8 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
 } from "../../../packages/protocol/src/index.ts";
+import { resolve } from "node:path";
+import { ClankieGuide } from "../src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../src/connector-mcp.ts";
 import type { RelayDeviceAuthorization } from "../src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../src/operator-conversations.ts";
@@ -230,6 +232,8 @@ async function startConnectorRelay(
     ),
     localAuthorizationServer: "http://127.0.0.1:4310",
     version: "test",
+    // This checkout's own shipped skills.
+    guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
   });
   const server = createServer((request, response) => {
     void (async () => {
@@ -274,7 +278,12 @@ describe("Claude connector MCP endpoint", () => {
     const relay = await startConnectorRelay();
     const client = await connect(relay.url);
     const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual(["list_agents", "read_agent", "message_agent"]);
+    expect(tools.tools.map((tool) => tool.name)).toEqual([
+      "list_agents",
+      "read_agent",
+      "message_agent",
+      "clankie_guide",
+    ]);
 
     const listed = JSON.parse(textOf(await client.callTool({ name: "list_agents", arguments: {} })));
     expect(listed).toEqual({
@@ -368,6 +377,33 @@ describe("Claude connector MCP endpoint", () => {
     for (const read of reads) expect(JSON.parse(textOf(read)).text).toContain("Compiling...done");
     expect(relay.resets).toBe(0);
     await Promise.all([first.close(), second.close()]);
+  });
+
+  it("serves the shipped skills as guide topics, and nothing outside a skill's own pages", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    const listed = JSON.parse(textOf(await client.callTool({ name: "clankie_guide", arguments: {} })));
+    expect(listed.topics).toContainEqual({
+      topic: "herdr",
+      about: expect.stringContaining("Control Herdr"),
+    });
+
+    const herdr = await client.callTool({ name: "clankie_guide", arguments: { topic: "herdr" } });
+    expect(textOf(herdr)).toContain("# Herdr");
+    const lead = await client.callTool({ name: "clankie_guide", arguments: { topic: "lead" } });
+    const [, more] = lead.content as Array<{ text: string }>;
+    expect(more!.text).toContain("lead/reference/delivery.md");
+    const page = await client.callTool({
+      name: "clankie_guide",
+      arguments: { topic: "lead/reference/delivery.md" },
+    });
+    expect(page.isError).not.toBe(true);
+
+    for (const topic of ["herdr/../../../package.json", "shared-checkout/scripts", "nobody"]) {
+      const refused = await client.callTool({ name: "clankie_guide", arguments: { topic } });
+      expect(refused.isError).toBe(true);
+    }
+    await client.close();
   });
 
   it("refuses everything outside the allowlist, including Clankie's own thread, by hand-built request", async () => {
