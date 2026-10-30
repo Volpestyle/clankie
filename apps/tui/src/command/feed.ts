@@ -208,17 +208,28 @@ export function feedConsoleCommand(client: OperatorConversationServiceClient) {
 }
 
 /**
- * `/drop PROJECT TEXT` in the console: a text drop into a project. Each call is
- * one new drop with its own key; files go through `clankie feed drop --file`.
+ * `/drop [--key KEY] PROJECT TEXT` in the console: a text drop into a project.
+ * Each call makes its own key unless one is given; files go through
+ * `clankie feed drop --file`. A lost or unavailable answer names the key, since
+ * the drop may already be written and a retry with it never files twice.
  */
 export function feedDropConsoleCommand(client: OperatorConversationServiceClient) {
   return async (argument: string): Promise<string> => {
-    const match = /^\s*(\S+)\s+([\s\S]*\S)\s*$/u.exec(argument);
-    if (!match) throw new Error("Usage: /drop PROJECT_ID TEXT");
+    const match = /^\s*(?:--key\s+([\w-]{16,128})\s+)?(\S+)\s+([\s\S]*\S)\s*$/u.exec(argument);
+    if (!match || match[2] === "--key") throw new Error("Usage: /drop [--key KEY] PROJECT_ID TEXT");
     if (!client.feedDrop) throw new Error("Drops are unavailable");
-    const key = randomBytes(18).toString("base64url");
-    const result = await client.feedDrop({ projectId: match[1]!, idempotencyKey: key, body: match[2]! });
-    return formatFeedDrop(result);
+    const key = match[1] ?? randomBytes(18).toString("base64url");
+    const [projectId, body] = [match[2]!, match[3]!];
+    const retry = `Retry with /drop --key ${key} ${projectId} ${body}: it never files twice.`;
+    let result: FeedDropResult;
+    try {
+      result = await client.feedDrop({ projectId, idempotencyKey: key, body });
+    } catch (error) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}\nThe drop may or may not be filed. ${retry}`,
+      );
+    }
+    return result.outcome === "unavailable" ? `${formatFeedDrop(result)}\n${retry}` : formatFeedDrop(result);
   };
 }
 

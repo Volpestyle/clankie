@@ -28,7 +28,7 @@ import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-sess
 import { EvidenceStore } from "../src/evidence-store.ts";
 import { createWorkItemsService, defaultRun } from "../src/work-items.ts";
 import { runEvidenceCommand } from "../../tui/src/command/evidence.ts";
-import { formatFeedPage, runFeedCommand } from "../../tui/src/command/feed.ts";
+import { feedDropConsoleCommand, formatFeedPage, runFeedCommand } from "../../tui/src/command/feed.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import {
   createCaptainConversationDispatch,
@@ -614,6 +614,29 @@ it("names the generated key when a drop is unavailable, so a retry with it files
   expect((await f.cli(...args, "--key", key)).output).toContain("Already filed: Rain gauge");
   const items = (await listing(join(f.orchard.repo, ".clankie/work"))).filter((name) => name.endsWith(".md"));
   expect(items).toHaveLength(1);
+
+  // The console's /drop: the answer is lost after the drop was filed, and the line it
+  // prints retries the same drop.
+  let lose = true;
+  const slashDrop = feedDropConsoleCommand(
+    createOperatorConversationServiceClient(async (request) => {
+      const response = await f.post(request);
+      if (lose) {
+        lose = false;
+        throw new Error("The connection dropped");
+      }
+      return OperatorConversationServiceResultSchema.parse(await response.json());
+    }),
+  );
+  const lost = await slashDrop("orchard Fence post leans").catch((error: unknown) => String(error));
+  const retry = /Retry with (\/drop --key \S+ orchard Fence post leans): it never files twice\./u.exec(
+    lost,
+  )?.[1];
+  if (retry === undefined) throw new Error(lost);
+  expect(await slashDrop(retry.slice("/drop ".length))).toContain("Already filed: Fence post leans");
+  expect(
+    (await listing(join(f.orchard.repo, ".clankie/work"))).filter((name) => name.endsWith(".md")),
+  ).toHaveLength(2);
 });
 
 it("refuses projects that keep no private issue files, and a missing upload, writing and waking nothing", async () => {

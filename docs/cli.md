@@ -8474,7 +8474,8 @@ clankie feed drop --project garden --file ~/Desktop/gate.png --title "Gate latch
 pbpaste | clankie feed drop --project garden --stdin --json
 ```
 
-TUI: `/drop PROJECT_ID TEXT` files a text drop.
+TUI: `/drop [--key KEY] PROJECT_ID TEXT` files a text drop; a lost or unavailable
+answer prints the `/drop --key` line that retries it without filing twice.
 
 - **The file.** The stub has `labels: ["drop"]`, `status: todo`, the owner's
   title (or the first line of the text, or "Dropped screenshot"), the owner's
