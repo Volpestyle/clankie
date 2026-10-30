@@ -1735,6 +1735,8 @@ export const ConversationQuestionSchema = z
     longer: z.literal(true).optional(),
     /** One evidence-store record the owner looks at to answer. */
     evidence: EvidenceLinkSchema.optional(),
+    /** The owner's project the ask is about, when the asker named one; it only places the ask. */
+    projectId: ProjectIdSchema.optional(),
     options: z
       .array(
         z

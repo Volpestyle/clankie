@@ -16,6 +16,9 @@ import {
   HERDR_SOCKET_HEADER,
   ISSUE_METRICS_PATH,
   IssueMetricsQuerySchema,
+  FEED_CHECK_ONE_SOURCE,
+  FeedCheckRequestSchema,
+  feedCheckHasOneSource,
   operatorAutonomyCommandRequiresOwner,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
@@ -50,6 +53,7 @@ import { ServiceShuttingDownError } from "../captain/captain-operator-service.ts
 import { WorkRequestError, type WorkInboxContext } from "../work-items.ts";
 import { createOwnerFeed, FeedCursorError } from "../feed.ts";
 import { createFeedDrops } from "../feed-drops.ts";
+import { createFeedChecks } from "../feed-checks.ts";
 import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
@@ -96,7 +100,15 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     ...(ctx.dependencies.workItems ? { workItems: ctx.dependencies.workItems } : {}),
     ...(ctx.dependencies.settings ? { settings: ctx.dependencies.settings } : {}),
     ...(feedDrops ? { drops: feedDrops } : {}),
+    ...(ctx.dependencies.builtInTracker ? { tracker: ctx.dependencies.builtInTracker } : {}),
+    ...(ctx.dependencies.evidenceStore ? { evidence: ctx.dependencies.evidenceStore } : {}),
     now: () => ctx.clock().getTime(),
+  });
+  const feedChecks = createFeedChecks({
+    ...(ctx.dependencies.settings ? { settings: ctx.dependencies.settings } : {}),
+    ...(ctx.dependencies.evidenceStore ? { evidence: ctx.dependencies.evidenceStore } : {}),
+    requestOwnerAsk: (conversationId, draft, publicationId) =>
+      ctx.dependencies.captain.requestOwnerAsk(conversationId, draft, publicationId),
   });
   ctx.app.get(SHIPPING_PATH, async (context) => {
     context.header("cache-control", "no-store");
@@ -463,6 +475,49 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
     // Narrow work refusals are typed receipts, so a device can render the reason
     // without confusing known non-dispatch with transport uncertainty.
+    if (typeof body === "object" && body !== null && (body as { op?: unknown }).op === "feed_check") {
+      // An agent on this machine asks the owner for a quick check: this machine's
+      // operator credential only, never a device, support grant or captain bearer.
+      const asker = () => owner?.principal.kind === "operator" && owner.current();
+      if (!owner) return context.json({ error: "operator_authority_required" }, 401);
+      if (!asker() || !(await owner.authorize()))
+        return context.json({ error: "operator_authority_required" }, 403);
+      if (!parsed.success || parsed.data.op !== "feed_check") {
+        // The asker learns exactly what to fix, such as the check line's 140-character limit.
+        const checked = FeedCheckRequestSchema.extend({
+          op: z.literal("feed_check"),
+          schemaVersion: z.literal(1),
+        })
+          .strict()
+          .refine(feedCheckHasOneSource, FEED_CHECK_ONE_SOURCE)
+          .safeParse(body);
+        const issue = checked.success ? undefined : checked.error.issues[0];
+        const field = issue?.path.length ? `${issue.path.join(".")}: ` : "";
+        return context.json(
+          { error: "invalid_request", message: issue ? `${field}${issue.message}` : "Invalid check" },
+          400,
+        );
+      }
+      const { op: _op, schemaVersion: _version, ...request } = parsed.data;
+      const reply = (result: import("@clankie/protocol").FeedCheckResult) =>
+        context.json({ op: "feed_check", schemaVersion: 1, result });
+      try {
+        const result = await feedChecks.raise(request, (read) =>
+          ctx.dependencies.captain.serveOperatorConversation(read, owner),
+        );
+        if (!asker() || !(await owner.authorize()))
+          return context.json({ error: "operator_authority_required" }, 403);
+        return reply(result);
+      } catch (error) {
+        if (!asker() || !(await owner.authorize()))
+          return context.json({ error: "operator_authority_required" }, 403);
+        logger.warn({ error }, "Owner check failed");
+        return reply({
+          outcome: "unavailable",
+          message: "The check couldn’t be asked right now. Ask again with the same key.",
+        });
+      }
+    }
     if (
       parsed.success &&
       (parsed.data.op === "work_item_write" || parsed.data.op === "work_item_write_receipt")

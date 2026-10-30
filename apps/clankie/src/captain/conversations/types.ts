@@ -40,6 +40,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "fleet_room" }
   | { op: "feed_list" }
   | { op: "feed_drop" }
+  | { op: "feed_check" }
   | { op: "work_repos" }
   | { op: "work_items" }
   | { op: "work_project" }

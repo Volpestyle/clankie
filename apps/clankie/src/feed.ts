@@ -1,10 +1,12 @@
 import {
   FEED_BODY_MAX,
+  FEED_CHECK_LINE_READ_MAX,
   FEED_LIST_LIMIT_DEFAULT,
   FeedItemSchema,
   FeedLinkSchema,
   FeedListResultSchema,
   FeedMediaSchema,
+  FeedUrlSchema,
   type FeedItem,
   type FeedLink,
   type FeedListRequest,
@@ -17,8 +19,10 @@ import {
 import type { Project } from "@clankie/protocol/projects";
 import type { WorkProjectDetails, WorkRepo } from "@clankie/protocol/work-items";
 import type { ClankieSettings } from "@clankie/settings";
+import type { TrackerToolBackend } from "@clankie/work-items";
 import type { WorkItemsService } from "./work-items.ts";
 import type { createFeedDrops } from "./feed-drops.ts";
+import { evidenceHash, evidenceMedia, withEvidenceTypes, type EvidenceTypes } from "./feed-media.ts";
 
 /** One read of the existing stores, carrying the caller's owner authority. */
 type FeedServe = (request: OperatorConversationServiceRequest) => Promise<OperatorConversationServiceResult>;
@@ -30,16 +34,22 @@ const PROJECT_UPDATE_READS = 4;
 const UNREADABLE = "This project’s updates can’t be read here right now.";
 
 /**
- * The owner's feed (step 5, slices C1 and C3): a newest-first join of pending
- * owner asks, mailed owner updates, project status updates and the owner's open
- * drops. It keeps no store of its own: asks are answered with `input_answer`,
- * mail dismissed with `owner_update_dismiss`, and drops are the projects' own
- * issue files. Status updates and refined drops are model-written text, shown only.
+ * The owner's feed (step 5, slices C1, C3 and C4): a newest-first join of pending
+ * owner asks, mailed owner updates, project status updates, the owner's open
+ * drops and finished built-in items waiting on his verdict. It keeps no store of
+ * its own: asks are answered with `input_answer`, mail dismissed with
+ * `owner_update_dismiss`, drops are the projects' own issue files, and proofs get
+ * the paired app's `post_owner_verdict`. Check lines, status updates and refined
+ * drops are model-written text, shown only.
  */
 export function createOwnerFeed(options: {
   readonly workItems?: Pick<WorkItemsService, "handle">;
   readonly settings?: { load(): Promise<ClankieSettings> };
-  readonly drops?: Pick<ReturnType<typeof createFeedDrops>, "items" | "enrich">;
+  readonly drops?: Pick<ReturnType<typeof createFeedDrops>, "items">;
+  /** The built-in tracker, for finished items the lead marked with an owner check. */
+  readonly tracker?: Pick<TrackerToolBackend, "call">;
+  /** The evidence store, for the content type of each `clankie://evidence` link. */
+  readonly evidence?: EvidenceTypes;
   readonly now?: () => number;
 }) {
   const now = options.now ?? Date.now;
@@ -96,20 +106,61 @@ export function createOwnerFeed(options: {
         return new Set(bound.map((project) => project.id)).size === 1 ? bound[0]!.id : undefined;
       };
 
+      // Finished built-in items with an owner check: a pending verify ask on one is its check.
+      const marked = await ownerChecks(options.tracker, projects);
+      const asked = new Set<string>();
+
       const items: FeedItem[] = [];
       for (const ask of asks.result.questions) {
         const question = ask.question;
         if (question?.status !== "pending" || ask.revision === undefined) continue;
         const projectId =
-          projectForPath(question.workspace) ?? projectForConversation(question.conversationId);
+          (question.projectId !== undefined && projects.some((project) => project.id === question.projectId)
+            ? question.projectId
+            : undefined) ??
+          projectForPath(question.workspace) ??
+          projectForConversation(question.conversationId);
+        const named =
+          question.purpose === "verify" && question.issue?.tracker === "clankie-work"
+            ? marked.get(question.issue.key)
+            : undefined;
+        if (named) asked.add(named.key);
+        const media = question.evidence
+          ? [evidenceMedia(evidenceHash(question.evidence)!)]
+          : named?.media.slice(0, 1);
+        const line = question.check ?? named?.line;
         items.push({
           kind: "check",
           id: `check:${question.requestId}`,
           at: iso(question.createdAt)!,
           ...(projectId ? { projectId } : {}),
-          check: { question, revision: ask.revision },
+          check: {
+            question,
+            revision: ask.revision,
+            ...(line ? { line } : {}),
+            ...(question.longer ? { longer: true as const } : {}),
+            ...(media?.length ? { media } : {}),
+          },
         });
       }
+      for (const proof of marked.values())
+        if (!asked.has(proof.key))
+          items.push({
+            kind: "proof",
+            id: `proof:${proof.issueId}`,
+            at: proof.at,
+            ...(proof.projectId ? { projectId: proof.projectId } : {}),
+            proof: {
+              issueId: proof.issueId,
+              key: proof.key,
+              title: proof.title,
+              line: proof.line,
+              bundleId: proof.bundleId,
+              stage: proof.stage,
+              ...(proof.url ? { url: proof.url } : {}),
+              ...(proof.media.length ? { media: proof.media } : {}),
+            },
+          });
       for (const update of mail.result.updates) {
         if (update.state === "dismissed") continue;
         const projectId = projectForConversation(update.conversationId);
@@ -191,7 +242,7 @@ export function createOwnerFeed(options: {
       const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor);
       const remaining = after ? ordered.filter((item) => compare(item, after) < 0) : ordered;
       const sliced = remaining.slice(0, request.limit ?? FEED_LIST_LIMIT_DEFAULT);
-      const page = options.drops ? await options.drops.enrich(sliced) : sliced;
+      const page = await withEvidenceTypes(sliced, options.evidence);
       const last = page.at(-1);
       return FeedListResultSchema.parse({
         outcome: "ready",
@@ -200,6 +251,107 @@ export function createOwnerFeed(options: {
         ...(unreadable.length ? { unreadable: unreadable.slice(0, 64) } : {}),
       });
     },
+  };
+}
+
+type MarkedItem = {
+  readonly issueId: string;
+  readonly key: string;
+  readonly title: string;
+  readonly line: string;
+  readonly bundleId: string;
+  readonly stage: "landed" | "delivered";
+  readonly at: string;
+  readonly url?: string;
+  readonly projectId?: string;
+  readonly media: FeedMedia[];
+};
+const PROOF_FIELDS = ["title", "ownerCheck", "stage", "bundle", "projectId", "url", "updatedAt"];
+const PROOF_PAGE = 250;
+const PROOF_PAGES = 40;
+
+/**
+ * The built-in items the lead marked with an owner check (ADR 0299) that wait on
+ * the owner: landed or delivered, not Done, with a current bundle for a verdict
+ * to name, by identifier. A tracker that cannot be read gives none; the feed
+ * still shows everything else.
+ */
+async function ownerChecks(
+  tracker: Pick<TrackerToolBackend, "call"> | undefined,
+  projects: readonly Project[],
+): Promise<Map<string, MarkedItem>> {
+  const found = new Map<string, MarkedItem>();
+  if (tracker === undefined) return found;
+  const projectFor = (trackerProjectId: unknown) =>
+    typeof trackerProjectId === "string"
+      ? projects.find((project) => project.trackerProjectId?.toLowerCase() === trackerProjectId.toLowerCase())
+          ?.id
+      : undefined;
+  let cursor: string | undefined;
+  try {
+    for (let read = 0; read < PROOF_PAGES; read++) {
+      const listed = (await tracker.call("list_issues", {
+        state: "open",
+        limit: PROOF_PAGE,
+        fields: PROOF_FIELDS,
+        ...(cursor === undefined ? {} : { cursor }),
+      })) as { issues?: Record<string, unknown>[]; hasNextPage?: boolean; cursor?: string };
+      for (const issue of listed.issues ?? []) {
+        const marked = markedItem(issue, projectFor(issue.projectId));
+        if (marked) found.set(marked.key, marked);
+      }
+      if (listed.hasNextPage !== true || typeof listed.cursor !== "string") break;
+      cursor = listed.cursor;
+    }
+  } catch {
+    // The deck's items are left out of this read; asks, mail, updates and drops still show.
+  }
+  return found;
+}
+
+function markedItem(issue: Record<string, unknown>, projectId: string | undefined): MarkedItem | undefined {
+  const line = typeof issue.ownerCheck === "string" ? issue.ownerCheck.trim() : "";
+  const stage = issue.stage;
+  const bundle = issue.bundle as
+    | { id?: unknown; at?: unknown; references?: { type?: unknown; sha256?: unknown }[] }
+    | null
+    | undefined;
+  if (
+    line === "" ||
+    (stage !== "landed" && stage !== "delivered") ||
+    typeof issue.id !== "string" ||
+    typeof issue.identifier !== "string" ||
+    typeof bundle?.id !== "string"
+  )
+    return undefined;
+  // Clips first, then screenshots, as the deck shows them; logs and diffs stay in the bundle.
+  const media: FeedMedia[] = [];
+  for (const kind of ["video", "screenshot"])
+    for (const reference of bundle.references ?? []) {
+      if (reference.type !== kind || typeof reference.sha256 !== "string") continue;
+      if (!/^[0-9a-f]{64}$/u.test(reference.sha256)) continue;
+      const entry = evidenceMedia(reference.sha256);
+      if (!media.some((existing) => existing.url === entry.url)) media.push(entry);
+    }
+  const url = typeof issue.url === "string" ? FeedUrlSchema.safeParse(issue.url) : undefined;
+  const at =
+    (typeof bundle.at === "string" ? iso(bundle.at) : undefined) ??
+    (typeof issue.updatedAt === "string" ? iso(issue.updatedAt) : undefined) ??
+    new Date(0).toISOString();
+  return {
+    issueId: issue.id,
+    key: issue.identifier,
+    title: (typeof issue.title === "string" && issue.title.trim()
+      ? issue.title.trim()
+      : issue.identifier
+    ).slice(0, 500),
+    line: line.slice(0, FEED_CHECK_LINE_READ_MAX),
+    bundleId: bundle.id,
+    stage,
+    at,
+    ...(url?.success ? { url: url.data } : {}),
+    ...(projectId ? { projectId } : {}),
+    media: media.slice(0, 16),
   };
 }
 
