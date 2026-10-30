@@ -39,6 +39,12 @@ import {
   type FleetAutonomyMode,
 } from "@clankie/protocol";
 import { ProjectReviewSchema } from "@clankie/protocol/reviews";
+import {
+  DEFAULT_TRACKER_POSTING,
+  TRACKER_POSTING_MODES,
+  TrackerPostingSchema,
+  type TrackerPosting,
+} from "@clankie/protocol/tracker-posting";
 import { commandHost } from "./io.ts";
 
 /** Revision-bearing API client shared by the CLI and the console's /project entry. */
@@ -68,7 +74,7 @@ export async function runProjectSettingsCommand(
     )
   )
     throw new Error(
-      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--link-repo PATH]... [--unlink-repo PATH]... | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
+      "Usage: clankie project list | settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--link-repo PATH]... [--unlink-repo PATH]... [--posting read-only|ask|lead|allow|default] | create PROJECT --settings FILE.json --revision REVISION | update PROJECT --changes FILE.json --revision REVISION | membership SEAT_ID OCCUPANT_ID",
     );
   let command: unknown;
   if (!list && !membership) {
@@ -134,7 +140,12 @@ export async function runProjectSettingsCommand(
         {
           ...((options.includeAutonomy ?? true) ? { includeAutonomy: "true" } : {}),
           ...((options.includeWorkPolicy ?? options.includeAutonomy ?? true)
-            ? { includeWorkPolicy: "true", includeAutoUpdates: "true", includeReview: "true" }
+            ? {
+                includeWorkPolicy: "true",
+                includeAutoUpdates: "true",
+                includeReview: "true",
+                includeTrackerPosting: "true",
+              }
             : {}),
         },
       ).toString()}`,
@@ -182,6 +193,13 @@ interface ProjectFleetSettingsResult extends ProjectsSnapshot {
   workTracker?: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
   /** Read-only repos this project's reviews and churn may read; present when the service supports them. */
   linkedRepoPaths?: string[];
+  /** "Posting to your tracker" (ADR 0302); present when the service supports it. */
+  posting?: {
+    saved: TrackerPosting | "default";
+    effective: TrackerPosting;
+    label: string;
+    appliesTo: string;
+  };
   fleet: {
     closure: FleetAutonomyMode | "inherit";
     machineSetup: FleetAutonomyMode | "inherit";
@@ -208,9 +226,11 @@ async function runProjectFleetSettings(
     workTracker = await workTrackerSettings(args.slice(3), options, args[1]);
     args = args.slice(0, 2);
   }
+  // `posting VALUE` reads like `tracker ...`; it is the same leaf as `--posting VALUE`.
+  if (args[2] === "posting") args = [args[0]!, args[1]!, "--posting", ...args.slice(3)];
   if (!args[1] || args.length % 2 !== 0)
     throw new Error(
-      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--link-repo PATH]... [--unlink-repo PATH]... [--reviewer-seat SEAT|--reviewer-role ROLE|--reviewer none]",
+      "Usage: clankie project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit] [--commit lead|owner|inherit] [--push lead|owner|inherit] [--release lead|owner|time_rule|inherit --release-rule TEXT] [--gate-preset hands-off|balanced|careful|inherit] [--everyday-work allow|lead|owner|inherit] [--leaves-mac allow|lead|owner|inherit] [--hard-to-undo allow|lead|owner|inherit] [--money-and-accounts owner|inherit] [--wip-cap 1..1000|none] [--owner-loop silent|milestones|landings|inherit] [--auto on|off] [--auto-updates on|off] [--focus TEXT|clear] [--tracker-project UUID|clear] [--linear-project UUID|clear] [--link-repo PATH]... [--unlink-repo PATH]... [--reviewer-seat SEAT|--reviewer-role ROLE|--reviewer none] [--posting read-only|ask|lead|allow|default]",
     );
   const changes: FleetAutonomyPatch = {};
   const work: Pick<
@@ -224,6 +244,7 @@ async function runProjectFleetSettings(
     | "ownerLoop"
     | "review"
     | "linkedRepos"
+    | "trackerPosting"
   > = {};
   let releaseMode: string | undefined;
   let releaseRule: string | undefined;
@@ -273,7 +294,14 @@ async function runProjectFleetSettings(
       work.review = ProjectReviewSchema.parse({ role: value });
     else if (args[index] === "--reviewer" && work.review === undefined && value === "none")
       work.review = null;
-    else if ((args[index] === "--link-repo" || args[index] === "--unlink-repo") && value)
+    else if (args[index] === "--posting" && work.trackerPosting === undefined) {
+      if (value === "default" || value === "inherit") work.trackerPosting = null;
+      else {
+        const posting = TrackerPostingSchema.safeParse(value === "read-only" ? "read_only" : value);
+        if (!posting.success) throw new Error("--posting takes read-only, ask, lead, allow or default.");
+        work.trackerPosting = posting.data;
+      }
+    } else if ((args[index] === "--link-repo" || args[index] === "--unlink-repo") && value)
       // Owner workspaces are saved canonical; a path that no longer exists keeps its spelling.
       (args[index] === "--link-repo" ? link : unlink).push(await realpath(value).catch(() => resolve(value)));
     else if (args[index] === "--release" && releaseMode === undefined) releaseMode = value;
@@ -337,6 +365,10 @@ async function runProjectFleetSettings(
     throw new Error(
       "This service does not support automatic project updates; update it before editing them.",
     );
+  if ("trackerPosting" in work && snapshot.projectTrackerPosting !== true)
+    throw new Error(
+      "This service does not support the Posting to your tracker setting; update it before changing it.",
+    );
   if ("review" in work && snapshot.projectReview !== true)
     throw new Error("This service does not support project reviewers; update it before setting one.");
   if (("wipCap" in work || "ownerLoop" in work) && snapshot.projectWorkPolicy !== true)
@@ -398,6 +430,17 @@ async function runProjectFleetSettings(
       ? { auto: project.auto === true, ...(project.focus === undefined ? {} : { focus: project.focus }) }
       : {}),
     ...(snapshot.projectReview === true ? { reviewer: project.review ?? "none" } : {}),
+    ...(snapshot.projectTrackerPosting === true
+      ? {
+          posting: {
+            saved: project.trackerPosting ?? "default",
+            effective: project.trackerPosting ?? DEFAULT_TRACKER_POSTING,
+            label: TRACKER_POSTING_MODES[project.trackerPosting ?? DEFAULT_TRACKER_POSTING].label,
+            appliesTo:
+              "Linear and GitHub issues; private issue files and the built-in tracker stay on this Mac and are always writable.",
+          },
+        }
+      : {}),
     ...(snapshot.linkedRepos === true
       ? { linkedRepoPaths: (project.linkedRepos ?? []).map((repo) => repo.path) }
       : {}),

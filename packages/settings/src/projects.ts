@@ -109,7 +109,7 @@ export function updateProjectSettings(
     }
     project.linkedRepos = input.changes.linkedRepos;
   }
-  for (const field of ["wipCap", "ownerLoop", "autoUpdates", "hiring", "review"] as const) {
+  for (const field of ["wipCap", "ownerLoop", "autoUpdates", "hiring", "review", "trackerPosting"] as const) {
     if (input.changes[field] === null) delete project[field];
     else if (input.changes[field] !== undefined) Object.assign(project, { [field]: input.changes[field] });
   }
