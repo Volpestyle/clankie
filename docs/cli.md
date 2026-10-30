@@ -3281,6 +3281,71 @@ Local records persist across restart and do not automatically migrate on
 connection. Other unavailable repo providers answer `backend_unavailable`. The HTTP
 form is `POST /v1/work` with the operator bearer and `{ "action": ... }`.
 
+#### Posting to your tracker (`work posts`)
+
+`clankie work posts [list [--project P] [--all]] | posts approve ID | posts send-back ID [--reason TEXT]`
+
+Each project says who decides before Clankie or a worker writes to its Linear or
+GitHub issues ([ADR 0302](adr/0302-posting-to-your-tracker-is-the-owners-call.md)).
+Set it with [`project settings PROJECT --posting`](#project-list-project-settings-and-project-update):
+
+| Value       | In the app      | What happens to a write                                                   |
+| ----------- | --------------- | ------------------------------------------------------------------------- |
+| `read-only` | Read only       | Nothing is posted; the message says to keep it in the issue file or notes |
+| `ask`       | Ask me          | It waits in the owner's feed, showing exactly what would go where         |
+| `lead`      | Clankie decides | Clankie's own writes post; a worker's wait for him                        |
+| `allow`     | Go ahead        | It posts                                                                  |
+
+A project with no saved value is on `ask`. Reads are never held. Private issue
+files (`.clankie/work`), committed issue files and the built-in tracker stay on
+the owner's Mac, so they are always writable; so is the local store Linear tools
+use while Linear is disconnected. The owner's own writes (the app, `work owner`,
+`/v1/tracker/owner/call`) are his and never held.
+
+Every outward write passes the same check: `linear_*` tools from the lead or a
+delegated worker, `POST /v1/tracker/call` and repo-routed tracker calls,
+`clankie work create|update|attach` on a Linear or GitHub repo, the seat issue
+status Clankie keeps, and drops. When a write could belong to several projects
+(no repo, project or issue that names one), the strictest of them applies; when
+it names none Clankie can match, it is held as on `ask`.
+
+- **Held for the owner.** The write becomes a check in his feed, "Post a comment
+  on VUH-12 to Linear" with the exact text, answered **Post it** or **Send it
+  back**. Post it posts it once, and only if the project still allows it: a
+  switch to `read-only` meanwhile refuses it. Only the owner answers it: his
+  feed, or his paired app through `POST /v1/work/posts`.
+- **Held for Clankie.** The lead chat is woken with the text and the two
+  commands below. `clankie work posts approve ID` posts it once; `send-back ID`
+  drops it. If the project moved to `ask` meanwhile, approving hands it to the
+  owner instead.
+- **Answers.** A held call is refused with `posting_held` (or `posting_refused`
+  for read only, a write too long to show whole, or a check that could not be
+  raised) and says which. Do not retry it: the same write while it waits is the
+  same post, never a second one. Clankie's lead chat hears how each held write
+  ended and passes it on to the worker who asked.
+- **Never twice.** A post is marked as sending before it goes. If the service
+  stops in between, it reads `uncertain` and is never sent again; check the
+  tracker by hand.
+
+```sh
+clankie work posts                     # waiting writes
+clankie work posts --project garden --all
+clankie work posts approve 6f0c…       # a write held for Clankie
+clankie work posts send-back 6f0c… --reason "Say it in the PR instead"
+```
+
+HTTP: `POST /v1/work/posts` with `{action:"list", state?:"waiting"|"all",
+projectId?}`, `{action:"approve", id}` or `{action:"send_back", id, reason?}`.
+The operator bearer decides writes held for Clankie; an owner-paired app device
+decides either kind (`owner_app_required`, 403, for another device). A decision
+answers `{post, changed, message}`; `changed: false` means it was already
+decided and nothing happened again. A held write's answer on
+`/v1/tracker/call` carries `post` with its `id`.
+
+The owner's own Clankie project keeps its work in private issue files with
+Linear on `read-only`: Linear sync stays on for reading history, and nothing
+Clankie or a worker writes goes back there.
+
 ### `work review-diff BASE HEAD [--repo PATH]`
 
 Reads the change between two commits of a local Git repository for a guided
@@ -8615,26 +8680,35 @@ answer prints the `/drop --key` line that retries it without filing twice.
   `woken`, `not_woken` (no lead took it; a retry tries again) or `uncertain`
   (an earlier try may have woken it, so it is never woken again).
   `.clankie/work/.drops.json` keeps each key's request hash and wake state.
-- **Refusals.** Drops go only to a project whose local tracker is private issue
-  files (`backend: "default"`, or `markdown` with `directory: ".clankie/work"`);
-  nothing is written otherwise, and the message names the way there:
+- **Linear and GitHub projects.** A drop on a project that tracks work in
+  Linear or GitHub issues is kept first as the same private file (the host
+  creates `.clankie/work` if needed), then posted there as a new issue under
+  the project's [Posting to your tracker](#posting-to-your-tracker-work-posts)
+  setting. The result's `posting` is `posted`, `waiting` (a check in the
+  owner's feed, or Clankie's call) or `kept_local` (read only, or posting could
+  not happen now). Once posted, the file's front matter gains `posted_to`,
+  `posted_key` and `posted_url`, and the feed item's `posted` names the tracker,
+  key and link. A retry with the same key never posts again.
+- **Refusals.** Nothing is written otherwise, and the message names the way
+  there:
   - a project on Auto keeps the built-in tracker: turn Auto off
     (`clankie project settings P --auto off`), then export and select files;
-  - a built-in or Linear tracker: move its open work with
+  - a built-in tracker: move its open work with
     `clankie work export --project P --to markdown`
     ([above](#work-export-project-p-to-markdown-dry-run-json)), then select the
     files with `clankie project settings P tracker '{"backend":"markdown","directory":".clankie/work"}'`;
-  - GitHub issues, committed issue files (`docs/tasks`), a folder inside the
-    private one (`.clankie/work/bugs`) or no saved tracker: select the private
-    files the same way;
+  - committed issue files (`docs/tasks`), a folder inside the private one
+    (`.clankie/work/bugs`) or no saved tracker: select the private files the
+    same way;
   - a tracker workspace on another machine is refused; drop there.
 
 HTTP uses `POST /operator/v1/dispatch` with `schemaVersion: 1`,
 `op: "feed_drop"`, `projectId`, `idempotencyKey`, and at least one of `title`
 (up to 200 characters), `body` (up to 20,000) or `attachments`
 (`[{conversationId, artifactId}]`, each committed to that conversation). The
-result is `{outcome: "filed", item, file, duplicate, wake, leadConversationId?}`
-(`item` is the drop as the feed shows it, `file` its path in the main checkout),
+result is `{outcome: "filed", item, file, duplicate, wake, leadConversationId?, posting?}`
+(`item` is the drop as the feed shows it, `file` its path in the main checkout,
+`posting` set only on a Linear or GitHub project),
 `{outcome: "refused", reason: "unknown_project" | "not_file_backed" |
 "attachment_missing" | "idempotency_conflict", message}` or
 `{outcome: "unavailable", message}` (retry with the same key). Only the owner
@@ -8857,6 +8931,20 @@ see `review` and `projectReview:true`; the CLI and TUI opt in automatically, and
 a service without `projectReview` refuses the flags. The `/project` menu has a
 **Reviewer** row.
 
+`--posting read-only|ask|lead|allow|default` (or the shorter
+`project settings PROJECT posting VALUE`) sets **Posting to your tracker**: who
+decides before Clankie or a worker writes to the project's Linear or GitHub
+issues ([above](#posting-to-your-tracker-work-posts);
+[ADR 0302](adr/0302-posting-to-your-tracker-is-the-owners-call.md)). `default`
+clears the saved value, which means `ask`. The output's `posting` shows the
+saved and effective value and its label. The JSON update takes
+`trackerPosting` as `"read_only"`, `"ask"`, `"lead"` or `"allow"`, or `null` to
+clear. Readers opt in with `includeTrackerPosting=true` and see `trackerPosting`
+and `projectTrackerPosting: true`; the CLI opts in automatically, and a service
+without `projectTrackerPosting` refuses the flag. The app labels the values
+Read only, Ask me, Clankie decides and Go ahead (`TRACKER_POSTING_MODES` in
+`@clankie/protocol/tracker-posting`).
+
 ```sh
 clankie project settings garden --closure owner
 clankie project settings garden --machine-setup lead
@@ -8867,6 +8955,8 @@ clankie project settings garden --wip-cap 6 --owner-loop milestones
 clankie project settings garden --auto-updates off
 clankie project settings garden --reviewer-role reviewer
 clankie project settings garden --reviewer none
+clankie project settings garden --posting read-only
+clankie project settings garden posting default
 clankie project settings clankie-work --link-repo ~/dev/clankie --link-repo ~/dev/clankie-app
 clankie project settings clankie-work --unlink-repo ~/dev/clankie-app
 ```
