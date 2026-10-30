@@ -808,6 +808,7 @@ export * from "./checkouts.ts";
 
 export * from "./mail-reference.ts";
 export * from "./owner-updates.ts";
+export * from "./feed.ts";
 
 export * from "./owner-settings.ts";
 export * from "./linear-settings.ts";

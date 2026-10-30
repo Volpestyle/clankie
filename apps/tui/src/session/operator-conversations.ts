@@ -98,11 +98,14 @@ export function createCaptainOperatorConversationClient(
           ? "Owner authentication required for mailbox updates."
           : request.op === "fleet_room"
             ? "Owner authentication required to read the fleet room."
-            : "Owner authentication required to turn Auto on.";
+            : request.op === "feed_list"
+              ? "Owner authentication required to read the feed."
+              : "Owner authentication required to turn Auto on.";
     const ownerRequired =
       request.op.startsWith("owner_update_") ||
       request.op === "acknowledge_worker_report_history" ||
       request.op === "fleet_room" ||
+      request.op === "feed_list" ||
       (request.op === "autonomy" && operatorAutonomyCommandRequiresOwner(request.command));
     if (ownerRequired && ownerFetcher === undefined) {
       throw new OperatorConversationClientError(ownerError);

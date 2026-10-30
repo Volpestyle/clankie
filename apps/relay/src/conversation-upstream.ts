@@ -80,6 +80,10 @@ export type DeviceConversationRequest = Extract<
       | "send"
       | "pending_messages"
       | "stop_task"
+      | "feed_list"
+      | "owner_update_list"
+      | "owner_update_read"
+      | "owner_update_dismiss"
       | "input_list"
       | "input_get"
       | "input_answer"
@@ -126,6 +130,10 @@ export function createDeviceConversationDispatch(options: {
         "send",
         "pending_messages",
         "stop_task",
+        "feed_list",
+        "owner_update_list",
+        "owner_update_read",
+        "owner_update_dismiss",
         "input_list",
         "input_get",
         "input_answer",

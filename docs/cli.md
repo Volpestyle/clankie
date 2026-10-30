@@ -8360,7 +8360,8 @@ Only HTTP/HTTPS links are accepted; media must already be published at a URL.
 Per conversation, retain active news and 32 recent dismissed updates within
 256 total records / 512,000 bytes. Capacity refuses new mail without evicting
 active updates. Same publication identity/draft reconciles across restart;
-a changed draft under that identity refuses. There is no automatic event feed.
+a changed draft under that identity refuses. Nothing is mailed automatically;
+the owner feed (`clankie feed`) shows mail beside asks and project updates.
 
 The operator-seat MCP bridge assigns a fresh UUID to each deliberate mail call,
 including calls with identical content. It keeps that UUID through an explicit
@@ -8371,6 +8372,56 @@ counters and tool names are never publication identities. Older MCP clients
 without this metadata receive a fresh host identity for each call. An unknown
 transport failure does not automatically repeat mail: inspect the original
 mailbox state before making another publication.
+
+### Owner feed: `feed [--project ID] [--cursor CURSOR] [--limit N] [--json]`
+
+One newest-first page of what is waiting on the owner and what happened, joined
+by the host from the stores above. It keeps no store of its own and changes
+nothing:
+
+- a **check** is a pending owner ask; answer it with `conversations answer`
+  (or `input_answer`) using the `question` and `revision` the item carries;
+- an **update** is either mailed news (`ownerUpdate`, unread or read; dismiss it
+  with `conversations dismiss-update`) or a project status update
+  (`projectUpdate`, read-only; `work_project_details` holds the full text and
+  its replies). Embedded images become `media`, other attachments `links`;
+  links that are not HTTP(S), `clankie://` or `clankie-work://` are left out;
+- a **drop** has its shape defined for the owner's filed screenshots, bugs and
+  ideas; no host emits drops yet.
+
+```sh
+clankie feed
+clankie feed --project garden --limit 10
+clankie feed --project garden --cursor CURSOR --json
+```
+
+TUI: `/feed [PROJECT_ID]`. Text output names the exact answer and dismiss
+commands, and its next-page command repeats `--project` and `--limit`, since a
+cursor marks only a place in the page; `--json` prints the page.
+
+An item belongs to a project when its ask's workspace, or its source
+conversation's local workspace, lies inside one of the project's local
+workspaces (the deepest root wins), or when its source conversation is the lead
+chat bound to exactly one project. Project status updates come only from
+trackers that belong to a project (Linear or the built-in tracker), each update
+once; a tracker that cannot be read is named in `unreadable` instead of failing
+the page. Tracker reads are reused for 30 seconds, so paging does not re-read
+them.
+
+HTTP uses `POST /operator/v1/dispatch` with `schemaVersion: 1`, `op: "feed_list"`
+and optional `projectId`, `cursor` and `limit` (1–50, default 20). The result is
+`{outcome: "ready", items, nextCursor?, unreadable?}` or
+`{outcome: "unavailable", message}`. Each item has `kind`
+(`check | update | drop`), a stable `id`, `at`, optional `projectId` and the
+payload named by its kind. Items order by `at`, then `id`, descending; the
+opaque cursor names the last item shown, so newer items never shift a later
+page, and a cursor this host did not issue is refused with 400. Bodies longer
+than 4000 characters are cut and marked `bodyTruncated`. A reader using
+`parseProtocolResponse` drops an item of a kind it does not know.
+
+The feed requires the same authority as the mailbox: the owner operator or an
+active device with `terminalControl`. The relay forwards it, like the mailbox
+operations, with the device's own bearer; a captain bearer is refused.
 
 ### `project create PROJECT --settings FILE.json --revision REVISION`
 

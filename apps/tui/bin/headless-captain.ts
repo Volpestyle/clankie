@@ -614,6 +614,8 @@ export async function runHeadlessCaptainCommand(
       return await (await import("../src/command/reset.ts")).runResetCommand(rest, options);
     if (command === "conversations" || command === "conversation")
       return await (await import("../src/command/conversations.ts")).runConversationsCommand(rest, options);
+    if (command === "feed")
+      return await (await import("../src/command/feed.ts")).runFeedCommand(rest, { ...options, stdout });
     if (command === "auto")
       return await (
         await import("../src/command/conversations.ts")

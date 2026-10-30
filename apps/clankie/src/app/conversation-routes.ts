@@ -48,6 +48,7 @@ import { HerdrUnavailableError } from "../herdr-session.ts";
 import { FleetRosterLimitError } from "../captain/herdr-census.ts";
 import { ServiceShuttingDownError } from "../captain/captain-operator-service.ts";
 import { WorkRequestError, type WorkInboxContext } from "../work-items.ts";
+import { createOwnerFeed, FeedCursorError } from "../feed.ts";
 import { CutoverRequestSchema } from "../linear-cutover.ts";
 import type { WorkWriteAuthority } from "../work-write-target.ts";
 import { FleetEfficiencyRequestSchema } from "../captain/fleet-efficiency-tools.ts";
@@ -75,6 +76,11 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  const ownerFeed = createOwnerFeed({
+    ...(ctx.dependencies.workItems ? { workItems: ctx.dependencies.workItems } : {}),
+    ...(ctx.dependencies.settings ? { settings: ctx.dependencies.settings } : {}),
+    now: () => ctx.clock().getTime(),
+  });
   ctx.app.get(SHIPPING_PATH, async (context) => {
     context.header("cache-control", "no-store");
     const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
@@ -644,6 +650,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       parsed.data.op === "project_proposal_get" ||
       parsed.data.op === "project_proposal_confirm" ||
       parsed.data.op === "project_proposal_tweak" ||
+      parsed.data.op === "feed_list" ||
       parsed.data.op === "owner_update_list" ||
       parsed.data.op === "owner_update_read" ||
       parsed.data.op === "owner_update_dismiss" ||
@@ -668,6 +675,29 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           ? context.req.header(HERDR_SOCKET_HEADER) === binding.socketPath
           : ctx.dependencies.herdrRuntime?.() === undefined;
       if (!sameSession && parsed.data.op === "send") delete parsed.data.turn.herdrPaneId;
+      if (parsed.data.op === "feed_list") {
+        // The feed joins the mailbox's own reads under the same owner, so the
+        // store checks that authority on each; nothing returns once it lapses.
+        const { op: _op, schemaVersion: _version, ...request } = parsed.data;
+        const denied = () => context.json({ error: "question_owner_required" }, 403);
+        try {
+          const result = await ownerFeed.list(request, (read) =>
+            ctx.dependencies.captain.serveOperatorConversation(read, owner),
+          );
+          if (!owner.current() || !(await owner.authorize())) return denied();
+          return context.json({ op: "feed_list", schemaVersion: 1, result });
+        } catch (error) {
+          if (error instanceof FeedCursorError) return context.json({ error: "invalid_request" }, 400);
+          if (!owner.current() || !(await owner.authorize())) return denied();
+          if (error instanceof Error && error.message === "question_owner_unavailable") return denied();
+          logger.warn({ error }, "Owner feed read failed");
+          return context.json({
+            op: "feed_list",
+            schemaVersion: 1,
+            result: { outcome: "unavailable", message: "The feed can’t be read right now. Read it again." },
+          });
+        }
+      }
       try {
         return context.json(await ctx.dependencies.captain.serveOperatorConversation(parsed.data, owner));
       } catch (error) {

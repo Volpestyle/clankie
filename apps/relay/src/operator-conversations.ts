@@ -732,6 +732,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "project_proposal_get" ||
       serviceRequest.op === "project_proposal_confirm" ||
       serviceRequest.op === "project_proposal_tweak" ||
+      // The mailbox and the feed are the owner's: the device's own identity carries them.
+      serviceRequest.op === "feed_list" ||
+      serviceRequest.op === "owner_update_list" ||
+      serviceRequest.op === "owner_update_read" ||
+      serviceRequest.op === "owner_update_dismiss" ||
       serviceRequest.op === "input_list" ||
       serviceRequest.op === "input_get" ||
       serviceRequest.op === "input_answer" ||
@@ -897,6 +902,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "project_proposal_tweak" ||
+          serviceRequest.op === "feed_list" ||
+          serviceRequest.op === "owner_update_list" ||
+          serviceRequest.op === "owner_update_read" ||
+          serviceRequest.op === "owner_update_dismiss" ||
           serviceRequest.op === "input_list" ||
           serviceRequest.op === "input_get" ||
           serviceRequest.op === "input_answer" ||

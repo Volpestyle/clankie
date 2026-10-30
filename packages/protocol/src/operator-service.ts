@@ -6,6 +6,7 @@ import {
   type FleetRoomResult,
 } from "./fleet-room.ts";
 import { TrackerSyncCommandSchema, TrackerSyncResultSchema } from "./tracker-sync.ts";
+import { FeedListRequestSchema, FeedListResultSchema, type FeedListRequest, type FeedPage } from "./feed.ts";
 import {
   EvidenceDeviceFetchSchema,
   EvidenceDeviceFetchRequestSchema,
@@ -219,6 +220,8 @@ import { encodeBase64 } from "./base64.ts";
 export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
+  FeedListRequestSchema.extend({ op: z.literal("feed_list"), schemaVersion: z.literal(1) }).strict(),
   OwnerUpdateListFilterSchema.extend({
     op: z.literal("owner_update_list"),
     schemaVersion: z.literal(1),
@@ -839,6 +842,9 @@ export const SendReceiptRecordSchema = z.strictObject({
 export type SendReceiptRecord = z.infer<typeof SendReceiptRecordSchema>;
 
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
+  z
+    .object({ op: z.literal("feed_list"), schemaVersion: z.literal(1), result: FeedListResultSchema })
+    .strict(),
   z
     .object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1), result: LeadChatsResultSchema })
     .strict(),
@@ -1461,6 +1467,8 @@ export interface OperatorConversationServiceClient {
     readonly result?: SubmitOperatorConversationTurnResult;
     readonly record?: SendReceiptRecord;
   }>;
+  /** Items are checked against their kind by the schema, so each carries its own payload. */
+  feedList?(request?: FeedListRequest): Promise<FeedPage>;
   ownerUpdateList?(filter?: OwnerUpdateListFilter): Promise<OwnerUpdateList>;
   ownerUpdateRead?(id: string): Promise<OwnerUpdateResult>;
   ownerUpdateDismiss?(id: string): Promise<OwnerUpdateResult>;
@@ -1726,6 +1734,13 @@ export function createOperatorConversationServiceClient(
       const result = await dispatch({ op: "project_proposal_confirm", schemaVersion: 1, ...target });
       if (result.op !== "project_proposal_confirm") throw new Error("Unexpected proposal response");
       return result.result;
+    },
+    async feedList(request = {}) {
+      const result = await dispatch(
+        OperatorConversationServiceRequestSchema.parse({ ...request, op: "feed_list", schemaVersion: 1 }),
+      );
+      if (result.op !== "feed_list") throw new Error(`Unexpected ${result.op} result for feed_list`);
+      return result.result as FeedPage;
     },
     async ownerUpdateList(filter = {}) {
       const result = await dispatch({ op: "owner_update_list", schemaVersion: 1, ...filter });
