@@ -404,6 +404,42 @@ it("chat-only send keeps captain semantics while all question operations, listin
   expect(f.continuation).not.toHaveBeenCalled();
 });
 
+it("the owner feed and mailed updates reach a control device through its own bearer, never the captain hop", async () => {
+  const f = await fixture();
+  await f.send();
+  const target = await f.target();
+  const mailed = await f.store.mailOwnerUpdate(
+    f.id,
+    { title: "Gate landed", body: "Try it in the app." },
+    "relay-mail",
+    { current: () => true },
+  );
+  const hops = () => f.seen.filter((r) => r.path !== "/v1/devices/self");
+  const feed = await f.client().feedList!();
+  if (feed.outcome !== "ready") throw new Error(feed.message);
+  expect(feed.items).toMatchObject([
+    { kind: "update", update: { ownerUpdate: { id: mailed.id, state: "unread" } } },
+    { kind: "check", check: { question: { requestId: target.requestId } } },
+  ]);
+  expect(hops().at(-1)).toMatchObject({ token: `Bearer ${f.tokens.control}`, body: { op: "feed_list" } });
+  expect((await f.client().ownerUpdateList!()).updates.map((update) => update.id)).toEqual([mailed.id]);
+  expect((await f.client().ownerUpdateDismiss!(mailed.id)).update?.state).toBe("dismissed");
+  const after = await f.client().feedList!();
+  expect(after).toMatchObject({ outcome: "ready", items: [{ kind: "check" }] });
+  expect(hops().every((r) => r.token === `Bearer ${f.tokens.control}`)).toBe(true);
+  for (const request of [
+    { op: "feed_list", schemaVersion: 1 },
+    { op: "owner_update_list", schemaVersion: 1 },
+    { op: "owner_update_read", schemaVersion: 1, id: mailed.id },
+    { op: "owner_update_dismiss", schemaVersion: 1, id: mailed.id },
+  ] as const) {
+    const before = hops().length;
+    expect((await f.raw(request, f.tokens.read!)).status).toBe(403);
+    expect((await f.raw(request, "fixture-captain-token")).status).toBe(401);
+    expect(hops()).toHaveLength(before);
+  }
+});
+
 it.each(["captain", "wrong-signer", "expired", "revoked"])(
   "refuses actual %s device authority",
   async (kind) => {

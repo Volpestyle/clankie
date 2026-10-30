@@ -171,6 +171,7 @@ export interface ConsoleCommandContext {
   readonly conversations?: {
     question?(argument: string, flow?: import("./shell/setup-flow.ts").SetupFlow): Promise<string>;
     updates?(argument: string): Promise<string>;
+    feed?(argument: string): Promise<string>;
     readonly conversationId?: string | undefined;
     readonly title?: string | undefined;
     /** Directory the selected conversation's session works in. */
@@ -237,6 +238,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             error instanceof Error ? error.message : String(error),
             "error",
           );
+        }
+      },
+    });
+
+  if (conversations?.feed)
+    commands.push({
+      name: "feed",
+      aliases: [],
+      description: "Read the owner feed: checks to answer and updates, newest first",
+      takesArgument: true,
+      argumentHint: "[PROJECT_ID]",
+      async run(argument, shell) {
+        try {
+          shell.insertCommandResult("/feed", await conversations.feed!(argument), "success");
+        } catch (error) {
+          shell.insertCommandResult("/feed", error instanceof Error ? error.message : String(error), "error");
         }
       },
     });

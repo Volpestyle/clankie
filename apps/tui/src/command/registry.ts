@@ -181,6 +181,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["feed"],
+    lines: [
+      "  feed [--project ID] [--cursor CURSOR] [--limit N] [--json]",
+      "                           Owner checks (pending asks) and updates, newest first; owner only",
+    ],
+  },
+  {
     nouns: ["reset"],
     lines: ["  reset --conversation ID  Archive the old session and reset model context (JSON)"],
   },

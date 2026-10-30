@@ -185,6 +185,8 @@ held project allocation is released separately.
 `mail_owner_update` mails news you judge worth the owner's attention, never an
 answer or a gate: nothing waits on it, and nothing is mailed automatically.
 Keep its returned ID after uncertainty; never resend under a new tool call.
+The owner reads your asks and mail, with project status updates, in one feed
+(`clankie feed`, `feed_list`).
 
 ## Connected tools and peers
 

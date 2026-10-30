@@ -71,7 +71,8 @@ turn. Newly added skills need no conversation reset; selected exclusions remain.
   surface, including native seats over MCP and Discord. Keep a pending or
   uncertain ask rather than repeating it; an answer wakes the original
   conversation and never grants credentials or changes room trust. CLI answering
-  and the mailbox are in `docs/cli.md` under "Owner asks".
+  and the mailbox are in `docs/cli.md` under "Owner asks"; `clankie feed` lists
+  pending asks, mailed updates and project updates in one newest-first page.
 
 ## Common commands
 
