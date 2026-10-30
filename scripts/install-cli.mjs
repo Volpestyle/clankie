@@ -68,6 +68,7 @@ if (process.stdin.isTTY && process.stdout.isTTY) {
   try {
     const result = await installHarnessBridges({
       repoRoot: root,
+      skipProfiles: refreshed.local.flatMap((entry) => (entry.profile ? [entry.profile] : [])),
       consent: async (_harness, detail) => {
         const answer = await terminal.question(`${detail}\nProceed? [y/N] `);
         return /^y(?:es)?$/iu.test(answer.trim());

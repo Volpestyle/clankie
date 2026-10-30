@@ -198,6 +198,7 @@ async function installHarnessBridges(options) {
     })),
   ];
   for (const { harness, profile, codexProfile } of targets) {
+    if (options.skipProfiles?.includes(harness === "claude" ? profile : codexProfile)) continue;
     if (options.linkedOnly && harness === "claude" && !(await linkedClaude(profile))) continue;
     const targetEnv = {
       ...env,

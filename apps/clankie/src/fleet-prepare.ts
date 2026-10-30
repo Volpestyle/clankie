@@ -149,6 +149,17 @@ function stageCommand(fleet: HerdrFleet): string {
       );
 }
 
+/**
+ * An ssh session keeps the PATH sshd started with, so Node installed since then
+ * is missing there. Read PATH from the machine as the fleet relay does, then
+ * name the fix when Node still isn't found.
+ */
+const POWERSHELL_NODE = [
+  "$fresh = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }",
+  "if ($fresh) { $env:Path = (@($env:Path) + $fresh) -join ';' }",
+  'if (-not (Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue)) { throw "Node.js is not on the PATH of $env:USERNAME\'s SSH sessions on $env:COMPUTERNAME. Install Node.js for that Windows user or add it to the system PATH, then run the install again." }',
+].join("; ");
+
 /** Native installers receive the explicit owner approval from `herdr prepare`; no config append. */
 function installCommand(fleet: HerdrFleet, sourceSetup?: string, linkedOnly = false): string {
   const setupArgs =
@@ -159,6 +170,7 @@ function installCommand(fleet: HerdrFleet, sourceSetup?: string, linkedOnly = fa
     ? powershellScriptCommand(
         [
           "$ErrorActionPreference = 'Stop'",
+          POWERSHELL_NODE,
           `$stage = Join-Path $env:USERPROFILE ${powershellLiteral(STAGING_DIR.replaceAll("/", "\\"))}`,
           `$target = Join-Path $env:USERPROFILE ${powershellLiteral(MARKETPLACE_DIR.replaceAll("/", "\\"))}`,
           "if (Test-Path -LiteralPath $target) { Remove-Item -Recurse -Force -LiteralPath $target }",
@@ -189,7 +201,7 @@ export async function inspectFleetHarnesses(
   const command =
     fleet.ssh.shell === "powershell"
       ? powershellScriptCommand(
-          `& node (Join-Path $env:USERPROFILE ${powershellLiteral(`${MARKETPLACE_DIR.replaceAll("/", "\\")}\\worker\\bin\\harness-inspect.mjs`)}) ${powershellLiteral(expected)}; if ($LASTEXITCODE -ne 0) { throw 'Harness inspection failed; run owner preparation' }`,
+          `${POWERSHELL_NODE}; & node (Join-Path $env:USERPROFILE ${powershellLiteral(`${MARKETPLACE_DIR.replaceAll("/", "\\")}\\worker\\bin\\harness-inspect.mjs`)}) ${powershellLiteral(expected)}; if ($LASTEXITCODE -ne 0) { throw 'Harness inspection failed; run owner preparation' }`,
         )
       : posixScriptCommand(
           `node "$HOME/${MARKETPLACE_DIR}/worker/bin/harness-inspect.mjs" ${posixQuote(expected)}`,
