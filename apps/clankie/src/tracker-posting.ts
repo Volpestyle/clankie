@@ -265,43 +265,53 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       return candidates.map((project) => project.id);
     const args = route.arguments;
     const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
-    let projectRefs = [text(args.project), text(args.projectId)].filter((ref) => ref !== undefined);
-    let teamRefs = [text(args.team), text(args.teamId)].filter((ref) => ref !== undefined);
-    const issueRef =
-      (route.tool === "save_issue" ? text(args.id) : undefined) ?? text(args.issueId) ?? text(args.issue);
-    if (issueRef && options.readLinear && projectRefs.length === 0) {
-      try {
-        const issue = (await options.readLinear("get_issue", { id: issueRef })) as {
-          project?: { id?: unknown; name?: unknown } | null;
-          team?: { id?: unknown; key?: unknown; name?: unknown } | null;
-        };
-        projectRefs = [text(issue?.project?.id), text(issue?.project?.name)].filter(
-          (ref) => ref !== undefined,
-        );
-        teamRefs = [text(issue?.team?.id), text(issue?.team?.key), text(issue?.team?.name)].filter(
-          (ref) => ref !== undefined,
-        );
-      } catch {
-        return [];
-      }
-    }
-    if (projectRefs.length === 0 && teamRefs.length === 0) return [];
     const same = (left: string | undefined, refs: readonly string[]) =>
       left !== undefined && refs.some((ref) => ref.toLowerCase() === left.toLowerCase());
-    const matched: string[] = [];
-    for (const project of candidates) {
-      const conventions = (await conventionsOf(project)).filter((entry) => entry.backend === "linear");
-      const byProject =
-        same(project.linearProjectBinding?.projectId, projectRefs) ||
-        conventions.some((entry) => same(entry.linear?.project, projectRefs));
-      const byTeam =
-        projectRefs.length === 0 &&
-        conventions.some(
-          (entry) => entry.linear?.project === undefined && same(entry.linear?.team, teamRefs),
-        );
-      if (byProject || byTeam) matched.push(project.id);
+    /** The projects a Linear project or, for a team-wide convention, a team names. */
+    const named = async (projectRefs: readonly string[], teamRefs: readonly string[]) => {
+      const matched: string[] = [];
+      if (projectRefs.length === 0 && teamRefs.length === 0) return matched;
+      for (const project of candidates) {
+        const conventions = (await conventionsOf(project)).filter((entry) => entry.backend === "linear");
+        const byProject =
+          same(project.linearProjectBinding?.projectId, projectRefs) ||
+          conventions.some((entry) => same(entry.linear?.project, projectRefs));
+        const byTeam =
+          projectRefs.length === 0 &&
+          conventions.some(
+            (entry) => entry.linear?.project === undefined && same(entry.linear?.team, teamRefs),
+          );
+        if (byProject || byTeam) matched.push(project.id);
+      }
+      return matched;
+    };
+    // Where the write sends it...
+    const targeted = await named(
+      [text(args.project), text(args.projectId)].filter((ref) => ref !== undefined),
+      [text(args.team), text(args.teamId)].filter((ref) => ref !== undefined),
+    );
+    const issueRef =
+      (route.tool === "save_issue" ? text(args.id) : undefined) ?? text(args.issueId) ?? text(args.issue);
+    if (!issueRef || !options.readLinear) return targeted;
+    // ...and, for an existing issue, where it is now: moving an issue out of a project
+    // meets that project's setting too.
+    let issue: {
+      project?: { id?: unknown; name?: unknown } | null;
+      team?: { id?: unknown; key?: unknown; name?: unknown } | null;
+    };
+    try {
+      issue = (await options.readLinear("get_issue", { id: issueRef })) as typeof issue;
+    } catch {
+      // An issue it can't read could be in any project.
+      return candidates.map((project) => project.id);
     }
-    return matched;
+    const current = await named(
+      [text(issue?.project?.id), text(issue?.project?.name)].filter((ref) => ref !== undefined),
+      [text(issue?.team?.id), text(issue?.team?.key), text(issue?.team?.name)].filter(
+        (ref) => ref !== undefined,
+      ),
+    );
+    return [...new Set([...targeted, ...current])];
   };
 
   /** The projects a write belongs to; when unsure, every project that uses that tracker. */

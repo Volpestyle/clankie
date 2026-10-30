@@ -873,3 +873,30 @@ it("a worker's GraphQL mutation meets the setting of every project on Linear, no
   expect(await f.host.call(call)).toMatchObject({ outcome: "ok", isError: false });
   expect(f.mutations("commentCreate")).toBe(1);
 });
+
+it("moving an issue out of a project meets that project's setting too", async () => {
+  const f = await fixture({ meadow: true });
+  await f.setPosting("meadow", "allow");
+  await f.setPosting("garden", "read_only");
+  const elsewhere = "00000000-0000-4000-8000-0000000000ff";
+  f.provider.rows.projects!.push({
+    ...f.provider.project,
+    id: elsewhere,
+    name: "Elsewhere",
+    identifier: "P-VUH-2",
+    slugId: "elsewhere",
+  });
+  const binding = (await f.host.account("linear", "operator")).binding;
+  // A worker hired into the meadow (go ahead) moves the garden's issue to another project.
+  const moved = await f.host.call({
+    lane: "operator",
+    server: "linear",
+    tool: "save_issue",
+    arguments: { id: ISSUE_ID, project: elsewhere },
+    delegation: { binding, grantId: "grant-3", principalId: "project:meadow", workId: "work-3" },
+  });
+  expect(moved).toMatchObject({ outcome: "refused", reason: "posting_refused", possiblyDispatched: false });
+  if (moved.outcome !== "refused") throw new Error("expected a refusal");
+  expect(moved.detail).toContain("Posting to Linear is read only for Garden");
+  expect(f.mutations("issueUpdate")).toBe(0);
+});
