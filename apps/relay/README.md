@@ -145,10 +145,17 @@ calls nothing on the service. Each fleet call checks the bearer against
 `GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request
-does: fleet, terminal catalog and tail, and get, create and send on persona
+does: fleet, terminal catalog, read and tail, and get, create and send on persona
 threads only. The tools go through the session-source layer of
 `@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids
-read `herdr:<id>`; that layer renders pane frames to plain text.
+read `herdr:<id>`. `read_agent` asks the service's `terminal_read` op first:
+Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
+Against an older service it falls back to the tail stream, which reaches this
+Mac's panes only. `list_agents` asks the catalog to probe each linked machine
+(`includeMachines`). It names every linked machine, even one running no
+agents, marks a machine that doesn't answer as `unreachable` on its agents, and
+adds a plain `notices` line for a machine that isn't answering or runs a Herdr
+older than the one Clankie ships.
 
 Without a bearer `/mcp` answers `401` with
 `WWW-Authenticate: Bearer resource_metadata=".../.well-known/oauth-protected-resource/mcp"`.

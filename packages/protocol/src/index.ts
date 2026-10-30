@@ -387,6 +387,9 @@ export {
   type OperatorConversationTailItem,
   type OperatorConversationServiceClient,
   createOperatorConversationServiceClient,
+  OPERATOR_TERMINAL_READ_MAX,
+  OperatorTerminalMachineSchema,
+  type OperatorTerminalMachine,
 } from "./operator-service.ts";
 export {
   OPERATOR_HEAD_AGENT_NAME,

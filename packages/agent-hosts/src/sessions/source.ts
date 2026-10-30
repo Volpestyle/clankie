@@ -25,6 +25,8 @@ export interface Session {
 export interface SessionList {
   readonly sessions: readonly Session[];
   readonly machines: readonly string[];
+  /** What a person should know about a machine, such as one not answering. */
+  readonly notices?: readonly string[];
 }
 
 export interface SessionText {
@@ -97,9 +99,11 @@ export class SessionSources {
         listed.flatMap((entry) => entry?.list.machines ?? entry?.list.sessions.map((s) => s.machine) ?? []),
       ),
     ];
+    const notices = listed.flatMap((entry) => entry?.list.notices ?? []);
     return {
       sessions: machine === undefined ? sessions : sessions.filter((session) => session.machine === machine),
       machines,
+      ...(notices.length === 0 ? {} : { notices }),
     };
   }
 

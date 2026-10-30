@@ -136,7 +136,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         name: "list_agents",
         title: "List agents",
         description:
-          "List the coding agents in Herdr on each of the owner's machines: their name, machine, project, status and what they last said they're doing. Use the returned agent id with read_agent and message_agent.",
+          "List the coding agents in Herdr on each of the owner's machines: their name, machine, project, status and what they last said they're doing. Every linked machine is named, even with no agents; notices say when a machine's Herdr isn't answering (its agents read unreachable) or is too old. Use the returned agent id with read_agent and message_agent.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -216,6 +216,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         return text({
           agents: listed.sessions.map(({ id, source: _source, ...session }) => ({ agent: id, ...session })),
           machines: listed.machines,
+          ...(listed.notices === undefined ? {} : { notices: listed.notices }),
         });
       }
       if (call.params.name === "read_agent") {

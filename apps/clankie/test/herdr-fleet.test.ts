@@ -23,6 +23,11 @@ import {
 } from "../src/captain/herdr-watch.ts";
 import { readFleet, readHerdrSessionCensus } from "../src/captain/herdr-census.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
+import {
+  createOperatorService,
+  type CreateOperatorServiceContext,
+} from "../src/captain/captain-operator-service.ts";
+import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
 import { herdrFleetRuntimeArgs } from "../../tui/src/command/herdr.ts";
 
 const pc: HerdrFleet = {
@@ -270,6 +275,70 @@ describe("fleet routing", () => {
     expect(await runner.createTab!({ cwd: "/src", label: "x" })).toBe("w1:p1");
     await expect(runner.get("laptop/w1:p1")).rejects.toThrow(/Unknown Herdr fleet laptop/u);
     expect(await runner.transcript!({ paneId: "pc/w2:p1J" } as HerdrAgentSnapshot)).toBeUndefined();
+  });
+
+  it("reads a PC's pane for the connector over ssh, and reports each PC's Herdr as it answers", async () => {
+    const calls: string[][] = [];
+    const run: HerdrFleetRun = async (args) => {
+      calls.push([...args]);
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "working")] } });
+      if (args[0] === "pane" && args[1] === "read") return "Building kh2\r\nCompiling...done\r\n";
+      if (args[0] === "api") return JSON.stringify({ result: { snapshot: { version: "0.9.5" } } });
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const down: HerdrFleetRun = async () => {
+      throw new Error("fleet_unreachable: ssh: connect to host box: Operation timed out");
+    };
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: {
+          list: [pc, box],
+          run: (fleet: HerdrFleet) => (fleet.id === "pc" ? run : down),
+          remoteWorkspace: async () => false,
+        },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      herdrRunner: routeHerdrFleets(
+        localRunner(),
+        new Map([
+          ["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5 })],
+          ["box", createRemoteHerdrRunner(box, down, { pollMs: 5 })],
+        ]),
+      ),
+    } as unknown as CreateOperatorServiceContext);
+
+    // A seat id names its PC and terminal (ADR 0184); Herdr there reads the pane it sits in.
+    expect(await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" })).toEqual({
+      op: "terminal_read",
+      schemaVersion: 1,
+      terminalId: "pc/term_abc",
+      status: "read",
+      text: "Building kh2\r\nCompiling...done\r\n",
+    });
+    expect(calls).toContainEqual([
+      "pane",
+      "read",
+      "w2:p1J",
+      "--source",
+      "recent-unwrapped",
+      "--format",
+      "text",
+    ]);
+    expect(await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "box/term_zzz" })).toMatchObject({
+      status: "unavailable",
+      detail: expect.stringContaining("Operation timed out"),
+    });
+    expect(await serve({ op: "terminal_catalog", schemaVersion: 1, includeMachines: true })).toMatchObject({
+      machines: [
+        { id: "pc", reachable: true, herdrVersion: "0.9.5" },
+        { id: "box", reachable: false },
+      ],
+    });
   });
 
   it("finds a pane made since the shared poll, such as a seat just hired (VUH-1527)", async () => {

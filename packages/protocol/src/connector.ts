@@ -48,9 +48,11 @@ export const ConnectorSignInCodeSchema = z
   .pipe(z.string().regex(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/u));
 
 /**
- * Who may receive an approved code: the hosted Claude apps' callback, or a
- * loopback port on the machine that opened the sign-in page (Claude Code,
- * MCP Inspector). Any port; RFC 8252 section 7.3.
+ * Who may receive an approved code: any app's own https callback (Claude,
+ * Grok and other hosted MCP clients), or a loopback port on the machine that
+ * opened the sign-in page (Claude Code, Codex, MCP Inspector; any port, RFC
+ * 8252 section 7.3). The owner's approval on the Mac is the gate, and both the
+ * sign-in page and `clankie connector` name the host a code goes to.
  */
 export function connectorRedirectUriAllowed(value: string): boolean {
   if ((CLAUDE_CONNECTOR_CALLBACK_URLS as readonly string[]).includes(value)) return true;
@@ -60,12 +62,12 @@ export function connectorRedirectUriAllowed(value: string): boolean {
   } catch {
     return false;
   }
+  if (url.username.length > 0 || url.password.length > 0 || url.hash.length > 0) return false;
+  // A named public host, so the sign-in page can say where access goes.
+  if (url.protocol === "https:") return url.hostname.includes(".") && !/^[\d.]+$|^\[/u.test(url.hostname);
   return (
     url.protocol === "http:" &&
-    (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]") &&
-    url.username.length === 0 &&
-    url.password.length === 0 &&
-    url.hash.length === 0
+    (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]")
   );
 }
 
@@ -152,6 +154,7 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "fleet":
     case "terminal_catalog":
     case "terminal_tail":
+    case "terminal_read":
     case "get":
     case "send":
     case "send_receipt":

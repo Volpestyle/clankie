@@ -1936,7 +1936,9 @@ on a page you opened. An approved connector is a device in `clankie devices`
 with `scope: "connector"`; `clankie devices revoke ID` disconnects it.
 
 The same URL works in Claude Code and Codex, which sign in through a loopback
-callback and show the same code to approve. Each app is its own device. The
+callback, and in hosted apps such as Grok, which return to their own https
+address; each shows the same kind of code to approve, and the sign-in names the
+host its access goes to. Each app is its own device. The
 connector also offers `clankie_guide`, which reads the skills Clankie ships.
 
 ```bash

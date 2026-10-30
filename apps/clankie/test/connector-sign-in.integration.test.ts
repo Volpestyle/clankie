@@ -102,8 +102,25 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
       code_challenge_methods_supported: ["S256"],
     });
 
-    // Only Claude's callback and loopback addresses can receive a code.
-    expect((await register(host.baseUrl, ["https://evil.example/callback"])).status).toBe(400);
+    // A code goes only to an app's own https callback or a loopback address.
+    for (const refused of [
+      "http://grok.example/callback",
+      "https://user:pass@grok.example/callback",
+      "https://grok.example/callback#frag",
+      "https://203.0.113.9/callback",
+      "javascript:alert(1)",
+    ])
+      expect((await register(host.baseUrl, [refused])).status, refused).toBe(400);
+    // Another hosted MCP app (Grok) signs in the same way, and the owner sees where access goes.
+    const other = await register(host.baseUrl, ["https://grok.example/oauth/callback"]);
+    expect(other.status).toBe(201);
+    const otherSignIn = await startSignIn(
+      host.baseUrl,
+      ((await other.json()) as { client_id: string }).client_id,
+      "https://grok.example/oauth/callback",
+    );
+    expect(otherSignIn.page.status).toBe(200);
+    expect(otherSignIn.html).toContain("Approving sends access to grok.example.");
     const registered = await register(host.baseUrl, [CALLBACK, "http://localhost:33418/callback"]);
     expect(registered.status).toBe(201);
     const { client_id: clientId } = (await registered.json()) as { client_id: string };
@@ -126,7 +143,10 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     expect(await owner.run(["--json"])).toBe(0);
     expect(JSON.parse(owner.output().stdout)).toMatchObject({
       ok: true,
-      signIns: [{ code: signIn.code, clientName: "Claude", redirectHost: "claude.ai" }],
+      signIns: expect.arrayContaining([
+        expect.objectContaining({ code: signIn.code, clientName: "Claude", redirectHost: "claude.ai" }),
+        expect.objectContaining({ code: otherSignIn.code, redirectHost: "grok.example" }),
+      ]),
     });
     // Nobody but the owner sees or decides a sign-in.
     expect((await fetch(`${host.baseUrl}/v1/connector/sign-ins`)).status).toBe(401);

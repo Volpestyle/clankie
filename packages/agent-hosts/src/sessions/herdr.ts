@@ -14,6 +14,8 @@ import { renderTerminalText } from "./terminal-text.ts";
 // thread (which delivers into the native pane), open is a terminal focus.
 
 const READ_SETTLE_MS = 400;
+/** The Herdr Clankie ships (scripts/release/herdr.json); a linked machine needs at least this. */
+const HERDR_MIN_VERSION = "0.9.3";
 const READ_DEADLINE_MS = 8_000;
 
 /** Clankie's operator boundary, already bound to the caller's credential. */
@@ -44,12 +46,23 @@ export function createHerdrSessionSource(
       const [fleet, catalog] = await Promise.all([
         port.dispatch({ op: "fleet", schemaVersion: 1, view: "home" }),
         port
-          .dispatch({ op: "terminal_catalog", schemaVersion: 1, includeSeatIds: true })
+          .dispatch({ op: "terminal_catalog", schemaVersion: 1, includeSeatIds: true, includeMachines: true })
+          // A service from before includeMachines refuses it; its catalog still lists hand-started agents.
+          .catch(() => port.dispatch({ op: "terminal_catalog", schemaVersion: 1, includeSeatIds: true }))
+          // allow-swallowed-rejection -- without a catalog the list still shows every seated agent.
           .catch(() => undefined),
       ]);
       if (fleet.op !== "fleet") throw new Error("The fleet answered with something else.");
       const names = new Map(fleet.snapshot.personas.map((persona) => [persona.personaId, persona.name]));
+      const linked = new Map(
+        (catalog?.op === "terminal_catalog" ? (catalog.machines ?? []) : []).map((machine) => [
+          machine.id,
+          machine,
+        ]),
+      );
       const sessions: Session[] = fleet.snapshot.seats.map((seat) => {
+        // A machine that doesn't answer leaves only what Clankie last saw.
+        const answering = seat.fleet === undefined || linked.get(seat.fleet)?.reachable !== false;
         const doing = seat.stance?.note ?? seat.summary;
         const name = names.get(seat.personaId);
         return {
@@ -61,7 +74,7 @@ export function createHerdrSessionSource(
           ...(seat.workingDirectory === undefined
             ? {}
             : { project: lastSegment(seat.workingDirectory), workingDirectory: seat.workingDirectory }),
-          status: seat.status,
+          status: answering ? seat.status : "unreachable",
           ...(seat.title.length === 0 ? {} : { title: seat.title }),
           ...(doing === undefined ? {} : { doing }),
           canMessage: true,
@@ -90,14 +103,53 @@ export function createHerdrSessionSource(
             canMessage: false,
           });
         }
-      return { sessions };
+      const notices = [...linked.values()].flatMap((machine) => {
+        const name = machines.get(machine.id) ?? machine.id;
+        if (!machine.reachable)
+          return [
+            `Herdr on ${name} isn't answering, so its agents show what Clankie last saw and can't be read.`,
+          ];
+        if (machine.herdrVersion !== undefined && olderVersion(machine.herdrVersion, HERDR_MIN_VERSION))
+          return [
+            `Herdr on ${name} is version ${machine.herdrVersion} and needs at least ${HERDR_MIN_VERSION}.`,
+          ];
+        return [];
+      });
+      // A linked machine with nothing running on it is still one Clankie reaches.
+      const named = [
+        ...new Set([
+          ...sessions.map((session) => session.machine),
+          ...[...linked.keys()].map((id) => machines.get(id) ?? id),
+        ]),
+      ];
+      return { sessions, machines: named, ...(notices.length === 0 ? {} : { notices }) };
     },
 
     async read(id, lines) {
-      const frames = await oneAtATime(`${options.surfaceClientId}\u0000${id}`, () =>
-        tailScreen(port, id, options.surfaceClientId),
-      );
-      return { id, text: renderTerminalText(frames).split("\n").slice(-lines).join("\n") };
+      // Herdr reads the screen itself on every machine Clankie reaches, ssh ones included.
+      const read = await port
+        .dispatch({ op: "terminal_read", schemaVersion: 1, terminalId: id })
+        // allow-swallowed-rejection -- a service from before terminal_read refuses it; the tail below reads instead.
+        .catch(() => undefined);
+      if (read?.op === "terminal_read" && read.status === "read")
+        return {
+          id,
+          text: trimScreen(read.text ?? "")
+            .split("\n")
+            .slice(-lines)
+            .join("\n"),
+        };
+      // A service without terminal_read still streams this Mac's panes.
+      try {
+        const frames = await oneAtATime(`${options.surfaceClientId}\u0000${id}`, () =>
+          tailScreen(port, id, options.surfaceClientId),
+        );
+        return { id, text: renderTerminalText(frames).split("\n").slice(-lines).join("\n") };
+      } catch (error) {
+        if (read?.op === "terminal_read" && read.detail !== undefined && error instanceof SessionRefusal)
+          throw new SessionRefusal(`${error.message} (${read.detail})`);
+        throw error;
+      }
     },
 
     async send(id, message) {
@@ -275,4 +327,23 @@ function lastSegment(path: string): string {
       .split(/[\\/]/u)
       .at(-1) ?? path
   );
+}
+
+/** The screen without its trailing blank rows. */
+function trimScreen(text: string): string {
+  return text
+    .replace(/\r\n?/gu, "\n")
+    .replace(/[ \t]+$/gmu, "")
+    .replace(/\n+$/u, "");
+}
+
+/** Whether a Herdr version is older than another; an unreadable one is not called old. */
+function olderVersion(version: string, minimum: string): boolean {
+  const parts = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)/u.exec(value)?.slice(1).map(Number);
+  const have = parts(version);
+  const need = parts(minimum)!;
+  if (have === undefined) return false;
+  for (let index = 0; index < 3; index += 1)
+    if (have[index] !== need[index]) return have[index]! < need[index]!;
+  return false;
 }
