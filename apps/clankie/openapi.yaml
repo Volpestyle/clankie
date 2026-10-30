@@ -4798,8 +4798,30 @@ paths:
         Each row carries runtime identity separately from Herdr workspace/tab IDs.
         Named terminal addresses pin their endpoint; tail, control and input refuse
         disabled or changed connections with a typed unavailable result, without
-        falling back to the default fleet. Terminal catalog/tail require the relay's
-        `terminalObserve` grant; control/input require `terminalControl`.
+        falling back to the default fleet. With `includeMachines`, the catalog also
+        probes each ssh machine and returns `machines` (id, reachable, herdrVersion).
+        `terminal_read` returns a pane's recent text (256 KiB at most), read by Herdr
+        on the pane's own machine, including over ssh; it answers `unavailable` with a
+        short detail when that machine or pane doesn't answer. Terminal catalog, read
+        and tail require the relay's `terminalObserve` grant; control/input require
+        `terminalControl`.
+        `start_agent` starts a claude or codex seat in a known project's workspace on
+        a machine Clankie reaches (a linked machine's also needs its directory grant),
+        led by `global-default`, with an optional first `prompt`. Without `machine` and
+        `workingDirectory` it returns only `places`; otherwise `started` with `seatId`
+        or `refused` with `detail`. It requires `steer`.
+        `app_notes` is the board apps signed in to the connector share (ADR 0301),
+        kept in the fleet room. `action: post` takes `text` (up to 2000 characters)
+        and answers `posted` with the note; only the relay's captain bearer posts,
+        carrying the `appDeviceId` it stamped from the connector device it
+        authenticated (a caller that sends one is refused), and the author is that
+        active connector device's approved name. `action: read` takes an optional
+        `cursor` and `limit` (1..50, default 20) and answers `ready` with `notes`
+        (sequence, at, author, text) oldest first and a `newer` cursor; without a
+        cursor it returns the newest notes. The relay's captain bearer and the
+        owner (operator bearer or a Take Control device) read it; the device relay
+        requires `chat`. `fleet_room` returns `app_note` entries only with
+        `include: ["app_note"]`.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

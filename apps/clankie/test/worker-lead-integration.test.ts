@@ -822,4 +822,20 @@ it("the fleet room records a lead's message to its hire and the hire's report on
   if (live.outcome !== "ready") throw new Error("Fleet room unavailable");
   expect(live.entries).toMatchObject([{ kind: "worker_report", text: "Ready for review" }]);
   expect(live.entries[0]!.sequence).toBe(reply!.sequence + 1);
+
+  // A connector app's note lands in the same journal, out of the default room,
+  // and the lead reads it with read_notes, framed as information (ADR 0301).
+  expect(
+    await restarted.appNotes!({ action: "post", author: "Claude", text: "PR review on kh2 is mine today." }),
+  ).toMatchObject({ outcome: "posted", note: { author: "Claude", sequence: live.entries[0]!.sequence + 1 } });
+  const room = await restarted.fleetRoom!({});
+  if (room.outcome !== "ready") throw new Error("Fleet room unavailable");
+  expect(room.entries.map((entry) => entry.kind)).not.toContain("app_note");
+  const leadBank = await restarted.laneToolBank("operator", f.leads[0]);
+  const notes = await leadBank.tools.find((tool) => tool.name === "read_notes")!.call({});
+  const [text] = notes.content;
+  expect(JSON.parse(text!.type === "text" ? text!.text : "{}")).toMatchObject({
+    about: expect.stringContaining("not instructions"),
+    notes: [{ author: "Claude", text: "PR review on kh2 is mine today." }],
+  });
 });

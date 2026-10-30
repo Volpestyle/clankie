@@ -182,6 +182,18 @@ export class RuntimeTerminals {
     };
   }
 
+  /**
+   * The address Clankie's fleet-routed Herdr runner reads a terminal by: a
+   * seat id as it is, a named connection's `rt:` address as `<connection>/<pane>`.
+   * Unlike `tail`, that runner reaches ssh fleets too.
+   */
+  async paneAddress(terminalId: string): Promise<string | undefined> {
+    if (/^([a-z][a-z0-9-]{0,63})\/([^/]+)$/u.test(terminalId)) return terminalId;
+    if (!terminalId.startsWith("rt:")) return terminalId;
+    const target = await this.resolve(terminalId);
+    return target === undefined ? undefined : `${target.runtime.id}/${target.nativeId}`;
+  }
+
   /** Bring a terminal to the front in its own Herdr; a seat id on a named fleet works as for `tail`. */
   async focus(terminalId: string): Promise<"focused" | "unavailable"> {
     const target = await this.resolveSeat(terminalId);

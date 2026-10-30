@@ -705,6 +705,18 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeConnectorDenial(response);
       return true;
     }
+    // A note's author is the device this relay authenticated, stamped below; a
+    // caller never names it. Only an app signed in to the connector posts (ADR 0301).
+    if (serviceRequest.op === "app_notes" && serviceRequest.action === "post") {
+      if (serviceRequest.appDeviceId !== undefined) {
+        writeJson(response, 400, { error: "app_note_author_is_stamped" });
+        return true;
+      }
+      if (authorization.device.scope !== "connector") {
+        writeJson(response, 403, { error: "connector_device_required" });
+        return true;
+      }
+    }
     if (
       authorization.device.controlScope === "hosted" &&
       !hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify(serviceRequest))
@@ -746,12 +758,20 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // identity carries it. Status and off stay on chat, as the CLI's do.
     const autoOnOp =
       serviceRequest.op === "autonomy" && operatorAutonomyCommandRequiresOwner(serviceRequest.command);
+    // Only a connector reads the app note board on the relay's own bearer; any other
+    // device reads it as the owner's coordination record, like the fleet room.
+    const ownerNoteRead =
+      serviceRequest.op === "app_notes" &&
+      serviceRequest.action === "read" &&
+      authorization.device.scope !== "connector";
     const workWriteOp =
       serviceRequest.op === "work_item_write" ||
       serviceRequest.op === "work_item_write_receipt" ||
       (serviceRequest.op === "tracker_sync" && serviceRequest.command.action === "transaction");
     const grant =
-      serviceRequest.op === "terminal_tail" || serviceRequest.op === "terminal_catalog"
+      serviceRequest.op === "terminal_tail" ||
+      serviceRequest.op === "terminal_catalog" ||
+      serviceRequest.op === "terminal_read"
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -759,6 +779,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             workWriteOp ||
             // The fleet room is the owner's coordination record (VUH-2184).
             serviceRequest.op === "fleet_room" ||
+            ownerNoteRead ||
             autoOnOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input" ||
@@ -771,6 +792,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "worker_reports" ||
               serviceRequest.op === "acknowledge_worker_reports" ||
               serviceRequest.op === "spawn_seat" ||
+              serviceRequest.op === "start_agent" ||
               serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
               serviceRequest.op === "update_persona" ||
@@ -791,6 +813,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // before that await is not authority to dispatch after it.
     const currentAuthorization = await authorizeGrant(options, token, response, grant, serviceRequest.op);
     if (currentAuthorization === undefined) return true;
+    if (serviceRequest.op === "app_notes" && serviceRequest.action === "post")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
     const connectorThread =
@@ -876,6 +900,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "tracker_sync" ||
       serviceRequest.op === "evidence_fetch" ||
       serviceRequest.op === "fleet_room" ||
+      ownerNoteRead ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
       if (abort.signal.aborted) return true;
@@ -899,6 +924,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "tracker_sync" ||
           serviceRequest.op === "evidence_fetch" ||
           serviceRequest.op === "fleet_room" ||
+          (serviceRequest.op === "app_notes" && ownerNoteRead) ||
           (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
@@ -1634,6 +1660,9 @@ const CONNECTOR_OPS = new Set([
   "fleet",
   "terminal_catalog",
   "terminal_tail",
+  "terminal_read",
+  "start_agent",
+  "app_notes",
   "get",
   "create",
   "send",

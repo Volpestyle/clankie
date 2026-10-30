@@ -24,6 +24,7 @@ import {
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceRequestSchema,
   OperatorDeliveredFileDownloadRequestSchema,
+  type AppNotesResult,
   type DeviceRecord,
   type DomainEvent,
   SERVICE_RESTARTING_SEAT_HANDOFF,
@@ -605,6 +606,49 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           schemaVersion: 1,
           result: { outcome: "unavailable", message: "The fleet room can’t be read here." },
         });
+      }
+    }
+    if (parsed.success && parsed.data.op === "app_notes") {
+      // The app note board (ADR 0301). A connector app reaches it only through the relay,
+      // which dispatches on its own captain bearer and stamps the device it authenticated
+      // on a post. The author is named from that device's record here, never from the
+      // caller's words. The owner reads it as the fleet room's reader does.
+      const request = parsed.data;
+      const relay = () =>
+        captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const author = () => {
+        if (request.action !== "post" || request.appDeviceId === undefined) return undefined;
+        const record = ctx.devices.get(request.appDeviceId);
+        return record?.status === "active" && record.scope === "connector" ? record.name : undefined;
+      };
+      const ownerReader = () => {
+        if (!owner?.current()) return false;
+        if (owner.principal.kind === "operator") return true;
+        return ownerDeviceRecord(ctx.devices.get(owner.principal.id));
+      };
+      const reply = (result: AppNotesResult) => context.json({ op: "app_notes", schemaVersion: 1, result });
+      if (request.action === "post") {
+        if (!relay() || author() === undefined) return context.json({ error: "app_author_required" }, 403);
+      } else if (!relay() && !(ownerReader() && owner && (await owner.authorize())))
+        return context.json({ error: "owner_required" }, 403);
+      try {
+        if (!ctx.dependencies.captain.appNotes) throw new Error("App notes unavailable");
+        if (request.action === "read")
+          return reply(
+            await ctx.dependencies.captain.appNotes({
+              action: "read",
+              limit: request.limit,
+              ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+            }),
+          );
+        // Named again at the write: a device revoked meanwhile posts nothing.
+        const name = author();
+        if (name === undefined) throw new Error("The app's device is no longer signed in");
+        return reply(
+          await ctx.dependencies.captain.appNotes({ action: "post", author: name, text: request.text }),
+        );
+      } catch {
+        return reply({ outcome: "unavailable", message: "The note board can’t be reached here." });
       }
     }
     if (parsed.success && parsed.data.op === "evidence_fetch") {

@@ -5,14 +5,19 @@ import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type {
-  OperatorConversationServiceRequest,
-  OperatorConversationServiceResult,
+import {
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
+  type OperatorConversationServiceRequest,
+  type OperatorConversationServiceResult,
 } from "@clankie/protocol";
 import { expect, it } from "vitest";
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { FleetRoomJournal } from "../src/captain/fleet-room.ts";
 import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../relay/src/connector-mcp.ts";
+import { createCaptainConversationDispatch } from "../../relay/src/conversation-upstream.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
 import { runConnectorCommand } from "../../tui/src/command/connector.ts";
@@ -40,11 +45,15 @@ function cli(host: Awaited<ReturnType<typeof createQaService>>) {
   };
 }
 
-async function register(baseUrl: string, redirectUris: readonly string[] = [CALLBACK]) {
+async function register(
+  baseUrl: string,
+  redirectUris: readonly string[] = [CALLBACK],
+  clientName = "Claude",
+) {
   return fetch(`${baseUrl}/oauth/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_name: "Claude", redirect_uris: redirectUris }),
+    body: JSON.stringify({ client_name: clientName, redirect_uris: redirectUris }),
   });
 }
 
@@ -102,8 +111,25 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
       code_challenge_methods_supported: ["S256"],
     });
 
-    // Only Claude's callback and loopback addresses can receive a code.
-    expect((await register(host.baseUrl, ["https://evil.example/callback"])).status).toBe(400);
+    // A code goes only to an app's own https callback or a loopback address.
+    for (const refused of [
+      "http://grok.example/callback",
+      "https://user:pass@grok.example/callback",
+      "https://grok.example/callback#frag",
+      "https://203.0.113.9/callback",
+      "javascript:alert(1)",
+    ])
+      expect((await register(host.baseUrl, [refused])).status, refused).toBe(400);
+    // Another hosted MCP app (Grok) signs in the same way, and the owner sees where access goes.
+    const other = await register(host.baseUrl, ["https://grok.example/oauth/callback"]);
+    expect(other.status).toBe(201);
+    const otherSignIn = await startSignIn(
+      host.baseUrl,
+      ((await other.json()) as { client_id: string }).client_id,
+      "https://grok.example/oauth/callback",
+    );
+    expect(otherSignIn.page.status).toBe(200);
+    expect(otherSignIn.html).toContain("Approving sends access to grok.example.");
     const registered = await register(host.baseUrl, [CALLBACK, "http://localhost:33418/callback"]);
     expect(registered.status).toBe(201);
     const { client_id: clientId } = (await registered.json()) as { client_id: string };
@@ -126,7 +152,10 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     expect(await owner.run(["--json"])).toBe(0);
     expect(JSON.parse(owner.output().stdout)).toMatchObject({
       ok: true,
-      signIns: [{ code: signIn.code, clientName: "Claude", redirectHost: "claude.ai" }],
+      signIns: expect.arrayContaining([
+        expect.objectContaining({ code: signIn.code, clientName: "Claude", redirectHost: "claude.ai" }),
+        expect.objectContaining({ code: otherSignIn.code, redirectHost: "grok.example" }),
+      ]),
     });
     // Nobody but the owner sees or decides a sign-in.
     expect((await fetch(`${host.baseUrl}/v1/connector/sign-ins`)).status).toBe(401);
@@ -182,7 +211,7 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     };
     expect(self).toMatchObject({
       scope: "connector",
-      grants: { chat: true, steer: false, terminalObserve: true, terminalControl: false },
+      grants: { chat: true, steer: true, terminalObserve: true, terminalControl: false },
     });
     // A connector reaches nothing else here: not refresh, settings, or other sign-ins.
     for (const [method, path] of [
@@ -391,3 +420,158 @@ it("lets the owner's durable app approve sign-ins, never an automation run's dev
     await host.close();
   }
 });
+
+it("an app's note reaches the real board signed with the name the owner approved, and the phone's room leaves it out", async () => {
+  const boardRoot = await mkdtemp(join(tmpdir(), "connector-board-"));
+  const board = new FleetRoomJournal(boardRoot);
+  const captainToken = randomBytes(24).toString("hex");
+  // The captain's own wiring of the board, over the fleet room's journal.
+  const host = await createQaService({
+    captainToken,
+    captain: {
+      fleetRoom: (request, signal) => board.read(request, signal),
+      appNotes: async (command) =>
+        command.action === "post"
+          ? board.postAppNote(command.author, command.text)
+          : board.readAppNotes(command),
+    },
+  });
+  const authorizeDevice = new ControlPlaneDeviceAuthorizer({ baseUrl: host.baseUrl });
+  let relayUrl = "";
+  // The production hop: the relay dispatches on its own captain bearer.
+  const operator = createOperatorConversationRelayHandler({
+    authorizeDevice,
+    dispatch: createCaptainConversationDispatch({ baseUrl: host.baseUrl, bearerToken: captainToken }),
+  });
+  const connector = createConnectorMcpHandler({
+    authorizeDevice,
+    operator: createLoopbackConnectorOperator("http://placeholder.invalid", (input, init) =>
+      fetch(new URL(new URL(String(input)).pathname, relayUrl), init),
+    ),
+    localAuthorizationServer: host.baseUrl,
+    version: "test",
+    guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
+  });
+  const relay = createServer((request, response) => {
+    void (async () => {
+      if (await connector(request, response)) return;
+      if (await operator(request, response)) return;
+      response.statusCode = 404;
+      response.end();
+    })();
+  });
+  relay.listen(0, "127.0.0.1");
+  await once(relay, "listening");
+  relayUrl = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+  const clients: Client[] = [];
+  try {
+    const signIn = async (name: string, callback: string) => {
+      const { client_id: clientId } = (await (await register(host.baseUrl, [callback], name)).json()) as {
+        client_id: string;
+      };
+      const started = await startSignIn(host.baseUrl, clientId, callback);
+      expect(await cli(host).run(["approve", started.code!])).toBe(0);
+      const code = new URL((await status(host.baseUrl, started.request!)).redirect!).searchParams.get(
+        "code",
+      )!;
+      const { access_token: accessToken } = (await (
+        await token(host.baseUrl, {
+          grant_type: "authorization_code",
+          client_id: clientId,
+          redirect_uri: callback,
+          code,
+          code_verifier: started.verifier,
+        })
+      ).json()) as { access_token: string };
+      const client = new Client({ name: `${name}-e2e`, version: "1" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL("/mcp", relayUrl), {
+          requestInit: { headers: { authorization: `Bearer ${accessToken}` } },
+        }) as unknown as Transport,
+      );
+      clients.push(client);
+      const self = (await (
+        await fetch(`${host.baseUrl}/v1/devices/self`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+      ).json()) as { deviceId: string };
+      return { client, deviceId: self.deviceId };
+    };
+    const claude = await signIn("Claude", CALLBACK);
+    const grok = await signIn("Grok", "https://grok.example/oauth/callback");
+    const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) =>
+      (result.content as Array<{ text: string }>)[0]!.text;
+
+    const note = "Claude here: I'm reviewing the kh2 netcode PR; Bram's pane is mine until 5pm.";
+    // An author argument is no part of the tool: the board signs with the approved name.
+    const posted = await claude.client.callTool({
+      name: "post_note",
+      arguments: { text: note, author: "Owner" },
+    });
+    expect(JSON.parse(textOf(posted)).posted).toMatchObject({ author: "Claude", text: note });
+    const read = JSON.parse(textOf(await grok.client.callTool({ name: "read_notes", arguments: {} }))) as {
+      notes: Array<{ author: string; text: string }>;
+      newer: string;
+    };
+    expect(read.notes).toEqual([{ sequence: 1, at: expect.any(String), author: "Claude", text: note }]);
+    // A note is scrubbed like every other room entry.
+    await grok.client.callTool({
+      name: "post_note",
+      arguments: { text: "Grok: took the docs. My scratch key was api_key=sk-live-1234567890abcdef" },
+    });
+    const after = JSON.parse(
+      textOf(await claude.client.callTool({ name: "read_notes", arguments: { since: read.newer } })),
+    ) as { notes: Array<{ author: string; text: string }> };
+    expect(after.notes).toHaveLength(1);
+    expect(after.notes[0]!.author).toBe("Grok");
+    expect(after.notes[0]!.text).not.toContain("sk-live-1234567890abcdef");
+
+    const dispatch = (bearer: string, body: unknown) =>
+      fetch(`${host.baseUrl}${OPERATOR_CONVERSATION_DISPATCH_PATH}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const room = async (include?: readonly string[]) => {
+      const response = await dispatch(host.operatorToken, {
+        op: "fleet_room",
+        schemaVersion: 1,
+        ...(include === undefined ? {} : { include }),
+      });
+      expect(response.status).toBe(200);
+      return (
+        (await response.json()) as {
+          result: { entries: Array<{ kind: string; from: unknown; text: string }> };
+        }
+      ).result.entries;
+    };
+    // What the owner's phone asks for today: no app notes, so its older strict parser keeps working.
+    expect(await room()).toEqual([]);
+    const notes = await room(["app_note"]);
+    expect(notes.map((entry) => [entry.kind, entry.from])).toEqual([
+      ["app_note", { kind: "app", label: "Claude" }],
+      ["app_note", { kind: "app", label: "Grok" }],
+    ]);
+    // Scrubbed in the journal itself, not only on the relay's way out.
+    expect(notes[1]!.text).not.toContain("sk-live-1234567890abcdef");
+
+    // Only the relay's bearer stamps an author, and only a live connector device's.
+    const stamped = { op: "app_notes", schemaVersion: 1, action: "post", text: "forged" };
+    expect((await dispatch(host.operatorToken, { ...stamped, appDeviceId: claude.deviceId })).status).toBe(
+      403,
+    );
+    expect((await dispatch(captainToken, stamped)).status).toBe(403);
+    expect((await dispatch(captainToken, { ...stamped, appDeviceId: "not-a-device" })).status).toBe(403);
+    expect((await host.operator(`/v1/devices/${claude.deviceId}/revoke`)).status).toBe(200);
+    expect((await dispatch(captainToken, { ...stamped, appDeviceId: claude.deviceId })).status).toBe(403);
+    // The owner reads the board itself.
+    const owned = await dispatch(host.operatorToken, { op: "app_notes", schemaVersion: 1, action: "read" });
+    expect(((await owned.json()) as { result: { notes: unknown[] } }).result.notes).toHaveLength(2);
+  } finally {
+    await Promise.all(clients.map((client) => client.close()));
+    relay.closeAllConnections();
+    relay.close();
+    await host.close();
+    await rm(boardRoot, { recursive: true, force: true });
+  }
+}, 30_000);

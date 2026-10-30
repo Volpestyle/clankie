@@ -169,7 +169,7 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
       return context.json(
         {
           error: "invalid_redirect_uri",
-          error_description: "Only Claude's sign-in callback and loopback addresses can receive a code",
+          error_description: "A code can go only to an https callback or a loopback address",
         },
         400,
       );
@@ -622,13 +622,13 @@ function page(title: string, body: string, script = ""): string {
 function approvalPage(signIn: PendingSignIn, statusUrl: string, nonce: string): string {
   const host = connectorRedirectHost(signIn.redirectUri);
   const body =
-    `<p>${escapeHtml(signIn.clientName)} is asking to see your agents, read their screens and message them. It can't type into them, hire or close them, or change anything else.</p>` +
+    `<p>${escapeHtml(signIn.clientName)} is asking to see your agents, read their screens, message them and start new ones in your projects. It can't type into them, stop or close them, or change anything else.</p>` +
     `<p>To allow it, approve this code on your Mac:</p><p class="code">${escapeHtml(signIn.code)}</p>` +
     `<p>Run this on your Mac. This page carries on by itself once you do.</p>` +
     `<p class="command"><code id="command">clankie connector approve ${escapeHtml(signIn.code)}</code><button id="copy" type="button">Copy</button></p>` +
     `<p class="muted"><code>clankie connector</code> on your Mac also lists this code.</p>` +
     `<p>Approving sends access to ${escapeHtml(host)}. If you didn't start this, close the page and nothing happens.</p>` +
     `<p id="status"></p>`;
-  const script = `<script nonce="${nonce}">(()=>{const id=${JSON.stringify(signIn.id)};const url=${JSON.stringify(statusUrl)};const status=document.getElementById("status");const copy=document.getElementById("copy");copy.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(document.getElementById("command").textContent);copy.textContent="Copied"}catch{copy.textContent="Select and copy it"}});const poll=async()=>{try{const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({request:id})});const b=await r.json();if(b.status==="approved"||b.status==="denied"){status.textContent=b.status==="approved"?"Approved. Returning to Claude…":"Declined.";location.replace(b.redirect);return}if(b.status==="expired"){status.textContent="This sign-in expired. Start again from Claude.";return}}catch{}setTimeout(poll,2000)};setTimeout(poll,2000)})();</script>`;
-  return page("Connect Claude to Clankie", body, script);
+  const script = `<script nonce="${nonce}">(()=>{const id=${JSON.stringify(signIn.id)};const url=${JSON.stringify(statusUrl)};const status=document.getElementById("status");const copy=document.getElementById("copy");copy.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(document.getElementById("command").textContent);copy.textContent="Copied"}catch{copy.textContent="Select and copy it"}});const poll=async()=>{try{const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({request:id})});const b=await r.json();if(b.status==="approved"||b.status==="denied"){status.textContent=b.status==="approved"?"Approved. Returning to the app…":"Declined.";location.replace(b.redirect);return}if(b.status==="expired"){status.textContent="This sign-in expired. Start again from the app.";return}}catch{}setTimeout(poll,2000)};setTimeout(poll,2000)})();</script>`;
+  return page(`Connect ${signIn.clientName} to Clankie`, body, script);
 }

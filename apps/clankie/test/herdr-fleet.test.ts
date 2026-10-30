@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SettingsStore } from "@clankie/settings";
+import { ClankieSettingsSchema, SettingsStore, emptySettings } from "@clankie/settings";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import {
   assertRemoteHerdrArgs,
   createHerdrFleetRun,
@@ -23,6 +24,11 @@ import {
 } from "../src/captain/herdr-watch.ts";
 import { readFleet, readHerdrSessionCensus } from "../src/captain/herdr-census.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
+import {
+  createOperatorService,
+  type CreateOperatorServiceContext,
+} from "../src/captain/captain-operator-service.ts";
+import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
 import { herdrFleetRuntimeArgs } from "../../tui/src/command/herdr.ts";
 
 const pc: HerdrFleet = {
@@ -270,6 +276,181 @@ describe("fleet routing", () => {
     expect(await runner.createTab!({ cwd: "/src", label: "x" })).toBe("w1:p1");
     await expect(runner.get("laptop/w1:p1")).rejects.toThrow(/Unknown Herdr fleet laptop/u);
     expect(await runner.transcript!({ paneId: "pc/w2:p1J" } as HerdrAgentSnapshot)).toBeUndefined();
+  });
+
+  it("reads a PC's pane for the connector over ssh, and reports each PC's Herdr as it answers", async () => {
+    const calls: string[][] = [];
+    const run: HerdrFleetRun = async (args) => {
+      calls.push([...args]);
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "working")] } });
+      if (args[0] === "pane" && args[1] === "read") return "Building kh2\r\nCompiling...done\r\n";
+      if (args[0] === "api") return JSON.stringify({ result: { snapshot: { version: "0.9.5" } } });
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const down: HerdrFleetRun = async () => {
+      throw new Error("fleet_unreachable: ssh: connect to host box: Operation timed out");
+    };
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: {
+          list: [pc, box],
+          run: (fleet: HerdrFleet) => (fleet.id === "pc" ? run : down),
+          remoteWorkspace: async () => false,
+        },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      herdrRunner: routeHerdrFleets(
+        localRunner(),
+        new Map([
+          ["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5 })],
+          ["box", createRemoteHerdrRunner(box, down, { pollMs: 5 })],
+        ]),
+      ),
+    } as unknown as CreateOperatorServiceContext);
+
+    // A seat id names its PC and terminal (ADR 0184); Herdr there reads the pane it sits in.
+    expect(await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" })).toEqual({
+      op: "terminal_read",
+      schemaVersion: 1,
+      terminalId: "pc/term_abc",
+      status: "read",
+      text: "Building kh2\r\nCompiling...done\r\n",
+    });
+    expect(calls).toContainEqual([
+      "pane",
+      "read",
+      "w2:p1J",
+      "--source",
+      "recent-unwrapped",
+      "--format",
+      "text",
+    ]);
+    expect(await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "box/term_zzz" })).toMatchObject({
+      status: "unavailable",
+      detail: expect.stringContaining("Operation timed out"),
+    });
+    expect(await serve({ op: "terminal_catalog", schemaVersion: 1, includeMachines: true })).toMatchObject({
+      machines: [
+        { id: "pc", reachable: true, herdrVersion: "0.9.5" },
+        { id: "box", reachable: false },
+      ],
+    });
+  });
+
+  it("starts a connected app's agent only in a granted project checkout, led by Clankie's own thread", async () => {
+    const settings = ClankieSettingsSchema.parse({
+      ...emptySettings(),
+      machines: [{ id: "pc", ssh: "volpe@supedupsilly", shell: "powershell" }],
+      execution: {
+        ...emptySettings().execution,
+        connections: [
+          // A second Herdr session on the same PC, listed first, never granted the checkout.
+          {
+            id: "pc-work",
+            machine: "pc",
+            session: "work",
+            ssh: { host: "volpe@supedupsilly", shell: "powershell" },
+          },
+          {
+            id: "pc",
+            machine: "pc",
+            session: "default",
+            ssh: { host: "volpe@supedupsilly", shell: "powershell" },
+          },
+        ],
+      },
+      projects: ProjectsSettingsSchema.parse({
+        projects: [
+          {
+            id: "kh2",
+            name: "kh2",
+            workspaces: [
+              { id: "pc", machineId: "pc", platform: "windows", path: "C:\\code\\kh2" },
+              // Registered to the project, but the owner never granted it on that machine.
+              { id: "pc-old", machineId: "pc", platform: "windows", path: "C:\\old\\kh2" },
+            ],
+          },
+        ],
+      }),
+    });
+    const hires: { seat: Record<string, unknown>; brief?: string; lead: string }[] = [];
+    let leading = true;
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: {
+          list: [pc],
+          run: () => async () => "{}",
+          remoteWorkspace: async (fleet: string, directory: string) =>
+            fleet === "pc" && directory === "C:\\code\\kh2",
+        },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      settings: async () => settings,
+      conversations: { runsCaptainTurns: (id: string) => leading && id === "global-default" },
+      hireSeat: async (
+        seat: Record<string, unknown>,
+        brief: string | undefined,
+        authority: { owner: { conversationId: string } },
+      ) => {
+        hires.push({ seat, ...(brief === undefined ? {} : { brief }), lead: authority.owner.conversationId });
+        return { outcome: "spawned", seat: { seatId: "pc/term_new" } };
+      },
+    } as unknown as CreateOperatorServiceContext);
+
+    const place = { machine: "volpe@supedupsilly", project: "kh2", workingDirectory: "C:\\code\\kh2" };
+    expect(await serve({ op: "start_agent", schemaVersion: 1 })).toEqual({
+      op: "start_agent",
+      schemaVersion: 1,
+      status: "places",
+      places: [place],
+    });
+    // The ungranted checkout and any other directory are refused before anything starts.
+    for (const workingDirectory of ["C:\\old\\kh2", "C:\\Windows"])
+      expect(
+        await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory }),
+      ).toMatchObject({ status: "refused" });
+    expect(hires).toEqual([]);
+
+    expect(
+      await serve({
+        op: "start_agent",
+        schemaVersion: 1,
+        machine: "volpe@supedupsilly",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "codex",
+        prompt: "fix the netcode desync",
+      }),
+    ).toMatchObject({ status: "started", seatId: "pc/term_new" });
+    expect(hires).toEqual([
+      {
+        seat: expect.objectContaining({
+          harness: "codex",
+          workingDirectory: "C:\\code\\kh2",
+          fleet: "pc",
+          projectId: "kh2",
+          hireKind: "worker",
+          // A work hire must name its effort, and this project sets none.
+          effort: "medium",
+          effortReason: expect.any(String),
+        }),
+        brief: "fix the netcode desync",
+        lead: "global-default",
+      },
+    ]);
+    // With nobody to lead it, nothing starts.
+    leading = false;
+    expect(
+      await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
+    ).toMatchObject({ status: "refused" });
+    expect(hires).toHaveLength(1);
   });
 
   it("finds a pane made since the shared poll, such as a seat just hired (VUH-1527)", async () => {

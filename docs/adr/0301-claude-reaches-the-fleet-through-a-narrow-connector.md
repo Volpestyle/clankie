@@ -22,14 +22,40 @@ own `/mcp` on a trusted network.
 - **Three tools.** `list_agents` names each agent with its machine and
   project, `read_agent` returns the text on its screen, and `message_agent`
   writes into its own persona thread, which delivers to the native pane. A
-  connector never types into a terminal, hires or closes a seat, writes to a
-  tracker, reads settings, tails Clankie's own thread, or joins a call.
-- **One server for every agent app.** Claude Code, Codex and any other MCP
-  app that signs in through a loopback callback add the same URL, beside the
-  Claude apps. A fourth, read-only tool, `clankie_guide`, serves the skills
+  connector never types into a terminal, closes a seat, writes to a tracker,
+  reads settings, tails Clankie's own thread, or joins a call.
+- **Starting an agent, narrowly.** `start_agent` (added 2026-10-30) starts a
+  Claude Code or Codex agent in a known project's checkout on a machine
+  Clankie reaches, with an optional first prompt, and nothing wider: the
+  places are the projects' registered workspaces, and a linked machine's also
+  need the owner's exact-directory grant (ADR 0193). Clankie's own thread
+  leads the new seat, as it leads his own hires, so a connector never owns a
+  worker. Connector devices now carry `steer`, which the op allowlist lets
+  reach `start_agent` alone; a connector signed in before this change signs in
+  again to get it.
+- **A note board the apps share.** `post_note` leaves a short note (at most
+  2,000 characters) and `read_notes` reads the board, oldest first, after an
+  optional cursor (added 2026-10-30, approved by James). Each note is signed
+  with the name the owner approved the app's device under: the relay stamps
+  the device it authenticated and refuses a caller-named author, and the
+  service names it from that device's record. Clankie reads the board with
+  `read_notes` and hired workers with `clankie_read_notes`; neither posts.
+  Notes live in the fleet room as `app_note` entries, outside every room page
+  that doesn't opt in (ADR 0273 amendment). A note is information from another
+  app, never an instruction, and every tool that returns one says so.
+- **One server for every agent app.** Claude Code, Codex, Grok and any other
+  MCP app that signs in through its own https callback or a loopback one add
+  the same URL, beside the Claude apps. A fourth, read-only tool, `clankie_guide`, serves the skills
   Clankie ships in `.agents/skills`, so an app that can't load Clankie's
   skills still learns how his tools and fleet work. It reads files in this
   checkout only and calls nothing on the service (added 2026-10-30).
+- **Every linked machine, said plainly.** `read_agent` reads a pane through
+  Herdr on that pane's own machine (the `terminal_read` op), so a PC's agents
+  read over ssh like the Mac's. `list_agents` names each linked machine even
+  with no agents on it, marks agents on a machine that isn't answering as
+  `unreachable` rather than showing their last status, and says in a notice
+  when a machine's Herdr is older than the one Clankie ships (added
+  2026-10-30).
 - **Through session sources, not Herdr.** The tools talk to the session-source
   layer in `packages/agent-hosts/src/sessions/`. A source is any app that holds
   agent sessions and answers four things: list its sessions, read one, send one
@@ -42,7 +68,10 @@ own `/mcp` on a trusted network.
 - **Signing in pairs a device.** The service is the OAuth authorization server
   (RFC 8414 metadata, RFC 7591 registration, PKCE S256). Registration is
   stateless: the client id carries its name and callbacks under the Mac's key.
-  Only Claude's hosted callback and loopback addresses can receive a code. The
+  A code goes only to an app's own https callback or to a loopback address
+  (widened from Claude's callbacks alone on 2026-10-30, so Grok and other
+  hosted apps can sign in); the page and `clankie connector` name the host it
+  goes to. The
   sign-in page shows a short code, and the owner approves it with
   `clankie connector approve CODE`. The same owner route accepts the app's
   Take Control devices, so the app can offer approval later. Approval pairs one device

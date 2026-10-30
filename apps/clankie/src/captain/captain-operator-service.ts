@@ -7,6 +7,9 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
   type OperatorFleetSeat,
+  OPERATOR_TERMINAL_READ_MAX,
+  type OperatorTerminalMachine,
+  type StartAgentPlace,
 } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import { logger } from "../app/log.ts";
@@ -38,6 +41,8 @@ import { captainIsThinking, captainNativeSubagents, pollPresence, projectPresenc
 import { RuntimeTerminals } from "./runtime-terminals.ts";
 import { waitForConversationRun } from "./conversation-run.ts";
 import { setTimeout as delay } from "node:timers/promises";
+import { hostname } from "node:os";
+import { remoteHireMachine } from "./project-hire-context.ts";
 import { type SeatLedger } from "./seat-ledger.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 import { warnSeatIssueUnavailable } from "./seat-issue-status.ts";
@@ -650,11 +655,132 @@ export function createOperatorService(
       };
     }
     if (request.op === "terminal_catalog") {
+      const [sessions, machines] = await Promise.all([
+        ctx.terminals.catalog({ seatIds: request.includeSeatIds === true }),
+        request.includeMachines === true ? linkedMachines(ctx) : undefined,
+      ]);
       return {
         op: "terminal_catalog",
         schemaVersion: 1,
-        sessions: await ctx.terminals.catalog({ seatIds: request.includeSeatIds === true }),
+        sessions,
+        ...(machines === undefined ? {} : { machines }),
       };
+    }
+    if (request.op === "terminal_read") {
+      const unavailable = (detail: string) =>
+        ({
+          op: "terminal_read",
+          schemaVersion: 1,
+          terminalId: request.terminalId,
+          status: "unavailable",
+          detail,
+        }) as const;
+      const address = await ctx.terminals.paneAddress(request.terminalId);
+      if (address === undefined) return unavailable("No terminal has that id now.");
+      if (ctx.herdrRunner.readPane === undefined)
+        return unavailable("Herdr pane reads are unavailable here.");
+      try {
+        // Herdr's own pane list names the pane; the routed runner reaches it over ssh when it's on a PC.
+        const pane = await ctx.herdrRunner.resolveTerminal(address);
+        if (pane === undefined) return unavailable("Herdr has no pane with that terminal now.");
+        // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
+        const text = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+        return {
+          op: "terminal_read",
+          schemaVersion: 1,
+          terminalId: request.terminalId,
+          status: "read",
+          text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
+        };
+      } catch (error) {
+        return unavailable(
+          error instanceof Error ? error.message.slice(0, 1024) : String(error).slice(0, 1024),
+        );
+      }
+    }
+    if (request.op === "start_agent") {
+      const settings = await ctx.settings();
+      // A linked machine also needs the owner's grant for that exact directory (ADR 0193).
+      const granted = (
+        await Promise.all(
+          startAgentPlaces(settings).map(async (entry) =>
+            entry.fleet === undefined ||
+            (await ctx.deps.fleets?.remoteWorkspace(entry.fleet, entry.place.workingDirectory)) === true
+              ? [entry]
+              : [],
+          ),
+        )
+      ).flat();
+      // The first granted connection per project checkout stands for it.
+      const seen = new Set<string>();
+      const places = granted
+        .filter((entry) => {
+          const key = JSON.stringify([entry.projectId, entry.machineKey, entry.place.workingDirectory]);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, 256);
+      const answer = (
+        status: "places" | "started" | "refused",
+        extra: { seatId?: string; detail?: string } = {},
+      ) =>
+        ({
+          op: "start_agent",
+          schemaVersion: 1,
+          status,
+          places: places.map(({ place }) => place),
+          ...extra,
+        }) as const;
+      if (request.machine === undefined || request.workingDirectory === undefined) return answer("places");
+      const machine = request.machine.toLowerCase();
+      const chosen = places.find(
+        ({ place, names }) => names.has(machine) && place.workingDirectory === request.workingDirectory,
+      );
+      if (chosen === undefined)
+        return answer("refused", {
+          detail:
+            "That isn't one of the places an agent can start. Pick a machine and directory from the list.",
+        });
+      // Clankie's own thread leads it, as his own hires are led; the caller only chose where and what to ask.
+      const lead = "global-default";
+      if (!ctx.conversations.runsCaptainTurns(lead))
+        return answer("refused", {
+          detail: "Clankie isn't running his own thread right now, so nobody would lead it.",
+        });
+      const harness = request.harness ?? "claude";
+      const title = /discord|clyde/iu.test(chosen.place.project)
+        ? harness
+        : chosen.place.project.slice(0, 80);
+      // Every work hire states its effort. Keep the project's own worker effort; otherwise the
+      // everyday level both harnesses share, since a connected app can't size the job.
+      const projectEffort = settings.projects.projects.find((project) => project.id === chosen.projectId)
+        ?.hiring?.worker?.effort;
+      const effort =
+        projectEffort === undefined
+          ? { effort: "medium", effortReason: "Started from a connected app; medium is the everyday level" }
+          : { effortReason: "Started from a connected app; the project sets this worker effort" };
+      const hired = await ctx.hireSeat(
+        {
+          schemaVersion: 1,
+          harness,
+          title,
+          workingDirectory: chosen.place.workingDirectory,
+          ...(chosen.fleet === undefined ? {} : { fleet: chosen.fleet }),
+          projectId: chosen.projectId,
+          hireKind: "worker",
+          ...effort,
+        },
+        request.prompt,
+        {
+          owner: { conversationId: lead },
+          current: () => ctx.conversations.runsCaptainTurns(lead),
+          authorize: async () => ctx.conversations.runsCaptainTurns(lead),
+        },
+      );
+      return hired.outcome === "spawned"
+        ? answer("started", { seatId: hired.seat.seatId })
+        : answer("refused", { detail: startAgentRefusal(hired.reason) });
     }
     if (request.op === "terminal_focus") {
       return {
@@ -940,6 +1066,7 @@ export function createOperatorService(
       request.op === "connections" ||
       request.op === "lead_chats" ||
       request.op === "fleet_room" ||
+      request.op === "app_notes" ||
       request.op === "feed_list" ||
       request.op === "feed_drop" ||
       request.op === "feed_check"
@@ -1191,4 +1318,103 @@ export function createOperatorService(
       throw new ServiceShuttingDownError(error);
     }
   };
+}
+
+const MACHINE_PROBE_MS = 5_000;
+
+/** Whether each linked machine's Herdr answers now, and the version it reports. */
+async function linkedMachines(ctx: CreateOperatorServiceContext): Promise<OperatorTerminalMachine[]> {
+  const fleets = (await ctx.deps.fleets?.current?.()) ?? ctx.deps.fleets?.list ?? [];
+  return Promise.all(
+    fleets.map(async (fleet): Promise<OperatorTerminalMachine> => {
+      try {
+        const stdout = await ctx.deps.fleets!.run(fleet)(["api", "snapshot"], undefined, MACHINE_PROBE_MS);
+        const version = (JSON.parse(stdout) as { result?: { snapshot?: { version?: unknown } } }).result
+          ?.snapshot?.version;
+        return {
+          id: fleet.id,
+          reachable: true,
+          ...(typeof version === "string" && version.length <= 64 ? { herdrVersion: version } : {}),
+        };
+      } catch {
+        // allow-swallowed-rejection -- a machine that doesn't answer is reported unreachable.
+        return { id: fleet.id, reachable: false };
+      }
+    }),
+  );
+}
+
+/** Every known project's checkout on a machine Clankie reaches, by the names agents list it under. */
+function startAgentPlaces(settings: ClankieSettings): {
+  place: StartAgentPlace;
+  names: ReadonlySet<string>;
+  fleet?: string;
+  projectId: string;
+  /** One machine however many connections reach it. */
+  machineKey: string;
+}[] {
+  const local = hostname().slice(0, 200);
+  const fleets = settings.execution.connections.flatMap((connection) => {
+    if (!connection.enabled || connection.ssh === undefined) return [];
+    const machine = remoteHireMachine(settings, connection.id);
+    return machine === undefined ? [] : [{ connection, machine }];
+  });
+  return settings.projects.projects.flatMap((project) =>
+    project.workspaces.flatMap((workspace) => {
+      if (workspace.machineId === "local" && workspace.platform === "posix")
+        return [
+          {
+            place: { machine: local, project: project.name, workingDirectory: workspace.path },
+            names: new Set(["local", "this mac", local.toLowerCase()]),
+            projectId: project.id,
+            machineKey: "local",
+          },
+        ];
+      // Every connection to that machine, the one the workspace names first; the caller keeps
+      // the first one granted this directory, so a directory isn't offered twice.
+      return fleets
+        .filter(
+          ({ machine }) => machine.ids.has(workspace.machineId) && machine.platform === workspace.platform,
+        )
+        .sort(
+          (a, b) =>
+            Number(b.connection.id === workspace.machineId) - Number(a.connection.id === workspace.machineId),
+        )
+        .map((reached) => {
+          const host = reached.connection.ssh!.host.slice(0, 200);
+          return {
+            place: { machine: host, project: project.name, workingDirectory: workspace.path },
+            names: new Set([
+              host.toLowerCase(),
+              reached.connection.id,
+              reached.machine.machine,
+              ...reached.machine.ids,
+            ]),
+            fleet: reached.connection.id,
+            projectId: project.id,
+            machineKey: `remote:${reached.machine.machine}`,
+          };
+        });
+    }),
+  );
+}
+
+function startAgentRefusal(reason: string): string {
+  switch (reason) {
+    case "unknown_directory":
+      return "That directory isn't there, or isn't one Clankie may start agents in on that machine.";
+    case "harness_unavailable":
+      return "That agent app isn't installed or signed in on that machine.";
+    case "herdr_unreachable":
+      return "Herdr on that machine isn't answering.";
+    case "at_capacity":
+      return "That machine already runs as many agents as it allows.";
+    case "trust_required":
+      return "The agent app needs the folder trusted on that machine first.";
+    case "delivery_unconfirmed":
+    case "start_unconfirmed":
+      return "The agent may have started but didn't confirm. List the agents before trying again.";
+    default:
+      return "Clankie couldn't start it right now.";
+  }
 }

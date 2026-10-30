@@ -25,6 +25,8 @@ export interface Session {
 export interface SessionList {
   readonly sessions: readonly Session[];
   readonly machines: readonly string[];
+  /** What a person should know about a machine, such as one not answering. */
+  readonly notices?: readonly string[];
 }
 
 export interface SessionText {
@@ -50,6 +52,32 @@ export interface SessionOpenResult {
   readonly detail: string;
 }
 
+/** Where a new session may start: a known project's checkout on one machine. */
+export interface SessionPlace {
+  readonly machine: string;
+  readonly project: string;
+  readonly workingDirectory: string;
+}
+
+export interface SessionStartRequest {
+  readonly machine?: string;
+  readonly workingDirectory?: string;
+  readonly harness?: "claude" | "codex";
+  /** The first thing the new agent is asked. */
+  readonly prompt?: string;
+}
+
+/**
+ * `places`: nothing started; these are where one can. `started`: the new
+ * session's id. `refused`: nothing started, and `detail` says why.
+ */
+export interface SessionStartResult {
+  readonly status: "places" | "started" | "refused";
+  readonly id?: string;
+  readonly places: readonly SessionPlace[];
+  readonly detail?: string;
+}
+
 /** What a session app answers. Ids here are the source's own, unqualified. */
 export interface SessionSource {
   readonly id: string;
@@ -58,6 +86,8 @@ export interface SessionSource {
   send(id: string, message: string): Promise<SessionSendResult>;
   /** Bring the session to the front in its own app on its machine. */
   open(id: string): Promise<SessionOpenResult>;
+  /** Start a new session in a known place; a source that can't start any leaves this out. */
+  start?(request: SessionStartRequest): Promise<SessionStartResult>;
 }
 
 /** A refusal worded for the person or model that asked. */
@@ -97,9 +127,11 @@ export class SessionSources {
         listed.flatMap((entry) => entry?.list.machines ?? entry?.list.sessions.map((s) => s.machine) ?? []),
       ),
     ];
+    const notices = listed.flatMap((entry) => entry?.list.notices ?? []);
     return {
       sessions: machine === undefined ? sessions : sessions.filter((session) => session.machine === machine),
       machines,
+      ...(notices.length === 0 ? {} : { notices }),
     };
   }
 
@@ -116,6 +148,17 @@ export class SessionSources {
   public async open(id: string): Promise<SessionOpenResult> {
     const [source, native] = this.resolve(id);
     return { ...(await source.open(native)), id };
+  }
+
+  /** Start a session through the named source, or the first that can start one. */
+  public async start(request: SessionStartRequest, sourceId?: string): Promise<SessionStartResult> {
+    const source =
+      sourceId === undefined
+        ? [...this.sources.values()].find((candidate) => candidate.start !== undefined)
+        : this.sources.get(sourceId);
+    if (source?.start === undefined) throw new SessionRefusal("No connected session app can start agents.");
+    const started = await source.start(request);
+    return started.id === undefined ? started : { ...started, id: `${source.id}:${started.id}` };
   }
 
   private resolve(id: string): [SessionSource, string] {

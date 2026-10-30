@@ -250,7 +250,12 @@ import {
   LeadVisitWindow,
   type EdgeSeat,
 } from "./fleet-edges.ts";
-import { FleetRoomJournal, inboundFleetRoomRecord, type FleetRoomRecord } from "./fleet-room.ts";
+import {
+  FleetRoomJournal,
+  inboundFleetRoomRecord,
+  type AppNotesReadInput,
+  type FleetRoomRecord,
+} from "./fleet-room.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.ts";
 import {
   deliverFleetSeatMessage,
@@ -1251,9 +1256,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const seatLedger: SeatLedger = createSeatLedger(seatLedgerPath(options.stateDir));
   const sessions = new Map<string, Promise<LaneSession>>();
   const desktop = new DesktopExpressions(async () => (await settingsStore.load()).desktop);
+  // The fleet room (VUH-2184): the durable, owner-only record of the same
+  // coordination, written where it happens. Recording never blocks delivery.
+  const fleetRoom = new FleetRoomJournal(join(options.stateDir, "fleet-room"));
   const desktopDeps = {
     ...deps,
     desktop,
+    appNotes: { read: async (input: AppNotesReadInput) => fleetRoom.readAppNotes(input) },
     linearWake: {
       settings: settingsStore,
       targetAllowed: (id: string) => conversations.linearWakeTargetAllowed(id),
@@ -1342,9 +1351,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // drew. Same bounds and the same volatility as the prompt ring (ADR 0163).
   const seatMessages = new SeatMessageWindow();
   const leadVisits = new LeadVisitWindow();
-  // The fleet room (VUH-2184): the durable, owner-only record of the same
-  // coordination, written where it happens. Recording never blocks delivery.
-  const fleetRoom = new FleetRoomJournal(join(options.stateDir, "fleet-room"));
   const noteFleetRoom = (record: FleetRoomRecord) => {
     try {
       fleetRoom.record(record);
@@ -7513,6 +7519,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prepareFreeAgentIntent,
     leadChats,
     fleetRoom: (request, signal) => fleetRoom.read(request, signal),
+    appNotes: async (command) =>
+      command.action === "post"
+        ? fleetRoom.postAppNote(command.author, command.text)
+        : fleetRoom.readAppNotes(command),
     recordInbound: (arrival) => noteFleetRoom(inboundFleetRoomRecord(arrival)),
     readWorkerAccounts,
     resolveWorkerAccountLabel: (machine, harness, label) =>

@@ -38,6 +38,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "connections" }
   | { op: "lead_chats" }
   | { op: "fleet_room" }
+  | { op: "app_notes" }
   | { op: "feed_list" }
   | { op: "feed_drop" }
   | { op: "feed_check" }
@@ -71,6 +72,8 @@ export type ConversationServiceRequest = Exclude<
   | { op: "set_persona_role" }
   | { op: "terminal_catalog" }
   | { op: "terminal_focus" }
+  | { op: "terminal_read" }
+  | { op: "start_agent" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }
@@ -88,6 +91,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "connections" }
   | { op: "lead_chats" }
   | { op: "fleet_room" }
+  | { op: "app_notes" }
   | { op: "work_repos" }
   | { op: "work_items" }
   | { op: "work_project" }
@@ -117,6 +121,8 @@ export type ConversationServiceResult = Exclude<
   | { op: "set_persona_role" }
   | { op: "terminal_catalog" }
   | { op: "terminal_focus" }
+  | { op: "terminal_read" }
+  | { op: "start_agent" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }
