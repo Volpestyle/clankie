@@ -153,6 +153,8 @@ async function fixture() {
           linearProjectBinding: { provider: "linear", projectId: GARDEN_LINEAR },
         },
         { id: "orchard", name: "Orchard", workspaces: workspace(orchard.repo), trackerRef },
+        // A second project kept in the orchard's checkout shares its private folder.
+        { id: "grove", name: "Grove", workspaces: workspace(orchard.repo), trackerRef },
         { id: "linear-app", name: "Linear App", workspaces: workspace(linear.repo), trackerRef },
         { id: "auto-app", name: "Auto App", workspaces: workspace(auto.repo), trackerRef, auto: true },
         { id: "docs-app", name: "Docs App", workspaces: workspace(committed.repo), trackerRef },
@@ -537,6 +539,48 @@ it("lists drops newest first beside asks and mail, with their source, and pages 
   expect(shown.output).toContain("Drop · orchard · from James’s iPhone");
   expect(shown.output).toContain("Drop · orchard · from this machine");
   expect(formatFeedPage(all)).toContain("Item: W-");
+});
+
+it("keeps each drop with its own project in a shared folder, and files the same picture under two names", async () => {
+  const f = await fixture();
+  const first = join(f.root, "before.png");
+  const second = join(f.root, "after.png");
+  await writeFile(first, PNG);
+  await writeFile(second, PNG);
+  const sha = createHash("sha256").update(PNG).digest("hex");
+  const twice = await f.cli(
+    "drop",
+    ...["--project", "grove", "--body", "Same view twice", "--file", first, "--file", second],
+    ...["--key", "same-bytes-two-names", "--json"],
+  );
+  expect(twice.status).toBe(0);
+  const grove = JSON.parse(twice.output) as FeedDropResult;
+  if (grove.outcome !== "filed" || grove.item.kind !== "drop") throw new Error(twice.output);
+  // Both names are kept under Evidence; the feed shows the one picture once.
+  const text = await readFile(join(f.orchard.repo, grove.file), "utf8");
+  expect(text).toContain(
+    `- image: [before.png](clankie://evidence/sha256/${sha})\n- image: [after.png](clankie://evidence/sha256/${sha})\n`,
+  );
+  expect(grove.item.drop.media).toEqual([
+    { url: `clankie://evidence/sha256/${sha}`, mimeType: "image/png", alt: "before.png" },
+  ]);
+  const orchard = await f.drop({ projectId: "orchard", idempotencyKey: "orchard-shared-key", body: "Prune" });
+  if (orchard.outcome !== "filed") throw new Error(JSON.stringify(orchard));
+
+  // Both drops share one folder, and each project's feed shows only its own.
+  const ids = async (projectId: string) => {
+    const page = await f.feed({ projectId });
+    if (page.outcome !== "ready") throw new Error(page.message);
+    return page.items.map((item) => [item.id, item.projectId]);
+  };
+  expect(await ids("orchard")).toEqual([[orchard.item.id, "orchard"]]);
+  expect(await ids("grove")).toEqual([[grove.item.id, "grove"]]);
+  const all = await f.feed();
+  if (all.outcome !== "ready") throw new Error(all.message);
+  expect(all.items.map((item) => [item.id, item.projectId])).toEqual([
+    [orchard.item.id, "orchard"],
+    [grove.item.id, "grove"],
+  ]);
 });
 
 it("refuses projects that keep no private issue files, and a missing upload, writing and waking nothing", async () => {

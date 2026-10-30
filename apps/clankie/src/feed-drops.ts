@@ -128,7 +128,10 @@ export function createFeedDrops(options: FeedDropsOptions) {
       ],
     };
     const { file, path } = stored;
-    const idempotencyKey = sha256(`feed-drop:${key}:${file.sha256}`);
+    // The same bytes may come twice under other names; each is its own evidence record.
+    const idempotencyKey = sha256(
+      JSON.stringify(["feed-drop", key, file.sha256, file.filename, file.mediaType]),
+    );
     const receipt = await evidence.upload(actor, {
       idempotencyKey,
       sha256: file.sha256,
@@ -279,11 +282,9 @@ export function createFeedDrops(options: FeedDropsOptions) {
         const place = `${record.root}\0${record.file}`;
         if (DONE.has(record.status) || seen.has(place)) continue;
         seen.add(place);
-        const projectId =
-          record.projectId !== undefined && projectIds.has(record.projectId)
-            ? record.projectId
-            : target.project.id;
-        const item = dropItem(record, target, projectId);
+        // A drop names its project; one outside the asked projects stays out, never reassigned.
+        if (record.projectId !== undefined && !projectIds.has(record.projectId)) continue;
+        const item = dropItem(record, target, record.projectId ?? target.project.id);
         if (item !== undefined) found.push(item);
       }
     }
