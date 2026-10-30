@@ -1,8 +1,19 @@
+import { randomBytes } from "node:crypto";
+import { text } from "node:stream/consumers";
 import { parseArgs } from "node:util";
-import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
+  resolveCaptainCredential,
+  resolveOperatorCredential,
+  type CredentialStore,
+} from "@clankie/credential-broker";
+import {
+  FEED_DROP_EMPTY,
   FEED_LIST_LIMIT_MAX,
+  FeedDropRequestSchema,
   FeedListRequestSchema,
+  OPERATOR_CONVERSATION_ATTACHMENTS_MAX,
+  feedDropHasContent,
+  type FeedDropResult,
   type FeedItem,
   type FeedListRequest,
   type FeedPage,
@@ -13,16 +24,50 @@ import {
   createCaptainRouteClient,
 } from "../session/operator-conversations.ts";
 import { commandHost, outputJson, type Writable } from "./io.ts";
+import { attachmentFile } from "./send.ts";
 
-export const FEED_USAGE =
-  "Usage: clankie feed [--project ID] [--cursor CURSOR] [--limit N] [--json]   (owner checks and updates, newest first)";
+export const FEED_USAGE = [
+  "Usage: clankie feed [--project ID] [--cursor CURSOR] [--limit N] [--json]   (owner checks, updates and drops, newest first)",
+  "       clankie feed drop --project ID [--title TEXT] [--body TEXT | --stdin] [--file PATH]... [--key KEY] [--json]   (file a drop as a private issue file and wake the project's lead)",
+].join("\n");
 
 export interface FeedCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly host?: string;
   readonly fetchImpl?: typeof fetch;
   readonly operatorCredentialStore?: CredentialStore;
+  readonly captainCredentialStore?: CredentialStore;
   readonly stdout?: Writable;
+  readonly stdin?: Parameters<typeof text>[0];
+}
+
+/**
+ * The operator credential is the owner on this machine, so it is also the owner
+ * transport. Uploads and the conversation list ride the captain's, as `clankie
+ * send --attach` does, when `withCaptain` asks for it.
+ */
+async function ownerClient(options: FeedCommandOptions, what: string, withCaptain = false) {
+  const env = options.env ?? process.env;
+  const credential = await resolveOperatorCredential({
+    env,
+    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+  });
+  if (!credential) throw new Error(`${what} needs the owner operator credential. Run clankie doctor.`);
+  const route = (token: string) =>
+    createCaptainRouteClient({
+      host: commandHost({ ...options, env }),
+      captainToken: token,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+  const owner = route(credential.token);
+  if (!withCaptain) return createCaptainOperatorConversationClient(owner, owner);
+  const captain = await resolveCaptainCredential({
+    env,
+    ...(options.captainCredentialStore === undefined ? {} : { store: options.captainCredentialStore }),
+  });
+  if (captain === undefined)
+    throw new Error("Uploading files needs the captain credential; start the clankie service once first.");
+  return createCaptainOperatorConversationClient(route(captain.token), owner);
 }
 
 /**
@@ -34,6 +79,7 @@ export async function runFeedCommand(
   args: readonly string[],
   options: FeedCommandOptions = {},
 ): Promise<number> {
+  if (args[0] === "drop") return runFeedDropCommand(args.slice(1), options);
   const { values, positionals } = parseArgs({
     args: [...args],
     allowPositionals: true,
@@ -53,23 +99,101 @@ export async function runFeedCommand(
     ...(limit === undefined ? {} : { limit }),
   });
   if (!request.success) throw new Error(`${FEED_USAGE}\n--limit takes 1 to ${FEED_LIST_LIMIT_MAX}`);
-  const env = options.env ?? process.env;
-  const credential = await resolveOperatorCredential({
-    env,
-    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-  });
-  if (!credential) throw new Error("The feed needs the owner operator credential. Run clankie doctor.");
-  // The operator credential is the owner on this machine, so it is also the owner transport.
-  const owner = createCaptainRouteClient({
-    host: commandHost({ ...options, env }),
-    captainToken: credential.token,
-    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-  });
-  const page = await createCaptainOperatorConversationClient(owner, owner).feedList!(request.data);
+  const page = await (await ownerClient(options, "The feed")).feedList!(request.data);
   const stdout = options.stdout ?? process.stdout;
   if (values.json) outputJson(stdout, page);
   else stdout.write(`${formatFeedPage(page, request.data)}\n`);
   return page.outcome === "ready" ? 0 : 1;
+}
+
+/**
+ * `clankie feed drop`: the owner throws a note, idea or screenshot at a project.
+ * Files are uploaded as owner attachments to the main conversation first; the
+ * drop names them, and the host copies them into the evidence store. The key
+ * makes a retry safe: it is printed so an uncertain answer can be retried.
+ */
+async function runFeedDropCommand(args: readonly string[], options: FeedCommandOptions): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: {
+      project: { type: "string" },
+      title: { type: "string" },
+      body: { type: "string" },
+      stdin: { type: "boolean" },
+      file: { type: "string", multiple: true },
+      key: { type: "string" },
+      json: { type: "boolean" },
+    },
+  });
+  if (positionals.length > 0 || (values.stdin === true && values.body !== undefined))
+    throw new Error(FEED_USAGE);
+  const paths = values.file ?? [];
+  if (paths.length > OPERATOR_CONVERSATION_ATTACHMENTS_MAX)
+    throw new Error(`At most ${String(OPERATOR_CONVERSATION_ATTACHMENTS_MAX)} files per drop.`);
+  const body = values.stdin === true ? await text(options.stdin ?? process.stdin) : values.body;
+  const key = values.key ?? randomBytes(18).toString("base64url");
+  const draft = FeedDropRequestSchema.safeParse({
+    projectId: values.project,
+    idempotencyKey: key,
+    ...(values.title === undefined ? {} : { title: values.title }),
+    ...(body === undefined ? {} : { body }),
+  });
+  if (!draft.success) throw new Error(`${FEED_USAGE}\n${draft.error.issues[0]?.message ?? ""}`);
+  if (!feedDropHasContent(draft.data) && paths.length === 0) throw new Error(FEED_DROP_EMPTY);
+  // Read and check every file before anything is uploaded or filed.
+  const files = await Promise.all(paths.map((path) => attachmentFile(path)));
+  const client = await ownerClient(options, "A drop", files.length > 0);
+  const attachments: { conversationId: string; artifactId: string }[] = [];
+  if (files.length > 0) {
+    const main = (await client.list()).find(
+      (conversation) => conversation.scope.kind === "global" && conversation.isDefault,
+    );
+    if (main === undefined) throw new Error("This Clankie has no main conversation to upload to.");
+    for (const file of files) {
+      if (client.uploadAttachment === undefined) throw new Error("This Clankie build cannot upload files");
+      const uploaded = await client.uploadAttachment({ conversationId: main.conversationId, ...file });
+      if (uploaded.status !== "committed")
+        throw new Error(
+          `Could not upload ${file.filename}: ${uploaded.status === "refused" ? uploaded.message : "upload incomplete"}`,
+        );
+      attachments.push({ conversationId: main.conversationId, artifactId: uploaded.file.artifactId });
+    }
+  }
+  let result: FeedDropResult;
+  try {
+    result = await client.feedDrop!({ ...draft.data, ...(attachments.length ? { attachments } : {}) });
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\nThe drop may or may not be filed. Retry with --key ${key}: it never files twice.`,
+    );
+  }
+  const stdout = options.stdout ?? process.stdout;
+  // An unavailable drop may already be written: keep the key so a retry finds it.
+  const retry = result.outcome === "unavailable" ? key : undefined;
+  if (values.json) outputJson(stdout, retry === undefined ? result : { ...result, idempotencyKey: retry });
+  else
+    stdout.write(
+      `${formatFeedDrop(result)}${retry === undefined ? "" : `\nRetry with --key ${retry}: it never files twice.`}\n`,
+    );
+  return result.outcome === "filed" ? 0 : 1;
+}
+
+export function formatFeedDrop(result: FeedDropResult): string {
+  if (result.outcome !== "filed") return result.message;
+  const item = result.item;
+  const title = item.drop.title;
+  const wake =
+    result.wake === "woken"
+      ? `Woke its lead${result.leadConversationId ? ` (${result.leadConversationId})` : ""} to refine it.`
+      : result.wake === "uncertain"
+        ? "An earlier try may already have woken its lead, so it was not woken again."
+        : "No lead could be woken; the file waits for the next agent that reads the project's work.";
+  return [
+    `${result.duplicate ? "Already filed" : "Filed"}: ${title}${item.projectId ? ` · ${item.projectId}` : ""}`,
+    `File: ${result.file}`,
+    wake,
+  ].join("\n");
 }
 
 /** `/feed [PROJECT]` in the console: the same page as text. */
@@ -80,6 +204,32 @@ export function feedConsoleCommand(client: OperatorConversationServiceClient) {
     if (extra.length || !request.success) throw new Error("Usage: /feed [PROJECT_ID]");
     if (!client.feedList) throw new Error("The feed is unavailable");
     return formatFeedPage(await client.feedList(request.data), request.data);
+  };
+}
+
+/**
+ * `/drop [--key KEY] PROJECT TEXT` in the console: a text drop into a project.
+ * Each call makes its own key unless one is given; files go through
+ * `clankie feed drop --file`. A lost or unavailable answer names the key, since
+ * the drop may already be written and a retry with it never files twice.
+ */
+export function feedDropConsoleCommand(client: OperatorConversationServiceClient) {
+  return async (argument: string): Promise<string> => {
+    const match = /^\s*(?:--key\s+([\w-]{16,128})\s+)?(\S+)\s+([\s\S]*\S)\s*$/u.exec(argument);
+    if (!match || match[2] === "--key") throw new Error("Usage: /drop [--key KEY] PROJECT_ID TEXT");
+    if (!client.feedDrop) throw new Error("Drops are unavailable");
+    const key = match[1] ?? randomBytes(18).toString("base64url");
+    const [projectId, body] = [match[2]!, match[3]!];
+    const retry = `Retry with /drop --key ${key} ${projectId} ${body}: it never files twice.`;
+    let result: FeedDropResult;
+    try {
+      result = await client.feedDrop({ projectId, idempotencyKey: key, body });
+    } catch (error) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}\nThe drop may or may not be filed. ${retry}`,
+      );
+    }
+    return result.outcome === "unavailable" ? `${formatFeedDrop(result)}\n${retry}` : formatFeedDrop(result);
   };
 }
 
@@ -129,5 +279,21 @@ function formatFeedItem(item: FeedItem): string {
       .filter(Boolean)
       .join("\n");
   }
-  return [`Drop${project} · ${item.at}`, item.drop.title, item.drop.body].filter(Boolean).join("\n");
+  const { drop } = item;
+  const from =
+    drop.source?.kind === "machine"
+      ? " · from this machine"
+      : drop.source?.name
+        ? ` · from ${drop.source.name}`
+        : "";
+  const status = drop.status && drop.status !== "todo" ? ` (${drop.status.replace(/_/gu, " ")})` : "";
+  return [
+    `Drop${status}${project}${from} · ${item.at}`,
+    drop.title,
+    drop.bodyTruncated ? `${drop.body}…` : drop.body,
+    ...(drop.media ?? []).map((media) => `${media.alt ?? media.mimeType ?? "Media"}: ${media.url}`),
+    `Item: ${drop.itemId} in repo ${drop.repoId}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

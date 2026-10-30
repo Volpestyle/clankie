@@ -6,7 +6,18 @@ import {
   type FleetRoomResult,
 } from "./fleet-room.ts";
 import { TrackerSyncCommandSchema, TrackerSyncResultSchema } from "./tracker-sync.ts";
-import { FeedListRequestSchema, FeedListResultSchema, type FeedListRequest, type FeedPage } from "./feed.ts";
+import {
+  FEED_DROP_EMPTY,
+  FeedDropRequestSchema,
+  FeedDropResultSchema,
+  FeedListRequestSchema,
+  FeedListResultSchema,
+  feedDropHasContent,
+  type FeedDropRequest,
+  type FeedDropResult,
+  type FeedListRequest,
+  type FeedPage,
+} from "./feed.ts";
 import {
   EvidenceDeviceFetchSchema,
   EvidenceDeviceFetchRequestSchema,
@@ -222,6 +233,10 @@ export const OPERATOR_CONVERSATION_DISPATCH_PATH = "/operator/v1/dispatch";
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
   FeedListRequestSchema.extend({ op: z.literal("feed_list"), schemaVersion: z.literal(1) }).strict(),
+  /** The owner drops a screenshot, bug or idea into a project: a private issue file. Owner authority. */
+  FeedDropRequestSchema.extend({ op: z.literal("feed_drop"), schemaVersion: z.literal(1) })
+    .strict()
+    .refine(feedDropHasContent, FEED_DROP_EMPTY),
   OwnerUpdateListFilterSchema.extend({
     op: z.literal("owner_update_list"),
     schemaVersion: z.literal(1),
@@ -844,6 +859,9 @@ export type SendReceiptRecord = z.infer<typeof SendReceiptRecordSchema>;
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("feed_list"), schemaVersion: z.literal(1), result: FeedListResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("feed_drop"), schemaVersion: z.literal(1), result: FeedDropResultSchema })
     .strict(),
   z
     .object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1), result: LeadChatsResultSchema })
@@ -1469,6 +1487,8 @@ export interface OperatorConversationServiceClient {
   }>;
   /** Items are checked against their kind by the schema, so each carries its own payload. */
   feedList?(request?: FeedListRequest): Promise<FeedPage>;
+  /** Files a drop; retry with the same `idempotencyKey` after any uncertain answer. */
+  feedDrop?(request: FeedDropRequest): Promise<FeedDropResult>;
   ownerUpdateList?(filter?: OwnerUpdateListFilter): Promise<OwnerUpdateList>;
   ownerUpdateRead?(id: string): Promise<OwnerUpdateResult>;
   ownerUpdateDismiss?(id: string): Promise<OwnerUpdateResult>;
@@ -1741,6 +1761,13 @@ export function createOperatorConversationServiceClient(
       );
       if (result.op !== "feed_list") throw new Error(`Unexpected ${result.op} result for feed_list`);
       return result.result as FeedPage;
+    },
+    async feedDrop(request) {
+      const result = await dispatch(
+        OperatorConversationServiceRequestSchema.parse({ ...request, op: "feed_drop", schemaVersion: 1 }),
+      );
+      if (result.op !== "feed_drop") throw new Error(`Unexpected ${result.op} result for feed_drop`);
+      return result.result as FeedDropResult;
     },
     async ownerUpdateList(filter = {}) {
       const result = await dispatch({ op: "owner_update_list", schemaVersion: 1, ...filter });

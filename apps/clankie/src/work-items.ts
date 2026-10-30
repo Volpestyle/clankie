@@ -31,6 +31,11 @@ import {
   blockerReferences,
   exportIssueFromTracker,
   exportIssuesToFiles,
+  fileDrop,
+  readDrops,
+  recordDropWake,
+  type DropDraft,
+  type DropWake,
   trackerIssueStatus,
   type ExportIssue,
   type FilesExportResult,
@@ -71,7 +76,7 @@ import {
 import type { McpHost, TrackerRouteFence } from "./mcp-host.ts";
 import type { CaptainPort } from "./captain/port.ts";
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
-import type { ProjectsSettings } from "@clankie/protocol/projects";
+import type { Project, ProjectsSettings } from "@clankie/protocol/projects";
 import { WORK_REPO_LIST_MAX } from "@clankie/protocol/work-items";
 import { createProjectWorkReader } from "./project-work-items.ts";
 import {
@@ -199,6 +204,21 @@ export const WorkExportRequestSchema = z
   })
   .strict();
 export type WorkExportRequest = z.infer<typeof WorkExportRequestSchema>;
+/** Where a project's drops go, or why they can't. */
+export type DropTarget =
+  | {
+      readonly ready: true;
+      readonly project: { readonly id: string; readonly name: string };
+      /** The tracker workspace; its private folder resolves to the main checkout. */
+      readonly root: string;
+      readonly repoId: string;
+    }
+  | {
+      readonly ready: false;
+      readonly reason: "unknown_project" | "not_file_backed";
+      readonly message: string;
+    };
+
 export type WorkExportResult = {
   readonly action: "export";
   readonly to: "markdown";
@@ -1260,6 +1280,109 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     return result.value;
   };
 
+  /**
+   * Where a settings project keeps its work on this machine: its tracker workspace
+   * (`trackerRef`), or else the one local workspace with a saved convention.
+   * `work export` and drops both go by it.
+   */
+  const projectTracker = async (
+    project: Project,
+  ): Promise<
+    | { readonly workspace: Project["workspaces"][number]; readonly convention: WorkConvention }
+    | { readonly missing: "remote" | "unreadable" | "ambiguous" | "none" }
+  > => {
+    const machine = options.localMachineId ?? "local";
+    const tracking =
+      project.trackerRef === undefined
+        ? undefined
+        : project.workspaces.find((workspace) => workspace.id === project.trackerRef!.workspaceId);
+    if (project.trackerRef !== undefined && tracking?.machineId !== machine) return { missing: "remote" };
+    if (tracking !== undefined) {
+      try {
+        const convention = await readConvention(tracking.path);
+        return convention === undefined ? { missing: "none" } : { workspace: tracking, convention };
+      } catch {
+        return { missing: "unreadable" };
+      }
+    }
+    const saved = (
+      await Promise.all(
+        project.workspaces
+          .filter((workspace) => workspace.machineId === machine)
+          .map(async (entry) => ({
+            entry,
+            // allow-swallowed-rejection -- an unreadable convention is no saved tracker; the count below refuses.
+            convention: await readConvention(entry.path).catch(() => undefined),
+          })),
+      )
+    ).filter((entry) => entry.convention !== undefined);
+    if (saved.length > 1) return { missing: "ambiguous" };
+    return saved.length === 1
+      ? { workspace: saved[0]!.entry, convention: saved[0]!.convention! }
+      : { missing: "none" };
+  };
+
+  /**
+   * Where a project's drops go (step 5, C3): its private `.clankie/work/` issue
+   * files, in the main checkout of its local tracker workspace. Anything else is
+   * refused in words that name the way there, and nothing is written.
+   */
+  const dropTarget = async (projectId: string): Promise<DropTarget> => {
+    const project = (await options.projects?.())?.projects.find((entry) => entry.id === projectId);
+    if (project === undefined)
+      return { ready: false, reason: "unknown_project", message: `No project ${projectId}.` };
+    const files = `'${JSON.stringify({ backend: "markdown", directory: DEFAULT_WORK_DIRECTORY })}'`;
+    const select = `clankie project settings ${project.id} tracker ${files}`;
+    const refused = (message: string): DropTarget => ({ ready: false, reason: "not_file_backed", message });
+    // Decision 3 of step 5: a project Clankie runs by himself keeps the built-in tracker for now.
+    if (project.auto === true)
+      return refused(
+        `${project.name} is on Auto, so its work stays in the built-in tracker and a drop has no issue file to go to. To drop into it, turn Auto off (clankie project settings ${project.id} --auto off), move its work with clankie work export --project ${project.id} --to markdown, then select the files with ${select}.`,
+      );
+    const located = await projectTracker(project);
+    if (!("workspace" in located))
+      return refused(
+        located.missing === "remote"
+          ? `${project.name}'s tracker workspace is on another machine, and drops are filed on this one.`
+          : located.missing === "unreadable"
+            ? `${project.name}'s saved work tracker (.clankie/tracking.json) can't be read, so the drop was not filed.`
+            : located.missing === "ambiguous"
+              ? `${project.name} has a saved tracker in more than one workspace here; choose one with clankie project settings ${project.id} tracker.`
+              : `${project.name} has no saved work tracker on this machine. Drops are filed as private issue files: select them with ${select}.`,
+      );
+    const { workspace, convention } = located;
+    const directory = conventionWorkDirectory(convention);
+    if (directory === undefined) {
+      const tracker =
+        convention.backend === "builtin"
+          ? "the built-in tracker"
+          : convention.backend === "linear"
+            ? "Linear"
+            : "GitHub issues";
+      return refused(
+        convention.backend === "github"
+          ? `${project.name} tracks work in ${tracker}, and drops are filed only as private issue files. Select them with ${select}.`
+          : `${project.name} tracks work in ${tracker}, and drops are filed only as private issue files. Move its open work with clankie work export --project ${project.id} --to markdown, then select the files with ${select}.`,
+      );
+    }
+    if (!isPrivateWorkDirectory(directory))
+      return refused(
+        `${project.name} keeps its work in committed files (${directory}), and drops are private: they go only to ${DEFAULT_WORK_DIRECTORY}. Select that folder with ${select}.`,
+      );
+    // Drops are filed and read in the private folder itself, never a folder inside it.
+    if (posix.normalize(directory.replace(/\\/gu, "/")).replace(/\/+$/u, "") !== DEFAULT_WORK_DIRECTORY)
+      return refused(
+        `${project.name} keeps its issue files in ${directory}, and drops go only to ${DEFAULT_WORK_DIRECTORY} itself. Select that folder with ${select}.`,
+      );
+    const repo = await register(workspace.path);
+    return {
+      ready: true,
+      project: { id: project.id, name: project.name },
+      root: workspace.path,
+      repoId: repo.id,
+    };
+  };
+
   return {
     handleOwnerWrite,
     /**
@@ -1613,6 +1736,25 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       };
     },
 
+    dropTarget,
+    /** Files one drop in a target `dropTarget` returned ready; see `fileDrop`. */
+    fileDrop: (
+      target: Extract<DropTarget, { ready: true }>,
+      draft: DropDraft,
+      beforeWrite?: () => Promise<void>,
+    ) =>
+      fileDrop(target.root, draft, {
+        ...(options.clock === undefined ? {} : { clock: options.clock }),
+        ...(beforeWrite === undefined ? {} : { beforeWrite }),
+      }),
+    recordDropWake: (
+      target: Extract<DropTarget, { ready: true }>,
+      key: string,
+      wake: DropWake,
+      lead?: string,
+    ) => recordDropWake(target.root, key, wake, lead),
+    readDrops: (target: Extract<DropTarget, { ready: true }>) => readDrops(target.root),
+
     /**
      * `clankie work export` (step 5, C2): a project's open items, read from its built-in
      * or Linear tracker, become issue files in its repo's private `.clankie/work/`, in the
@@ -1637,44 +1779,18 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         return refused(
           `${project.name} is on Auto: Clankie works its backlog by himself there (rounds, the work queue, runs and leases), and that needs the built-in tracker for now. Turn Auto off first (clankie project settings ${project.id} --auto off), or leave its work where it is.`,
         );
-      const machine = options.localMachineId ?? "local";
-      const local = project.workspaces.filter((workspace) => workspace.machineId === machine);
-      const tracking =
-        project.trackerRef === undefined
-          ? undefined
-          : project.workspaces.find((workspace) => workspace.id === project.trackerRef!.workspaceId);
-      if (project.trackerRef !== undefined && tracking?.machineId !== machine)
-        return refused(`${project.name}'s tracker workspace is on another machine; export it there.`);
-      let workspace = tracking;
-      let convention: WorkConvention | undefined;
-      if (workspace !== undefined) {
-        try {
-          convention = await readConvention(workspace.path);
-        } catch {
-          return refused(`${project.name}'s saved work tracker (.clankie/tracking.json) can't be read.`);
-        }
-      } else {
-        const saved = (
-          await Promise.all(
-            local.map(async (entry) => ({
-              entry,
-              // allow-swallowed-rejection -- an unreadable convention is no saved tracker; the count below refuses.
-              convention: await readConvention(entry.path).catch(() => undefined),
-            })),
-          )
-        ).filter((entry) => entry.convention !== undefined);
-        if (saved.length === 1) {
-          workspace = saved[0]!.entry;
-          convention = saved[0]!.convention;
-        } else if (saved.length > 1)
-          return refused(
-            `${project.name} has a saved tracker in more than one workspace here; choose one with clankie project settings ${project.id} tracker.`,
-          );
-      }
-      if (workspace === undefined || convention === undefined)
+      const located = await projectTracker(project);
+      if (!("workspace" in located))
         return refused(
-          `${project.name} has no saved work tracker on this machine, so there is nothing to export.`,
+          located.missing === "remote"
+            ? `${project.name}'s tracker workspace is on another machine; export it there.`
+            : located.missing === "unreadable"
+              ? `${project.name}'s saved work tracker (.clankie/tracking.json) can't be read.`
+              : located.missing === "ambiguous"
+                ? `${project.name} has a saved tracker in more than one workspace here; choose one with clankie project settings ${project.id} tracker.`
+                : `${project.name} has no saved work tracker on this machine, so there is nothing to export.`,
         );
+      const { workspace, convention } = located;
       if (convention.backend !== "builtin" && convention.backend !== "linear")
         return refused(
           convention.backend === "github"

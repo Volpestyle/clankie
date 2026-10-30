@@ -1,6 +1,6 @@
 import { runEvidenceStorageCommand } from "./evidence-storage.ts";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -49,7 +49,7 @@ export { evidenceRoots };
 const EVIDENCE_USAGE = [
   "Usage: clankie evidence storage [status|local|s3 --bucket BUCKET --region REGION [--prefix PREFIX]]",
   "       clankie evidence push [PATH] [--issue KEY] [--caption TEXT]",
-  "       clankie evidence fetch [PATH]",
+  "       clankie evidence fetch [PATH | clankie://evidence/sha256/HASH]",
   "       clankie evidence backfill --database SQLITE [--repo PATH] [--apply]",
   "       clankie evidence list --issue KEY | --commit SHA",
   "       clankie evidence list --recent [--project NAME] [--repo REPO] [--issue KEY] [--actor-kind KIND] [--actor-name NAME] [--media-type TYPE] [--since ISO] [--until ISO] [--cursor CURSOR] [--limit N]",
@@ -325,6 +325,76 @@ async function evidenceFetch(
   return { ok: failures.length === 0, fetched, present, failures, summary };
 }
 
+const EVIDENCE_LINK = /^clankie:\/\/evidence\/sha256\/([0-9a-f]{64})$/u;
+
+/** The extension an object's leading bytes name, so a harness opens it as what it is. */
+function sniffExtension(head: Buffer): string {
+  if (head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+    return ".png";
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return ".jpg";
+  if (head.subarray(0, 4).toString("latin1") === "GIF8") return ".gif";
+  if (head.subarray(0, 4).toString("latin1") === "RIFF" && head.subarray(8, 12).toString("latin1") === "WEBP")
+    return ".webp";
+  if (head.subarray(4, 8).toString("latin1") === "ftyp") {
+    const brand = head.subarray(8, 12).toString("latin1");
+    if (["heic", "heix", "mif1", "msf1"].includes(brand)) return ".heic";
+    return brand === "qt  " ? ".mov" : ".mp4";
+  }
+  return "";
+}
+
+/**
+ * One `clankie://evidence/sha256/HASH` object, as an issue file or a drop links it,
+ * downloaded into the repo's `.local/evidence/sha256/` (ignored) and verified.
+ */
+async function evidenceFetchLink(link: string, options: EvidenceOptions = {}): Promise<EvidenceFetchResult> {
+  const sha = EVIDENCE_LINK.exec(link)![1]!;
+  const cwd = options.cwd ?? process.cwd();
+  const repo = await repoRootOf(cwd);
+  const folder = join(repo, MIRROR, "sha256");
+  const named = posix(relative(repo, join(folder, sha)));
+  const already = (await readdir(folder).catch(() => [] as string[])).find(
+    (name) => name === sha || name.startsWith(`${sha}.`),
+  );
+  const done = (fetched: string[], present: string[], failures: Failure[]): EvidenceFetchResult => ({
+    ok: failures.length === 0,
+    fetched,
+    present,
+    failures,
+    summary: [
+      ...[...fetched, ...present].map(
+        (path) => `${fetched.includes(path) ? "Fetched" : "Already present"}: ${join(repo, path)}`,
+      ),
+      ...failures.map((failure) => `failed ${failure.path}: ${failure.reason}`),
+    ].join("\n"),
+  });
+  if (already !== undefined && (await sha256File(join(folder, already))) === sha)
+    return done([], [posix(relative(repo, join(folder, already)))], []);
+  await mkdir(folder, { recursive: true });
+  const partial = join(folder, `${sha}.${process.pid}.part`);
+  try {
+    const client = await EvidenceClient.connect({ ...options, cwd });
+    const signed = await client.signedFetch(sha);
+    await client.download(signed.url, partial);
+    if ((await stat(partial)).size !== signed.size) throw new Error("size does not match the store");
+    if ((await sha256File(partial)) !== sha) throw new Error("sha256 does not match");
+    const head = Buffer.alloc(16);
+    const handle = await open(partial, "r");
+    try {
+      await handle.read(head, 0, 16, 0);
+    } finally {
+      await handle.close();
+    }
+    const destination = join(folder, `${sha}${sniffExtension(head)}`);
+    await rename(partial, destination);
+    return done([posix(relative(repo, destination))], [], []);
+  } catch (error) {
+    return done([], [], [{ path: named, reason: error instanceof Error ? error.message : String(error) }]);
+  } finally {
+    await rm(partial, { force: true });
+  }
+}
+
 async function evidenceList(
   filter: { issueKey: string } | { commit: string },
   options: EvidenceOptions = {},
@@ -407,7 +477,10 @@ export async function runEvidenceCommand(
   if (verb === "fetch") {
     const { positional } = flags(rest, []);
     if (positional.length > 1) throw new Error(EVIDENCE_USAGE);
-    const result = await evidenceFetch(positional[0] === undefined ? {} : { path: positional[0] }, options);
+    const result =
+      positional[0] !== undefined && EVIDENCE_LINK.test(positional[0])
+        ? await evidenceFetchLink(positional[0], options)
+        : await evidenceFetch(positional[0] === undefined ? {} : { path: positional[0] }, options);
     stderr.write(`${result.summary}\n`);
     return { ok: result.ok, body: result };
   }
@@ -478,11 +551,16 @@ export const EVIDENCE_TOOLS = [
   {
     name: "evidence_fetch",
     description:
-      "Download the objects listed by evidence.json manifests at or under a path into .local/evidence/<folder>/, verifying each sha256. Names every failure.",
+      "Download the objects listed by evidence.json manifests at or under a path into .local/evidence/<folder>/, verifying each sha256. Names every failure. " +
+      "Given one clankie://evidence/sha256/HASH link instead (as an issue file's Evidence line or a drop carries), downloads that object into .local/evidence/sha256/ and names the file, so it can be opened.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        path: { type: "string", description: "Folder relative to the working directory (default .)." },
+        path: {
+          type: "string",
+          description:
+            "Folder relative to the working directory (default .), or one clankie://evidence/sha256/HASH link.",
+        },
       },
     },
   },
@@ -533,7 +611,10 @@ export async function callEvidenceTool(
     }
     if (name === "evidence_fetch") {
       const path = string("path");
-      const result = await evidenceFetch(path === undefined ? {} : { path }, options);
+      const result =
+        path !== undefined && EVIDENCE_LINK.test(path)
+          ? await evidenceFetchLink(path, options)
+          : await evidenceFetch(path === undefined ? {} : { path }, options);
       return text(result, !result.ok);
     }
     const issueKey = string("issue");

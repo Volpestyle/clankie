@@ -1,15 +1,22 @@
 import { z } from "zod";
 import { MailIssueReferenceSchema } from "./mail-reference.ts";
-import { ConversationQuestionSchema, OperatorConversationIdSchema } from "./operator-conversations.ts";
+import { DevicePlatformSchema } from "./devices.ts";
+import {
+  ConversationQuestionSchema,
+  OPERATOR_CONVERSATION_ATTACHMENTS_MAX,
+  OperatorConversationAttachmentRefSchema,
+  OperatorConversationIdSchema,
+} from "./operator-conversations.ts";
 import { ProjectIdSchema } from "./projects.ts";
 import { additiveEnum } from "./response.ts";
-import { WorkRepoSchema } from "./work-items.ts";
+import { WorkItemStatusSchema, WorkRepoSchema } from "./work-items.ts";
 
 /**
  * The owner's feed: one newest-first read joined by the host from the stores
  * that already exist. Pending owner asks are checks; mailed owner updates and
- * project status updates are updates. Drops (the owner's screenshots, bugs and
- * ideas filed as issue files) have their shape here and no source yet.
+ * project status updates are updates. Drops are what the owner threw at
+ * Clankie (`feed_drop`): a screenshot of a bug, an idea, a note, each filed as a
+ * private issue file labelled `drop` that the project's lead refines.
  *
  * The feed is display only. A check is answered with `input_answer` and an owner
  * update dismissed with `owner_update_dismiss`, against the ids each item
@@ -100,7 +107,26 @@ export const FeedUpdateSchema = z
   });
 export type FeedUpdate = z.infer<typeof FeedUpdateSchema>;
 
-/** Something the owner dropped, filed as an issue file labelled `drop`. No host emits these yet. */
+/**
+ * Where a drop came from: one of the owner's paired devices (by the name the
+ * owner gave it) or this machine itself (the CLI or console). The host records
+ * it from the caller's authority, never from the request.
+ */
+export const FeedDropSourceSchema = z
+  .object({
+    kind: additiveEnum(["device", "machine"]),
+    name: z.string().trim().min(1).max(64).optional(),
+    platform: DevicePlatformSchema.optional(),
+  })
+  .strict();
+export type FeedDropSource = z.infer<typeof FeedDropSourceSchema>;
+
+/**
+ * Something the owner dropped, filed as a private issue file (`.clankie/work/`)
+ * labelled `drop`. `itemId` and `repoId` read it with the work ops; `title` and
+ * `body` follow the file as its lead refines it, and it leaves the feed once
+ * it is done or canceled. `source` and `status` are absent from older hosts.
+ */
 export const FeedDropSchema = z
   .object({
     itemId: z.string().trim().min(1).max(256),
@@ -109,6 +135,8 @@ export const FeedDropSchema = z
     ...body,
     issue: MailIssueReferenceSchema.optional(),
     media: z.array(FeedMediaSchema).max(16).optional(),
+    status: WorkItemStatusSchema.optional(),
+    source: FeedDropSourceSchema.optional(),
   })
   .strict();
 export type FeedDrop = z.infer<typeof FeedDropSchema>;
@@ -122,7 +150,10 @@ export type FeedItemKind = z.infer<typeof FeedItemKindSchema>;
 export const FeedItemSchema = z
   .object({
     kind: FeedItemKindSchema,
-    /** Stable across reads: `check:<requestId>`, `owner-update:<id>`, `project-update:<id>`. */
+    /**
+     * Stable across reads: `check:<requestId>`, `owner-update:<id>`,
+     * `project-update:<id>`, `drop:<repoId>/<itemId>`.
+     */
     id: z.string().min(1).max(600),
     at: z.string().datetime(),
     /** The owner's project the item belongs to, when the host can tell. */
@@ -192,3 +223,85 @@ export type FeedListResult = z.infer<typeof FeedListResultSchema>;
 export type FeedPage =
   | Exclude<FeedListResult, { outcome: "ready" }>
   | (Omit<Extract<FeedListResult, { outcome: "ready" }>, "items"> & { items: FeedItem[] });
+
+/** The owner's own words in one drop; the issue file holds them whole. */
+export const FEED_DROP_BODY_MAX = 20_000;
+export const FEED_DROP_TITLE_MAX = 200;
+
+/**
+ * `feed_drop`: the owner throws something at Clankie. The host files it as a
+ * stub issue in the project's private `.clankie/work/` (main checkout), so it is
+ * kept even when no agent runs, then wakes the project's lead once to refine it.
+ *
+ * Attachments are owner uploads (ADR 0209: `upload_begin`/`upload_chunk`/
+ * `upload_commit`) committed to any conversation the owner can upload to; the
+ * host copies each into the evidence store (ADR 0258) and links it from the
+ * file's `## Evidence` section. Image bytes never enter `.clankie/work`.
+ *
+ * `idempotencyKey` is the client's: a retry with the same key and request
+ * answers with the same item and never files or wakes twice. The same key with
+ * a different request is refused.
+ */
+export const FeedDropRequestSchema = z
+  .object({
+    projectId: ProjectIdSchema,
+    idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{16,128}$/u),
+    title: z.string().trim().min(1).max(FEED_DROP_TITLE_MAX).optional(),
+    body: z.string().max(FEED_DROP_BODY_MAX).optional(),
+    attachments: z
+      .array(
+        OperatorConversationAttachmentRefSchema.extend({
+          conversationId: OperatorConversationIdSchema,
+        }).strict(),
+      )
+      .max(OPERATOR_CONVERSATION_ATTACHMENTS_MAX)
+      .optional(),
+  })
+  .strict();
+export type FeedDropRequest = z.infer<typeof FeedDropRequestSchema>;
+export const FEED_DROP_EMPTY = "A drop needs a title, some text or an attachment";
+/** A drop says something: a title, some text or an attachment. */
+export function feedDropHasContent(drop: Pick<FeedDropRequest, "title" | "body" | "attachments">): boolean {
+  return (
+    (drop.body !== undefined && drop.body.trim() !== "") ||
+    drop.title !== undefined ||
+    (drop.attachments?.length ?? 0) > 0
+  );
+}
+
+/**
+ * `woken`: the lead's conversation took the wake (now or on an earlier try).
+ * `not_woken`: no lead could take it; the file waits, and a retry tries again.
+ * `uncertain`: an earlier try may have woken it, so it is never woken again.
+ */
+export const FeedDropWakeSchema = z.enum(["woken", "not_woken", "uncertain"]);
+export type FeedDropWake = z.infer<typeof FeedDropWakeSchema>;
+
+export const FeedDropResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("filed"),
+      /** The drop as `feed_list` shows it. */
+      item: FeedItemSchema,
+      /** The issue file, relative to the project's main checkout. */
+      file: z.string().min(1).max(1024),
+      /** True when this key was already filed: nothing was written again. */
+      duplicate: z.boolean(),
+      wake: FeedDropWakeSchema,
+      leadConversationId: OperatorConversationIdSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      outcome: z.literal("refused"),
+      reason: z.enum(["unknown_project", "not_file_backed", "attachment_missing", "idempotency_conflict"]),
+      message: z.string().min(1).max(1000),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("unavailable"), message: z.string().min(1).max(1000) }).strict(),
+]);
+type FeedDropResultFields = z.infer<typeof FeedDropResultSchema>;
+/** A drop answer whose filed item is narrowed to a drop, as the host guarantees. */
+export type FeedDropResult =
+  | Exclude<FeedDropResultFields, { outcome: "filed" }>
+  | (Omit<Extract<FeedDropResultFields, { outcome: "filed" }>, "item"> & { item: FeedDropItem });

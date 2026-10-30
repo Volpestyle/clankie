@@ -72,7 +72,11 @@ turn. Newly added skills need no conversation reset; selected exclusions remain.
   uncertain ask rather than repeating it; an answer wakes the original
   conversation and never grants credentials or changes room trust. CLI answering
   and the mailbox are in `docs/cli.md` under "Owner asks"; `clankie feed` lists
-  pending asks, mailed updates and project updates in one newest-first page.
+  pending asks, mailed updates, project updates and open drops in one
+  newest-first page. `clankie feed drop --project P` (or `/drop`) files the
+  owner's note or screenshot as a private issue file and wakes the project's
+  lead once; it needs a project on private issue files and refuses others
+  with the steps there (`docs/cli.md`, "Drops").
 
 ## Common commands
 

@@ -260,7 +260,7 @@ export interface ClankieAppDependencies {
     id: string,
   ) => Promise<import("@clankie/protocol/projects").FleetMembershipReport>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
-  deliveredFiles?: Pick<DeliveredFileStore, "read">;
+  deliveredFiles?: Pick<DeliveredFileStore, "read"> & Partial<Pick<DeliveredFileStore, "attachment">>;
   /** Local owner-authorized projection of delivered artifacts; hosted launch/admission is separate. */
   activitySharing?: ActivitySharing;
   /**

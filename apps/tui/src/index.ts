@@ -1,5 +1,5 @@
 import { ownerUpdateConsoleCommand } from "./owner-update-commands.ts";
-import { feedConsoleCommand } from "./command/feed.ts";
+import { feedConsoleCommand, feedDropConsoleCommand } from "./command/feed.ts";
 import { questionConsoleCommand } from "./question-commands.ts";
 import { runUpdateCommand } from "./command/update.ts";
 import { runHarnessLoginCommand } from "./command/harness-login.ts";
@@ -273,6 +273,7 @@ const conversationsContext = {
   question: questionCommand,
   updates: ownerUpdateConsoleCommand(conversationClient),
   feed: feedConsoleCommand(conversationClient),
+  drop: feedDropConsoleCommand(conversationClient),
   designateHead: async (headConversationId: string | null) => {
     const conversationId = conversationSelection.conversationId;
     if (operatorClient === undefined || conversationId === undefined)

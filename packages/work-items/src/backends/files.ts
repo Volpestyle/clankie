@@ -114,7 +114,8 @@ export function serializeFile(fields: ReadonlyMap<string, string>, body: string)
   return `---\n${front}\n---\n${body}`;
 }
 
-function statusOf(raw: string | undefined): WorkItemStatus {
+/** A file's `status:` read as a work status; anything unknown is `todo`. */
+export function statusOf(raw: string | undefined): WorkItemStatus {
   const value = (raw ?? "todo").toLowerCase().replace(/[\s-]+/gu, "_");
   if (isWorkItemStatus(value)) return value;
   if (["open", "planned"].includes(value)) return "todo";

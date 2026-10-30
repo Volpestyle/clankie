@@ -172,6 +172,7 @@ export interface ConsoleCommandContext {
     question?(argument: string, flow?: import("./shell/setup-flow.ts").SetupFlow): Promise<string>;
     updates?(argument: string): Promise<string>;
     feed?(argument: string): Promise<string>;
+    drop?(argument: string): Promise<string>;
     readonly conversationId?: string | undefined;
     readonly title?: string | undefined;
     /** Directory the selected conversation's session works in. */
@@ -254,6 +255,22 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           shell.insertCommandResult("/feed", await conversations.feed!(argument), "success");
         } catch (error) {
           shell.insertCommandResult("/feed", error instanceof Error ? error.message : String(error), "error");
+        }
+      },
+    });
+
+  if (conversations?.drop)
+    commands.push({
+      name: "drop",
+      aliases: [],
+      description: "Drop a note or idea into a project: a private issue file its lead refines",
+      takesArgument: true,
+      argumentHint: "PROJECT_ID TEXT",
+      async run(argument, shell) {
+        try {
+          shell.insertCommandResult("/drop", await conversations.drop!(argument), "success");
+        } catch (error) {
+          shell.insertCommandResult("/drop", error instanceof Error ? error.message : String(error), "error");
         }
       },
     });
