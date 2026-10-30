@@ -190,13 +190,19 @@ export function renderDropBody(body: string, evidence: readonly WorkEvidence[]):
 export async function fileDrop(
   root: string,
   draft: DropDraft,
-  options: { readonly clock?: () => Date; readonly newId?: () => string } = {},
+  options: {
+    readonly clock?: () => Date;
+    readonly newId?: () => string;
+    /** Rechecks the caller's authority once the folder lock is held, before anything is written. */
+    readonly beforeWrite?: () => Promise<void>;
+  } = {},
 ): Promise<{ readonly created: boolean; readonly drop: DropRecord; readonly receipt: DropReceipt }> {
   if (!KEY.test(draft.key) || !KEY.test(draft.request)) throw new Error("Drop keys are SHA-256 hex");
   const { main, directory } = folderOf(root);
   await adopt(root);
   await mkdir(directory, { recursive: true });
   return withTrackerStoreLock(join(directory, PRIVATE_WORK_LOCK), async (assertHeld) => {
+    await options.beforeWrite?.();
     await ensurePrivateGitignore(directory);
     const receipts = await readReceipts(directory);
     const held = receipts[draft.key];

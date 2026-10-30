@@ -752,6 +752,22 @@ it("takes drops only from the owner: a paired phone through the relay, never a S
     expect((await f.post(op, CAPTAIN)).status).toBe(403);
     expect((await f.post(op, f.tokens.watcher)).status).toBe(401);
     expect(await listing(join(f.orchard.repo, ".clankie/work"))).toHaveLength(3);
+
+    // The owner revokes the phone while its drop is storing a screenshot: nothing is filed.
+    const upload = f.evidence.upload.bind(f.evidence);
+    vi.spyOn(f.evidence, "upload").mockImplementationOnce(async (...args) => {
+      const revoked = await f.service.app.request("/v1/devices/phone/revoke", {
+        method: "POST",
+        headers: { authorization: `Bearer ${OWNER}` },
+      });
+      expect(revoked.status).toBe(200);
+      return upload(...args);
+    });
+    await expect(phone.feedDrop!({ ...request, idempotencyKey: "phone-revoked-mid-drop" })).rejects.toThrow(
+      "HTTP 403",
+    );
+    expect(await listing(join(f.orchard.repo, ".clankie/work"))).toHaveLength(3);
+    expect(f.wakes()).toHaveLength(1);
   } finally {
     const closed = once(server, "close");
     server.close();

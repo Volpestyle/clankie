@@ -185,6 +185,8 @@ export function createFeedDrops(options: FeedDropsOptions) {
             message:
               "Attachments can't be stored on this Clankie right now, so the drop was not filed. Try again.",
           };
+        // The owner may have revoked this device while the request waited.
+        await caller.guard();
         try {
           for (const attachment of stored)
             evidence.push(await storeAttachment(attachment, key, request.projectId, caller));
@@ -198,15 +200,19 @@ export function createFeedDrops(options: FeedDropsOptions) {
       }
       let filed: Awaited<ReturnType<typeof options.workItems.fileDrop>>;
       try {
-        filed = await options.workItems.fileDrop(target, {
-          key,
-          request: requestHash,
-          projectId: request.projectId,
-          title: request.title ?? dropTitle(request, evidence),
-          body: request.body ?? "",
-          evidence,
-          source: caller.source,
-        });
+        filed = await options.workItems.fileDrop(
+          target,
+          {
+            key,
+            request: requestHash,
+            projectId: request.projectId,
+            title: request.title ?? dropTitle(request, evidence),
+            body: request.body ?? "",
+            evidence,
+            source: caller.source,
+          },
+          caller.guard,
+        );
       } catch (error) {
         if (error instanceof DropConflictError)
           return { outcome: "refused", reason: "idempotency_conflict", message: error.message };
