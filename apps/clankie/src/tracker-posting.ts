@@ -182,8 +182,8 @@ const StoredSchema = TrackerPostSchema.extend({
 type Stored = z.infer<typeof StoredSchema>;
 const StateSchema = z.object({ posts: z.array(StoredSchema).max(2000) }).strict();
 
-export const POST_IT = "Post it";
-export const SEND_IT_BACK = "Send it back";
+const POST_IT = "Post it";
+const SEND_IT_BACK = "Send it back";
 const KEEP_DECIDED_MS = 30 * 24 * 60 * 60 * 1000;
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const TRACKER_NAMES = { linear: "Linear", github: "GitHub issues" } as const;
