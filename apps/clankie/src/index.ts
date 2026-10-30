@@ -246,11 +246,15 @@ import {
 import { EvidenceStore } from "./evidence-store.ts";
 import { startTrackerOwnerLoop } from "./tracker-owner-loop.ts";
 import {
+  trackerProjectForPrincipal,
   trackerRepoForPrincipal,
   trackerRoleForPrincipal,
   trackerRunner,
   trackerWorkerNameForPrincipal,
 } from "./tracker-runner.ts";
+import { createTrackerPosting, trackerPostingExecutor } from "./tracker-posting.ts";
+import { projectLeadConversation } from "./feed-drops.ts";
+import { recordDropPosted } from "@clankie/work-items";
 import { createWorkItemsService } from "./work-items.ts";
 import {
   collectLinearImport,
@@ -643,7 +647,48 @@ const linearApiTracker = createLinearApiTracker({
   credentials: operatorCredentialStore,
   requestBudget: linearRequestBudget,
 });
+// "Posting to your tracker" (ADR 0302): every outward tracker write by Clankie or a worker
+// passes this one check. Its captain, tracker routes and listener are bound once they exist.
+const trackerPosting = createTrackerPosting({
+  statePath: join(stateRoot, "tracker", "posts.json"),
+  settings: settingsStore,
+  localMachineId: "local",
+  workerProject: (principalId) =>
+    trackerProjectForPrincipal(principalId, (fleet, pane) =>
+      captain.projectHireMembershipCandidate(fleet, pane),
+    ),
+  readLinear: async (tool, args) => {
+    const result = await mcpHost.call({
+      lane: "operator",
+      server: "linear",
+      tool,
+      arguments: args,
+      resultMode: "data",
+    });
+    if (result.outcome !== "ok" || result.isError) throw new Error(`Linear ${tool} is unreadable`);
+    return JSON.parse(result.content) as unknown;
+  },
+  leadConversation: async (projectId) => {
+    const listed = await captain.serveOperatorConversation({ op: "list", schemaVersion: 1 });
+    if (listed.op !== "list") return undefined;
+    const main = listed.conversations.find(
+      (conversation) => conversation.scope.kind === "global" && conversation.isDefault,
+    )?.conversationId;
+    return (
+      (projectId === undefined
+        ? undefined
+        : projectLeadConversation(await settingsStore.load(), projectId, listed.conversations)) ?? main
+    );
+  },
+  requestOwnerAsk: (conversationId, draft, publicationId) =>
+    captain.requestOwnerAsk(conversationId, draft, publicationId),
+  readOwnerAsk: (requestId) => captain.readOwnerAsk(requestId),
+  observeQuestionResolutions: (listener) => captain.observeQuestionResolutions(listener),
+  wakeConversation: (owner, text) => captain.wakeConversation(owner, text),
+  logger,
+});
 const mcpHost = createMcpHost({
+  trackerPosting,
   googleApps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env).google ?? {},
   linearApiTracker,
   linearRequestBudget,
@@ -919,6 +964,12 @@ const workItems = createWorkItemsService({
       : createLocalTracker({ ...builtInTrackerOptions, assertIssueWrite }),
   mcpHost,
   githubToken: () => githubConnectionToken(operatorCredentialStore),
+  posting: trackerPosting,
+});
+trackerPosting.bind({
+  execute: trackerPostingExecutor({ mcpHost, workItems }),
+  repoTarget: (repo) => workItems.postingTarget(repo),
+  afterPosted: (drop, posted) => recordDropPosted(drop.root, drop.key, posted),
 });
 // Read-only capability discovery on this host and registered Windows fleets.
 const computerUseHarnesses = cachedComputerUseHarnesses(async () => {
@@ -1687,6 +1738,8 @@ const linearWakeReads = new LinearWakeReadReceipts({
   ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
 });
 retireLinearNotifications(join(stateRoot, "linear-notifications.json"), (message) => logger.info(message));
+// Posting to your tracker (ADR 0302): the owner's answers to waiting posts.
+trackerPosting.start();
 // Built-in tracker owner loop: owner-closure items ask the owner to check them, the answer
 // verifies or sends back, and owner activity wakes the routed chat. In-process only.
 void startTrackerOwnerLoop({
@@ -2368,6 +2421,7 @@ const clankie = await createClankieApp({
   captainSeats,
   agentSessions,
   workItems,
+  trackerPosting,
   workerMcp,
   deployHolds,
   ...(integration === undefined ? {} : { integration }),
