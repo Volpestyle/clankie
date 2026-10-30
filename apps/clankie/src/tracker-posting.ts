@@ -300,7 +300,10 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
     const same = (left: string | undefined, refs: readonly string[]) =>
       left !== undefined && refs.some((ref) => ref.toLowerCase() === left.toLowerCase());
-    /** The projects a Linear project or, for a team-wide convention, a team names. */
+    /**
+     * The projects a Linear project or a team names. A team-wide convention holds every issue
+     * on its team, those in a Linear project too; with a project but no known team, every one.
+     */
     const named = async (projectRefs: readonly string[], teamRefs: readonly string[]) => {
       const matched: string[] = [];
       if (projectRefs.length === 0 && teamRefs.length === 0) return matched;
@@ -309,11 +312,11 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         const byProject =
           same(project.linearProjectBinding?.projectId, projectRefs) ||
           conventions.some((entry) => same(entry.linear?.project, projectRefs));
-        const byTeam =
-          projectRefs.length === 0 &&
-          conventions.some(
-            (entry) => entry.linear?.project === undefined && same(entry.linear?.team, teamRefs),
-          );
+        const byTeam = conventions.some(
+          (entry) =>
+            entry.linear?.project === undefined &&
+            (teamRefs.length === 0 || same(entry.linear?.team, teamRefs)),
+        );
         if (byProject || byTeam) matched.push(project.id);
       }
       return matched;
@@ -321,19 +324,22 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     /**
      * Linear takes a project or team by name, slug or key as well as by id: each ref reads
      * as every name it has. Undefined when one can't be read, since it could be any project.
+     * A project's teams are added to `teams`, since a team-wide convention holds its issues.
      */
-    const aliases = async (kind: "project" | "team", refs: readonly string[]) => {
+    type Named = { id?: unknown; name?: unknown; key?: unknown; slugId?: unknown };
+    const namesOf = (found: Named | null | undefined) =>
+      [found?.id, found?.name, found?.key, found?.slugId].map(text).filter((alias) => alias !== undefined);
+    const aliases = async (kind: "project" | "team", refs: readonly string[], teams: string[] = []) => {
       const all = [...refs];
       for (const ref of refs) {
         if (!options.readLinear) return undefined;
         try {
           const found = (await options.readLinear(kind === "project" ? "get_project" : "get_team", {
             query: ref,
-          })) as { id?: unknown; name?: unknown; key?: unknown; slugId?: unknown } | null;
-          for (const value of [found?.id, found?.name, found?.key, found?.slugId]) {
-            const alias = text(value);
-            if (alias !== undefined) all.push(alias);
-          }
+          })) as (Named & { teams?: Named[] | { nodes?: Named[] } | null }) | null;
+          all.push(...namesOf(found));
+          const projectTeams = Array.isArray(found?.teams) ? found.teams : (found?.teams?.nodes ?? []);
+          teams.push(...projectTeams.flatMap(namesOf));
         } catch {
           return undefined;
         }
@@ -341,16 +347,18 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       return all;
     };
     // Where the write sends it...
+    const projectTeams: string[] = [];
     const projectRefs = await aliases(
       "project",
       [text(args.project), text(args.projectId)].filter((ref) => ref !== undefined),
+      projectTeams,
     );
     const teamRefs = await aliases(
       "team",
       [text(args.team), text(args.teamId)].filter((ref) => ref !== undefined),
     );
     if (projectRefs === undefined || teamRefs === undefined) return everyProject;
-    const targeted = await named(projectRefs, teamRefs);
+    const targeted = await named(projectRefs, [...teamRefs, ...projectTeams]);
     const saveIssue = route.kind !== "work" && route.tool === "save_issue";
     const issueRef = (saveIssue ? text(args.id) : undefined) ?? text(args.issueId) ?? text(args.issue);
     // Any other existing record (a comment, a reply's parent, a project update, a document)

@@ -1156,6 +1156,35 @@ it("a project or team named by its name or slug meets that project's setting", a
   expect(f.mutations("issueCreate")).toBe(0);
 });
 
+it("a team-wide project's setting covers that team's issues that sit in another project", async () => {
+  const f = await fixture({ meadow: true });
+  const binding = (await f.host.account("linear", "operator")).binding;
+  const hired = (args: Record<string, unknown>) =>
+    f.host.call({
+      lane: "operator",
+      server: "linear",
+      tool: "save_issue",
+      arguments: args,
+      delegation: { binding, grantId: "grant-garden", principalId: "project:garden", workId: "work-garden" },
+    });
+  // The garden (go ahead) works in its own Linear project; the meadow tracks the whole team.
+  await f.setPosting("garden", "allow");
+  await f.setPosting("meadow", "read_only");
+  for (const args of [
+    // An issue of the garden's project, on the meadow's team.
+    { id: ISSUE_ID, title: "Retitled in the garden" },
+    // A new one in the garden's project, named with its team or by the project alone.
+    { title: "New in the garden", team: "VUH", project: PROJECT_ID },
+    { title: "New in the garden", project: PROJECT_ID },
+  ]) {
+    const result = await hired(args);
+    expect(result).toMatchObject({ outcome: "refused", reason: "posting_refused" });
+    if (result.outcome !== "refused") throw new Error("expected a refusal");
+    expect(result.detail).toContain("Posting to Linear is read only for Meadow");
+  }
+  expect(f.mutations("issueCreate") + f.mutations("issueUpdate")).toBe(0);
+});
+
 it("an owner check cut off before its question was saved is asked again on restart", async () => {
   const id = randomUUID();
   const body = "Cut off mid-ask.";
