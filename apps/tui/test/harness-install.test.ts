@@ -149,3 +149,38 @@ it("gives only the source manager the prepared marketplace and selected native p
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it.each([
+  ["updated", false],
+  ["failed", true],
+  ["declined", true],
+] as const)(
+  "after an update's refresh of a linked profile ends %s, the install asks about that profile only if it didn't complete",
+  async (status, askedAgain) => {
+    const home = await mkdtemp(join(tmpdir(), "clankie-harness-ask-new-"));
+    const linked = join(home, ".claude"),
+      added = join(home, ".claude-new");
+    await mkdir(join(linked, "plugins"), { recursive: true });
+    await writeFile(join(linked, "plugins", "known_marketplaces.json"), JSON.stringify({ clankie: {} }));
+    await mkdir(added);
+    try {
+      const asked: (string | undefined)[] = [];
+      await installHarnessBridges({
+        prepareSkills: async () => {},
+        repoRoot: "/fixture/clankie",
+        env: { HOME: home },
+        execute: async (command) => {
+          if (command === "codex") throw new Error("absent");
+        },
+        refreshed: [{ harness: "claude", profile: linked, status, detail: "refresh" }],
+        consent: async (_harness, _detail, context) => {
+          asked.push(context?.profile);
+          return false;
+        },
+      });
+      expect(asked).toEqual(askedAgain ? [linked, added] : [added]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+);
