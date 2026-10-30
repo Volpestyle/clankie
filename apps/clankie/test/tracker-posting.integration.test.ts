@@ -17,6 +17,7 @@ import {
   type FeedDropResult,
   type FeedPage,
   type OperatorConversationServiceRequest,
+  type WorkItemWriteCommand,
 } from "@clankie/protocol";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import {
@@ -258,6 +259,10 @@ async function fixture(
   const workItems = createWorkItemsService({
     stateDirectory: join(root, "work-state"),
     projects: async () => (await settings.load()).projects,
+    projectsFence: async () => {
+      const snapshot = await settings.loadFenced();
+      return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
+    },
     localMachineId: "local",
     mcpHost: host,
     run: defaultRun,
@@ -987,4 +992,43 @@ describe("an issue that belongs to another project", () => {
     expect(f.mutations("issueUpdate")).toBe(0);
     expect(f.mutations("attachment")).toBe(0);
   });
+});
+
+it("a local caller's work item write meets the posting setting, and a held one goes as asked", async () => {
+  const f = await fixture();
+  await f.workItems.callTracker("list_issues", {}, { repo: f.garden, local: true });
+  const { repos } = (await f.workItems.handle({ action: "repos" }, true)) as {
+    repos: { id: string; root: string }[];
+  };
+  const repoId = repos.find((entry) => entry.root === f.garden)!.id;
+  const write = async (command: WorkItemWriteCommand) => {
+    const result = await f.dispatch({
+      op: "work_item_write",
+      schemaVersion: 1,
+      request: { repoId, itemId: ISSUE_ID, requestId: randomUUID(), command },
+    });
+    if (result.op !== "work_item_write") throw new Error(`unexpected ${result.op}`);
+    return result.receipt;
+  };
+  const labelWrites = () => f.mutations("issueUpdate") + f.mutations("issueAddLabel");
+  // Read only: the operator bearer is any local caller, so Clankie would be posting.
+  await f.setPosting("garden", "read_only");
+  expect(await write({ action: "remove_label", label: "Urgent" })).toMatchObject({
+    outcome: "refused",
+    message: expect.stringContaining("Posting to Linear is read only for Garden"),
+  });
+  expect(labelWrites()).toBe(0);
+  // Ask me: the write waits for the owner and goes, as asked, once he says yes.
+  await f.setPosting("garden", "ask");
+  const held = await write({ action: "remove_label", label: "Urgent" });
+  expect(held).toMatchObject({ outcome: "refused", message: expect.stringMatching(/post [0-9a-f-]{36}/u) });
+  expect(labelWrites()).toBe(0);
+  const id = /post ([0-9a-f-]{36})/u.exec(held.message)![1]!;
+  await f.answer("Post it");
+  await f.settle(() => f.posting.read(id)?.state === "posted");
+  expect(labelWrites()).toBe(1);
+  // Go ahead lets it straight through.
+  await f.setPosting("garden", "allow");
+  expect(await write({ action: "add_label", label: "Urgent" })).toMatchObject({ outcome: "applied" });
+  expect(labelWrites()).toBe(2);
 });

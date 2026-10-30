@@ -38,8 +38,9 @@ Each project has one setting, **Posting to your tracker**
   always writable. Reads are never held.
 - **The owner's writes are his.** The owner's app, `clankie work owner` and
   `/v1/tracker/owner/call` are never held. The operator bearer on
-  `/v1/tracker/call` and `clankie work` counts as Clankie, as it already does for
-  attribution.
+  `/v1/tracker/call`, `clankie work` and a work item write over operator
+  dispatch counts as Clankie, as it already does for attribution. A held work
+  item write goes later as the same `work update`.
 - **One check point.** Every outward write passes the same admission in
   `apps/clankie/src/tracker-posting.ts`: Linear tool calls through the MCP host
   (the lead's, a delegated worker's, internal callers'), repo-routed tracker

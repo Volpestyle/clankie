@@ -188,6 +188,9 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       owner: z.string().trim().min(1).max(128).nullable().optional(),
       title: z.string().trim().min(1).max(200).optional(),
       dependsOn: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
+      addDependsOn: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
+      addLabels: z.array(z.string().trim().min(1).max(128)).max(50).optional(),
+      removeLabels: z.array(z.string().trim().min(1).max(128)).max(50).optional(),
       check: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       uncheck: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       addCriteria: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
@@ -350,6 +353,9 @@ const workPatch = (request: Extract<WorkRequest, { action: "update" }>): WorkIte
   ...(request.owner === undefined ? {} : { owner: request.owner }),
   ...(request.title === undefined ? {} : { title: request.title }),
   ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
+  ...(request.addDependsOn === undefined ? {} : { addDependsOn: request.addDependsOn }),
+  ...(request.addLabels === undefined ? {} : { addLabels: request.addLabels }),
+  ...(request.removeLabels === undefined ? {} : { removeLabels: request.removeLabels }),
   ...(request.check === undefined ? {} : { check: request.check }),
   ...(request.uncheck === undefined ? {} : { uncheck: request.uncheck }),
   ...(request.addCriteria === undefined ? {} : { addCriteria: request.addCriteria }),
@@ -1058,6 +1064,29 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         );
         if (previous) return previous;
         begun = true;
+        // The operator bearer is any local caller, so on an outward tracker this is Clankie
+        // posting: it meets the project's setting, and a held write goes later as this same
+        // `work update` (ADR 0302). The owner's own app is exempt.
+        if (authority.principal.kind !== "device")
+          await checkWorkPosting(
+            {
+              action: "update",
+              // Its local checkout: a project's reference is read-only to `work update`.
+              repo: target.path,
+              id: request.itemId,
+              ...(request.command.action === "assign"
+                ? { owner: request.command.owner }
+                : request.command.action === "add_label"
+                  ? { addLabels: [request.command.label] }
+                  : request.command.action === "remove_label"
+                    ? { removeLabels: [request.command.label] }
+                    : { addDependsOn: [request.command.id] }),
+            },
+            target.convention,
+            target.path,
+            undefined,
+            undefined,
+          );
         const beforeWrite = () => {
           free?.assertCurrent();
           if (!authority.current()) throw new Error("Owner authority expired or was revoked.");
@@ -1200,11 +1229,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             : receipt(
                 request.requestId,
                 "refused",
-                error instanceof Error &&
-                  (error.name === "WorkItemScopeError" ||
-                    /^(Owner authority|Saved work|Connected .* account|An item cannot|No work item|Work item .*outside|Role label|This project|Project work|Connect GitHub)/u.test(
-                      error.message,
-                    ))
+                (error instanceof WorkRequestError &&
+                  (error.code === "posting_refused" || error.code === "posting_held")) ||
+                  (error instanceof Error &&
+                    (error.name === "WorkItemScopeError" ||
+                      /^(Owner authority|Saved work|Connected .* account|An item cannot|No work item|Work item .*outside|Role label|This project|Project work|Connect GitHub)/u.test(
+                        error.message,
+                      )))
                   ? error.message
                   : "This saved work tracker cannot accept the write. Read the work again and check its connection.",
               );
