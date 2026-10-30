@@ -382,9 +382,18 @@ describe("Claude connector MCP endpoint", () => {
       "list_agents",
       "read_agent",
       "message_agent",
+      "list_places",
       "start_agent",
+      "answer_prompt",
       "post_note",
       "read_notes",
+      "read_inbox",
+      "read_reports",
+      "acknowledge_reports",
+      "list_issues",
+      "read_issue",
+      "save_issue",
+      "comment_issue",
       "clankie_guide",
     ]);
 
@@ -495,6 +504,14 @@ describe("Claude connector MCP endpoint", () => {
       status: "places",
       places: [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }],
     });
+    const startsBefore = relay.seen.filter((request) => request.op === "start_agent").length;
+    expect(JSON.parse(textOf(await client.callTool({ name: "list_places", arguments: {} })))).toEqual({
+      places: [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }],
+    });
+    // Listing asks the service for places only: no machine, no directory, nothing to start.
+    expect(relay.seen.filter((request) => request.op === "start_agent").slice(startsBefore)).toEqual([
+      { op: "start_agent", schemaVersion: 1 },
+    ]);
     const started = JSON.parse(
       textOf(
         await client.callTool({

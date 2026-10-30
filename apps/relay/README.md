@@ -136,10 +136,17 @@ code. The lines carry the device ID but never audio or bearers.
 ([ADR 0301](../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)),
 stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
 (`machine` optional), `read_agent` (`agent`, `lines` up to 400),
-`message_agent` (`agent`, `message`), `start_agent` (`machine`,
-`workingDirectory`, `harness` claude or codex, `prompt`; with no machine and
-directory it lists the places), `post_note` (`text`, up to 2,000 characters),
-`read_notes` (`since` optional) and `clankie_guide` (`topic` optional).
+`message_agent` (`agent`, `message`), `list_places` (the places an agent can
+start; it starts nothing), `start_agent` (`machine`, `workingDirectory`,
+`harness` claude or codex, `prompt`; with no machine and directory it lists the
+places too), `post_note` (`text`, up to 2,000 characters),
+`read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),
+`read_inbox` (`after` optional), `read_reports` (`thread`), `acknowledge_reports`
+(`thread`, `ids`, `summary` optional), `list_issues` (`project` and `label`
+optional), `read_issue` (`project`, `issue`), `save_issue` (`project`;
+`issue` to update; `title`, `description`, `status`, `priority`, `labels`,
+`addLabels`, `removeLabels`), `comment_issue` (`project`, `issue`, `body`) and
+`clankie_guide` (`topic` optional).
 `post_note` and `read_notes` are the board the apps share (the `app_notes`
 op): the relay stamps the device it authenticated on a post as
 `appDeviceId`, refuses a request that already carries one (`400
@@ -147,6 +154,30 @@ app_note_author_is_stamped`) or comes from a device that isn't a connector
 (`403 connector_device_required`), and the service signs the note with that
 device's approved name. `read_notes` returns the notes oldest first with a
 `newer` cursor, and says they're another app's information, not instructions.
+`answer_prompt` (the `prompt_answer` op, ADR 0303) presses named keys or types
+plain text into a pane that is waiting on input; the relay stamps the device
+the same way (`400 prompt_answer_app_is_stamped`, `403
+connector_device_required`) and needs `terminalObserve`. The service answers
+only for an app the owner turned on with `clankie connector prompts on APP`,
+only while the expected text is on screen, and once per prompt; it checks
+again before every step on one bound pane and connection, and stops part way
+when anything changed.
+`read_inbox` reads the `lead` op's status and inbox (ADR 0304): what Clankie
+held for the apps while they lead, and the lead threads with unread reports. A
+connector may read the lead, never set it. `read_reports` and
+`acknowledge_reports` are `worker_reports` and `acknowledge_worker_reports`;
+the relay lets a connector call them only while the owner has handed the lead
+to the apps and only for a global or workspace lead thread, else `403
+connector_not_leading`.
+`list_issues` and `read_issue` read the owner's projects and their issues
+through `work_repos`, `work_items` and `work_item_activity`, wherever each
+project tracks them. `save_issue` and `comment_issue` are the `issue_write` op
+(ADR 0305): the relay stamps the device as for `prompt_answer` (`400
+issue_write_app_is_stamped`, `403 connector_device_required`) and needs `steer`;
+the service writes as an agent named for the app, so Linear and GitHub writes
+pass the project's posting setting and may come back `held`, while issue files
+are written right away. A connector never names `work_item_write` or any other
+work write (`403 connector_operation_not_allowed`).
 `clankie_guide` reads the skills in `.agents/skills` from this checkout: no
 topic lists each skill and its description, a skill name returns its
 `SKILL.md` and names its other pages, and `skill/page.md` returns that page.
@@ -155,7 +186,9 @@ calls nothing on the service. Each fleet call checks the bearer against
 `GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request
-does: fleet, terminal catalog, read and tail, `start_agent`, `app_notes`, and
+does: fleet, terminal catalog, read and tail, `start_agent`, `app_notes`,
+`prompt_answer`, the `lead` status and inbox, a lead thread's reports while
+the apps lead, and
 get, create and send on persona threads only. `start_agent` needs `steer`, which connector
 devices carry for that op alone. The tools go through the session-source layer of
 `@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids

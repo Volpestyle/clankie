@@ -1,4 +1,7 @@
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
+import type { IssueWriteResult, PromptAnswerResult } from "@clankie/protocol/connector";
+import { writeIssueForApp } from "../connector-issue-writes.ts";
+import type { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import {
   TRACKER_REQUEST_BUDGET_PATH,
   TrackerRequestBudgetReportSchema,
@@ -20,6 +23,7 @@ import {
   FeedCheckRequestSchema,
   feedCheckHasOneSource,
   operatorAutonomyCommandRequiresOwner,
+  operatorLeadCommandRequiresOwner,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceRequestSchema,
@@ -77,6 +81,8 @@ export interface RegisterConversationRoutesContext {
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly devices: DeviceRegistry;
+  /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
+  readonly promptAnswers?: ConnectorPromptAnswers;
   readonly clock: () => Date;
   readonly recordEvent: (
     type: string,
@@ -658,6 +664,87 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return reply({ outcome: "unavailable", message: "The note board can’t be reached here." });
       }
     }
+    if (parsed.success && parsed.data.op === "prompt_answer") {
+      // Answering a prompt in an agent's pane (ADR 0303). Like a note, it reaches the
+      // service only through the relay's captain bearer, which stamps the connector
+      // device it authenticated; the app is named from that device's own record, and
+      // only an app the owner turned answering on for may press anything.
+      const request = parsed.data;
+      const relay = () =>
+        captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const app = () => {
+        if (request.appDeviceId === undefined) return undefined;
+        const record = ctx.devices.get(request.appDeviceId);
+        return record?.status === "active" && record.scope === "connector" ? record : undefined;
+      };
+      const reply = (result: PromptAnswerResult) =>
+        context.json({ op: "prompt_answer", schemaVersion: 1, result });
+      const named = app();
+      if (!relay() || named === undefined) return context.json({ error: "app_author_required" }, 403);
+      if (ctx.promptAnswers?.allowed(named.deviceId) !== true)
+        return reply({
+          outcome: "refused",
+          message: `The owner hasn't turned on answering prompts for ${named.name}. The owner turns it on at the Mac with: clankie connector prompts on "${named.name}"`,
+        });
+      if (!ctx.dependencies.captain.answerPrompt)
+        return reply({
+          outcome: "unavailable",
+          message: "Answering prompts isn't available on this Clankie.",
+        });
+      try {
+        return reply(
+          await ctx.dependencies.captain.answerPrompt({
+            app: named.name,
+            // Rechecked before the first key: a revoked app or a switch turned off presses nothing.
+            current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
+            terminalId: request.terminalId,
+            expect: request.expect,
+            steps: request.steps,
+          }),
+        );
+      } catch (error) {
+        logger.warn({ error }, "Prompt answer failed");
+        return reply({
+          outcome: "uncertain",
+          message: "The answer may or may not have reached the agent. Read its screen before trying again.",
+        });
+      }
+    }
+    if (parsed.success && parsed.data.op === "issue_write") {
+      // A connected app writing an issue (ADR 0305): only through the relay's captain
+      // bearer, which stamps the connector device it authenticated. The app is named from
+      // that device's own record, and Linear or GitHub writes pass the project's setting.
+      const request = parsed.data;
+      const relay = () =>
+        captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const app = () => {
+        if (request.appDeviceId === undefined) return undefined;
+        const record = ctx.devices.get(request.appDeviceId);
+        return record?.status === "active" && record.scope === "connector" ? record : undefined;
+      };
+      const reply = (result: IssueWriteResult) =>
+        context.json({ op: "issue_write", schemaVersion: 1, result });
+      const named = app();
+      if (!relay() || named === undefined) return context.json({ error: "app_author_required" }, 403);
+      if (ctx.dependencies.workItems === undefined)
+        return reply({ outcome: "refused", message: "Work tracking is not running on this Clankie." });
+      try {
+        return reply(
+          await writeIssueForApp(ctx.dependencies.workItems, {
+            repoId: request.repoId,
+            write: request.write,
+            app: { deviceId: named.deviceId, name: named.name },
+            current: () => app() !== undefined,
+          }),
+        );
+      } catch (error) {
+        logger.warn({ error }, "Connected app's issue write failed");
+        return reply({
+          outcome: "uncertain",
+          message: "It may or may not have been written. Read the issue before trying again.",
+        });
+      }
+    }
     if (parsed.success && parsed.data.op === "evidence_fetch") {
       // Media stays in the device's authenticated relay. Operator/captain tokens are not device authority.
       const ownerDevice = () =>
@@ -770,7 +857,9 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     )
       return context.json({ error: "operator_authority_required" }, 403);
     const goalOwnerOp =
-      parsed.data.op === "autonomy" && operatorAutonomyCommandRequiresOwner(parsed.data.command);
+      (parsed.data.op === "autonomy" && operatorAutonomyCommandRequiresOwner(parsed.data.command)) ||
+      // Handing the lead back restarts Clankie's own turns (ADR 0304).
+      (parsed.data.op === "lead" && operatorLeadCommandRequiresOwner(parsed.data.command));
     if (goalOwnerOp && !owner) return context.json({ error: "goal_owner_required" }, 403);
     const ownerHireOp = parsed.data.op === "spawn_seat" && parsed.data.seat.ownerWork !== undefined;
     if (ownerHireOp && !owner) return context.json({ error: "owner_hire_required" }, 403);
@@ -797,6 +886,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         goalOwnerOp ||
         questionOp ||
         workerOwnerOp ||
+        // The owner reads and sets who leads with their own credential.
+        parsed.data.op === "lead" ||
         parsed.data.op === "send" ||
         parsed.data.op === "set_persona_role")
     ) {

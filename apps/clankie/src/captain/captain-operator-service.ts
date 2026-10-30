@@ -3,6 +3,7 @@ import {
   OPERATOR_SEAT_HARNESSES,
   operatorFleetHome,
   operatorAutonomyCommandRequiresOwner,
+  operatorLeadCommandRequiresOwner,
   type OperatorConversation,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
@@ -22,6 +23,7 @@ import { splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import type { createAgentWorkStore } from "./agent-work.ts";
 import { AutonomyStore } from "./autonomy.ts";
+import { LeadStore } from "./lead.ts";
 import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
 import { captainComposerCatalog, composerCatalogResponse, seatComposerCatalog } from "./composer-catalog.ts";
 import {
@@ -72,6 +74,7 @@ export interface CreateOperatorServiceContext {
   readonly terminals: RuntimeTerminals;
   readonly conversations: ConversationStore;
   readonly autonomy: AutonomyStore;
+  readonly lead: LeadStore;
   readonly settings: () => Promise<ClankieSettings>;
   readonly workingDirectory: string;
   readonly options: CaptainOptions;
@@ -215,6 +218,42 @@ export function createOperatorService(
         schemaVersion: 1,
         status,
       });
+    }
+    if (request.op === "lead") {
+      const command = request.command;
+      const requiresOwner = operatorLeadCommandRequiresOwner(command);
+      // Handing the lead back restarts Clankie's own turns: the owner's, rechecked at the write.
+      if (requiresOwner && (!authority || !authority.current() || !(await authority.authorize())))
+        throw new Error("goal_owner_required");
+      if (command.action === "set") {
+        const status = ctx.lead.set(command.lead);
+        ctx.fleetChanges.touch();
+        return { op: "lead", schemaVersion: 1, result: { status } };
+      }
+      if (command.action === "status")
+        return { op: "lead", schemaVersion: 1, result: { status: ctx.lead.status() } };
+      const page = ctx.lead.inbox(command.after, command.limit);
+      const counts = new Map<string, number>();
+      for (const report of ctx.conversations.inboundReports())
+        counts.set(report.conversationId, (counts.get(report.conversationId) ?? 0) + 1);
+      const unreadReports = [...counts]
+        .filter(([conversationId]) => {
+          const kind = ctx.conversations.conversation(conversationId)?.scope.kind;
+          return kind === "global" || kind === "workspace";
+        })
+        .map(([conversationId, count]) => ({ conversationId, count }))
+        .slice(0, 256);
+      return {
+        op: "lead",
+        schemaVersion: 1,
+        result: {
+          status: ctx.lead.status(),
+          items: page.items,
+          next: page.next,
+          ...(page.more ? { more: true } : {}),
+          ...(unreadReports.length === 0 ? {} : { unreadReports }),
+        },
+      };
     }
     if (request.op === "composer_catalog") {
       const conversation = ctx.conversations.conversation(request.conversationId);
@@ -1095,6 +1134,7 @@ export function createOperatorService(
       request.op === "lead_chats" ||
       request.op === "fleet_room" ||
       request.op === "app_notes" ||
+      request.op === "prompt_answer" ||
       request.op === "feed_list" ||
       request.op === "feed_drop" ||
       request.op === "feed_check"
@@ -1112,7 +1152,8 @@ export function createOperatorService(
       request.op === "work_media" ||
       request.op === "work_items" ||
       request.op === "work_item_write" ||
-      request.op === "work_item_write_receipt"
+      request.op === "work_item_write_receipt" ||
+      request.op === "issue_write"
     )
       throw new Error("Work items are served by the authenticated app boundary");
     if (request.op === "subagent_replay") {

@@ -1,5 +1,12 @@
 import { LeadChatsResultSchema, type LeadChatsResult } from "./lead-chats.ts";
 import {
+  IssueWriteResultSchema,
+  IssueWriteSchema,
+  PROMPT_ANSWER_EXPECT_MAX,
+  PromptAnswerResultSchema,
+  PromptAnswerStepSchema,
+} from "./connector.ts";
+import {
   AppNotesRequestSchema,
   AppNotesResultSchema,
   FleetRoomRequestSchema,
@@ -145,6 +152,8 @@ import {
   OperatorAgentPersonaIdSchema,
   OperatorConversationEventRefSchema,
   OperatorAutonomyCommandSchema,
+  OperatorLeadCommandSchema,
+  OperatorLeadResultSchema,
   OperatorConversationCursorSchema,
   OPERATOR_FLEET_WAIT_MS_MAX,
   StateOperatorAgentStanceSchema,
@@ -531,6 +540,39 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   FleetRoomRequestSchema,
   /** The app note board (ADR 0301): connector apps post through the relay; the owner and apps read. */
   AppNotesRequestSchema,
+  z
+    .object({
+      /**
+       * Answer the prompt open in an agent's pane (ADR 0303): a menu, a permission
+       * prompt or a question. Only an app signed in to the connector, through the
+       * relay, once the owner turned it on for that app. The steps run only while
+       * the agent waits on input and `expect` is still on its screen.
+       */
+      op: z.literal("prompt_answer"),
+      schemaVersion: z.literal(1),
+      terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+      /** Text the app saw on the prompt, such as the option it picks; it must still be showing. */
+      expect: z.string().trim().min(1).max(PROMPT_ANSWER_EXPECT_MAX),
+      steps: z.array(PromptAnswerStepSchema).min(1).max(12),
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /**
+       * A connected app writes an issue in one of the owner's projects (ADR 0305), only
+       * through the relay, which stamps the app's device. Linear and GitHub writes pass
+       * the project's "Posting to your tracker" setting.
+       */
+      op: z.literal("issue_write"),
+      schemaVersion: z.literal(1),
+      repoId: WorkRepoSchema.shape.id,
+      write: IssueWriteSchema,
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
   EvidenceDeviceFetchRequestSchema.extend({
     op: z.literal("evidence_fetch"),
     schemaVersion: z.literal(1),
@@ -605,6 +647,10 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       conversationId: OperatorConversationIdSchema,
       command: OperatorAutonomyCommandSchema,
     })
+    .strict(),
+  /** Who leads Clankie's lead threads (ADR 0304). */
+  z
+    .object({ op: z.literal("lead"), schemaVersion: z.literal(1), command: OperatorLeadCommandSchema })
     .strict(),
   z
     .object({
@@ -947,6 +993,12 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({ op: z.literal("app_notes"), schemaVersion: z.literal(1), result: AppNotesResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("prompt_answer"), schemaVersion: z.literal(1), result: PromptAnswerResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("issue_write"), schemaVersion: z.literal(1), result: IssueWriteResultSchema })
     .strict(),
   z
     .object({
@@ -1314,6 +1366,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       status: OperatorAutonomyStatusSchema,
     })
     .strict(),
+  z.object({ op: z.literal("lead"), schemaVersion: z.literal(1), result: OperatorLeadResultSchema }).strict(),
   z
     .object({
       op: z.literal("roster"),

@@ -188,6 +188,26 @@ export function routeHerdrFleets(
       const found = await runner.resolveTerminal(id);
       return found === undefined ? undefined : qualify(fleet, found);
     },
+    bindPane: async (terminalId) => {
+      // Route once: a fleet's runner refuses every call once its connection
+      // changes, so a later send can't reach a new endpoint (ADR 0303).
+      const { runner, id, fleet } = await route(terminalId);
+      if (!runner.readPane || !runner.sendKeys || !runner.sendText)
+        throw new Error("Herdr key presses are unavailable");
+      const found = await runner.resolveTerminal(id);
+      if (found === undefined) return undefined;
+      const paneId = found.paneId;
+      return {
+        pane: qualify(fleet, found),
+        resolve: async () => {
+          const now = await runner.resolveTerminal(id);
+          return now === undefined ? undefined : qualify(fleet, now);
+        },
+        readScreen: () => runner.readPane!(paneId, "visible", "text"),
+        sendKeys: (keys) => runner.sendKeys!(paneId, keys),
+        sendText: (text) => runner.sendText!(paneId, text),
+      };
+    },
     wait: (target, signal) => onTarget(target, (runner, id) => runner.wait(id, signal)),
     waitForChange: (target, status, signal) =>
       onTarget(target, (runner, id) =>
@@ -217,6 +237,11 @@ export function routeHerdrFleets(
       const { runner, id } = await route(paneId);
       if (!runner.sendKeys) throw new Error("Herdr key presses are unavailable");
       await runner.sendKeys(id, keys);
+    },
+    sendText: async (paneId, text) => {
+      const { runner, id } = await route(paneId);
+      if (!runner.sendText) throw new Error("Herdr text input is unavailable");
+      await runner.sendText(id, text);
     },
     paneProcesses: async (paneId) => {
       const { runner, id } = await route(paneId);

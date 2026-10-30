@@ -51,6 +51,7 @@ import {
 import { supportReadOperationAllowed } from "../../../packages/protocol/src/support-access.ts";
 import {
   connectorConversationOf,
+  connectorLeadThreadOf,
   connectorOperationAllowed,
 } from "../../../packages/protocol/src/connector.ts";
 import {
@@ -717,6 +718,30 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         return true;
       }
     }
+    // So is the app answering a prompt in an agent's pane; the service checks the
+    // owner turned answering on for that app (ADR 0303).
+    if (serviceRequest.op === "prompt_answer") {
+      if (serviceRequest.appDeviceId !== undefined) {
+        writeJson(response, 400, { error: "prompt_answer_app_is_stamped" });
+        return true;
+      }
+      if (authorization.device.scope !== "connector") {
+        writeJson(response, 403, { error: "connector_device_required" });
+        return true;
+      }
+    }
+    // And the app writing an issue; the service names it and passes the write through
+    // the project's posting setting (ADR 0305).
+    if (serviceRequest.op === "issue_write") {
+      if (serviceRequest.appDeviceId !== undefined) {
+        writeJson(response, 400, { error: "issue_write_app_is_stamped" });
+        return true;
+      }
+      if (authorization.device.scope !== "connector") {
+        writeJson(response, 403, { error: "connector_device_required" });
+        return true;
+      }
+    }
     if (
       authorization.device.controlScope === "hosted" &&
       !hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify(serviceRequest))
@@ -771,7 +796,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     const grant =
       serviceRequest.op === "terminal_tail" ||
       serviceRequest.op === "terminal_catalog" ||
-      serviceRequest.op === "terminal_read"
+      serviceRequest.op === "terminal_read" ||
+      // The owner's per-app switch, checked by the service, is what lets keys through.
+      serviceRequest.op === "prompt_answer" ||
+      // Reading who leads and what is held for the apps (ADR 0304).
+      (serviceRequest.op === "lead" && serviceRequest.command.action !== "set")
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -791,8 +820,11 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "readopt_seat" ||
               serviceRequest.op === "worker_reports" ||
               serviceRequest.op === "acknowledge_worker_reports" ||
+              serviceRequest.op === "lead" ||
               serviceRequest.op === "spawn_seat" ||
               serviceRequest.op === "start_agent" ||
+              // An app's issue write is lead work: what the lead files and moves.
+              serviceRequest.op === "issue_write" ||
               serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
               serviceRequest.op === "update_persona" ||
@@ -815,6 +847,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (currentAuthorization === undefined) return true;
     if (serviceRequest.op === "app_notes" && serviceRequest.action === "post")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (serviceRequest.op === "prompt_answer")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (serviceRequest.op === "issue_write")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
     const connectorThread =
@@ -831,6 +867,34 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
       if (thread.op !== "get" || thread.conversation?.scope.kind !== "persona") {
         writeConnectorDenial(response);
+        return true;
+      }
+    }
+    // A connector reads and clears a lead thread's reports only while the owner has
+    // handed the lead to the apps, and only Clankie's own lead threads (ADR 0304).
+    const connectorLeadThread =
+      currentAuthorization.device.scope === "connector" ? connectorLeadThreadOf(serviceRequest) : undefined;
+    if (connectorLeadThread !== undefined) {
+      let lead: OperatorConversationServiceResult;
+      let thread: OperatorConversationServiceResult;
+      try {
+        lead = publicServiceResult(
+          await options.dispatch({ op: "lead", schemaVersion: 1, command: { action: "status" } }),
+        );
+        thread = publicServiceResult(
+          await options.dispatch({ op: "get", schemaVersion: 1, conversationId: connectorLeadThread }),
+        );
+      } catch {
+        writeJson(response, 502, { error: "conversation_upstream_unavailable" });
+        return true;
+      }
+      const kind = thread.op === "get" ? thread.conversation?.scope.kind : undefined;
+      if (
+        lead.op !== "lead" ||
+        lead.result.status.lead !== "apps" ||
+        (kind !== "global" && kind !== "workspace")
+      ) {
+        writeJson(response, 403, { error: "connector_not_leading" });
         return true;
       }
     }
@@ -1663,6 +1727,16 @@ const CONNECTOR_OPS = new Set([
   "terminal_read",
   "start_agent",
   "app_notes",
+  "prompt_answer",
+  "lead",
+  "worker_reports",
+  "acknowledge_worker_reports",
+  // Reading the owner's projects and their issues. An app writes only its own
+  // issue_write, through the posting setting; the owner's work writes stay off.
+  "work_repos",
+  "work_items",
+  "work_item_activity",
+  "issue_write",
   "get",
   "create",
   "send",

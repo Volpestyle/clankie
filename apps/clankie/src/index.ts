@@ -685,6 +685,15 @@ const trackerPosting = createTrackerPosting({
   readOwnerAsk: (requestId) => captain.readOwnerAsk(requestId),
   observeQuestionResolutions: (listener) => captain.observeQuestionResolutions(listener),
   wakeConversation: (owner, text) => captain.wakeConversation(owner, text),
+  // A damaged lead setting reads as the apps leading for Clankie's turns; here it holds writes.
+  appsLead: async () => {
+    const lead = await captain.serveOperatorConversation({
+      op: "lead",
+      schemaVersion: 1,
+      command: { action: "status" },
+    });
+    return lead.op === "lead" && lead.result.status.lead === "apps" && lead.result.status.error === undefined;
+  },
   logger,
 });
 const mcpHost = createMcpHost({
@@ -2346,6 +2355,7 @@ const clankie = await createClankieApp({
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
+  connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
   evidenceStore,
   builtInTracker,
   discordForum: { receive: (event) => discordForum.accept(event, discordForumOwner) },

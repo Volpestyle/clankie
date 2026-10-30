@@ -39,6 +39,8 @@ export type ConversationServiceRequest = Exclude<
   | { op: "lead_chats" }
   | { op: "fleet_room" }
   | { op: "app_notes" }
+  | { op: "prompt_answer" }
+  | { op: "issue_write" }
   | { op: "feed_list" }
   | { op: "feed_drop" }
   | { op: "feed_check" }
@@ -55,6 +57,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
+  | { op: "lead" }
   | { op: "roster" }
   | { op: "fleet" }
   | { op: "readopt_seat" }
@@ -92,6 +95,8 @@ export type ConversationServiceResult = Exclude<
   | { op: "lead_chats" }
   | { op: "fleet_room" }
   | { op: "app_notes" }
+  | { op: "prompt_answer" }
+  | { op: "issue_write" }
   | { op: "work_repos" }
   | { op: "work_items" }
   | { op: "work_project" }
@@ -105,6 +110,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "work_item_write" }
   | { op: "work_item_write_receipt" }
   | { op: "autonomy" }
+  | { op: "lead" }
   | { op: "roster" }
   | { op: "fleet" }
   | { op: "readopt_seat" }

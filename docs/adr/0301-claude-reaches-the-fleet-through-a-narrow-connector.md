@@ -22,7 +22,9 @@ own `/mcp` on a trusted network.
 - **Three tools.** `list_agents` names each agent with its machine and
   project, `read_agent` returns the text on its screen, and `message_agent`
   writes into its own persona thread, which delivers to the native pane. A
-  connector never types into a terminal, closes a seat, writes to a tracker,
+  connector never types into a terminal (except to answer an open prompt, once
+  the owner turns that on for the app:
+  [ADR 0303](0303-connected-apps-answer-agents-prompts.md)), closes a seat, writes to a tracker,
   reads settings, tails Clankie's own thread, or joins a call.
 - **Starting an agent, narrowly.** `start_agent` (added 2026-10-30) starts a
   Claude Code or Codex agent in a known project's checkout on a machine
@@ -32,7 +34,17 @@ own `/mcp` on a trusted network.
   leads the new seat, as it leads his own hires, so a connector never owns a
   worker. Connector devices now carry `steer`, which the op allowlist lets
   reach `start_agent` alone; a connector signed in before this change signs in
-  again to get it.
+  again to get it. `list_places` lists the places without starting anything, so an
+  app's own permission check can tell a listing from a start.
+- **Reading the owner's issues.** `list_issues` lists the owner's projects with
+  the tracker each keeps its issues in (private issue files, Linear, GitHub
+  Issues or the built-in tracker), and one project's issues; `read_issue` reads
+  one in full with its comments and state changes (added 2026-10-30). They are
+  the same reads the Clankie app makes (`work_repos`, `work_items`,
+  `work_item_activity`) and need only `chat`. Writes go only through
+  `save_issue` and `comment_issue`, as an agent under the project's posting
+  setting ([ADR 0305](0305-connected-apps-write-issues-as-agents.md)); every
+  other work write stays off its op allowlist.
 - **A note board the apps share.** `post_note` leaves a short note (at most
   2,000 characters) and `read_notes` reads the board, oldest first, after an
   optional cursor (added 2026-10-30, approved by James). Each note is signed

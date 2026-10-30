@@ -257,7 +257,25 @@ export interface HerdrAgentSnapshot {
 
 type SpawnOperatorSeat = HireRequest & { harness: NonNullable<HireRequest["harness"]> };
 
+/**
+ * One pane on one machine connection, held for a whole prompt answer (ADR 0303).
+ * Every call goes through the connection the pane was found on, to the pane it
+ * was found in, so a machine whose connection changes mid-answer refuses the next
+ * call instead of reaching another endpoint.
+ */
+export interface HerdrBoundPane {
+  /** The pane as found when it was bound. */
+  readonly pane: HerdrAgentSnapshot;
+  /** The same terminal as Herdr reports it now, over the same connection. */
+  resolve(): Promise<HerdrAgentSnapshot | undefined>;
+  readScreen(): Promise<string>;
+  sendKeys(keys: readonly string[]): Promise<void>;
+  sendText(text: string): Promise<void>;
+}
+
 export interface HerdrWatchRunner {
+  /** Bind an exact terminal to its pane and connection; undefined when no such terminal. */
+  bindPane?(terminalId: string): Promise<HerdrBoundPane | undefined>;
   /** Fresh complete inventory of exactly one fleet, for native session reuse. */
   list?(fleet?: string): Promise<readonly HerdrAgentSnapshot[]>;
   get(target: string): Promise<HerdrAgentSnapshot>;
@@ -275,6 +293,12 @@ export interface HerdrWatchRunner {
   readPane?(target: string, source: "visible" | "recent-unwrapped", format: "text" | "ansi"): Promise<string>;
   /** `herdr pane send-keys`: named key presses, never text. Claude's Stop presses one `esc` (VUH-2680). */
   sendKeys?(paneId: string, keys: readonly string[]): Promise<void>;
+  /**
+   * `herdr pane send-text`: one line typed into the pane, no Enter. Only a
+   * connected app answering an open prompt the owner let it answer (ADR 0303);
+   * never a channel for automated messages (ADR 0207).
+   */
+  sendText?(paneId: string, text: string): Promise<void>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `herdr pane process-info --pane` → the pane's own shell and its foreground processes. */
@@ -743,6 +767,7 @@ export function createHerdrWatchRunner(
     readPane: (target, source, format) =>
       runHerdr(["pane", "read", target, "--source", source, "--format", format]),
     sendKeys: (paneId, keys) => runHerdr(["pane", "send-keys", paneId, ...keys]).then(() => undefined),
+    sendText: (paneId, text) => runHerdr(["pane", "send-text", paneId, text]).then(() => undefined),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     paneShell: async (paneId) => {

@@ -4825,6 +4825,31 @@ paths:
         owner (operator bearer or a Take Control device) read it; the device relay
         requires `chat`. `fleet_room` returns `app_note` entries only with
         `include: ["app_note"]`.
+        `prompt_answer` (ADR 0303) presses named keys or types plain text into an
+        agent pane waiting on input, for a connector app the owner turned on with
+        `clankie connector prompts on APP`. It takes `terminalId`, `expect` (text
+        that must still be on the visible screen) and 1..12 `steps`, each `{key}`
+        or `{text}`; only the relay's captain bearer calls it, carrying the
+        `appDeviceId` it stamped. It answers `result` with `outcome` answered,
+        refused, uncertain or unavailable and a `message`, and records each answer
+        as an `app_note` in that app's name.
+        `issue_write` (ADR 0305) writes an issue in one of the owner's projects for
+        a connector app: `repoId` and `write`, which is `create` (title, optional
+        description, status, priority, labels), `update` (issue plus any of title,
+        description, status, priority, addLabels, removeLabels) or `comment`
+        (issue, body). Only the relay's captain bearer calls it, carrying the
+        `appDeviceId` it stamped. The write goes out as an agent named for the app,
+        so Linear and GitHub writes pass the project's posting setting; issue files
+        are written right away and take no comments. It answers `result` with
+        `outcome` written, held (with the waiting `post`), refused or uncertain, a
+        `message`, and the `issue` when known.
+        `lead` (ADR 0304) reads or sets who leads Clankie's lead threads:
+        `clankie` or `apps`. `command.action` is `status`, `set` (with `lead`) or
+        `inbox` (optional `after`, `limit` 1..100), and the result carries
+        `status` (`lead`, `held`, optional `error`) plus, for `inbox`, held `items`
+        (seq, at, conversationId, origin, text), `next`, `more` and
+        `unreadReports`. Setting `clankie` needs the owner (operator bearer or a
+        Take Control device); a connector reads status and inbox only.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

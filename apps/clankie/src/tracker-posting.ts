@@ -51,7 +51,12 @@ export type PostingAsker =
   /** A hired worker; its project comes from its hire. */
   | { readonly kind: "worker"; readonly principalId: string; readonly name?: string }
   /** Clankie's host acting on its own, such as posting a drop the owner filed. */
-  | { readonly kind: "service"; readonly what: string };
+  | { readonly kind: "service"; readonly what: string }
+  /** An app signed in to the connector (ADR 0305); it decides as the lead only while the apps lead. */
+  | { readonly kind: "app"; readonly deviceId: string; readonly name: string };
+
+/** Tracker actor ids of connected apps (ADR 0305): `app:` and the app's device id. */
+export const CONNECTED_APP_ACTOR_PREFIX = "app:";
 
 const RouteSchema = z.discriminatedUnion("kind", [
   /** A Linear tool, replayed through the connected Linear the way Clankie's own tools reach it. */
@@ -192,6 +197,11 @@ export interface TrackerPostingOptions {
   readonly readOwnerAsk?: (requestId: string) => ConversationQuestion | undefined;
   readonly observeQuestionResolutions?: (listener: (question: ConversationQuestion) => void) => () => void;
   readonly wakeConversation: (owner: { conversationId: string }, text: string) => Promise<boolean>;
+  /**
+   * Whether the owner has handed the lead to the connected apps (ADR 0304). Under "Clankie
+   * decides" an app's writes go only then; when unknown, they wait for the lead.
+   */
+  readonly appsLead?: () => Promise<boolean>;
   readonly clock?: () => Date;
   readonly logger?: { warn(data: object, message: string): void };
 }
@@ -238,6 +248,13 @@ const TRACKER_NAMES = { linear: "Linear", github: "GitHub issues" } as const;
 export type TrackerPostingGate = ReturnType<typeof createTrackerPosting>;
 
 export function createTrackerPosting(options: TrackerPostingOptions) {
+  const appsLead = async () => {
+    try {
+      return (await options.appsLead?.()) === true;
+    } catch {
+      return false;
+    }
+  };
   const now = () => (options.clock ?? (() => new Date()))();
   let binding: TrackerPostingBinding | undefined;
   let state = load(options.statePath);
@@ -493,7 +510,13 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
   };
 
   const askerWords = (asker: PostingAsker) =>
-    asker.kind === "lead" ? "Clankie" : asker.kind === "worker" ? (asker.name ?? "A worker") : asker.what;
+    asker.kind === "lead"
+      ? "Clankie"
+      : asker.kind === "worker"
+        ? (asker.name ?? "A worker")
+        : asker.kind === "app"
+          ? asker.name
+          : asker.what;
 
   /** What would be posted and where, in the owner's words, and the full text of it. */
   const describe = (write: PostingWrite, projects: readonly Project[]) => {
@@ -564,7 +587,11 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         write.destination ?? null,
         projects.map((project) => project.id).sort(),
         decider,
-        write.asker.kind === "worker" ? write.asker.principalId : write.asker.kind,
+        write.asker.kind === "worker"
+          ? write.asker.principalId
+          : write.asker.kind === "app"
+            ? `${CONNECTED_APP_ACTOR_PREFIX}${write.asker.deviceId}`
+            : write.asker.kind,
       ]),
     );
 
@@ -897,7 +924,12 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     }
     if (setting === "read_only")
       return { outcome: "refused", message: readOnlyMessage(projects, write.tracker) };
-    const direct = setting === "allow" || (setting === "lead" && write.asker.kind === "lead");
+    // "Clankie decides" lets the lead's own writes go. While the owner has handed the lead
+    // to the connected apps, an app's writes are the lead's (ADR 0305).
+    const direct =
+      setting === "allow" ||
+      (setting === "lead" &&
+        (write.asker.kind === "lead" || (write.asker.kind === "app" && (await appsLead()))));
     // A keyed write that may go now still takes a record, so a retry never posts it twice.
     if (direct && write.key === undefined) return { outcome: "post" };
     const decider: "owner" | "lead" = setting === "ask" ? "owner" : "lead";
