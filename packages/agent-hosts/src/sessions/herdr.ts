@@ -47,6 +47,9 @@ export function createHerdrSessionSource(
         port.dispatch({ op: "fleet", schemaVersion: 1, view: "home" }),
         port
           .dispatch({ op: "terminal_catalog", schemaVersion: 1, includeSeatIds: true, includeMachines: true })
+          // A service from before includeMachines refuses it; its catalog still lists hand-started agents.
+          .catch(() => port.dispatch({ op: "terminal_catalog", schemaVersion: 1, includeSeatIds: true }))
+          // allow-swallowed-rejection -- without a catalog the list still shows every seated agent.
           .catch(() => undefined),
       ]);
       if (fleet.op !== "fleet") throw new Error("The fleet answered with something else.");

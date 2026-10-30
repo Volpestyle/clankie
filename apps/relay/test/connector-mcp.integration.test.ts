@@ -124,6 +124,9 @@ async function startConnectorRelay(
           },
         };
       case "terminal_catalog":
+        // An older service's strict schema refuses the field it doesn't know.
+        if (linked.terminalRead === false && request.includeMachines !== undefined)
+          throw new Error("unrecognized key includeMachines");
         return {
           op: "terminal_catalog",
           schemaVersion: 1,
@@ -419,6 +422,9 @@ describe("Claude connector MCP endpoint", () => {
   it("on a service without pane reads, streams this Mac's panes and lets two reads take turns", async () => {
     const relay = await startConnectorRelay(undefined, { terminalRead: false });
     const [first, second] = await Promise.all([connect(relay.url), connect(relay.url)]);
+    // Its catalog, asked again without machines, still lists the agents started by hand.
+    const listed = JSON.parse(textOf(await first.callTool({ name: "list_agents", arguments: {} })));
+    expect(listed.agents.map((agent: { agent: string }) => agent.agent)).toContain("herdr:term-loose");
     const reads = await Promise.all(
       [first, second].map((client) =>
         client.callTool({ name: "read_agent", arguments: { agent: "herdr:term-loose" } }),
