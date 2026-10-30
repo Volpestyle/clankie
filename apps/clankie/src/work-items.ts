@@ -710,6 +710,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     return { projectId: project.trackerProjectId, teamId, open: openBuiltIn };
   };
 
+  /**
+   * The tracker a convention's writes reach off this Mac (ADR 0302): GitHub issues, or
+   * Linear while it is connected. A disconnected Linear repo writes to the local
+   * compatibility store, which stays here like issue files.
+   */
+  const outwardTracker = async (
+    convention: WorkConvention | undefined,
+  ): Promise<"linear" | "github" | undefined> => {
+    if (convention?.backend === "github") return "github";
+    if (convention?.backend !== "linear" || linear === undefined) return undefined;
+    return (await options.mcpHost?.trackerStatus?.())?.backend === "local" ? undefined : "linear";
+  };
+
   const deps = async (path: string, local = true, projectId?: string): Promise<TrackerDeps> => {
     const token = await options.githubToken?.();
     const builtIn = await builtInBinding(path, projectId);
@@ -1334,14 +1347,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     path: string,
     posting: typeof TRACKER_POSTING_ADMITTED | undefined,
   ) => {
-    if (
-      !options.posting ||
-      posting === TRACKER_POSTING_ADMITTED ||
-      (convention.backend !== "linear" && convention.backend !== "github")
-    )
-      return;
+    if (!options.posting || posting === TRACKER_POSTING_ADMITTED) return;
+    const tracker = await outwardTracker(convention);
+    if (tracker === undefined) return;
     const admission = await options.posting.admit({
-      tracker: convention.backend,
+      tracker,
       route: { kind: "work", request: structuredClone(request) as Record<string, unknown> },
       asker: { kind: "lead" },
       projectIds: await projectIdsAt(path),
@@ -1773,14 +1783,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           await beforeWrite();
           await assertLinear();
           // A seat's own issue status is Clankie writing for this project (ADR 0302).
-          if (
-            options.posting &&
-            (convention.backend === "linear" || convention.backend === "github") &&
-            isTrackerWriteTool(name)
-          )
+          const tracker =
+            options.posting && isTrackerWriteTool(name) ? await outwardTracker(convention) : undefined;
+          if (options.posting && tracker !== undefined)
             assertAdmitted(
               await options.posting.admit({
-                tracker: convention.backend,
+                tracker,
                 route:
                   convention.backend === "linear" || repo === undefined
                     ? { kind: "linear", tool: name, arguments: structuredClone(args) }
@@ -1852,8 +1860,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           (await readConvention(path)) ??
           ((await discoverConvention(path, run)).suggestion as WorkConvention | undefined);
       }
-      if (convention?.backend !== "linear" && convention?.backend !== "github") return undefined;
-      return { tracker: convention.backend, projectIds: await projectIdsAt(path) };
+      const tracker = await outwardTracker(convention);
+      if (tracker === undefined) return undefined;
+      return { tracker, projectIds: await projectIdsAt(path) };
     },
     /** Files one drop in a target `dropTarget` returned ready; see `fileDrop`. */
     fileDrop: (
@@ -2147,16 +2156,17 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
       // "Posting to your tracker" (ADR 0302): Clankie's and his workers' writes to an
       // outward tracker pass the project's setting; the owner's own writes are his.
-      if (
+      const outward =
         options.posting &&
         posting !== TRACKER_POSTING_ADMITTED &&
-        (convention.backend === "linear" || convention.backend === "github") &&
         isTrackerWriteTool(name) &&
         !ownerActor(callbacks.actor)
-      )
+          ? await outwardTracker(convention)
+          : undefined;
+      if (options.posting && outward !== undefined)
         assertAdmitted(
           await options.posting.admit({
-            tracker: convention.backend,
+            tracker: outward,
             route: { kind: "repo", repo, local, tool: name, arguments: structuredClone(toolArgs) },
             asker: postingAsker(callbacks.actor),
             projectIds: await projectIdsAt(path),

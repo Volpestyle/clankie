@@ -13,7 +13,11 @@ import {
   type OperatorConversationServiceRequest,
 } from "@clankie/protocol";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
-import type { TrackerPost, TrackerPosting } from "@clankie/protocol/tracker-posting";
+import {
+  TrackerPostsResultSchema,
+  type TrackerPost,
+  type TrackerPosting,
+} from "@clankie/protocol/tracker-posting";
 import type { WorkConvention } from "@clankie/protocol/work-items";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker, readDrops, recordDropPosted, writeConvention } from "@clankie/work-items";
@@ -280,6 +284,7 @@ async function fixture() {
     root,
     garden,
     orchard,
+    accounts,
     provider,
     credentials,
     settings,
@@ -606,4 +611,36 @@ it("a drop on a Linear project is kept as a private issue file first, then poste
     await new Promise((r) => setTimeout(r, 10));
   expect((await fence())?.posted).toMatchObject({ tracker: "linear" });
   expect(await files()).toHaveLength(3);
+});
+
+it("on go ahead a drop longer than the owner's screen still posts whole, once, and the post list still reads", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "allow");
+  const body = `The greenhouse vents stick. ${"Notes from the morning walk. ".repeat(120)}`.trim();
+  expect(body.length).toBeGreaterThan(2000);
+  const result = await f.dispatch({
+    op: "feed_drop",
+    schemaVersion: 1,
+    projectId: "garden",
+    idempotencyKey: "drop-long-go-ahead-01",
+    title: "Greenhouse vents stick",
+    body,
+  });
+  expect(result).toMatchObject({ op: "feed_drop", result: { outcome: "filed", posting: "posted" } });
+  expect(f.mutations("issueCreate")).toBe(1);
+  const created = f.provider.seen.filter((entry) => entry.query?.includes("issueCreate")).at(-1)!;
+  expect(JSON.parse(created.body).variables.input).toMatchObject({ description: body });
+  const listed = await f.posts({ action: "list", state: "all" });
+  expect(listed.status).toBe(200);
+  const parsed = parseProtocolResponse(TrackerPostsResultSchema, listed.body);
+  expect(parsed).toMatchObject({ posts: [{ state: "posted", tracker: "linear" }] });
+});
+
+it("with Linear disconnected, the Linear repo's work stays on this Mac and is never held or refused", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "read_only");
+  expect(await f.accounts.disconnect("linear")).toMatchObject({ ok: true });
+  const created = await f.work("create", "Kept here while Linear is away");
+  expect(created).toMatchObject({ ok: true });
+  expect(f.mutations("Create")).toBe(0);
 });

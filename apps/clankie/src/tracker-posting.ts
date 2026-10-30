@@ -671,7 +671,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     if (direct && write.key === undefined) return { outcome: "post" };
     const decider: "owner" | "lead" = setting === "ask" ? "owner" : "lead";
     const { summary, detail } = describe(write, projects);
-    if (detail.length > 2000)
+    // Only a write someone must look at first has to fit on screen whole; one that may
+    // go now posts as written and keeps a shortened copy for the record.
+    if (!direct && detail.length > 2000)
       return {
         outcome: "refused",
         message: `This is too long to show the owner whole before it posts (${String(detail.length)} characters; 2,000 fit). Nothing was posted: post a shorter version, and keep the rest in the issue file.`,
@@ -689,7 +691,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         decider,
         state: "waiting",
         summary,
-        detail,
+        detail: detail.length <= 2000 ? detail : `${detail.slice(0, 1999)}…`,
         asker: clip(askerWords(write.asker), 200),
         createdAt: now().toISOString(),
         route: write.route,
