@@ -60,7 +60,7 @@ current work, or got nothing.
 `createHerdrSessionSource` is the first source. It speaks Clankie's operator
 ops through a port bound to the caller's own credential, so the caller's
 allowlist still applies: list is the fleet plus agent panes Clankie didn't
-seat (readable, not messageable), read is a terminal tail rendered by
+seat, on this Mac or a linked PC (readable, not messageable), read is a terminal tail rendered by
 `terminal-text.ts`, send writes into the agent's persona thread, and open is the
 `terminal_focus` op. The Claude connector in `apps/relay` uses this layer; a
 second session app (Orca next) is another source, not another set of tools.
