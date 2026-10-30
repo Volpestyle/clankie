@@ -184,7 +184,9 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["feed"],
     lines: [
       "  feed [--project ID] [--cursor CURSOR] [--limit N] [--json]",
-      "                           Owner checks (pending asks) and updates, newest first; owner only",
+      "                           Owner checks (pending asks), updates and drops, newest first; owner only",
+      "  feed drop --project ID [--title TEXT] [--body TEXT | --stdin] [--file PATH]... [--key KEY] [--json]",
+      "                           File a drop as a private issue file and wake the project's lead; owner only",
     ],
   },
   {

@@ -141,7 +141,8 @@ export async function runSendCommand(
   return result.status === "accepted" ? 0 : 1;
 }
 
-async function attachmentFile(path: string) {
+/** One owner attachment read and checked from disk before any upload (ADR 0209). */
+export async function attachmentFile(path: string) {
   const mediaType = ATTACHMENT_TYPES[extname(path).toLowerCase()];
   if (mediaType === undefined)
     throw new Error(`${basename(path)}: attach png, jpeg, heic, gif, webp, mp4 or mov files.`);
