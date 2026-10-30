@@ -170,6 +170,14 @@ async function installHarnessBridges(options) {
   const home = env.HOME || env.USERPROFILE || homedir();
   const marketplace = options.marketplaceRoot ?? join(options.repoRoot, "integrations", "claude-plugin");
   const results = [];
+  // A profile whose refresh failed or was refused can still be repaired here.
+  const refreshed = new Set(
+    (options.refreshed ?? []).flatMap((entry) =>
+      ["installed", "updated", "source-setup-completed"].includes(entry.status) && entry.profile
+        ? [entry.profile]
+        : [],
+    ),
+  );
   const remembered = await linkedProfiles(home);
   const profiles = [
     ...new Set([
@@ -198,7 +206,7 @@ async function installHarnessBridges(options) {
     })),
   ];
   for (const { harness, profile, codexProfile } of targets) {
-    if (options.skipProfiles?.includes(harness === "claude" ? profile : codexProfile)) continue;
+    if (refreshed.has(harness === "claude" ? profile : codexProfile)) continue;
     if (options.linkedOnly && harness === "claude" && !(await linkedClaude(profile))) continue;
     const targetEnv = {
       ...env,

@@ -26,8 +26,8 @@ export function installHarnessBridges(options: {
   /** Refresh only existing links; never opt a new profile in or enable a disabled Claude plugin. */
   linkedOnly?: boolean;
   codexHomes?: readonly string[];
-  /** Profiles the caller already handled, such as links an update just refreshed; never asked about again. */
-  skipProfiles?: readonly string[];
+  /** Results of a refresh that just ran; profiles it completed are not asked about again. */
+  refreshed?: readonly HarnessInstallResult[];
   consent(
     harness: HarnessInstallTarget,
     detail: string,
