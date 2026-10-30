@@ -150,6 +150,7 @@ export async function runConnectorCommand(
         if (response.status === 404) throw new ConnectorCommandError("unknown_app");
         if (!response.ok) throw new ConnectorCommandError("unavailable");
         const status = ConnectorPromptAnswersResponseSchema.safeParse(
+          // allow-swallowed-rejection -- a body that is not JSON fails the parse below as malformed
           await response.json().catch(() => undefined),
         );
         if (!status.success) throw new ConnectorCommandError("malformed");

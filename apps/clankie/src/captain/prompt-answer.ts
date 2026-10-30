@@ -84,9 +84,9 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
       };
     }
     const label = pane.name ?? pane.terminalId;
-    // allow-swallowed-rejection -- the record is a courtesy; the keys were already pressed.
     await Promise.resolve()
       .then(() => deps.record(input.app, `Answered a prompt in ${label}: ${describe(input.steps)}.`))
+      // allow-swallowed-rejection -- the record is a courtesy; the keys were already pressed.
       .catch(() => undefined);
     const sentTo = `Sent to ${label}: ${describe(input.steps)}`;
     return {
