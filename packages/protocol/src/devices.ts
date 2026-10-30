@@ -42,6 +42,22 @@ export const TAKE_CONTROL_GRANTS: DeviceGrantSet = {
   terminalControl: true,
 };
 
+/**
+ * The Claude connector preset: list agents, read panes and message seats, never
+ * steer, hire or type raw keys. A device with `scope: "connector"` is further
+ * held to the connector op allowlist by the relay, whatever its grants say.
+ */
+export const CONNECTOR_GRANTS: DeviceGrantSet = {
+  chat: true,
+  steer: false,
+  terminalObserve: true,
+  terminalControl: false,
+};
+
+/** A narrower kind of device than its grants alone describe. */
+export const DeviceScopeSchema = z.literal("connector");
+export type DeviceScope = z.infer<typeof DeviceScopeSchema>;
+
 export const DeviceStatusSchema = z.enum(["pending", "active", "revoked"]);
 export type DeviceStatus = z.infer<typeof DeviceStatusSchema>;
 
@@ -81,6 +97,8 @@ export const DeviceRecordSchema = z
     /** Paired through a long-lived review offer (ADR 0154); revoke after the review. */
     review: z.literal(true).optional(),
     localCompanion: z.literal(true).optional(),
+    /** Paired through the Claude connector sign-in; held to its op allowlist. */
+    scope: DeviceScopeSchema.optional(),
     run: PairingRunSchema.optional(),
     createdAt: z.string().datetime(),
     pendingExpiresAt: z.string().datetime(),
@@ -309,6 +327,8 @@ export const DeviceSelfResponseSchema = z.object({
   controlScope: z.literal("hosted").optional(),
   supportGrantId: z.string().uuid().optional(),
   supportScope: z.enum(["read-state", "shell"]).optional(),
+  /** A connector device; the relay holds it to the connector op allowlist. */
+  scope: DeviceScopeSchema.optional(),
   directRoute: DeviceDirectRouteSchema.optional(),
   deviceId: z.string().min(1),
   name: z.string().min(1),
@@ -327,6 +347,7 @@ export const DeviceListItemSchema = z.object({
   status: DeviceStatusSchema,
   grants: DeviceGrantSetSchema,
   review: z.literal(true).optional(),
+  scope: DeviceScopeSchema.optional(),
   run: PairingRunSchema.optional(),
   /** All registrations in an explicitly requested grouped row. */
   pairingIds: z.array(z.string().min(1)).optional(),
@@ -374,6 +395,7 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
         .optional(),
       review: z.literal(true).optional(),
       localCompanion: z.literal(true).optional(),
+      scope: DeviceScopeSchema.optional(),
       run: PairingRunSchema.optional(),
       pendingExpiresAt: z.string().datetime(),
     }),

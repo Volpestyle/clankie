@@ -622,6 +622,74 @@ describe("public gateway Mac connector", () => {
     ]);
   });
 
+  it("carries a Claude connector call in plaintext with its own bearer and names the public base", async () => {
+    const received: Array<Record<string, string | undefined>> = [];
+    const relay = await listen(
+      createServer((request, response) => {
+        received.push({
+          path: request.url,
+          authorization: request.headers.authorization,
+          base: request.headers["x-clankie-public-base"] as string | undefined,
+          protocol: request.headers["mcp-protocol-version"] as string | undefined,
+        });
+        response.writeHead(401, {
+          "content-type": "application/json",
+          "www-authenticate":
+            'Bearer resource_metadata="https://example/.well-known/oauth-protected-resource/mcp"',
+          "set-cookie": "never=forwarded",
+        });
+        response.end('{"error":"invalid_token"}');
+      }),
+    );
+    const control = await listen(createServer((_request, response) => response.end("{}")));
+    const gateway = await fakeGateway();
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      hostToken,
+      controlPlaneUrl: control,
+      relayUrl: relay,
+      logger: { info: () => {}, warn: () => {} },
+      reconnectMinimumMs: 5,
+      reconnectMaximumMs: 10,
+    });
+    connectors.push(connector);
+    connector.start();
+    const connection = await gateway.nextConnection();
+    expect(publicGatewayTargetFor("POST", "/mcp")).toBe("relay");
+    expect(publicGatewayTargetFor("POST", "/oauth/token")).toBe("control");
+
+    connection.send({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "request",
+      requestId: "request_connector1",
+      target: "relay",
+      method: "POST",
+      path: "/mcp",
+      headers: [
+        { name: "content-type", value: "application/json" },
+        { name: "authorization", value: "Bearer connector-token" },
+        { name: "mcp-protocol-version", value: "2025-06-18" },
+      ],
+      bodyBase64: Buffer.from('{"jsonrpc":"2.0","id":1,"method":"tools/list"}').toString("base64"),
+    });
+    const frames = await connection.framesThrough("response_end");
+
+    expect(received).toEqual([
+      {
+        path: "/mcp",
+        authorization: "Bearer connector-token",
+        base: `${gateway.origin}/h/${hostId}`,
+        protocol: "2025-06-18",
+      },
+    ]);
+    const start = frames.find((frame) => frame.kind === "response_start");
+    expect(start).toMatchObject({ status: 401 });
+    const headers = start?.kind === "response_start" ? start.headers.map((header) => header.name) : [];
+    expect(headers).toContain("www-authenticate");
+    expect(headers).not.toContain("set-cookie");
+  });
+
   it("replays live pairing routes after an authenticated reconnect", async () => {
     const target = await listen(createServer((_request, response) => response.end("{}")));
     const gateway = await fakeGateway();

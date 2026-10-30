@@ -1509,6 +1509,12 @@ export const OperatorTerminalSessionSchema = z
      * so surfaces must be able to tell the two apart without guessing.
      */
     agent: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
+    /**
+     * The id a fleet seat in this pane carries (`<fleet>/<native>` on a named
+     * fleet), so a surface can tell a seated agent's pane from an unseated one.
+     * Only when the catalog request set `includeSeatIds`.
+     */
+    seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
   })
   .strict();
 export type OperatorTerminalSession = z.infer<typeof OperatorTerminalSessionSchema>;

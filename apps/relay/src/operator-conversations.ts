@@ -50,6 +50,10 @@ import {
 } from "./conversation-upstream.ts";
 import { supportReadOperationAllowed } from "../../../packages/protocol/src/support-access.ts";
 import {
+  connectorConversationOf,
+  connectorOperationAllowed,
+} from "../../../packages/protocol/src/connector.ts";
+import {
   DISCORD_VOICE_TRANSCRIPTS_PATH,
   DiscordVoiceTranscriptPageSchema,
   SERVICE_RESTARTING_SEAT_HANDOFF,
@@ -600,6 +604,15 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeAuthDenial(response, authorization.denial);
       return true;
     }
+    // A connector reads the fleet and panes and messages persona threads, nothing more (ADR 0301).
+    if (
+      authorization.device.scope === "connector" &&
+      path !== OPERATOR_CONVERSATION_DISPATCH_PATH &&
+      path !== OPERATOR_TERMINAL_TAIL_PATH
+    ) {
+      writeConnectorDenial(response);
+      return true;
+    }
     if (path === BODY_LEASE_STATUS_PATH) {
       if (!authorization.device.grants.terminalObserve) {
         writeGrantDenial(response, "terminalObserve");
@@ -688,6 +701,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       writeJson(response, 400, { error: "invalid_conversation_request" });
       return true;
     }
+    if (authorization.device.scope === "connector" && !connectorOperationAllowed(serviceRequest)) {
+      writeConnectorDenial(response);
+      return true;
+    }
     if (
       authorization.device.controlScope === "hosted" &&
       !hostedOperatorAllows("POST", "/operator/v1/dispatch", JSON.stringify(serviceRequest))
@@ -743,7 +760,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             serviceRequest.op === "fleet_room" ||
             autoOnOp ||
             serviceRequest.op === "terminal_control" ||
-            serviceRequest.op === "terminal_input"
+            serviceRequest.op === "terminal_input" ||
+            serviceRequest.op === "terminal_focus"
           ? "terminalControl"
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||
@@ -772,6 +790,25 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // before that await is not authority to dispatch after it.
     const currentAuthorization = await authorizeGrant(options, token, response, grant, serviceRequest.op);
     if (currentAuthorization === undefined) return true;
+    // A connector's thread must be an agent's own persona thread, never Clankie's
+    // lead or a channel. The scope of a thread never changes, so one look holds.
+    const connectorThread =
+      currentAuthorization.device.scope === "connector" ? connectorConversationOf(serviceRequest) : undefined;
+    if (connectorThread !== undefined) {
+      let thread: OperatorConversationServiceResult;
+      try {
+        thread = publicServiceResult(
+          await options.dispatch({ op: "get", schemaVersion: 1, conversationId: connectorThread }),
+        );
+      } catch {
+        writeJson(response, 502, { error: "conversation_upstream_unavailable" });
+        return true;
+      }
+      if (thread.op !== "get" || thread.conversation?.scope.kind !== "persona") {
+        writeConnectorDenial(response);
+        return true;
+      }
+    }
     // Support's legacy presence read carries public labels only, regardless of its read-state scope.
     if (currentActivityOp && currentAuthorization.device.supportGrantId !== undefined) {
       writeGrantDenial(response, "terminalControl");
@@ -955,6 +992,10 @@ async function authorizeGrant(
   const authorization = await options.authorizeDevice.authorize(token);
   if (!authorization.authorized) {
     writeAuthDenial(response, authorization.denial);
+    return undefined;
+  }
+  if (authorization.device.scope === "connector" && (op === undefined || !CONNECTOR_OPS.has(op))) {
+    writeConnectorDenial(response);
     return undefined;
   }
   if (authorization.device.supportGrantId !== undefined) {
@@ -1584,6 +1625,21 @@ function writeGrantDenial(response: ServerResponse, grant: DispatchGrant): void 
             ? "terminal_control_grant_required"
             : "terminal_observe_grant_required",
   });
+}
+
+/** Ops a connector device may name at all; the full request is checked by `connectorOperationAllowed`. */
+const CONNECTOR_OPS = new Set([
+  "fleet",
+  "terminal_catalog",
+  "terminal_tail",
+  "get",
+  "create",
+  "send",
+  "send_receipt",
+]);
+
+function writeConnectorDenial(response: ServerResponse): void {
+  writeJson(response, 403, { error: "connector_operation_not_allowed" });
 }
 
 function writeJson(response: ServerResponse, status: number, body: unknown): void {
