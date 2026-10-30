@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, dirname, join, normalize, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   WorkConventionSchema,
@@ -18,6 +18,45 @@ import {
 
 export const CONVENTION_FILE = ".clankie/tracking.json";
 export const DEFAULT_WORK_DIRECTORY = ".clankie/work";
+
+/**
+ * Issue files in `.clankie/work/` are the owner's private notes: bug reports,
+ * screenshots and ideas that never belong in a commit. They live once per
+ * repository, in its main checkout, and every linked worktree reads and
+ * writes that one copy. Any other directory (`docs/tasks`) is the repo's own
+ * committed convention and stays per checkout.
+ */
+export function isPrivateWorkDirectory(directory: string): boolean {
+  const path = normalize(directory).replace(/\\/gu, "/").replace(/\/+$/u, "");
+  return path === DEFAULT_WORK_DIRECTORY || path.startsWith(`${DEFAULT_WORK_DIRECTORY}/`);
+}
+
+/** The directory a file-backed convention keeps its items in, or undefined for a remote tracker. */
+export function conventionWorkDirectory(convention: WorkConvention): string | undefined {
+  if (convention.backend === "default") return DEFAULT_WORK_DIRECTORY;
+  return convention.backend === "markdown" ? convention.directory : undefined;
+}
+
+/**
+ * A linked Git worktree's main checkout, read the way Git does: the worktree's
+ * `.git` file names its private Git directory, whose `commondir` names the
+ * shared one. A main checkout, a submodule, or a folder Git doesn't know is
+ * its own checkout. Synchronous and process-free, so every backend open can ask.
+ */
+export function mainCheckoutOf(root: string): string {
+  const absolute = resolve(root);
+  try {
+    const marker = join(absolute, ".git");
+    if (!lstatSync(marker).isFile()) return absolute;
+    const gitdir = /^gitdir:\s*(.+?)\s*$/mu.exec(readFileSync(marker, "utf8"))?.[1];
+    if (gitdir === undefined) return absolute;
+    const own = resolve(absolute, gitdir);
+    const common = resolve(own, readFileSync(join(own, "commondir"), "utf8").trim());
+    return basename(common) === ".git" ? dirname(common) : absolute;
+  } catch {
+    return absolute;
+  }
+}
 
 /** Runs a command in the repo; resolves stdout, rejects on failure. Injected so tests never touch git or the network. */
 export type CommandRunner = (command: string, args: readonly string[], cwd: string) => Promise<string>;

@@ -54,7 +54,13 @@ describe("the files backend", () => {
     expect(text).toMatch(
       /^---\nid: W-test01\ntitle: Board view in the app\nstatus: in_review\nowner: app-worker/u,
     );
-    expect(await readdir(join(root, ".clankie/work"))).toHaveLength(2);
+    // Two items, beside the private folder's own .gitignore (step 5, C2).
+    expect((await readdir(join(root, ".clankie/work"))).sort()).toEqual([
+      ".gitignore",
+      "W-test01-board-view-in-the-app.md",
+      "W-test02-second.md",
+    ]);
+    expect(await readFile(join(root, ".clankie/work/.gitignore"), "utf8")).toContain("*\n");
     await expect(backend.update("W-nope00", { status: "done" })).rejects.toThrow(/No work item/u);
   });
 

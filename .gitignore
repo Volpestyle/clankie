@@ -29,6 +29,8 @@ ios/Pods/
 macos/Pods/
 .pnpm-store/
 /.local/
+# Issue files are the owner's private notes (step 5); the folder ignores itself too.
+/.clankie/work/
 # Local proof scratch space and DynamoDB Local's working-directory metadata.
 /.tmp/
 /dynamodb-local-metadata.json

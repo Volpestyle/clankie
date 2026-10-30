@@ -77,18 +77,18 @@ describe("the work-items service", () => {
     return { repo, worktree, service, repos };
   }
 
-  it("names a worktree after its checkout and keeps its own file-backed work discoverable (VUH-2848)", async () => {
+  it("names a worktree after its checkout and shares the checkout's private issue files (VUH-2848, step 5 C2)", async () => {
     const { repo, worktree, service, repos } = await checkoutWithWorktree();
     // An agent in the worktree names its path first: no folder name, the checkout's.
     await service.handle({ action: "create", repo: worktree, title: "From the worktree" }, true);
     expect((await repos()).map((entry) => [entry.name, entry.root])).toEqual([[basename(repo), worktree]]);
-    // Once the checkout is known too, both stay offered: their file-backed work differs.
+    // The item is written once, in the main checkout's private folder, never in the worktree.
+    expect(readdirSync(join(repo, ".clankie/work")).filter((name) => name.endsWith(".md"))).toHaveLength(1);
+    expect(existsSync(join(worktree, ".clankie/work"))).toBe(false);
+    // Once the checkout is known too, it is offered once: both read the same files.
     await service.handle({ action: "list", repo }, true);
     const offered = await repos();
-    expect(offered.map((entry) => [entry.name, entry.root])).toEqual([
-      [`${basename(repo)} (worktree)`, worktree],
-      [basename(repo), repo],
-    ]);
+    expect(offered.map((entry) => [entry.name, entry.root])).toEqual([[basename(repo), repo]]);
     // A device enumerating what it is offered still finds the worktree's item.
     const titles = [];
     for (const entry of offered) {
@@ -96,6 +96,12 @@ describe("the work-items service", () => {
       if ("items" in listed) titles.push(...listed.items.map((item) => item.title));
     }
     expect(titles).toEqual(["From the worktree"]);
+    // The worktree reads the same item, and git sees nothing to commit in the checkout.
+    const fromWorktree = await service.handle({ action: "list", repo: worktree }, true);
+    expect("items" in fromWorktree ? fromWorktree.items.map((item) => item.title) : []).toEqual([
+      "From the worktree",
+    ]);
+    expect(await defaultRun("git", ["status", "--porcelain", "--", ".clankie/work"], repo)).toBe("");
   });
 
   it("offers a checkout once when its worktree reads the same Linear project (VUH-2848)", async () => {
@@ -355,7 +361,7 @@ describe("the work routes", () => {
     expect(unknown.result.outcome).toBe("unavailable");
 
     // A role station reads its backlog by label (ADR 0208).
-    const [file] = readdirSync(join(workspace, ".clankie/work"));
+    const [file] = readdirSync(join(workspace, ".clankie/work")).filter((name) => name.endsWith(".md"));
     const path = join(workspace, ".clankie/work", file!);
     writeFileSync(path, readFileSync(path, "utf8").replace(/^---\n/u, "---\nlabels: [Designer]\n"));
     const station = async (label: string) =>

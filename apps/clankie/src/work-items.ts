@@ -23,7 +23,9 @@ import {
 } from "@clankie/protocol/work-items";
 import {
   CONVENTION_FILE,
+  conventionWorkDirectory,
   ConventionNeededError,
+  isPrivateWorkDirectory,
   discoverConvention,
   readConvention,
   resolveTracker,
@@ -477,10 +479,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
 
   /**
    * The repos to offer, named for people. A worktree whose checkout is listed
-   * and reads the same remote tracker (Linear or GitHub, bound alike) is that
-   * checkout, so it is not offered twice. A worktree with
-   * its own file-backed work stays offered, so its items stay discoverable, as
-   * "<checkout> (worktree)" rather than by its folder (VUH-2848).
+   * and reads the same remote tracker (Linear or GitHub, bound alike), or the
+   * checkout's private issue files (`.clankie/work/` lives once, in the main
+   * checkout), is that checkout, so it is not offered twice. A worktree with
+   * its own committed file-backed work stays offered, so its items stay
+   * discoverable, as "<checkout> (worktree)" rather than by its folder (VUH-2848).
    */
   const listed = async () => {
     const repos = await known();
@@ -498,12 +501,21 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     }
     return shown;
   };
-  /** Both read one remote tracker binding; file-backed work lives in each worktree and is never the same. */
+  /**
+   * Both read one remote tracker binding, or the one private issue folder in the main
+   * checkout. Committed file-backed work (`docs/tasks`) lives in each worktree and is never the same.
+   */
   const sameRemoteTracker = async (left: string, right: string) => {
     const [a, b] = await Promise.all(
       // allow-swallowed-rejection -- an unreadable convention can't prove a shared tracker, so the worktree stays listed.
       [left, right].map((path) => readConvention(path).catch(() => undefined)),
     );
+    const privateFiles = (convention: typeof a) => {
+      const directory = convention === undefined ? undefined : conventionWorkDirectory(convention);
+      return directory !== undefined && isPrivateWorkDirectory(directory);
+    };
+    // The checkout with no saved choice yet discovers the same folder its worktree writes.
+    if (privateFiles(a)) return b === undefined || privateFiles(b);
     if (a === undefined || b === undefined || a.backend !== b.backend) return false;
     // A built-in binding lives in host settings, not here, so it is never proven shared.
     if (a.backend !== "linear" && a.backend !== "github") return false;
@@ -518,8 +530,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     const absolute = resolve(path);
     const existing = (await known()).find((repo) => repo.path === absolute);
     if (existing !== undefined) return existing;
-    // A worktree keeps its own path, so file-backed work is written where its agent commits;
-    // it is named after its checkout, and the repo list offers the checkout (see `listed`).
+    // A worktree keeps its own path, so committed file-backed work is written where its agent
+    // commits (private issue files resolve to the checkout's); it is named after its checkout,
+    // and the repo list offers the checkout (see `listed`).
     const main = await mainCheckout(absolute);
     const entry = { id: repoId(absolute), path: absolute, name: basename(main ?? absolute) };
     await writeRegistry([...repos.filter((repo) => repo.path !== absolute), entry].slice(-50));
