@@ -77,18 +77,18 @@ describe("the work-items service", () => {
     return { repo, worktree, service, repos };
   }
 
-  it("names a worktree after its checkout and keeps its own file-backed work discoverable (VUH-2848)", async () => {
+  it("names a worktree after its checkout and shares the checkout's private issue files (VUH-2848, step 5 C2)", async () => {
     const { repo, worktree, service, repos } = await checkoutWithWorktree();
     // An agent in the worktree names its path first: no folder name, the checkout's.
     await service.handle({ action: "create", repo: worktree, title: "From the worktree" }, true);
     expect((await repos()).map((entry) => [entry.name, entry.root])).toEqual([[basename(repo), worktree]]);
-    // Once the checkout is known too, both stay offered: their file-backed work differs.
+    // The item is written once, in the main checkout's private folder, never in the worktree.
+    expect(readdirSync(join(repo, ".clankie/work")).filter((name) => name.endsWith(".md"))).toHaveLength(1);
+    expect(existsSync(join(worktree, ".clankie/work"))).toBe(false);
+    // Once the checkout is known too, it is offered once: both read the same files.
     await service.handle({ action: "list", repo }, true);
     const offered = await repos();
-    expect(offered.map((entry) => [entry.name, entry.root])).toEqual([
-      [`${basename(repo)} (worktree)`, worktree],
-      [basename(repo), repo],
-    ]);
+    expect(offered.map((entry) => [entry.name, entry.root])).toEqual([[basename(repo), repo]]);
     // A device enumerating what it is offered still finds the worktree's item.
     const titles = [];
     for (const entry of offered) {
@@ -96,6 +96,70 @@ describe("the work-items service", () => {
       if ("items" in listed) titles.push(...listed.items.map((item) => item.title));
     }
     expect(titles).toEqual(["From the worktree"]);
+    // The worktree reads the same item, and git sees nothing to commit in the checkout.
+    const fromWorktree = await service.handle({ action: "list", repo: worktree }, true);
+    expect("items" in fromWorktree ? fromWorktree.items.map((item) => item.title) : []).toEqual([
+      "From the worktree",
+    ]);
+    expect(await defaultRun("git", ["status", "--porcelain", "--", ".clankie/work"], repo)).toBe("");
+  });
+
+  it("brings a worktree's own older issue files into the shared folder once, losing none", async () => {
+    const { repo, worktree, service } = await checkoutWithWorktree();
+    // Before the folder was shared, an agent in the worktree kept its items there.
+    const legacy = join(worktree, ".clankie/work");
+    await mkdir(legacy, { recursive: true });
+    const item = (id: string, title: string) =>
+      `---\nid: ${id}\ntitle: ${title}\nstatus: todo\npriority: 0\n---\n# ${title}\n`;
+    await writeFile(join(legacy, "W-old001-kept-in-worktree.md"), item("W-old001", "Kept in the worktree"));
+    await writeFile(join(legacy, "W-old002-also-older.md"), item("W-old002", "Also older"));
+    const titles = async (path: string) => {
+      const listed = await service.handle({ action: "list", repo: path }, true);
+      return "items" in listed ? listed.items.map((entry) => entry.title).sort() : [];
+    };
+    expect(await titles(worktree)).toEqual(["Also older", "Kept in the worktree"]);
+    expect(await titles(repo)).toEqual(["Also older", "Kept in the worktree"]);
+    // An update reaches the item where it now lives, and the worktree's files are left alone.
+    await service.handle({ action: "update", repo: worktree, id: "W-old001", status: "in_progress" }, true);
+    const shared = readdirSync(join(repo, ".clankie/work")).filter((name) => name.endsWith(".md"));
+    expect(shared).toHaveLength(2);
+    expect(readdirSync(legacy).sort()).toEqual(["W-old001-kept-in-worktree.md", "W-old002-also-older.md"]);
+    // Once is enough: a later read never copies them again.
+    await service.handle({ action: "create", repo: worktree, title: "New in the shared folder" }, true);
+    expect(await titles(worktree)).toEqual([
+      "Also older",
+      "Kept in the worktree",
+      "New in the shared folder",
+    ]);
+  });
+
+  it("keeps a worktree listed when it keeps its issue files in another private folder", async () => {
+    const tracking = (directory: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        backend: "markdown",
+        directory,
+        decidedBy: "owner",
+        decidedAt: "2026-10-30T00:00:00.000Z",
+      });
+    const { repo, worktree, service, repos } = await checkoutWithWorktree({
+      ".clankie/tracking.json": tracking(".clankie/work/garden"),
+    });
+    await writeFile(join(worktree, ".clankie/tracking.json"), tracking(".clankie/work/orchard/"));
+    await service.handle({ action: "create", repo: worktree, title: "Orchard item" }, true);
+    await service.handle({ action: "create", repo, title: "Garden item" }, true);
+    // Both folders live in the checkout, but they hold different items, so both are offered.
+    const offered = await repos();
+    expect(offered.map((entry) => entry.root).sort()).toEqual([repo, worktree].sort());
+    const titles = [];
+    for (const entry of offered) {
+      const listed = await service.handle({ action: "list", repo: entry.id }, false);
+      if ("items" in listed) titles.push(...listed.items.map((item) => item.title));
+    }
+    expect(titles.sort()).toEqual(["Garden item", "Orchard item"]);
+    expect(
+      readdirSync(join(repo, ".clankie/work/orchard")).filter((name) => name.endsWith(".md")),
+    ).toHaveLength(1);
   });
 
   it("offers a checkout once when its worktree reads the same Linear project (VUH-2848)", async () => {
@@ -355,7 +419,7 @@ describe("the work routes", () => {
     expect(unknown.result.outcome).toBe("unavailable");
 
     // A role station reads its backlog by label (ADR 0208).
-    const [file] = readdirSync(join(workspace, ".clankie/work"));
+    const [file] = readdirSync(join(workspace, ".clankie/work")).filter((name) => name.endsWith(".md"));
     const path = join(workspace, ".clankie/work", file!);
     writeFileSync(path, readFileSync(path, "utf8").replace(/^---\n/u, "---\nlabels: [Designer]\n"));
     const station = async (label: string) =>

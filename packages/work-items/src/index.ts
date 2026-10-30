@@ -13,7 +13,8 @@ export {
 export * from "./linear-import.ts";
 export * from "./linear-mirror.ts";
 export * from "./outcomes.ts";
-export { createFilesBackend } from "./backends/files.ts";
+export { createFilesBackend, PRIVATE_WORK_GITIGNORE } from "./backends/files.ts";
+export * from "./files-export.ts";
 export {
   createGithubBackend,
   ghCliApi,

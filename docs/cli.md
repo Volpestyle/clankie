@@ -2880,6 +2880,33 @@ Linear or durable local storage. `clankie doctor` reports the active backend and
 selection reason. An explicit `repo` tool argument selects the repo's recorded
 GitHub or Markdown adapter.
 
+#### Issue files (`.clankie/work/`)
+
+Issue files are the default home for new owner work: one Markdown file per item,
+named `<id>-<slug>.md`, with front matter (`id`, `title`, `status`, `priority`,
+`parent`, `labels`, `depends_on`, `created`, `updated`, optional `owner_check`)
+and the shared body (`## Acceptance Criteria`, `## Evidence`). The folder is
+private to the owner's Mac:
+
+- It is never committed. The first write puts a `.gitignore` holding `*` in the
+  folder, so Git ignores it in any repo; an existing `.gitignore` there is kept.
+- It lives once per repository, in the main checkout. From a linked worktree,
+  `.clankie/work/` resolves to the main checkout's folder (Git's own `commondir`
+  link), so every worktree reads and writes the same files and the repo list
+  offers the worktree as its checkout. A committed Markdown directory such as
+  `docs/tasks` stays per checkout. A worktree that kept its own `.clankie/work/`
+  before this has its items copied into the shared folder on first use, skipping
+  any id the shared folder already holds; its own files are left as they are, and
+  a marker in `.adopted/` keeps the copy from happening twice.
+- Two private folders (`.clankie/work/a`, `.clankie/work/b`) are different
+  trackers, so a worktree on the other one stays listed on its own.
+- Every write (create, update, attach, export) holds one lock kept in the folder
+  (`.writes.lock`), so writers in different worktrees serialize.
+
+Comments and project status updates for a file-backed repo stay in the service's
+own state (`repo-trackers/<repo>/ancillary`, per registered path), not in the folder. `owner_check` is
+read back as the issue's `ownerCheck`; only the built-in tracker sets it.
+
 #### Items of a cut-over project
 
 A project cut over to the built-in tracker keeps only a frozen copy in Linear.
@@ -10187,6 +10214,59 @@ be proved.
 
 Paired owner devices fetch evidence bytes with `evidence_fetch` (`sha256`, `offset`, `length`, at most 256 KiB). Responses contain base64 bytes, total size and the recorded content type; no service URL or signed link leaves the authenticated device/relay path. Unsupported storage backends answer unavailable. The relay forwards it as an owner route under the device's own identity (never the captain bearer) and passes the bytes through unredacted; unpaired, revoked or supervise-only devices are refused (VUH-1977).
 
+### `work export --project P --to markdown [--dry-run] [--json]`
+
+Moves project `P`'s open work into its repo's issue files (step 5). `P` is the
+settings project id (`clankie project list`). The service reads the project's
+saved tracker, the built-in tracker (its bound `trackerProjectId`) or Linear (the
+connected account, or the offline local tracker without one), and writes one
+file per open item (not Done or Canceled) into `.clankie/work/` in the main
+checkout of the project's tracker workspace. The tracker is only read: Linear and
+the built-in store stay as the record. Output is JSON; `--json` is accepted for
+scripts that pass it. The route is `POST /v1/work/export` with
+`{"project":P,"to":"markdown","dryRun":BOOLEAN}` and the operator credential.
+
+Each file keeps the tracker's own identifier as its `id` (`LOCAL-VUH-12`,
+`VUH-2900`), with the title, status, priority, labels, body (criteria, evidence
+and every other section), parent and blockers by identifier, milestone,
+`owner_check`, timestamps and the tracker `source` URL. Built-in links and the
+current evidence bundle's references are added to `## Evidence`. A parent or
+blocker the tracker cannot name is left out rather than guessed.
+
+`--dry-run` reads only and prints the plan; nothing is written, not even the
+folder. The result lists `items` (`id`, `title`, `status`, `action`, `file`,
+`reason`), `counts` (`create`, `update`, `unchanged`, `kept`, `closedSkipped`),
+the `.gitignore` action and `next`, the selection command.
+
+Re-running is safe. Each exported file records `export_hash`, the hash of exactly
+what export wrote:
+
+- no file for an id: an open item gets a new file; a closed one is skipped;
+- a file still matching its `export_hash` is refreshed from the tracker, so a
+  rename or a close there reaches it (`update`, or `unchanged` when equal);
+- a file changed since export, by an agent, the files backend or a hand edit, or
+  one export never wrote, is `kept` byte for byte and reported. Export never
+  overwrites it.
+
+A refused export returns the same shape with `ready: false` and `refusals`, HTTP
+409 (200 for a dry run), and writes nothing. It refuses a project on Auto:
+Clankie works its backlog by himself there (rounds, the work queue, runs,
+leases), which needs the built-in tracker for now; turn Auto off first with
+`clankie project settings P --auto off`. It also refuses a project whose tracker
+is GitHub or already files, an unbound built-in project and a tracker workspace
+on another machine.
+
+Export does not change which tracker the project uses. That stays the owner's
+separate, previewed step:
+
+```sh
+clankie work export --project app --to markdown --dry-run
+clankie work export --project app --to markdown
+clankie project settings app tracker '{"backend":"markdown","directory":".clankie/work"}'
+clankie project settings app tracker '{"backend":"markdown","directory":".clankie/work"}' \
+  --revision PREVIEW_REVISION --confirm-retain-items
+```
+
 ### `work import linear --project UUID --scratch NAME`
 
 Read-only import of a single-team Linear project through Clankie's broker-connected
@@ -10293,7 +10373,8 @@ These commands only preview. Apply the exact preview by adding
 `--revision PREVIEW_REVISION`; project changes also require
 `--confirm-retain-items`. Existing items remain in their original tracker.
 Nothing is migrated or deleted; switching back makes the previous items
-accessible again. A changed project, convention, workspace or connection
+accessible again. To take a project's open items along into issue files, run
+[`work export`](#work-export-project-p-to-markdown-dry-run-json) first. A changed project, convention, workspace or connection
 invalidates the preview. Review again rather than automatically retrying.
 
 Selections are `{"backend":"builtin"}` (a separate built-in project is created

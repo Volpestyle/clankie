@@ -48,12 +48,15 @@ const WORK_USAGE = [
   "  | sync --json COMMAND   (built-in bootstrap, batch, subscribe or keyed transaction)",
   "  | call TOOL [--json ARGS]   (Clankie's call to the built-in tracker, for the owner)",
   "  | owner TOOL [--json ARGS]   (the owner's own call to the built-in tracker; agents never use it)",
+  "  | export --project P --to markdown [--dry-run] [--json]   (the project's open items become private issue files in .clankie/work/)",
   "  | import linear --project UUID --scratch NAME   (read-only Linear mirror into a scratch store)",
   "  | mirror linear --scratch NAME --project UUID enable|disable|status   (Linear webhooks keep that scratch store current)",
   "  | cutover linear --world-project ID --scratch NAME --project UUID [--dry-run]   (that import becomes the live built-in tracker)",
   "  | cutover linear --world-project ID --switch-back [--dry-run]   (restore Linear as that project's tracker)",
   "  Every command takes --repo PATH (default: the git repo containing the current directory).",
 ].join("\n");
+
+const EXPORT_USAGE = "Usage: clankie work export --project P --to markdown [--dry-run] [--json]";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,7 +81,8 @@ export function parseWorkArgs(args: readonly string[]): Parsed {
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
     if (arg.startsWith("--")) {
-      if (BOOLEAN_FLAGS.has(arg)) {
+      // Output is always JSON; a bare `--json` says so (`sync --json COMMAND` still takes a value).
+      if (BOOLEAN_FLAGS.has(arg) || (arg === "--json" && (args[i + 1] ?? "--").startsWith("--"))) {
         flags.set(arg, ["true"]);
         continue;
       }
@@ -445,6 +449,17 @@ function trackerRequest(
       const command = TrackerSyncCommandSchema.parse(JSON.parse(one(parsed, "--json")!));
       return { path: "/operator/v1/dispatch", body: { op: "tracker_sync", schemaVersion: 1, command } };
     }
+    case "export":
+      if (rest.length !== 0 || !one(parsed, "--project") || one(parsed, "--to") !== "markdown")
+        throw new Error(EXPORT_USAGE);
+      return {
+        path: "/v1/work/export",
+        body: {
+          project: one(parsed, "--project"),
+          to: "markdown",
+          dryRun: one(parsed, "--dry-run") === "true",
+        },
+      };
     case "import":
       if (rest.length !== 1 || rest[0] !== "linear" || !one(parsed, "--project") || !one(parsed, "--scratch"))
         throw new Error("Usage: clankie work import linear --project UUID --scratch NAME");
@@ -701,9 +716,11 @@ export async function runWorkCommand(
       method: "POST",
       headers,
       body: JSON.stringify(tracker.body),
-      // An import or cutover reads the whole Linear project through the shared request budget.
+      // An import, cutover or export reads the whole project through the shared request budget.
       signal: AbortSignal.timeout(
-        tracker.path === "/v1/tracker/import/linear" || tracker.path === "/v1/tracker/cutover/linear"
+        tracker.path === "/v1/tracker/import/linear" ||
+          tracker.path === "/v1/tracker/cutover/linear" ||
+          tracker.path === "/v1/work/export"
           ? 1_200_000
           : 60_000,
       ),

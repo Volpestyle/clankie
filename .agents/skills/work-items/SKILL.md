@@ -5,7 +5,8 @@ description: >-
   repo: issues, acceptance criteria, status, evidence, result and project status
   updates, or a handoff. Tracks work where the repo already does (Linear, GitHub
   issues, its own Markdown directory, Clankie's built-in tracker) and in
-  .clankie/work/ only when it has nothing. Covers read-before-write, where each
+  private issue files (.clankie/work/) when it has nothing or the owner moved a
+  project there with clankie work export. Covers read-before-write, where each
   kind of work state lives, what status means, and how to write a post that
   carries only what a reader cannot re-derive.
 ---
@@ -33,6 +34,7 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | Progress                       | `clankie work update ID --status in_progress --check 1`       |
 | Finished                       | `clankie work close ID` (`--canceled` if dropped)             |
 | Evidence                       | `clankie work attach ID --url URL --caption "what it proves"` |
+| Move open items to issue files | `clankie work export --project P --to markdown [--dry-run]`   |
 | Review a local Git change      | `clankie work review-diff BASE HEAD` (read-only, two commits) |
 | Review a supplied patch file   | `clankie work review-patch FILE` (patch claims only, no Git)  |
 
@@ -58,6 +60,18 @@ Routing never raises a worker's role or request budget.
 Issue summaries have no separate 20,000-character limit: `work create --summary`
 matches canonical `save_issue` descriptions, and `work show`/API reads return
 the full summary. Provider and transport request limits still apply.
+
+**Issue files** (`.clankie/work/`, one Markdown file per item) are the default
+home for new owner work. They are private: the folder has its own `.gitignore`,
+so they are never committed, and they live once per repo, in its main checkout,
+so every linked worktree reads and writes the same files. Edit them through
+`clankie work` or the `linear_*` tools, whose writes hold the folder's lock. To
+move a project there, run `clankie work export --project P --to markdown
+--dry-run`, then without `--dry-run`, then select
+`{"backend":"markdown","directory":".clankie/work"}` with `clankie project
+settings P tracker ...`. Export copies open items only and never writes the old
+tracker, which stays the frozen record. A file edited after export is never
+overwritten by a re-run. Projects on Auto keep the built-in tracker for now.
 
 Backend specifics: [Linear](reference/linear.md) (data-destroying mechanics,
 media, threading, worker posts) and [built-in tracker](reference/builtin-tracker.md)
@@ -88,7 +102,8 @@ report instead. Never ask him to read evidence gaps, logs or review records.
    preview with `--revision REV --confirm-retain-items`. For the new-project
    default, use `clankie fleet tracker JSON --revision REV`. The TUI accepts the
    same arguments through `/fleet tracker` and `/project settings PROJECT tracker`.
-   Existing items stay in the old tracker; nothing migrates or is deleted. Linear/GitHub use connected
+   Existing items stay in the old tracker; nothing migrates or is deleted
+   (`clankie work export` copies open items to issue files first). Linear/GitHub use connected
    accounts; built-in and repo files need none. See the CLI's Work tracker settings.
 3. **Follow what is recorded.** `.clankie/tracking.json` is the owner's answer.
    Do not create `.clankie/work/` files in a repo whose convention is Linear,

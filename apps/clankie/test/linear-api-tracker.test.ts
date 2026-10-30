@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileCredentialStore, resolveProviderBearer } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker, readProjectDetails, writeConvention } from "@clankie/work-items";
+import {
+  createFilesBackend,
+  createLocalTracker,
+  readProjectDetails,
+  writeConvention,
+} from "@clankie/work-items";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { linearProjectExists } from "../src/linear-project-binding.ts";
@@ -508,6 +514,54 @@ describe("registered Linear OAuth through real broker and hosted tracker", () =>
     expect(provider.validationErrors).toEqual([]);
   });
 
+  it("exports a connected Linear project's open issue with the issues that block it", async () => {
+    const { host, provider, directory } = await setup();
+    const repo = join(directory, "repo");
+    await writeConvention(repo, {
+      schemaVersion: 1,
+      backend: "linear",
+      linear: { team: TEAM_ID, project: PROJECT_ID },
+      decidedBy: "owner",
+      decidedAt: "2026-10-05T02:00:00.000Z",
+    });
+    // Linear names a blocker only among the blocked issue's inverse relations.
+    const issue = provider.rows.issues![0]!;
+    issue.state = { id: STATE_ID, name: "In Progress", type: "started", team: issue.team };
+    const relation = (type: string, identifier: string) => ({
+      id: `relation-${identifier}`,
+      type,
+      issue: { id: `00000000-0000-4000-8000-0000000014${identifier.slice(-2)}`, identifier },
+      relatedIssue: { id: ISSUE_ID, identifier: "VUH-1383" },
+    });
+    issue.inverseRelations = {
+      nodes: [relation("blocks", "VUH-1400"), relation("related", "VUH-1401")],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    };
+    const service = createWorkItemsService({
+      stateDirectory: directory,
+      mcpHost: host,
+      hosted: true,
+      localMachineId: "local",
+      projects: async () =>
+        ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "app",
+              name: "App",
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: repo }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+            },
+          ],
+        }),
+    });
+    const exported = await service.exportProject({ project: "app", to: "markdown", dryRun: false });
+    expect(exported).toMatchObject({ ready: true, counts: { create: 1 } });
+    const files = createFilesBackend({ root: repo, directory: ".clankie/work", kind: "markdown" });
+    expect((await files.list()).map((item) => [item.id, item.status, item.dependsOn])).toEqual([
+      ["VUH-1383", "in_progress", ["VUH-1400"]],
+    ]);
+    expect(provider.validationErrors).toEqual([]);
+  });
   it("rejects an account replacement after lookup without claiming a mutation was dispatched", async () => {
     const { host, provider, store } = await setup();
     const gate = provider.blockNextGraphql();
