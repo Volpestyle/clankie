@@ -752,6 +752,25 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         const question = options.readOwnerAsk?.(record.requestId);
         if (question && question.status !== "pending") void answered(question).catch(() => undefined);
       }
+    // An owner check cut off before its question was saved is asked again: the ask is keyed
+    // by the post, so one already raised is found, not raised twice. One that can't be asked
+    // is dropped, unposted, so the asker's retry asks afresh.
+    for (const record of state.posts)
+      if (record.state === "waiting" && record.decider === "owner" && record.requestId === undefined)
+        void serial(async () => {
+          if (record.state !== "waiting" || record.requestId !== undefined) return;
+          const asked = await askOwner(record);
+          if (!asked) state.posts = state.posts.filter((entry) => entry !== record);
+          save();
+          const question = asked ? options.readOwnerAsk?.(record.requestId!) : undefined;
+          // Its answer is applied after this turn of the queue, which deciding waits on.
+          if (question && question.status !== "pending") void answered(question).catch(() => undefined);
+        }).catch((error: unknown) =>
+          options.logger?.warn(
+            { event: "tracker.posting.reask_failed", error },
+            "A held post's owner check was not asked again",
+          ),
+        );
   };
 
   async function admit(write: PostingWrite): Promise<PostingAdmission> {

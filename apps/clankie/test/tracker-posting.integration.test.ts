@@ -1113,3 +1113,34 @@ it("a project or team named by its name or slug meets that project's setting", a
   expect(result.detail).toContain("Posting to Linear is read only for Meadow");
   expect(f.mutations("issueCreate")).toBe(0);
 });
+
+it("an owner check cut off before its question was saved is asked again on restart", async () => {
+  const id = randomUUID();
+  const body = "Cut off mid-ask.";
+  // Clankie stopped after saving the held post, before the owner's question was linked to it.
+  const f = await fixture({
+    posts: [
+      {
+        id,
+        projectId: "garden",
+        tracker: "linear",
+        decider: "owner",
+        state: "waiting",
+        summary: `Post a comment on ${ISSUE_ID} to Linear`,
+        detail: `Post a comment on ${ISSUE_ID} to Linear (Garden).\nbody: ${body}`,
+        asker: "Clankie",
+        createdAt: new Date().toISOString(),
+        route: { kind: "linear", tool: "save_comment", arguments: comment(body) },
+        askerRef: { kind: "lead" },
+        projectIds: ["garden"],
+        fingerprint: "cut-off",
+      },
+    ],
+  });
+  await f.settle(() => f.posting.read(id)?.requestId !== undefined);
+  const checks = (await f.feed()).items.filter((item) => item.kind === "check");
+  expect(checks).toHaveLength(1);
+  await f.answer("Post it");
+  await f.settle(() => f.posting.read(id)?.state === "posted");
+  expect(f.mutations("commentCreate")).toBe(1);
+});
