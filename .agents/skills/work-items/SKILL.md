@@ -96,9 +96,13 @@ permits those calls from a same-user shell; that is a known boundary gap, not a
 secure distinction ([ADR 0253](../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)).
 Report missing isolation honestly and keep owner-verified acceptance open.
 Ask the owner to check only a ten-second try in the app or a human-only
-judgement of feel, look, reading or sound. Only the lead marks that, with
-`ownerCheck` on the built-in tracker; workers suggest a one-line check in their
-report instead. Never ask him to read evidence gaps, logs or review records.
+judgement of feel, look, reading or sound, in one line of at most 140
+characters saying exactly what to look at. Only the lead asks: with
+`ownerCheck` on the built-in tracker, or as a quick check in the owner's feed
+(`request_user_input` with `check`, or `clankie feed check`) for any tracker,
+issue files included; mark one that takes longer than ten seconds `longer`.
+Workers suggest a one-line check in their report instead. Never ask him to read
+evidence gaps, logs or review records.
 
 ## Rules
 

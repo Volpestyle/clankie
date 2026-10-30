@@ -76,6 +76,7 @@ export async function requestQuestion(
   context: ConversationTurnContext,
   projectDraft?: ProjectProposalDraft,
   surface = false,
+  exactPublication = false,
 ): Promise<ConversationQuestionResult> {
   const input = QuestionDraftSchema.parse(draft);
   const workspaceBound = !!projectDraft || input.purpose === "preference";
@@ -94,8 +95,16 @@ export async function requestQuestion(
   )
     throw new Error("question_turn_unavailable");
   ctx["validQuestionState"](meta);
+  // A check marked as not longer is the same ask as one that leaves the mark out.
+  const { longer: _longer, ...unmarked } = input;
+  const wanted = {
+    ...unmarked,
+    ...(input.longer ? { longer: true } : {}),
+    allowFreeform: input.kind === "text" || input.allowFreeform,
+  };
   const matchingPending = () =>
     meta.questions?.records.find((record) => {
+      if (exactPublication && record.question.originRunId !== context.runId) return false;
       if (record.question.status !== "pending" && !(surface && record.question.originRunId === context.runId))
         return false;
       if (workspaceBound) return !!record.projectCreation || record.question.purpose === "preference";
@@ -115,9 +124,13 @@ export async function requestQuestion(
           ...(q.waitingOn ? { waitingOn: q.waitingOn } : {}),
           ...(steps?.length ? { steps } : {}),
           ...(q.gate ? { gate: q.gate } : {}),
+          ...(q.check ? { check: q.check } : {}),
+          ...(q.longer ? { longer: true } : {}),
+          ...(q.evidence ? { evidence: q.evidence } : {}),
+          ...(q.projectId ? { projectId: q.projectId } : {}),
           ...(input.defaultAction !== undefined ? record.decisionPolicy : {}),
         },
-        { ...input, allowFreeform: input.kind === "text" || input.allowFreeform },
+        wanted,
       );
     });
   const pending = matchingPending();
@@ -208,6 +221,10 @@ export async function requestQuestion(
       kind: input.kind,
       ...(input.issue ? { issue: input.issue } : {}),
       prompt: input.prompt,
+      ...(input.check ? { check: input.check } : {}),
+      ...(input.longer ? { longer: true as const } : {}),
+      ...(input.evidence ? { evidence: input.evidence } : {}),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       options: input.options.map((o) => ({ ...o, optionId: randomUUID() })),
       allowFreeform: input.kind === "text" || input.allowFreeform,
       createdAt,

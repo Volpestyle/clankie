@@ -107,12 +107,15 @@ it("a worker is refused, on create and on update, and nothing is written", async
   expect((await f.save({ id: f.issue.id, title: "Renamed" }, worker)).title).toBe("Renamed");
 });
 
-it("an owner check is one line of at most 160 characters", async () => {
+it("an owner check is one line of at most 140 characters", async () => {
   const f = await fixture();
   await expect(f.save({ id: f.issue.id, ownerCheck: "Open Work\ntap a house" })).rejects.toThrow(/one line/u);
   await expect(f.save({ id: f.issue.id, ownerCheck: "Open Work\rtap a house" })).rejects.toThrow(/one line/u);
-  await expect(f.save({ id: f.issue.id, ownerCheck: "x".repeat(161) })).rejects.toThrow(/160/u);
-  expect((await f.save({ id: f.issue.id, ownerCheck: "x".repeat(160) })).ownerCheck).toBe("x".repeat(160));
+  await expect(f.save({ id: f.issue.id, ownerCheck: "x".repeat(141) })).rejects.toThrow(
+    /at most 140 characters/u,
+  );
+  expect((await f.read()).ownerCheck).toBeUndefined();
+  expect((await f.save({ id: f.issue.id, ownerCheck: "x".repeat(140) })).ownerCheck).toBe("x".repeat(140));
 });
 
 it("workers and reviewers neither see nor call the owner check; other backends refuse it", () => {

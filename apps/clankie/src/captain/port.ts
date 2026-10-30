@@ -615,6 +615,8 @@ export interface CaptainPort {
     conversationId: string,
     draft: import("./conversation-questions.ts").QuestionDraft,
     publicationId?: string,
+    /** Reuse only this publication's own ask: an equal ask under another id is a new ask. */
+    options?: { readonly exactPublication?: boolean },
   ): Promise<import("@clankie/protocol").ConversationQuestionResult>;
   fleetConversationAuthority(principalId: string): Promise<ConversationAuthority | undefined>;
   fleetWriteAuthority(

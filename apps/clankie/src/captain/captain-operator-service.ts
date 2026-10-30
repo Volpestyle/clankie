@@ -1068,7 +1068,8 @@ export function createOperatorService(
       request.op === "fleet_room" ||
       request.op === "app_notes" ||
       request.op === "feed_list" ||
-      request.op === "feed_drop"
+      request.op === "feed_drop" ||
+      request.op === "feed_check"
     )
       throw new Error("Connections are served by the authenticated app boundary");
     if (

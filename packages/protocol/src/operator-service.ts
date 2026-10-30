@@ -9,12 +9,18 @@ import {
 } from "./fleet-room.ts";
 import { TrackerSyncCommandSchema, TrackerSyncResultSchema } from "./tracker-sync.ts";
 import {
+  FEED_CHECK_ONE_SOURCE,
   FEED_DROP_EMPTY,
+  FeedCheckRequestSchema,
+  FeedCheckResultSchema,
   FeedDropRequestSchema,
   FeedDropResultSchema,
   FeedListRequestSchema,
   FeedListResultSchema,
+  feedCheckHasOneSource,
   feedDropHasContent,
+  type FeedCheckRequest,
+  type FeedCheckResult,
   type FeedDropRequest,
   type FeedDropResult,
   type FeedListRequest,
@@ -269,6 +275,10 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   FeedDropRequestSchema.extend({ op: z.literal("feed_drop"), schemaVersion: z.literal(1) })
     .strict()
     .refine(feedDropHasContent, FEED_DROP_EMPTY),
+  /** An agent asks the owner for a quick check: a pending verify ask. This machine's operator only. */
+  FeedCheckRequestSchema.extend({ op: z.literal("feed_check"), schemaVersion: z.literal(1) })
+    .strict()
+    .refine(feedCheckHasOneSource, FEED_CHECK_ONE_SOURCE),
   OwnerUpdateListFilterSchema.extend({
     op: z.literal("owner_update_list"),
     schemaVersion: z.literal(1),
@@ -927,6 +937,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({ op: z.literal("feed_drop"), schemaVersion: z.literal(1), result: FeedDropResultSchema })
     .strict(),
   z
+    .object({ op: z.literal("feed_check"), schemaVersion: z.literal(1), result: FeedCheckResultSchema })
+    .strict(),
+  z
     .object({ op: z.literal("lead_chats"), schemaVersion: z.literal(1), result: LeadChatsResultSchema })
     .strict(),
   z
@@ -1577,6 +1590,8 @@ export interface OperatorConversationServiceClient {
   feedList?(request?: FeedListRequest): Promise<FeedPage>;
   /** Files a drop; retry with the same `idempotencyKey` after any uncertain answer. */
   feedDrop?(request: FeedDropRequest): Promise<FeedDropResult>;
+  /** Asks the owner for a quick check; retry with the same `idempotencyKey` after any uncertain answer. */
+  feedCheck?(request: FeedCheckRequest): Promise<FeedCheckResult>;
   ownerUpdateList?(filter?: OwnerUpdateListFilter): Promise<OwnerUpdateList>;
   ownerUpdateRead?(id: string): Promise<OwnerUpdateResult>;
   ownerUpdateDismiss?(id: string): Promise<OwnerUpdateResult>;
@@ -1856,6 +1871,13 @@ export function createOperatorConversationServiceClient(
       );
       if (result.op !== "feed_drop") throw new Error(`Unexpected ${result.op} result for feed_drop`);
       return result.result as FeedDropResult;
+    },
+    async feedCheck(request) {
+      const result = await dispatch(
+        OperatorConversationServiceRequestSchema.parse({ ...request, op: "feed_check", schemaVersion: 1 }),
+      );
+      if (result.op !== "feed_check") throw new Error(`Unexpected ${result.op} result for feed_check`);
+      return result.result as FeedCheckResult;
     },
     async ownerUpdateList(filter = {}) {
       const result = await dispatch({ op: "owner_update_list", schemaVersion: 1, ...filter });

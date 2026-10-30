@@ -3,7 +3,9 @@ import { realpathSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  EvidenceLinkSchema,
   MailIssueReferenceSchema,
+  OwnerCheckLineSchema,
   ConversationQuestionSchema,
   ConversationDecisionPolicySchema,
   ConversationQuestionAnswerSchema,
@@ -17,7 +19,7 @@ import {
   observeLocalProjectWorktreeRoot,
   observeLocalProjectGitWorktree,
 } from "@clankie/settings";
-import type { ProjectsSettings } from "@clankie/protocol/projects";
+import { ProjectIdSchema, type ProjectsSettings } from "@clankie/protocol/projects";
 
 export const SAFE_DECISION_DEFAULT =
   "Leave the requested change pending and continue other authorized work; do not cross any owner gate.";
@@ -53,6 +55,19 @@ export const QuestionDraftSchema = z
       .strict()
       .optional(),
     prompt: z.string().trim().min(1).max(2000),
+    check: OwnerCheckLineSchema.optional().describe(
+      "A quick check's one line, at most 140 characters: exactly what the owner looks at, answerable in about ten seconds. The owner's feed shows it first.",
+    ),
+    longer: z
+      .boolean()
+      .optional()
+      .describe("True when answering takes more than a ten-second look; the feed still shows it, marked."),
+    evidence: EvidenceLinkSchema.optional().describe(
+      "One clankie://evidence/sha256/HASH link (ADR 0258) the owner looks at to answer, such as a screenshot.",
+    ),
+    projectId: ProjectIdSchema.optional().describe(
+      "The owner's project this ask is about, so his feed files it there. Grants nothing.",
+    ),
     options: z
       .array(
         z
@@ -78,8 +93,12 @@ export const QuestionDraftSchema = z
     if ((v.purpose === "approval" || v.purpose === "gate") && !v.gate)
       ctx.addIssue({ code: "custom", message: "Approval requires an owner-reserved gate" });
     // "Check it works" for a landed tracker item (VUH-1917): the answer verifies it or sends it back.
-    if (v.purpose === "verify" && (v.kind !== "choice" || !v.issue))
-      ctx.addIssue({ code: "custom", message: "A verify ask names its issue and offers choices" });
+    // A quick check (step 5, C4) is a verify ask whose check line says what to look at.
+    if (v.purpose === "verify" && (v.kind !== "choice" || (!v.issue && !v.check)))
+      ctx.addIssue({
+        code: "custom",
+        message: "A verify ask names its issue or carries a check line, and offers choices",
+      });
     if (v.purpose === "owner_action" && !v.steps?.length)
       ctx.addIssue({ code: "custom", message: "Owner action requires exact steps" });
     if (new Set(v.options.map((o) => o.label)).size !== v.options.length)

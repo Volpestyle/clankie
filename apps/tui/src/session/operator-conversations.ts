@@ -102,13 +102,16 @@ export function createCaptainOperatorConversationClient(
               ? "Owner authentication required to read the feed."
               : request.op === "feed_drop"
                 ? "Owner authentication required to drop into a project."
-                : "Owner authentication required to turn Auto on.";
+                : request.op === "feed_check"
+                  ? "Asking the owner for a check needs this machine's operator credential."
+                  : "Owner authentication required to turn Auto on.";
     const ownerRequired =
       request.op.startsWith("owner_update_") ||
       request.op === "acknowledge_worker_report_history" ||
       request.op === "fleet_room" ||
       request.op === "feed_list" ||
       request.op === "feed_drop" ||
+      request.op === "feed_check" ||
       (request.op === "autonomy" && operatorAutonomyCommandRequiresOwner(request.command));
     if (ownerRequired && ownerFetcher === undefined) {
       throw new OperatorConversationClientError(ownerError);
@@ -141,6 +144,18 @@ export function createCaptainOperatorConversationClient(
       }
       if (response.status === 503 && (await errorCode(response)) === "service_restarting")
         throw new OperatorConversationRestartingError();
+      // A refused check names what to fix, such as the check line's limit.
+      if (response.status === 400 && request.op === "feed_check") {
+        // allow-swallowed-rejection -- a body that is not JSON names no fix; the status still fails the request
+        const body: unknown = await response.json().catch(() => undefined);
+        if (
+          typeof body === "object" &&
+          body !== null &&
+          "message" in body &&
+          typeof body.message === "string"
+        )
+          throw new Error(body.message.slice(0, 500));
+      }
       if (response.status === 409) {
         const body: unknown = await response.json();
         if (

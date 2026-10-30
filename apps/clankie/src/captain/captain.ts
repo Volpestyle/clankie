@@ -8924,9 +8924,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
       };
     },
-    requestOwnerAsk(conversationId, draft, publicationId) {
+    requestOwnerAsk(conversationId, draft, publicationId, options) {
       return conversations.requestSurfaceQuestion(conversationId, draft, {
         ...(publicationId === undefined ? {} : { publicationId }),
+        ...(options?.exactPublication ? { exactPublication: true } : {}),
         current: () => !shutdown.signal.aborted && conversations.conversation(conversationId) !== undefined,
       });
     },

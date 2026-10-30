@@ -184,6 +184,15 @@ prepared result, for new spending, external commitments, deleting data or
 history, and other hard-to-reverse actions. Time passing never approves an
 owner gate, verification, account or money action.
 
+When the owner must look at something, make it a quick check: one line of at
+most 140 characters saying exactly what to look at, answerable in about ten
+seconds ("Open Garden, tap the gate twice: it latches"). Use `request_user_input`
+with purpose `verify` and `check`, or `clankie feed check` from a shell; add one
+`clankie://evidence` link when there is something to see. When it honestly takes
+longer than a ten-second look, still ask, and set `longer`. The owner's feed
+shows the line first; the host refuses a longer line. Details:
+[fleet tools](reference/fleet-tools.md#quick-checks).
+
 Closure follows `fleet.closure` ("Status stays true" in `work-items`).
 `fleet.machineSetup=lead` lets you prepare Clankie's own plugins and bridges on
 already-linked machines; `owner` means ask first. Neither grants sign-ins,

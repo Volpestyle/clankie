@@ -8268,6 +8268,15 @@ the same mailbox. Legacy `preference` questions remain supported. `kind`
 never grant credentials, enroll a machine or change settings. Project creation
 still requires its separate reviewed CREATE target.
 
+An ask may also carry a quick check (step 5): `check`, one line of at most 140
+characters saying exactly what the owner looks at, answerable in about ten
+seconds; `longer: true` when it honestly takes more than a ten-second look;
+`evidence`, one `clankie://evidence/sha256/HASH` link to look at; and
+`projectId`, the owner's project it is about, which only places it in the feed.
+A `verify` ask names its issue or carries a check line. A longer check line is
+refused, naming the limit. See
+[Quick checks](#quick-checks-feed-check-project-id-conversation-id-longer-evidence-link-waiting-on-text-key-key-json-line).
+
 Decision asks include `defaultAction` (up to 1900 characters) and `deadlineAt`
 (UTC ISO timestamp) together. The owner sees both in the existing steps display.
 If neither is supplied, the safe default leaves the requested change pending and
@@ -8446,7 +8455,12 @@ by the host from the stores above. It keeps no store of its own and changes
 nothing:
 
 - a **check** is a pending owner ask; answer it with `conversations answer`
-  (or `input_answer`) using the `question` and `revision` the item carries;
+  (or `input_answer`) using the `question` and `revision` the item carries.
+  `line` is what to look at: the ask's own check line, or the owner check of
+  the built-in item a verify ask names. `longer` marks an ask its asker said
+  takes longer than a ten-second look. `media` is the one thing to look at: the
+  ask's evidence, or that item's first clip (else screenshot), as a
+  `clankie://evidence` link with its `mimeType` from the evidence store;
 - an **update** is either mailed news (`ownerUpdate`, unread or read; dismiss it
   with `conversations dismiss-update`) or a project status update
   (`projectUpdate`, read-only; `work_project_details` holds the full text and
@@ -8457,7 +8471,17 @@ nothing:
   with its `itemId` and `repoId` for the work operations, its current `title`,
   `status` and text, its screenshots as `media`, and its `source` (a paired
   device by name and platform, or `machine` for this computer's CLI or
-  console). It leaves the feed once its file is done or canceled.
+  console). It leaves the feed once its file is done or canceled;
+- a **proof** is a finished built-in tracker item the lead marked with an owner
+  check ([ADR 0299](adr/0299-the-owners-app-gives-the-verdict-on-finished-work.md)):
+  landed or delivered, not Done, with a current evidence bundle and no pending
+  verify ask (that ask is its check instead). It carries `issueId`, `key`,
+  `title`, `line` (the owner check), `bundleId`, `stage`, `url` and the bundle's
+  clips then screenshots as `media`. Only the owner's paired app answers it,
+  with `post_owner_verdict` (`issueId`, `bundleId`, `verdict` of `works` or
+  `send_back`, and a `note` to send back) through `tracker_sync` or the device
+  path of `POST /v1/tracker/call`; it leaves the feed once verified, sent back
+  or Done. The CLI has no verdict.
 
 ```sh
 clankie feed
@@ -8482,8 +8506,10 @@ HTTP uses `POST /operator/v1/dispatch` with `schemaVersion: 1`, `op: "feed_list"
 and optional `projectId`, `cursor` and `limit` (1–50, default 20). The result is
 `{outcome: "ready", items, nextCursor?, unreadable?}` or
 `{outcome: "unavailable", message}`. Each item has `kind`
-(`check | update | drop`), a stable `id`, `at`, optional `projectId` and the
-payload named by its kind. Items order by `at`, then `id`, descending; the
+(`check | update | drop | proof`), a stable `id`, `at`, optional `projectId` and the
+payload named by its kind. A check's `line`, `longer` and `media` and the
+`proof` kind are absent from older hosts. Every `clankie://evidence` media link
+on a page gets its `mimeType` from the evidence store when the store holds it. Items order by `at`, then `id`, descending; the
 opaque cursor names the last item shown, so newer items never shift a later
 page, and a cursor this host did not issue is refused with 400. Bodies longer
 than 4000 characters are cut and marked `bodyTruncated`. A reader using
@@ -8492,6 +8518,57 @@ than 4000 characters are cut and marked `bodyTruncated`. A reader using
 The feed requires the same authority as the mailbox: the owner operator or an
 active device with `terminalControl`. The relay forwards it, like the mailbox
 operations, with the device's own bearer; a captain bearer is refused.
+
+### Quick checks: `feed check [--project ID | --conversation ID] [--longer] [--evidence LINK] [--waiting-on TEXT] [--key KEY] [--json] LINE`
+
+The feed holds quick checks: something a lead or worker needs the owner to
+verify, answerable in about ten seconds. An agent on this machine asks with
+this machine's operator credential:
+
+```sh
+clankie feed check --project garden "Open Garden, tap the gate twice: it latches"
+clankie feed check --project garden --evidence clankie://evidence/sha256/HASH "Look at the new icon: the gate reads at a glance"
+clankie feed check --project garden --longer "Read the onboarding copy aloud: does it sound like Clankie?"
+```
+
+- **The line** is what the owner reads first: exactly what to look at and what
+  right looks like, one line, at most 140 characters. A longer line, or a
+  second line, is refused with HTTP 400 and a `message` naming the limit; the
+  CLI refuses it before sending. The line is the asker's words, shown, never run.
+- **Longer.** `--longer` (`longer: true`) marks a check that honestly takes more
+  than a ten-second look. It still shows in the feed, marked.
+- **Evidence.** `--evidence` takes one link the evidence store already holds
+  (`clankie evidence push` stores a screenshot or clip and prints it); an
+  unknown one is refused as `evidence_missing`.
+- **The answer** is an ADR 0245 ask with purpose `verify`, the answers
+  "It works" and "Send it back", and room for a note. It waits in the chat that
+  should hear the answer: `--conversation` (a top-level chat), otherwise the
+  project's lead chat as tracker work routes it (its bound chat, else the main
+  chat), otherwise the main chat. The answer wakes that chat; the check names
+  its project so the feed files it there.
+- **Retries.** `idempotencyKey` (16–128 letters, digits, `_` or `-`) is the
+  caller's; the CLI makes one and, when an answer is lost or `unavailable`,
+  prints it (`idempotencyKey` in `--json`) for `--key`. The same key and check
+  answer with the same check and `duplicate: true`; the same key with another
+  check is refused as `idempotency_conflict`. Each key's check is its own ask,
+  even when another key asks the same words. The host keeps a receipt for every
+  key, so once a chat's question history has let an old answer go, the same key
+  is refused as `already_asked` and asks nothing.
+
+In a lead chat, the same check is `request_user_input` with `purpose: "verify"`
+and `check` (and optionally `longer`, `evidence`, `projectId`, `issue`). On the
+built-in tracker, `save_issue` `ownerCheck` takes the same 140-character line
+and shows the finished item as a proof.
+
+HTTP uses `POST /operator/v1/dispatch` with `schemaVersion: 1`,
+`op: "feed_check"`, `idempotencyKey`, `check`, and optional `longer`,
+`projectId` or `conversationId` (not both), `evidence`, `issue` and `waitingOn`.
+The result is `{outcome: "raised", item, duplicate}` (`item` is the check as the
+feed shows it), `{outcome: "refused", reason: "unknown_project" |
+"unknown_conversation" | "evidence_missing" | "idempotency_conflict" |
+"already_asked", message}` or `{outcome: "unavailable", message}` (retry with the same key). Only this
+machine's operator credential asks: a paired device, a captain bearer or a
+support grant is refused. The relay does not carry it.
 
 ### Drops: `feed drop --project ID [--title TEXT] [--body TEXT | --stdin] [--file PATH]... [--key KEY] [--json]`
 
