@@ -24,9 +24,9 @@ own `/mcp` on a trusted network.
   writes into its own persona thread, which delivers to the native pane. A
   connector never types into a terminal, hires or closes a seat, writes to a
   tracker, reads settings, tails Clankie's own thread, or joins a call.
-- **One server for every agent app.** Claude Code, Codex and any other MCP
-  app that signs in through a loopback callback add the same URL, beside the
-  Claude apps. A fourth, read-only tool, `clankie_guide`, serves the skills
+- **One server for every agent app.** Claude Code, Codex, Grok and any other
+  MCP app that signs in through its own https callback or a loopback one add
+  the same URL, beside the Claude apps. A fourth, read-only tool, `clankie_guide`, serves the skills
   Clankie ships in `.agents/skills`, so an app that can't load Clankie's
   skills still learns how his tools and fleet work. It reads files in this
   checkout only and calls nothing on the service (added 2026-10-30).
@@ -49,7 +49,10 @@ own `/mcp` on a trusted network.
 - **Signing in pairs a device.** The service is the OAuth authorization server
   (RFC 8414 metadata, RFC 7591 registration, PKCE S256). Registration is
   stateless: the client id carries its name and callbacks under the Mac's key.
-  Only Claude's hosted callback and loopback addresses can receive a code. The
+  A code goes only to an app's own https callback or to a loopback address
+  (widened from Claude's callbacks alone on 2026-10-30, so Grok and other
+  hosted apps can sign in); the page and `clankie connector` name the host it
+  goes to. The
   sign-in page shows a short code, and the owner approves it with
   `clankie connector approve CODE`. The same owner route accepts the app's
   Take Control devices, so the app can offer approval later. Approval pairs one device
