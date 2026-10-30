@@ -429,6 +429,9 @@ describe("fleet routing", () => {
           fleet: "pc",
           projectId: "kh2",
           hireKind: "worker",
+          // A work hire must name its effort, and this project sets none.
+          effort: "medium",
+          effortReason: expect.any(String),
         }),
         brief: "fix the netcode desync",
         lead: "global-default",

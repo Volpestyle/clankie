@@ -742,6 +742,14 @@ export function createOperatorService(
       const title = /discord|clyde/iu.test(chosen.place.project)
         ? harness
         : chosen.place.project.slice(0, 80);
+      // Every work hire states its effort. Keep the project's own worker effort; otherwise the
+      // everyday level both harnesses share, since a connected app can't size the job.
+      const projectEffort = settings.projects.projects.find((project) => project.id === chosen.projectId)
+        ?.hiring?.worker?.effort;
+      const effort =
+        projectEffort === undefined
+          ? { effort: "medium", effortReason: "Started from a connected app; medium is the everyday level" }
+          : { effortReason: "Started from a connected app; the project sets this worker effort" };
       const hired = await ctx.hireSeat(
         {
           schemaVersion: 1,
@@ -751,7 +759,7 @@ export function createOperatorService(
           ...(chosen.fleet === undefined ? {} : { fleet: chosen.fleet }),
           projectId: chosen.projectId,
           hireKind: "worker",
-          effortReason: "Started from a connected app",
+          ...effort,
         },
         request.prompt,
         {
