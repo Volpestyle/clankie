@@ -3,7 +3,10 @@
 `pnpm check` is the full manual and release gate. Per-change handoffs require the
 root landing gate in ADR 0240. The full gate includes the
 HTTP journey, unit, integration, Rust, IPC, type, lint and documentation checks.
-Pushes and pull requests run fast formatting, lint and native MCP contracts on Linux. Run the
+Pushes and pull requests run fast formatting, lint and native MCP contracts on Linux.
+Pull requests also run the landing gate's checks on Linux against their base;
+exit 3, green checks waiting for the standing reviewer, passes there, and
+macOS-only tests still need a Mac. Run the
 complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,
 live gateway or running operator service is required.
