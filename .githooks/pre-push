@@ -1,0 +1,6 @@
+#!/bin/sh
+# Format and lint only the files this push changes, before the push starts a CI
+# round over them. The typecheck and tests stay with CI or the landing gate, so
+# no check runs twice (ADR 0310). Install with `pnpm hooks:install`; skip one
+# push with `git push --no-verify`.
+exec node scripts/pre-push.mjs
