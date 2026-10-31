@@ -23,6 +23,11 @@ export default class ReleaseTestReporter {
         files: modules.map((module) => ({
           path: relative(this.root, module.moduleId),
           state: module.state(),
+          // Load errors and failed hooks belong to the file or a suite, not to a test.
+          suiteErrors: [module, ...module.children.allSuites()].reduce(
+            (count, suite) => count + suite.errors().length,
+            0,
+          ),
           tests: [...module.children.allTests()].map((test) => ({
             name: test.fullName,
             state: test.result().state,
