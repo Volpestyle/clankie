@@ -796,9 +796,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
-  const tracker = async (path: string, record: boolean, requireRecorded = false, local = true) => {
+  const tracker = async (
+    path: string,
+    record: boolean,
+    requireRecorded = false,
+    local = true,
+    beforeWrite?: () => Promise<void>,
+  ) => {
     try {
-      return await resolveTracker(path, await deps(path, local), { record, requireRecorded });
+      return await resolveTracker(
+        path,
+        { ...(await deps(path, local)), ...(beforeWrite === undefined ? {} : { beforeWrite }) },
+        { record, requireRecorded },
+      );
     } catch (error) {
       if (error instanceof ConventionNeededError)
         throw new WorkRequestError("needs_decision", error.message, {
@@ -816,7 +826,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
    * (VUH-2805): the shared store scoped to that project, whatever repo the caller stands in.
    * An item outside the project is not found there; writes are scope-checked again.
    */
-  const builtInProjectItem = async (project: string, id: string) => {
+  const builtInProjectItem = async (project: string, id: string, beforeWrite?: () => Promise<void>) => {
     const store = openBuiltIn();
     // The store's own lookup misses are answers; any other failure propagates.
     const lookup = async (name: string, args: Record<string, unknown>, missing: string) => {
@@ -866,6 +876,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         builtIn,
         actor: CLANKIE_FOR_OWNER,
         scopedWrites: true,
+        ...(beforeWrite === undefined ? {} : { beforeWrite }),
       }),
     };
   };
@@ -1412,6 +1423,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if ((await options.posting?.watching?.()) === true)
       throw new WorkRequestError("posting_refused", WATCH_REFUSAL);
   };
+  /**
+   * Watch asked again as a work-item write commits, so a write waiting on the tracker's
+   * lock when Watch is chosen changes nothing (ADR 0307). An owner-approved write is his.
+   */
+  const watchedWrite = (posting: typeof TRACKER_POSTING_ADMITTED | undefined) =>
+    posting === TRACKER_POSTING_ADMITTED ? undefined : refuseWhileWatching;
 
   /** `clankie work create|update|attach` on an outward tracker is Clankie posting (ADR 0302). */
   const checkWorkPosting = async (
@@ -2392,7 +2409,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (itemRequest && itemProject !== undefined) {
         // An explicit project wins over whatever repo, or repo reference, the caller names.
         if (!local) throw new WorkRequestError("invalid", "Devices read work items through their repo");
-        const { repo, backend } = await builtInProjectItem(itemProject, request.id);
+        const { repo, backend } = await builtInProjectItem(
+          itemProject,
+          request.id,
+          request.action === "update" || request.action === "attach" ? watchedWrite(posting) : undefined,
+        );
         if (
           (request.action === "update" || request.action === "attach") &&
           posting !== TRACKER_POSTING_ADMITTED
@@ -2589,7 +2610,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "create": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend, convention } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           const item = await backend.create({
             title: request.title,
@@ -2604,7 +2625,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "update": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend, convention } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return {
@@ -2619,7 +2640,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "attach": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend, convention } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return { repo: await describe(entry), item: await backend.attach(request.id, request.evidence) };

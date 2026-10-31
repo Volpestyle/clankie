@@ -1613,6 +1613,74 @@ it("Watch chosen while a repo's built-in tracker write waits for the store stops
   expect(listed).not.toContain("Chosen meanwhile");
 });
 
+it("Watch chosen after a work-item write's own check stops it as it commits", async () => {
+  const f = await fixture();
+  const beds = await repo(f.root, "beds", { ...decided, backend: "builtin" });
+  const tracker = createLocalTracker({ directory: join(f.root, "work-state", "tracker") });
+  const team = ((await tracker.call("list_teams", {})) as { teams: { id: string }[] }).teams[0]!.id;
+  const project = ((await tracker.call("save_project", { name: "Beds", addTeams: [team] })) as { id: string })
+    .id;
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ...ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "beds",
+              name: "Beds",
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: beds }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+              trackerProjectId: project,
+            },
+          ],
+        }).projects,
+      ],
+    },
+  }));
+  const created = await f.workItems.handle({ action: "create", repo: beds, title: "Before Watch" }, true);
+  if (!("item" in created) || created.item === undefined) throw new Error("expected an item");
+  const id = (created.item as { id: string }).id;
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  // Each write's own first Watch check reads Off, as when Watch is chosen just after it while
+  // the write waits on the tracker's lock; every later read sees Watch.
+  let reads = 0;
+  const work = createWorkItemsService({
+    stateDirectory: join(f.root, "work-state"),
+    projects: async () => (await f.settings.load()).projects,
+    projectsFence: async () => {
+      const snapshot = await f.settings.loadFenced();
+      return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
+    },
+    localMachineId: "local",
+    run: defaultRun,
+    posting: { ...f.posting, watching: async () => (reads++ === 0 ? false : f.posting.watching()) },
+  });
+  // A create from the repo, an update named by its project, and evidence attached from the repo.
+  for (const request of [
+    { action: "create" as const, repo: beds, title: "Chosen meanwhile" },
+    { action: "update" as const, repo: beds, project, id, status: "in_progress" as const },
+    {
+      action: "attach" as const,
+      repo: beds,
+      id,
+      evidence: { kind: "link" as const, url: "https://example.com/meanwhile", caption: "Chosen meanwhile" },
+    },
+  ]) {
+    reads = 0;
+    await expect(work.handle(request, true)).rejects.toThrow("only watching");
+  }
+  const shown = JSON.stringify(await f.workItems.handle({ action: "show", repo: beds, id }, true));
+  expect(shown).toContain("Before Watch");
+  expect(shown).not.toContain("Chosen meanwhile");
+  expect(shown).not.toContain('"in_progress"');
+  expect(JSON.stringify(await f.workItems.handle({ action: "list", repo: beds }, true))).not.toContain(
+    "Chosen meanwhile",
+  );
+});
+
 it("Watch refuses a worker's or lead's saved-view changes on the built-in tracker, and the owner's still save", async () => {
   const f = await fixture();
   // The beds track their work in the built-in tracker, with one bound project.
