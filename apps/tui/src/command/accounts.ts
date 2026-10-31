@@ -26,7 +26,6 @@ import {
 } from "@clankie/credential-broker";
 import { OauthAppsSettingsSchema, SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { commandHost } from "./io.ts";
-import { isHostedModelEnvironment } from "@clankie/model-provider";
 
 const ACCOUNTS_USAGE =
   "Usage: clankie accounts [list] | connect github|linear|email|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
@@ -253,7 +252,8 @@ export async function runAccountsCommand(
     }
   }
   if (args[0] === "apps") {
-    if (options.request) throw new Error("OAuth application configuration is managed by the hosted service");
+    if (options.request)
+      throw new Error("OAuth application configuration is set on the machine Clankie runs on");
     if (
       args.length === 5 &&
       (args[1] === "github-secret" || args[1] === "google-secret") &&
@@ -262,10 +262,6 @@ export async function runAccountsCommand(
     ) {
       const provider = args[1] === "google-secret" ? "google" : "github";
       const name = provider === "google" ? "Google" : "GitHub";
-      if (isHostedModelEnvironment(env))
-        throw new Error(
-          `${name} application secrets are only supported for an owner-run self-hosted OAuth app`,
-        );
       if (
         !(provider === "google" ? /^[A-Za-z0-9._-]{1,256}$/u : /^[A-Za-z0-9._-]{1,128}$/u).test(args[3] ?? "")
       )

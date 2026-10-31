@@ -486,16 +486,6 @@ describe("auth command", () => {
     expect(rendered(view)).not.toContain("sk-ant-api03-owned");
   });
 
-  it("refuses hosted ChatGPT before browser or device sign-in", async () => {
-    const fixture = await testServices();
-    fixture.env.CLANKIE_HOSTED_BOOTSTRAP_FILE = "/owned-test/bootstrap.json";
-    const view = testShell(["codex", "done"]);
-    await command(buildProviderCommands(fixture.services), "auth").run("", view.shell);
-    expect(rendered(view)).toContain("AI credits only");
-    expect(rendered(view)).toContain("self-hosted bodies");
-    expect(fixture.credentials.size).toBe(0);
-  });
-
   it("does not render provider errors that may contain secret material", async () => {
     const fixture = await testServices();
     const leaked = "provider-error-contained-secret-token";

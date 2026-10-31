@@ -32,7 +32,6 @@ const listen = async (server: Server) => {
 };
 async function fixture(
   options: {
-    hosted?: boolean;
     operatorSeat?: boolean;
     timeoutMs?: number;
     hold?: boolean;
@@ -45,7 +44,6 @@ async function fixture(
     XDG_CONFIG_HOME: dir,
     CLANKIE_DISABLE_MODELS_FETCH: "1",
     CLANKIE_MODELS_PATH: join(dir, "catalog.json"),
-    ...(options.hosted ? { CLANKIE_HOSTED_BOOTSTRAP_FILE: join(dir, "hosted.json") } : {}),
   };
   await writeFile(env.CLANKIE_MODELS_PATH, "{}");
   await mkdir(join(dir, "clankie"));
@@ -121,7 +119,7 @@ async function fixture(
   const app = await createClankieApp({
     captain,
     modelKeys: models,
-    modelDeviceSetup: { platform: "darwin", hosted: Boolean(options.hosted) },
+    modelDeviceSetup: { platform: "darwin", hosted: false },
     eventLogPath: join(dir, "events.jsonl"),
     deviceSessionKey: randomBytes(32),
     authenticateOperator: async (request) =>
@@ -309,7 +307,7 @@ describe("device subscription setup", () => {
     expect(await readFile(join(f.dir, "events.jsonl"), "utf8")).not.toContain("synthetic-token-marker");
   });
 
-  it("allows self-hosted device keys only during first-run readiness and refuses managed customer keys", async () => {
+  it("allows device keys only during first-run readiness", async () => {
     const f = await fixture();
     const device = await f.pair();
     expect(
@@ -345,21 +343,6 @@ describe("device subscription setup", () => {
         )
       ).status,
     ).toBe(403);
-    const hosted = await fixture({ hosted: true });
-    const phone = await hosted.pair();
-    const existing = { type: "api" as const, key: "existing" };
-    await hosted.store.set("openai", existing);
-    await setCaptainModel("openai/legacy-selection", { env: hosted.env });
-    const refused = await hosted.call(
-      "/v1/model-keys/set",
-      { providerId: "openai", apiKey: "hosted-key-marker" },
-      phone.deviceToken,
-    );
-    expect(refused.status).toBe(403);
-    expect(await refused.json()).toMatchObject({ ok: false, error: "managed_credits_only" });
-    expect(await hosted.store.get("openai")).toEqual(existing);
-    const methods = await (await hosted.call("/v1/model-keys/subscriptions/methods")).json();
-    expect(methods.methods).toEqual([]);
   });
 
   it("cancels and expires pending browser sign-ins without storing credentials, and rejects supervise/provider-policy bypasses", async () => {
