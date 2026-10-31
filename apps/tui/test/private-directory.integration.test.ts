@@ -39,7 +39,9 @@ it.each([0o755, 0o770, 0o777])("refuses a nonprivate symlink target with mode %s
   expect(() => privateDirectory(link)).toThrow("unsafe symlink or target");
 });
 
-it("refuses links replaceable in shared directories and private targets beneath writable shared ancestors", () => {
+it("refuses links replaceable in shared directories and private targets beneath writable shared ancestors", (context) => {
+  // A root-owned link in a root-owned private directory is an OS alias, whose target is not checked.
+  context.skip(process.getuid?.() === 0, "as root every link is root-owned, so it reads as an OS alias");
   const { root, target, link } = fixture();
   const shared = join(root, "shared");
   mkdirSync(shared, { mode: 0o777 });
