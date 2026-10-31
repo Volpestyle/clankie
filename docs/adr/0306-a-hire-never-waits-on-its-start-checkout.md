@@ -56,7 +56,11 @@ instead of a refusal.
   [ADR 0207](0207-work-records-and-native-agent-delivery.md) see the first
   attempt and no second agent starts. Once the launch resolves, the next hire
   gets a new worktree. A record is dropped only when it is over 30 days old and
-  its launch is no longer fenced, never for age alone.
+  its launch is no longer fenced, never for age alone. Hires from one start
+  folder queue through checkout preparation, and one that relocates keeps its
+  place until it returns, so an overlapping attempt finds the first launch
+  fenced instead of making a second worktree. Hires that run in the start
+  folder itself still overlap as before.
 
 A worktree left by a hire that failed later is clean at `origin/main`, so the
 usual tidy removes it once no pane or process is in it. Calling

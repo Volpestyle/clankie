@@ -2804,7 +2804,35 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
   };
   const hireWorktrees = new HireWorktrees(join(options.stateDir, "hire-worktrees.json"));
+  // Hires from one start folder queue through checkout preparation; one that relocates keeps
+  // its place until it returns, so an overlapping attempt sees its launch fenced (ADR 0306).
+  const startQueues = new Map<string, Promise<void>>();
+  const queueStart = async (scope: string) => {
+    const previous = startQueues.get(scope) ?? Promise.resolve();
+    let release!: () => void;
+    const tail = previous.then(() => new Promise<void>((resolve) => (release = resolve)));
+    startQueues.set(scope, tail);
+    await previous;
+    return () => {
+      release();
+      if (startQueues.get(scope) === tail) startQueues.delete(scope);
+    };
+  };
   const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
+    const place: { release?: () => void } = {};
+    try {
+      return await admitHire(request, brief, source, autonomous, place);
+    } finally {
+      place.release?.();
+    }
+  };
+  const admitHire = async (
+    request: Parameters<HireSeat>[0],
+    brief: Parameters<HireSeat>[1],
+    source: Parameters<HireSeat>[2],
+    autonomous: Parameters<HireSeat>[3],
+    place: { release?: () => void },
+  ): ReturnType<HireSeat> => {
     const taskBrief = brief !== undefined;
     // The room shows the lead's own brief, not the preferences appended below.
     const leadBrief = brief;
@@ -2893,6 +2921,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // A retry of a launch that is still unresolved returns to the worktree its first attempt
       // made, so the allocation and receipt checks below see it (ADR 0207, ADR 0306).
       const scope = hireWorktreeScope(request);
+      place.release = await queueStart(scope);
       let prior: HireWorktreeRelocation | undefined;
       try {
         prior = hireWorktrees.get(scope);
@@ -2930,6 +2959,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               name: request.title,
               refuse: managedRuntime,
             });
+      if (freshness.outcome !== "worktree") {
+        place.release();
+        delete place.release;
+      }
       if (freshness.outcome === "refused")
         return {
           outcome: "failed",

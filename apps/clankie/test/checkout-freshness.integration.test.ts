@@ -627,3 +627,78 @@ it("remote observer starts a hire in a fresh worktree beside a dirty, divergent 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("overlapping hires from one dirty start folder queue, and the second returns to the first's still-fenced worktree", async () => {
+  const { vi } = await import("vitest");
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { HerdrWatchStore, createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-hire-overlap-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner");
+  let captain: ReturnType<typeof createCaptain> | undefined;
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+    // Only the native launch is stood in for: the first one stays unconfirmed, so its
+    // worktree remains fenced, as a real uncertain launch's allocation and receipt do.
+    const fenced = new Set<string>();
+    const launched: string[] = [];
+    vi.spyOn(HerdrWatchStore.prototype, "hireRetained").mockImplementation((input) =>
+      fenced.has(input.workingDirectory),
+    );
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
+      launched.push(seat.workingDirectory);
+      fenced.add(seat.workingDirectory);
+      return { outcome: "failed", reason: "start_unconfirmed", detail: "fixture launch unconfirmed" };
+    });
+    captain = createCaptain({ herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps, {
+      repoRoot: join(root, "runtime"),
+      stateDir: join(root, "state"),
+      settings: new SettingsStore(join(root, "settings.json")),
+      nativeHerdrRunner: createHerdrWatchRunner(() => false),
+    });
+    const hire = () =>
+      captain!.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "spawn_seat",
+        conversationId: "global-default",
+        seat: {
+          schemaVersion: 1,
+          harness: "codex",
+          title: "Fixture",
+          workingDirectory: owner,
+          effort: "low",
+          effortReason: "A fixture hire only needs to reach the native launch.",
+        },
+        brief: "implement",
+      });
+    await Promise.all([hire(), hire()]);
+    expect(launched).toHaveLength(2);
+    expect(launched[0]).toMatch(/\/\.local\/wt-fixture-[a-f0-9]{6}$/u);
+    expect(launched[1]).toBe(launched[0]);
+    expect(
+      (await checkoutGit(owner, ["worktree", "list", "--porcelain"])).match(/wt-fixture-/gu),
+    ).toHaveLength(1);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    vi.restoreAllMocks();
+    await captain?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
