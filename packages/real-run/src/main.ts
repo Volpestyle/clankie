@@ -9,7 +9,8 @@
  * Exit 0 when every flow passed. The run's own JSON log, the service and relay logs
  * and report.json stay in the output directory (default .local/real-run/<time>).
  */
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cause, Effect, Exit, Fiber } from "effect";
@@ -28,6 +29,9 @@ const out = resolve(
   values.out ?? join(repoRoot, ".local/real-run", new Date().toISOString().replace(/[:.]/gu, "-")),
 );
 mkdirSync(out, { recursive: true, mode: 0o700 });
+// Herdr's Unix sockets live under the scratch state and must stay within 103 bytes,
+// so the scratch home sits under a short root whatever the checkout or output path.
+const home = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "clankie-real-run-"));
 const only = values.only?.split(",").map((name) => name.trim());
 for (const name of only ?? [])
   if (!flows.some((flow) => flow.name === name))
@@ -49,7 +53,7 @@ interface FlowReport {
 
 /** Runs the selected flows, then stops everything it started before returning. */
 const runFlows = Effect.gen(function* () {
-  const stack = yield* Effect.acquireRelease(makeStack(join(out, "home")), (stack) => stack.close);
+  const stack = yield* Effect.acquireRelease(makeStack(home), (stack) => stack.close);
   const state: RunState = {};
   const reports: FlowReport[] = [];
   let failed = false;
@@ -112,8 +116,8 @@ const program = Effect.gen(function* () {
     serviceWarnings: [...new Set(warnings.map((line) => String(line.event ?? line.msg)))],
     logs: {
       run: join(out, "run.jsonl"),
-      service: join(out, "home/service.log"),
-      relay: join(out, "home/relay.log"),
+      service: join(out, "service.log"),
+      relay: join(out, "relay.log"),
     },
   };
   writeFileSync(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
@@ -133,18 +137,24 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     fiber.interruptUnsafe();
   });
 const exit = await Effect.runPromise(Fiber.await(fiber));
+// The processes have stopped: their logs join the run's own output.
+for (const log of ["service.log", "relay.log"])
+  if (existsSync(join(home, log))) copyFileSync(join(home, log), join(out, log));
+const passed = !interrupted && Exit.isSuccess(exit) && exit.value.passed;
 if (interrupted) {
-  console.error(`real run interrupted; the scratch home stays at ${join(out, "home")}`);
+  console.error("real run interrupted");
   process.exitCode = 130;
 } else if (Exit.isFailure(exit)) {
   console.error(Cause.pretty(exit.cause));
   process.exitCode = 1;
 } else {
-  const { flows: ran, passed } = exit.value;
+  const { flows: ran } = exit.value;
   console.log(
     `\nreal run ${passed ? "passed" : "FAILED"}: ${ran.filter((f) => f.outcome === "passed").length}/${ran.length} flows; ${out}/report.json`,
   );
   process.exitCode = passed ? 0 : 1;
-  // A passing run leaves nothing but its logs and report unless --keep holds the home.
-  if (passed && !values.keep) rmSync(join(out, "home/state"), { recursive: true, force: true });
 }
+// A run leaves its logs and report. The scratch home stays for a look after a local
+// failure or with --keep; CI keeps only the logs.
+if (values.keep || (!passed && !process.env.CI)) console.log(`scratch home kept at ${home}`);
+else rmSync(home, { recursive: true, force: true });

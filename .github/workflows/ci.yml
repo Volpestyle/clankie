@@ -245,6 +245,6 @@ jobs:
           path: |
             ${{ runner.temp }}/real-run/report.json
             ${{ runner.temp }}/real-run/run.jsonl
-            ${{ runner.temp }}/real-run/home/service.log
-            ${{ runner.temp }}/real-run/home/relay.log
+            ${{ runner.temp }}/real-run/service.log
+            ${{ runner.temp }}/real-run/relay.log
           retention-days: 7

@@ -7,11 +7,12 @@ One command that runs the real Clankie and checks what the owner would notice
 pnpm real-run                          # every flow, about a minute
 pnpm real-run --only project,feed      # boot plus the named flows, in order; name
                                        # the flows a flow builds on (feed needs project)
-pnpm real-run --out DIRECTORY --keep   # keep the scratch home for a look
+pnpm real-run --out DIRECTORY --keep   # keep the scratch home after a pass too
 ```
 
 It starts this checkout's service and relay as plain Node in a new scratch home
-(`scripts/scratch-stack.mjs --broker-operator`): its own HOME, state, settings,
+under `/tmp/clankie-real-run-*` (short, so Herdr's sockets fit whatever the
+checkout path; `scripts/scratch-stack.mjs --broker-operator`): its own HOME, state, settings,
 credential file, free ports and private bundled Herdr. It never reads or writes
 the owner's `~/.config/clankie`, live service, Keychain or Herdr sessions, and
 calls no model. Run it through `clankie heavy --` on a shared machine.
@@ -27,10 +28,11 @@ The output directory (default `.local/real-run/TIME`) holds:
   service's errors and distinct warnings;
 - `run.jsonl`: the run's Effect log, one JSON line per event, CLI calls included,
   with the flow and span timings;
-- `home/service.log` and `home/relay.log`: the processes' own logs.
+- `service.log` and `relay.log`: the processes' own logs, copied once they stopped.
 
-A passing run removes the scratch state unless `--keep` is given; a failing run
-keeps it.
+A passing run removes the scratch home unless `--keep` is given; a failing run
+keeps it and prints where, except under CI, which keeps only the logs. Ctrl-C
+stops everything the run started before it exits.
 
 ## Adding a flow
 
