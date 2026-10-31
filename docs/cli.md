@@ -1949,7 +1949,12 @@ the fleet can afford before a hire
 each metered account's plan, usage, remaining limit and reset, heavy-work
 permits, tracker request budgets, and each live pane's context against its
 budget. A number Clankie does not have is `"unknown"`. It does not include
-homes, emails or credentials, and it hires nothing. `list_issues` and `read_issue`
+homes, emails or credentials, and it hires nothing. `message_agent` can carry
+up to four images (by public https address or as base64), which the agent finds
+in its workspace under `.clankie/inbox/`, and `read_image` returns an image an
+agent saved in its working directory, such as a screenshot
+([ADR 0315](adr/0315-connected-apps-pass-images-to-and-from-agents.md)). Both
+work for agents on this Mac. `list_issues` and `read_issue`
 read your projects' issues, wherever each project tracks them. `save_issue`
 and `comment_issue` write them as that app, never as you: issue files are
 written right away, and Linear or GitHub follow the project's "Posting to your

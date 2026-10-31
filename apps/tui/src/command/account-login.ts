@@ -5,7 +5,7 @@ import {
   completeClankieAccountLogin,
   createDefaultCredentialStore,
 } from "@clankie/credential-broker";
-import { hostedOrigin } from "@clankie/protocol/hosted-pairing";
+import { gatewayOrigin } from "@clankie/protocol/public-gateway";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { gatewayEnableWithAccount } from "./gateway.ts";
 import { outputJson, type Writable } from "./io.ts";
@@ -44,7 +44,7 @@ export async function loginThisMac(
   const pipedCode = process.stdin.isTTY ? undefined : input[Symbol.asyncIterator]().next();
   try {
     const email = values.email ?? (await input.question("Clankie account email: "));
-    const gatewayUrl = hostedOrigin(values.url!);
+    const gatewayUrl = gatewayOrigin(values.url!);
     const challenge = await beginClankieAccountLogin({ gatewayUrl, email });
     const code =
       pipedCode === undefined

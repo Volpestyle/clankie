@@ -112,6 +112,10 @@ own `/mcp` on a trusted network.
 - **Capacity is a read.** `fleet_capacity` shows what the fleet can afford
   before a hire, from numbers Clankie already tracks. A missing number is
   `"unknown"` ([ADR 0313](0313-the-connector-can-read-what-the-fleet-can-afford.md)).
+- **Images go both ways, as files.** `message_agent` carries images as owner
+  attachments into the agent's workspace, and `read_image` returns an image the
+  agent saved there
+  ([ADR 0315](0315-connected-apps-pass-images-to-and-from-agents.md)).
 - **Plaintext through the doorway, for this route only.** The gateway carries
   the connector's discovery, OAuth and `/mcp` calls in plaintext, with the
   `authorization` header only on `/mcp` and a query only on the sign-in link.

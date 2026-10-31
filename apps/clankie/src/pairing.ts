@@ -1,12 +1,12 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import {
   PAIRING_DIRECT_PARAM,
+  type DeviceGrantSet,
   type DomainEvent,
   type PairingRun,
   type PairingOfferWire,
 } from "@clankie/protocol";
 import { z } from "zod";
-import type { HostedBrowserBinding } from "@clankie/protocol/hosted-browser-session";
 
 // Device pairing-offer minting and single-use redemption for the service.
 // An offer is short-lived display data an operator hands to a device; it is not
@@ -37,6 +37,13 @@ const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const PAIRING_CODE_GROUPS = 2;
 const PAIRING_CODE_GROUP_LENGTH = 4;
 
+/** A browser session an offer was minted for: it fixes the device id and grants. */
+interface PairingBrowserBinding {
+  readonly sessionId: string;
+  readonly deviceId: string;
+  readonly grants: DeviceGrantSet;
+}
+
 /**
  * What redemption needs once the secrets have left for the operator's screen:
  * the offer keyed by the hashes the gateway also routes on. Secret-free.
@@ -55,7 +62,7 @@ export interface PairingOfferRecord {
   readonly review?: true;
   readonly run?: PairingRun;
   readonly supportGrantId?: string;
-  readonly browser?: HostedBrowserBinding;
+  readonly browser?: PairingBrowserBinding;
   readonly authorizedByBrowserSession?: string;
 }
 
@@ -90,7 +97,7 @@ export interface MintPairingOfferOptions {
   readonly ttlMs?: number;
   readonly run?: PairingRun;
   readonly supportGrantId?: string;
-  readonly browser?: HostedBrowserBinding;
+  readonly browser?: PairingBrowserBinding;
   readonly authorizedByBrowserSession?: string;
   /** Review offer lifetime in days; the route validates the ceiling. */
   readonly review?: { readonly days: number };

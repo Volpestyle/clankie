@@ -5,6 +5,7 @@ import {
   PROMPT_ANSWER_EXPECT_MAX,
   PromptAnswerResultSchema,
   PromptAnswerStepSchema,
+  SeatImageResultSchema,
 } from "./connector.ts";
 import { FleetCapacitySchema } from "./fleet-capacity.ts";
 import {
@@ -755,6 +756,18 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({
       /**
+       * One image file inside a seated agent's working directory, as base64
+       * (ADR 0315). Read only; anything but a PNG, JPEG, GIF or WebP is refused.
+       */
+      op: z.literal("seat_image"),
+      schemaVersion: z.literal(1),
+      seatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+      path: z.string().trim().min(1).max(4096),
+    })
+    .strict(),
+  z
+    .object({
+      /**
        * Start one coding agent in a known project's checkout on a machine
        * Clankie reaches, led by Clankie's own thread (a session source's start).
        * Without a machine and directory it only names the places it can start.
@@ -1484,6 +1497,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       status: z.enum(["read", "unavailable"]),
       text: z.string().max(OPERATOR_TERMINAL_READ_MAX).optional(),
       detail: z.string().max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("seat_image"),
+      schemaVersion: z.literal(1),
+      result: SeatImageResultSchema,
     })
     .strict(),
   z

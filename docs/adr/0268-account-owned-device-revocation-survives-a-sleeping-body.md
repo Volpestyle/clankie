@@ -1,6 +1,6 @@
 # 0268: Account-owned device revocation survives a sleeping body
 
-Status: Accepted — lead decision, 2026-10-13
+Status: Superseded by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md); `@clankie/protocol/hosted-browser-session` is removed. Accepted — lead decision, 2026-10-13
 
 Tracks: VUH-2121 and backend VUH-2215. Builds on hosted security-state reconciliation (VUH-1068 RESTORE-1).
 

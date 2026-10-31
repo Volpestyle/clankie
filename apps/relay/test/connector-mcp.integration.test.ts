@@ -11,10 +11,13 @@ import {
   type OperatorConversationServiceResult,
   type OperatorTerminalMachine,
 } from "../../../packages/protocol/src/index.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FleetRoomJournal } from "../../clankie/src/captain/fleet-room.ts";
+import { DeliveredFileStore } from "../../clankie/src/delivered-files.ts";
+import { readSeatImage } from "../../clankie/src/seat-images.ts";
+import type { ConnectorImageOptions } from "../src/connector-images.ts";
 import { ClankieGuide } from "../src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../src/connector-mcp.ts";
 import type { RelayDeviceAuthorization } from "../src/device-auth.ts";
@@ -77,6 +80,13 @@ const PANE_TEXT = "Building kh2   \r\n> cargo build\r\nCompiling...done\r\n     
 
 const HISTORY = Array.from({ length: 10 }, (_, index) => `\u001b[2mline ${index + 1}\u001b[0m\r\n`).join("");
 
+// The leading bytes the store and the connector check, and enough after them to be a file.
+const PNG = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  Buffer.from("IHDR-and-the-rest-of-a-tiny-png"),
+]);
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from("JFIF-and-the-rest")]);
+
 const servers: Server[] = [];
 const boards: string[] = [];
 afterEach(async () => {
@@ -101,6 +111,7 @@ async function startConnectorRelay(
       readonly herdr: boolean;
       readonly served: boolean;
     }>;
+    readonly images?: ConnectorImageOptions;
   } = {},
 ) {
   const machines = linked.machines ?? [{ id: "pc1", reachable: true, herdrVersion: "0.9.3" }];
@@ -118,6 +129,9 @@ async function startConnectorRelay(
   const boardRoot = await mkdtemp(join(tmpdir(), "connector-notes-"));
   boards.push(boardRoot);
   const board = new FleetRoomJournal(boardRoot);
+  // The service's real attachment store takes the uploads; Bram's workspace is a real directory.
+  const files = new DeliveredFileStore(join(boardRoot, "attachments"));
+  const workspace = join(boardRoot, "kh2");
   let selfUrl = "";
   const dispatch = async (
     request: OperatorConversationServiceRequest,
@@ -366,6 +380,25 @@ async function startConnectorRelay(
         };
       }
       // The Herdr desktop app's own terminal server on this Mac.
+      case "upload_begin":
+        return { op: "upload_begin", schemaVersion: 1, result: await files.beginUpload(request.upload) };
+      case "upload_chunk":
+        return { op: "upload_chunk", schemaVersion: 1, result: await files.appendUpload(request.chunk) };
+      case "upload_commit":
+        return {
+          op: "upload_commit",
+          schemaVersion: 1,
+          result: await files.commitUpload(request.conversationId, request.uploadId),
+        };
+      case "seat_image":
+        return {
+          op: "seat_image",
+          schemaVersion: 1,
+          result:
+            request.seatId === "pc1/kh2"
+              ? await readSeatImage({ workspace, path: request.path })
+              : { outcome: "unavailable", message: "That agent isn't one Clankie seats now." },
+        };
       case "herdr_core_list":
         return {
           op: "herdr_core_list",
@@ -405,6 +438,7 @@ async function startConnectorRelay(
     // This checkout's own shipped skills.
     guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
     ...(linked.policy === undefined ? {} : { policy: linked.policy }),
+    ...(linked.images === undefined ? {} : { images: linked.images }),
   });
   const server = createServer((request, response) => {
     void (async () => {
@@ -423,6 +457,8 @@ async function startConnectorRelay(
   return {
     url: selfUrl,
     seen,
+    files,
+    workspace,
     get resets() {
       return resets;
     },
@@ -453,6 +489,7 @@ describe("Claude connector MCP endpoint", () => {
       "list_agents",
       "read_agent",
       "message_agent",
+      "read_image",
       "fleet_capacity",
       "list_places",
       "start_agent",
@@ -960,5 +997,122 @@ describe("Claude connector MCP endpoint", () => {
     expect(read.isError).not.toBe(true);
     expect(capacity.heavy).toBe("unknown");
     expect(capacity.tracker).toBe("unknown");
+  });
+
+  it("sends images into the agent's thread as uploaded attachments, by data or by public address", async () => {
+    const fetched: string[] = [];
+    const relay = await startConnectorRelay(undefined, {
+      images: {
+        // The network boundary: a public CDN host, and one that resolves to this Mac.
+        lookup: async (host) => (host === "cdn.example.com" ? ["93.184.216.34"] : ["127.0.0.1"]),
+        fetch: async (url) => {
+          fetched.push(url.href);
+          return new Response(JPEG, { headers: { "content-type": "image/jpeg" } });
+        },
+      },
+    });
+    const client = await connect(relay.url);
+    const sent = await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:pc1/kh2",
+        message: "does the menu match this mock?",
+        images: [
+          { data: PNG.toString("base64"), name: "mock" },
+          { url: "https://cdn.example.com/shots/menu.jpeg?v=2" },
+        ],
+      },
+    });
+    expect(sent.isError).not.toBe(true);
+    expect(fetched).toEqual(["https://cdn.example.com/shots/menu.jpeg?v=2"]);
+    const send = relay.seen.find((request) => request.op === "send");
+    if (send?.op !== "send") throw new Error("no send");
+    expect(send.turn.message).toBe("does the menu match this mock?");
+    expect(send.turn.attachments).toHaveLength(2);
+    // The real store holds both, verified against their hashes and leading bytes.
+    const stored = await Promise.all(
+      send.turn.attachments!.map((ref) => relay.files.read("conv-bram", ref.artifactId)),
+    );
+    expect(stored.map((file) => [file?.file.filename, file?.file.mediaType])).toEqual([
+      ["mock.png", "image/png"],
+      ["menu.jpg", "image/jpeg"],
+    ]);
+    expect(Buffer.compare(stored[0]!.data, PNG)).toBe(0);
+
+    // Nothing is sent when an image is refused: a private address, or bytes that aren't an image.
+    const sends = relay.seen.filter((request) => request.op === "send").length;
+    const local = await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:pc1/kh2",
+        message: "look",
+        images: [{ url: "https://intranet.example.com/a.png" }],
+      },
+    });
+    expect(local.isError).toBe(true);
+    expect(textOf(local)).toContain("private or local address");
+    const notImage = await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:pc1/kh2",
+        message: "look",
+        images: [{ data: Buffer.from("#!/bin/sh\necho hi\n").toString("base64") }],
+      },
+    });
+    expect(textOf(notImage)).toContain("isn't a PNG, JPEG, GIF or WebP");
+    const plain = await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:pc1/kh2",
+        message: "look",
+        images: [{ url: "http://cdn.example.com/a.png" }],
+      },
+    });
+    expect(textOf(plain)).toContain("https");
+    expect(relay.seen.filter((request) => request.op === "send")).toHaveLength(sends);
+  });
+
+  it("returns an image an agent saved in its workspace, and only an image inside it", async () => {
+    const relay = await startConnectorRelay();
+    await mkdir(join(relay.workspace, ".clankie", "inbox"), { recursive: true });
+    await writeFile(join(relay.workspace, ".clankie", "inbox", "boss.png"), PNG);
+    await writeFile(join(relay.workspace, "notes.png"), "not really a picture");
+    const outside = join(relay.workspace, "..", "secret.png");
+    await writeFile(outside, PNG);
+    await symlink(outside, join(relay.workspace, "linked.png"));
+    const client = await connect(relay.url);
+
+    const image = await client.callTool({
+      name: "read_image",
+      arguments: { agent: "herdr:pc1/kh2", path: ".clankie/inbox/boss.png" },
+    });
+    expect(image.isError).not.toBe(true);
+    const [, picture] = image.content as Array<{ type: string; data?: string; mimeType?: string }>;
+    expect(picture).toEqual({ type: "image", data: PNG.toString("base64"), mimeType: "image/png" });
+    // The same file by its absolute path.
+    const absolute = await client.callTool({
+      name: "read_image",
+      arguments: { agent: "herdr:pc1/kh2", path: join(relay.workspace, ".clankie", "inbox", "boss.png") },
+    });
+    expect(absolute.isError).not.toBe(true);
+
+    for (const [path, said] of [
+      ["notes.png", "isn't a PNG, JPEG, GIF or WebP"],
+      ["linked.png", "inside the agent's working directory"],
+      ["../secret.png", "inside the agent's working directory"],
+      ["missing.png", "There's no file"],
+    ] as const) {
+      const refused = await client.callTool({
+        name: "read_image",
+        arguments: { agent: "herdr:pc1/kh2", path },
+      });
+      expect(refused.isError, path).toBe(true);
+      expect(textOf(refused), path).toContain(said);
+    }
+    const unseated = await client.callTool({
+      name: "read_image",
+      arguments: { agent: "herdr:pc1/spike", path: "a.png" },
+    });
+    expect(textOf(unseated)).toContain("isn't one Clankie seats");
   });
 });

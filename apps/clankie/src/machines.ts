@@ -69,7 +69,7 @@ export async function readSshConfig(path = join(homedir(), ".ssh", "config")): P
 }
 
 /** A machine on the owner's tailnet, as Tailscale itself reports it (ADR 0314). */
-export interface TailnetPeer {
+interface TailnetPeer {
   /** The MagicDNS label Clankie reaches it at, e.g. `desktop` in `desktop.tail1234.ts.net`. */
   readonly host: string;
   readonly dnsName: string;
@@ -83,7 +83,7 @@ const TAILNET_PEER_MAX = 16;
 const HOST_KEY = /^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,3}$/u;
 
 /** Online computers in `tailscale status --json`; phones and the Mac itself are left out. */
-export function tailnetPeers(status: string): TailnetPeer[] {
+function tailnetPeers(status: string): TailnetPeer[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(status);
@@ -127,7 +127,7 @@ export function tailnetPeers(status: string): TailnetPeer[] {
 const TAILSCALE_BINARIES = ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"];
 
 /** This machine's view of its tailnet, or "" when Tailscale isn't installed or running. */
-export async function readTailscaleStatus(env: NodeJS.ProcessEnv = process.env): Promise<string> {
+async function readTailscaleStatus(env: NodeJS.ProcessEnv = process.env): Promise<string> {
   for (const binary of TAILSCALE_BINARIES) {
     try {
       const { stdout } = await exec(binary, ["status", "--json"], {
