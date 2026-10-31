@@ -372,6 +372,34 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
               deliveryIds: [deliveryId],
             });
             expect(acknowledged.structuredContent).toMatchObject({ acknowledged: true, unanswered: [] });
+            // Watch holds the joined machine at Portal: its lead's message to a worker is refused,
+            // and the lead and worker stay bound for when Clankie may act again (ADR 0307).
+            const watch = (on: boolean) =>
+              settings.update((current) => {
+                const { watch: _watch, ...autonomy } = current.autonomy;
+                return { ...current, autonomy: on ? { ...autonomy, watch: true } : autonomy };
+              });
+            await watch(true);
+            const watched = await upstream
+              .callTool("message_seat", {
+                seat: `${credential.lease.machineId}/worker-proof`,
+                message: "Not while watching",
+              })
+              .then(
+                (result) => JSON.stringify(result),
+                (error: unknown) => String(error),
+              );
+            expect(watched).toContain("only watching");
+            await watch(false);
+            const afterPoll = worker.pollEvents(2000);
+            const after = upstream.callTool("message_seat", {
+              seat: `${credential.lease.machineId}/worker-proof`,
+              message: "Back from watching",
+            });
+            const afterEvents = await afterPoll;
+            expect(afterEvents.map((event) => event.content)).toEqual(["Back from watching"]);
+            expect(await worker.acknowledge!(afterEvents[0]!.id)).toBe(true);
+            expect(JSON.stringify(await after)).toContain("delivered");
           } finally {
             await worker.close();
           }

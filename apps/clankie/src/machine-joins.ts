@@ -36,7 +36,7 @@ import {
   type JoinedSeatRequest,
   type JoinedSeatResponse,
 } from "@clankie/protocol/machine-join";
-import { machineAccessLevel, refuseMachineAccess } from "./machine-access.ts";
+import { machineAccessLevel, refuseMachineAccess, refuseWhileWatching } from "./machine-access.ts";
 import { privateDirectory, readPrivateJson, writePrivateJson } from "../../tui/bin/update-files.ts";
 
 const credentialName = (id: string) => `clankie-joined-host-${id}`;
@@ -97,6 +97,13 @@ export class MachineJoins {
           directories: record.directories,
           authorize: this.workersAuthority(record),
         };
+  }
+  /**
+   * Watch holds every machine at Portal (ADR 0307): a hire or a message for a worker on a
+   * joined machine is refused at the moment it would go, whoever leads it.
+   */
+  async refuseWatching(id: string): Promise<void> {
+    refuseWhileWatching(await this.options.settings.load(), id, "workers");
   }
   /** Current registration and a live level of at least workers, or a named refusal. */
   private workersAuthority(record: Registration) {

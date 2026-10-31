@@ -53,8 +53,11 @@ changes nothing.
   says Clankie is only watching.
 - **Machines act at Portal.** Machine access treats every machine as Portal
   (ADR 0244), so hires, moves, deliveries into a worker, question answers,
-  lead launches and anything else above Portal are refused. These refusals
-  leave no doctor item: the fix is the dial, not the machine.
+  lead launches and anything else above Portal are refused. That holds on
+  joined machines too, for Clankie's own hires and for a joined lead's hires and
+  messages to its workers; the lead and its workers stay bound for when Watch
+  ends. These refusals leave no doctor item: the fix is the dial, not the
+  machine.
 - **Wakes and alerts.** No wake reaches a lead, native or service, and no
   health alert is sent into a seat.
 - **Restarts and tidying.** Lead relaunches (fresh restart, failover,
