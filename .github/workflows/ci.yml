@@ -73,3 +73,55 @@ jobs:
             .data/qa/
             .local/typechecks/
           retention-days: 7
+  # The landing gate's checks on GitHub's free Linux runner for every pull
+  # request (ADR 0240): skills, format, lint with Vox's cargo checks, deadcode,
+  # doc links, swallowed rejections, evidence, the scoped typecheck and the
+  # changed-test selection. Tests Linux skips (macOS-only) stay on the owner's
+  # Mac. Exit 3 is green checks waiting for the standing reviewer (ADR 0287),
+  # which needs the owner's operator credential and never answers here.
+  landing:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy, rustfmt
+      # Vox's turbojpeg-sys builds libjpeg-turbo's SIMD code with NASM.
+      - run: sudo apt-get install -y --no-install-recommends nasm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/vox/target
+          key: landing-cargo-${{ runner.os }}-${{ hashFiles('apps/vox/Cargo.lock') }}
+          restore-keys: landing-cargo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      # The gate's skills phase installs the pinned Herdr here; tests spawn it by name.
+      - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
+      - name: Landing gate checks against the pull request's base
+        run: |
+          status=0
+          # The checked-out merge commit's first parent is the base it merges into.
+          node scripts/check-landing.mjs --base "$(git rev-parse HEAD^1)" || status=$?
+          checks=$(node -p 'JSON.parse(require("fs").readFileSync(".local/landing-gate.json", "utf8")).checksExitCode')
+          echo "[landing] gate exit $status, checks exit $checks"
+          test "$checks" = 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: landing-gate
+          include-hidden-files: true
+          path: .local/landing-gate.json
+          retention-days: 7
