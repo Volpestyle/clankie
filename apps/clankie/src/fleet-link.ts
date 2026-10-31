@@ -5,7 +5,7 @@ import { LINK_EVIDENCE_BLOB, type LocalFleetIdentity } from "./local-fleet-link.
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import type { RemoteStream } from "./remote-project-proof.ts";
 import { RemoteFleetRelay, RemoteObservationError } from "./remote-fleet-relay.ts";
-import { windowsFleetRelayCommand } from "./windows-fleet-relay.ts";
+import { windowsFleetRelayLaunch } from "./windows-fleet-relay.ts";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FleetLinkFile } from "@clankie/protocol";
 import {
@@ -204,8 +204,12 @@ class FleetLink {
           return;
         }
         if (this.relayChild) return;
-        const relayChild = this.options.stream!(windowsFleetRelayCommand(Number(allocated[1])));
+        const relayLaunch = windowsFleetRelayLaunch(Number(allocated[1]));
+        const relayChild = this.options.stream!(relayLaunch.command);
         this.relayChild = relayChild;
+        // A relay that dies before reading its script surfaces through close below, not as a pipe error.
+        relayChild.stdin?.on("error", () => {});
+        relayChild.stdin?.write(relayLaunch.stdin);
         let relayStderr = "";
         relayChild.stderr?.setEncoding("utf8");
         relayChild.stderr?.on("data", (chunk: string) => {

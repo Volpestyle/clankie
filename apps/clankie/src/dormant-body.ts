@@ -26,9 +26,12 @@ function dormantAdmits(method: string, path: string): boolean {
 /**
  * The same app composition an active body uses, with no captain, and the
  * dormant gate in front. Device authority behaves exactly as it does on an
- * active body.
+ * active body. clankie-ops's gateway body-transfer path test builds its
+ * destination body with it, so it stays exported.
+ *
+ * @public
  */
-function createDormantApp(
+export function createDormantApp(
   options: Omit<ClankieAppDependencies, "captain" | "admit" | "bodyTransfer"> & {
     readonly transfer: BodyTransfer;
     readonly restart: () => void;

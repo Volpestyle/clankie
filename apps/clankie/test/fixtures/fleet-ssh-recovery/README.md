@@ -25,6 +25,8 @@ port; there is no scheduled replacement. An isolated control file stops only
 that fixture relay to verify a real outage revokes its lifetime and the link
 recovers on a fresh port. Program lookup against a refreshed machine and user
 PATH happens inside the real Windows relay, which this fixture does not run.
+The relay's command line carries only its loader; the fixture reads the
+length-prefixed relay script from stdin as the loader does, leaving stdin open.
 
 Large finite commands cross child stdin: the PowerShell-shaped fixture decodes
 the streamed base64 script, and POSIX uses a real `sh -s`. The opt-in
