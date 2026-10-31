@@ -2804,9 +2804,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
   };
   const hireWorktrees = new HireWorktrees(join(options.stateDir, "hire-worktrees.json"));
-  // One admission per start folder at a time, so two attempts never relocate to two worktrees.
-  const startsAdmitting = new Set<string>();
-  const admitHire: HireSeat = async (request, brief, source, autonomous) => {
+  const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
     const taskBrief = brief !== undefined;
     // The room shows the lead's own brief, not the preferences appended below.
     const leadBrief = brief;
@@ -3075,22 +3073,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : undefined
         : adoptedRoleWrite;
     return { ...result, seat: adopted, ...(roleAssignment ? { roleAssignment } : {}) };
-  };
-  const hireSeat: HireSeat = async (request, ...rest) => {
-    if (request.resume !== undefined) return admitHire(request, ...rest);
-    const scope = hireWorktreeScope(request);
-    if (startsAdmitting.has(scope))
-      return {
-        outcome: "failed",
-        reason: "not_ready",
-        detail: "Another hire from this start folder is still starting; no second hire began.",
-      };
-    startsAdmitting.add(scope);
-    try {
-      return await admitHire(request, ...rest);
-    } finally {
-      startsAdmitting.delete(scope);
-    }
   };
 
   const paneTidy: PaneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {

@@ -54,9 +54,8 @@ instead of a refusal.
   start folder on the same machine reuses that worktree and brief line instead
   of making another, so the allocation and receipt checks of
   [ADR 0207](0207-work-records-and-native-agent-delivery.md) see the first
-  attempt and no second agent starts. Only one hire from a start folder is
-  admitted at a time. Once the launch resolves, the next hire gets a new
-  worktree.
+  attempt and no second agent starts. Once the launch resolves, the next hire
+  gets a new worktree.
 
 A worktree left by a hire that failed later is clean at `origin/main`, so the
 usual tidy removes it once no pane or process is in it. Calling
