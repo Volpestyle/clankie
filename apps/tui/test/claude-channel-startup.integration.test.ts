@@ -83,10 +83,12 @@ async function fixture(
   );
   const parent = join(root, "parent.mjs");
   // Recorded native launch argv; a real intermediary shell prevents exec folding.
+  // dash points an asynchronous command's stdin at /dev/null before its own
+  // redirections, so the hook's input travels on fd 3 instead of a bare <&0.
   await writeFile(
     parent,
     `import {spawn} from 'node:child_process';
-const child=spawn('/bin/sh',['-c','"$@" <&0 & wait "$!"','fixture',process.execPath,${JSON.stringify(hook)},...JSON.parse(process.env.HOOK_ARGS)],{stdio:['pipe','inherit','inherit']});
+const child=spawn('/bin/sh',['-c','exec 3<&0; "$@" <&3 3<&- & wait "$!"','fixture',process.execPath,${JSON.stringify(hook)},...JSON.parse(process.env.HOOK_ARGS)],{stdio:['pipe','inherit','inherit']});
 child.stdin.end(process.env.HOOK_INPUT);child.on('exit',code=>process.exit(code??0));`,
   );
   async function run(

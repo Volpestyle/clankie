@@ -36,7 +36,16 @@ import { createCatalogWatcher, signalCodexCatalog } from "./catalog-watch.mjs";
 //
 // MCP's stdio transport is newline-delimited JSON-RPC 2.0; this speaks the few
 // methods a channel server needs, so nothing beyond Node is installed here.
-import { approvesWorkerChannel, authorization, readLink, seatRoute, TEXT_MAX } from "./link.mjs";
+// Every link request goes through linkFetch, which works around Node's idle
+// keep-alive stall without giving up the connection the service has proven.
+import {
+  approvesWorkerChannel,
+  authorization,
+  linkFetch as fetch,
+  readLink,
+  seatRoute,
+  TEXT_MAX,
+} from "./link.mjs";
 
 const WAIT_MS = 25_000;
 const RETRY_MS = 2_000;
