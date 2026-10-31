@@ -2954,11 +2954,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : undefined;
       // A launch still fenced, or still being admitted, in the start folder itself is checked
       // there the old way, never moved, so its retry meets that folder's own allocation and
-      // receipt (ADR 0207).
-      const inPlace =
+      // receipt (ADR 0207). A launch under another harness is never this one's retry.
+      const admitting = retained === undefined && (inPlaceStarts.get(scope) ?? 0) > 0;
+      const fenced =
         retained === undefined &&
-        ((inPlaceStarts.get(scope) ?? 0) > 0 ||
-          herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: request.workingDirectory }));
+        !admitting &&
+        herdrWatches.hireRetained({
+          fleet: request.fleet,
+          workingDirectory: request.workingDirectory,
+          harness: request.harness,
+        });
+      const inPlace = admitting || fenced;
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
       const freshness: HireCheckoutFreshness = retained
@@ -2992,7 +2998,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return {
           outcome: "failed",
           reason: "not_ready",
-          detail: freshness.reason ?? "Checkout freshness unverified",
+          detail: [
+            freshness.reason ?? "Checkout freshness unverified",
+            // Say why no fresh worktree was offered, so the caller doesn't chase the checkout.
+            fenced
+              ? `This start was not moved to a fresh worktree because an earlier ${request.harness ?? "agent"} start in this folder is still unresolved; it keeps the folder until its pane is closed or the earlier start is recovered.`
+              : admitting
+                ? "This start was not moved to a fresh worktree because another start in this folder is still being admitted; try again once it finishes."
+                : undefined,
+          ]
+            .filter(Boolean)
+            .join(". "),
         };
       if (freshness.outcome === "fresh")
         brief = [

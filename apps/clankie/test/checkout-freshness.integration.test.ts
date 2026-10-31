@@ -782,6 +782,110 @@ it("a retry whose launch is still fenced in its clean start folder is never move
   }
 });
 
+it("an old unresolved start under another harness doesn't pin a new start to its dirty folder", async () => {
+  const { vi } = await import("vitest");
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { HerdrWatchStore, createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-hire-other-harness-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner");
+  let captain: ReturnType<typeof createCaptain> | undefined;
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+    // A long-ago codex start in the start folder that never confirmed, as an owner's journal keeps it.
+    await mkdir(join(root, "state"), { recursive: true });
+    await writeFile(
+      join(root, "state", "herdr-watches.json.project-hires.json"),
+      JSON.stringify({
+        version: 1,
+        allocations: [
+          {
+            id: "old-codex-start",
+            key: JSON.stringify(["default", owner]),
+            projectId: "default",
+            policy: JSON.stringify([null, null, null]),
+            request: {
+              schemaVersion: 1,
+              harness: "codex",
+              title: "Ada",
+              workingDirectory: owner,
+              effort: "low",
+              effortReason: "An old fixture start.",
+            },
+            started: true,
+            confirmed: false,
+            gone: false,
+          },
+        ],
+      }),
+    );
+    // Only the native launch is stood in for; which folder each start reaches is the evidence.
+    const launched: string[] = [];
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
+      launched.push(seat.workingDirectory);
+      return { outcome: "failed", reason: "start_unconfirmed", detail: "fixture launch unconfirmed" };
+    });
+    captain = createCaptain({ herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps, {
+      repoRoot: join(root, "runtime"),
+      stateDir: join(root, "state"),
+      settings: new SettingsStore(join(root, "settings.json")),
+      nativeHerdrRunner: createHerdrWatchRunner(() => false),
+    });
+    const hire = (harness: "claude" | "codex") =>
+      captain!.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "spawn_seat",
+        conversationId: "global-default",
+        seat: {
+          schemaVersion: 1,
+          harness,
+          title: "Fixture",
+          workingDirectory: owner,
+          effort: "low",
+          effortReason: "A fixture hire only needs to reach the native launch.",
+        },
+        brief: "implement",
+      });
+    await hire("claude");
+    expect(launched).toHaveLength(1);
+    expect(launched[0]).toMatch(/[/\\]\.local[/\\]wt-fixture-[0-9a-f]{6}$/u);
+    // The same harness may be that old start's retry, so it stays in place and says why.
+    expect(await hire("codex")).toMatchObject({
+      op: "spawn_seat",
+      result: {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: expect.stringMatching(
+          /Start checkout is dirty.*an earlier codex start in this folder is still unresolved/su,
+        ),
+      },
+    });
+    expect(launched).toHaveLength(1);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    vi.restoreAllMocks();
+    await captain?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("an overlapping hire while a clean in-place hire is still being admitted is never moved once the folder turns dirty", async () => {
   const { vi } = await import("vitest");
   const { createCaptain } = await import("../src/captain/captain.ts");
