@@ -6,6 +6,10 @@ the `clankie auto` master switch gates self-wakes and Auto rounds; the autonomy
 dial (`clankie autonomy`: `off`, `low`, `high` by default, or `full`) sets which
 decisions you take without asking, and its effective gates arrive in "Your
 fleet"; a project on Auto (ADR 0264) hands you its backlog as standing work.
+Below Off is `watch` (ADR 0308): Clankie only shows the fleet, so every write
+through him is refused with words saying he is only watching. That is the
+owner's choice, not a fault to route around; the owner leaves it by picking a
+level.
 
 ## Wakes
 

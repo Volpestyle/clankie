@@ -28,6 +28,8 @@ import {
   prepareFreeAgentIntent as prepareFreeIntent,
 } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
+import { WATCH_REFUSAL, WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
+import { routeLaneRun } from "./lane-route.ts";
 import {
   joinedMachineShellTool,
   joinedHireTools,
@@ -361,6 +363,7 @@ import {
 } from "./remote-codex-app-server.ts";
 import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
+import { guardWatchedRequests } from "./watch-request.ts";
 import { RoomHandoffBursts } from "./room-handoff-bursts.ts";
 import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
@@ -403,9 +406,6 @@ import { voiceCallHandoff, voiceCallTranscript } from "./voice-call-handoff.ts";
 const WORKER_RESULT_BRIEF =
   "End each finished turn with a report in the resolved reporting style that the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
 
-/** Pi's answers to a compaction request that leave nothing to do. */
-const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to compact (session too small)"]);
-
 /** How long a head seat stays held after a completed poll; see the seat outbox. */
 const HEAD_BOUND_GRACE_MS = 30_000;
 /** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
@@ -440,6 +440,8 @@ const LEAD_HANDOFF_REQUEST = [
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
+  // Watch (ADR 0308): machine access holds every machine at Portal; this gate covers the rest.
+  const watch = createWatchGate(settingsStore);
   const requireAccess =
     options.requireMachineAccess ??
     ((fleet, required) => requireRuntimeMachineAccess(settingsStore, fleet, required));
@@ -482,6 +484,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     get settings() {
       return settings;
     },
+    watching: () => watch.watching(),
     get deps() {
       return deps;
     },
@@ -1236,10 +1239,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
         }),
   });
-  const evaluator = new Evaluator(
-    join(options.stateDir, "evaluator"),
-    deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable },
-  );
+  const evaluator = new Evaluator(join(options.stateDir, "evaluator"), {
+    ...(deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable }),
+    watching: () => watch.watching(),
+  });
   const evaluationStarts = new Map<string, () => EvaluationCapture>();
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir), (metrics) => {
     const capture = evaluationStarts.get(metrics.runId);
@@ -1624,7 +1627,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (modelRuntime === undefined) {
       const created =
         options.evalSessionBoundary === undefined
-          ? createCaptainModelRuntime(options.repoRoot)
+          ? createCaptainModelRuntime(options.repoRoot, {
+              refuse: () => watch.refuse(WATCH_TURN_REFUSAL),
+            })
           : Promise.resolve(options.evalSessionBoundary.runtime);
       modelRuntime = created;
       modelRuntimeReady = false;
@@ -2020,6 +2025,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // noTools: "builtin" only changes the initial active loadout.
         });
         preparingSession = created.session;
+        guardWatchedRequests(created.session, watch);
         if (run?.signal.aborted) {
           disposePreparingSession();
           run.signal.throwIfAborted();
@@ -2060,19 +2066,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * next run must start routine again.
    */
   async function syncModel(lane: LaneSession): Promise<void> {
-    if (lane.budget.compactBeforeNextRun) {
-      lane.budget.compactBeforeNextRun = false;
-      // A request had to be trimmed to fit the included-usage limit: compact now,
-      // while idle, so this run's requests fit whole.
-      await lane.session.compact().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        // Pi's own threshold may already have compacted, or the bytes were
-        // images that compaction cannot shrink; the request budget still holds.
-        if (BENIGN_COMPACTION_REFUSALS.has(message)) return;
-        console.warn("Compaction before the next run failed:", message);
-      });
-    }
-    lane.route.current = await (await runtime()).resolveRoute(lane.purpose);
+    lane.route.current = await routeLaneRun(lane, await runtime());
     const selection = lane.route.current.selection;
     const current = lane.session.model;
     if (
@@ -2706,6 +2700,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const pruneGuard =
     (current: Awaited<ReturnType<typeof settings>>, guard: () => Promise<void>) => async () => {
+      // Watch removes no worktree (ADR 0308), asked again before every tree's removal.
+      await watch.refuse(WATCH_REFUSAL);
       await guard();
       const latest = await settings();
       if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
@@ -4942,6 +4938,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (shutdown.signal.aborted || !text.trim() || text.length > 4000)
         return outcome(false, "stopped_or_invalid");
       if (!(await validateConversationOwner(owner))) return outcome(false, "owner_unavailable");
+      // Watch sends nothing into a seat, a lead's included (ADR 0308).
+      if (await watch.watching()) return outcome(false, "watching");
       await guard();
       await conversations.waitForDriverAdmission(owner.conversationId, shutdown.signal);
       await guard();
@@ -5643,7 +5641,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (id) => milestoneSignals(autoMeasurements.get(id)),
     );
   const stopAutoRounds = autoCadence.start(async () => {
-    if (shutdown.signal.aborted || !autonomy.enabled) return;
+    if (shutdown.signal.aborted || !autonomy.enabled || (await watch.watching())) return;
     await projectMirrors
       .refresh((await settings()).projects.projects)
       .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
@@ -5827,8 +5825,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (herdrRunner.readPane === undefined) throw new Error("Herdr pane reads are unavailable");
       return herdrRunner.readPane(paneId, "visible", "ansi");
     },
+    watching: () => watch.watching(),
     runInPane: async (paneId, argv) => {
       if (herdrRunner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
+      // Every lead relaunch (fresh restart, failover, failback) types its command here.
+      await watch.refuse();
       await herdrRunner.runInPane(paneId, argv);
     },
     idle: (conversationId) => {
@@ -5992,13 +5993,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }, options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS);
   const hiredSeatRestarts = createHiredSeatRestarts({
     path: join(options.stateDir, "hired-seat-restart-policy.json"),
-    enabled: async () => (await settings()).fleet.seatRestarts !== "off",
+    enabled: async () => (await settings()).fleet.seatRestarts !== "off" && !(await watch.watching()),
     candidates: () => herdrWatches.freshRestartCandidates(),
     receipts: () => herdrWatches.hiredRestartReceipts(),
     observe: readHiredRestartObservation,
     authority: async (candidate) => {
       if (shutdown.signal.aborted || !(await validateConversationOwner(candidate.owner)))
         throw new RestartRefusal("authority_unavailable");
+      if (await watch.watching()) throw new RestartRefusal("watching");
     },
     resources: async (candidate) => {
       const guard = await options.fleetResources?.restartGuard(candidate.agent);
@@ -6207,7 +6209,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // VUH-2392: finished, harvested, landed hires close on their own, and landed worktrees in
   // enrolled roots go, through the same guarded close and prune a lead uses.
   const autoTidy = createAutoTidy({
-    setting: async () => (await settings()).fleet.autoTidy,
+    // Watch closes nothing and prunes nothing (ADR 0308).
+    setting: async () => ((await watch.watching()) ? "off" : (await settings()).fleet.autoTidy),
     runner: herdrRunner,
     tidy: paneTidy,
     reviewerSeats: async () => reviewerSeatIds((await settings()).projects),
@@ -7679,6 +7682,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       runner: herdrRunner,
       ownerAskPending: (seatId) => conversations.ownerAskPendingFor(seatId),
       record: (app, text) => fleetRoom.postAppNote(app, text),
+      watching: () => watch.watching(),
     }),
     recordInbound: (arrival) => noteFleetRoom(inboundFleetRoomRecord(arrival)),
     readWorkerAccounts,
@@ -8458,6 +8462,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               recipientBinding = inboundBinding(source);
               polledSource = source;
               if (source !== undefined) await rememberOperatorSource(binding.conversationId, source);
+              // A turn waiting from before Watch is refused, not held for later, so it reaches
+              // no model; the poll itself is then refused below Portal (ADR 0308).
+              outbox.watching(await watch.watching());
               await admit();
             },
           )
@@ -9001,6 +9008,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
+      // A message queued before Watch is refused here, so it starts no native turn (ADR 0308).
+      await mailbox.readWatch(() => watch.watching());
       const pending = mailbox.poll(waitMs, signal, binding);
       if (binding && !live) fleetChanges.touch();
       const events = await pending;

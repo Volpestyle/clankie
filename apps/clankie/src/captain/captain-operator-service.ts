@@ -1,3 +1,4 @@
+import { WatchingError } from "../watch.ts";
 import {
   hireDeliveryStage,
   OPERATOR_SEAT_HARNESSES,
@@ -1003,6 +1004,12 @@ export function createOperatorService(
       };
     }
     if (request.op === "close_seat") {
+      // Watch closes nothing through Clankie (ADR 0308); the owner can still close it in Herdr.
+      // It asks again just before the exit, so Watch chosen meanwhile stops a close under way.
+      const refuseWhileWatching = async () => {
+        if ((await ctx.settings()).autonomy?.watch === true) throw new WatchingError();
+      };
+      await refuseWhileWatching();
       // The same hold as close_worker_pane: unlanded work stays unless a reason is recorded.
       const tidy = ctx.herdrWatches.tidy;
       const held = (await tidy?.seatWorktreeHold(request.seatId)) ?? [];
@@ -1014,14 +1021,11 @@ export function createOperatorService(
           closed: false,
           refusal: { reason: "unlanded_work", worktrees: held.slice(0, 8) },
         };
-      const closed = await ctx.herdrWatches.closeSeat(
-        request.seatId,
-        request.unlandedReason === undefined
-          ? async () => {
-              if ((await tidy?.seatWorktreeHold(request.seatId))?.length) throw new Error("unlanded_work");
-            }
-          : undefined,
-      );
+      const closed = await ctx.herdrWatches.closeSeat(request.seatId, async () => {
+        await refuseWhileWatching();
+        if (request.unlandedReason === undefined && (await tidy?.seatWorktreeHold(request.seatId))?.length)
+          throw new Error("unlanded_work");
+      });
       if (closed && held.length && request.unlandedReason !== undefined)
         try {
           tidy?.recordLeftBehind(

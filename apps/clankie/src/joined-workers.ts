@@ -5,6 +5,7 @@ import type { MachineJoins, JoinedSeatMachine, JoinedWorkerHireRequest } from ".
 import { posix, win32 } from "node:path";
 import type { RemoteSeatAuthority } from "./remote-lead-bridge.ts";
 import { SeatOutbox } from "./captain/seat-outbox.ts";
+import { WatchingMachineRefused } from "@clankie/protocol";
 import { JoinedWorkerLaunchSchema } from "@clankie/protocol/machine-join";
 
 const Hire = z.strictObject({
@@ -122,6 +123,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     led: () => boolean;
   }) => {
     const { machine, directory } = args;
+    await input.joins.refuseWatching(machine.machineId);
     for (const worker of workers.values()) if (!worker.current()) close(worker);
     if (workers.size >= 128) throw Error("joined_worker_capacity");
     const token = randomBytes(32).toString("base64url"),
@@ -161,6 +163,8 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       },
       pollEvents: async (wait, signal) => {
         if (!worker.paneId) return [];
+        // A message queued before Watch is refused here, so it starts no native turn (ADR 0308).
+        await outbox.readWatch(() => input.joins.watching());
         return outbox.poll(wait, signal, binding);
       },
       acknowledge: async (id) => outbox.acknowledge(id, binding),
@@ -265,6 +269,19 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       };
     }
   };
+  /**
+   * Watch holds every machine at Portal (ADR 0308). Asked before a joined lead's hire or
+   * message, its refusal is a definite answer: nothing was sent, so nothing needs reconciling.
+   */
+  const refusedWhileWatching = async (machineId: string) => {
+    try {
+      await input.joins.refuseWatching(machineId);
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof WatchingMachineRefused)) throw error;
+      return { ...reply({ outcome: "refused", reason: "watching", detail: error.message }), isError: true };
+    }
+  };
   /** Down the worker's native join channel, never terminal typing; only its own lead conversation. */
   const deliver = async (seat: string, conversationId: string, message: string, leading = () => true) => {
     const worker = [...workers.values()].find(
@@ -275,6 +292,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     // Its bridge delivers messages as Claude channel events; a Codex worker launched
     // without an app-server has no such channel, and is never typed into (VUH-2609).
     if (worker.harness === "codex") throw Error("joined_codex_worker_takes_no_messages");
+    await input.joins.refuseWatching(worker.machineId);
     const result = await worker.outbox.deliver({
       kind: "message",
       conversationId: worker.binding.conversationId,
@@ -307,6 +325,8 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
             if (hire.workingDirectory !== undefined && hire.workingDirectory !== directory)
               throw Error("joined_worker_directory_mismatch");
             if (!lead.current() || !(await lead.authorize())) throw Error("joined_seat_revoked");
+            const watching = await refusedWhileWatching(machine.machineId);
+            if (watching) return watching;
             return reply(
               await launch({
                 machine,
@@ -329,6 +349,8 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
           "Send to one of this joined lead's workers by the exact seatId returned by hire_agent. Uses its native join channel, never terminal typing.",
           z.strictObject({ seat: z.string().min(1), message: z.string().min(1).max(16_384) }),
           async (args) => {
+            const watching = await refusedWhileWatching(machine.machineId);
+            if (watching) return watching;
             return reply(
               await deliver(
                 String(args.seat),

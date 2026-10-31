@@ -38,6 +38,7 @@ async function fixture(
     root?: string;
     notice?: (conversationId: string, text: string) => void;
     workingDirectory?: string;
+    watching?: () => Promise<boolean>;
   } = {},
 ) {
   // A shared root is the same service state seen by a restarted service.
@@ -103,6 +104,7 @@ async function fixture(
     notice: options.notice ?? ((_id, text) => notices.push(text)),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 50))),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.watching === undefined ? {} : { watching: options.watching }),
     exitTimeoutMs: 1_500,
     bindTimeoutMs: 1_500,
   });
@@ -149,6 +151,24 @@ it.each([false, true])(
     );
   },
 );
+
+// Watch (ADR 0308): a failback or fresh restart ends no lead session while Clankie only
+// watches, even when Watch is chosen after the first checks passed.
+it("leaves the lead running when Watch is chosen before its session would end", async () => {
+  let reads = 0;
+  // The first read passes; the read right before the signal sees Watch.
+  const f = await fixture({ watching: async () => ++reads > 1 });
+  expect(await f.relaunch.relaunchLeadSeat({ ...restart, reason: "usage_limit_reset" })).toMatchObject({
+    outcome: "refused",
+    reason: "watching",
+  });
+  expect(reads).toBe(2);
+  expect(f.alive()).toBe(true);
+  expect(f.launched).toEqual([]);
+  // Nothing is left uncertain, so a relaunch once Watch ends starts clean.
+  reads = -100;
+  expect(await f.relaunch.relaunchLeadSeat(restart)).toMatchObject({ outcome: "relaunched" });
+});
 
 it("relaunches the same command in the same pane, delivers the brief and keeps the launch", async () => {
   const f = await fixture();

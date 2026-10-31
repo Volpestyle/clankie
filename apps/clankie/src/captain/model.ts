@@ -226,7 +226,13 @@ export function createRejectedCredentialRefresh(
   };
 }
 
-export async function createCaptainModelRuntime(repoRoot: string): Promise<CaptainModelRuntime> {
+export async function createCaptainModelRuntime(
+  repoRoot: string,
+  options: {
+    /** Refuses before any selection while Clankie only watches (ADR 0308), so no turn reaches a provider. */
+    readonly refuse?: () => Promise<void>;
+  } = {},
+): Promise<CaptainModelRuntime> {
   const broker = createDefaultCredentialStore();
   const credentials = new BrokerCredentialStore(broker);
   const runtime = await ModelRuntime.create({
@@ -242,6 +248,7 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
     config: Awaited<ReturnType<typeof loadConfig>>["config"],
     label?: string,
   ): Promise<PiModelSelection> => {
+    await options.refuse?.();
     try {
       const selection = resolvePiModelSelection(config, runtime, {
         hasCodexSubscription:

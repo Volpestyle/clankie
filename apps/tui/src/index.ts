@@ -1,6 +1,7 @@
 import { ownerUpdateConsoleCommand } from "./owner-update-commands.ts";
 import { feedConsoleCommand, feedDropConsoleCommand } from "./command/feed.ts";
 import { questionConsoleCommand } from "./question-commands.ts";
+import { runHerdrCommand } from "./command/herdr.ts";
 import { runUpdateCommand } from "./command/update.ts";
 import { runHarnessLoginCommand } from "./command/harness-login.ts";
 import { gatewayStatus } from "./command/gateway.ts";
@@ -505,6 +506,7 @@ const setupServices: SetupCommandServices = {
   workspace: () => currentWorkspace,
   pair: (shell) => runConsolePair("", shell, { repoRoot, env: process.env, host: serviceUrl }),
   autostart: (verb) => runAutostartCommand([verb], { env: process.env }),
+  herdr: () => runHerdrCommand(["status"], { ...herdrOptions, settings: settingsStore }),
   commands: () => commands,
   restartCaptain,
   onReady: () => {
