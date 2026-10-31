@@ -1943,7 +1943,13 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
-`start_agent` existed sign in again to use it. `list_issues` and `read_issue`
+`start_agent` existed sign in again to use it. `fleet_capacity` reads what
+the fleet can afford before a hire
+([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
+each metered account's plan, usage, remaining limit and reset, heavy-work
+permits, tracker request budgets, and each live pane's context against its
+budget. A number Clankie does not have is `"unknown"`. It does not include
+homes, emails or credentials, and it hires nothing. `list_issues` and `read_issue`
 read your projects' issues, wherever each project tracks them. `save_issue`
 and `comment_issue` write them as that app, never as you: issue files are
 written right away, and Linear or GitHub follow the project's "Posting to your

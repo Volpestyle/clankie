@@ -215,6 +215,47 @@ async function startConnectorRelay(
               : {}),
           },
         } as OperatorConversationServiceResult;
+      case "fleet_capacity":
+        return {
+          op: "fleet_capacity",
+          schemaVersion: 1,
+          result: {
+            observedAt: NOW,
+            reviewBudgets: { leadTokens: 250_000, workerTokens: 300_000 },
+            accounts: [
+              {
+                machine: "local",
+                harness: "codex",
+                account: "volpestyle",
+                plan: "pro",
+                tier: "unknown",
+                signedIn: true,
+                usable: true,
+                held: false,
+                remaining: 0.5,
+                resetsAt: "unknown",
+                sparePerDay: "unknown",
+                usage: "unknown",
+                spend: "unknown",
+              },
+            ],
+            panes: [
+              {
+                agent: "pc1/kh2",
+                machine: "PC1",
+                harness: "claude",
+                account: "unknown",
+                title: "kh2",
+                contextTokens: 1000,
+                contextPercentOfWindow: "unknown",
+                reviewBudgetTokens: "unknown",
+              },
+            ],
+            heavy: "unknown",
+            tracker: "unknown",
+            notices: [],
+          },
+        };
       case "start_agent": {
         const places = [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }];
         if (request.machine === undefined || request.workingDirectory === undefined)
@@ -412,6 +453,7 @@ describe("Claude connector MCP endpoint", () => {
       "list_agents",
       "read_agent",
       "message_agent",
+      "fleet_capacity",
       "list_places",
       "start_agent",
       "answer_prompt",
@@ -868,6 +910,9 @@ describe("Claude connector MCP endpoint", () => {
     const refused = await client.callTool({ name: "list_agents", arguments: {} });
     expect(refused.isError).toBe(true);
     expect(textOf(refused)).toContain('clankie connector serve on "Claude"');
+    const refusedCapacity = await client.callTool({ name: "fleet_capacity", arguments: {} });
+    expect(refusedCapacity.isError).toBe(true);
+    expect(textOf(refusedCapacity)).toContain('clankie connector serve on "Claude"');
 
     const hidden = await startConnectorRelay(
       { authorized: true, device: connectorDevice },
@@ -888,5 +933,32 @@ describe("Claude connector MCP endpoint", () => {
     });
     expect(unsent.isError).toBe(true);
     expect(textOf(unsent)).toContain("isn't reachable");
+    const hiddenCapacity = JSON.parse(
+      textOf(await reader.callTool({ name: "fleet_capacity", arguments: {} })),
+    );
+    expect(hiddenCapacity.panes).toEqual([]);
+    expect(hiddenCapacity.accounts[0].remaining).toBe(0.5);
+    expect(hiddenCapacity.notices[0]).toContain("clankie connector detect on herdr");
+  });
+
+  it("returns fleet capacity with unknown where the service has no number", async () => {
+    const relay = await startConnectorRelay({ authorized: true, device: connectorDevice });
+    const client = await connect(relay.url);
+    const capacity = JSON.parse(textOf(await client.callTool({ name: "fleet_capacity", arguments: {} })));
+    expect(capacity.accounts[0]).toMatchObject({
+      account: "volpestyle",
+      plan: "pro",
+      remaining: 0.5,
+      tier: "unknown",
+    });
+    expect(capacity.panes[0].contextTokens).toBe(1000);
+    // The same id list_agents gives, so read_agent takes it as it is.
+    expect(capacity.panes[0].agent).toBe("herdr:pc1/kh2");
+    const listed = JSON.parse(textOf(await client.callTool({ name: "list_agents", arguments: {} })));
+    expect(listed.agents.map((agent: { agent: string }) => agent.agent)).toContain(capacity.panes[0].agent);
+    const read = await client.callTool({ name: "read_agent", arguments: { agent: capacity.panes[0].agent } });
+    expect(read.isError).not.toBe(true);
+    expect(capacity.heavy).toBe("unknown");
+    expect(capacity.tracker).toBe("unknown");
   });
 });

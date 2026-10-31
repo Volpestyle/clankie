@@ -540,14 +540,12 @@ it("does not take an older identical message in the same session as proof the ne
 it("hands the mailbox fallback the final attempt's options when it sends once more", async () => {
   const { create, entries, adapter, setSession } = fixture();
   adapter.attach = async () => undefined;
-  const mailbox = vi.fn<(attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>>(
-    async () => {
-      if (mailbox.mock.calls.length > 1) return { outcome: "delivered", messageId: "landed" };
-      setSession("session-after-clear");
-      entries.splice(0, entries.length);
-      return { outcome: "unconfirmed", messageId: "native-id", detail: "session ended" };
-    },
-  );
+  const mailbox = vi.fn<(attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>>(async () => {
+    if (mailbox.mock.calls.length > 1) return { outcome: "delivered", messageId: "landed" };
+    setSession("session-after-clear");
+    entries.splice(0, entries.length);
+    return { outcome: "unconfirmed", messageId: "native-id", detail: "session ended" };
+  });
   await expect(
     create().deliverToSeat("seat1", "hello there", mailbox, { rediscover: true }),
   ).resolves.toMatchObject({ outcome: "delivered", messageId: "landed" });

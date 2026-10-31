@@ -20,6 +20,7 @@ import {
   type FleetProjectionDiagnostics,
 } from "./fleet-projection-diagnostics.ts";
 import { harnessAccountIdentities, harnessAccountIdentityPath } from "./harness-account-identities.ts";
+import { createFleetCapacityReader } from "../app/fleet-capacity.ts";
 import { remoteRetirementWork } from "./remote-retirement-work.ts";
 import { workerWorktreeHold } from "./worktree-decisions.ts";
 import { renderLeadChats, type LeadChat } from "./lead-roster.ts";
@@ -3437,7 +3438,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // waits for the harness's own receipt; any other seat needs a structured lane.
     // `attempt` is the delivery attempt that fell back here: the rediscovery's
     // final resend passes its own options, not the first attempt's.
-    const fallback = async (attempt?: { readonly rediscover?: boolean | "final" }): Promise<FleetSeatDelivery> => {
+    const fallback = async (attempt?: {
+      readonly rediscover?: boolean | "final";
+    }): Promise<FleetSeatDelivery> => {
       const live = fleetMailboxes.get(seatId);
       const rediscover = attempt?.rediscover ?? deliveryOptions?.rediscover;
       // A cleared session leaves the mailbox certain of an occupant that is gone.
@@ -7814,6 +7817,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get headSeat() {
         return headSeat;
       },
+      fleetCapacity: createFleetCapacityReader({
+        settings,
+        accounts: (fleetId) => readWorkerAccounts(fleetId),
+        seats: () => refreshFleet(),
+        leadSeatId: () => headSeat?.seatId,
+        heavy: () => options.fleetResources?.status(),
+        tracker: () => options.trackerRequestBudget?.(),
+      }),
       get observeFleet() {
         return observeFleet;
       },

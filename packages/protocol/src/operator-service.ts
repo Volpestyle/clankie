@@ -6,6 +6,7 @@ import {
   PromptAnswerResultSchema,
   PromptAnswerStepSchema,
 } from "./connector.ts";
+import { FleetCapacitySchema } from "./fleet-capacity.ts";
 import {
   AppNotesRequestSchema,
   AppNotesResultSchema,
@@ -704,6 +705,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       waitMs: z.number().int().min(0).max(OPERATOR_FLEET_WAIT_MS_MAX).optional(),
     })
     .strict(),
+  /** What the fleet can afford before a hire (ADR 0313). Read only. */
+  z.object({ op: z.literal("fleet_capacity"), schemaVersion: z.literal(1) }).strict(),
   z
     .object({
       op: z.literal("composer_catalog"),
@@ -1435,6 +1438,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("fleet"),
       schemaVersion: z.literal(1),
       snapshot: OperatorFleetSnapshotSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("fleet_capacity"),
+      schemaVersion: z.literal(1),
+      result: FleetCapacitySchema,
     })
     .strict(),
   z
