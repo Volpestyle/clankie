@@ -65,6 +65,28 @@ export function hasLinks(env = process.env) {
   }
 }
 
+/**
+ * Node's built-in fetch before undici 8.10.0 (Node 26.7 ships 8.9.0) holds a
+ * request meant for an idle keep-alive socket until some unrelated timer wakes
+ * the event loop (nodejs/undici#5600, #5606). A bridge sits idle between its
+ * polls and acks, so its next request could wait out its own timeouts. On
+ * those versions each link request takes a connection of its own.
+ */
+export const LINK_CONNECTION = undiciBefore(process.versions.undici, [8, 10, 0])
+  ? { connection: "close" }
+  : {};
+
+function undiciBefore(version, fixed) {
+  if (typeof version !== "string") return false;
+  const parts = version.split(".").map(Number);
+  for (const [index, part] of fixed.entries()) {
+    const value = parts[index] ?? 0;
+    if (Number.isNaN(value)) return false;
+    if (value !== part) return value < part;
+  }
+  return false;
+}
+
 /** One seat route on Clankie's service, for the pane this process sits in. */
 export function seatRoute(link, paneId, route) {
   return new URL(`/v1/fleet/seats/${encodeURIComponent(paneId)}/${route}`, link.url);
