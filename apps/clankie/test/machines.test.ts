@@ -19,6 +19,7 @@ test("discovery reads literal owner aliases without prompts, retains unreachable
       primary: () => undefined,
       changed: () => {},
       sshConfig: async () => "Host pc offline *.internal !skip\nHost pc",
+      tailnet: async () => "",
       run: async (cmd, args, env) => {
         calls.push({ cmd, args });
         expect(env.HERDR_PANE_ID).toBeUndefined();
@@ -55,6 +56,7 @@ test("slow discovery has a global deadline and at most four probes", async () =>
       primary: () => undefined,
       changed: () => {},
       sshConfig: async () => Array.from({ length: 30 }, (_, i) => `Host host${i}`).join("\n"),
+      tailnet: async () => "",
       run: async () => {
         calls++;
         return new Promise(() => {});
@@ -150,6 +152,7 @@ test("discovery never counts a replacement local session as the pinned connectio
       primary: () => undefined,
       changed: () => {},
       sshConfig: async () => "",
+      tailnet: async () => "",
       run: async (_cmd, args, env) => {
         if (args[0] === "session")
           return { stdout: JSON.stringify({ sessions: [{ name: "work", socket_path: "/tmp/new.sock" }] }) };
@@ -205,6 +208,7 @@ test("a failed count probe preserves an explicitly disabled connection", async (
       primary: () => undefined,
       changed: () => {},
       sshConfig: async () => "",
+      tailnet: async () => "",
       run: async (_cmd, args) => {
         if (args[0] === "session") return { stdout: JSON.stringify({ sessions: [] }) };
         throw new Error("offline");
@@ -285,6 +289,7 @@ test("discovery IDs remain unique across case-folded aliases and configured cand
       primary: () => undefined,
       changed: () => {},
       sshConfig: async () => "Host box BOX candidate-1",
+      tailnet: async () => "",
       run: async () => ({ stdout: JSON.stringify({ sessions: [] }) }),
     });
     await machines.add({ id: "candidate-1", ssh: "other", shell: "posix" });
