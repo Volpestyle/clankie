@@ -1125,6 +1125,7 @@ export class SeatOutbox {
   /**
    * Watch (ADR 0307), read fresh before each poll: while it holds, every event the seat has
    * not taken is refused, never sent, so nothing queued before Watch starts a native turn.
+   * A delivery during a poll parked while watching ends that poll, so the next one decides.
    */
   public watching(watching: boolean): void {
     this.watched = watching;
@@ -1246,10 +1247,9 @@ export class SeatOutbox {
   }
 
   private take(recipientBinding?: string, capabilities?: OperatorSeatCapabilities): OperatorSeatEvent[] {
-    if (this.watched) {
-      this.refuseUntaken();
-      return [];
-    }
+    // Watch read at this poll's start already refused what was waiting; anything newer waits
+    // for the next poll, which reads Watch again.
+    if (this.watched) return [];
     // The owner is heard first; wakes, watches and reports follow (VUH-2874).
     const taken = [...this.queued].sort((left, right) => ownerFirst(left) - ownerFirst(right));
     const events: OperatorSeatEvent[] = [];
@@ -1355,6 +1355,9 @@ export class SeatOutbox {
   private wakePoller(): void {
     const [first] = this.pollers;
     if (first === undefined) return;
+    // A poll parked while watching ends at once, so the seat's next poll reads Watch afresh:
+    // leaving Watch lets a new message straight through, and staying refuses it (ADR 0307).
+    if (this.watched) return first.finish([], "wake");
     const ready = this.take(first.recipientBinding, first.capabilities);
     if (ready.length > 0) first.finish(ready, "wake");
   }

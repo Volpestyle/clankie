@@ -402,13 +402,17 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
                 (error: unknown) => String(error),
               );
             expect(watched).toContain("only watching");
+            // A poll parked while watching does not refuse a message sent after Watch ends: it
+            // returns at once, and the worker's next poll takes the message.
+            const parked = worker.pollEvents(5000);
+            await new Promise((resolve) => setTimeout(resolve, 300));
             await watch(false);
-            const afterPoll = worker.pollEvents(2000);
             const after = upstream.callTool("message_seat", {
               seat: `${credential.lease.machineId}/worker-proof`,
               message: "Back from watching",
             });
-            const afterEvents = await afterPoll;
+            expect(await parked).toEqual([]);
+            const afterEvents = await worker.pollEvents(2000);
             expect(afterEvents.map((event) => event.content)).toEqual(["Back from watching"]);
             expect(await worker.acknowledge!(afterEvents[0]!.id)).toBe(true);
             expect(JSON.stringify(await after)).toContain("delivered");
