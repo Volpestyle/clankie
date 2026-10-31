@@ -40,7 +40,11 @@ agent showed.
   part of the anchor is still in the read window its last lines stand first
   there, and the cut falls after them. A later line naming the command is only
   ever below the real launch, so picking the last one can hide some of the
-  agent's own output, never show earlier text.
+  agent's own output, never show earlier text. A line that can run other
+  commands before the agent is no boundary, since their output follows it: a
+  list, pipe or background operator (`&&`, `||`, `;`, `|`, `&`), a command
+  substitution, or a line the one above carries on into (a trailing `\`,
+  backtick or operator). Then there is no launch line.
 - **If the anchor goes, earlier text stays out line by line.** The first read
   also keeps the text of every line above the launch line. Once the anchor is
   wholly gone, scrolled out or redrawn by the agent, the read is the window

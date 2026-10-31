@@ -507,6 +507,22 @@ describe("fleet routing", () => {
       text: " Hi! What are we building?",
       note: "Earlier screen hidden until this agent prints something new.",
     });
+
+    // A launch line that may have run other commands first is no boundary, whether they share
+    // its line or the line above carries on into it: their output is held back the same way.
+    for (const [pid, launched] of [
+      [404, "$ cat .env && claude\nTOKEN=owner-fourth"],
+      [405, "$ cat .env && \\\n> claude\nTOKEN=owner-fifth"],
+    ] as const) {
+      foreground = [pid];
+      history = `${launched}\n Claude Code\n> hi`;
+      screen = history;
+      expect(await read()).toMatchObject({
+        status: "read",
+        text: "",
+        detail: "Earlier screen hidden until this agent prints something new.",
+      });
+    }
   });
 
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {

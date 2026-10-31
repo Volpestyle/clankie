@@ -147,15 +147,27 @@ export function agentReadScope(runner: HerdrWatchRunner): AgentReadScope {
 /**
  * The index of the last history line with a word that is one of the agent's command names,
  * as the shell echoed the command that started it. A later line naming it is only ever below
- * the real one, so the cut hides more, never less.
+ * the real one, so the cut hides more, never less. A line that may run other commands before
+ * the agent (`cat .env && claude`, a pipe, a substitution, a continued line) is no boundary:
+ * their output would follow it, so there is no launch line then.
  */
 function launchLine(history: string, commands: ReadonlySet<string>): number | undefined {
   if (commands.size === 0) return undefined;
   const lines = history.split("\n");
-  for (let index = lines.length - 1; index >= 0; index -= 1)
-    if (lines[index]!.split(/\s+/u).some((word) => commands.has(command(word)))) return index;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (!lines[index]!.split(/\s+/u).some((word) => commands.has(command(word)))) continue;
+    let above = index - 1;
+    while (above >= 0 && lines[above]!.trim().length === 0) above -= 1;
+    const continued = above >= 0 && CONTINUES.test(lines[above]!);
+    return continued || COMPOUND.test(lines[index]!) ? undefined : index;
+  }
   return undefined;
 }
+
+/** Shell syntax that can run another command on the same line: lists, pipes, substitutions. */
+const COMPOUND = /&&|\|\||[;|&`]|\$\(|<\(|>\(/u;
+/** A line the shell carries on to the next one (POSIX `\`, PowerShell backtick, a dangling operator). */
+const CONTINUES = /(?:\\|`|&&|\|\||\|)\s*$/u;
 
 /** Up to ANCHOR_LINES non-empty lines ending with the line at `end`. */
 function nonEmptyEndingAt(lines: readonly string[], end: number): readonly string[] {
