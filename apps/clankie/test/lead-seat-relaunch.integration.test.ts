@@ -786,6 +786,94 @@ it("hires into the routed project while an open relaunch's successor has no sess
   expect(spawn).toHaveBeenCalledOnce();
 });
 
+it("rebinds a cleared or restarted lead session in the same pane when Herdr detection is on", async () => {
+  const f = await leadChatFixture(false, cleanup, {
+    nativeSourceProof: true,
+    defaultLead: true,
+    connectorSessionDetection: () => true,
+    projectHireIdentity: async (fleet, pane) => {
+      const occupant = f.current();
+      return {
+        fleet,
+        pane,
+        ...(occupant.session === undefined
+          ? { nativeOccupantId: `process-${occupant.terminalId}`, nativeSessionPending: true as const }
+          : { nativeOccupantId: occupantIdForHerdrSession(occupant.session) }),
+        binding: { socketPath: join(f.root, "herdr.sock") },
+        processes: [{ pid: process.pid, startTime: "fixture" }],
+        shell: { pid: process.pid, startTime: "fixture" },
+      };
+    },
+  });
+  const conversation = "global-default";
+  await f.captain.pollSeatEvents(50, undefined, conversation, capabilities);
+  const ended = f.head.session!.value;
+  const source = async () =>
+    (
+      JSON.parse(await readFile(join(f.root, "conversations", conversation, "meta.json"), "utf8")) as {
+        nativeSource?: { terminalId: string; session?: { value: string } };
+      }
+    ).nativeSource;
+  const folder = async (name: string) => {
+    await mkdir(join(f.root, name));
+    return realpath(join(f.root, name));
+  };
+  const clankie = await folder("clankie");
+  await f.settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "clankie",
+          name: "Clankie",
+          auto: true,
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: clankie }],
+        },
+      ],
+    }),
+  }));
+  const bank = await f.captain.laneToolBank("operator", conversation);
+  const spawn = vi.spyOn(HerdrWatchStore.prototype, "spawnSeat");
+  const hire = async () => {
+    const result = await bank.tools
+      .find((tool) => tool.name === "hire_agent")!
+      .call({
+        harness: "codex",
+        effort: "medium",
+        effortReason: "One bounded runtime fix and its proof.",
+        title: "Iris",
+        role: "builder",
+        workingDirectory: clankie,
+        projectId: "clankie",
+        brief: "Own the cleared session.",
+      });
+    const text = result.content.find((part) => part.type === "text");
+    return JSON.parse(text?.type === "text" ? text.text : "null") as Record<string, unknown>;
+  };
+  const changed = {
+    outcome: "failed",
+    reason: "not_ready",
+    detail: expect.stringContaining("original agent has changed"),
+  };
+
+  const restarted = randomUUID();
+  f.occupy({ sessionId: restarted });
+  expect(await hire()).toMatchObject({
+    outcome: "failed",
+    reason: "harness_unavailable",
+    control: { reason: "pane_run_unavailable" },
+  });
+  expect(spawn).toHaveBeenCalledOnce();
+  expect(await source()).toMatchObject({ terminalId: "term_work", session: { value: restarted } });
+
+  f.occupy({ sessionId: randomUUID(), agent: "codex" });
+  expect(await hire()).toMatchObject(changed);
+  f.occupy({ sessionId: randomUUID(), terminalId: "term_other" });
+  expect(await hire()).toMatchObject(changed);
+  expect(spawn).toHaveBeenCalledOnce();
+  expect(ended).not.toBe(restarted);
+});
+
 it("reads a Claude session's start and latest main-thread context, unknown after a compaction", async () => {
   const root = await mkdtemp(join(tmpdir(), "lead-seat-usage-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

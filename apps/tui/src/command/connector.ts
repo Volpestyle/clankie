@@ -1,13 +1,16 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
 import {
+  CONNECTOR_DETECTION_PATH,
   CONNECTOR_PROMPT_ANSWERS_PATH,
   CONNECTOR_SIGN_INS_PATH,
   CONNECTOR_SIGN_IN_APPROVE_PATH,
   CONNECTOR_SIGN_IN_DENY_PATH,
+  ConnectorDetectionResponseSchema,
   ConnectorPromptAnswersResponseSchema,
   ConnectorSignInCodeSchema,
   ConnectorSignInDecisionResponseSchema,
   ConnectorSignInsResponseSchema,
+  type ConnectorDetectionResponse,
   type ConnectorPromptAnswersResponse,
   type ConnectorSignInsResponse,
 } from "@clankie/protocol/connector";
@@ -24,11 +27,13 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // Connected connectors are devices: `clankie devices revoke ID` ends one.
 // `clankie connector prompts` lists which apps may answer prompts in agent
 // panes, and turns one on or off by its name or device id (ADR 0303).
+// `clankie connector detect` turns Herdr session discovery on or off, and
+// `clankie connector serve` turns the connector on or off per app (ADR 0308).
 // `clankie connector lead` says who leads Clankie's lead threads, and hands
 // them to the connected apps or back to Clankie (ADR 0304).
 
 const CONNECTOR_USAGE =
-  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json]";
+  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json] | clankie connector detect [on|off herdr] [--json] | clankie connector serve [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json]";
 const TIMEOUT_MS = 10_000;
 
 export interface ConnectorCliCommandOptions {
@@ -47,7 +52,8 @@ type ClosedStatus =
   | "malformed"
   | "interrupted"
   | "unknown_app"
-  | "ambiguous_app";
+  | "ambiguous_app"
+  | "unknown_multiplexer";
 
 class ConnectorCommandError extends Error {
   public readonly status: ClosedStatus | "already_decided";
@@ -73,9 +79,11 @@ function failureMessage(status: ClosedStatus | "already_decided"): string {
     case "interrupted":
       return "The request didn't finish in time. Retry.";
     case "unknown_app":
-      return "No connected app has that name or id. `clankie connector prompts` lists them.";
+      return "No connected app has that name or id. `clankie connector prompts` and `clankie connector serve` list them.";
     case "ambiguous_app":
-      return "More than one connected app has that name. Name it by its device id from `clankie connector prompts`.";
+      return "More than one connected app has that name. Name it by its device id from `clankie connector prompts` or `clankie connector serve`.";
+    case "unknown_multiplexer":
+      return "That isn't a multiplexer Clankie detects. `clankie connector detect` lists them.";
   }
 }
 
@@ -84,6 +92,25 @@ function parse(args: readonly string[]) {
   const positional = args.filter((arg) => arg !== "--json");
   if (positional.length === 0 || (positional.length === 1 && positional[0] === "status"))
     return { json, subcommand: "status" as const };
+  if (positional[0] === "detect" && positional.length === 1) return { json, subcommand: "detect" as const };
+  if (
+    positional[0] === "detect" &&
+    (positional[1] === "on" || positional[1] === "off") &&
+    positional.length === 3
+  )
+    return {
+      json,
+      subcommand: "detect" as const,
+      enabled: positional[1] === "on",
+      multiplexer: positional[2]!,
+    };
+  if (positional[0] === "serve" && positional.length === 1) return { json, subcommand: "serve" as const };
+  if (
+    positional[0] === "serve" &&
+    (positional[1] === "on" || positional[1] === "off") &&
+    positional.length === 3
+  )
+    return { json, subcommand: "serve" as const, served: positional[1] === "on", app: positional[2]! };
   if (positional[0] === "prompts" && positional.length === 1) return { json, subcommand: "prompts" as const };
   if (
     positional[0] === "prompts" &&
@@ -105,6 +132,25 @@ function parse(args: readonly string[]) {
     return { json, subcommand: positional[0], code: code.data };
   }
   throw new Error(CONNECTOR_USAGE);
+}
+
+function formatDetection(status: ConnectorDetectionResponse): string {
+  const lines = status.multiplexers.map((entry) => {
+    const label = entry.id === "herdr" ? "Herdr" : entry.id;
+    return `${label}: ${entry.enabled ? "on" : "off"}`;
+  });
+  return [
+    ...lines,
+    "A multiplexer that is on discovers every session in it, including one that was just cleared or restarted.",
+  ].join("\n");
+}
+
+function formatServed(status: ConnectorDetectionResponse): string {
+  if (status.apps.length === 0) return "No apps are connected.";
+  return [
+    ...status.apps.map((app) => `${app.name}: ${app.served ? "on" : "off"}  (${app.deviceId})`),
+    "An app that is on is served by the connector. One that is off is refused.",
+  ].join("\n");
 }
 
 function formatPromptAnswers(status: ConnectorPromptAnswersResponse): string {
@@ -195,6 +241,47 @@ export async function runConnectorCommand(
       const status = result.data.result.status;
       if (parsed.json) outputJson(stdout, { ok: true, ...status });
       else stdout.write(`${formatLead(status)}\n`);
+      return 0;
+    }
+    if (parsed.subcommand === "detect" || parsed.subcommand === "serve") {
+      const read = async (response: Response) => {
+        if (response.status === 401 || response.status === 403)
+          throw new ConnectorCommandError("unauthorized");
+        if (response.status === 404) throw new ConnectorCommandError("unknown_app");
+        if (response.status === 400) throw new ConnectorCommandError("unknown_multiplexer");
+        if (!response.ok) throw new ConnectorCommandError("unavailable");
+        const status = ConnectorDetectionResponseSchema.safeParse(
+          // allow-swallowed-rejection -- a body that is not JSON fails the parse below as malformed
+          await response.json().catch(() => undefined),
+        );
+        if (!status.success) throw new ConnectorCommandError("malformed");
+        return status.data;
+      };
+      let status = await read(
+        await operatorRequest(CONNECTOR_DETECTION_PATH, "GET", request, ConnectorCommandError),
+      );
+      if (parsed.subcommand === "detect" && "multiplexer" in parsed) {
+        if (parsed.multiplexer !== "herdr") throw new ConnectorCommandError("unknown_multiplexer");
+        status = await read(
+          await operatorRequest(CONNECTOR_DETECTION_PATH, "POST", request, ConnectorCommandError, {
+            jsonBody: { multiplexer: "herdr", enabled: parsed.enabled },
+            contentType: "application/json",
+          }),
+        );
+      }
+      if (parsed.subcommand === "serve" && "app" in parsed) {
+        const named = status.apps.filter((app) => app.deviceId === parsed.app || app.name === parsed.app);
+        if (named.length === 0) throw new ConnectorCommandError("unknown_app");
+        if (named.length > 1) throw new ConnectorCommandError("ambiguous_app");
+        status = await read(
+          await operatorRequest(CONNECTOR_DETECTION_PATH, "POST", request, ConnectorCommandError, {
+            jsonBody: { deviceId: named[0]!.deviceId, served: parsed.served },
+            contentType: "application/json",
+          }),
+        );
+      }
+      if (parsed.json) outputJson(stdout, { ok: true, ...status });
+      else stdout.write(`${(parsed.subcommand === "detect" ? formatDetection : formatServed)(status)}\n`);
       return 0;
     }
     if (parsed.subcommand === "prompts") {

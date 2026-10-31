@@ -33,6 +33,13 @@ export const CONNECTOR_TOKEN_PATH = "/oauth/token";
  * (ADR 0303). GET lists the apps; POST {deviceId, allowed} turns one on or off.
  */
 export const CONNECTOR_PROMPT_ANSWERS_PATH = "/v1/connector/prompt-answers";
+/**
+ * Owner route: which multiplexers the connector discovers, and which connected
+ * apps it serves (ADR 0308). GET lists both. POST is either
+ * `{ multiplexer, enabled }` (an adapter id; Herdr is the first this service
+ * knows) or `{ deviceId, served }`.
+ */
+export const CONNECTOR_DETECTION_PATH = "/v1/connector/detection";
 /** Owner routes: pending sign-ins, and the approve and deny decisions. */
 export const CONNECTOR_SIGN_INS_PATH = "/v1/connector/sign-ins";
 export const CONNECTOR_SIGN_IN_APPROVE_PATH = "/v1/connector/sign-ins/approve";
@@ -269,6 +276,33 @@ export type ConnectorPromptAnswersResponse = z.infer<typeof ConnectorPromptAnswe
 export const ConnectorPromptAnswersRequestSchema = z
   .object({ deviceId: z.string().min(1).max(256), allowed: z.boolean() })
   .strict();
+
+export const ConnectorDetectionAppSchema = z
+  .object({
+    deviceId: z.string().min(1).max(256),
+    name: z.string().min(1).max(64),
+    served: z.boolean(),
+  })
+  .strict();
+/** An adapter id. The service decides which ids it knows; Herdr is the first. */
+export const ConnectorMultiplexerIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u);
+export const ConnectorMultiplexerSchema = z
+  .object({
+    id: ConnectorMultiplexerIdSchema,
+    enabled: z.boolean(),
+  })
+  .strict();
+export const ConnectorDetectionResponseSchema = z
+  .object({
+    multiplexers: z.array(ConnectorMultiplexerSchema).max(32),
+    apps: z.array(ConnectorDetectionAppSchema).max(256),
+  })
+  .strict();
+export type ConnectorDetectionResponse = z.infer<typeof ConnectorDetectionResponseSchema>;
+export const ConnectorDetectionRequestSchema = z.union([
+  z.object({ multiplexer: ConnectorMultiplexerIdSchema, enabled: z.boolean() }).strict(),
+  z.object({ deviceId: z.string().min(1).max(256), served: z.boolean() }).strict(),
+]);
 
 /**
  * What a connector device may ask the relay, whatever its grants: read the

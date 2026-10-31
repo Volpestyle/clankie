@@ -132,7 +132,14 @@ code. The lines carry the device ID but never audio or bearers.
 
 ## Claude connector
 
-`POST /mcp` is a remote MCP server Claude adds as a custom connector
+`POST /mcp` is a remote MCP server Claude adds as a custom connector.
+The owner turns multiplexer discovery on or off with `clankie connector detect`
+(Herdr is the first adapter), and turns the connector on or off per app with
+`clankie connector serve`
+([ADR 0308](../../docs/adr/0308-a-cleared-session-is-rediscovered.md)). An app
+that is off is refused. Herdr off lists no sessions and says so. A message
+that still cannot be confirmed after one rediscovery is an error that says why,
+not an ambiguous unconfirmed.
 ([ADR 0301](../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)),
 stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
 (`machine` optional), `read_agent` (`agent`, `lines` up to 400),

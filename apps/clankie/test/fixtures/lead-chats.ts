@@ -46,6 +46,8 @@ export async function leadChatFixture(
     beforeOpen?: (sessionId: string) => Promise<void>;
     projectHireIdentity?: CaptainOptions["projectHireIdentity"];
     paneReadFails?: () => boolean;
+    /** Herdr detection (ADR 0308). Absent leaves lead rebind off. */
+    connectorSessionDetection?: () => boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
@@ -230,6 +232,9 @@ export async function leadChatFixture(
       ...(options.projectHireIdentity === undefined
         ? {}
         : { projectHireIdentity: options.projectHireIdentity }),
+      ...(options.connectorSessionDetection === undefined
+        ? {}
+        : { connectorSessionDetection: options.connectorSessionDetection }),
       discordEnvironment: {},
       seatAdapters: [],
     });

@@ -1918,7 +1918,7 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
-### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector lead [clankie|apps]`
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
 a remote MCP server that lets Claude list your agents, read their screens and
@@ -1966,6 +1966,25 @@ when two share the name. An app that is on presses keys only while the agent
 waits on input and the prompt it read is still on screen, once per prompt, and
 never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
+
+`clankie connector detect` says whether Herdr sessions are discovered
+([ADR 0308](adr/0308-a-cleared-session-is-rediscovered.md)). It is on until you
+turn it off: `Herdr: on`, and `clankie connector detect off herdr` stops
+listing and reaching those sessions, including one you just cleared. `on herdr`
+turns discovery back on. While it is on, a message that cannot be confirmed is
+checked against the agent's current session and sent once more only when that
+session is idle and does not already contain it; if that still fails, the tool
+errors and says why. JSON: `{ "ok": true, "multiplexers": [{ "id": "herdr",
+"enabled": true }], "apps": […] }`. The list is adapters; Herdr is the first
+this service knows. Exit 1 with status `unknown_multiplexer` for an id this
+install does not detect (today, anything other than `herdr`).
+
+`clankie connector serve` says which connected apps the connector serves. Every
+app is on until you turn it off: `NAME: on|off  (DEVICE_ID)`, and `clankie
+connector serve off APP` refuses that app's tools until `serve on APP`. Name it
+by its approved name or device id. JSON is the same shape as `detect`. Exit 1
+with status `unknown_app` when no connected app matches, or `ambiguous_app`
+when two share the name.
 
 `clankie connector lead` says who leads Clankie's lead threads
 ([ADR 0304](adr/0304-the-owner-hands-the-lead-to-connected-apps.md)): Clankie
