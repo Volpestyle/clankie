@@ -226,17 +226,18 @@ export async function remoteOpenCodeFixture(options: {
     // Checkout admission runs the exact remote program against the real fixture
     // directory. This workspace is intentionally non-Git; preserve that actual
     // observation rather than manufacturing a fresh checkout receipt.
-    // The program carries the hire's worktree slug, named from its title (ADR 0306).
+    // The program carries the hire's worktree slug, named from its title, except for a retry
+    // whose earlier launch is still fenced in this folder (ADR 0306).
     const launch = (value: string) =>
       value.replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture");
     if (
-      ["Oriana Vale", "Remote Stranger"].some(
+      [undefined, "Oriana Vale", "Remote Stranger"].some(
         (title) =>
           launch(command) ===
           launch(
             remoteProgramCommand(fleet.ssh.shell, "node", [
               "-e",
-              remoteCheckoutProgram(root, [root], hireWorktreeSlug(title)),
+              remoteCheckoutProgram(root, [root], title === undefined ? "" : hireWorktreeSlug(title)),
             ]),
           ),
       )

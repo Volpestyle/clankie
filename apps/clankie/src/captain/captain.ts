@@ -2937,6 +2937,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: prior.workingDirectory })
           ? prior
           : undefined;
+      // A launch still fenced in the start folder itself is checked there the old way, never
+      // moved, so its retry meets that folder's own allocation and receipt (ADR 0207).
+      const inPlace =
+        retained === undefined &&
+        herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: request.workingDirectory });
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
       const freshness: HireCheckoutFreshness = retained
@@ -2948,17 +2953,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 shell,
                 request.workingDirectory,
                 remoteDirectories,
-                request.title,
+                inPlace ? undefined : request.title,
               )
             : {
                 outcome: "refused" as const,
                 path: request.workingDirectory,
                 reason: "Remote checkout observer unavailable",
               }
-          : await verifyHireCheckout(request.workingDirectory, assertInactive, {
-              name: request.title,
-              refuse: managedRuntime,
-            });
+          : await verifyHireCheckout(
+              request.workingDirectory,
+              assertInactive,
+              inPlace ? undefined : { name: request.title, refuse: managedRuntime },
+            );
       if (freshness.outcome !== "worktree") {
         place.release();
         delete place.release;
