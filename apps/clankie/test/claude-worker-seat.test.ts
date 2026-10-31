@@ -47,6 +47,22 @@ describe("consent", () => {
       detail: "Could not inspect installed Claude plugins: inspection timed out",
     });
   });
+  it("inspects plugins in the hire's own Claude profile", async () => {
+    const profile = await scratch();
+    const seen: (string | undefined)[] = [];
+    const consent = await claudeWorkerChannelConsent({
+      env: { CLAUDE_CONFIG_DIR: profile },
+      listPlugins: async (env) => {
+        seen.push(env.CLAUDE_CONFIG_DIR);
+        return "[]";
+      },
+    });
+    expect(seen).toEqual([profile]);
+    expect(consent).toMatchObject({
+      approved: false,
+      detail: `clankie-worker@clankie is not installed in profile ${profile}.`,
+    });
+  });
   it("needs the installed plugin and an owner-approved channel, and names the fix for each", async () => {
     const root = await scratch();
     const policy = join(root, "managed-settings.json");

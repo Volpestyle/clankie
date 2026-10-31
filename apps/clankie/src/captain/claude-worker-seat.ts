@@ -496,27 +496,33 @@ export function policiesApproveWorker(contents: readonly string[]): boolean {
   return enabled && allowed;
 }
 
-/** This Mac's answer: the plugin installed from Clankie's marketplace, and its channel approved. */
+/**
+ * This Mac's answer for the profile a launch runs in: the plugin installed from Clankie's
+ * marketplace there, and its channel approved. `env` is the launch's own environment, so a hire
+ * into another Claude profile (its `CLAUDE_CONFIG_DIR`) is checked in that profile.
+ */
 export async function claudeWorkerChannelConsent(
   options: {
     readonly managedSettingsPath?: string;
-    readonly listPlugins?: () => Promise<string>;
+    readonly env?: Readonly<Record<string, string>>;
+    readonly listPlugins?: (env: NodeJS.ProcessEnv) => Promise<string>;
   } = {},
 ): Promise<ClaudeWorkerConsent> {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...options.env };
   const list =
     options.listPlugins ??
-    (() =>
+    ((env: NodeJS.ProcessEnv) =>
       new Promise<string>((resolve, reject) =>
         execFile(
           "claude",
           ["plugin", "list", "--json"],
-          { timeout: 10_000, maxBuffer: 4 * 1024 * 1024 },
+          { timeout: 10_000, maxBuffer: 4 * 1024 * 1024, env },
           (error, stdout) => (error === null ? resolve(String(stdout)) : reject(error)),
         ),
       ));
   let installed = false;
   try {
-    const plugins = JSON.parse(await list()) as unknown;
+    const plugins = JSON.parse(await list(env)) as unknown;
     installed =
       Array.isArray(plugins) &&
       plugins.some((entry) => (entry as { id?: unknown })?.id === CLAUDE_WORKER_PLUGIN_ID);
@@ -527,10 +533,11 @@ export async function claudeWorkerChannelConsent(
       fix: `Run claude plugin list --json in the service environment and resolve its error. ${INSTALL_FIX}`,
     };
   }
+  const profile = options.env?.CLAUDE_CONFIG_DIR;
   if (!installed)
     return {
       approved: false,
-      detail: `${CLAUDE_WORKER_PLUGIN_ID} is not installed.`,
+      detail: `${CLAUDE_WORKER_PLUGIN_ID} is not installed${profile === undefined ? "" : ` in profile ${profile}`}.`,
       fix: `${INSTALL_FIX}. ${POLICY_FIX}`,
     };
   if (!managedPolicyApprovesWorker(options.managedSettingsPath))
