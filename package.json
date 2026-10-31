@@ -28,6 +28,7 @@
     "release:build": "node scripts/build-release.mjs",
     "release:smoke": "node scripts/smoke-release.mjs",
     "herdr:build": "node scripts/build-herdr.mjs",
+    "test:changed": "node scripts/check-changed-tests.mjs",
     "fleet-proof:build": "node scripts/build-fleet-proof.mjs",
     "herdr:skill": "node scripts/herdr-skill.mjs",
     "herdr:skill:check": "node scripts/herdr-skill.mjs --check",
