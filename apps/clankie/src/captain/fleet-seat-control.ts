@@ -569,7 +569,9 @@ export function createFleetSeatControl(
   ) => {
     if (!live?.session || runner.transcript === undefined) return undefined;
     const pi = live.agent === "pi" || live.session.source === "herdr:pi";
-    const liveSessionId = pi ? nativeSessionId(live) : (nativeSessionId(live) ?? basename(live.session.value, ".jsonl"));
+    const liveSessionId = pi
+      ? nativeSessionId(live)
+      : (nativeSessionId(live) ?? basename(live.session.value, ".jsonl"));
     const original = pending?.sessionId !== undefined && liveSessionId === pending.sessionId;
     if (original && pending.beforeIds === undefined && pending.beganAt === undefined) return undefined;
     const transcript = await runner.transcript(live).catch(() => undefined);
