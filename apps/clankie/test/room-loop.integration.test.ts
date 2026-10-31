@@ -353,3 +353,28 @@ it("an automatic Pi participant voice room reuses its isolated history across sp
     await f.close();
   }
 });
+
+it("withholds a running Pi participant reply when the owner changes its harness", async () => {
+  const f = await fixture(undefined, true);
+  try {
+    const run = f.captain.submitDiscordTurn(message("revoked-participant", "20001", "Hello"));
+    f.work.push(run);
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1), { timeout: 10_000 });
+    await f.settings.update((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        guilds: {
+          ...current.discord.guilds,
+          "12345": { ...current.discord.guilds["12345"]!, participantHarness: "claude" },
+        },
+      },
+    }));
+    f.calls[0]!.finish("This old reply must be withheld.");
+    expect(await run).toMatchObject({ state: "failed" });
+    expect(f.calls).toHaveLength(1);
+    expect(f.nativeCalls()).toBe(0);
+  } finally {
+    await f.close();
+  }
+});

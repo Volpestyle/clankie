@@ -7662,6 +7662,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   nativeCapture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
                   const guard = async () => {
                     shutdown.signal.throwIfAborted();
+                    if (participant !== undefined && (await resolveGrant()).key !== key)
+                      throw new Error("participant_authority_changed");
                     if (
                       access.privateContext &&
                       request.trigger.guildId !== undefined &&
