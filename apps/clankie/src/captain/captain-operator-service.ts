@@ -753,7 +753,10 @@ export function createOperatorService(
         if (pane === undefined) return unavailable("Herdr has no pane with that terminal now.");
         // Only a live coding agent's pane is read, and only what that agent showed (ADR 0307).
         const occupant = await liveAgentOccupant(ctx.herdrRunner, pane);
-        if (occupant === undefined) return unavailable("No coding agent is running in that pane now.");
+        if (occupant === undefined) {
+          agentReadScope(ctx.herdrRunner).forget(request.terminalId);
+          return unavailable("No coding agent is running in that pane now.");
+        }
         // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
         const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
         const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");

@@ -460,10 +460,27 @@ describe("fleet routing", () => {
       text: "$ claude --resume\n Claude Code\n> next task",
     });
 
-    // Once the history it was cut at scrolls out of the window, all that remains is its own.
-    history = " Claude Code\n> next task\n Done";
+    // While only part of the history it was cut at has scrolled out, the cut still holds.
+    history = " Reading files\n Build fixed\n$ claude --resume\n Claude Code\n> next task\n Done";
+    screen = " Claude Code\n> next task\n Done";
+    expect(await read()).toMatchObject({
+      status: "read",
+      text: "$ claude --resume\n Claude Code\n> next task\n Done",
+    });
+
+    // The agent exits, the owner works in the shell, and the same native session is resumed:
+    // a new process is a new occupant, so the shell work stays out.
+    foreground = [];
+    expect(await read()).toMatchObject({ status: "unavailable" });
+    foreground = [402];
+    history = `${history}\n$ cat .env\nTOKEN=owner-again\n$ claude --resume\n Claude Code\n> back`;
+    screen = "$ claude --resume\n Claude Code\n> back";
+    expect(await read()).toMatchObject({ status: "read", text: "$ claude --resume\n Claude Code\n> back" });
+
+    // Once the history it was cut at has wholly scrolled out, all that remains is its own.
+    history = " Claude Code\n> back\n All done";
     screen = history;
-    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> next task\n Done" });
+    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> back\n All done" });
   });
 
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {

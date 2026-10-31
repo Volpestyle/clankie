@@ -6,8 +6,9 @@ const ANCHOR_LINES = 3;
 
 /**
  * The agent occupying a pane now, by native identity: the agent Herdr detects, its native
- * session when Herdr knows it, and a live foreground process that is not the pane's shell.
- * Undefined when the pane holds no live agent.
+ * session when Herdr knows it, and its live foreground process that is not the pane's shell.
+ * The process is always part of it, so an agent resumed into the same native session after
+ * the shell had the pane is a new occupant. Undefined when the pane holds no live agent.
  */
 export async function liveAgentOccupant(
   runner: HerdrWatchRunner,
@@ -20,11 +21,12 @@ export async function liveAgentOccupant(
     .map((process) => process.pid)
     .filter((pid) => Number.isSafeInteger(pid) && pid > 1 && pid !== shellPid);
   if (occupants.length === 0) return undefined;
-  // A native session names the occupant across its subprocesses; without one, its oldest process.
+  // The oldest foreground process is the agent itself; its own subprocesses come after it.
+  const process = Math.min(...occupants);
   return JSON.stringify(
     pane.session === undefined
-      ? [pane.agent, "process", Math.min(...occupants)]
-      : [pane.agent, pane.session.source, pane.session.value],
+      ? [pane.agent, "process", process]
+      : [pane.agent, pane.session.source, pane.session.value, process],
   );
 }
 
@@ -48,6 +50,11 @@ export class AgentReadScope {
       this.anchors.set(terminalId, entry);
     }
     return after(history, entry.anchor);
+  }
+
+  /** The pane has no live agent now; whoever comes next starts from their own screen. */
+  public forget(terminalId: string): void {
+    this.anchors.delete(terminalId);
   }
 }
 
@@ -83,9 +90,11 @@ function anchorAbove(history: string, screen: string): readonly string[] {
 }
 
 /**
- * History after the last place the anchor's lines stand in order, or all of it when gone.
- * The last place is never above the real anchor, so a repeat cuts away the agent's own
- * lines rather than revealing earlier ones.
+ * History after the last place the anchor's lines stand in order. The last place is never
+ * above the real anchor, so a repeat cuts away the agent's own lines rather than revealing
+ * earlier ones. Scrollback loses lines only from its top, so an anchor partly scrolled out
+ * leaves its last lines first in the window, and the cut falls after those. Only an anchor
+ * wholly gone returns everything.
  */
 function after(history: string, anchor: readonly string[]): string {
   if (anchor.length === 0) return history;
@@ -94,6 +103,11 @@ function after(history: string, anchor: readonly string[]): string {
   for (let start = written.length - anchor.length; start >= 0; start -= 1) {
     if (anchor.every((line, offset) => lines[written[start + offset]!]!.trimEnd() === line.trimEnd()))
       return lines.slice(written[start + anchor.length - 1]! + 1).join("\n");
+  }
+  for (let kept = Math.min(anchor.length - 1, written.length); kept > 0; kept -= 1) {
+    const rest = anchor.slice(anchor.length - kept);
+    if (rest.every((line, offset) => lines[written[offset]!]!.trimEnd() === line.trimEnd()))
+      return lines.slice(written[kept - 1]! + 1).join("\n");
   }
   return history;
 }
