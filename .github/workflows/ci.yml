@@ -100,7 +100,9 @@ jobs:
       # Vox's turbojpeg-sys builds libjpeg-turbo's SIMD code with NASM; the activity-sharing
       # tests decode real MP4 and GIF media with ffmpeg.
       - run: sudo apt-get install -y --no-install-recommends nasm ffmpeg
-      - uses: actions/cache@v4
+      # A pull request's own cache is visible only to that pull request, so the
+      # landing job restores the one the vox-cache job saves on main.
+      - uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
@@ -112,6 +114,9 @@ jobs:
       # The gate's skills phase installs the pinned Herdr here; tests spawn it by name.
       - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
       - name: Landing gate checks against the pull request's base
+        env:
+          # Four vCPUs and 16 GB fit three 2.5 GiB compiler heaps at once.
+          CLANKIE_TYPECHECK_JOBS: 3
         run: |
           status=0
           # The checked-out merge commit's first parent is the base it merges into.
@@ -126,3 +131,27 @@ jobs:
           include-hidden-files: true
           path: .local/landing-gate.json
           retention-days: 7
+
+  # Seeds the cargo cache the landing job restores. Caches saved on main are
+  # visible to every pull request; one saved by a pull request is not.
+  vox-cache:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy, rustfmt
+      - run: sudo apt-get install -y --no-install-recommends nasm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/vox/target
+          key: landing-cargo-${{ runner.os }}-${{ hashFiles('apps/vox/Cargo.lock') }}
+          restore-keys: landing-cargo-${{ runner.os }}-
+      # The landing gate's own Vox lint, so the cached build is the one it reuses.
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        working-directory: apps/vox

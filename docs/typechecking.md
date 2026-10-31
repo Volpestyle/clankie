@@ -28,7 +28,11 @@ to preserve project-wide conflicts. Generated configs preserve the original
 compiler options, project references and effective type roots.
 
 Other projects retain one program. This avoids repeating small checks. Programs
-are checked serially and stop at the first failure. A future test that pulls in
+are checked serially by default and stop starting new ones at the first failure.
+`CLANKIE_TYPECHECK_JOBS=N` checks up to N programs of a project at once, each
+under the same ceiling, for a machine with memory for N heaps; pull request CI
+uses 3 on GitHub's four-vCPU Linux runner. Turbo still runs one project at a
+time. A future test that pulls in
 a much larger graph must still fit the same ceiling; the supervisor does not
 silently increase the budget or skip that test.
 

@@ -93,7 +93,13 @@ async function main() {
     programs: [],
   };
   const started = performance.now();
-  for (const program of programs) {
+  // Programs share nothing but the read-only sources, so a runner with the
+  // memory for several heap ceilings may check several at once. The shared
+  // machine's default stays one.
+  const jobs = Math.max(1, Math.min(programs.length, Number(process.env.CLANKIE_TYPECHECK_JOBS) || 1));
+  report.jobs = jobs;
+  let failed = false;
+  const checkProgram = async (program) => {
     const programConfig = join(directory, `${program.name}.json`);
     await writeFile(
       programConfig,
@@ -183,10 +189,20 @@ async function main() {
           "Split the oversized group or reduce its imported graph; do not raise the heap ceiling.",
         );
       process.exitCode = 1;
-      break;
+      failed = true;
+      return;
     }
     console.log(`[typecheck] ${project} ${program.name} passed; compiler heap ${measuredMiB.toFixed(1)} MiB`);
-  }
+  };
+  // Stop starting programs after the first failure; ones already running finish.
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: jobs }, async () => {
+      while (!failed && next < programs.length) await checkProgram(programs[next++]);
+    }),
+  );
+  const order = new Map(programs.map(({ name }, index) => [name, index]));
+  report.programs.sort((a, b) => order.get(a.name) - order.get(b.name));
   report.wallSeconds = (performance.now() - started) / 1000;
   report.passed =
     report.programs.length === programs.length && report.programs.every((program) => program.passed);
