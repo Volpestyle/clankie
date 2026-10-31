@@ -273,9 +273,12 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
+      # Each Mac runner installs pnpm in its own temp folder: the default
+      # ~/setup-pnpm is shared by every runner on the machine.
       - uses: pnpm/action-setup@v4
         with:
           version: 11.11.0
+          dest: ${{ runner.temp }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 26.7.0
@@ -314,6 +317,7 @@ jobs:
       vars.CLANKIE_MAC_RUNNER == 'true' &&
       (github.event_name == 'push' ||
       (github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository))
     runs-on: [self-hosted, macOS, james-mac]
     timeout-minutes: 15
@@ -321,9 +325,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           filter: blob:none
+      # Each Mac runner installs pnpm in its own temp folder: the default
+      # ~/setup-pnpm is shared by every runner on the machine.
       - uses: pnpm/action-setup@v4
         with:
           version: 11.11.0
+          dest: ${{ runner.temp }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 26.7.0
