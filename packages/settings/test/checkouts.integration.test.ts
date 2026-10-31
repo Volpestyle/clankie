@@ -7,6 +7,8 @@ import { afterEach, expect, it } from "vitest";
 import { CheckoutReportSchema } from "@clankie/protocol";
 import {
   checkoutGit,
+  hireWorktreeSlug,
+  hireWorktreeStart,
   inspectCheckout,
   reconcileWorktree,
   syncOwnerCheckout,
@@ -323,4 +325,114 @@ it("behind hire preserves live, divergent and ignored-collision work and advance
   expect((await checkoutGit(divergent, ["rev-parse", "HEAD"])).trim()).toBe(localHead);
   expect(await readFile(join(collision, "ignored.txt"), "utf8")).toBe("private notes\n");
   expect(await checkoutGit(collision, ["stash", "list"])).toBe("");
+});
+it("a hire leaves a dirty, divergent or live start checkout alone and works in a fresh worktree from origin/main", async () => {
+  const f = await fixture();
+  const target = await f.advance();
+  const worktree = (refuse?: (root: string) => Promise<string | undefined>) => ({
+    name: "Nell: fix the HUD!",
+    ...(refuse === undefined ? {} : { refuse }),
+  });
+  // Dirty: staged, unstaged and untracked work in a subfolder the hire started from.
+  await mkdir(join(f.owner, "src"));
+  await writeFile(join(f.owner, "src", "keep.txt"), "tracked\n");
+  await checkoutGit(f.owner, ["add", "src/keep.txt"]);
+  await writeFile(join(f.owner, "draft.txt"), "unstaged draft\n");
+  await writeFile(join(f.owner, "notes.txt"), "owner notes\n");
+  const status = await checkoutGit(f.owner, ["status", "--porcelain=v1", "-z"]);
+  const dirty = await verifyHireCheckout(join(f.owner, "src"), async () => {}, worktree());
+  expect(dirty).toMatchObject({
+    outcome: "worktree",
+    start: f.owner,
+    startReason: "Start checkout has uncommitted changes in 3 files",
+    head: target,
+    remoteMain: target,
+    branch: expect.stringMatching(/^clankie\/nell-fix-the-hud-[a-f0-9]{6}$/u),
+    path: expect.stringMatching(/\/\.local\/wt-nell-fix-the-hud-[a-f0-9]{6}$/u),
+  });
+  // `src` exists only in the owner's uncommitted work, so the hire starts at the worktree root.
+  expect(dirty.workingDirectory).toBe(dirty.path);
+  expect(await checkoutGit(f.owner, ["status", "--porcelain=v1", "-z"])).toBe(status);
+  expect((await checkoutGit(f.owner, ["rev-parse", "HEAD"])).trim()).toBe(f.base);
+  expect(await readFile(join(f.owner, "draft.txt"), "utf8")).toBe("unstaged draft\n");
+  expect((await checkoutGit(dirty.path, ["rev-parse", "HEAD"])).trim()).toBe(target);
+  expect(await checkoutGit(dirty.path, ["status", "--porcelain=v1", "-z"])).toBe("");
+  expect(await readFile(join(dirty.path, "incoming.txt"), "utf8")).toBe("remote\n");
+  expect((await checkoutGit(dirty.path, ["branch", "--show-current"])).trim()).toBe(dirty.branch);
+  // Without the worktree option the guard still refuses, naming the files.
+  expect(await verifyHireCheckout(f.owner)).toMatchObject({
+    outcome: "refused",
+    reason: expect.stringContaining('"notes.txt"'),
+  });
+  // Divergent: a local commit stays where it is; the hire starts in the folder's twin.
+  const divergent = join(f.root, "divergent");
+  await checkoutGit(f.owner, ["worktree", "add", "-b", "local-work", divergent, f.base]);
+  await mkdir(join(divergent, "docs"));
+  await writeFile(join(divergent, "docs", "plan.txt"), "local\n");
+  await checkoutGit(divergent, ["add", "docs/plan.txt"]);
+  await checkoutGit(divergent, [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-m",
+    "local",
+  ]);
+  await mkdir(join(f.writer, "docs"));
+  await f.advance("docs/plan.txt", "main's plan\n");
+  const localHead = (await checkoutGit(divergent, ["rev-parse", "HEAD"])).trim();
+  const diverged = await verifyHireCheckout(join(divergent, "docs"), async () => {}, worktree());
+  expect(diverged).toMatchObject({
+    outcome: "worktree",
+    start: divergent,
+    startReason: "Start checkout has commits that origin/main does not",
+  });
+  expect(diverged.workingDirectory).toBe(join(diverged.path, "docs"));
+  expect(await readFile(join(diverged.workingDirectory!, "plan.txt"), "utf8")).toBe("main's plan\n");
+  expect((await checkoutGit(divergent, ["rev-parse", "HEAD"])).trim()).toBe(localHead);
+  expect((await checkoutGit(divergent, ["branch", "--show-current"])).trim()).toBe("local-work");
+  // Behind but owned by a live pane: its HEAD is not advanced under that pane.
+  const live = join(f.root, "live");
+  await checkoutGit(f.owner, ["worktree", "add", "--detach", live, f.base]);
+  const paneOwned = await verifyHireCheckout(
+    live,
+    async () => {
+      throw Error("Start checkout belongs to a live pane; preserve its HEAD");
+    },
+    worktree(),
+  );
+  expect(paneOwned).toMatchObject({
+    outcome: "worktree",
+    startReason: "Start checkout was not advanced: Start checkout belongs to a live pane; preserve its HEAD",
+  });
+  expect((await checkoutGit(live, ["rev-parse", "HEAD"])).trim()).toBe(f.base);
+  // A managed runtime holds no worktree; an unreachable origin/main starts nothing.
+  expect(
+    await verifyHireCheckout(
+      f.owner,
+      async () => {},
+      worktree(async () => "Start checkout is a managed runtime"),
+    ),
+  ).toMatchObject({ outcome: "refused", reason: expect.stringContaining("managed runtime") });
+  await checkoutGit(f.owner, ["remote", "set-url", "origin", join(f.root, "missing.git")]);
+  expect(await verifyHireCheckout(f.owner, async () => {}, worktree())).toMatchObject({
+    outcome: "refused",
+    reason: expect.stringContaining("Cannot verify fresh origin/main"),
+  });
+  const registered = await checkoutGit(f.owner, ["worktree", "list", "--porcelain"]);
+  for (const made of [dirty, diverged, paneOwned]) expect(registered).toContain(`worktree ${made.path}\n`);
+  expect(registered.match(/\.local\/wt-/gu)).toHaveLength(3);
+});
+it("names a hire worktree's start checkout only for Clankie's own worktree folders", () => {
+  expect(hireWorktreeSlug("Nell: fix the HUD!")).toBe("nell-fix-the-hud");
+  expect(hireWorktreeSlug("¿?")).toBe("worker");
+  expect(hireWorktreeStart("/repos/kh2/.local/wt-nell-1a2b3c")).toBe("/repos/kh2");
+  expect(hireWorktreeStart("/repos/kh2/.local/wt-nell-1a2b3c/apps/x")).toBe("/repos/kh2/apps/x");
+  expect(hireWorktreeStart("C:\\Users\\volpe\\repos\\kh2\\.local\\wt-nell-fix-1a2b3c")).toBe(
+    "C:\\Users\\volpe\\repos\\kh2",
+  );
+  expect(hireWorktreeStart("/repos/kh2/.local/wt-nell-1a2b3c/../../other")).toBeUndefined();
+  expect(hireWorktreeStart("/repos/kh2/.local/notes")).toBeUndefined();
+  expect(hireWorktreeStart("/repos/kh2")).toBeUndefined();
 });

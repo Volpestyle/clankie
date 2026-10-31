@@ -1,6 +1,6 @@
 import { Machines } from "./machines.ts";
 import { randomUUID } from "node:crypto";
-import { verifiedLocalSandbox } from "@clankie/settings";
+import { hireWorktreeStart, verifiedLocalSandbox } from "@clankie/settings";
 import { requireRuntimeMachineAccess } from "./machine-access.ts";
 import { z } from "zod";
 import { realpath, stat } from "node:fs/promises";
@@ -407,6 +407,13 @@ export class ExecutionConnections {
 
   /** The owner's exact-directory grant for a remote fleet (ADR 0193). */
   async remoteWorkspace(fleetId: string, directory: string): Promise<boolean> {
+    if (await this.grantedWorkspace(fleetId, directory)) return true;
+    // A hire's own worktree inside a granted start checkout (`<start>/.local/wt-*`) is that workspace.
+    const start = hireWorktreeStart(directory);
+    return start !== undefined && (await this.grantedWorkspace(fleetId, start));
+  }
+
+  private async grantedWorkspace(fleetId: string, directory: string): Promise<boolean> {
     const connection = (await this.options.settings.load()).execution.connections.find(
       (entry) => entry.id === fleetId,
     );

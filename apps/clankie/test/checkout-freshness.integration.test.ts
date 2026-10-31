@@ -319,7 +319,7 @@ it("remote observer enforces fetched main and cleanliness in a real child proces
   }
 });
 
-it("the real captain refuses a dirty hire before launch and serves checkout maintenance through the authenticated CLI/API", async () => {
+it("the real captain starts a dirty hire in a fresh worktree, refuses one in its own runtime, and serves checkout maintenance through the authenticated CLI/API", async () => {
   const { createCaptain } = await import("../src/captain/captain.ts");
   const { createClankieApp } = await import("../src/app.ts");
   const { SettingsStore } = await import("@clankie/settings");
@@ -388,8 +388,48 @@ it("the real captain refuses a dirty hire before launch and serves checkout main
       }),
     ).toMatchObject({
       op: "spawn_seat",
-      result: { outcome: "failed", reason: "not_ready", detail: expect.stringContaining("dirty") },
+      result: {
+        outcome: "failed",
+        reason: "not_ready",
+        detail:
+          "Start checkout has uncommitted changes in 1 file; Start checkout is a managed runtime; preserve its pinned HEAD",
+      },
     });
+    // The service's own runtime holds no hire worktree; any other dirty checkout gets one.
+    const elsewhere = createCaptain(
+      { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
+      {
+        repoRoot: join(root, "runtime"),
+        stateDir: join(root, "state-elsewhere"),
+        settings,
+        nativeHerdrRunner: createHerdrWatchRunner(() => false),
+      },
+    );
+    try {
+      const hired = await elsewhere.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "spawn_seat",
+        conversationId: "global-default",
+        seat: {
+          schemaVersion: 1,
+          harness: "codex",
+          title: "Fixture",
+          workingDirectory: owner,
+          effort: "low",
+          effortReason: "A fixture hire only needs to reach the native launch.",
+        },
+        brief: "implement",
+      });
+      // Freshness passed: the hire got as far as choosing a harness, from a new worktree.
+      expect(hired).toMatchObject({ op: "spawn_seat", result: { reason: "harness_unavailable" } });
+      const registered = await checkoutGit(owner, ["worktree", "list", "--porcelain"]);
+      expect(registered).toMatch(
+        /worktree [^\n]*\/\.local\/wt-fixture-[a-f0-9]{6}\nHEAD [a-f0-9]+\nbranch refs\/heads\/clankie\/fixture-[a-f0-9]{6}\n/u,
+      );
+      expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+    } finally {
+      await elsewhere.close();
+    }
     service = await createClankieApp({
       captain,
       authenticateOperator: async (request) =>
@@ -417,6 +457,117 @@ it("the real captain refuses a dirty hire before launch and serves checkout main
   } finally {
     service?.close();
     await captain?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+it("remote observer starts a hire in a fresh worktree beside a dirty, divergent or live start checkout", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-remote-worktree-")));
+  try {
+    const origin = join(root, "origin.git"),
+      owner = join(root, "owner"),
+      writer = join(root, "writer");
+    const commit = async (checkout: string, file: string, text: string, message: string) => {
+      await writeFile(join(checkout, file), text);
+      await checkoutGit(checkout, ["add", file]);
+      await checkoutGit(checkout, [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        message,
+      ]);
+    };
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    for (const checkout of [owner, writer]) {
+      await exec("git", ["clone", origin, checkout]);
+      await checkoutGit(checkout, ["config", "user.name", "Fixture"]);
+      await checkoutGit(checkout, ["config", "user.email", "fixture@example.invalid"]);
+      if (checkout === owner) {
+        await commit(owner, "base.txt", "base\n", "base");
+        await checkoutGit(owner, ["push", "origin", "main"]);
+      }
+    }
+    await checkoutGit(writer, ["pull", "--ff-only", "origin", "main"]);
+    await commit(writer, "base.txt", "remote\n", "advance");
+    await checkoutGit(writer, ["push", "origin", "main"]);
+    const remoteMain = (await checkoutGit(writer, ["rev-parse", "HEAD"])).trim();
+    const fleet: HerdrFleet = {
+      id: "fixture",
+      session: "default",
+      ssh: { host: "fixture.invalid", shell: "posix" },
+    };
+    const shell = async (command: string) => (await exec("/bin/sh", ["-c", command])).stdout;
+    const before = (await checkoutGit(owner, ["rev-parse", "HEAD"])).trim();
+
+    // Dirty, in a repository that does not ignore `.local`: the start checkout's status is unchanged.
+    await writeFile(join(owner, "draft.txt"), "owner draft\n");
+    const status = await checkoutGit(owner, ["status", "--porcelain=v1", "-z"]);
+    const dirty = await verifyRemoteHireCheckout(fleet, shell, owner, [], "Nell");
+    expect(dirty).toMatchObject({
+      outcome: "worktree",
+      start: owner,
+      startReason: "Start checkout has uncommitted changes in 1 file",
+      head: remoteMain,
+      remoteMain,
+      branch: expect.stringMatching(/^clankie\/nell-[a-f0-9]{6}$/u),
+      path: expect.stringMatching(/\/\.local\/wt-nell-[a-f0-9]{6}$/u),
+    });
+    expect(dirty.workingDirectory).toBe(dirty.path);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1", "-z"])).toBe(status);
+    expect(await readFile(join(owner, ".git", "info", "exclude"), "utf8")).toContain("/.local/\n");
+    expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(before);
+    expect(await readFile(join(dirty.path, "base.txt"), "utf8")).toBe("remote\n");
+    // Without a worktree name the guard still refuses.
+    expect(await verifyRemoteHireCheckout(fleet, shell, owner, [])).toMatchObject({
+      outcome: "refused",
+      reason: expect.stringContaining('"draft.txt"'),
+    });
+    await rm(join(owner, "draft.txt"));
+
+    // Behind and owned by a live pane: the pane's HEAD stays where it was.
+    const live = await verifyRemoteHireCheckout(fleet, shell, owner, [owner], "Nell");
+    expect(live).toMatchObject({
+      outcome: "worktree",
+      startReason: `Start checkout was not advanced: Start checkout belongs to a live pane: ${JSON.stringify(owner)}`,
+    });
+    expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(before);
+
+    // Divergent: the local commit stays; the hire starts in the twin of its subfolder.
+    await mkdir(join(owner, "apps"));
+    await commit(owner, "apps/game.txt", "local\n", "local work");
+    const localHead = (await checkoutGit(owner, ["rev-parse", "HEAD"])).trim();
+    await mkdir(join(writer, "apps"));
+    await commit(writer, "apps/game.txt", "main\n", "main work");
+    await checkoutGit(writer, ["push", "origin", "main"]);
+    const diverged = await verifyRemoteHireCheckout(fleet, shell, join(owner, "apps"), null, "Nell");
+    expect(diverged).toMatchObject({
+      outcome: "worktree",
+      startReason: "Start checkout has commits that origin/main does not",
+      workingDirectory: expect.stringMatching(/\/\.local\/wt-nell-[a-f0-9]{6}\/apps$/u),
+    });
+    expect(await readFile(join(diverged.workingDirectory!, "game.txt"), "utf8")).toBe("main\n");
+    expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(localHead);
+
+    // A managed runtime holds no worktree.
+    await mkdir(join(root, ".clankie"));
+    await symlink(owner, join(root, ".clankie", "pinned"), "dir");
+    const runtime = JSON.parse(
+      (
+        await exec(process.execPath, ["-e", remoteCheckoutProgram(owner, [], "nell")], {
+          env: { ...process.env, HOME: root },
+        })
+      ).stdout,
+    );
+    expect(runtime).toMatchObject({
+      outcome: "refused",
+      reason: expect.stringContaining("Managed runtime checkout"),
+    });
+    expect(
+      (await checkoutGit(owner, ["worktree", "list", "--porcelain"])).match(/\.local\/wt-nell-/gu),
+    ).toHaveLength(3);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

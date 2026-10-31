@@ -2863,11 +2863,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ),
         ];
       };
-      const assertInactive = async (root: string) => {
+      const managedRuntime = async (root: string) => {
         for (const managed of await managedWorktreePaths({ runtimeRoot: options.repoRoot })) {
           if (projectPathContains(managed, root, "posix") || projectPathContains(root, managed, "posix"))
-            throw Error("Start checkout is a managed runtime; preserve its pinned HEAD");
+            return "Start checkout is a managed runtime; preserve its pinned HEAD";
         }
+        return undefined;
+      };
+      const assertInactive = async (root: string) => {
+        const managed = await managedRuntime(root);
+        if (managed) throw Error(managed);
         for (const directory of await paneDirectories()) {
           if (projectPathContains(root, await realpath(directory), "posix"))
             throw Error("Start checkout belongs to a live pane; preserve its HEAD");
@@ -2877,13 +2882,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
       const freshness = remote
         ? shell
-          ? await verifyRemoteHireCheckout(remote, shell, request.workingDirectory, remoteDirectories)
+          ? await verifyRemoteHireCheckout(
+              remote,
+              shell,
+              request.workingDirectory,
+              remoteDirectories,
+              request.title,
+            )
           : {
               outcome: "refused" as const,
               path: request.workingDirectory,
               reason: "Remote checkout observer unavailable",
             }
-        : await verifyHireCheckout(request.workingDirectory, assertInactive);
+        : await verifyHireCheckout(request.workingDirectory, assertInactive, {
+            name: request.title,
+            refuse: managedRuntime,
+          });
       if (freshness.outcome === "refused")
         return {
           outcome: "failed",
@@ -2897,6 +2911,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ]
           .filter(Boolean)
           .join("\n\n");
+      if (freshness.outcome === "worktree") {
+        // The start checkout keeps its own work; the hire runs in the new worktree.
+        request = { ...request, workingDirectory: freshness.workingDirectory ?? freshness.path };
+        brief = [
+          brief,
+          `Your start checkout ${freshness.start} was left exactly as it was (${freshness.startReason}). You are in a new worktree at ${freshness.path}, on branch ${freshness.branch}, made from fetched origin/main ${freshness.remoteMain}. Work and commit here.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+      }
     }
     if (request.harness === "claude" && namedLocal.some((entry) => entry.id === request.fleet))
       return {

@@ -894,6 +894,11 @@ describe("registering an ssh fleet", () => {
       ).rejects.toThrow(/exact directories/u);
       expect(await runtimes.remoteWorkspace("pc", "c:/src/rivals/")).toBe(true);
       expect(await runtimes.remoteWorkspace("pc", "C:\\src")).toBe(false);
+      // A hire's own worktree inside the granted checkout, and its twin of a granted subfolder.
+      expect(await runtimes.remoteWorkspace("pc", "C:/src/Rivals/.local/wt-nell-1a2b3c")).toBe(true);
+      expect(await runtimes.remoteWorkspace("pc", "C:\\src\\.local\\wt-nell-1a2b3c\\Rivals")).toBe(true);
+      expect(await runtimes.remoteWorkspace("pc", "C:\\src\\.local\\wt-nell-1a2b3c")).toBe(false);
+      expect(await runtimes.remoteWorkspace("pc", "C:\\src\\Rivals\\.local\\notes")).toBe(false);
       expect(await runtimes.fleets()).toEqual([
         { id: "pc", session: "default", ssh: { host: "volpe@supedupsilly", shell: "powershell" } },
       ]);

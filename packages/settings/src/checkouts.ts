@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { appendFile, mkdir, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { CheckoutStatus, WorktreeReconciliation } from "@clankie/protocol";
 
@@ -297,16 +298,109 @@ export async function syncOwnerCheckout(repository: string): Promise<CheckoutSyn
   }
 }
 export interface HireCheckoutFreshness {
-  outcome: "fresh" | "not-repository" | "refused";
+  outcome: "fresh" | "worktree" | "not-repository" | "refused";
+  /** The checkout the hire runs in: the start checkout, or the new worktree. */
   path: string;
+  /** `worktree`: where the hire starts, the start folder's place inside the new worktree. */
+  workingDirectory?: string;
+  /** `worktree`: the new branch, made from fetched origin/main. */
+  branch?: string;
+  /** `worktree`: the start checkout, left exactly as it was, and why. */
+  start?: string;
+  startReason?: string;
   head?: string;
   remoteMain?: string;
   reason?: string | undefined;
 }
-/** New work starts clean and contains the fetched origin/main, including fresh topic branches. */
+/** A start checkout the hire must not take over gets a fresh worktree beside its work instead. */
+export interface HireWorktreeOptions {
+  /** Names the worktree folder and its branch, e.g. the hire's title. */
+  name: string;
+  /** A reason to refuse even a worktree here, e.g. a managed runtime that updates replace. */
+  refuse?: (root: string) => Promise<string | undefined>;
+}
+/** Lowercase letters, digits and dashes, at most 24: safe in a folder, a branch and a PowerShell literal. */
+export function hireWorktreeSlug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(0, 24)
+      .replace(/-+$/u, "") || "worker"
+  );
+}
+/** The start checkout this hire worktree's folder sits in: `<start>/.local/wt-<slug>-<hex>[/<sub>]`. */
+export function hireWorktreeStart(directory: string): string | undefined {
+  const match = /^(.+?)[\\/]\.local[\\/]wt-[a-z0-9-]{1,24}-[a-f0-9]{6}([\\/].*)?$/u.exec(directory);
+  if (!match || /(?:^|[\\/])\.\.(?:[\\/]|$)/u.test(directory)) return undefined;
+  return `${match[1]}${match[2] ?? ""}`.replace(/[\\/]+$/u, "") || undefined;
+}
+const STATUS = ["status", "--porcelain=v1", "-z", "--untracked-files=normal"] as const;
+async function startHireWorktree(
+  root: string,
+  start: string,
+  remoteMain: string,
+  startReason: string,
+  options: HireWorktreeOptions,
+): Promise<HireCheckoutFreshness> {
+  const refusal = await options.refuse?.(root);
+  if (refusal) return { outcome: "refused", path: root, remoteMain, reason: `${startReason}; ${refusal}` };
+  const tag = `${hireWorktreeSlug(options.name)}-${randomBytes(3).toString("hex")}`;
+  const directory = join(root, ".local", `wt-${tag}`);
+  const branch = `clankie/${tag}`;
+  // The start checkout's own status must not grow an untracked `.local/`.
+  try {
+    await checkoutGit(root, ["check-ignore", "-q", ".local/"]);
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== 1) throw error;
+    const exclude = (
+      await checkoutGit(root, ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"])
+    ).trim();
+    await mkdir(dirname(exclude), { recursive: true });
+    await appendFile(exclude, "\n# Clankie hire worktrees\n/.local/\n");
+  }
+  await mkdir(join(root, ".local"), { recursive: true });
+  await checkoutGit(root, [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "worktree",
+    "add",
+    "--no-track",
+    "-b",
+    branch,
+    directory,
+    remoteMain,
+  ]);
+  const head = (await checkoutGit(directory, ["rev-parse", "HEAD"])).trim();
+  if (head !== remoteMain || (await checkoutGit(directory, STATUS)))
+    throw Error("The new worktree is not a clean origin/main");
+  const place = relative(root, await realpath(start));
+  const inside = place && !place.startsWith("..") && !isAbsolute(place) ? join(directory, place) : directory;
+  const workingDirectory = await stat(inside).then(
+    (entry) => (entry.isDirectory() ? inside : directory),
+    () => directory,
+  );
+  return {
+    outcome: "worktree",
+    path: directory,
+    workingDirectory,
+    branch,
+    start: root,
+    startReason,
+    head,
+    remoteMain,
+  };
+}
+/**
+ * New work starts clean and contains the fetched origin/main, including fresh topic branches.
+ * With `worktree`, a start checkout that is dirty, diverged, or can't safely be advanced is
+ * left exactly as it is and the hire gets a new worktree from origin/main inside it.
+ */
 export async function verifyHireCheckout(
   path: string,
   beforeAdvance: (root: string) => Promise<void> = async () => {},
+  worktree?: HireWorktreeOptions,
 ): Promise<HireCheckoutFreshness> {
   let root: string;
   try {
@@ -331,37 +425,29 @@ export async function verifyHireCheckout(
       .split("\0")
       .filter(Boolean)
       .map((entry) => entry.slice(3));
+    const leave = (startReason: string, reason = startReason): Promise<HireCheckoutFreshness> =>
+      worktree
+        ? startHireWorktree(root, path, remoteMain, startReason, worktree).catch(
+            (error: unknown): HireCheckoutFreshness => ({
+              outcome: "refused",
+              path: root,
+              head,
+              remoteMain,
+              reason: `${startReason}; a worktree from origin/main could not be made: ${error instanceof Error ? error.message : String(error)}`,
+            }),
+          )
+        : Promise.resolve({ outcome: "refused", path: root, head, remoteMain, reason });
     if (dirty.length)
-      return {
-        outcome: "refused",
-        path: root,
-        head,
-        remoteMain,
-        reason: `Start checkout is dirty: ${dirty
+      return leave(
+        `Start checkout has uncommitted changes in ${dirty.length} ${dirty.length === 1 ? "file" : "files"}`,
+        `Start checkout is dirty: ${dirty
           .slice(0, 20)
           .map((file) => JSON.stringify(file))
           .join(
             ", ",
           )}${dirty.length > 20 ? " (more files omitted)" : ""}; preserve it and create a clean worktree from origin/main`,
-      };
-    try {
-      await checkoutGit(root, ["merge-base", "--is-ancestor", remoteMain, head]);
-    } catch {
-      // A behind-only checkout has no local commits to reconcile. Git keeps
-      // ignored collisions and concurrent index edits safe; never reset/stash.
-      try {
-        await checkoutGit(root, ["merge-base", "--is-ancestor", head, remoteMain]);
-      } catch (error) {
-        if ((error as { code?: unknown }).code !== 1) throw error;
-        return {
-          outcome: "refused",
-          path: root,
-          head,
-          remoteMain,
-          reason:
-            "Start checkout does not contain fetched origin/main; it diverges, so preserve its local commits",
-        };
-      }
+      );
+    const advance = async () => {
       await beforeAdvance(root);
       if (
         (await checkoutGit(root, ["rev-parse", "HEAD"])).trim() !== head ||
@@ -383,6 +469,30 @@ export async function verifyHireCheckout(
       await checkoutGit(root, ["merge-base", "--is-ancestor", remoteMain, head]);
       if (await checkoutGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"]))
         throw Error("Start checkout changed during fast-forward");
+    };
+    try {
+      await checkoutGit(root, ["merge-base", "--is-ancestor", remoteMain, head]);
+    } catch {
+      // A behind-only checkout has no local commits to reconcile. Git keeps
+      // ignored collisions and concurrent index edits safe; never reset/stash.
+      try {
+        await checkoutGit(root, ["merge-base", "--is-ancestor", head, remoteMain]);
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== 1) throw error;
+        return leave(
+          "Start checkout has commits that origin/main does not",
+          "Start checkout does not contain fetched origin/main; it diverges, so preserve its local commits",
+        );
+      }
+      try {
+        await advance();
+      } catch (error) {
+        // Nothing moved the start checkout but a completed fast-forward; its work stays put.
+        if (!worktree) throw error;
+        return leave(
+          `Start checkout was not advanced: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     return { outcome: "fresh", path: root, head, remoteMain };
   } catch (error) {
