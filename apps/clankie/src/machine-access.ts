@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MachineAccessRefusalSchema, type MachineAccessRefusal } from "@clankie/protocol";
-import { MachineAccessRefused, machineAccessAllows, type MachineAccessLevel } from "@clankie/protocol";
+import {
+  MachineAccessRefused,
+  WatchingMachineRefused,
+  machineAccessAllows,
+  type MachineAccessLevel,
+} from "@clankie/protocol";
 import { localSandboxAccess, type ClankieSettings, type SettingsStore } from "@clankie/settings";
 
 interface JoinedMachineRegistry {
@@ -40,6 +45,7 @@ export async function requireMachineAccess(
   joined?: JoinedMachineRegistry,
 ): Promise<MachineAccessFence> {
   const policy = await settings.loadFenced();
+  refuseWhileWatching(policy.settings, id, required);
   const level = machineAccessLevel(policy.settings, id, joined);
   if (!machineAccessAllows(level, required)) await refuseMachineAccess(settings, id, level, required);
   policy.assertCurrent();
@@ -61,10 +67,24 @@ export async function requireRuntimeMachineAccess(
   if (connection.ssh && connection.machine === undefined)
     throw new Error("Remote runtime has no proven machine");
   const machine = connection.machine ?? "local";
+  refuseWhileWatching(policy.settings, machine, required);
   const level = machineAccessLevel(policy.settings, machine, joined);
   if (!machineAccessAllows(level, required)) await refuseMachineAccess(settings, machine, level, required);
   policy.assertCurrent();
   return { assertCurrent: () => policy.assertCurrent() };
+}
+
+/**
+ * Watch holds every machine at Portal (ADR 0308). It leaves no refusal
+ * observation: the owner chose Watch, and the fix is the dial, not the machine.
+ */
+export function refuseWhileWatching(
+  settings: ClankieSettings,
+  machine: string,
+  required: MachineAccessLevel,
+): void {
+  if (settings.autonomy.watch === true && !machineAccessAllows("portal", required))
+    throw new WatchingMachineRefused(machine, required);
 }
 
 /** One durable owner observation per machine/required level; repeated refusals coalesce. */
