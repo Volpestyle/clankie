@@ -160,7 +160,9 @@ export async function initializeConvention(
     const scope =
       convention.linear ?? (await readConvention(root).catch(() => undefined))?.linear ?? undefined;
     if (scope === undefined || convention.backend !== "github")
-      throw new WorkInitInvalid("Reading a previous Linear tracker needs the github backend and a Linear team");
+      throw new WorkInitInvalid(
+        "Reading a previous Linear tracker needs the github backend and a Linear team",
+      );
     convention = WorkConventionSchema.parse({
       ...convention,
       linear: { team: scope.team, ...(scope.project === undefined ? {} : { project: scope.project }) },

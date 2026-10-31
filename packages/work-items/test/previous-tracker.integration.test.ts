@@ -17,9 +17,7 @@ const issueAt = (number: number) => ({
 // #81: a repo moving off Linear reads both trackers and files every new issue on GitHub.
 it("lists and works Linear's open issues in place while every new issue goes to GitHub", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-previous-tracker-"));
-  const githubIssues = [
-    { ...issueAt(81), id: 9081, title: "Read two trackers", body: "" },
-  ];
+  const githubIssues = [{ ...issueAt(81), id: 9081, title: "Read two trackers", body: "" }];
   const linearIssues: Record<string, Record<string, unknown>> = {
     "VUH-2954": { id: "VUH-2954", identifier: "VUH-2954", title: "Still in Linear", status: "Todo" },
   };
@@ -106,7 +104,9 @@ it("lists and works Linear's open issues in place while every new issue goes to 
       trackerDirectory: join(root, ".local", "tracker"),
     });
 
-    const listed = (await tools.call("list_issues", {})) as { issues: { id?: string; identifier?: string }[] };
+    const listed = (await tools.call("list_issues", {})) as {
+      issues: { id?: string; identifier?: string }[];
+    };
     expect(listed.issues.map((issue) => issue.identifier ?? issue.id)).toEqual(["#81", "VUH-2954"]);
     // Linear's read stays inside its own saved scope.
     expect(linearCalls.at(-1)).toMatchObject({
