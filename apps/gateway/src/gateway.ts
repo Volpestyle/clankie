@@ -13,7 +13,13 @@ import {
 } from "@clankie/protocol/machine-join";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  validateHeaderValue,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { Duplex } from "node:stream";
 import {
   PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH,
@@ -29,6 +35,8 @@ import {
   GatewayPushIdentitySchema,
   GATEWAY_ENCRYPTED_PATH,
   GATEWAY_PUSH_AUTHORIZE_PATH,
+  GATEWAY_STREAM_PATH,
+  GATEWAY_STREAM_RECORD_BYTES_MAX,
   type GatewayEnvelope,
 } from "@clankie/protocol/gateway-encryption";
 import type { ApnsSender, ApnsResult } from "./apns.ts";
@@ -42,6 +50,8 @@ import {
   PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS,
   PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
+  PUBLIC_GATEWAY_STREAMS_HEADER,
+  PUBLIC_GATEWAY_STREAMS_MAX,
   PublicGatewayHostIdSchema,
   PublicGatewayInstallationIdSchema,
   PublicGatewayTunnelFrameSchema,
@@ -49,6 +59,7 @@ import {
   PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
   PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST,
   publicGatewayTargetFor,
+  sendableStreamCloseCode,
   type PublicGatewayCapabilityHash,
   type PublicGatewayConfig,
   type PublicGatewayHttpHeader,
@@ -115,8 +126,39 @@ const REQUEST_ID_HEADER = "x-clankie-request-id";
 const CONNECTOR_HOST_BUDGET = { capacity: 240, perSecond: 8 } as const;
 const CONNECTOR_SIGN_IN_PEER_BUDGET = { capacity: 60, perSecond: 2 } as const;
 
+/**
+ * A device's sealed stream (clankie ADR 0289): the phone's call socket, carried
+ * record by record to a Mac that said it carries calls. The upgrade has no
+ * bearer, since the Mac checks the sealed opening, so opens are budgeted per
+ * host and per client before a socket exists. The opening must arrive soon
+ * after the upgrade; a phone sends it on open.
+ */
+const STREAM_OPEN_HOST_BUDGET = { capacity: 12, perSecond: 0.2 } as const;
+const STREAM_OPEN_PEER_BUDGET = { capacity: 24, perSecond: 0.5 } as const;
+const STREAM_OPENING_DEADLINE_MS = 10_000;
+/** The opening is one `GatewayEnvelope`, the frame's own cap. */
+const STREAM_OPENING_CHARS_MAX = 16 * 1024;
+/** Downlink a phone has not read yet; past it the call is too far behind to be a call. */
+const STREAM_DOWNLINK_BUFFER_BYTES_MAX = 1024 * 1024;
+/**
+ * The Mac's tunnel backlog past which a device's uplink record is refused. The
+ * tunnel is shared with ordinary requests (bodies up to 2 MiB, as base64), so
+ * the cap leaves room for those; a call this far behind is not a call anyway.
+ */
+const STREAM_UPLINK_HOST_BUFFER_BYTES_MAX = 4 * 1024 * 1024;
+
 const REQUEST_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST);
 const RESPONSE_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST);
+
+function isSendableResponseHeader(header: PublicGatewayHttpHeader): boolean {
+  if (!RESPONSE_HEADER_ALLOWLIST.has(header.name)) return true;
+  try {
+    validateHeaderValue(header.name, header.value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export interface PublicGatewayLogger {
   info(fields: Readonly<Record<string, unknown>>, message: string): void;
@@ -154,6 +196,23 @@ interface HostConnection {
   readonly socket: WebSocket;
   readonly pendingRequestIds: Set<string>;
   readonly credentialDeadline?: ReturnType<typeof setTimeout>;
+  /** The Mac sent `x-clankie-gateway-streams: 1`: it opens a device's sealed stream. */
+  readonly carriesStreams: boolean;
+  readonly streamIds: Set<string>;
+  alive: boolean;
+}
+
+/** One device socket carried to its Mac. The gateway reads its sizes and timing, never a record. */
+interface DeviceStream {
+  readonly streamId: string;
+  readonly host: HostConnection;
+  readonly socket: WebSocket;
+  readonly openedAtMs: number;
+  readonly openingDeadline: ReturnType<typeof setTimeout>;
+  /** The opening went to the Mac, so the Mac knows this stream and is told when it ends. */
+  opened: boolean;
+  upBytes: number;
+  downBytes: number;
   alive: boolean;
 }
 
@@ -200,6 +259,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   const hosts = new Map<string, HostConnection>();
   const pairingRoutes = new Map<PublicGatewayCapabilityHash, PairingRoute>();
   const pending = new Map<string, PendingExchange>();
+  const streams = new Map<string, DeviceStream>();
+  const streamBudgets = new Map<string, { tokens: number; at: number }>();
   const pushBudgets = new Map<string, { tokens: number; at: number }>();
   /**
    * Separate namespace, same bucket: unauthenticated callers are metered by the
@@ -216,6 +277,11 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   let pushesInFlight = 0;
   let closing = false;
   const webSockets = new WebSocketServer({ noServer: true, maxPayload: WEBSOCKET_PAYLOAD_BYTES_MAX });
+  // A record over the cap closes the device socket with 1009, and its Mac hears that close.
+  const deviceSockets = new WebSocketServer({
+    noServer: true,
+    maxPayload: GATEWAY_STREAM_RECORD_BYTES_MAX,
+  });
   const server = createServer((request, response) => {
     void handlePublicRequest(request, response).catch((error: unknown) => {
       logger.warn({ error: errorName(error) }, "gateway request failed");
@@ -231,7 +297,14 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   const heartbeat = setInterval(() => {
     void options.trustedProxy?.refresh();
     reportTelemetryThrottles();
-    for (const budgets of [pushBudgets, peerBudgets, telemetryBudgets, joinBudgets, connectorBudgets]) {
+    for (const budgets of [
+      pushBudgets,
+      peerBudgets,
+      telemetryBudgets,
+      joinBudgets,
+      connectorBudgets,
+      streamBudgets,
+    ]) {
       for (const [key, budget] of budgets) {
         if (clock() - budget.at > 10 * 60_000) budgets.delete(key);
       }
@@ -243,6 +316,15 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       }
       connection.alive = false;
       connection.socket.ping();
+    }
+    // A phone that vanished without a close would otherwise hold its Mac's call open.
+    for (const stream of streams.values()) {
+      if (!stream.alive) {
+        stream.socket.terminate();
+        continue;
+      }
+      stream.alive = false;
+      stream.socket.ping();
     }
   }, HOST_HEARTBEAT_MS);
   heartbeat.unref();
@@ -760,6 +842,11 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
 
   async function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = requestUrl(request);
+    const streamRoute = url === null ? null : parseHostRoute(url.pathname);
+    if (streamRoute?.path === GATEWAY_STREAM_PATH && url !== null) {
+      handleStreamUpgrade(request, socket, head, streamRoute.hostId, url);
+      return;
+    }
     const hostId = url?.searchParams.get("hostId");
     const token = bearerToken(request.headers.authorization);
     if (
@@ -804,18 +891,248 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       }
     }
 
+    // An older Mac never sends the header, so it is never offered a device's stream.
+    const carriesStreams = request.headers[PUBLIC_GATEWAY_STREAMS_HEADER] === "1";
     webSockets.handleUpgrade(request, socket, head, (webSocket) =>
-      attachHost(hostId, ownerId, webSocket, expiresAtMs),
+      attachHost(hostId, ownerId, webSocket, carriesStreams, expiresAtMs),
     );
   }
 
-  function attachHost(hostId: string, ownerId: string, socket: WebSocket, expiresAtMs?: number): void {
+  /**
+   * The phone's call socket (clankie ADR 0289). Refusals are statuses the phone
+   * already explains: 404 for a Mac that doesn't carry calls yet, 503 for a Mac
+   * that isn't connected, 429 for no room. A bearer here would be plaintext,
+   * so it is refused like one on any other device route.
+   */
+  function handleStreamUpgrade(
+    request: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    hostId: string,
+    url: URL,
+  ): void {
+    if (closing) {
+      refuseUpgrade(socket, 503);
+      return;
+    }
+    if (url.search !== "" || request.url?.includes("?") === true) {
+      refuseUpgrade(socket, 404);
+      return;
+    }
+    if (request.headers.authorization !== undefined) {
+      refuseUpgrade(socket, 400);
+      return;
+    }
+    const host = hosts.get(hostId);
+    if (host === undefined) {
+      refuseUpgrade(socket, 503);
+      return;
+    }
+    if (!host.carriesStreams) {
+      refuseUpgrade(socket, 404);
+      return;
+    }
+    // After the host checks, so made-up host ids never take a budget slot.
+    if (
+      host.streamIds.size >= PUBLIC_GATEWAY_STREAMS_MAX ||
+      !takeBudget(
+        streamBudgets,
+        `host:${hostId}`,
+        STREAM_OPEN_HOST_BUDGET.capacity,
+        STREAM_OPEN_HOST_BUDGET.perSecond,
+      ) ||
+      !takeBudget(
+        streamBudgets,
+        `peer:${clientAddress(request, options.trustedProxy)}`,
+        STREAM_OPEN_PEER_BUDGET.capacity,
+        STREAM_OPEN_PEER_BUDGET.perSecond,
+      )
+    ) {
+      refuseUpgrade(socket, 429);
+      return;
+    }
+    deviceSockets.handleUpgrade(request, socket, head, (webSocket) => attachStream(host, webSocket));
+  }
+
+  function attachStream(host: HostConnection, socket: WebSocket): void {
+    // The host can go, or fill up, while the upgrade completes.
+    if (closing || hosts.get(host.hostId) !== host) {
+      socket.close(1001);
+      return;
+    }
+    if (host.streamIds.size >= PUBLIC_GATEWAY_STREAMS_MAX) {
+      socket.close(1013);
+      return;
+    }
+    const streamId = requestIdFactory();
+    if (streams.has(streamId)) {
+      socket.close(1011);
+      return;
+    }
+    const openingDeadline = setTimeout(() => {
+      const stream = streams.get(streamId);
+      if (stream !== undefined && !stream.opened) endStream(stream, 1008, "gateway");
+    }, STREAM_OPENING_DEADLINE_MS);
+    openingDeadline.unref();
+    const stream: DeviceStream = {
+      streamId,
+      host,
+      socket,
+      openedAtMs: clock(),
+      openingDeadline,
+      opened: false,
+      upBytes: 0,
+      downBytes: 0,
+      alive: true,
+    };
+    streams.set(streamId, stream);
+    host.streamIds.add(streamId);
+    socket.on("pong", () => {
+      stream.alive = true;
+    });
+    socket.on("message", (data, isBinary) => handleDeviceMessage(stream, data, isBinary));
+    socket.once("close", (code) => {
+      // Ended here or by the Mac already, or the device hung up: tell the Mac only once.
+      if (streams.get(streamId) === stream) endStream(stream, sendableStreamCloseCode(code), "device");
+    });
+    socket.once("error", () => undefined);
+  }
+
+  /** The opening first, as text; then only binary sealed records, passed on unread. */
+  function handleDeviceMessage(stream: DeviceStream, data: RawData, isBinary: boolean): void {
+    if (streams.get(stream.streamId) !== stream) return;
+    const bytes = rawBytes(data);
+    if (!stream.opened) {
+      const envelope = isBinary ? "" : bytes.toString("utf8");
+      if (envelope.length === 0 || envelope.length > STREAM_OPENING_CHARS_MAX) {
+        endStream(stream, 1008, "gateway");
+        return;
+      }
+      clearTimeout(stream.openingDeadline);
+      stream.opened = true;
+      if (
+        !sendToHost(stream.host, {
+          schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+          kind: "stream_open",
+          streamId: stream.streamId,
+          envelope,
+        })
+      ) {
+        endStream(stream, 1001, "gateway", false);
+        return;
+      }
+      logger.info(
+        { event: "gateway.stream.opened", hostId: stream.host.hostId, streamId: stream.streamId },
+        "gateway stream opened",
+      );
+      return;
+    }
+    if (!isBinary || bytes.byteLength === 0) {
+      endStream(stream, 1008, "gateway");
+      return;
+    }
+    // A stalled or slow Mac must not let a device queue gateway memory without bound.
+    if (stream.host.socket.bufferedAmount > STREAM_UPLINK_HOST_BUFFER_BYTES_MAX) {
+      endStream(stream, 1013, "gateway");
+      return;
+    }
+    stream.upBytes += bytes.byteLength;
+    if (
+      !sendToHost(stream.host, {
+        schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+        kind: "stream_data",
+        streamId: stream.streamId,
+        dataBase64: bytes.toString("base64"),
+      })
+    )
+      endStream(stream, 1001, "gateway", false);
+  }
+
+  function handleHostStreamFrame(
+    connection: HostConnection,
+    frame: Extract<PublicGatewayTunnelFrame, { readonly kind: "stream_data" | "stream_close" }>,
+  ): void {
+    const stream = streams.get(frame.streamId);
+    // A stream that ended here can still have frames on the wire; they are nothing.
+    if (stream === undefined) return;
+    if (stream.host !== connection || !stream.opened) {
+      connection.socket.close(1008, "stream frame does not name a live host stream");
+      return;
+    }
+    if (frame.kind === "stream_close") {
+      endStream(stream, sendableStreamCloseCode(frame.code), "host", false);
+      return;
+    }
+    if (stream.socket.readyState !== WebSocket.OPEN) return;
+    if (stream.socket.bufferedAmount > STREAM_DOWNLINK_BUFFER_BYTES_MAX) {
+      endStream(stream, 1013, "gateway");
+      return;
+    }
+    const record = Buffer.from(frame.dataBase64, "base64");
+    stream.downBytes += record.byteLength;
+    stream.socket.send(record, { binary: true });
+  }
+
+  /**
+   * Ends one stream everywhere it is open. The code is already sendable; the Mac
+   * hears it unless the Mac ended the stream or is gone.
+   */
+  function endStream(
+    stream: DeviceStream,
+    code: number,
+    endedBy: "device" | "host" | "gateway",
+    tellHost = true,
+  ): void {
+    if (streams.get(stream.streamId) !== stream) return;
+    streams.delete(stream.streamId);
+    stream.host.streamIds.delete(stream.streamId);
+    clearTimeout(stream.openingDeadline);
+    if (tellHost && stream.opened && hosts.get(stream.host.hostId) === stream.host)
+      sendToHost(stream.host, {
+        schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+        kind: "stream_close",
+        streamId: stream.streamId,
+        code,
+      });
+    if (stream.socket.readyState === WebSocket.OPEN || stream.socket.readyState === WebSocket.CONNECTING)
+      stream.socket.close(code);
+    logger.info(
+      {
+        event: "gateway.stream.closed",
+        hostId: stream.host.hostId,
+        streamId: stream.streamId,
+        code,
+        endedBy,
+        upBytes: stream.upBytes,
+        downBytes: stream.downBytes,
+        durationMs: clock() - stream.openedAtMs,
+      },
+      "gateway stream closed",
+    );
+  }
+
+  /** A Mac that went or was replaced takes its calls with it. */
+  function endHostStreams(connection: HostConnection): void {
+    for (const streamId of Array.from(connection.streamIds)) {
+      const stream = streams.get(streamId);
+      if (stream !== undefined) endStream(stream, 1001, "gateway", false);
+    }
+  }
+
+  function attachHost(
+    hostId: string,
+    ownerId: string,
+    socket: WebSocket,
+    carriesStreams: boolean,
+    expiresAtMs?: number,
+  ): void {
     const prior = hosts.get(hostId);
     if (prior !== undefined) {
       for (const requestId of prior.pendingRequestIds) {
         const exchange = pending.get(requestId);
         if (exchange !== undefined) finishExchange(exchange, 503, "host_unavailable");
       }
+      endHostStreams(prior);
       prior.socket.close(1012, "host connection replaced");
     }
     const credentialDeadline =
@@ -830,6 +1147,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       socket,
       pendingRequestIds: new Set(),
       ...(credentialDeadline === undefined ? {} : { credentialDeadline }),
+      carriesStreams,
+      streamIds: new Set(),
       alive: true,
     };
     hosts.set(hostId, connection);
@@ -884,6 +1203,10 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       if (exchange?.host === connection) finishExchange(exchange, 502, "host_cancelled");
       return;
     }
+    if (frame.kind === "stream_data" || frame.kind === "stream_close") {
+      handleHostStreamFrame(connection, frame);
+      return;
+    }
     connection.socket.close(1008, "host sent a gateway-owned frame");
   }
 
@@ -935,6 +1258,12 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     if (frame.kind === "response_start") {
       if (exchange.started) {
         connection.socket.close(1008, "duplicate response start");
+        return;
+      }
+      // setHeader throws on a value Node refuses (a CR or LF, for one), and a
+      // throw inside this socket listener would take down every host's tunnel.
+      if (!frame.headers.every(isSendableResponseHeader)) {
+        connection.socket.close(1008, "invalid response header value");
         return;
       }
       exchange.started = true;
@@ -1001,6 +1330,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       const exchange = pending.get(requestId);
       if (exchange !== undefined) finishExchange(exchange, 503, "host_unavailable");
     }
+    endHostStreams(connection);
     for (const route of new Set(pairingRoutes.values())) {
       if (route.hostId !== connection.hostId) continue;
       pairingRoutes.delete(route.offerHash);
@@ -1163,11 +1493,13 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       closing = true;
       clearInterval(heartbeat);
       for (const exchange of pending.values()) finishExchange(exchange, 503, "gateway_closed");
+      for (const stream of Array.from(streams.values())) endStream(stream, 1001, "gateway");
       for (const connection of hosts.values()) {
         if (connection.credentialDeadline !== undefined) clearTimeout(connection.credentialDeadline);
         connection.socket.close(1001, "gateway shutting down");
       }
       webSockets.close();
+      deviceSockets.close();
       if (!server.listening) return;
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
@@ -1302,8 +1634,29 @@ function bearerToken(header: string | undefined): string | null {
 }
 
 function denyUpgrade(socket: Duplex): void {
-  socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+  refuseUpgrade(socket, 401);
+}
+
+const UPGRADE_REFUSALS: Readonly<Record<number, string>> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  404: "Not Found",
+  429: "Too Many Requests",
+  503: "Service Unavailable",
+};
+
+function refuseUpgrade(socket: Duplex, status: 400 | 401 | 404 | 429 | 503): void {
+  const retry = status === 429 ? "Retry-After: 5\r\n" : "";
+  socket.write(
+    `HTTP/1.1 ${status} ${UPGRADE_REFUSALS[status]}\r\n${retry}Connection: close\r\nContent-Length: 0\r\n\r\n`,
+  );
   socket.destroy();
+}
+
+function rawBytes(data: RawData): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return Buffer.from(data);
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
