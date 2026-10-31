@@ -12,7 +12,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Fiber } from "effect";
 import { flows, type RunState } from "./flows.ts";
 import { runLoggers } from "./log.ts";
 import { makeStack, repoRoot } from "./stack.ts";
@@ -120,8 +120,23 @@ const program = Effect.gen(function* () {
   return report;
 });
 
-const exit = await Effect.runPromiseExit(program.pipe(Effect.provide(runLoggers(join(out, "run.jsonl")))));
-if (Exit.isFailure(exit)) {
+const fiber = Effect.runFork(program.pipe(Effect.provide(runLoggers(join(out, "run.jsonl")))));
+// The service and relay run in their own process groups, so Ctrl-C or a cancelled CI
+// job reaches only this process: interrupting the run lets its scope stop them and
+// the scratch Herdr server before it exits. A second signal leaves at once.
+let interrupted: NodeJS.Signals | undefined;
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.on(signal, () => {
+    if (interrupted) process.exit(130);
+    interrupted = signal;
+    console.error(`\n${signal}: stopping the scratch stack...`);
+    fiber.interruptUnsafe();
+  });
+const exit = await Effect.runPromise(Fiber.await(fiber));
+if (interrupted) {
+  console.error(`real run interrupted; the scratch home stays at ${join(out, "home")}`);
+  process.exitCode = 130;
+} else if (Exit.isFailure(exit)) {
   console.error(Cause.pretty(exit.cause));
   process.exitCode = 1;
 } else {

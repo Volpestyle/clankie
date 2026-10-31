@@ -189,12 +189,13 @@ export const makeStack = (directory: string) =>
     /** The installed `clankie` CLI, as an agent runs it: this checkout's, in the scratch home. */
     const cli = (...args: string[]) =>
       Effect.tryPromise({
-        try: () =>
+        // An interrupted run aborts the command it is waiting on.
+        try: (signal) =>
           new Promise<CliResult>((done) =>
             execFile(
               process.execPath,
               [scratchStack, "run", directory, "cli", ...args],
-              { cwd: repoRoot, timeout: 120_000, maxBuffer: 32 * 1024 * 1024 },
+              { cwd: repoRoot, timeout: 120_000, maxBuffer: 32 * 1024 * 1024, signal },
               (error, stdout, stderr) => {
                 let json: unknown;
                 try {
