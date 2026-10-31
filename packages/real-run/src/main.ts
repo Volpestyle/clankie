@@ -9,7 +9,15 @@
  * Exit 0 when every flow passed. The run's own JSON log, the service and relay logs
  * and report.json stay in the output directory (default .local/real-run/<time>).
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -31,7 +39,11 @@ const out = resolve(
 mkdirSync(out, { recursive: true, mode: 0o700 });
 // Herdr's Unix sockets live under the scratch state and must stay within 103 bytes,
 // so the scratch home sits under a short root whatever the checkout or output path.
-const home = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "clankie-real-run-"));
+// The path is resolved because the service keeps only canonical workspace paths and
+// macOS's /tmp is a link to /private/tmp.
+const home = realpathSync(
+  mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "clankie-real-run-")),
+);
 const only = values.only?.split(",").map((name) => name.trim());
 for (const name of only ?? [])
   if (!flows.some((flow) => flow.name === name))
