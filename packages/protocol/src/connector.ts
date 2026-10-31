@@ -202,6 +202,49 @@ export const PromptAnswerResultSchema = z
   .strict();
 export type PromptAnswerResult = z.infer<typeof PromptAnswerResultSchema>;
 
+/**
+ * Images a connected app passes to and from agents (ADR 0315). Images sent to
+ * an agent ride the owner-attachment upload (ADR 0209); this many per message.
+ */
+export const CONNECTOR_IMAGES_PER_MESSAGE_MAX = 4;
+/**
+ * Largest image an app may read back from an agent's workspace. Its base64
+ * stays under the 5 MB a model accepts per image.
+ */
+export const CONNECTOR_IMAGE_READ_BYTES_MAX = 3_750_000;
+/** Image kinds an app reads back: the ones every model takes. */
+export const CONNECTOR_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export type ConnectorImageMediaType = (typeof CONNECTOR_IMAGE_MEDIA_TYPES)[number];
+
+/** What an image's leading bytes say it is, or undefined when they are not one a model takes. */
+export function connectorImageMediaType(bytes: Uint8Array): ConnectorImageMediaType | undefined {
+  const ascii = (start: number, end: number) => String.fromCharCode(...bytes.subarray(start, end));
+  if (
+    bytes.length >= 8 &&
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, index) => bytes[index] === byte)
+  )
+    return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  return undefined;
+}
+
+/** One image read from an agent's workspace, or why it can't be. */
+export const SeatImageResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("ready"),
+      filename: z.string().min(1).max(256),
+      mediaType: z.enum(CONNECTOR_IMAGE_MEDIA_TYPES),
+      byteCount: z.number().int().positive().max(CONNECTOR_IMAGE_READ_BYTES_MAX),
+      dataBase64: z.string().max(Math.ceil(CONNECTOR_IMAGE_READ_BYTES_MAX / 3) * 4),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("unavailable"), message: z.string().min(1).max(1_000) }).strict(),
+]);
+export type SeatImageResult = z.infer<typeof SeatImageResultSchema>;
+
 /** Longest issue description or comment a connected app writes; trackers' own limit. */
 export const ISSUE_WRITE_TEXT_MAX = 20_000;
 const IssueTitleSchema = z.string().trim().min(1).max(WORK_ITEM_TITLE_MAX);
@@ -331,6 +374,14 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "send":
     case "send_receipt":
       return true;
+    // Images to an agent upload into its own persona thread (ADR 0315); the relay checks the thread.
+    case "upload_begin":
+    case "upload_chunk":
+    case "upload_commit":
+      return true;
+    // One image file inside a seated agent's workspace, read only (ADR 0315).
+    case "seat_image":
+      return true;
     case "create":
       return request.scope.kind === "persona";
     // Who leads is the owner's to set; an app reads the status and what is held (ADR 0304).
@@ -364,5 +415,8 @@ export function connectorLeadThreadOf(request: OperatorConversationServiceReques
 export function connectorConversationOf(request: OperatorConversationServiceRequest): string | undefined {
   if (request.op === "get") return request.conversationId;
   if (request.op === "send" || request.op === "send_receipt") return request.turn.conversationId;
+  if (request.op === "upload_begin") return request.upload.conversationId;
+  if (request.op === "upload_chunk") return request.chunk.conversationId;
+  if (request.op === "upload_commit") return request.conversationId;
   return undefined;
 }

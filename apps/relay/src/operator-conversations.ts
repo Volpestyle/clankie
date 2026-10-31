@@ -797,6 +797,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "terminal_tail" ||
       serviceRequest.op === "terminal_catalog" ||
       serviceRequest.op === "terminal_read" ||
+      // An image a seated agent saved is read like its screen (ADR 0315).
+      serviceRequest.op === "seat_image" ||
       // The owner's per-app switch, checked by the service, is what lets keys through.
       serviceRequest.op === "prompt_answer" ||
       // Reading who leads and what is held for the apps (ADR 0304).
@@ -1648,7 +1650,8 @@ async function writeTailAuthFailure(response: ServerResponse, reason: string): P
 function publicServiceResult(value: unknown): OperatorConversationServiceResult {
   const parsed = OperatorConversationServiceResultSchema.parse(value);
   // Opaque payloads: redacting inside base64 bytes or an NDJSON bootstrap would corrupt them.
-  if (parsed.op === "tracker_sync" || parsed.op === "evidence_fetch") return parsed;
+  if (parsed.op === "tracker_sync" || parsed.op === "evidence_fetch" || parsed.op === "seat_image")
+    return parsed;
   return OperatorConversationServiceResultSchema.parse(redactPublicValue(parsed));
 }
 
@@ -1747,6 +1750,11 @@ const CONNECTOR_OPS = new Set([
   "create",
   "send",
   "send_receipt",
+  // Images to and from agents (ADR 0315): uploads into a persona thread, and one workspace image read.
+  "upload_begin",
+  "upload_chunk",
+  "upload_commit",
+  "seat_image",
 ]);
 
 function writeConnectorDenial(response: ServerResponse): void {
