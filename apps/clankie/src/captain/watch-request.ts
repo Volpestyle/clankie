@@ -12,8 +12,11 @@ export function guardWatchedRequests(
   session: Pick<AgentSession, "agent">,
   watch: Pick<WatchGate, "refuse">,
 ): void {
-  const send = session.agent.streamFunction;
-  session.agent.streamFunction = async (model, context, options) => {
+  // A session with no agent sends no request, so there is nothing to guard.
+  const agent = session.agent as AgentSession["agent"] | undefined;
+  if (agent === undefined) return;
+  const send = agent.streamFunction;
+  agent.streamFunction = async (model, context, options) => {
     await watch.refuse(WATCH_TURN_REFUSAL);
     return await send(model, context, options);
   };

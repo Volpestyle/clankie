@@ -32,7 +32,7 @@ export interface WatchGate {
 export function createWatchGate(settings: Pick<SettingsStore, "load">): WatchGate {
   const watching = async (): Promise<boolean> => {
     try {
-      return (await settings.load()).autonomy.watch === true;
+      return (await settings.load()).autonomy?.watch === true;
     } catch {
       // Fail closed: a write that cannot confirm Clankie may act does not act.
       return true;
