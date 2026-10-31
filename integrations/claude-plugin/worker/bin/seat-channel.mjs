@@ -36,10 +36,12 @@ import { createCatalogWatcher, signalCodexCatalog } from "./catalog-watch.mjs";
 //
 // MCP's stdio transport is newline-delimited JSON-RPC 2.0; this speaks the few
 // methods a channel server needs, so nothing beyond Node is installed here.
+// Every link request goes through linkFetch, which works around Node's idle
+// keep-alive stall without giving up the connection the service has proven.
 import {
   approvesWorkerChannel,
   authorization,
-  LINK_CONNECTION,
+  linkFetch as fetch,
   readLink,
   seatRoute,
   TEXT_MAX,
@@ -252,7 +254,6 @@ function fleetTools(
             "content-type": "application/json",
             accept: "application/json, text/event-stream",
             "x-clankie-bridge-id": bridgeId,
-            ...LINK_CONNECTION,
             ...(session === undefined ? {} : { "mcp-session-id": session }),
           },
           body: JSON.stringify({ jsonrpc: "2.0", ...body }),
@@ -624,7 +625,7 @@ export function runSeatChannel({
   const refusedMembershipResponse = () =>
     Response.json({ error: "local_process_membership_required" }, { status: 403 });
   const bridgeId = randomUUID();
-  const linkHeaders = () => ({ ...authorization(link), "x-clankie-bridge-id": bridgeId, ...LINK_CONNECTION });
+  const linkHeaders = () => ({ ...authorization(link), "x-clankie-bridge-id": bridgeId });
   const granted = fleetTools(
     () => link,
     refresh,

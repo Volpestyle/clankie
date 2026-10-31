@@ -66,15 +66,29 @@ export function hasLinks(env = process.env) {
 }
 
 /**
- * Node's built-in fetch before undici 8.10.0 (Node 26.7 ships 8.9.0) holds a
- * request meant for an idle keep-alive socket until some unrelated timer wakes
- * the event loop (nodejs/undici#5600, #5606). A bridge sits idle between its
- * polls and acks, so its next request could wait out its own timeouts. On
- * those versions each link request takes a connection of its own.
+ * Node's built-in fetch before undici 8.10.0 (Node 26.7 ships 8.9.0) checks an
+ * idle keep-alive socket through an unref'd setImmediate before reusing it, so
+ * on an otherwise idle event loop the request is not written until some
+ * unrelated timer wakes the loop (nodejs/undici#5600, #5606). A bridge sits idle
+ * between its polls and acks, so its next request could wait out its own
+ * timeouts. On those versions a link request keeps the loop awake for its first
+ * moments. The socket is still reused, and the service's per-connection fleet
+ * proof (ADR 0217) still holds.
  */
-export const LINK_CONNECTION = undiciBefore(process.versions.undici, [8, 10, 0])
-  ? { connection: "close" }
-  : {};
+const STALLS_IDLE_REUSE = undiciBefore(process.versions.undici, [8, 10, 0]);
+const WAKE_TICK_MS = 5;
+const WAKE_WINDOW_MS = 250;
+
+export function linkFetch(input, init) {
+  if (!STALLS_IDLE_REUSE) return fetch(input, init);
+  const wake = setInterval(() => {}, WAKE_TICK_MS);
+  const settle = () => clearInterval(wake);
+  const deadline = setTimeout(settle, WAKE_WINDOW_MS);
+  return fetch(input, init).finally(() => {
+    clearTimeout(deadline);
+    settle();
+  });
+}
 
 function undiciBefore(version, fixed) {
   if (typeof version !== "string") return false;
