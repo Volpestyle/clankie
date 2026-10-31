@@ -13,7 +13,8 @@ private transport and body admission checks. It requires a 64-bit Linux kernel
 with pidfds (5.3 or newer) and Python 3.9 or newer. Only the **initial PID
 namespace** is supported. The helper authenticates procfs with `fstatfs`, checks
 the PID namespace through its nsfs descriptor and kernel initial-namespace inode,
-and rejects mismatched proc views, `hidepid`, and nested mounts under `/proc`.
+and rejects mismatched proc views, `hidepid`, and nested mounts under `/proc`
+other than systemd's on-demand `binfmt_misc` mount at `/proc/sys/fs/binfmt_misc`.
 Containers refuse with `unsupported_pid_namespace`; a pane label does not
 bypass this boundary. Container admission is tracked separately in [VUH-2120](https://linear.app/vuhlp/issue/VUH-2120).
 

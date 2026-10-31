@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 // Paths read/built at runtime are invisible to Vitest's import graph. Keep each
 // edge explicit: these inputs also belong to the test's revalidation footprint.
-// build-fleet-proof selects one platform source; the five regressions exercise
+// build-fleet-proof selects one platform source; these regressions exercise
 // the resulting transport/census, including the blocked-caller timing boundary.
 const fleetInputs = [
   "integrations/fleet-proof/native-process-proof.c",
@@ -45,6 +45,7 @@ export const landingFsInputs = Object.fromEntries([
     "tidy-worktrees.integration.test.ts",
     "tidy-worktrees-home-pane.integration.test.ts",
     "native-process-blocked-caller.integration.test.ts",
+    "fleet-project-membership.test.ts",
   ].map((file) => [`apps/clankie/test/${file}`, fleetInputs]),
   [
     "apps/clankie/test/linux-native-fleet.integration.test.ts",
