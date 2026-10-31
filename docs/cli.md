@@ -1423,7 +1423,8 @@ wires `CLANKIE_CAPTAIN_URL`, `CLANKIE_CONTROL_PLANE_URL`, `CLANKIE_RELAY_PORT`
 and `CLANKIE_RELAY_URL` together, and creates private state, settings, file-backed
 credentials and random test bearers. Browser and Herdr connections are disabled.
 The launcher uses a clean environment and the preset, so inherited live-stack
-variables cannot override it. Keep the preset local; it contains scratch credentials. Stop both owned processes
+variables cannot override it. Scratch services also skip the checkout's `.env.local`.
+Keep the preset local; it contains scratch credentials. Stop both owned processes
 after the proof. Port selection does not reserve ports across later launches:
 a collision fails startup; generate a new directory and preset rather than
 falling back to the installed ports.

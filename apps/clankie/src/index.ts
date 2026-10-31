@@ -282,6 +282,8 @@ const onDoorwayChange =
  */
 const repoRoot = resolve(import.meta.dirname, "../../..");
 function loadRepoEnvFile(): void {
+  // Scratch services use their generated environment, never the owner's keys.
+  if (process.env.CLANKIE_SCRATCH === "1") return;
   let contents: string;
   try {
     contents = readFileSync(join(repoRoot, ".env.local"), "utf8");
