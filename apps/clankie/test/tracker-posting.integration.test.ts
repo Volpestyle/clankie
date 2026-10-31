@@ -1416,6 +1416,65 @@ it("Watch refuses every write by Clankie, a lead or a worker, holds nothing, and
   expect(f.mutations("commentCreate")).toBe(2);
 });
 
+it("Watch chosen while a keyed post waits its turn behind another post refuses it", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "allow");
+  // The second post's first look at the settings is the last one before Watch is chosen.
+  let chooseWatchAfterNextLoad = false;
+  const settings = {
+    load: async () => {
+      const loaded = await f.settings.load();
+      if (chooseWatchAfterNextLoad) {
+        chooseWatchAfterNextLoad = false;
+        await f.settings.update((current) => ({
+          ...current,
+          autonomy: { ...current.autonomy, watch: true },
+        }));
+      }
+      return loaded;
+    },
+  };
+  const posting = createTrackerPosting({
+    ...f.postingOptions,
+    statePath: join(f.root, "state", "queued-posts.json"),
+    settings,
+  });
+  cleanups.push(() => posting.close());
+  const sent: string[] = [];
+  let releaseFirst!: () => void;
+  const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+  posting.bind({
+    execute: async (route) => {
+      sent.push(JSON.stringify(route));
+      if (sent.length === 1) await firstHeld;
+      return { ok: true, result: {} };
+    },
+    repoTarget: (ref) => f.workItems.postingTarget(ref),
+    afterPosted: async () => {},
+  });
+  posting.start();
+  const write = (key: string, body: string) =>
+    posting.admit({
+      tracker: "linear",
+      route: { kind: "linear", tool: "save_comment", arguments: comment(body) },
+      asker: { kind: "lead" },
+      projectIds: ["garden"],
+      key,
+    });
+  const first = write("queued-first", "Posting before Watch.");
+  await f.settle(() => sent.length === 1);
+  chooseWatchAfterNextLoad = true;
+  const second = write("queued-second", "Waiting its turn.");
+  await f.settle(() => !chooseWatchAfterNextLoad);
+  releaseFirst();
+  expect(await first).toMatchObject({ outcome: "posted" });
+  expect(await second).toMatchObject({
+    outcome: "refused",
+    message: expect.stringContaining("only watching"),
+  });
+  expect(sent).toHaveLength(1);
+});
+
 it("Watch keeps a post held for Clankie from going out when he approves it, until Watch is off", async () => {
   const f = await fixture();
   await f.setPosting("garden", "lead");

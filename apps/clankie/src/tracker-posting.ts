@@ -948,6 +948,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         message: `This is too long to show the owner whole before it posts (${String(detail.length)} characters; 2,000 fit). Nothing was posted: post a shorter version, and keep the rest in the issue file.`,
       };
     return serial(async () => {
+      // Watch may have been chosen while this write waited its turn (ADR 0307).
+      if ((await options.settings.load()).autonomy.watch === true)
+        return { outcome: "refused" as const, message: WATCH_REFUSAL };
       const fingerprint = fingerprintOf(write, projects, decider);
       const same = state.posts.find(
         (entry) => entry.state === "waiting" && entry.fingerprint === fingerprint,
