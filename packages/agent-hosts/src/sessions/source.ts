@@ -34,6 +34,8 @@ export interface SessionText {
   readonly id: string;
   /** Plain text, newest lines last. */
   readonly text: string;
+  /** Why some of the screen was left out, when it was. */
+  readonly note?: string;
 }
 
 export interface SessionSendResult {

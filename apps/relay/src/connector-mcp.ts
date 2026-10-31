@@ -206,7 +206,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         name: "read_agent",
         title: "Read an agent's screen",
         description:
-          "Read the current text of one agent's terminal pane, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged.",
+          "Read the current text of one agent's terminal pane, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged. Only a pane with a coding agent running in it now can be read, and only what that agent showed: shell work from before it started, or from an earlier agent in the same pane, is left out. When the start of the agent can't be found on its screen, its first screen is held back and a note says so; read again once it has printed more.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -577,11 +577,12 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         });
       }
       if (call.params.name === "read_agent") {
-        const { id, text: screen } = await sessions.read(
-          requiredString(args.agent, "agent"),
-          lines(args.lines),
-        );
-        return text({ agent: id, text: screen });
+        const {
+          id,
+          text: screen,
+          note,
+        } = await sessions.read(requiredString(args.agent, "agent"), lines(args.lines));
+        return text({ agent: id, text: screen, ...(note === undefined ? {} : { note }) });
       }
       if (call.params.name === "message_agent") {
         const { id, ...sent } = await sessions.send(

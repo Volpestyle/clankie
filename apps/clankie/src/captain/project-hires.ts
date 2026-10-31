@@ -207,13 +207,15 @@ export class ProjectHires {
   public unresolved(input: {
     readonly fleet?: string | undefined;
     readonly workingDirectory: string;
+    readonly harness?: string | undefined;
   }): boolean {
     return this.read().allocations.some(
       (a) =>
         !a.gone &&
         !a.confirmed &&
         (a.request.fleet ?? "default") === (input.fleet ?? "default") &&
-        a.request.workingDirectory === input.workingDirectory,
+        a.request.workingDirectory === input.workingDirectory &&
+        (input.harness === undefined || a.request.harness === input.harness),
     );
   }
   public reserve(
