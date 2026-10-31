@@ -250,7 +250,9 @@ async function fixture(
         // This fixture owns both TCP ends in this PID. Keep the real positive
         // socket ownership proof; skip unrelated filesystem stat/readlink probes
         // with -b because cwd and process birth are already golden inputs above.
-        sample = execute(file, ["-b", "-p", String(process.pid), ...args]).then((result) => result.stdout);
+        // The host is pinned to Darwin's /usr/sbin/lsof; Linux ships it in /usr/bin.
+        const lsof = file === "/usr/sbin/lsof" && process.platform === "linux" ? "/usr/bin/lsof" : file;
+        sample = execute(lsof, ["-b", "-p", String(process.pid), ...args]).then((result) => result.stdout);
         socketSamples.set(key, sample);
       }
       return sample;
@@ -737,7 +739,15 @@ async function remoteFollowup(f: Awaited<ReturnType<typeof fixture>>, brief = "S
   return result;
 }
 
-test("SSH native hire, API history and follow-up reuse the original controller without local allocation", async () => {
+// The remote helper serves only a Darwin remote host (remote-opencode-helper.ts
+// refuses `initialize` elsewhere), and this fixture runs it in this process. So
+// the SSH cases below can prove something only on a Mac; elsewhere they would
+// only test that refusal.
+const notMac = process.platform !== "darwin";
+const REMOTE_HELPER_DARWIN_ONLY = "the remote OpenCode helper serves only a Darwin host";
+
+test("SSH native hire, API history and follow-up reuse the original controller without local allocation", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true });
   const host = f.ssh!.fleet.id;
   expect(f.hired.seat.seatId).toBe(host + "/term_native123");
@@ -817,6 +827,7 @@ function waitForPendingReport<T>(waiting: Promise<void>, sending: Promise<T>): P
 }
 
 test("SSH native follow-up keeps its original controller while a valid Herdr reply is pending", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const started = performance.now();
   const stages: { stage: string; elapsedMs: number }[] = [];
   const stage = (name: string) => {
@@ -867,7 +878,7 @@ test("SSH native follow-up keeps its original controller while a valid Herdr rep
   }
 });
 
-test.each([
+test.for([
   "birth",
   "uid",
   "socket-owner",
@@ -877,19 +888,24 @@ test.each([
   "windows",
   "link-loss",
   "session",
-])("remote %s change refuses follow-up/reuse without another writer or local fallback", async (mode) => {
-  const f = await fixture({ remote: true });
-  if (mode === "session") f.switchRoute();
-  else f.ssh!.mutate(mode);
-  const result = await remoteFollowup(f);
-  expect(result).toMatchObject({ result: { outcome: "failed" } });
-  if (result.op === "spawn_seat" && result.result.outcome === "failed")
-    expect(result.result.detail).not.toContain("Hire from a project conversation");
-  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
-  expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
-});
+])(
+  "remote %s change refuses follow-up/reuse without another writer or local fallback",
+  async (mode, context) => {
+    context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+    const f = await fixture({ remote: true });
+    if (mode === "session") f.switchRoute();
+    else f.ssh!.mutate(mode);
+    const result = await remoteFollowup(f);
+    expect(result).toMatchObject({ result: { outcome: "failed" } });
+    if (result.op === "spawn_seat" && result.result.outcome === "failed")
+      expect(result.result.detail).not.toContain("Hire from a project conversation");
+    expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+    expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
+  },
+);
 
-test("the global operator seat hires on a linked machine only into a registered project workspace", async () => {
+test("the global operator seat hires on a linked machine only into a registered project workspace", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   // Live repro on 4b9c935f: the operator seat has no project of its own, so the remote
   // destination is proven by the owner's registration on the fleet's machine.
   const f = await fixture({ remote: true, operatorSeat: true });
@@ -941,7 +957,8 @@ test("the global operator seat hires on a linked machine only into a registered 
   expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
 });
 
-test("conflicting host and fleet SSH identities refuse every native history API before transport", async () => {
+test("conflicting host and fleet SSH identities refuse every native history API before transport", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true });
   const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
   await f.settings.update((current) => ({
@@ -956,7 +973,8 @@ test("conflicting host and fleet SSH identities refuse every native history API 
   expect(f.ssh!.commands).toHaveLength(count);
 });
 
-test("lost native send receipt over SSH is not replayed by a repeated live-session follow-up", async () => {
+test("lost native send receipt over SSH is not replayed by a repeated live-session follow-up", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true });
   f.loseSend();
   expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
@@ -964,7 +982,8 @@ test("lost native send receipt over SSH is not replayed by a repeated live-sessi
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
 });
 
-test("stored remote history grants no cold controller adoption, and unknown hosts do not read local history", async () => {
+test("stored remote history grants no cold controller adoption, and unknown hosts do not read local history", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true });
   const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
   f.ssh!.mutate("link-loss");
@@ -974,7 +993,8 @@ test("stored remote history grants no cold controller adoption, and unknown host
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
 });
 
-test("history-first native hire keeps Captain admission during a prepare drop and return", async () => {
+test("history-first native hire keeps Captain admission during a prepare drop and return", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   // Cache admission is independent of concurrent project role journal writes.
   const f = await fixture({ remote: true, historyFirst: true, assignRole: false });
   const ssh = f.ssh!;
@@ -1009,7 +1029,8 @@ test("history-first native hire keeps Captain admission during a prepare drop an
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
 });
 
-test("Captain-first history works after a reconnect without adopting its old controller", async () => {
+test("Captain-first history works after a reconnect without adopting its old controller", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true, assignRole: false });
   const ssh = f.ssh!;
   const ref = ssh.fleet.id + ":ses_nativeWorker123";
@@ -1026,7 +1047,8 @@ test("Captain-first history works after a reconnect without adopting its old con
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
 });
 
-test("advancing a fleet revision closes and evicts the old helper and SSH forward", async () => {
+test("advancing a fleet revision closes and evicts the old helper and SSH forward", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true, historyFirst: true, assignRole: false });
   const ssh = f.ssh!;
   const old = ssh.workers.forFleet(ssh.fleet, async () => {}, 0);
