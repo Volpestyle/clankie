@@ -7,7 +7,7 @@ Pushes and pull requests run fast formatting, lint and native MCP contracts on L
 Pull requests also run the landing gate's checks on Linux against their base;
 exit 3, green checks waiting for the standing reviewer, passes there, and
 macOS-only tests run in the `mac` job on the owner's Mac runner: install, the
-pinned Herdr and `pnpm test:changed --base <commit>` (the landing gate's test
+pinned Herdr and `node scripts/check-changed-tests.mjs --base <commit>` (the landing gate's test
 selection, declared filesystem-input consumers included), for pushes and same-repository pull requests
 only, never forks. It stays off until the `CLANKIE_MAC_RUNNER` repository
 variable is `true`. The `codex-clean` commit status, posted when Codex edits

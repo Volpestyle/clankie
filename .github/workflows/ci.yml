@@ -204,4 +204,4 @@ jobs:
           # merge commit has its base as the first parent.
           base="$BEFORE"
           if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=$(git rev-parse HEAD^1); fi
-          $HEAVY pnpm test:changed --base "$base"
+          $HEAVY node scripts/check-changed-tests.mjs --base "$base"
