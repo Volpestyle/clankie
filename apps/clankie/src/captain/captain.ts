@@ -20,6 +20,7 @@ import {
   type FleetProjectionDiagnostics,
 } from "./fleet-projection-diagnostics.ts";
 import { harnessAccountIdentities, harnessAccountIdentityPath } from "./harness-account-identities.ts";
+import { createFleetCapacityReader } from "../app/fleet-capacity.ts";
 import { remoteRetirementWork } from "./remote-retirement-work.ts";
 import { workerWorktreeHold } from "./worktree-decisions.ts";
 import { renderLeadChats, type LeadChat } from "./lead-roster.ts";
@@ -7785,6 +7786,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get headSeat() {
         return headSeat;
       },
+      fleetCapacity: createFleetCapacityReader({
+        settings,
+        accounts: (fleetId) => readWorkerAccounts(fleetId),
+        seats: () => refreshFleet(),
+        leadSeatId: () => headSeat?.seatId,
+        heavy: () => options.fleetResources?.status(),
+        tracker: () => options.trackerRequestBudget?.(),
+      }),
       get observeFleet() {
         return observeFleet;
       },

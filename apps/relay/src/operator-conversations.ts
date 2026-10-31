@@ -1722,6 +1722,7 @@ function writeGrantDenial(response: ServerResponse, grant: DispatchGrant): void 
 /** Ops a connector device may name at all; the full request is checked by `connectorOperationAllowed`. */
 const CONNECTOR_OPS = new Set([
   "fleet",
+  "fleet_capacity",
   "terminal_catalog",
   "terminal_tail",
   "terminal_read",

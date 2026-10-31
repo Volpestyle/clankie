@@ -67,6 +67,8 @@ export interface CaptainOptions {
    * Absent means off, so existing deliveries keep the uncertain-receipt fence.
    */
   readonly connectorSessionDetection?: () => boolean;
+  /** Per-actor tracker request budgets, for the connector's capacity read (ADR 0309). */
+  readonly trackerRequestBudget?: () => import("@clankie/protocol/tracker-request-budget").TrackerRequestBudgetReport;
   readonly projectHireIdentity?: (
     fleet: string,
     pane: string,

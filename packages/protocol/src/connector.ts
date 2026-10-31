@@ -318,6 +318,7 @@ export const ConnectorDetectionRequestSchema = z.union([
 export function connectorOperationAllowed(request: OperatorConversationServiceRequest): boolean {
   switch (request.op) {
     case "fleet":
+    case "fleet_capacity":
     case "terminal_catalog":
     case "terminal_tail":
     case "terminal_read":

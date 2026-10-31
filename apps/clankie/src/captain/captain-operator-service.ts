@@ -94,6 +94,10 @@ export interface CreateOperatorServiceContext {
   readonly fleetSnapshot: (options?: {
     includeCheckouts?: boolean;
   }) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
+  /** What the fleet can afford, from accounts and permits Clankie already tracks (ADR 0309). */
+  readonly fleetCapacity?: () => Promise<
+    Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]
+  >;
   readonly headSeat: ObservedHeadSeat | undefined;
   readonly observeFleet: (localOnly?: boolean) => Promise<ObservedFleet>;
   readonly agentWork: ReturnType<typeof createAgentWorkStore>;
@@ -495,6 +499,10 @@ export function createOperatorService(
               },
             };
       return request.view === "home" ? { ...result, snapshot: operatorFleetHome(result.snapshot) } : result;
+    }
+    if (request.op === "fleet_capacity") {
+      if (ctx.fleetCapacity === undefined) throw new Error("Fleet capacity isn't available on this Clankie.");
+      return { op: "fleet_capacity", schemaVersion: 1, result: await ctx.fleetCapacity() };
     }
     if (request.op === "state_work") {
       const seatId = await readSeatIdForHerdrPane(

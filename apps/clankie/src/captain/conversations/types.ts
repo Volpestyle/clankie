@@ -60,6 +60,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "lead" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "fleet_capacity" }
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }
@@ -113,6 +114,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "lead" }
   | { op: "roster" }
   | { op: "fleet" }
+  | { op: "fleet_capacity" }
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }

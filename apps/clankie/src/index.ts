@@ -1713,6 +1713,7 @@ const captain = createCaptain(
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
     connectorSessionDetection: () => connectorDetection.multiplexer("herdr"),
+    trackerRequestBudget: () => trackerRequestBudget.report(),
     operatorSeatMigrationHeld: (conversationId) => operatorSeatMigrations.held(conversationId),
     ...(process.env.CLANKIE_DURABLE_PI_ROOM === undefined
       ? {}

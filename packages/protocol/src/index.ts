@@ -40,6 +40,7 @@ export * from "./fleet-settings.ts";
 export * from "./seat-restarts.ts";
 export * from "./discord-attention.ts";
 export * from "./worker-accounts.ts";
+export * from "./fleet-capacity.ts";
 export * from "./huddles.ts";
 export { OPERATOR_SEAT_HARNESSES, type OperatorSeatHarness } from "./seat-harnesses.ts";
 export {

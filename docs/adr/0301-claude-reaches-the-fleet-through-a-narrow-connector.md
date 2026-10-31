@@ -99,6 +99,9 @@ own `/mcp` on a trusted network.
   off per connected app. With Herdr on, a cleared or restarted session is
   rediscovered and an unconfirmed operator message is sent once more, or the
   error says why ([ADR 0308](0308-a-cleared-session-is-rediscovered.md)).
+- **Capacity is a read.** `fleet_capacity` shows what the fleet can afford
+  before a hire, from numbers Clankie already tracks. A missing number is
+  `"unknown"` ([ADR 0309](0309-the-connector-can-read-what-the-fleet-can-afford.md)).
 - **Plaintext through the doorway, for this route only.** The gateway carries
   the connector's discovery, OAuth and `/mcp` calls in plaintext, with the
   `authorization` header only on `/mcp` and a query only on the sign-in link.
