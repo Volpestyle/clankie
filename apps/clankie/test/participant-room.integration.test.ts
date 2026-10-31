@@ -20,7 +20,7 @@ vi.mock("../src/captain/model.ts", () => ({
 // Production captain, launch planner, settings migration, native census parser,
 // durable launch journal and bound outbox. The harness process is a fixture;
 // this does not claim Claude itself enforced its permission prompts.
-it.each([false, true])(
+it.each([false, true, "absent"] as const)(
   "auto-creates one isolated character and reuses it after restart (lost launch response: %s)",
   async (loseLaunchResponse) => {
     const root = await mkdtemp(join(tmpdir(), "clankie-participant-"));
@@ -85,6 +85,8 @@ it.each([false, true])(
         launches += 1;
         expect(input.command?.slice(0, 3)).toEqual(["clankie", "claude", "--conversation"]);
         roomId = input.command![3]!;
+        if (loseLaunchResponse === "absent" && launches === 1)
+          throw Error("Uncertain launch with no native allocation");
         const context = captain.seatContext(roomId)!;
         expect(context).toMatchObject({
           cwd: join(root, "participant-rooms", roomId),
@@ -130,7 +132,7 @@ it.each([false, true])(
             transcriptPath,
             JSON.stringify({ cwd: context.cwd, sessionId: plan.sessionId }) + "\n",
           );
-        if (launches > 1) expect(input.command).toContain("--resume");
+        if (plan.resumed) expect(input.command).toContain("--resume");
         native = {
           paneId: `w1:p${launches}`,
           terminalId: `term-character-${launches}`,
@@ -224,12 +226,28 @@ it.each([false, true])(
     try {
       const first = await captain.submitDiscordTurn(request(1));
       expect(first.state).toBe(loseLaunchResponse ? "failed" : "settled");
+      if (loseLaunchResponse === "absent") {
+        expect(await captain.submitDiscordTurn(request(2))).toMatchObject({ state: "failed" });
+        expect(launches).toBe(1);
+        await captain.close();
+        // Owner recovery only after a complete inventory confirms no process.
+        expect(await runner.list!()).toEqual([]);
+        const journalPath = join(root, "participant-room-launches.json");
+        const journal = JSON.parse(await readFile(journalPath, "utf8"));
+        expect(journal[roomId].phase).toBe("uncertain");
+        delete journal[roomId];
+        await writeFile(journalPath, JSON.stringify(journal), { mode: 0o600 });
+        captain = make();
+      }
+      const launchBase = loseLaunchResponse === "absent" ? 2 : 1;
       const nextAnswer = messages.length + 1;
-      expect(await captain.submitDiscordTurn(request(2, "33333"))).toMatchObject({
+      expect(
+        await captain.submitDiscordTurn(request(loseLaunchResponse === "absent" ? 20 : 2, "33333")),
+      ).toMatchObject({
         state: "settled",
         response: `character answer ${nextAnswer}`,
       });
-      expect(launches).toBe(1);
+      expect(launches).toBe(launchBase);
       expect((await captain.laneToolBank("operator", roomId)).tools).toEqual([]);
       expect(
         await captain.lanePrompt({ lane: "operator", conversationId: roomId, sections: ["persona"] }),
@@ -245,15 +263,15 @@ it.each([false, true])(
       bridgeStop = new AbortController();
       runBridge();
       expect(await captain.submitDiscordTurn(request(3, "11111"))).toMatchObject({ state: "settled" });
-      expect(launches).toBe(1);
+      expect(launches).toBe(launchBase);
       bridgeStop.abort();
       await bridge;
       const originalSession = native!.session;
       native = undefined;
       bridgeStop = new AbortController();
       expect(await captain.submitDiscordTurn(request(4))).toMatchObject({ state: "settled" });
-      expect(launches).toBe(2);
-      expect(native!.session).toEqual(originalSession);
+      expect(launches).toBe(launchBase + 1);
+      expect((await runner.get("character")).session).toEqual(originalSession);
       let releaseReply!: () => void;
       replyGate = new Promise<void>((resolve) => {
         releaseReply = resolve;
@@ -287,16 +305,56 @@ it.each([false, true])(
       // A foreign native process in the same pane cannot inherit this mailbox.
       bridgeStop.abort();
       await bridge;
-      native = { ...native!, session: { source: "herdr:claude", kind: "id", value: randomUUID() } };
+      native = {
+        ...(await runner.get("character")),
+        session: { source: "herdr:claude", kind: "id", value: randomUUID() },
+      };
       expect(await captain.submitDiscordTurn(request(6))).toMatchObject({ state: "failed" });
-      expect(launches).toBe(2);
+      expect(launches).toBe(launchBase + 1);
       native = undefined;
       await settings.update((current) => ({
         ...current,
         machineAccess: { ...current.machineAccess, local: "portal" },
       }));
       expect(await captain.submitDiscordTurn(request(7))).toMatchObject({ state: "failed" });
-      expect(launches).toBe(2);
+      expect(launches).toBe(launchBase + 1);
+      await settings.update((current) => ({
+        ...current,
+        discord: {
+          ...current.discord,
+          guilds: {
+            ...current.discord.guilds,
+            "12345": { ...current.discord.guilds["12345"]!, role: "admin" },
+          },
+        },
+      }));
+      expect(captain.seatContext(roomId)).toMatchObject({ cwd: join(root, "owner-private") });
+      expect(captain.seatContext(roomId)).not.toHaveProperty("participantRoom");
+      expect(
+        (await captain.laneToolBank("operator", roomId)).tools.some(
+          (tool) => tool.name === "room_task_tools",
+        ),
+      ).toBe(true);
+      const ownerPlan = await planSeat(
+        { resume: false, dryRun: true, conversationId: roomId },
+        {
+          repoRoot: join(import.meta.dirname, "../../.."),
+          env: {
+            HOME: root,
+            CLAUDE_CONFIG_DIR: root,
+            XDG_STATE_HOME: root,
+            CLANKIE_OPERATOR_TOKEN: `clankie_op_${"a".repeat(43)}`,
+          },
+          execFileImpl: async () => ({ stdout: "2.1.316 (Claude Code)", stderr: "" }),
+          fetchImpl: async (input) =>
+            String(input).includes("maximum-trust")
+              ? Response.json({ schemaVersion: 1, enabled: false })
+              : Response.json(captain.seatContext(roomId)),
+        },
+      );
+      expect(ownerPlan.cwd).toBe(join(root, "owner-private"));
+      expect(ownerPlan.args).not.toContain("--restricted");
+      expect(ownerPlan.skills.length).toBeGreaterThan(0);
     } finally {
       bridgeStop.abort();
       await captain.close();

@@ -40,6 +40,8 @@ export function planDiscordTurnSession(input: {
   readonly ownerAudience?: boolean;
 }): DiscordTurnSessionPlan {
   const policy = input.settings.servers?.find((entry) => entry.serverId === input.guildId);
+  if (policy?.role === "participant")
+    return { kind: "social", durable: input.durable, systemTools: false, sessionKey: input.baseSessionKey };
   const owner =
     input.guildId === undefined
       ? input.actorId === input.settings.ownerUserId

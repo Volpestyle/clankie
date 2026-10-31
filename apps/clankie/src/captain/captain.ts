@@ -1547,17 +1547,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         conversation.scope.kind !== "workspace")
     )
       return undefined;
+    let participant = false;
+    if (conversation.scope.kind === "room" && conversation.roomHandoff === undefined) {
+      const guildId = conversation.scope.targetId.split(":")[0];
+      const discord = resolveDiscordSettings(
+        settingsStore.readSync().discord,
+        options.discordEnvironment,
+      ).settings;
+      const policy =
+        guildId === undefined
+          ? undefined
+          : (discord.guilds[guildId] ?? discord.servers.find((entry) => entry.serverId === guildId));
+      participant = policy?.role === "participant";
+    }
     return {
       conversationId,
       cwd:
         conversation.scope.kind === "workspace"
           ? conversation.scope.workspaceId
-          : conversation.scope.kind === "room" && conversation.roomHandoff === undefined
+          : participant
             ? participantRoomDirectory(options.stateDir, conversationId)
             : workingDirectory,
-      ...(conversation.scope.kind === "room" && conversation.roomHandoff === undefined
-        ? { participantRoom: true as const }
-        : {}),
+      ...(participant ? { participantRoom: true as const } : {}),
       ...(conversation.scope.kind === "workspace" && conversation.scope.machineId !== undefined
         ? { machineId: conversation.scope.machineId }
         : {}),
@@ -4145,7 +4156,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // A cached MCP bank has no per-event actor proof. Attachment never
         // turns a room into an operator lane or inherits a later actor's grant.
         // No cached room bridge may acquire account, browser, memory or fleet tools.
-        return { lane: scope.lane, tools: [] };
+        if (binding.participantRoom) return { lane: scope.lane, tools: [] };
+        toolLane = scope.lane;
+        capture.shell = false;
+        capture.room = roomKey(scope.lane, scope.targetId);
+        capture.targetId = scope.targetId;
       } else {
         capture.hireReceiptOperator = delegation === undefined && privateLeadConversation(targetId);
         if (privateLeadConversation(targetId))

@@ -26,7 +26,9 @@ transport. The native process and model responses are fixtures. Checks cover:
 automatic creation, reuse across speakers, service restart, cold resume of the
 same UUID in a new pane, uncertain launch reconciliation, replaced occupants,
 configuration revocation before reply publication, reply-only MCP denial,
-owner resume-record preservation and old-client setting preservation. Existing
+owner resume-record preservation, Pi ownership-grant refusal, Admin attachment
+preservation, owner recovery of an absent uncertain launch, the local machine
+ceiling and old-client setting preservation. Existing
 real Pi-loop tests also cover automatic participant loops without the rollout
 switch. No live Discord or real Claude permission-prompt claim is made.
 

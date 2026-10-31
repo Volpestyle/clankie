@@ -1,4 +1,4 @@
-# ADR 0307: Discord participants have their own character session
+# ADR 0312: Discord participants have their own character session
 
 Status: Accepted, 2026-10-31, on James's request for a dedicated isolated
 participant session, automatic creation when absent, and owner-only real work.
