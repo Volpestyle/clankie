@@ -203,7 +203,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         name: "read_agent",
         title: "Read an agent's screen",
         description:
-          "Read the current text of one agent's terminal pane, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged.",
+          "Read the current text of one agent's terminal pane, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged. Only a pane with a coding agent running in it now can be read, and only what that agent showed: shell work from before it started, or from an earlier agent in the same pane, is left out.",
         inputSchema: {
           type: "object" as const,
           properties: {

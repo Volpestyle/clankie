@@ -139,17 +139,15 @@ export function createHerdrSessionSource(
             .slice(-lines)
             .join("\n"),
         };
+      // A service that answers terminal_read decides what may be read; streaming the screen
+      // instead would pass over its refusal (ADR 0307).
+      if (read?.op === "terminal_read")
+        throw new SessionRefusal(read.detail ?? "The pane can't be read right now.");
       // A service without terminal_read still streams this Mac's panes.
-      try {
-        const frames = await oneAtATime(`${options.surfaceClientId}\u0000${id}`, () =>
-          tailScreen(port, id, options.surfaceClientId),
-        );
-        return { id, text: renderTerminalText(frames).split("\n").slice(-lines).join("\n") };
-      } catch (error) {
-        if (read?.op === "terminal_read" && read.detail !== undefined && error instanceof SessionRefusal)
-          throw new SessionRefusal(`${error.message} (${read.detail})`);
-        throw error;
-      }
+      const frames = await oneAtATime(`${options.surfaceClientId}\u0000${id}`, () =>
+        tailScreen(port, id, options.surfaceClientId),
+      );
+      return { id, text: renderTerminalText(frames).split("\n").slice(-lines).join("\n") };
     },
 
     async start(request) {
