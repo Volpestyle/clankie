@@ -290,6 +290,13 @@ it.each([false, true])(
       native = { ...native!, session: { source: "herdr:claude", kind: "id", value: randomUUID() } };
       expect(await captain.submitDiscordTurn(request(6))).toMatchObject({ state: "failed" });
       expect(launches).toBe(2);
+      native = undefined;
+      await settings.update((current) => ({
+        ...current,
+        machineAccess: { ...current.machineAccess, local: "portal" },
+      }));
+      expect(await captain.submitDiscordTurn(request(7))).toMatchObject({ state: "failed" });
+      expect(launches).toBe(2);
     } finally {
       bridgeStop.abort();
       await captain.close();

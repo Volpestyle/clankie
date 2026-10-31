@@ -6,6 +6,7 @@ import { z } from "zod";
 import { ClankieApiClient, DiscordSetupClient } from "../../../packages/api-client/src/index.ts";
 import {
   DiscordSettingsSchema,
+  DiscordGuildSettingsSchema,
   DiscordSettingsSnapshotSchema,
   parseProtocolResponse,
 } from "@clankie/protocol";
@@ -72,7 +73,19 @@ it("the owner chooses a character harness through the CLI and an older guild wri
   );
   const selected = await client.discordSettings();
   expect(selected.settings.guilds["12345"]?.participantHarness).toBe("claude");
-  const { participantHarness: _unknown, ...oldGuild } = selected.settings.guilds["12345"]!;
+  const oldRead = parseProtocolResponse(
+    DiscordSettingsSnapshotSchema.extend({
+      settings: DiscordSettingsSchema.extend({
+        guilds: z.record(
+          z.string(),
+          z.object(DiscordGuildSettingsSchema.shape).omit({ participantHarness: true }).strict(),
+        ),
+      }),
+    }),
+    selected,
+  );
+  const oldGuild = oldRead.settings.guilds["12345"]!;
+  expect(oldGuild).not.toHaveProperty("participantHarness");
   const saved = await client.updateDiscordSettings({
     expectedRevision: selected.revision,
     settings: {

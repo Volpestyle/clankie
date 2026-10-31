@@ -37,6 +37,7 @@ chart_scratch="$(mktemp -d)"
 cp docs/testing/2026-10-31-participant-sessions/*.tla "$chart_scratch/"
 cp docs/testing/2026-10-31-participant-sessions/*.cfg "$chart_scratch/"
 cp docs/testing/2026-10-31-participant-sessions/*.mjs "$chart_scratch/"
+cp docs/testing/2026-10-31-participant-sessions/theme.css "$chart_scratch/"
 cd "$chart_scratch"
 # Set TLA2TOOLS to TLC 1.7.4 and JAVA to Java 11+ if mise does not supply them.
 # Run each through clankie heavy -- in this repository's fleet.
@@ -47,3 +48,9 @@ cd "$chart_scratch"
 
 The full routing graph exceeds pstack's 500-state drawing budget; its report
 still checks every invariant. Use the drawing config only for visualization.
+
+Render with Pele 1.9.0 installed outside the repository:
+
+```sh
+node render.mjs /absolute/path/to/pele/dist/pele.js participant-new/chart.mmd theme.css
+```
