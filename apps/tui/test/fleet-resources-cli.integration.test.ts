@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { spawn, type ChildProcess } from "node:child_process";
+import { access, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -133,12 +133,6 @@ async function fixture() {
     CLANKIE_CONTROL_PLANE_URL: host,
   };
   await mkdir(env.PATH);
-  // Off macOS the native resource helper runs as `python3` from PATH (macOS
-  // uses /usr/bin/python3), so the otherwise empty PATH offers only that.
-  if (process.platform !== "darwin") {
-    const python = execFileSync("sh", ["-c", "command -v python3"], { encoding: "utf8" }).trim();
-    await symlink(python, join(env.PATH, "python3"));
-  }
   const options = {
     settings,
     resourceGovernor: governor,
