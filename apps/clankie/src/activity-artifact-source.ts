@@ -213,7 +213,8 @@ async function decode(
           "-sn",
           "-dn",
           "-vf",
-          // Fit within 640, never enlarging: an upscaled small clip can outgrow the frame cap.
+          // Fit within 640x640 but never enlarge: an upscaled small clip only
+          // makes bigger PNGs, and one frame over the cap ends the share.
           `fps=${FRAME_RATE},scale='min(640,iw)':'min(640,ih)':force_original_aspect_ratio=decrease`,
           "-threads",
           "1",
