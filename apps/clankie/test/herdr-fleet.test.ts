@@ -91,7 +91,12 @@ function decodePowerShellArgv(command: string): string[] {
 }
 
 /** `herdr pane process-info`: the pane's shell and its foreground processes. */
-function processInfo(paneId: string, shellPid: number, foreground: readonly number[]): string {
+function processInfo(
+  paneId: string,
+  shellPid: number,
+  foreground: readonly number[],
+  rootName = "zsh",
+): string {
   return JSON.stringify({
     result: {
       process_info: {
@@ -100,8 +105,8 @@ function processInfo(paneId: string, shellPid: number, foreground: readonly numb
         foreground_process_group_id: foreground[0] ?? shellPid,
         foreground_processes: (foreground.length === 0 ? [shellPid] : foreground).map((pid) => ({
           pid,
-          name: pid === shellPid ? "zsh" : "claude",
-          argv: [pid === shellPid ? "zsh" : "claude"],
+          name: pid === shellPid ? rootName : "claude",
+          argv: [pid === shellPid ? rootName : "claude"],
         })),
       },
     },
@@ -378,6 +383,7 @@ describe("fleet routing", () => {
     let history = "";
     let screen = "";
     let midRead: (() => void) | undefined;
+    let root = { pid: 400, name: "zsh" };
     const run: HerdrFleetRun = async (args) => {
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({
@@ -390,7 +396,8 @@ describe("fleet routing", () => {
             ],
           },
         });
-      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, foreground);
+      if (args[0] === "pane" && args[1] === "process-info")
+        return processInfo("w2:p1J", root.pid, foreground, root.name);
       if (args[0] === "pane" && args[1] === "read") {
         midRead?.();
         return args[4] === "visible" ? screen : history;
@@ -564,6 +571,19 @@ describe("fleet routing", () => {
     screen = frame("Running the tests");
     history = `$ cat .env\nTOKEN=owner-tui\n$ cc\n${screen}`;
     expect(await read()).toMatchObject({ status: "read", text: "│ Running the tests                  │" });
+
+    // An agent launched as the pane's own command is its root process, with no shell to hide
+    // behind: it is the occupant, whatever subprocesses it runs, and is read like any other.
+    root = { pid: 412, name: "opencode" };
+    foreground = [412];
+    history = " OpenCode\n> plan";
+    screen = history;
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+    foreground = [412, 413];
+    history = `${history}\n Planning the change`;
+    screen = history;
+    expect(await read()).toMatchObject({ status: "read", text: " Planning the change" });
+    root = { pid: 400, name: "zsh" };
 
     // The agent exits and the shell takes the pane while it is being read: nothing read in that
     // gap is returned, and whoever comes next starts from their own first read.

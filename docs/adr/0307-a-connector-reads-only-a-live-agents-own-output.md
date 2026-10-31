@@ -20,7 +20,8 @@ agent showed.
 
 - **A live agent is in the pane now.** Herdr detects an agent there (not
   `unknown`, `none` or `shell`), and the pane has a foreground process that is
-  not its own shell (`herdr pane process-info`). Otherwise the read is refused:
+  not its own shell (`herdr pane process-info`). An agent launched as the
+  pane's own command is its root process, not a shell by name, and counts. Otherwise the read is refused:
   "No coding agent is running in that pane now." This holds on every machine;
   `process-info` is one of the verbs the fleet runner may run over ssh.
 - **The occupant is named by native identity.** The agent Herdr detects, its

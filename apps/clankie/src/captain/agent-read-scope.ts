@@ -22,7 +22,11 @@ export async function liveAgentOccupant(
   if (NOT_AN_AGENT.has(pane.agent.trim().toLowerCase())) return undefined;
   if (runner.paneShell === undefined) return undefined;
   const { shellPid, foreground } = await runner.paneShell(pane.paneId);
-  const occupants = foreground.filter(({ pid }) => Number.isSafeInteger(pid) && pid > 1 && pid !== shellPid);
+  const live = foreground.filter(({ pid }) => Number.isSafeInteger(pid) && pid > 1);
+  // An agent launched as the pane's own command is its root process, with no shell under it.
+  const root = live.find(({ pid }) => pid === shellPid);
+  const occupants =
+    root !== undefined && !isShell(root) ? [root] : live.filter(({ pid }) => pid !== shellPid);
   if (occupants.length === 0) return undefined;
   // The oldest foreground process is the agent itself; its own subprocesses come after it.
   const agent = occupants.reduce((oldest, process) => (process.pid < oldest.pid ? process : oldest));
@@ -33,6 +37,38 @@ export async function liveAgentOccupant(
         : [pane.agent, pane.session.source, pane.session.value, agent.pid],
     ),
   };
+}
+
+/** Interactive shells a pane can run as its root process. */
+const SHELLS = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "dash",
+  "ksh",
+  "mksh",
+  "tcsh",
+  "csh",
+  "ash",
+  "nu",
+  "elvish",
+  "xonsh",
+  "pwsh",
+  "powershell",
+  "cmd",
+]);
+
+/** Whether a process is a shell, by its name or argv0 (a login shell's leading `-` and a `.exe` aside). */
+function isShell(process: { readonly name: string; readonly argv0?: string }): boolean {
+  return [process.name, process.argv0].some((value) => {
+    const base = (value ?? "")
+      .split(/[\\/]/u)
+      .pop()!
+      .replace(/^-/u, "")
+      .replace(/\.exe$/iu, "");
+    return SHELLS.has(base.toLowerCase());
+  });
 }
 
 /** What a connected app may read now, and why some of the pane is held back. */
