@@ -114,6 +114,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The gate's skills phase installs the pinned Herdr here; tests spawn it by name.
       - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
+      - name: TEMP diagnosis of unreadable same-uid FD tables
+        run: |
+          me=$(id -u); id
+          for t in /proc/[0-9]*/task/[0-9]*; do
+            grep -Eq "^Uid:.*[[:space:]]$me([[:space:]]|$)" "$t/status" 2>/dev/null || continue
+            ls "$t/fd" >/dev/null 2>&1 && continue
+            echo "UNREADABLE $t"
+            grep -E '^(Name|Uid|Gid|PPid|NSpid|CapEff|NoNewPrivs)' "$t/status"
+            tr '\0' ' ' < "${t%/task/*}/cmdline"; echo
+            stat -c 'fd owner %U:%G mode %a' "$t/fd" "${t%/task/*}"
+          done
+          ps -eo pid,ppid,user,args --forest | head -80
       - name: Landing gate checks against the pull request's base
         env:
           # Four vCPUs and 16 GB fit three 2.5 GiB compiler heaps at once.
