@@ -210,8 +210,7 @@ export const WorkConventionSchema = WorkConventionFieldsSchema.refine(
   { message: "A Linear board label requires the linear backend", path: ["linear", "label"] },
 ).refine(
   (convention) =>
-    convention.previous === undefined ||
-    (convention.linear !== undefined && convention.backend === "github"),
+    convention.previous === undefined || (convention.linear !== undefined && convention.backend === "github"),
   { message: "A previous Linear tracker needs its Linear scope and the github backend", path: ["previous"] },
 );
 export type WorkConvention = z.infer<typeof WorkConventionSchema>;
