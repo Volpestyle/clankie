@@ -1672,6 +1672,15 @@ it("Watch chosen after a work-item write's own check stops it as it commits", as
     reads = 0;
     await expect(work.handle(request, true)).rejects.toThrow("only watching");
   }
+  // A hire's automatic issue notes, waiting the same way, are refused as they commit too.
+  const seat = await work.prepareSeatIssueTracker("beds", async () => {});
+  for (const [name, args] of [
+    ["save_comment", { issueId: id, body: "Chosen meanwhile" }],
+    ["save_issue", { id, state: "In Progress" }],
+  ] as const) {
+    reads = 0;
+    await expect(seat.call(name, args, "background")).rejects.toThrow("only watching");
+  }
   const shown = JSON.stringify(await f.workItems.handle({ action: "show", repo: beds, id }, true));
   expect(shown).toContain("Before Watch");
   expect(shown).not.toContain("Chosen meanwhile");

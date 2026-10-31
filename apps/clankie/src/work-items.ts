@@ -1887,6 +1887,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           // Watch (ADR 0307): a local tracker has no admission to refuse it, so ask here.
           if (options.posting && isTrackerWriteTool(name) && tracker === undefined)
             await refuseWhileWatching();
+          // Asked again as the write commits, so bookkeeping that waited on the tracker's lock
+          // when Watch was chosen changes nothing (ADR 0307).
+          const writing = async () => {
+            await beforeWrite();
+            if (options.posting && isTrackerWriteTool(name)) await refuseWhileWatching();
+          };
           if (options.posting && tracker !== undefined)
             assertAdmitted(
               await options.posting.admit({
@@ -1905,7 +1911,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             ...(builtIn ? { builtIn } : {}),
             scopedWrites: true,
             actor: CLANKIE_FOR_OWNER,
-            beforeWrite,
+            beforeWrite: writing,
             ...(convention.backend !== "linear"
               ? {}
               : {
@@ -1920,7 +1926,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                       // `call` below checked posting for this project first (ADR 0302).
                       posting: TRACKER_POSTING_ADMITTED,
                       fence: async () => {
-                        await beforeWrite();
+                        await writing();
                         await assertLinear();
                         return () => target?.assertCurrent();
                       },
@@ -1931,7 +1937,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                   },
                 }),
           });
-          const result = await tools.call(name, args, { beforeWrite, actor: CLANKIE_FOR_OWNER });
+          const result = await tools.call(name, args, { beforeWrite: writing, actor: CLANKIE_FOR_OWNER });
           await beforeWrite();
           await assertLinear();
           return result;
