@@ -35,7 +35,7 @@ export const CONNECTOR_TOKEN_PATH = "/oauth/token";
 export const CONNECTOR_PROMPT_ANSWERS_PATH = "/v1/connector/prompt-answers";
 /**
  * Owner route: which multiplexers the connector discovers, and which connected
- * apps it serves (ADR 0308). GET lists both. POST is either
+ * apps it serves (ADR 0312). GET lists both. POST is either
  * `{ multiplexer, enabled }` (an adapter id; Herdr is the first this service
  * knows) or `{ deviceId, served }`.
  */
@@ -325,6 +325,8 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "start_agent":
     case "app_notes":
     case "prompt_answer":
+    case "herdr_core_list":
+    case "herdr_core_read":
     case "get":
     case "send":
     case "send_receipt":

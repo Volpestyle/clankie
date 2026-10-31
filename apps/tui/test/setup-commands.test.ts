@@ -14,6 +14,10 @@ import {
   type SetupCommandServices,
 } from "../src/setup-commands.ts";
 import type { SetupFlow } from "../src/shell/setup-flow.ts";
+import { SettingsStore } from "@clankie/settings";
+import { runAutonomyCommand } from "../src/command/fleet.ts";
+import { runHerdrCommand } from "../src/command/herdr.ts";
+import { fleetSettingsClient } from "./fixtures/fleet-settings-client.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "../src/shell/shell.ts";
 
 const tempDirs: string[] = [];
@@ -186,6 +190,7 @@ async function fixture(options: {
           log: "/log",
         };
       },
+      herdr: async () => ({ unavailable: "not under test", restart: "clankie restart captain" }) as never,
       commands: () => commands,
     },
   };
@@ -336,4 +341,74 @@ it("names the missing harnesses and their install steps when no harness can take
   expect(
     noHarnessReady({ ...fresh, accounts: [{ ...signedOut, usable: true, signedIn: true }] }),
   ).toBeUndefined();
+});
+
+it("Watch makes setup three steps with no model, and says watching only for the session that runs", async () => {
+  // What the running service watches; settings hold the owner's pick until a restart.
+  const running = { runtime: "external" as const, session: "default", socketPath: "/tmp/herdr.sock" };
+  const cases = [
+    {
+      name: "kept the running session",
+      pick: undefined,
+      active: running,
+      says: "3 of 3 · Clankie is watching default",
+    },
+    {
+      name: "picked another session",
+      pick: "work",
+      active: running,
+      says: "Your pick starts after a restart",
+    },
+    { name: "no session runs", pick: undefined, active: undefined, says: "No Herdr session to watch yet" },
+  ];
+  for (const scenario of cases) {
+    const { services, opened } = await fixture({});
+    const root = await mkdtemp(join(tmpdir(), "clankie-setup-watch-"));
+    tempDirs.push(root);
+    // The real owner route, autonomy and Herdr commands over settings on disk.
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const client = fleetSettingsClient(settings);
+    const herdr: FaceShellCommand = {
+      name: "herdr",
+      aliases: [],
+      description: "herdr",
+      takesArgument: true,
+      async run() {
+        opened.push("herdr");
+        // The picker either saves a session or is cancelled; it returns the same way.
+        if (scenario.pick !== undefined) await runHerdrCommand(["use", scenario.pick], { settings });
+      },
+    };
+    const watching: SetupCommandServices = {
+      ...services,
+      autonomy: (args) => runAutonomyCommand(args, client),
+      herdr: async () => ({
+        ...(await runHerdrCommand(["status"], { settings })),
+        ...(scenario.active === undefined
+          ? { unavailable: "Herdr is not running" }
+          : { active: scenario.active }),
+      }),
+      commands: () => [...services.commands(), herdr],
+    };
+    const asked: string[] = [];
+    const said: string[] = [];
+    const view = testShell(["watch"]);
+    const flow = view.shell.setupFlow;
+    const readSelect = flow.readSelect.bind(flow);
+    flow.readSelect = async (options) => {
+      asked.push(options.options.map((option) => option.value).join(","));
+      return readSelect(options);
+    };
+    (view.shell as { insertMarkdown: (text: string) => void }).insertMarkdown = (text) => said.push(text);
+
+    await setup(watching).run("", view.shell);
+
+    expect(asked, scenario.name).toEqual(["watch,off,low,high,full"]);
+    expect((await settings.load()).autonomy.watch, scenario.name).toBe(true);
+    expect(opened, scenario.name).toEqual(["herdr"]);
+    expect(said.join("\n"), scenario.name).toContain(scenario.says);
+    if (scenario.says !== cases[0]!.says)
+      expect(said.join("\n"), scenario.name).not.toContain("Clankie is watching");
+    expect(said.join("\n"), scenario.name).not.toContain("can't think yet");
+  }
 });

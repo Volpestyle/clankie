@@ -845,6 +845,51 @@ test("lowering a joined machine below shell mid-call stops the running command",
   }
 });
 
+test("Watch chosen mid-call stops a joined machine's running command, as lowering it below shell does", async () => {
+  const s = await joinedShell();
+  try {
+    const call = s.run(s.f.directory, "(sleep 1; touch finished) | cat");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await s.f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+    expect((await call).details).toMatchObject({ ok: false, error: "revoked" });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await expect(readFile(join(s.f.directory, "finished"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await s.close();
+  }
+});
+
+test("Watch refuses work queued for a joined machine before it was chosen, and the machine polls at Portal", async () => {
+  const f = await fixture();
+  try {
+    const credential = await f.approve("shell");
+    const machineId = credential.lease.machineId;
+    // Queued while Clankie may act; the machine has not polled for it yet.
+    const queued = f.joins.request(machineId, {
+      kind: "shell",
+      directory: f.directory,
+      command: "touch queued",
+    });
+    await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+    expect(await f.joins.poll(credential.lease.token, { results: [] })).toEqual({
+      policy: { machineId, accessLevel: "portal", directories: [f.directory] },
+      requests: [],
+    });
+    expect(await queued).toMatchObject({ ok: false, error: "machine_access_refused" });
+    // Leaving Watch gives the machine its own level back, with nothing held for it meanwhile.
+    await f.settings.update((current) => {
+      const { watch: _watch, ...autonomy } = current.autonomy;
+      return { ...current, autonomy };
+    });
+    expect(await f.joins.poll(credential.lease.token, { results: [] })).toMatchObject({
+      policy: { accessLevel: "shell" },
+      requests: [],
+    });
+  } finally {
+    await f.close();
+  }
+});
+
 test("a joined shell call that cannot be audited never leaves this machine", async () => {
   const s = await joinedShell();
   try {

@@ -164,7 +164,7 @@ export interface ClankieAppDependencies {
   connectorPromptAnswersPath?: string;
   /**
    * Shared with the captain so operator delivery and the connector routes see
-   * one Herdr detection switch (ADR 0308). Absent: an in-memory store, on.
+   * one Herdr detection switch (ADR 0312). Absent: an in-memory store, on.
    */
   connectorDetection?: import("./connector-detection.ts").ConnectorDetection;
   discordTurnReceipts?: DiscordTurnReceipts;

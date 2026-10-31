@@ -61,7 +61,7 @@ export interface CaptainOptions {
   /** Machine-wide resource admission and cached fleet metadata; never project-local policy. */
   readonly fleetResources?: FleetResourceRuntime;
   /**
-   * Herdr session detection for the connector (ADR 0308). When it returns true,
+   * Herdr session detection for the connector (ADR 0312). When it returns true,
    * an operator message that cannot be confirmed is rediscovered once, and a
    * lead whose session was cleared or restarted in the same pane rebinds.
    * Absent means off, so existing deliveries keep the uncertain-receipt fence.

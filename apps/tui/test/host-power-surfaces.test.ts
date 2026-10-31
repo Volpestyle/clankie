@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileCredentialStore } from "@clankie/credential-broker";
+import { SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ClankieFaceShell } from "../src/shell/shell.ts";
 import { buildConsoleCommands } from "../src/commands.ts";
@@ -29,10 +30,15 @@ const pmset =
     return { stdout: "Listed by owning process:\n", stderr: "" };
   };
 
-async function doctor(execFileImpl: ExecFileImpl, fetchImpl: typeof fetch) {
+async function doctor(execFileImpl: ExecFileImpl, fetchImpl: typeof fetch, keepAwake?: boolean) {
   const root = await mkdtemp(join(tmpdir(), "clankie-doctor-power-"));
   tempDirs.push(root);
   await mkdir(join(root, "config", "clankie"), { recursive: true });
+  // Keep-awake defaults on only on macOS, so a test of the owner's choice states it.
+  if (keepAwake !== undefined) {
+    const settings = new SettingsStore(join(root, "config", "clankie", "settings.json"));
+    await settings.update((current) => ({ ...current, host: { ...current.host, keepAwake } }));
+  }
   return await inspectInstall({
     repoRoot: root,
     env: { HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config") },
@@ -49,10 +55,12 @@ const health = (body: unknown): typeof fetch =>
       : new Response("{}", { status: 401 })) as typeof fetch;
 
 describe("doctor host power", () => {
-  it("names a Mac on battery with sleep allowed and how to keep it awake", async () => {
+  it("names a Mac on battery with sleep allowed and how to keep it awake", async (context) => {
+    context.skip(process.platform !== "darwin", "keep-awake is requested by default only on macOS");
     const report = await doctor(
       pmset("Battery Power", { battery: 1, ac: 0 }),
       health({ doorway: { state: "connected" } }),
+      true,
     );
 
     expect(report.power).toMatchObject({

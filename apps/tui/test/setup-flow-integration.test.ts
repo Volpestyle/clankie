@@ -14,6 +14,7 @@ import { PersonaStore } from "../../clankie/src/captain/personas.ts";
 import { listDevices } from "../bin/devices.ts";
 import { inspectInstall } from "../src/install-doctor.ts";
 import { createProviderServices } from "../src/provider-commands.ts";
+import { runHerdrCommand } from "../src/command/herdr.ts";
 import { runAutostartCommand } from "../src/command/autostart.ts";
 import { runConsolePair } from "../src/pair-commands.ts";
 import { buildSetupCommands, type SetupCommandServices } from "../src/setup-commands.ts";
@@ -61,6 +62,7 @@ async function fixture() {
     workspace: () => root,
     pair: (shell) => runConsolePair("", shell, { repoRoot: root, env, host: host.baseUrl }),
     autostart: (verb) => runAutostartCommand([verb], { env }),
+    herdr: () => runHerdrCommand(["status"], { env, settings }),
     commands: () => commands,
   };
   const commands = buildSetupCommands(services);
@@ -109,7 +111,7 @@ it("a fresh model config reaches the first-hire composer through the actual TUI 
   const devices = await listDevices({ controlPlaneUrl: f.host.baseUrl, operatorToken: f.host.operatorToken });
   expect(devices[0]?.status).toBe("pending");
   const running = f.start();
-  await choose(f.shell, "How much should Clankie decide", "Full");
+  await choose(f.shell, "How much should Clankie do", "Full");
   await pickModel(f.shell);
   await choose(f.shell, "Pair your phone or iPad", "Do this later");
   await choose(f.shell, "Optional:", "Continue to my first agent");
@@ -145,13 +147,13 @@ it("only a completed phone advances automatically; a completed Mac does not", as
   }
   await pair("macos");
   const first = f.start();
-  await choose(f.shell, "How much should Clankie decide", "Full");
+  await choose(f.shell, "How much should Clankie do", "Full");
   await pickModel(f.shell);
   (await prompt(f.shell, "Pair your phone or iPad")).handleInput("\x1b");
   await first;
   await pair("ios");
   const second = f.start();
-  await choose(f.shell, "How much should Clankie decide", "High");
+  await choose(f.shell, "How much should Clankie do", "High");
   await choose(f.shell, "Optional:", "Continue to my first agent");
   (await prompt(f.shell, "Which folder should your first agent work in?")).handleInput("\r");
   (await prompt(f.shell, "What should your first agent do?")).handleInput("\x1b");
@@ -162,7 +164,7 @@ it("only a completed phone advances automatically; a completed Mac does not", as
   ).find((device) => device.platform === "ios")!;
   expect((await f.host.operator(`/v1/devices/${phone.deviceId}/revoke`)).status).toBe(200);
   const third = f.start();
-  await choose(f.shell, "How much should Clankie decide", "Low");
+  await choose(f.shell, "How much should Clankie do", "Low");
   (await prompt(f.shell, "Pair your phone or iPad")).handleInput("\x1b");
   await third;
 });
@@ -175,7 +177,7 @@ it("cancelling autonomy keeps saved custom leaves and does not advance first-run
   }));
   const before = await f.settings.load();
   const running = f.start();
-  (await prompt(f.shell, "How much should Clankie decide")).handleInput("\x1b");
+  (await prompt(f.shell, "How much should Clankie do")).handleInput("\x1b");
   await running;
   expect((await f.settings.load()).autonomy).toEqual(before.autonomy);
   expect(f.shell.getDraft()).toBe("");

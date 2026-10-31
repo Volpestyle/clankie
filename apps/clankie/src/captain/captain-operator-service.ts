@@ -1,3 +1,4 @@
+import { WatchingError } from "../watch.ts";
 import {
   hireDeliveryStage,
   OPERATOR_SEAT_HARNESSES,
@@ -21,6 +22,7 @@ import { projectsRevision, SettingsStore, type ClankieSettings } from "@clankie/
 import { FleetMembershipReadError } from "../fleet-project-membership.ts";
 import { splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
+import { agentReadScope, liveAgentOccupant } from "./agent-read-scope.ts";
 import type { createAgentWorkStore } from "./agent-work.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { LeadStore } from "./lead.ts";
@@ -42,6 +44,7 @@ import {
   type ObservedHeadSeat,
 } from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
+import { createHerdrCore, type HerdrCore } from "./herdr-core.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
 import { PersonaStore } from "./personas.ts";
@@ -108,6 +111,8 @@ export interface CreateOperatorServiceContext {
   readonly hireSeat: HireSeat;
   readonly seatSubjects: Map<string, string>;
   readonly herdrRunner: HerdrWatchRunner;
+  /** The Herdr desktop app's terminal server on this Mac; the default finds it as `hc` does. */
+  readonly herdrCore?: HerdrCore;
   readonly withDriver: (conversation: OperatorConversation) => OperatorConversation;
   readonly conversationGoal: (conversationId: string) =>
     | {
@@ -153,6 +158,8 @@ export function createOperatorService(
 ): CaptainPort["serveOperatorConversation"] {
   let reportCursor: string | undefined;
   let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
+  let defaultHerdrCore: HerdrCore | undefined;
+  const herdrCore = () => ctx.herdrCore ?? (defaultHerdrCore ??= createHerdrCore());
   async function serve(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
@@ -758,14 +765,34 @@ export function createOperatorService(
         // Herdr's own pane list names the pane; the routed runner reaches it over ssh when it's on a PC.
         const pane = await ctx.herdrRunner.resolveTerminal(address);
         if (pane === undefined) return unavailable("Herdr has no pane with that terminal now.");
+        // Only a live coding agent's pane is read, and only what that agent showed (ADR 0307).
+        const scope = agentReadScope(ctx.herdrRunner);
+        const occupant = await liveAgentOccupant(
+          ctx.herdrRunner,
+          pane,
+          scope.occupantPid(request.terminalId),
+        );
+        if (occupant === undefined) {
+          scope.forget(request.terminalId);
+          return unavailable("No coding agent is running in that pane now.");
+        }
         // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
-        const text = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+        const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+        const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
+        // The pane is read only if the same agent held it on both sides of the reads.
+        const after = await liveAgentOccupant(ctx.herdrRunner, pane, occupant.pid);
+        if (after?.key !== occupant.key) {
+          scope.forget(request.terminalId);
+          return unavailable("The agent in that pane changed while it was read; read it again.");
+        }
+        const { text, detail } = scope.bound(request.terminalId, occupant, history, screen);
         return {
           op: "terminal_read",
           schemaVersion: 1,
           terminalId: request.terminalId,
           status: "read",
           text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
+          ...(detail === undefined ? {} : { detail }),
         };
       } catch (error) {
         return unavailable(
@@ -849,6 +876,9 @@ export function createOperatorService(
         request.prompt,
         {
           owner: { conversationId: lead },
+          // The owner granted this place; Clankie's thread only leads the seat, so its own
+          // agent's project doesn't decide where the new one works.
+          connectorPlace: { projectId: chosen.projectId },
           current: () => ctx.conversations.runsCaptainTurns(lead),
           authorize: async () => ctx.conversations.runsCaptainTurns(lead),
         },
@@ -875,6 +905,26 @@ export function createOperatorService(
         terminalId: request.terminalId,
         status: await ctx.terminals.focus(request.terminalId),
       };
+    }
+    if (request.op === "herdr_core_list") {
+      const listed = await herdrCore().list();
+      return listed.status === "listed"
+        ? { op: "herdr_core_list", schemaVersion: 1, status: "listed", agents: [...listed.agents] }
+        : {
+            op: "herdr_core_list",
+            schemaVersion: 1,
+            status: "unavailable",
+            agents: [],
+            detail: listed.detail,
+          };
+    }
+    if (request.op === "herdr_core_read") {
+      const read = await herdrCore().read(request.terminal);
+      return { op: "herdr_core_read", schemaVersion: 1, terminal: request.terminal, ...read };
+    }
+    if (request.op === "herdr_core_focus") {
+      const focused = await herdrCore().focus(request.terminal);
+      return { op: "herdr_core_focus", schemaVersion: 1, terminal: request.terminal, ...focused };
     }
     if (request.op === "seat_bridges") {
       return {
@@ -987,6 +1037,12 @@ export function createOperatorService(
       };
     }
     if (request.op === "close_seat") {
+      // Watch closes nothing through Clankie (ADR 0308); the owner can still close it in Herdr.
+      // It asks again just before the exit, so Watch chosen meanwhile stops a close under way.
+      const refuseWhileWatching = async () => {
+        if ((await ctx.settings()).autonomy?.watch === true) throw new WatchingError();
+      };
+      await refuseWhileWatching();
       // The same hold as close_worker_pane: unlanded work stays unless a reason is recorded.
       const tidy = ctx.herdrWatches.tidy;
       const held = (await tidy?.seatWorktreeHold(request.seatId)) ?? [];
@@ -998,14 +1054,11 @@ export function createOperatorService(
           closed: false,
           refusal: { reason: "unlanded_work", worktrees: held.slice(0, 8) },
         };
-      const closed = await ctx.herdrWatches.closeSeat(
-        request.seatId,
-        request.unlandedReason === undefined
-          ? async () => {
-              if ((await tidy?.seatWorktreeHold(request.seatId))?.length) throw new Error("unlanded_work");
-            }
-          : undefined,
-      );
+      const closed = await ctx.herdrWatches.closeSeat(request.seatId, async () => {
+        await refuseWhileWatching();
+        if (request.unlandedReason === undefined && (await tidy?.seatWorktreeHold(request.seatId))?.length)
+          throw new Error("unlanded_work");
+      });
       if (closed && held.length && request.unlandedReason !== undefined)
         try {
           tidy?.recordLeftBehind(

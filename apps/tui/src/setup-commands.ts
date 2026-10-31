@@ -3,12 +3,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   AUTONOMY_LEVELS,
   AutonomyLevelSchema,
+  WATCH_LEVEL,
+  type AutonomyLevel,
   type DeviceListItem,
   type OperatorAgentPersona,
 } from "@clankie/protocol";
 import type { CaptainReadiness } from "@clankie/model-provider";
 import type { MachineWorkerAccounts } from "@clankie/protocol/worker-accounts";
 import type { AutonomyCommandResult } from "./command/fleet.ts";
+import type { HerdrCommandResult } from "./command/herdr.ts";
+import { describeHerdrBinding } from "./shell/footer.ts";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import type { AutostartCommandResult } from "./command/autostart.ts";
 import { readCaptainReadiness, runThinkingSetup, type ProviderServices } from "./provider-commands.ts";
@@ -28,6 +32,8 @@ export interface SetupCommandServices {
   readonly workspace: () => string;
   readonly pair: (shell: ClankieFaceShell) => Promise<number>;
   readonly autostart: (verb: "status" | "enable") => Promise<AutostartCommandResult>;
+  /** The Herdr session in settings beside the one the running service watches (`clankie herdr status`). */
+  readonly herdr: () => Promise<Pick<HerdrCommandResult, "herdr" | "active" | "unavailable" | "restart">>;
   /** Every console command, read when an entry opens one, so `/setup` never duplicates a wizard. */
   readonly commands: () => readonly FaceShellCommand[];
   readonly restartCaptain?: () => Promise<void>;
@@ -44,7 +50,7 @@ export function buildSetupCommands(services: SetupCommandServices): FaceShellCom
     {
       name: "setup",
       aliases: ["onboard"],
-      description: "Model sign-in, autonomy, phone pairing, then your first agent",
+      description: "Watch your sessions, or set up a model, phone and your first agent",
       argumentHint: "[rooms]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -68,7 +74,12 @@ export function buildSetupCommands(services: SetupCommandServices): FaceShellCom
 export async function runFirstSetup(shell: ClankieFaceShell, services: SetupCommandServices): Promise<void> {
   // Choose authority before model setup becomes ready, so cancelling cannot
   // make a partial first run look complete on the next console launch.
-  if (!(await runAutonomySetup(shell, services.autonomy))) return;
+  const chosen = await runAutonomySetup(shell, services.autonomy);
+  if (chosen === undefined) return;
+  if (chosen === "watch") {
+    await runWatchSetup(shell, services);
+    return;
+  }
   const readiness = await runThinkingSetup(shell, services.provider, {
     restartCaptain: services.restartCaptain,
   });
@@ -115,7 +126,14 @@ async function runGuidedSetup(
     );
     return;
   }
-  if (!autonomySelected && !(await runAutonomySetup(shell, services.autonomy))) return;
+  if (!autonomySelected) {
+    const chosen = await runAutonomySetup(shell, services.autonomy);
+    if (chosen === undefined) return;
+    if (chosen === "watch") {
+      await runWatchSetup(shell, services);
+      return;
+    }
+  }
   if (!(await setupPhone(shell, services))) return;
 
   const flow = shell.setupFlow;
@@ -229,30 +247,86 @@ export function noHarnessReady(report: MachineWorkerAccounts): string | undefine
 async function runAutonomySetup(
   shell: ClankieFaceShell,
   autonomy: SetupCommandServices["autonomy"],
-): Promise<boolean> {
+): Promise<AutonomyLevel | "watch" | undefined> {
   const flow = shell.setupFlow;
   flow.begin("setup · autonomy");
   try {
     const current = await autonomy([]);
+    // Watch comes first where the service can watch (ADR 0308): it needs no model.
+    const canWatch = current.levels.watch !== undefined;
     const choice = await flow.readSelect({
-      message: "How much should Clankie decide on his own?",
-      options: AutonomyLevelSchema.options.map((value) => ({
-        value,
-        label: AUTONOMY_LEVELS[value].label,
-        description: AUTONOMY_LEVELS[value].description,
-      })),
+      message: "How much should Clankie do?",
+      options: [
+        ...(canWatch
+          ? [{ value: "watch", label: WATCH_LEVEL.label, description: WATCH_LEVEL.description }]
+          : []),
+        ...AutonomyLevelSchema.options.map((value) => ({
+          value,
+          label: AUTONOMY_LEVELS[value].label,
+          description: AUTONOMY_LEVELS[value].description,
+        })),
+      ],
       ...(current.level === "custom" ? {} : { initialValue: current.level }),
     });
-    if (choice === undefined) return false;
-    const level = AutonomyLevelSchema.parse(choice);
+    if (choice === undefined) return undefined;
+    const level = choice === "watch" && canWatch ? "watch" : AutonomyLevelSchema.parse(choice);
     const saved = await autonomy([level]);
     if (saved.level !== level)
       throw new Error("Autonomy selection was not confirmed. Return to /setup to review it.");
     shell.insertCommandResult("/setup", saved.description, "success");
-    return true;
+    return level;
   } finally {
     flow.end();
   }
+}
+
+/**
+ * Setup for Watch is three steps: Clankie is installed, the owner picks the Herdr session to
+ * watch, and he watches. No model, phone, connection or hire; Settings holds those for later.
+ */
+async function runWatchSetup(shell: ClankieFaceShell, services: SetupCommandServices): Promise<void> {
+  shell.insertCommandResult("/setup", "2 of 3 · Pick the Herdr session Clankie should watch.", "success");
+  await openSetupCommand(shell, services, "herdr");
+  // `/herdr` returns the same way after a pick, a cancel or an error: ask what is saved and what runs.
+  const status = await services.herdr().catch((error: unknown) => ({
+    unavailable: error instanceof Error ? error.message : String(error),
+  }));
+  const saved = "herdr" in status ? status.herdr : undefined;
+  const active = "active" in status ? status.active : undefined;
+  if (saved?.runtime === "disabled" || active === undefined) {
+    shell.insertMarkdown(
+      [
+        "**2 of 3 · No Herdr session to watch yet**",
+        "",
+        saved?.runtime === "disabled"
+          ? "Herdr is turned off for Clankie, so there is nothing for him to show."
+          : `Clankie can't see a Herdr session${status.unavailable ? `: ${status.unavailable}` : "."}`,
+        "Run `/herdr` to pick or create one, then `/setup` again.",
+      ].join("\n"),
+    );
+    return;
+  }
+  const pending =
+    (saved?.runtime === "bundled" && active.runtime !== "bundled") ||
+    (saved?.runtime === "external" && (active.runtime !== "external" || active.session !== saved.session));
+  if (pending) {
+    shell.insertMarkdown(
+      [
+        "**2 of 3 · Your pick starts after a restart**",
+        "",
+        `Clankie still watches ${describeHerdrBinding(active)}. Run \`${"restart" in status ? status.restart : "clankie restart captain"}\` to switch to ${saved.runtime === "bundled" ? "Clankie’s own session" : saved.session}, then \`/setup\` again.`,
+      ].join("\n"),
+    );
+    return;
+  }
+  shell.insertMarkdown(
+    [
+      `**3 of 3 · Clankie is watching ${describeHerdrBinding(active)}**`,
+      "",
+      "He shows its sessions and workers and changes nothing. No AI model runs, so there is nothing more to set up.",
+      "`/agents` shows the team. When you want him to act, run `/autonomy` and pick a level; `/setup` then adds a model.",
+    ].join("\n"),
+  );
 }
 
 async function openSetupCommand(

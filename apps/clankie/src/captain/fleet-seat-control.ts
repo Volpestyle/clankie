@@ -318,7 +318,7 @@ export function createFleetSeatControl(
     begin: () => void,
     clear: () => void,
     /** A bound mailbox can work even while terminal discovery is unavailable. */
-    uncontrolled?: () => Promise<FleetSeatDelivery>,
+    uncontrolled?: (attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>,
     options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> => {
     const authorized =
@@ -337,7 +337,7 @@ export function createFleetSeatControl(
         return modeUnavailable(options.delivery);
       if (authorized && !(await authorized())) return refused();
       if (options.stableReceiptKey !== undefined) begin();
-      return uncontrolled();
+      return uncontrolled(options);
     }
     const control = current === undefined ? undefined : await attach(current);
     // Codex's native queue is distinct from app-server turn/steer, including
@@ -399,7 +399,7 @@ export function createFleetSeatControl(
     if (uncontrolled !== undefined) {
       if (authorized && !(await authorized())) return refused();
       if (options?.stableReceiptKey !== undefined) begin();
-      return uncontrolled();
+      return uncontrolled(options);
     }
     return isMessageableSeat(current)
       ? {
@@ -559,8 +559,19 @@ export function createFleetSeatControl(
   };
   // The current session, not the one a receipt was filed against. `undefined`
   // means the transcript could not be read, so it proves neither arrival nor absence.
-  const currentArrival = async (text: string, live: HerdrAgentSnapshot | undefined) => {
+  // Any copy in a different session than the original counts. In the original
+  // session only a copy newer than the send's baseline does, so an older
+  // identical message never proves arrival; with no baseline it proves nothing.
+  const currentArrival = async (
+    text: string,
+    live: HerdrAgentSnapshot | undefined,
+    pending: UncertainReceipt | undefined,
+  ) => {
     if (!live?.session || runner.transcript === undefined) return undefined;
+    const pi = live.agent === "pi" || live.session.source === "herdr:pi";
+    const liveSessionId = pi ? nativeSessionId(live) : (nativeSessionId(live) ?? basename(live.session.value, ".jsonl"));
+    const original = pending?.sessionId !== undefined && liveSessionId === pending.sessionId;
+    if (original && pending.beforeIds === undefined && pending.beganAt === undefined) return undefined;
     const transcript = await runner.transcript(live).catch(() => undefined);
     if (transcript === undefined) return undefined;
     const fingerprint = deliveryFingerprint(text);
@@ -569,13 +580,17 @@ export function createFleetSeatControl(
         (entry) =>
           entry.type === "message" &&
           entry.role === "operator" &&
+          (!original ||
+            (pending.beforeIds !== undefined
+              ? !pending.beforeIds.includes(entry.id)
+              : entry.occurredAt !== undefined && Date.parse(entry.occurredAt) > pending.beganAt!)) &&
           deliveryFingerprint(channelBody(entry.text) ?? entry.text) === fingerprint,
       ),
     };
   };
   /**
    * One look at the pane's current session after a send was not confirmed
-   * (ADR 0308). A message already there is reconciled and not sent again. An
+   * (ADR 0312). A message already there is reconciled and not sent again. An
    * idle session that does not contain it may be sent once (`release` drops
    * the uncertain receipt first). Anything less is a specific not-sent.
    */
@@ -606,7 +621,7 @@ export function createFleetSeatControl(
         detail: `No coding session is running in pane ${pane}${earlier}. Nothing was sent again.`,
       };
     const sessionLabel = nativeSessionId(live) ?? live.session.value;
-    const observed = await currentArrival(text, live);
+    const observed = await currentArrival(text, live, pending);
     if (observed === undefined)
       return {
         outcome: "undelivered",
@@ -773,7 +788,7 @@ export function createFleetSeatControl(
     async deliverToSeat(
       seatId: string,
       text: string,
-      uncontrolled?: () => Promise<FleetSeatDelivery>,
+      uncontrolled?: (attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>,
       options?: PeerDeliveryOptions,
     ): Promise<FleetSeatDelivery> {
       const agent = await runner.resolveTerminal(seatId).catch(() => undefined);

@@ -5,6 +5,8 @@ public doorway from [ADR 0151](0151-the-public-doorway-routes-home.md), account
 enrollment from [ADR 0153](0153-an-account-signs-the-mac-in.md), and push
 delivery from [ADR 0159](0159-the-device-authorizes-push-delivery.md) out of this
 repository. The decisions themselves stand.
+[ADR 0311](0311-the-doorway-source-is-public.md) moves the gateway source back
+here; its deployment, accounts and records stay private.
 
 ## Context
 

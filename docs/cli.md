@@ -1974,7 +1974,7 @@ never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
 
 `clankie connector detect` says whether Herdr sessions are discovered
-([ADR 0308](adr/0308-a-cleared-session-is-rediscovered.md)). It is on until you
+([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you
 turn it off: `Herdr: on`, and `clankie connector detect off herdr` stops
 listing and reaching those sessions, including one you just cleared. `on herdr`
 turns discovery back on. While it is on, a message that cannot be confirmed is
@@ -5112,7 +5112,7 @@ The existing owner API accepts category leaves in the revision-fenced
 
 <a id="autonomy-dial"></a>
 
-### `autonomy [status|off|low|high|full]`
+### `autonomy [status|watch|off|low|high|full]`
 
 One dial over all of the above: how much Clankie decides without asking
 ([ADR 0263](adr/0263-one-autonomy-dial-over-the-decision-leaves.md)). `off`
@@ -5144,10 +5144,30 @@ service, so the CLI refuses to set a level there. In the console, `/autonomy
 LEVEL` sets the dial and `/autonomy clear` cancels the selected chat's scheduled
 wake.
 
-First-run `/setup` explicitly asks for Off, Low, High or Full using the same
-descriptions and API. The choice is confirmed before model setup can become
-ready; cancelling leaves the saved leaves untouched and does not advance setup.
-A ready console's `/setup` also asks before pairing or hiring.
+`watch` is the step below Off
+([ADR 0308](adr/0308-watch-is-the-step-below-off.md)). Clankie reads the fleet,
+sessions and transcripts and changes nothing: no model turn reaches a provider,
+every machine acts at Portal (no hire, delivery, question answer, restart or
+close), no wake or health alert reaches a seat, connected apps cannot answer
+prompts, Auto rounds and auto-tidy stop, and no tracker write by Clankie, a lead
+or a worker goes through him. Stop, every read, settings and the owner's own
+tracker writes still work. The command reports `level: "watch"`. The API is
+`changes.watch` (`true` turns it on and writes Off's leaves; `false` leaves it);
+any `changes.autonomyLevel` leaves Watch too, so a client that predates Watch,
+which reads Off, moves up with its next choice. Snapshots carry `watch` only
+on `?includeWatch=true`; its absence there means the service cannot watch, and
+the CLI refuses `watch` against it.
+
+First-run `/setup` explicitly asks for Watch (where the service can watch),
+Off, Low, High or Full using the same descriptions and API. The choice is
+confirmed before model setup can become ready; cancelling leaves the saved
+leaves untouched and does not advance setup. A ready console's `/setup` also
+asks before pairing or hiring. Choosing Watch makes setup three steps: Clankie
+is installed, `/herdr` picks the session to watch, and he watches. Setup says
+he is watching only once the running service watches that session; a new pick
+that waits on `clankie restart captain`, a cancelled picker or no Herdr session
+says so instead. No model, phone, connection or hire is asked for; pick a level
+later and `/setup` adds them.
 
 <a id="auto-switch"></a>
 
@@ -5684,9 +5704,9 @@ requested working directory; an authorized shell command still runs as the
 owner and can address other paths. The explicit local macOS envelope described
 below does not confine these joined receivers.
 
-The public service and client contract is implemented. Production gateway
-bootstrap/channel routing and admission/rate limits belong to `clankie-ops` and
-has separate source and rollout evidence; real Mac/Windows driving remains an
+The public service and client contract is implemented. Gateway
+bootstrap/channel routing and admission/rate limits live in `apps/gateway`; their
+production rollout belongs to `clankie-ops`; real Mac/Windows driving remains an
 owner-run live gap.
 Do not treat a loopback relay fixture as a live gateway deployment. The gateway
 cannot read or forge joined-host capabilities, commands or results
@@ -9593,7 +9613,8 @@ Unknown names fail closed without signalling any process.
 These carry secrets, external consent, or live session chrome, so entry stays
 interactive in the console. The capability exists — only the flag does not:
 
-- `/setup` — explicit autonomy level → first-run sign-in and model choice →
+- `/setup` — explicit autonomy level (Watch goes straight to `/herdr` and
+  stops: no model is needed) → first-run sign-in and model choice →
   phone sign-in and `/pair` →
   optional `/connect` → first agent's folder/task and a reviewed request through
   Clankie's normal conversation. An active phone with chat access is required

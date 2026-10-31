@@ -4850,6 +4850,16 @@ paths:
         (seq, at, conversationId, origin, text), `next`, `more` and
         `unreadReports`. Setting `clankie` needs the owner (operator bearer or a
         Take Control device); a connector reads status and inbox only.
+        `herdr_core_list`, `herdr_core_read` (terminal) and `herdr_core_focus`
+        (terminal) reach the Herdr desktop app's terminal server, herdr-core, on this
+        Mac: its live agents (a terminal whose program reports a status, with a
+        process in front that isn't a shell), what one agent showed, and showing one
+        in the app. A read is bound as `terminal_read` is (ADR 0307): only a live
+        agent, only what it showed since its first read, refused when the agent
+        changed while it was read, with `detail` saying when earlier screen is held
+        back. List and read need `terminalObserve`, focus `terminalControl`. They
+        never send to a terminal or start a core; with no core running, list answers
+        `unavailable` with no agents.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

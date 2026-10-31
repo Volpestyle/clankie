@@ -485,6 +485,23 @@ it("refuses a parent native health message behind its durable fleet mailbox with
   ).toBe(false);
 });
 
+// Watch (ADR 0308): a message already waiting in a seat's mailbox when Watch is chosen is
+// refused at the seat's next poll, so it starts no native turn.
+it("refuses a message waiting for a fleet seat once Watch is chosen, and hands it nothing", async () => {
+  const f = await fixture(60 * 60_000, undefined, false, true, async (_root, rows) => {
+    rows[3]!.parent_pane_id = "w1:p3";
+  });
+  // A poll that parks and ends leaves the seat bound, so the alert waits for its next poll.
+  expect(await f.captain.pollFleetSeatEvents("w1:p3", 1)).toEqual([]);
+  const delivery = f.captain.notifyFleetHealthAlert("w1:p4", "Fleet proof alert: waiting before Watch.");
+  // Long enough for the alert to pass its own Watch check and wait in the mailbox.
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  const settings = new SettingsStore(join(f.root, "settings.json"));
+  await settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  expect(await f.captain.pollFleetSeatEvents("w1:p3", 300)).toEqual([]);
+  expect(await delivery).toBe(false);
+});
+
 // VUH-2249: each report receipt (stored, taken, acknowledged) ended the
 // reporter's parked poll, so an idle worker spent a whole turn saying it was
 // standing by. Receipts now wait for the seat's next actionable event.

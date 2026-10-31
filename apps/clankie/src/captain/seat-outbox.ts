@@ -259,6 +259,7 @@ export class SeatOutbox {
   /** Until a seat polls this process, a seat present before the restart is presumed bound. */
   private reconnectUntil: number | undefined;
   private closed = false;
+  private watched = false;
   private turnActive = false;
   private turnSessionId: string | undefined;
   private turnObservedAt = 0;
@@ -619,7 +620,7 @@ export class SeatOutbox {
 
   /**
    * Drop one unresolved receipt for this exact content so a rediscovery can
-   * send it once (ADR 0308). An unreadable journal and a delivery still in
+   * send it once (ADR 0312). An unreadable journal and a delivery still in
    * flight stay put. Returns whether a receipt was released.
    */
   public releaseAbsent(content: string): boolean {
@@ -1134,6 +1135,29 @@ export class SeatOutbox {
     return this.acknowledge(original.messageId, original.recipientBinding);
   }
 
+  /**
+   * Watch (ADR 0308), read fresh before each poll: while it holds, every event the seat has
+   * not taken is refused, never sent, so nothing queued before Watch starts a native turn.
+   * A delivery during a poll parked while watching ends that poll, so the next one decides.
+   */
+  public watching(watching: boolean): void {
+    this.watched = watching;
+    if (watching) this.refuseUntaken();
+  }
+
+  /**
+   * Reads Watch only when an event is waiting for this poll. A poll with nothing waiting
+   * binds the seat at once instead of waiting on the read; anything sent after that passed
+   * its own Watch check when it was sent.
+   */
+  public async readWatch(watching: () => Promise<boolean>): Promise<void> {
+    if (this.queued.some((pending) => !pending.taken && !pending.settled)) this.watching(await watching());
+  }
+  private refuseUntaken(): void {
+    for (const pending of this.queued.slice())
+      if (!pending.taken && !pending.settled) pending.settle({ outcome: "aborted" });
+  }
+
   /** Explicit launcher departure; unlike service shutdown it cannot reconnect. */
   public release(): void {
     this.close();
@@ -1244,6 +1268,9 @@ export class SeatOutbox {
   }
 
   private take(recipientBinding?: string, capabilities?: OperatorSeatCapabilities): OperatorSeatEvent[] {
+    // Watch read at this poll's start already refused what was waiting; anything newer waits
+    // for the next poll, which reads Watch again.
+    if (this.watched) return [];
     // The owner is heard first; wakes, watches and reports follow (VUH-2874).
     const taken = [...this.queued].sort((left, right) => ownerFirst(left) - ownerFirst(right));
     const events: OperatorSeatEvent[] = [];
@@ -1349,6 +1376,9 @@ export class SeatOutbox {
   private wakePoller(): void {
     const [first] = this.pollers;
     if (first === undefined) return;
+    // A poll parked while watching ends at once, so the seat's next poll reads Watch afresh:
+    // leaving Watch lets a new message straight through, and staying refuses it (ADR 0308).
+    if (this.watched) return first.finish([], "wake");
     const ready = this.take(first.recipientBinding, first.capabilities);
     if (ready.length > 0) first.finish(ready, "wake");
   }

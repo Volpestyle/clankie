@@ -17,9 +17,10 @@ This repository is public. Both neighbors are private and consume
 
 - `~/dev/clankie-app` holds the React Native app built on top of Clankie's
   foundation.
-- `~/dev/clankie-ops` holds the public gateway behind `api.clankie.bot`,
-  Cognito accounts, their AWS templates and deploys, and production, App Store
-  and launch records.
+- `~/dev/clankie-ops` deploys the gateway behind `api.clankie.bot` from this
+  repo's `apps/gateway`, and holds Cognito accounts, their AWS templates and
+  deploys, and production, App Store and launch records
+  ([ADR 0311](docs/adr/0311-the-doorway-source-is-public.md)).
 
 ## Map
 
@@ -30,6 +31,8 @@ This repository is public. Both neighbors are private and consume
   (one active mouth; `/discord` picks which process the launcher starts).
 - `apps/discord-activity` — the watch-me-play surface.
 - `apps/relay` — remote access for the phone/desktop app.
+- `apps/gateway` — the doorway behind `api.clankie.bot` that carries the
+  phone's encrypted traffic to the owner's Mac (ADR 0311); `clankie-ops` deploys it.
 - `apps/docs` — public field guide and generated technical references. The
   [library index](docs/README.md) maps current guides, proposals, and history. The
   [current architecture](docs/architecture.md) describes system boundaries,
@@ -59,7 +62,13 @@ This repository is public. Both neighbors are private and consume
 
 ## Rules
 
-- Project planning and issue tracking live in the [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview).
+- File every new core issue as a [GitHub issue](https://github.com/Volpestyle/clankie/issues)
+  on this repo. New private work (the app, deploys, accounts, and any security
+  finding not yet fixed) goes in the issues of the private `clankie-app` or
+  `clankie-ops` repo, never here. Create no new issues in the
+  [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview);
+  issues already there keep being worked and updated there, and milestone
+  updates still go to that project.
 - Match the surrounding code and iterate with focused checks. On a shared
   machine, run builds, typechecks, test suites, installs and formatting/linting
   through `clankie heavy --` (the `fleet-resources` skill); CI runs them directly.
@@ -83,6 +92,16 @@ This repository is public. Both neighbors are private and consume
   [`scripts/testing/landing-test-policy.ts`](scripts/testing/landing-test-policy.ts));
   never report that as a green gate. The full `pnpm check` runs for releases and
   on request; `clankie integrate` is optional.
+- Work never waits on CI ([ADR 0310](docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)).
+  Keep pushing, iterating, restarting and finding bugs while CI checkpoints on
+  the side; nobody sits idle on a run. File each bug as an issue at the front of
+  the queue, ordered by how badly it blocks the current goals. Open pull
+  requests as drafts: a draft gets the quick checks on every push, and marking
+  it ready runs the landing gate and the Mac job once before merge. A test that
+  already fails on `main` warns and does not block a pull request; file it. A
+  change gets its full checks in one place, never twice: CI for a pull request,
+  `pnpm check:landing` for a direct landing. While iterating, run only the tests
+  for what you changed.
 - On a pull request, keep its branch current with `main` and resolve conflicts
   yourself before asking anyone to look. Take each Codex review round as a batch:
   fix every finding together in one push, reply on and resolve each thread you
@@ -108,8 +127,8 @@ This repository is public. Both neighbors are private and consume
   `node integrations/claude-plugin/build.mjs` and `node integrations/codex-plugin/build.mjs`
   after changing it. Episode memory preserves experiences, not standing
   operating instructions. Keep project-specific procedures in that project's repo.
-- Keep the public/private boundary: code that runs only on Clankie's public
-  gateway and accounts, its deployment, and business, App Store or production
+- Keep the public/private boundary: the gateway's source lives here, but its
+  deployment, Clankie's accounts, and business, App Store or production
   records go to `clankie-ops`, never here.
 - Clankie runs only on the owner's own machines. There is no hosted or managed
   body: the gateway is only the phone's encrypted doorway to the owner's Mac

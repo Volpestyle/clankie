@@ -29,6 +29,8 @@ import {
   prepareFreeAgentIntent as prepareFreeIntent,
 } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
+import { WATCH_REFUSAL, WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
+import { routeLaneRun } from "./lane-route.ts";
 import {
   joinedMachineShellTool,
   joinedHireTools,
@@ -362,6 +364,7 @@ import {
 } from "./remote-codex-app-server.ts";
 import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
+import { guardWatchedRequests } from "./watch-request.ts";
 import { RoomHandoffBursts } from "./room-handoff-bursts.ts";
 import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
@@ -404,9 +407,6 @@ import { voiceCallHandoff, voiceCallTranscript } from "./voice-call-handoff.ts";
 const WORKER_RESULT_BRIEF =
   "End each finished turn with a report in the resolved reporting style that the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
 
-/** Pi's answers to a compaction request that leave nothing to do. */
-const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to compact (session too small)"]);
-
 /** How long a head seat stays held after a completed poll; see the seat outbox. */
 const HEAD_BOUND_GRACE_MS = 30_000;
 /** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
@@ -441,6 +441,8 @@ const LEAD_HANDOFF_REQUEST = [
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
+  // Watch (ADR 0308): machine access holds every machine at Portal; this gate covers the rest.
+  const watch = createWatchGate(settingsStore);
   const requireAccess =
     options.requireMachineAccess ??
     ((fleet, required) => requireRuntimeMachineAccess(settingsStore, fleet, required));
@@ -483,6 +485,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     get settings() {
       return settings;
     },
+    watching: () => watch.watching(),
     get deps() {
       return deps;
     },
@@ -811,7 +814,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         )
       ).projectId;
     let source: string | undefined;
-    const origin = authority?.owner.conversationId;
+    // A connector start is placed by the owner's grant, not by the leading conversation's
+    // agent (ADR 0301), so only its folder and the granted project count.
+    const placed = authority?.connectorPlace;
+    if (placed !== undefined) {
+      if (input.projectId !== placed.projectId)
+        throw new Error("The selected project does not match the place this agent was started in.");
+    }
+    const origin = placed === undefined ? authority?.owner.conversationId : undefined;
     const configuredProject = await leadHireProject(
       projects,
       (await settings()).linearWebhook.projectChats,
@@ -840,7 +850,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : undefined;
       // A cleared or restarted session keeps the pane and harness and replaces
       // the session. With Herdr detection on, that is the same agent: rebind the
-      // lead to the session now in the pane (ADR 0308). A different harness,
+      // lead to the session now in the pane (ADR 0312). A different harness,
       // terminal, or a missing proof still refuses.
       let expectedOccupant =
         native.session === undefined ? undefined : occupantIdForHerdrSession(native.session);
@@ -1255,10 +1265,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
         }),
   });
-  const evaluator = new Evaluator(
-    join(options.stateDir, "evaluator"),
-    deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable },
-  );
+  const evaluator = new Evaluator(join(options.stateDir, "evaluator"), {
+    ...(deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable }),
+    watching: () => watch.watching(),
+  });
   const evaluationStarts = new Map<string, () => EvaluationCapture>();
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir), (metrics) => {
     const capture = evaluationStarts.get(metrics.runId);
@@ -1643,7 +1653,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (modelRuntime === undefined) {
       const created =
         options.evalSessionBoundary === undefined
-          ? createCaptainModelRuntime(options.repoRoot)
+          ? createCaptainModelRuntime(options.repoRoot, {
+              refuse: () => watch.refuse(WATCH_TURN_REFUSAL),
+            })
           : Promise.resolve(options.evalSessionBoundary.runtime);
       modelRuntime = created;
       modelRuntimeReady = false;
@@ -2039,6 +2051,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // noTools: "builtin" only changes the initial active loadout.
         });
         preparingSession = created.session;
+        guardWatchedRequests(created.session, watch);
         if (run?.signal.aborted) {
           disposePreparingSession();
           run.signal.throwIfAborted();
@@ -2079,19 +2092,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * next run must start routine again.
    */
   async function syncModel(lane: LaneSession): Promise<void> {
-    if (lane.budget.compactBeforeNextRun) {
-      lane.budget.compactBeforeNextRun = false;
-      // A request had to be trimmed to fit the included-usage limit: compact now,
-      // while idle, so this run's requests fit whole.
-      await lane.session.compact().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        // Pi's own threshold may already have compacted, or the bytes were
-        // images that compaction cannot shrink; the request budget still holds.
-        if (BENIGN_COMPACTION_REFUSALS.has(message)) return;
-        console.warn("Compaction before the next run failed:", message);
-      });
-    }
-    lane.route.current = await (await runtime()).resolveRoute(lane.purpose);
+    lane.route.current = await routeLaneRun(lane, await runtime());
     const selection = lane.route.current.selection;
     const current = lane.session.model;
     if (
@@ -2725,6 +2726,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const pruneGuard =
     (current: Awaited<ReturnType<typeof settings>>, guard: () => Promise<void>) => async () => {
+      // Watch removes no worktree (ADR 0308), asked again before every tree's removal.
+      await watch.refuse(WATCH_REFUSAL);
       await guard();
       const latest = await settings();
       if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
@@ -2973,11 +2976,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : undefined;
       // A launch still fenced, or still being admitted, in the start folder itself is checked
       // there the old way, never moved, so its retry meets that folder's own allocation and
-      // receipt (ADR 0207).
-      const inPlace =
+      // receipt (ADR 0207). A launch under another harness is never this one's retry.
+      const admitting = retained === undefined && (inPlaceStarts.get(scope) ?? 0) > 0;
+      const fenced =
         retained === undefined &&
-        ((inPlaceStarts.get(scope) ?? 0) > 0 ||
-          herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: request.workingDirectory }));
+        !admitting &&
+        herdrWatches.hireRetained({
+          fleet: request.fleet,
+          workingDirectory: request.workingDirectory,
+          harness: request.harness,
+        });
+      const inPlace = admitting || fenced;
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
       const freshness: HireCheckoutFreshness = retained
@@ -3011,7 +3020,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return {
           outcome: "failed",
           reason: "not_ready",
-          detail: freshness.reason ?? "Checkout freshness unverified",
+          detail: [
+            freshness.reason ?? "Checkout freshness unverified",
+            // Say why no fresh worktree was offered, so the caller doesn't chase the checkout.
+            fenced
+              ? `This start was not moved to a fresh worktree because an earlier ${request.harness ?? "agent"} start in this folder is still unresolved; it keeps the folder until its pane is closed or the earlier start is recovered.`
+              : admitting
+                ? "This start was not moved to a fresh worktree because another start in this folder is still being admitted; try again once it finishes."
+                : undefined,
+          ]
+            .filter(Boolean)
+            .join(". "),
         };
       if (freshness.outcome === "fresh")
         brief = [
@@ -3417,16 +3436,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat needs a structured lane.
-    const fallback = async (): Promise<FleetSeatDelivery> => {
+    // `attempt` is the delivery attempt that fell back here: the rediscovery's
+    // final resend passes its own options, not the first attempt's.
+    const fallback = async (attempt?: { readonly rediscover?: boolean | "final" }): Promise<FleetSeatDelivery> => {
       const live = fleetMailboxes.get(seatId);
+      const rediscover = attempt?.rediscover ?? deliveryOptions?.rediscover;
       // A cleared session leaves the mailbox certain of an occupant that is gone.
       // Release that one receipt so the rediscovery can send once. A poll still
       // bound to the current session keeps its receipt until the transcript
       // proves the message absent, which is the final attempt.
       if (
         live &&
-        (deliveryOptions?.rediscover === "final" ||
-          (deliveryOptions?.rediscover === true && !live.boundTo(inboundBinding(current) ?? "")))
+        (rediscover === "final" || (rediscover === true && !live.boundTo(inboundBinding(current) ?? "")))
       )
         live.releaseAbsent(message);
       if (live?.boundTo(inboundBinding(current) ?? "") || live?.uncertain()) {
@@ -4962,6 +4983,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (shutdown.signal.aborted || !text.trim() || text.length > 4000)
         return outcome(false, "stopped_or_invalid");
       if (!(await validateConversationOwner(owner))) return outcome(false, "owner_unavailable");
+      // Watch sends nothing into a seat, a lead's included (ADR 0308).
+      if (await watch.watching()) return outcome(false, "watching");
       await guard();
       await conversations.waitForDriverAdmission(owner.conversationId, shutdown.signal);
       await guard();
@@ -5663,7 +5686,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (id) => milestoneSignals(autoMeasurements.get(id)),
     );
   const stopAutoRounds = autoCadence.start(async () => {
-    if (shutdown.signal.aborted || !autonomy.enabled) return;
+    if (shutdown.signal.aborted || !autonomy.enabled || (await watch.watching())) return;
     await projectMirrors
       .refresh((await settings()).projects.projects)
       .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
@@ -5847,8 +5870,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (herdrRunner.readPane === undefined) throw new Error("Herdr pane reads are unavailable");
       return herdrRunner.readPane(paneId, "visible", "ansi");
     },
+    watching: () => watch.watching(),
     runInPane: async (paneId, argv) => {
       if (herdrRunner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
+      // Every lead relaunch (fresh restart, failover, failback) types its command here.
+      await watch.refuse();
       await herdrRunner.runInPane(paneId, argv);
     },
     idle: (conversationId) => {
@@ -6012,13 +6038,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }, options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS);
   const hiredSeatRestarts = createHiredSeatRestarts({
     path: join(options.stateDir, "hired-seat-restart-policy.json"),
-    enabled: async () => (await settings()).fleet.seatRestarts !== "off",
+    enabled: async () => (await settings()).fleet.seatRestarts !== "off" && !(await watch.watching()),
     candidates: () => herdrWatches.freshRestartCandidates(),
     receipts: () => herdrWatches.hiredRestartReceipts(),
     observe: readHiredRestartObservation,
     authority: async (candidate) => {
       if (shutdown.signal.aborted || !(await validateConversationOwner(candidate.owner)))
         throw new RestartRefusal("authority_unavailable");
+      if (await watch.watching()) throw new RestartRefusal("watching");
     },
     resources: async (candidate) => {
       const guard = await options.fleetResources?.restartGuard(candidate.agent);
@@ -6227,7 +6254,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // VUH-2392: finished, harvested, landed hires close on their own, and landed worktrees in
   // enrolled roots go, through the same guarded close and prune a lead uses.
   const autoTidy = createAutoTidy({
-    setting: async () => (await settings()).fleet.autoTidy,
+    // Watch closes nothing and prunes nothing (ADR 0308).
+    setting: async () => ((await watch.watching()) ? "off" : (await settings()).fleet.autoTidy),
     runner: herdrRunner,
     tidy: paneTidy,
     reviewerSeats: async () => reviewerSeatIds((await settings()).projects),
@@ -7699,6 +7727,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       runner: herdrRunner,
       ownerAskPending: (seatId) => conversations.ownerAskPendingFor(seatId),
       record: (app, text) => fleetRoom.postAppNote(app, text),
+      watching: () => watch.watching(),
     }),
     recordInbound: (arrival) => noteFleetRoom(inboundFleetRoomRecord(arrival)),
     readWorkerAccounts,
@@ -8486,6 +8515,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               recipientBinding = inboundBinding(source);
               polledSource = source;
               if (source !== undefined) await rememberOperatorSource(binding.conversationId, source);
+              // A turn waiting from before Watch is refused, not held for later, so it reaches
+              // no model; the poll itself is then refused below Portal (ADR 0308).
+              outbox.watching(await watch.watching());
               await admit();
             },
           )
@@ -9029,6 +9061,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
+      // A message queued before Watch is refused here, so it starts no native turn (ADR 0308).
+      await mailbox.readWatch(() => watch.watching());
       const pending = mailbox.poll(waitMs, signal, binding);
       if (binding && !live) fleetChanges.touch();
       const events = await pending;

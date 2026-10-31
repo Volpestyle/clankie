@@ -1627,7 +1627,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public async deliverToSeat(
     seatId: string,
     text: string,
-    uncontrolled?: () => Promise<FleetSeatDelivery>,
+    uncontrolled?: (attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>,
     options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
     if (this.requireWorkerAccess) {
@@ -2256,12 +2256,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return this.hireOwners.hiredProjectContext(pane, seat, occupant);
   }
   /**
-   * Whether a new launch into this folder is still unresolved or was settled by recovery, under
-   * any harness. A retry of that launch must arrive at the same folder (ADR 0207, ADR 0306).
+   * Whether a new launch into this folder is still unresolved or was settled by recovery. A retry
+   * of that launch must arrive at the same folder (ADR 0207, ADR 0306). With a harness, only that
+   * harness's launches count: a launch under another harness is never this one's retry, so it
+   * doesn't pin a new start to the folder.
    */
   public hireRetained(input: {
     readonly fleet?: string | undefined;
     readonly workingDirectory: string;
+    readonly harness?: string | undefined;
   }): boolean {
     if (this.projectHires.unresolved(input)) return true;
     let receipts: ReturnType<DeliveryFence["all"]>;
@@ -2278,9 +2281,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return false;
       }
       if (!Array.isArray(parts)) return false;
-      const [fleet, , workingDirectory, session] = parts as unknown[];
+      const [fleet, harness, workingDirectory, session] = parts as unknown[];
       return (
         fleet === (input.fleet ?? "local") &&
+        (input.harness === undefined || harness === input.harness) &&
         workingDirectory === input.workingDirectory &&
         session === "new" &&
         (this.hireReceipts.pending(key) !== undefined || this.hireReceipts.settled(key) !== undefined)

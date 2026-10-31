@@ -64,7 +64,7 @@ export const ReceiptSchema = z
     occupantId: z.string().optional(),
     /**
      * This receipt is the one rediscovery of an operator message whose first
-     * send was not confirmed (ADR 0308). A later send of the same text is not
+     * send was not confirmed (ADR 0312). A later send of the same text is not
      * dispatched again until the receipt is settled.
      */
     rediscovered: z.literal(true).optional(),

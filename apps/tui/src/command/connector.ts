@@ -28,7 +28,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // `clankie connector prompts` lists which apps may answer prompts in agent
 // panes, and turns one on or off by its name or device id (ADR 0303).
 // `clankie connector detect` turns Herdr session discovery on or off, and
-// `clankie connector serve` turns the connector on or off per app (ADR 0308).
+// `clankie connector serve` turns the connector on or off per app (ADR 0312).
 // `clankie connector lead` says who leads Clankie's lead threads, and hands
 // them to the connected apps or back to Clankie (ADR 0304).
 

@@ -1,4 +1,3 @@
-import { MANAGED_CREDITS_ONLY_MESSAGE } from "@clankie/protocol/model-keys";
 import { ModelSubscriptionSignIns, type ModelSignInAuthority } from "./model-subscriptions.ts";
 import type { BodyTelemetry, BodyModelTelemetryInput } from "@clankie/observability/body-telemetry";
 import type { CredentialStore } from "@clankie/credential-broker";
@@ -6,7 +5,6 @@ import { createModelRegistry, loadBundledCatalog } from "@clankie/model-registry
 import {
   captainReadiness,
   CODEX_PROVIDER_ID,
-  isHostedModelEnvironment,
   modelCredentialAllowed,
   loadConfig,
   parseModelRef,
@@ -93,12 +91,6 @@ export function createModelKeys(options: {
     return next;
   };
   const env = options.env ?? process.env;
-  const managed = isHostedModelEnvironment(env);
-  const refused = {
-    ok: false,
-    error: "managed_credits_only",
-    message: MANAGED_CREDITS_ONLY_MESSAGE,
-  } as const;
   const telemetryCatalog = options.telemetry === undefined ? undefined : loadBundledCatalog();
   const report = (
     action: BodyModelTelemetryInput["action"],
@@ -146,7 +138,6 @@ export function createModelKeys(options: {
     const disabled = new Set(config.disabled_providers ?? []);
     const providers = models
       .getProviders()
-      .filter((provider) => !managed || provider.id === "clankie")
       .filter((provider) => !disabled.has(provider.id) && (enabled.size === 0 || enabled.has(provider.id)));
     return { config, catalog, models, providers };
   };
@@ -177,7 +168,7 @@ export function createModelKeys(options: {
       const { variant: _variant, ...config } = state.config;
       const selection = resolvePiModelSelection(config, state.models, {
         catalog: state.catalog,
-        hasCodexSubscription: !isHostedModelEnvironment(env) && credentials[CODEX_PROVIDER_ID] !== undefined,
+        hasCodexSubscription: credentials[CODEX_PROVIDER_ID] !== undefined,
       });
       const providerId = parseModelRef(selection.ref)?.providerId;
       if (providerId === undefined || !modelCredentialAllowed(providerId, credentials[providerId], { env }))
@@ -193,7 +184,6 @@ export function createModelKeys(options: {
     validate: async (input) => {
       if (
         !["openai-codex", "xai"].includes(input.providerId) ||
-        (input.providerId === "openai-codex" && isHostedModelEnvironment(env)) ||
         (input.providerId === "xai" && input.method !== "device")
       )
         return "unsupported_provider";
@@ -229,11 +219,10 @@ export function createModelKeys(options: {
   const port: ModelKeysPort = {
     close: () => signIns.close(),
     async subscriptionMethods() {
-      if (managed) return { methods: [] };
       const state = await snapshot();
       return {
         methods: [
-          ...(!isHostedModelEnvironment(env) && state.providers.some((p) => p.id === "openai-codex")
+          ...(state.providers.some((p) => p.id === "openai-codex")
             ? [
                 {
                   providerId: "openai-codex" as const,
@@ -248,10 +237,8 @@ export function createModelKeys(options: {
         ],
       };
     },
-    startSubscription: (input, authority) =>
-      managed ? Promise.resolve(refused) : signIns.start(input, authority),
-    subscriptionStatus: (sessionId, principal, cancel) =>
-      managed ? refused : signIns.status(sessionId, principal, cancel),
+    startSubscription: (input, authority) => signIns.start(input, authority),
+    subscriptionStatus: (sessionId, principal, cancel) => signIns.status(sessionId, principal, cancel),
     async readiness() {
       const loaded = await loadConfig({ env, ...(options.cwd ? { cwd: options.cwd } : {}) });
       if (loaded.issues.length > 0) throw new Error("model_configuration_invalid");
@@ -269,8 +256,7 @@ export function createModelKeys(options: {
       try {
         effectiveModel = resolvePiModelSelection(state.config, state.models, {
           catalog: state.catalog,
-          hasCodexSubscription:
-            !isHostedModelEnvironment(env) && credentials[CODEX_PROVIDER_ID] !== undefined,
+          hasCodexSubscription: credentials[CODEX_PROVIDER_ID] !== undefined,
         }).ref;
         const effectiveProvider = parseModelRef(effectiveModel)?.providerId;
         if (
@@ -308,8 +294,7 @@ export function createModelKeys(options: {
         try {
           resolved = resolvePiModelSelection({ ...state.config, model: ref }, state.models, {
             catalog: state.catalog,
-            hasCodexSubscription:
-              !isHostedModelEnvironment(env) && credentials[CODEX_PROVIDER_ID] !== undefined,
+            hasCodexSubscription: credentials[CODEX_PROVIDER_ID] !== undefined,
           });
         } catch {
           /* Unresolvable settings remain named and unavailable. */
@@ -368,7 +353,7 @@ export function createModelKeys(options: {
             escalation: route.escalation === undefined ? null : project(route.escalation.ref),
           };
         }),
-        openItems: isHostedModelEnvironment(env) ? ["included_catalog_policy", "credit_rate_policy"] : [],
+        openItems: [],
       };
     },
     async subscriptions() {
@@ -433,7 +418,6 @@ export function createModelKeys(options: {
       return { ok: true };
     },
     async set(providerId, apiKey, guard) {
-      if (managed) return refused;
       return mutate(async () => {
         let action: "key-set" | "key-replaced" = "key-set";
         try {
@@ -462,7 +446,6 @@ export function createModelKeys(options: {
       });
     },
     async validate(providerId, modelId) {
-      if (managed) return refused;
       const state = await apiProvider(providerId);
       if (state === undefined) return { ok: false, error: "unsupported_provider" };
       const model = piModelFor(state.models, providerId, modelId, state);
@@ -509,7 +492,6 @@ export function createModelKeys(options: {
       }
     },
     async select(model) {
-      if (managed && parseModelRef(model)?.providerId !== "clankie") return refused;
       return mutate(async () => {
         const ref = parseModelRef(model);
         // Unknown input is never an identifier in telemetry: report() checks the bundled catalog.
@@ -532,8 +514,7 @@ export function createModelKeys(options: {
           try {
             resolvePiModelSelection({ ...state.config, model }, state.models, {
               catalog: state.catalog,
-              hasCodexSubscription:
-                !isHostedModelEnvironment(env) && (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+              hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
             });
           } catch {
             report("model-selected", "unsupported_model", providerId, ref.modelId);
@@ -550,7 +531,6 @@ export function createModelKeys(options: {
       });
     },
     async remove(providerId) {
-      if (managed) return refused;
       try {
         if ((await apiProvider(providerId)) === undefined) {
           report("key-removed", "unsupported_provider", providerId);
