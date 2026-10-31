@@ -21,7 +21,12 @@ import {
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
 } from "../../../packages/protocol/src/operator-service.ts";
-import { SessionRefusal, SessionSources, createHerdrSessionSource } from "@clankie/agent-hosts/sessions";
+import {
+  SessionRefusal,
+  SessionSources,
+  createHerdrCoreSessionSource,
+  createHerdrSessionSource,
+} from "@clankie/agent-hosts/sessions";
 import type { ClankieGuide } from "./connector-guide.ts";
 import type { RelayDeviceAuthorizer } from "./device-auth.ts";
 
@@ -166,7 +171,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
     {
       capabilities: { tools: {} },
       instructions:
-        "Clankie's agents are the coding agents running in Herdr panes on the owner's machines. " +
+        "Clankie's agents are the coding agents running in Herdr panes on the owner's machines, and in the Herdr desktop app on this Mac. " +
         "list_agents shows each one with its machine and project. read_agent shows what its screen says now. " +
         "message_agent sends it one message, as the owner would from the Clankie app. " +
         "list_places lists where an agent can start; start_agent starts one there. " +
@@ -192,7 +197,7 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
         name: "list_agents",
         title: "List agents",
         description:
-          "List the coding agents in Herdr on each of the owner's machines: their name, machine, project, status and what they last said they're doing. Every linked machine is named, even with no agents; notices say when a machine's Herdr isn't answering (its agents read unreachable) or is too old. Use the returned agent id with read_agent and message_agent.",
+          "List the coding agents in Herdr on each of the owner's machines, and in the Herdr desktop app on this Mac (ids starting herdr-core:, which can be read but not messaged): their name, machine, project, status and what they last said they're doing. Every linked machine is named, even with no agents; notices say when a machine's Herdr isn't answering (its agents read unreachable) or is too old. Use the returned agent id with read_agent and message_agent.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -821,15 +826,18 @@ function connectorServer(options: ConnectorMcpOptions, bearer: string): Server {
 
 /** The session sources this connector reaches, bound to its own bearer. */
 function connectorSessions(operator: ConnectorOperatorPort, bearer: string): SessionSources {
+  const dispatch = (request: OperatorConversationServiceRequest) => operator.dispatch(request, bearer);
   return new SessionSources([
     createHerdrSessionSource(
       {
-        dispatch: (request) => operator.dispatch(request, bearer),
+        dispatch,
         terminalTail: (request, signal) => operator.terminalTail(request, bearer, signal),
         tailRefusal: async (response) => new ConnectorRefusal(response.status, await errorCode(response)),
       },
       { surfaceClientId: SURFACE_CLIENT_ID },
     ),
+    // The Herdr desktop app's agents: listed and read beside Herdr's, never messaged.
+    createHerdrCoreSessionSource({ dispatch }),
   ]);
 }
 
