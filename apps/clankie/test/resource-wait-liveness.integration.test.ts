@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import type { Socket } from "node:net";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
-import { afterEach, expect, it, vi, type TestContext } from "vitest";
+import { afterEach, beforeAll, expect, it, vi, type TestContext } from "vitest";
 import {
   createResourceGovernor,
   createSimctlAdapter,
@@ -30,6 +30,13 @@ import { FileCredentialStore } from "@clankie/credential-broker";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 
 const execute = promisify(execFile);
+// Codex seats read process births through the kernel helper a source checkout
+// prepares; build it rather than rely on another test file having done so.
+beforeAll(async () => {
+  await execute(process.execPath, [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")], {
+    timeout: 65_000,
+  });
+}, 70_000);
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close();
