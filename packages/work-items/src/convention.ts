@@ -152,6 +152,21 @@ export async function initializeConvention(
       linear: { ...convention.linear, label: request.linearLabel },
     });
   }
+  if (request.previous === "none" && convention.previous !== undefined) {
+    const { previous: _dropped, ...rest } = convention;
+    convention = WorkConventionSchema.parse(rest);
+  } else if (request.previous === "linear") {
+    // Moving off Linear (#81): keep its scope readable, usually the one recorded before this init.
+    const scope =
+      convention.linear ?? (await readConvention(root).catch(() => undefined))?.linear ?? undefined;
+    if (scope === undefined || convention.backend !== "github")
+      throw new WorkInitInvalid("Reading a previous Linear tracker needs the github backend and a Linear team");
+    convention = WorkConventionSchema.parse({
+      ...convention,
+      linear: { team: scope.team, ...(scope.project === undefined ? {} : { project: scope.project }) },
+      previous: "linear",
+    });
+  }
   if (request.releaseSource !== undefined || request.releaseLane !== undefined) {
     convention = WorkConventionSchema.parse({
       ...convention,

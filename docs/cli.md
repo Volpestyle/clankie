@@ -3081,10 +3081,16 @@ Under owner closure, work stays In Review for the owner's ordinary verification.
   same report as `trackerRequestBudget`.
 - `clankie work init` records what discovery found; `work init --backend
 default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
-[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL]
+[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--previous linear|none]
 [--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]` records the owner's
   choice. The answer is written to `.clankie/tracking.json` in the repo; nothing
   else is added to a repo that tracks work elsewhere.
+  `--previous linear` with `--backend github` is for a repo moving off Linear
+  (#81). It keeps the Linear scope recorded before (or the one `--linear-team`
+  names) readable: lists show GitHub's issues, then Linear's, and an existing
+  Linear issue is read, updated and commented on where it lives. Every new issue
+  goes to GitHub, never to Linear. `--previous none` drops Linear once its open
+  issues are done or no longer relevant.
   `--linear-label` saves an existing Linear label as `linear.label`, scoping
   this repo's board within its team/project and adding the label to new items.
   It requires a Linear convention with a team; blank, multiline or over-64-character

@@ -1,11 +1,16 @@
 {
   "schemaVersion": 1,
-  "backend": "linear",
+  "backend": "github",
+  "github": {
+    "repo": "Volpestyle/clankie"
+  },
   "linear": {
     "team": "VUH",
     "project": "clankie-7f2de0de4a75"
   },
+  "previous": "linear",
   "decisions": "docs/adr",
-  "decidedBy": "discovery",
-  "decidedAt": "2026-09-26T18:24:50.522Z"
+  "decidedBy": "owner",
+  "decidedAt": "2026-10-31T23:45:00.000Z",
+  "note": "New issues go to GitHub. Linear stays readable until its open issues are done or no longer relevant (#81)."
 }
