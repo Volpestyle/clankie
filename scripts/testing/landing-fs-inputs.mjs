@@ -46,6 +46,7 @@ export const landingFsInputs = Object.fromEntries([
     "tidy-worktrees-home-pane.integration.test.ts",
     "native-process-blocked-caller.integration.test.ts",
     "fleet-project-membership.test.ts",
+    "hired-seat-native-restart.integration.test.ts",
   ].map((file) => [`apps/clankie/test/${file}`, fleetInputs]),
   [
     "apps/clankie/test/linux-native-fleet.integration.test.ts",
