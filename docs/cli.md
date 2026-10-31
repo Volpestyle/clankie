@@ -5679,9 +5679,9 @@ requested working directory; an authorized shell command still runs as the
 owner and can address other paths. The explicit local macOS envelope described
 below does not confine these joined receivers.
 
-The public service and client contract is implemented. Production gateway
-bootstrap/channel routing and admission/rate limits belong to `clankie-ops` and
-has separate source and rollout evidence; real Mac/Windows driving remains an
+The public service and client contract is implemented. Gateway
+bootstrap/channel routing and admission/rate limits live in `apps/gateway`; their
+production rollout belongs to `clankie-ops`; real Mac/Windows driving remains an
 owner-run live gap.
 Do not treat a loopback relay fixture as a live gateway deployment. The gateway
 cannot read or forge joined-host capabilities, commands or results
