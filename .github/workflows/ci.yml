@@ -132,18 +132,20 @@ jobs:
         env:
           # Four vCPUs and 16 GB fit three 2.5 GiB compiler heaps at once.
           CLANKIE_TYPECHECK_JOBS: 3
+          # A complete run report: unhandled errors and unfinished files count against it.
+          CLANKIE_RELEASE_TEST_REPORT: ${{ github.workspace }}/.local/landing-run.json
         run: |
           status=0
           # The checked-out merge commit's first parent is the base it merges into.
           base=$(git rev-parse HEAD^1)
           node scripts/check-landing.mjs --base "$base" --keep-going -- \
-            --reporter=default --reporter=json --outputFile.json=.local/landing-tests.json || status=$?
+            --reporter=default --reporter=./scripts/testing/release-test-reporter.mjs || status=$?
           checks=$(node -p 'JSON.parse(require("fs").readFileSync(".local/landing-gate.json", "utf8")).checksExitCode')
           failed=$(node -p 'JSON.parse(require("fs").readFileSync(".local/landing-gate.json", "utf8")).phases.at(-1)?.name ?? ""')
           echo "[landing] gate exit $status, checks exit $checks, last phase $failed"
           if [ "$checks" != 0 ] && [ "$failed" = tests ]; then
             # Only failures the base does not already have fail this change (ADR 0310).
-            node scripts/testing/baseline-failures.mjs --base "$base" --report .local/landing-tests.json
+            node scripts/testing/baseline-failures.mjs --base "$base" --report .local/landing-run.json
             exit $?
           fi
           test "$checks" = 0
@@ -160,7 +162,7 @@ jobs:
           include-hidden-files: true
           path: |
             .local/landing-gate.json
-            .local/landing-tests.json
+            .local/landing-run.json
           retention-days: 7
 
   # Seeds the cargo cache the landing job restores. Caches saved on main are
