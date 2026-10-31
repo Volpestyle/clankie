@@ -524,9 +524,7 @@ it.each([
 );
 
 it("a hung producer call fails admissions closed until it settles, then the channel recovers", async () => {
-  // The recovering admission lists, opens and grants a share inside this same
-  // bound, so it stays well above what that takes on a loaded CI runner.
-  const s = await stack({ lockTimeoutMs: 2_000 });
+  const s = await stack({ lockTimeoutMs: 200 });
   const playSink = s.play.createSink("FireRed");
   s.launches.launched(GUILD, CHANNEL);
   const lookup = s.hold("GET", "/shares");
