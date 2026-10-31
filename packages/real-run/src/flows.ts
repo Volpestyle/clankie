@@ -29,6 +29,13 @@ export const flows: readonly Flow[] = [
     proves: "Clankie starts from an empty home with his own private Herdr fleet and answers",
     run: (stack) =>
       Effect.gen(function* () {
+        // Its own free ports, never the live service's or relay's.
+        const ports = [stack.env.PORT, stack.env.CLANKIE_RELAY_PORT, stack.env.CLANKIE_DEVICE_PORT];
+        yield* check(
+          new Set(ports).size === 3 && !ports.some((port) => port === "4310" || port === "4321"),
+          "the scratch home has its own ports, apart from the live ones",
+          ports,
+        );
         // His own bundled Herdr, under the scratch home's state: never the owner's sessions.
         const herdr = yield* stack.cliJson("herdr", "create");
         yield* check(herdr.herdr?.runtime === "bundled", "herdr create selects his own fleet", herdr);
@@ -115,7 +122,8 @@ export const flows: readonly Flow[] = [
   },
   {
     name: "relay",
-    proves: "the app relay the phone reaches starts beside the service and answers",
+    proves:
+      "the app relay the phone reaches starts beside the service, and a phone pairs from `clankie pair` and reads the owner's settings through it",
     run: (stack) =>
       Effect.gen(function* () {
         const health = yield* stack.startRelay;
@@ -128,6 +136,63 @@ export const flows: readonly Flow[] = [
           ),
         );
         yield* Effect.logInfo("relay healthy").pipe(Effect.annotateLogs({ relay: status }));
+
+        // The phone's side of pairing: the owner mints an offer with the CLI, and
+        // the app redeems it with no credential of its own.
+        const offer = yield* stack.cliJson("pair", "--json");
+        yield* check(offer.ok === true && typeof offer.code === "string", "`clankie pair` mints an offer", {
+          ok: offer.ok,
+        });
+        const post = (path: string, body: unknown) =>
+          stack.http(path, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        const redeemed = yield* post("/v1/pairing/redeem", {
+          code: offer.code,
+          device: { name: "Real run phone", platform: "ios" },
+        });
+        yield* check(redeemed.status === 200, "the app redeems the code", { status: redeemed.status });
+        const pending = (yield* Effect.promise(() => redeemed.json())) as {
+          completionToken?: string;
+          offeredGrants?: unknown;
+          deviceToken?: unknown;
+        };
+        yield* check(
+          pending.deviceToken === undefined && !JSON.stringify(pending).includes(offer.code),
+          "redeeming hands out no device token and never echoes the code",
+        );
+        const completed = yield* post("/v1/pairing/complete", {
+          completionToken: pending.completionToken,
+          acceptedGrants: pending.offeredGrants,
+        });
+        yield* check(completed.status === 200, "the app completes pairing", { status: completed.status });
+        const paired = (yield* Effect.promise(() => completed.json())) as {
+          relayUrl?: string;
+          deviceToken?: string;
+        };
+        yield* check(paired.relayUrl === stack.relayUrl, "pairing points the app at this relay", {
+          relayUrl: paired.relayUrl,
+        });
+        const settings = yield* Effect.tryPromise(() =>
+          fetch(`${stack.relayUrl}/v1/operator/host-settings`, {
+            headers: { authorization: `Bearer ${paired.deviceToken}` },
+            signal: AbortSignal.timeout(10_000),
+          }),
+        );
+        yield* check(
+          settings.status === 200,
+          "the paired phone reads the owner's settings through the relay",
+          {
+            status: settings.status,
+          },
+        );
+        const reused = yield* post("/v1/pairing/redeem", {
+          code: offer.code,
+          device: { name: "Second phone", platform: "ios" },
+        });
+        yield* check(reused.status !== 200, "a used code pairs nothing more", { status: reused.status });
       }),
   },
   {
