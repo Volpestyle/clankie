@@ -13,7 +13,13 @@ import {
 } from "@clankie/protocol/machine-join";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  validateHeaderValue,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { Duplex } from "node:stream";
 import {
   PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH,
@@ -117,6 +123,16 @@ const CONNECTOR_SIGN_IN_PEER_BUDGET = { capacity: 60, perSecond: 2 } as const;
 
 const REQUEST_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST);
 const RESPONSE_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST);
+
+function isSendableResponseHeader(header: PublicGatewayHttpHeader): boolean {
+  if (!RESPONSE_HEADER_ALLOWLIST.has(header.name)) return true;
+  try {
+    validateHeaderValue(header.name, header.value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export interface PublicGatewayLogger {
   info(fields: Readonly<Record<string, unknown>>, message: string): void;
@@ -935,6 +951,12 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     if (frame.kind === "response_start") {
       if (exchange.started) {
         connection.socket.close(1008, "duplicate response start");
+        return;
+      }
+      // setHeader throws on a value Node refuses (a CR or LF, for one), and a
+      // throw inside this socket listener would take down every host's tunnel.
+      if (!frame.headers.every(isSendableResponseHeader)) {
+        connection.socket.close(1008, "invalid response header value");
         return;
       }
       exchange.started = true;
