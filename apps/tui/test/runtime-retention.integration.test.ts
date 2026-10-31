@@ -9,7 +9,10 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  readlinkSync,
   realpathSync,
+  statSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -144,7 +147,28 @@ function fixture(longPaths = false) {
   return { home, checkout, runtime, updates, git, commits, input, record, holds, heldIds };
 }
 
-it("passed canaries release obsolete real cutovers, keep current/previous, and publish CLI/API evidence", async () => {
+/**
+ * On Linux, retention reads each of this account's processes from /proc and keeps every
+ * candidate when one cwd cannot be read. Some containers give a root run an init it owns but
+ * cannot read, so the cases that need a complete inventory skip there.
+ */
+function unreadableSameAccountCwds(): string[] {
+  const uid = process.getuid?.();
+  if (process.platform !== "linux" || uid === undefined) return [];
+  const unreadable: string[] = [];
+  for (const pid of readdirSync("/proc").filter((name) => /^\d+$/u.test(name)))
+    try {
+      if (statSync(join("/proc", pid)).uid === uid) readlinkSync(join("/proc", pid, "cwd"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EACCES") unreadable.push(pid);
+    }
+  return unreadable;
+}
+const unreadableCwds = unreadableSameAccountCwds();
+const INVENTORY_INCOMPLETE = `process inventory incomplete beside unreadable PIDs ${unreadableCwds.join(", ")}`;
+
+it("passed canaries release obsolete real cutovers, keep current/previous, and publish CLI/API evidence", async (context) => {
+  context.skip(unreadableCwds.length > 0, INVENTORY_INCOMPLETE);
   const f = fixture();
   let body: ChildProcess | undefined;
   let boot: RuntimeBootIdentity = f.input().boot;
@@ -268,7 +292,8 @@ it("passed canaries release obsolete real cutovers, keep current/previous, and p
   }
 }, 60_000);
 
-it("protects live cwd and recorded service PIDs, canary/recovery dependencies, dirty/locked trees and journals", async () => {
+it("protects live cwd and recorded service PIDs, canary/recovery dependencies, dirty/locked trees and journals", async (context) => {
+  context.skip(unreadableCwds.length > 0, INVENTORY_INCOMPLETE);
   const f = fixture();
   f.git(f.runtime, "checkout", "--detach", f.commits[4]!);
   const live = f.record(f.commits[0]!, f.commits[1]!);
@@ -381,7 +406,8 @@ it("fails closed on pending latest canary, unreadable recovery, pin aliases and 
   expect(updater.status()).toMatchObject({ retentionPending: { state: "unconfirmed" } });
 }, 60_000);
 
-it("finishes an interrupted removal on a later run, from an old-style marker or a failed delete", async () => {
+it("finishes an interrupted removal on a later run, from an old-style marker or a failed delete", async (context) => {
+  context.skip(unreadableCwds.length > 0, INVENTORY_INCOMPLETE);
   const f = fixture();
   f.git(f.runtime, "checkout", "--detach", f.commits[4]!);
   const current = f.record(f.commits[3]!, f.commits[4]!);

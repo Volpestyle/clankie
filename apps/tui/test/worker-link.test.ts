@@ -945,9 +945,19 @@ it("keeps an original claim when HTTP403 carries an exact-looking refusal body",
   expect(service.runner).toHaveBeenCalledOnce();
 });
 
-it.each([false, true])(
+async function ipv6Loopback(): Promise<boolean> {
+  const probe = createServer();
+  return await new Promise<boolean>((resolve) => {
+    probe.once("error", () => resolve(false));
+    probe.listen(0, "::1", () => probe.close(() => resolve(true)));
+  });
+}
+
+it.for([false, true])(
   "handles a real AggregateError cause chain without clearing a lost accepted reply=%s",
-  async (accepted) => {
+  async (accepted, context) => {
+    // A real two-family refusal needs ::1; without it the IPv6 attempt fails as EAFNOSUPPORT.
+    context.skip(!(await ipv6Loopback()), "needs an IPv6 loopback for a real two-family refusal");
     const service = await receiptService();
     service.setDrop(accepted);
     const home = await linkedHome(service.url, true);
