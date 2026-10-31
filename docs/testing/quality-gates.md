@@ -6,7 +6,10 @@ HTTP journey, unit, integration, Rust, IPC, type, lint and documentation checks.
 Pushes and pull requests run fast formatting, lint and native MCP contracts on Linux.
 Pull requests also run the landing gate's checks on Linux against their base;
 exit 3, green checks waiting for the standing reviewer, passes there, and
-macOS-only tests still need a Mac. That job restores the Vox cargo cache a
+macOS-only tests run in the `mac` job on the owner's Mac runner: install, the
+pinned Herdr and the changed tests, for pushes and same-repository pull requests
+only, never forks. It stays off until the `CLANKIE_MAC_RUNNER` repository
+variable is `true`. The landing job restores the Vox cargo cache a
 push to main saves, and checks three TypeScript programs at once. Run the
 complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,

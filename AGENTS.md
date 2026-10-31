@@ -83,6 +83,9 @@ This repository is public. Both neighbors are private and consume
   [`scripts/testing/landing-test-policy.ts`](scripts/testing/landing-test-policy.ts));
   never report that as a green gate. The full `pnpm check` runs for releases and
   on request; `clankie integrate` is optional.
+- On a pull request, keep its branch current with `main` and resolve conflicts
+  yourself before asking anyone to look. Take each Codex review round as a batch:
+  fix every finding together in one push, then ask for one re-review.
 - Before committing, pushing or releasing, read the resolved owner working
   preferences (`clankie fleet status` or `clankie doctor --json`). Defaults permit
   commit and push and ask before official releases; explicit task gates take

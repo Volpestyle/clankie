@@ -155,3 +155,45 @@ jobs:
       # The landing gate's own Vox lint, so the cached build is the one it reuses.
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
         working-directory: apps/vox
+
+  # The changed tests on James's Mac, so macOS-only tests run on every change
+  # (ADR 0240). This repository is public, so the job never runs code from a
+  # fork on that machine: only pushes here and pull requests from this
+  # repository's own branches. It stays off until the Mac's runner for this
+  # repository is registered and the CLANKIE_MAC_RUNNER variable is "true".
+  mac:
+    if: >-
+      vars.CLANKIE_MAC_RUNNER == 'true' &&
+      (github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: [self-hosted, macOS, james-mac]
+    timeout-minutes: 30
+    steps:
+      # The runner's own work directory, never the owner's ~/dev checkout.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+      # The Mac is shared with the owner's agents: heavy steps take a permit
+      # from Clankie's fleet scheduler when its CLI is installed. The pnpm
+      # store stays on the Mac between runs, so there is no Actions cache.
+      - name: Share the machine's heavy-work permits
+        run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
+      - run: $HEAVY pnpm install --frozen-lockfile
+      # Tests spawn the pinned Herdr by name; activity tests decode media with
+      # the Mac's own ffmpeg.
+      - name: Pinned Herdr
+        run: |
+          pnpm herdr:build
+          echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
+          command -v ffmpeg || echo "::warning::ffmpeg is not on this Mac's PATH"
+      - name: Changed tests against the base
+        # A pull request's merge commit, or a push to main, has the base as its first parent.
+        run: $HEAVY pnpm exec vitest run --config vitest.config.ts --changed "$(git rev-parse HEAD^1)" --passWithNoTests
