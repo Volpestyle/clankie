@@ -36,6 +36,7 @@ import {
 } from "@clankie/protocol/local-companion";
 import { bodyLimit } from "hono/body-limit";
 import { randomBytes } from "node:crypto";
+import QRCode from "qrcode";
 import { COMPLETION_TOKEN_TTL_MS, DeviceSessionSigner, mintDeviceSessionClaims } from "../device-session.ts";
 import {
   applyDeviceEvent,
@@ -67,6 +68,14 @@ import {
   type TrustedDeviceIdentity,
   type TrustedOperatorIdentity,
 } from "./types.ts";
+/** The pairing link as QR modules, row by row, for an app that draws it (ADR 0314). */
+export function pairingQr(deepLink: string): { size: number; modules: string } {
+  const { modules } = QRCode.create(deepLink, { errorCorrectionLevel: "M" });
+  let bits = "";
+  for (let i = 0; i < modules.size * modules.size; i += 1) bits += modules.data[i] ? "1" : "0";
+  return { size: modules.size, modules: bits };
+}
+
 export interface RegisterPairingRoutesContext {
   readonly dependencies: ClankieAppDependencies;
   readonly app: Hono;
@@ -329,13 +338,31 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     };
   };
 
-  ctx.app.post("/v1/pairing/offer", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+  // The owner's app on this Mac may also add a device (ADR 0314): a paired
+  // device with Take Control, calling over this Mac's own loopback, can mint
+  // an ordinary offer. Review and run offers stay the operator's.
+  const offerMinter = async (request: Request) => {
+    const operator = await authenticateOperator(request, ctx.dependencies);
     if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+      return { error: "operator_authentication_unavailable", status: 503 } as const;
+    if (operator) return { mintedBy: operator.operatorId, device: false } as const;
+    if (!ctx.dependencies.isSameMacRequest?.(request))
+      return { error: "operator_authentication_required", status: 401 } as const;
+    const device = await ctx.authenticateDevice(request);
+    if (device === "unavailable") return { error: "device_authentication_unavailable", status: 503 } as const;
+    if ("denied" in device) return { error: "operator_authentication_required", status: 401 } as const;
+    if (!device.grants.terminalControl) return { error: "forbidden", status: 403 } as const;
+    return { mintedBy: `device:${device.deviceId}`, device: true } as const;
+  };
+
+  ctx.app.post("/v1/pairing/offer", async (context) => {
+    const minter = await offerMinter(context.req.raw);
+    if ("error" in minter) return context.json({ error: minter.error }, minter.status);
+    const operator = { operatorId: minter.mintedBy };
     const parsed = PairingOfferRequestSchema.safeParse((await readJson(context.req.raw)) ?? {});
     if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    if (minter.device && (parsed.data.run !== undefined || parsed.data.review !== undefined))
+      return context.json({ error: "forbidden" }, 403);
     if (parsed.data.run !== undefined && parsed.data.review !== undefined)
       return context.json({ error: "run_review_conflict" }, 400);
     // A configured doorway wins (ADR 0151), so an offer it cannot carry is a code
@@ -414,7 +441,8 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     // only this authenticated ordinary operator response exposes the short code.
     const wire =
       parsed.data.review === undefined ? { ...protectedWire, localCode: offer.code } : protectedWire;
-    return context.json(direct === undefined ? wire : withDirectPairingRoute(wire, direct));
+    const routed = direct === undefined ? wire : withDirectPairingRoute(wire, direct);
+    return context.json(minter.device ? { ...routed, qr: pairingQr(routed.deepLink) } : routed);
   });
 
   // Redeem an offer secret or typed code (the secret IS the capability, so the

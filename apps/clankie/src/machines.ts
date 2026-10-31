@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { glob, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { appendFile, chmod, glob, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { AgentHostConnectionSchema, type SettingsStore } from "@clankie/settings";
@@ -68,6 +68,81 @@ export async function readSshConfig(path = join(homedir(), ".ssh", "config")): P
   return contents.join("\n");
 }
 
+/** A machine on the owner's tailnet, as Tailscale itself reports it (ADR 0314). */
+export interface TailnetPeer {
+  /** The MagicDNS label Clankie reaches it at, e.g. `desktop` in `desktop.tail1234.ts.net`. */
+  readonly host: string;
+  readonly dnsName: string;
+  readonly name: string;
+  readonly platform?: "darwin" | "win32" | "linux";
+  /** Host keys Tailscale SSH advertises for it; empty when the machine runs its own sshd. */
+  readonly sshHostKeys: readonly string[];
+}
+
+const TAILNET_PEER_MAX = 16;
+const HOST_KEY = /^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,3}$/u;
+
+/** Online computers in `tailscale status --json`; phones and the Mac itself are left out. */
+export function tailnetPeers(status: string): TailnetPeer[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(status);
+  } catch {
+    return [];
+  }
+  const peers = (parsed as { Peer?: unknown } | null)?.Peer;
+  if (peers === null || typeof peers !== "object") return [];
+  const result: TailnetPeer[] = [];
+  for (const raw of Object.values(peers as Record<string, unknown>)) {
+    const peer = raw as {
+      HostName?: unknown;
+      DNSName?: unknown;
+      OS?: unknown;
+      Online?: unknown;
+      sshHostKeys?: unknown;
+    };
+    if (peer.Online !== true || typeof peer.DNSName !== "string") continue;
+    const dnsName = peer.DNSName.replace(/\.$/u, "").toLowerCase();
+    const host = dnsName.split(".")[0] ?? "";
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/u.test(host)) continue;
+    const os = typeof peer.OS === "string" ? peer.OS.toLowerCase() : "";
+    const platform =
+      os === "macos" ? "darwin" : os === "windows" ? "win32" : os === "linux" ? "linux" : undefined;
+    if (platform === undefined) continue;
+    const name =
+      typeof peer.HostName === "string" && peer.HostName.trim().length > 0
+        ? peer.HostName.trim().slice(0, 64)
+        : host;
+    const sshHostKeys = Array.isArray(peer.sshHostKeys)
+      ? peer.sshHostKeys
+          .filter((key): key is string => typeof key === "string" && HOST_KEY.test(key))
+          .slice(0, 8)
+      : [];
+    result.push({ host, dnsName, name, platform, sshHostKeys });
+    if (result.length >= TAILNET_PEER_MAX) break;
+  }
+  return result;
+}
+
+const TAILSCALE_BINARIES = ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"];
+
+/** This machine's view of its tailnet, or "" when Tailscale isn't installed or running. */
+export async function readTailscaleStatus(env: NodeJS.ProcessEnv = process.env): Promise<string> {
+  for (const binary of TAILSCALE_BINARIES) {
+    try {
+      const { stdout } = await exec(binary, ["status", "--json"], {
+        env,
+        timeout: 1500,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+      return stdout;
+    } catch {
+      /* Try the next install location; none means no tailnet. */
+    }
+  }
+  return "";
+}
+
 type Probe = (
   command: string,
   args: readonly string[],
@@ -96,8 +171,14 @@ export class Machines {
     changed: (id: string) => void | Promise<void>;
     run?: Probe;
     sshConfig?: () => Promise<string>;
+    /** `tailscale status --json`; "" when there is no tailnet. */
+    tailnet?: () => Promise<string>;
+    /** The service user's known_hosts, which Tailscale's host keys join when a machine is added. */
+    knownHostsPath?: string;
     env?: NodeJS.ProcessEnv;
   };
+  /** Tailscale's host keys for the peers of the latest discovery, by MagicDNS label. */
+  private tailnetKeys = new Map<string, readonly string[]>();
   constructor(options: Machines["options"]) {
     this.options = options;
   }
@@ -106,6 +187,7 @@ export class Machines {
     machine: Pick<Machine, "transport" | "ssh" | "shell">,
     args: readonly string[],
     socketPath?: string,
+    knownHosts?: string,
   ) {
     if (this.active >= 4)
       await new Promise<void>((resolve, reject) => {
@@ -134,6 +216,10 @@ export class Machines {
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=yes",
+            // Tailscale's own record of the machine's keys, beside the owner's.
+            ...(knownHosts === undefined
+              ? []
+              : ["-o", `UserKnownHostsFile=${this.knownHostsPath()} ${knownHosts}`]),
             "-o",
             "ConnectTimeout=2",
             "-o",
@@ -163,6 +249,30 @@ export class Machines {
     }
   }
 
+  private knownHostsPath() {
+    return this.options.knownHostsPath ?? join(homedir(), ".ssh", "known_hosts");
+  }
+
+  /**
+   * A machine added from the tailnet is trusted with the host keys Tailscale
+   * reports for it, so later fleet calls (which never accept a new key) reach it.
+   * An owner entry already there for that name is left as it is.
+   */
+  private async trustTailnetKeys(ssh: string) {
+    const host = ssh.slice(ssh.lastIndexOf("@") + 1);
+    const keys = this.tailnetKeys.get(host);
+    if (keys === undefined || keys.length === 0) return;
+    const path = this.knownHostsPath();
+    const existing = await readFile(path, "utf8").catch(() => "");
+    const named = existing
+      .split(/\r?\n/u)
+      .some((line) => line.trim().split(/\s+/u)[0]?.split(",").includes(host) === true);
+    if (named) return;
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const prefix = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+    await appendFile(path, prefix + keys.map((key) => `${host} ${key}\n`).join(""), { mode: 0o600 });
+  }
+
   async add(raw: unknown) {
     const input = AgentHostConnectionSchema.parse(raw);
     if (JoinedMachineIdSchema.safeParse(input.id).success)
@@ -183,6 +293,7 @@ export class Machines {
         },
       };
     });
+    await this.trustTailnetKeys(input.ssh);
     this.cached = undefined;
     await this.options.changed(input.id);
     return input;
@@ -357,6 +468,52 @@ export class Machines {
         sessions: [],
       });
     }
+    let tailnetTimer: ReturnType<typeof setTimeout> | undefined;
+    const status = await Promise.race([
+      (this.options.tailnet?.() ?? readTailscaleStatus(this.options.env)).catch(() => ""),
+      new Promise<string>((resolve) => {
+        tailnetTimer = setTimeout(() => resolve(""), 2000);
+      }),
+    ]);
+    clearTimeout(tailnetTimer);
+    const reached = new Set(configured.map((entry) => entry.ssh?.slice(entry.ssh.lastIndexOf("@") + 1)));
+    const knownHosts: string[] = [];
+    const tailnetKeys = new Map<string, readonly string[]>();
+    for (const peer of tailnetPeers(status)) {
+      if (reached.has(peer.host) || reached.has(peer.dnsName)) continue;
+      reached.add(peer.host);
+      tailnetKeys.set(peer.host, peer.sshHostKeys);
+      for (const key of peer.sshHostKeys) knownHosts.push(`${peer.host} ${key}`);
+      let id = peer.host;
+      if (!/^[a-z]/u.test(id)) id = `ts-${id}`;
+      const base = id.slice(0, 48);
+      for (let suffix = 1; configured.some((entry) => entry.id === id); suffix += 1) id = `${base}-${suffix}`;
+      configured.push({
+        id,
+        name: peer.name,
+        platform: peer.platform!,
+        ssh: peer.host,
+        shell: peer.platform === "win32" ? "powershell" : "posix",
+        transport: "ssh",
+        configured: false,
+        accessLevel: "portal",
+        accessEnforcement: "service-preference",
+        state: "discovering",
+        workerCount: null,
+        sessions: [],
+      });
+    }
+    this.tailnetKeys = tailnetKeys;
+    // Probes read Tailscale's keys from a private file that lives only for this discovery.
+    const keyDirectory =
+      knownHosts.length === 0
+        ? undefined
+        : await mkdtemp(join(tmpdir(), "clankie-tailnet-")).catch(() => undefined);
+    const keyFile = keyDirectory === undefined ? undefined : join(keyDirectory, "known_hosts");
+    if (keyFile !== undefined) {
+      await writeFile(keyFile, `${knownHosts.join("\n")}\n`, { mode: 0o600 });
+      await chmod(keyFile, 0o600);
+    }
     const pending = Promise.all(
       configured.map(async (machine) => {
         const connections = settings.execution.connections.filter((entry) => entry.machine === machine.id);
@@ -377,7 +534,9 @@ export class Machines {
           });
         machine.sessions = pinned;
         try {
-          const { stdout } = await this.probe(machine, ["session", "list", "--json"]);
+          const tailnetFile =
+            machine.ssh !== undefined && tailnetKeys.get(machine.ssh)?.length ? keyFile : undefined;
+          const { stdout } = await this.probe(machine, ["session", "list", "--json"], undefined, tailnetFile);
           const parsed = JSON.parse(stdout) as { sessions?: Array<{ name?: string; socket_path?: string }> };
           if (!Array.isArray(parsed.sessions)) throw new Error("Invalid session inventory");
           machine.state = "available";
@@ -410,6 +569,7 @@ export class Machines {
                     ? ["agent", "list"]
                     : ["--session", session.name, "agent", "list"],
                   session.socketPath,
+                  tailnetFile,
                 );
                 session.workerCount = parseHerdrAgentList(result.stdout).length;
                 if (session.state !== "disabled")
@@ -435,6 +595,8 @@ export class Machines {
       }),
     ]);
     clearTimeout(deadline);
+    // Probes still running past the deadline lose their key file and fail closed.
+    if (keyDirectory !== undefined) await rm(keyDirectory, { recursive: true, force: true }).catch(() => {});
     return {
       observedAt: new Date().toISOString(),
       machines: [

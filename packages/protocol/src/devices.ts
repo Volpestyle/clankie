@@ -178,6 +178,17 @@ export const PairingOfferWireSchema = z.object({
   gateway: z.literal(true).optional(),
   /** The Mac's direct control origin the link carries (ADR 0204). */
   direct: z.string().min(1).max(2_048).optional(),
+  /**
+   * The link as a QR code, for an app that draws it (ADR 0314): `size` modules
+   * a side, row by row, "1" dark and "0" light.
+   */
+  qr: z
+    .object({
+      size: z.number().int().min(21).max(177),
+      modules: z.string().regex(/^[01]+$/u),
+    })
+    .refine((qr) => qr.modules.length === qr.size * qr.size, "QR modules must fill the square")
+    .optional(),
 });
 export type PairingOfferWire = z.infer<typeof PairingOfferWireSchema>;
 
