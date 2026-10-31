@@ -10,8 +10,8 @@
 // when every failure also fails there. A failure the base does not have, a test
 // file the base does not have, or a report it cannot read exits 1, so a change
 // still fails on anything it newly breaks. So does a file that failed outside
-// any test (a load error or a failed hook): the report cannot say which error
-// it was, so it is never matched with the base. Failures the base shares are printed
+// any test (a load error or a failed hook, even beside failed tests): such an
+// error has no test name to match, so it is never matched with the base. Failures the base shares are printed
 // as warnings: they belong to main, and the lead files and fixes them there.
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -56,8 +56,9 @@ const failures = (path) => {
       throw new Error(`${file.path} did not finish (${file.state}).`);
     const tests = (file.tests ?? []).filter((test) => test.state === "failed");
     for (const test of tests) failed.add(`${file.path} > ${test.name}`);
-    // A suite that failed to load or failed in a hook has no failed test to name.
-    if (file.state === "failed" && !tests.length) failed.add(`${file.path} ${FILE_FAILURE}`);
+    // A load error or a failed hook belongs to no test, even beside failed tests.
+    if (file.state === "failed" && (!tests.length || file.suiteErrors !== 0))
+      failed.add(`${file.path} ${FILE_FAILURE}`);
   }
   return failed;
 };
