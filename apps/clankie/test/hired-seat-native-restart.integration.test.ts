@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
@@ -13,7 +13,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import { afterEach, expect, it } from "vitest";
+import { promisify } from "node:util";
+import { afterEach, beforeAll, expect, it } from "vitest";
 import type { HarnessSeatAdapter, SeatControl, SeatEvent, SeatLaunch } from "@clankie/agent-hosts";
 import { HiredSeatRestarts, type OriginalHiredRuntime } from "../src/captain/hired-seat-restart.ts";
 import {
@@ -30,6 +31,12 @@ import { nativeProcessStart, observeNativeBirth } from "../src/local-fleet-proce
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import { createClaudeWorkerSeatAdapter, SeatHookLog } from "../src/captain/claude-worker-seat.ts";
 
+// Every fixture observes real births through the same kernel helper a source
+// checkout prepares; build it rather than rely on another test having done so.
+const proofBuilder = join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs");
+beforeAll(async () => {
+  await promisify(execFile)(process.execPath, [proofBuilder], { timeout: 65_000 });
+}, 70_000);
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const action of cleanup.splice(0).reverse()) await action();

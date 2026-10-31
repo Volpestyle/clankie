@@ -19,6 +19,11 @@ MAX_LINE = 4096
 MAX_OUTPUT = 65536
 MAX_CHAIN = 64
 PREFIX = "Native process proof diagnostic: "
+# systemd hosts (Ubuntu among them) mount binfmt_misc on demand at this one
+# path: an autofs trigger with the binfmt_misc filesystem stacked on it. Neither
+# filesystem can hold a PID directory, FD table or namespace handle, and this
+# helper reads nothing under /proc/sys/fs, so they shadow nothing it proves.
+KERNEL_PROC_MOUNTS = {("/proc/sys/fs/binfmt_misc", "autofs"), ("/proc/sys/fs/binfmt_misc", "binfmt_misc")}
 
 
 class Refusal(Exception):
@@ -104,9 +109,13 @@ class Proof:
         rows = [row.split() for row in mounts.decode("ascii", "strict").splitlines()]
         # Refuse nested bind mounts that could substitute an initial namespace
         # handle or hide a process/FD table. Decode mountinfo's kernel escapes.
-        paths = [re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), row[4])
-                 for row in rows if len(row) >= 10]
-        require(mounts == self.proc_mounts and not any(path.startswith("/proc/") for path in paths),
+        # The filesystem type follows the "-" that ends the optional fields.
+        nested = [(re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), row[4]),
+                   row[row.index("-", 6) + 1] if "-" in row[6:-3] else None)
+                  for row in rows if len(row) >= 10]
+        require(mounts == self.proc_mounts and
+                all(not path.startswith("/proc/") or (path, kind) in KERNEL_PROC_MOUNTS
+                    for path, kind in nested),
                 "census", "process_census_unavailable")
 
     def __enter__(self):
