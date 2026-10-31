@@ -14,6 +14,9 @@ import {
   type SetupCommandServices,
 } from "../src/setup-commands.ts";
 import type { SetupFlow } from "../src/shell/setup-flow.ts";
+import { SettingsStore } from "@clankie/settings";
+import { runAutonomyCommand } from "../src/command/fleet.ts";
+import { fleetSettingsClient } from "./fixtures/fleet-settings-client.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "../src/shell/shell.ts";
 
 const tempDirs: string[] = [];
@@ -336,4 +339,45 @@ it("names the missing harnesses and their install steps when no harness can take
   expect(
     noHarnessReady({ ...fresh, accounts: [{ ...signedOut, usable: true, signedIn: true }] }),
   ).toBeUndefined();
+});
+
+it("Watch makes setup three steps with no model: choose Watch, pick the Herdr session, watching", async () => {
+  const { services, opened } = await fixture({});
+  const root = await mkdtemp(join(tmpdir(), "clankie-setup-watch-"));
+  tempDirs.push(root);
+  // The real owner route and CLI over settings on disk.
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const client = fleetSettingsClient(settings);
+  const herdr: FaceShellCommand = {
+    name: "herdr",
+    aliases: [],
+    description: "herdr",
+    takesArgument: true,
+    run() {
+      opened.push("herdr");
+    },
+  };
+  const watching: SetupCommandServices = {
+    ...services,
+    autonomy: (args) => runAutonomyCommand(args, client),
+    commands: () => [...services.commands(), herdr],
+  };
+  const asked: string[] = [];
+  const said: string[] = [];
+  const view = testShell(["watch"]);
+  const flow = view.shell.setupFlow;
+  const readSelect = flow.readSelect.bind(flow);
+  flow.readSelect = async (options) => {
+    asked.push(options.options.map((option) => option.value).join(","));
+    return readSelect(options);
+  };
+  (view.shell as { insertMarkdown: (text: string) => void }).insertMarkdown = (text) => said.push(text);
+
+  await setup(watching).run("", view.shell);
+
+  expect(asked).toEqual(["watch,off,low,high,full"]);
+  expect((await settings.load()).autonomy.watch).toBe(true);
+  expect(opened).toEqual(["herdr"]);
+  expect(said.join("\n")).toContain("3 of 3 · Clankie is watching");
+  expect(said.join("\n")).not.toContain("can't think yet");
 });

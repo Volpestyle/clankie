@@ -5133,10 +5133,14 @@ which reads Off, moves up with its next choice. Snapshots carry `watch` only
 on `?includeWatch=true`; its absence there means the service cannot watch, and
 the CLI refuses `watch` against it.
 
-First-run `/setup` explicitly asks for Off, Low, High or Full using the same
-descriptions and API. The choice is confirmed before model setup can become
-ready; cancelling leaves the saved leaves untouched and does not advance setup.
-A ready console's `/setup` also asks before pairing or hiring.
+First-run `/setup` explicitly asks for Watch (where the service can watch),
+Off, Low, High or Full using the same descriptions and API. The choice is
+confirmed before model setup can become ready; cancelling leaves the saved
+leaves untouched and does not advance setup. A ready console's `/setup` also
+asks before pairing or hiring. Choosing Watch makes setup three steps: Clankie
+is installed, `/herdr` picks the session to watch, and he watches. No model,
+phone, connection or hire is asked for; pick a level later and `/setup` adds
+them.
 
 <a id="auto-switch"></a>
 
@@ -9582,7 +9586,8 @@ Unknown names fail closed without signalling any process.
 These carry secrets, external consent, or live session chrome, so entry stays
 interactive in the console. The capability exists — only the flag does not:
 
-- `/setup` — explicit autonomy level → first-run sign-in and model choice →
+- `/setup` — explicit autonomy level (Watch goes straight to `/herdr` and
+  stops: no model is needed) → first-run sign-in and model choice →
   phone sign-in and `/pair` →
   optional `/connect` → first agent's folder/task and a reviewed request through
   Clankie's normal conversation. An active phone with chat access is required

@@ -3,6 +3,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   AUTONOMY_LEVELS,
   AutonomyLevelSchema,
+  WATCH_LEVEL,
+  type AutonomyLevel,
   type DeviceListItem,
   type OperatorAgentPersona,
 } from "@clankie/protocol";
@@ -44,7 +46,7 @@ export function buildSetupCommands(services: SetupCommandServices): FaceShellCom
     {
       name: "setup",
       aliases: ["onboard"],
-      description: "Model sign-in, autonomy, phone pairing, then your first agent",
+      description: "Watch your sessions, or set up a model, phone and your first agent",
       argumentHint: "[rooms]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
@@ -68,7 +70,12 @@ export function buildSetupCommands(services: SetupCommandServices): FaceShellCom
 export async function runFirstSetup(shell: ClankieFaceShell, services: SetupCommandServices): Promise<void> {
   // Choose authority before model setup becomes ready, so cancelling cannot
   // make a partial first run look complete on the next console launch.
-  if (!(await runAutonomySetup(shell, services.autonomy))) return;
+  const chosen = await runAutonomySetup(shell, services.autonomy);
+  if (chosen === undefined) return;
+  if (chosen === "watch") {
+    await runWatchSetup(shell, services);
+    return;
+  }
   const readiness = await runThinkingSetup(shell, services.provider, {
     restartCaptain: services.restartCaptain,
   });
@@ -115,7 +122,14 @@ async function runGuidedSetup(
     );
     return;
   }
-  if (!autonomySelected && !(await runAutonomySetup(shell, services.autonomy))) return;
+  if (!autonomySelected) {
+    const chosen = await runAutonomySetup(shell, services.autonomy);
+    if (chosen === undefined) return;
+    if (chosen === "watch") {
+      await runWatchSetup(shell, services);
+      return;
+    }
+  }
   if (!(await setupPhone(shell, services))) return;
 
   const flow = shell.setupFlow;
@@ -229,30 +243,54 @@ export function noHarnessReady(report: MachineWorkerAccounts): string | undefine
 async function runAutonomySetup(
   shell: ClankieFaceShell,
   autonomy: SetupCommandServices["autonomy"],
-): Promise<boolean> {
+): Promise<AutonomyLevel | "watch" | undefined> {
   const flow = shell.setupFlow;
   flow.begin("setup · autonomy");
   try {
     const current = await autonomy([]);
+    // Watch comes first where the service can watch (ADR 0307): it needs no model.
+    const canWatch = current.levels.watch !== undefined;
     const choice = await flow.readSelect({
-      message: "How much should Clankie decide on his own?",
-      options: AutonomyLevelSchema.options.map((value) => ({
-        value,
-        label: AUTONOMY_LEVELS[value].label,
-        description: AUTONOMY_LEVELS[value].description,
-      })),
+      message: "How much should Clankie do?",
+      options: [
+        ...(canWatch
+          ? [{ value: "watch", label: WATCH_LEVEL.label, description: WATCH_LEVEL.description }]
+          : []),
+        ...AutonomyLevelSchema.options.map((value) => ({
+          value,
+          label: AUTONOMY_LEVELS[value].label,
+          description: AUTONOMY_LEVELS[value].description,
+        })),
+      ],
       ...(current.level === "custom" ? {} : { initialValue: current.level }),
     });
-    if (choice === undefined) return false;
-    const level = AutonomyLevelSchema.parse(choice);
+    if (choice === undefined) return undefined;
+    const level = choice === "watch" && canWatch ? "watch" : AutonomyLevelSchema.parse(choice);
     const saved = await autonomy([level]);
     if (saved.level !== level)
       throw new Error("Autonomy selection was not confirmed. Return to /setup to review it.");
     shell.insertCommandResult("/setup", saved.description, "success");
-    return true;
+    return level;
   } finally {
     flow.end();
   }
+}
+
+/**
+ * Setup for Watch is three steps: Clankie is installed, the owner picks the Herdr session to
+ * watch, and he watches. No model, phone, connection or hire; Settings holds those for later.
+ */
+async function runWatchSetup(shell: ClankieFaceShell, services: SetupCommandServices): Promise<void> {
+  shell.insertCommandResult("/setup", "2 of 3 · Pick the Herdr session Clankie should watch.", "success");
+  await openSetupCommand(shell, services, "herdr");
+  shell.insertMarkdown(
+    [
+      "**3 of 3 · Clankie is watching**",
+      "",
+      "He shows your sessions and workers and changes nothing. No AI model runs, so there is nothing more to set up.",
+      "`/agents` shows the team. When you want him to act, run `/autonomy` and pick a level; `/setup` then adds a model.",
+    ].join("\n"),
+  );
 }
 
 async function openSetupCommand(
