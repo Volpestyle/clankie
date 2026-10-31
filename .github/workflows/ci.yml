@@ -1,6 +1,11 @@
 name: CI
+# Every push gets the quick `check` job. A draft pull request stops there: the
+# landing gate and the Mac job run once it is ready for review, and again on
+# each push after that, so the full checks run before merge, not on every
+# iteration (ADR 0310). A draft cannot merge, so the skipped jobs pass nothing.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -80,7 +85,7 @@ jobs:
   # Mac. Exit 3 is green checks waiting for the standing reviewer (ADR 0287),
   # which needs the owner's operator credential and never answers here.
   landing:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -112,25 +117,52 @@ jobs:
           key: landing-cargo-${{ runner.os }}-${{ hashFiles('apps/vox/Cargo.lock') }}
           restore-keys: landing-cargo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
+      # Compiler state from this pull request's last run, else from main, so the
+      # typecheck rechecks only what changed since (ADR 0310).
+      - uses: actions/cache/restore@v4
+        with:
+          path: .local/tsbuildinfo
+          key: tsbuildinfo-${{ runner.os }}-pr${{ github.event.pull_request.number }}-${{ github.sha }}
+          restore-keys: |
+            tsbuildinfo-${{ runner.os }}-pr${{ github.event.pull_request.number }}-
+            tsbuildinfo-${{ runner.os }}-main-
       # The gate's skills phase installs the pinned Herdr here; tests spawn it by name.
       - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
       - name: Landing gate checks against the pull request's base
         env:
           # Four vCPUs and 16 GB fit three 2.5 GiB compiler heaps at once.
           CLANKIE_TYPECHECK_JOBS: 3
+          # A complete run report: unhandled errors and unfinished files count against it.
+          CLANKIE_RELEASE_TEST_REPORT: ${{ github.workspace }}/.local/landing-run.json
         run: |
           status=0
           # The checked-out merge commit's first parent is the base it merges into.
-          node scripts/check-landing.mjs --base "$(git rev-parse HEAD^1)" || status=$?
+          base=$(git rev-parse HEAD^1)
+          node scripts/check-landing.mjs --base "$base" --keep-going -- \
+            --reporter=default --reporter=./scripts/testing/release-test-reporter.mjs || status=$?
           checks=$(node -p 'JSON.parse(require("fs").readFileSync(".local/landing-gate.json", "utf8")).checksExitCode')
-          echo "[landing] gate exit $status, checks exit $checks"
+          failed=$(node -p 'JSON.parse(require("fs").readFileSync(".local/landing-gate.json", "utf8")).phases.at(-1)?.name ?? ""')
+          echo "[landing] gate exit $status, checks exit $checks, last phase $failed"
+          if [ "$checks" != 0 ] && [ "$failed" = tests ]; then
+            # Only failures the base does not already have fail this change (ADR 0310).
+            node scripts/testing/baseline-failures.mjs --base "$base" --report .local/landing-run.json
+            exit $?
+          fi
           test "$checks" = 0
+      # Saved even when the gate fails: the next push rechecks only what changed.
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .local/tsbuildinfo
+          key: tsbuildinfo-${{ runner.os }}-pr${{ github.event.pull_request.number }}-${{ github.sha }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: landing-gate
           include-hidden-files: true
-          path: .local/landing-gate.json
+          path: |
+            .local/landing-gate.json
+            .local/landing-run.json
           retention-days: 7
 
   # Seeds the cargo cache the landing job restores. Caches saved on main are
@@ -157,17 +189,82 @@ jobs:
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
         working-directory: apps/vox
 
+  # Seeds the compiler state the landing job restores, from main's own tree.
+  typecheck-cache:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache/restore@v4
+        with:
+          path: .local/tsbuildinfo
+          key: tsbuildinfo-${{ runner.os }}-main-${{ github.sha }}
+          restore-keys: tsbuildinfo-${{ runner.os }}-main-
+      # Vox's cargo check is the vox-cache job's; this keeps the TypeScript state.
+      - run: pnpm exec turbo run typecheck --concurrency=1 --filter=!@clankie/vox
+        env:
+          CLANKIE_TYPECHECK_JOBS: 3
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .local/tsbuildinfo
+          key: tsbuildinfo-${{ runner.os }}-main-${{ github.sha }}
+
+  # Which tests the Mac job would run, worked out on a free Linux runner, so a
+  # change that selects none leaves the Mac idle and the mac check passes as
+  # skipped (ADR 0310). Any failure here runs the Mac job anyway.
+  mac-scope:
+    if: >-
+      vars.CLANKIE_MAC_RUNNER == 'true' &&
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tests: ${{ steps.scope.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - id: scope
+        run: |
+          node scripts/check-changed-tests.mjs --base "$(git rev-parse HEAD^1)" --list .local/mac-scope.json
+          count=$(node -p 'JSON.parse(require("fs").readFileSync(".local/mac-scope.json", "utf8")).length')
+          echo "tests=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
   # The changed tests on James's Mac, so macOS-only tests run on every change
   # (ADR 0240). This repository is public, so the job never runs code from a
   # fork on that machine: only pushes here and pull requests from this
   # repository's own branches. It stays off until the Mac's runner for this
   # repository is registered and the CLANKIE_MAC_RUNNER variable is "true".
   mac:
+    needs: mac-scope
     if: >-
+      !cancelled() &&
       vars.CLANKIE_MAC_RUNNER == 'true' &&
       (github.event_name == 'push' ||
       (github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository))
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (needs.mac-scope.result != 'success' || needs.mac-scope.outputs.tests != 'false')))
     runs-on: [self-hosted, macOS, james-mac]
     timeout-minutes: 30
     steps:

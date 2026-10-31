@@ -49,7 +49,8 @@ const health = (body: unknown): typeof fetch =>
       : new Response("{}", { status: 401 })) as typeof fetch;
 
 describe("doctor host power", () => {
-  it("names a Mac on battery with sleep allowed and how to keep it awake", async () => {
+  it("names a Mac on battery with sleep allowed and how to keep it awake", async (context) => {
+    context.skip(process.platform !== "darwin", "keep-awake is requested by default only on macOS");
     const report = await doctor(
       pmset("Battery Power", { battery: 1, ac: 0 }),
       health({ doorway: { state: "connected" } }),

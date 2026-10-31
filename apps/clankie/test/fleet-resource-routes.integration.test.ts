@@ -442,7 +442,11 @@ it("answers service_restarting (503) while seat proof is not bound, not owner_un
   expect(await f.commands()).toEqual([]);
 });
 
-it("names a hand-booted simulator, the seat whose process uses it, and tells that seat's lead; the CLI waits with progress", async () => {
+it("names a hand-booted simulator, the seat whose process uses it, and tells that seat's lead; the CLI waits with progress", async (context) => {
+  context.skip(
+    process.platform !== "darwin",
+    "simulator holders are looked up only on macOS, where simulators run",
+  );
   const udid = randomUUID().toUpperCase();
   // The seat's own process starts a tool that names the device, as xcodebuild
   // or a test runner would. The native helper finds it by its arguments.
