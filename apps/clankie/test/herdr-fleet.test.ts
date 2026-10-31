@@ -299,12 +299,12 @@ describe("fleet routing", () => {
 
   it("reads a PC's pane for the connector over ssh, and reports each PC's Herdr as it answers", async () => {
     const calls: string[][] = [];
+    let paneText = "PS C:\\kh2> claude\r\nBuilding kh2\r\n";
     const run: HerdrFleetRun = async (args) => {
       calls.push([...args]);
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "working")] } });
-      if (args[0] === "pane" && args[1] === "read")
-        return "PS C:\\kh2> claude\r\nBuilding kh2\r\nCompiling...done\r\n";
+      if (args[0] === "pane" && args[1] === "read") return paneText;
       if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, [401]);
       if (args[0] === "api") return JSON.stringify({ result: { snapshot: { version: "0.9.5" } } });
       throw new Error(`unexpected ${args.join(" ")}`);
@@ -334,13 +334,20 @@ describe("fleet routing", () => {
       ),
     } as unknown as CreateOperatorServiceContext);
 
-    // A seat id names its PC and terminal (ADR 0184); Herdr there reads the pane it sits in.
+    // A seat id names its PC and terminal (ADR 0184); Herdr there reads the pane it sits in. The
+    // first read holds back what the pane already showed (ADR 0307); later ones show what's new.
+    expect(await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" })).toMatchObject({
+      status: "read",
+      text: "",
+    });
+    paneText += "Compiling...done\r\n";
     expect(await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" })).toEqual({
       op: "terminal_read",
       schemaVersion: 1,
       terminalId: "pc/term_abc",
       status: "read",
-      text: "Building kh2\r\nCompiling...done\r\n",
+      text: "Compiling...done\r\n",
+      detail: "Earlier screen hidden until this agent prints something new.",
     });
     expect(calls).toContainEqual([
       "pane",
@@ -435,93 +442,76 @@ describe("fleet routing", () => {
     );
     expect(tailed).toBe(false);
 
-    // The agent starts below the owner's earlier shell work, still on its screen: its reads start
-    // after the line that launched it.
+    const HIDDEN = "Earlier screen hidden until this agent prints something new.";
+    // The agent starts below the owner's earlier shell work, still on its screen. Nothing the
+    // pane held at its first read is returned, and the read says why.
     foreground = [401];
     history = "$ cat .env\nTOKEN=owner-secret\n$ claude\n\n Claude Code\n> fix the build";
     screen = history;
-    expect(await read()).toMatchObject({ status: "read", text: "\n Claude Code\n> fix the build" });
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
 
-    // A new occupant (here a new native session) starts over after its own launch, even where
-    // the shell work above it repeats the lines it is cut at.
-    session = "session-two";
-    history = `${"$ cat .env\nTOKEN=owner-secret\n".repeat(3)}$ claude\n\n Claude Code\n> fix the build`;
-    screen = "$ claude\n\n Claude Code\n> fix the build";
-    expect(await read()).toMatchObject({ status: "read", text: "\n Claude Code\n> fix the build" });
-
-    // Later reads add what it wrote since, and still never the shell work above it.
+    // Later reads add only what it wrote since.
     history = `${history}\n Reading files\n Build fixed`;
     screen = " Claude Code\n> fix the build\n Reading files\n Build fixed";
-    const later = await read();
-    expect(later).toMatchObject({ status: "read" });
-    expect(later.op === "terminal_read" && later.text).toBe(
-      "\n Claude Code\n> fix the build\n Reading files\n Build fixed",
-    );
+    expect(await read()).toMatchObject({ status: "read", text: " Reading files\n Build fixed" });
+    // The connector's session source passes the note on with the text.
+    history = `${history}\n> next?`;
+    screen = history;
+    expect(await source.read("pc/term_abc", 20)).toMatchObject({
+      id: "pc/term_abc",
+      text: " Reading files\n Build fixed\n> next?",
+    });
 
-    session = "session-three";
-    history = `${history}\n$ claude --resume\n Claude Code\n> next task`;
-    screen = "$ claude --resume\n Claude Code\n> next task";
-    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> next task" });
+    // An older launch by the agent's own name, then the owner's shell work, then this agent
+    // started under an alias: the older launch is no boundary, and the shell work never shows.
+    session = "session-two";
+    foreground = [402];
+    history =
+      "$ claude\n Claude Code\n> earlier task\n$ cat .env\nTOKEN=owner-again\n$ cc\n Claude Code\n> hello";
+    screen = "$ cat .env\nTOKEN=owner-again\n$ cc\n Claude Code\n> hello";
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+    history = `${history}\n Hi! What are we building?`;
+    screen = "TOKEN=owner-again\n$ cc\n Claude Code\n> hello\n Hi! What are we building?";
+    const next = await read();
+    expect(next).toMatchObject({ status: "read", text: " Hi! What are we building?" });
+    expect(next.op === "terminal_read" && next.text).not.toContain("owner-again");
 
-    // While only part of the history it was cut at has scrolled out, the cut still holds.
-    history = " Build fixed\n$ claude --resume\n Claude Code\n> next task\n Done";
-    screen = " Claude Code\n> next task\n Done";
-    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> next task\n Done" });
+    // Once the lines it was anchored on are gone, scrolled out or redrawn, the pane's text from
+    // its first read stays out line by line, an agent line repeating that text included.
+    history = "TOKEN=owner-again\n Claude Code\n> hello\n Hi! What are we building?\n All done";
+    screen = history;
+    expect(await read()).toMatchObject({
+      status: "read",
+      text: " Hi! What are we building?\n All done",
+      detail: HIDDEN,
+    });
 
     // The agent exits, the owner works in the shell, and the same native session is resumed:
     // a new process is a new occupant, so the shell work stays out.
     foreground = [];
     expect(await read()).toMatchObject({ status: "unavailable" });
-    foreground = [402];
-    history = `${history}\n$ cat .env\nTOKEN=owner-again\n$ claude --resume\n Claude Code\n> back`;
-    screen = "$ claude --resume\n Claude Code\n> back";
-    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> back" });
-
-    // Once the line it was cut at is gone, scrolled out or redrawn, the pane's text from before
-    // it stays out line by line, an agent line repeating that text included.
-    history = "TOKEN=owner-again\n Claude Code\n> back\n All done";
-    screen = history;
-    expect(await read()).toMatchObject({ status: "read", text: "> back\n All done" });
-
-    // Started under a name its launch line doesn't show (an alias), the agent's first screen is
-    // held back whole, and the read says why; what it writes next is shown.
     foreground = [403];
-    history = "$ cat .env\nTOKEN=owner-third\n$ cc\n Claude Code\n> hello";
-    screen = history;
-    const hidden = await read();
-    expect(hidden).toMatchObject({
-      status: "read",
-      text: "",
-      detail: "Earlier screen hidden until this agent prints something new.",
-    });
-    history = `${history}\n Hi! What are we building?`;
-    screen = history;
-    expect(await read()).toMatchObject({
-      status: "read",
-      text: " Hi! What are we building?",
-      detail: "Earlier screen hidden until this agent prints something new.",
-    });
-    // The connector's session source passes that note on with the text.
-    expect(await source.read("pc/term_abc", 20)).toEqual({
-      id: "pc/term_abc",
-      text: " Hi! What are we building?",
-      note: "Earlier screen hidden until this agent prints something new.",
-    });
+    history = `${history}\n$ cat .env\nTOKEN=owner-third\n$ claude --resume\n Claude Code\n> back`;
+    screen = "$ cat .env\nTOKEN=owner-third\n$ claude --resume\n Claude Code\n> back";
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
 
-    // A launch line that may have run other commands first is no boundary, whether they share
-    // its line or the line above carries on into it: their output is held back the same way.
+    // Commands echoed before the agent ran, on its line or carried onto it, are held back the same way.
     for (const [pid, launched] of [
       [404, "$ cat .env && claude\nTOKEN=owner-fourth"],
       [405, "$ cat .env && \\\n> claude\nTOKEN=owner-fifth"],
+      [406, "$ if true; then\n> cat .env\n> claude\n> fi\nTOKEN=owner-sixth"],
+      // A wrapper script named nothing like the agent, after an older launch by its own name.
+      [407, "$ claude\n Claude Code\n> old\n$ cat .env\nTOKEN=owner-seventh\n$ start-coding"],
     ] as const) {
       foreground = [pid];
       history = `${launched}\n Claude Code\n> hi`;
       screen = history;
-      expect(await read()).toMatchObject({
-        status: "read",
-        text: "",
-        detail: "Earlier screen hidden until this agent prints something new.",
-      });
+      expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+      history = `${history}\n Working`;
+      screen = history;
+      const later = await read();
+      expect(later).toMatchObject({ status: "read", text: " Working" });
+      expect(later.op === "terminal_read" && later.text).not.toContain("TOKEN");
     }
   });
 
@@ -533,6 +523,7 @@ describe("fleet routing", () => {
       ssh: { host: "ccroc@bld", shell: "powershell" },
     };
     const pc2Again: HerdrFleet = { ...pc2, id: "pc2-alt" };
+    let slots = "PS C:\\kh2> claude\r\n";
     const snapshot = JSON.stringify({
       result: {
         snapshot: {
@@ -558,7 +549,7 @@ describe("fleet routing", () => {
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w1:p1", "term_claude", "idle")] } });
       if (args[0] === "pane" && args[1] === "process-info") return processInfo("w1:p1", 400, [401]);
-      if (args[0] === "pane" && args[1] === "read") return "PS C:\\kh2> claude\r\nMapped 3 save slots\r\n";
+      if (args[0] === "pane" && args[1] === "read") return slots;
       throw new Error(`unexpected ${args.join(" ")}`);
     };
     const serve = createOperatorService({
@@ -605,6 +596,9 @@ describe("fleet routing", () => {
       },
     ]);
     expect(listed.machines).toEqual(["pc2", "pc2-alt"]);
+    // The first read holds back what the pane already showed; what the agent writes next comes through.
+    expect((await source.read("pc2/term_claude", 20)).text).toBe("");
+    slots += "Mapped 3 save slots\r\n";
     expect((await source.read("pc2/term_claude", 20)).text).toContain("Mapped 3 save slots");
   });
 

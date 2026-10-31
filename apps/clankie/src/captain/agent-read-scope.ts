@@ -4,15 +4,9 @@ import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 const NOT_AN_AGENT = new Set(["", "unknown", "none", "shell"]);
 const ANCHOR_LINES = 3;
 
-/** Runtimes an agent CLI runs under; the script they run names the agent, not them. */
-const INTERPRETERS = new Set(["node", "bun", "deno", "python", "python3", "npx", "pnpm", "npm", "env"]);
-/** Shells name every prompt's session, never one agent's launch. */
-const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "pwsh", "powershell", "cmd", "login"]);
-
-/** A live agent in a pane: its identity, and the command names its launch line would show. */
+/** A live agent in a pane, by its identity. */
 export interface LiveAgentOccupant {
   readonly key: string;
-  readonly commands: ReadonlySet<string>;
 }
 
 /**
@@ -32,34 +26,13 @@ export async function liveAgentOccupant(
   if (occupants.length === 0) return undefined;
   // The oldest foreground process is the agent itself; its own subprocesses come after it.
   const agent = occupants.reduce((oldest, process) => (process.pid < oldest.pid ? process : oldest));
-  const argv0 = command(agent.argv0 ?? agent.argv?.[0] ?? "");
-  const commands = new Set(
-    [
-      pane.agent.trim(),
-      command(agent.name),
-      argv0,
-      ...(INTERPRETERS.has(argv0) && agent.argv?.[1] !== undefined ? [command(agent.argv[1])] : []),
-    ].filter((name) => name.length > 1 && !INTERPRETERS.has(name) && !SHELLS.has(name.toLowerCase())),
-  );
   return {
     key: JSON.stringify(
       pane.session === undefined
         ? [pane.agent, "process", agent.pid]
         : [pane.agent, pane.session.source, pane.session.value, agent.pid],
     ),
-    commands,
   };
-}
-
-/** A command word as a shell line shows it: no quotes, directory or executable extension. */
-function command(word: string): string {
-  return (
-    word
-      .replace(/^["']+|["']+$/gu, "")
-      .split(/[\\/]/u)
-      .pop()
-      ?.replace(/\.(?:exe|cmd|bat|ps1|js|mjs|cjs)$/iu, "") ?? ""
-  );
 }
 
 /** What a connected app may read now, and why some of the pane is held back. */
@@ -72,12 +45,12 @@ const EARLIER_SCREEN_HIDDEN = "Earlier screen hidden until this agent prints som
 
 /**
  * Bounds what a connected app reads from a pane to what its current agent showed (ADR 0307).
- * Terminal history carries no record of who wrote each line, so the first read of an
- * occupant anchors on the line that launched it: the last history line naming its command.
- * That read and every later one return only what follows. Should that line go, the lines
- * the pane held above it at the first read stay hidden by their text. When
- * no line names the command, nothing the pane held at that first read is shown, only lines
- * the agent writes after it, and the read says so. A new occupant gets a new anchor.
+ * Terminal history carries no record of who wrote each line, and the line that launched the
+ * agent can't be told from an older launch by its text (an alias, a launch run inside a
+ * longer command), so nothing the pane held when an occupant is first read is ever returned
+ * for it. That first read anchors on the few lines above its screen and keeps the text of
+ * every line it saw; this read and every later one return only lines written since, and say
+ * so while anything is held back. A new occupant gets a new anchor.
  */
 export class AgentReadScope {
   private readonly anchors = new Map<
@@ -85,44 +58,30 @@ export class AgentReadScope {
     {
       readonly occupant: string;
       readonly anchor: readonly string[];
-      /** Text the pane held before this agent, never shown even if the anchor is lost. */
+      /** Text the pane held at this occupant's first read, never shown for it. */
       readonly earlier: ReadonlySet<string>;
-      /** The launch line could not be found, so the whole first screen is held back. */
-      readonly closed: boolean;
     }
   >();
 
   public bound(terminalId: string, occupant: LiveAgentOccupant, history: string, screen: string): AgentRead {
     let entry = this.anchors.get(terminalId);
     if (entry?.occupant !== occupant.key) {
-      const launch = launchLine(history, occupant.commands);
-      const lines = history.split("\n");
-      entry =
-        launch === undefined
-          ? {
-              occupant: occupant.key,
-              anchor: anchorAbove(history, screen),
-              earlier: written(lines),
-              closed: true,
-            }
-          : {
-              occupant: occupant.key,
-              anchor: nonEmptyEndingAt(lines, launch),
-              earlier: written(lines.slice(0, launch + 1)),
-              closed: false,
-            };
+      entry = {
+        occupant: occupant.key,
+        anchor: anchorAbove(history, screen),
+        earlier: written(history.split("\n")),
+      };
       this.anchors.set(terminalId, entry);
     }
-    const cut = after(history, entry.anchor);
-    // A cut at the launch line needs nothing more. Without one, the pane's earlier text is
-    // held back line by line, so an anchor redrawn away still reveals nothing before it.
-    if (cut !== undefined && !entry.closed) return { text: cut };
-    const lines = (cut ?? history).split("\n");
+    // Held back line by line, so an anchor scrolled or redrawn away still reveals nothing older.
+    const lines = (after(history, entry.anchor) ?? history).split("\n");
     const earlier = entry.earlier;
     const shown = lines.filter((line) => !earlier.has(compact(line)));
+    // Blank lines left above the first shown one were the held-back text's spacing.
+    const first = shown.findIndex((line) => line.trim().length > 0);
     return {
-      text: shown.join("\n"),
-      ...(entry.closed && shown.length < lines.length ? { detail: EARLIER_SCREEN_HIDDEN } : {}),
+      text: (first < 0 ? [] : shown.slice(first)).join("\n"),
+      ...(shown.length < lines.length ? { detail: EARLIER_SCREEN_HIDDEN } : {}),
     };
   }
 
@@ -142,39 +101,6 @@ export function agentReadScope(runner: HerdrWatchRunner): AgentReadScope {
     scopes.set(runner, scope);
   }
   return scope;
-}
-
-/**
- * The index of the last history line with a word that is one of the agent's command names,
- * as the shell echoed the command that started it. A later line naming it is only ever below
- * the real one, so the cut hides more, never less. A line that may run other commands before
- * the agent (`cat .env && claude`, a pipe, a substitution, a continued line) is no boundary:
- * their output would follow it, so there is no launch line then.
- */
-function launchLine(history: string, commands: ReadonlySet<string>): number | undefined {
-  if (commands.size === 0) return undefined;
-  const lines = history.split("\n");
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    if (!lines[index]!.split(/\s+/u).some((word) => commands.has(command(word)))) continue;
-    let above = index - 1;
-    while (above >= 0 && lines[above]!.trim().length === 0) above -= 1;
-    const continued = above >= 0 && CONTINUES.test(lines[above]!);
-    return continued || COMPOUND.test(lines[index]!) ? undefined : index;
-  }
-  return undefined;
-}
-
-/** Shell syntax that can run another command on the same line: lists, pipes, substitutions. */
-const COMPOUND = /&&|\|\||[;|&`]|\$\(|<\(|>\(/u;
-/** A line the shell carries on to the next one (POSIX `\`, PowerShell backtick, a dangling operator). */
-const CONTINUES = /(?:\\|`|&&|\|\||\|)\s*$/u;
-
-/** Up to ANCHOR_LINES non-empty lines ending with the line at `end`. */
-function nonEmptyEndingAt(lines: readonly string[], end: number): readonly string[] {
-  const anchor = [lines[end]!];
-  for (let above = end - 1; above >= 0 && anchor.length < ANCHOR_LINES; above -= 1)
-    if (lines[above]!.trim().length > 0) anchor.unshift(lines[above]!);
-  return anchor;
 }
 
 const compact = (line: string) => line.replace(/\s+/gu, "");
