@@ -98,8 +98,9 @@ jobs:
         with:
           components: clippy, rustfmt
       # Vox's turbojpeg-sys builds libjpeg-turbo's SIMD code with NASM; the activity-sharing
-      # tests decode real MP4 and GIF media with ffmpeg.
-      - run: sudo apt-get install -y --no-install-recommends nasm ffmpeg
+      # tests decode real MP4 and GIF media with ffmpeg; the seat-command tests resolve
+      # numbered Claude commands through a real zsh login shell.
+      - run: sudo apt-get install -y --no-install-recommends nasm ffmpeg zsh
       # A pull request's own cache is visible only to that pull request, so the
       # landing job restores the one the vox-cache job saves on main.
       - uses: actions/cache/restore@v4

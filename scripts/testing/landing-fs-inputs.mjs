@@ -174,6 +174,7 @@ export const landingFsInputs = Object.fromEntries([
     "apps/clankie/test/resource-wait-liveness.integration.test.ts",
     [
       ...seatHookInputs,
+      ...fleetInputs,
       "integrations/claude-plugin/worker/bin/root-lease-hook.sh",
       "apps/clankie/test/fixtures/resource-activity-engine.mjs",
       "integrations/claude-plugin/worker/mods/tool-catalog.mjs",
