@@ -195,7 +195,9 @@ devices carry for that op alone. The tools go through the session-source layer o
 read `herdr:<id>`. `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
 It answers only for a pane with a live coding agent, and only with what that
-agent showed since it was first read (ADR 0307); its refusal is final. Only
+agent showed after the line that launched it (ADR 0307); its refusal is final.
+When that line can't be found, the agent's first screen is held back and the
+read carries a `note` saying so. Only
 against an older service without `terminal_read` does it fall back to the tail
 stream, which reaches this Mac's panes only. `list_agents` asks the catalog to probe each linked machine
 (`includeMachines`). It names every linked machine, even one running no

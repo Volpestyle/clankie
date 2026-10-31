@@ -760,13 +760,19 @@ export function createOperatorService(
         // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
         const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
         const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
-        const text = agentReadScope(ctx.herdrRunner).bound(request.terminalId, occupant, history, screen);
+        const { text, detail } = agentReadScope(ctx.herdrRunner).bound(
+          request.terminalId,
+          occupant,
+          history,
+          screen,
+        );
         return {
           op: "terminal_read",
           schemaVersion: 1,
           terminalId: request.terminalId,
           status: "read",
           text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
+          ...(detail === undefined ? {} : { detail }),
         };
       } catch (error) {
         return unavailable(

@@ -28,16 +28,33 @@ agent showed.
   process, which is the agent itself. A different occupant is a different
   agent, so an agent resumed into the same native session after the shell had
   the pane starts over. A refused read also drops the pane's anchor.
-- **History starts where the occupant was first read.** Scrollback carries no
-  author per line, so the first read of an occupant anchors on the few
-  non-empty lines just above its screen at that moment (lines also on the
-  screen are passed over, so the cut never hides what is visible). That read
-  and every later one return only what follows the anchor. A new occupant gets
-  a new anchor. Scrollback loses lines only from its top, so while part of the
-  anchor is still in the read window its last lines stand first there, and the
-  cut falls after them. Once the anchor has wholly scrolled out, everything
-  before it went with it, so the whole window is returned. Anchors live in the
-  service's memory, per Herdr runner and terminal.
+- **History starts at the line that launched the occupant.** Scrollback
+  carries no author per line, so the first read of an occupant looks for the
+  line the shell echoed when it started: the last history line with a word
+  equal to the agent's command name (Herdr's agent name, or its process's name
+  or executable, or the script an interpreter such as `node` runs, without
+  directory or `.exe`-style extension). The anchor is that line and up to two
+  non-empty lines above it, and that read and every later one return only what
+  follows it, even shell work still on the screen when the agent started. A new
+  occupant gets a new anchor. Scrollback loses lines only from its top, so while
+  part of the anchor is still in the read window its last lines stand first
+  there, and the cut falls after them. A later line naming the command is only
+  ever below the real launch, so picking the last one can hide some of the
+  agent's own output, never show earlier text.
+- **If the anchor goes, earlier text stays out line by line.** The first read
+  also keeps the text of every line above the launch line. Once the anchor is
+  wholly gone, scrolled out or redrawn by the agent, the read is the window
+  with every line whose text matches one of those removed.
+- **Without a launch line, the first screen is held back.** When no line names
+  the command (an alias, a wrapper, a launch already scrolled out), nothing the
+  pane showed at the first read is returned: the anchor is the few non-empty
+  lines above the screen then, and every line whose text was in that first
+  read is removed from this and later reads. Only lines the agent writes after
+  that come through, and the read carries the detail "Earlier screen hidden
+  until this agent prints something new." The connector's `read_agent` passes
+  it on as `note`, so a lead sees why the read is empty instead of taking it
+  for an empty pane. Anchors live in the service's memory, per Herdr runner and
+  terminal.
 - **A refusal is final.** The connector's Herdr session source used to stream
   the screen when `terminal_read` did not answer `read`. It now streams only
   for a service that has no `terminal_read` at all; any answer from that op,
@@ -54,3 +71,11 @@ agent showed.
 - When the exact anchor lines appear more than once, the read is cut at their
   last appearance, which can drop some of the agent's own lines but never adds
   earlier ones.
+- Lines held back by their text also drop an agent line that repeats that text
+  exactly (a banner or a border), only while the agent has no launch line or
+  after its anchor is gone.
+- An agent started under an alias in a pane whose window still holds an older
+  line with its real command name above the owner's later shell work is cut at
+  that older line, so the shell work between them is shown. The launch line
+  can't be told from such a line by its text; the owner avoids it by starting
+  agents by their own name, or in a fresh pane.

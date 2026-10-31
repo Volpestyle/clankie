@@ -4,6 +4,17 @@ import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 const NOT_AN_AGENT = new Set(["", "unknown", "none", "shell"]);
 const ANCHOR_LINES = 3;
 
+/** Runtimes an agent CLI runs under; the script they run names the agent, not them. */
+const INTERPRETERS = new Set(["node", "bun", "deno", "python", "python3", "npx", "pnpm", "npm", "env"]);
+/** Shells name every prompt's session, never one agent's launch. */
+const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "pwsh", "powershell", "cmd", "login"]);
+
+/** A live agent in a pane: its identity, and the command names its launch line would show. */
+export interface LiveAgentOccupant {
+  readonly key: string;
+  readonly commands: ReadonlySet<string>;
+}
+
 /**
  * The agent occupying a pane now, by native identity: the agent Herdr detects, its native
  * session when Herdr knows it, and its live foreground process that is not the pane's shell.
@@ -13,43 +24,106 @@ const ANCHOR_LINES = 3;
 export async function liveAgentOccupant(
   runner: HerdrWatchRunner,
   pane: HerdrAgentSnapshot,
-): Promise<string | undefined> {
+): Promise<LiveAgentOccupant | undefined> {
   if (NOT_AN_AGENT.has(pane.agent.trim().toLowerCase())) return undefined;
   if (runner.paneShell === undefined) return undefined;
   const { shellPid, foreground } = await runner.paneShell(pane.paneId);
-  const occupants = foreground
-    .map((process) => process.pid)
-    .filter((pid) => Number.isSafeInteger(pid) && pid > 1 && pid !== shellPid);
+  const occupants = foreground.filter(({ pid }) => Number.isSafeInteger(pid) && pid > 1 && pid !== shellPid);
   if (occupants.length === 0) return undefined;
   // The oldest foreground process is the agent itself; its own subprocesses come after it.
-  const process = Math.min(...occupants);
-  return JSON.stringify(
-    pane.session === undefined
-      ? [pane.agent, "process", process]
-      : [pane.agent, pane.session.source, pane.session.value, process],
+  const agent = occupants.reduce((oldest, process) => (process.pid < oldest.pid ? process : oldest));
+  const argv0 = command(agent.argv0 ?? agent.argv?.[0] ?? "");
+  const commands = new Set(
+    [
+      pane.agent.trim(),
+      command(agent.name),
+      argv0,
+      ...(INTERPRETERS.has(argv0) && agent.argv?.[1] !== undefined ? [command(agent.argv[1])] : []),
+    ].filter((name) => name.length > 1 && !INTERPRETERS.has(name) && !SHELLS.has(name.toLowerCase())),
+  );
+  return {
+    key: JSON.stringify(
+      pane.session === undefined
+        ? [pane.agent, "process", agent.pid]
+        : [pane.agent, pane.session.source, pane.session.value, agent.pid],
+    ),
+    commands,
+  };
+}
+
+/** A command word as a shell line shows it: no quotes, directory or executable extension. */
+function command(word: string): string {
+  return (
+    word
+      .replace(/^["']+|["']+$/gu, "")
+      .split(/[\\/]/u)
+      .pop()
+      ?.replace(/\.(?:exe|cmd|bat|ps1|js|mjs|cjs)$/iu, "") ?? ""
   );
 }
+
+/** What a connected app may read now, and why some of the pane is held back. */
+export interface AgentRead {
+  readonly text: string;
+  readonly detail?: string;
+}
+
+const EARLIER_SCREEN_HIDDEN = "Earlier screen hidden until this agent prints something new.";
 
 /**
  * Bounds what a connected app reads from a pane to what its current agent showed (ADR 0307).
  * Terminal history carries no record of who wrote each line, so the first read of an
- * occupant anchors on the scrollback just above its screen then; that read and every later
- * one return only what follows. A new occupant gets a new anchor. Scrollback above the
- * screen never changes, so an anchor that is gone took everything before it along.
+ * occupant anchors on the line that launched it: the last history line naming its command.
+ * That read and every later one return only what follows. Should that line go, the lines
+ * the pane held above it at the first read stay hidden by their text. When
+ * no line names the command, nothing the pane held at that first read is shown, only lines
+ * the agent writes after it, and the read says so. A new occupant gets a new anchor.
  */
 export class AgentReadScope {
   private readonly anchors = new Map<
     string,
-    { readonly occupant: string; readonly anchor: readonly string[] }
+    {
+      readonly occupant: string;
+      readonly anchor: readonly string[];
+      /** Text the pane held before this agent, never shown even if the anchor is lost. */
+      readonly earlier: ReadonlySet<string>;
+      /** The launch line could not be found, so the whole first screen is held back. */
+      readonly closed: boolean;
+    }
   >();
 
-  public bound(terminalId: string, occupant: string, history: string, screen: string): string {
+  public bound(terminalId: string, occupant: LiveAgentOccupant, history: string, screen: string): AgentRead {
     let entry = this.anchors.get(terminalId);
-    if (entry?.occupant !== occupant) {
-      entry = { occupant, anchor: anchorAbove(history, screen) };
+    if (entry?.occupant !== occupant.key) {
+      const launch = launchLine(history, occupant.commands);
+      const lines = history.split("\n");
+      entry =
+        launch === undefined
+          ? {
+              occupant: occupant.key,
+              anchor: anchorAbove(history, screen),
+              earlier: written(lines),
+              closed: true,
+            }
+          : {
+              occupant: occupant.key,
+              anchor: nonEmptyEndingAt(lines, launch),
+              earlier: written(lines.slice(0, launch + 1)),
+              closed: false,
+            };
       this.anchors.set(terminalId, entry);
     }
-    return after(history, entry.anchor);
+    const cut = after(history, entry.anchor);
+    // A cut at the launch line needs nothing more. Without one, the pane's earlier text is
+    // held back line by line, so an anchor redrawn away still reveals nothing before it.
+    if (cut !== undefined && !entry.closed) return { text: cut };
+    const lines = (cut ?? history).split("\n");
+    const earlier = entry.earlier;
+    const shown = lines.filter((line) => !earlier.has(compact(line)));
+    return {
+      text: shown.join("\n"),
+      ...(entry.closed && shown.length < lines.length ? { detail: EARLIER_SCREEN_HIDDEN } : {}),
+    };
   }
 
   /** The pane has no live agent now; whoever comes next starts from their own screen. */
@@ -68,6 +142,34 @@ export function agentReadScope(runner: HerdrWatchRunner): AgentReadScope {
     scopes.set(runner, scope);
   }
   return scope;
+}
+
+/**
+ * The index of the last history line with a word that is one of the agent's command names,
+ * as the shell echoed the command that started it. A later line naming it is only ever below
+ * the real one, so the cut hides more, never less.
+ */
+function launchLine(history: string, commands: ReadonlySet<string>): number | undefined {
+  if (commands.size === 0) return undefined;
+  const lines = history.split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1)
+    if (lines[index]!.split(/\s+/u).some((word) => commands.has(command(word)))) return index;
+  return undefined;
+}
+
+/** Up to ANCHOR_LINES non-empty lines ending with the line at `end`. */
+function nonEmptyEndingAt(lines: readonly string[], end: number): readonly string[] {
+  const anchor = [lines[end]!];
+  for (let above = end - 1; above >= 0 && anchor.length < ANCHOR_LINES; above -= 1)
+    if (lines[above]!.trim().length > 0) anchor.unshift(lines[above]!);
+  return anchor;
+}
+
+const compact = (line: string) => line.replace(/\s+/gu, "");
+
+/** Every non-empty line's text, ignoring spacing a redraw can change. */
+function written(lines: readonly string[]): ReadonlySet<string> {
+  return new Set(lines.map(compact).filter((line) => line.length > 0));
 }
 
 /**
@@ -93,10 +195,10 @@ function anchorAbove(history: string, screen: string): readonly string[] {
  * History after the last place the anchor's lines stand in order. The last place is never
  * above the real anchor, so a repeat cuts away the agent's own lines rather than revealing
  * earlier ones. Scrollback loses lines only from its top, so an anchor partly scrolled out
- * leaves its last lines first in the window, and the cut falls after those. Only an anchor
- * wholly gone returns everything.
+ * leaves its last lines first in the window, and the cut falls after those. Undefined when the
+ * anchor is wholly gone, scrolled out or redrawn away.
  */
-function after(history: string, anchor: readonly string[]): string {
+function after(history: string, anchor: readonly string[]): string | undefined {
   if (anchor.length === 0) return history;
   const lines = history.split("\n");
   const written = lines.flatMap((line, index) => (line.trim().length > 0 ? [index] : []));
@@ -109,5 +211,5 @@ function after(history: string, anchor: readonly string[]): string {
     if (rest.every((line, offset) => lines[written[offset]!]!.trimEnd() === line.trimEnd()))
       return lines.slice(written[kept - 1]! + 1).join("\n");
   }
-  return history;
+  return undefined;
 }
