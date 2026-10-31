@@ -47,6 +47,16 @@ instead of a refusal.
   project registered at a subfolder still owns that subfolder's twin. A hire
   started inside another hire's worktree gets its own nested one, and grants
   and projects walk out through each start.
+- **A retry returns to its first worktree.** The service records each start
+  folder's last relocation (`hire-worktrees.json` in its state directory).
+  While the launch into that worktree is unresolved (an unconfirmed allocation
+  or an open hire receipt) or was settled by recovery, a hire from the same
+  start folder on the same machine reuses that worktree and brief line instead
+  of making another, so the allocation and receipt checks of
+  [ADR 0207](0207-work-records-and-native-agent-delivery.md) see the first
+  attempt and no second agent starts. Only one hire from a start folder is
+  admitted at a time. Once the launch resolves, the next hire gets a new
+  worktree.
 
 A worktree left by a hire that failed later is clean at `origin/main`, so the
 usual tidy removes it once no pane or process is in it. Calling

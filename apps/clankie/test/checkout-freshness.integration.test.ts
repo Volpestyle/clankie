@@ -398,42 +398,70 @@ it("the real captain starts a dirty hire in a fresh worktree, refuses one in its
       },
     });
     // The service's own runtime holds no hire worktree; any other dirty checkout gets one.
-    const elsewhere = createCaptain(
-      { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
-      {
-        repoRoot: join(root, "runtime"),
-        stateDir: join(root, "state-elsewhere"),
-        settings,
-        nativeHerdrRunner: createHerdrWatchRunner(() => false),
-      },
-    );
-    try {
-      const hired = await elsewhere.serveOperatorConversation({
-        schemaVersion: 1,
-        op: "spawn_seat",
-        conversationId: "global-default",
-        seat: {
-          schemaVersion: 1,
-          harness: "codex",
-          title: "Fixture",
-          workingDirectory: join(owner, "app"),
-          projectId: "checkout-fixture",
-          effort: "low",
-          effortReason: "A fixture hire only needs to reach the native launch.",
+    const elsewhereState = join(root, "state-elsewhere");
+    const hireElsewhere = async () => {
+      const elsewhere = createCaptain(
+        { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
+        {
+          repoRoot: join(root, "runtime"),
+          stateDir: elsewhereState,
+          settings,
+          nativeHerdrRunner: createHerdrWatchRunner(() => false),
         },
-        brief: "implement",
-      });
-      // Freshness passed and the worktree's `app` twin kept the project registered at `owner/app`:
-      // the hire got as far as choosing a harness.
-      expect(hired).toMatchObject({ op: "spawn_seat", result: { reason: "harness_unavailable" } });
-      const registered = await checkoutGit(owner, ["worktree", "list", "--porcelain"]);
-      expect(registered).toMatch(
-        /worktree [^\n]*\/\.local\/wt-fixture-[a-f0-9]{6}\nHEAD [a-f0-9]+\nbranch refs\/heads\/clankie\/fixture-[a-f0-9]{6}\n/u,
       );
-      expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
-    } finally {
-      await elsewhere.close();
-    }
+      try {
+        return await elsewhere.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          conversationId: "global-default",
+          seat: {
+            schemaVersion: 1,
+            harness: "codex",
+            title: "Fixture",
+            workingDirectory: join(owner, "app"),
+            projectId: "checkout-fixture",
+            effort: "low",
+            effortReason: "A fixture hire only needs to reach the native launch.",
+          },
+          brief: "implement",
+        });
+      } finally {
+        await elsewhere.close();
+      }
+    };
+    const hireWorktrees = async () =>
+      [
+        ...(await checkoutGit(owner, ["worktree", "list", "--porcelain"])).matchAll(
+          /worktree ([^\n]*\/\.local\/wt-fixture-[a-f0-9]{6})\nHEAD [a-f0-9]+\nbranch refs\/heads\/clankie\/fixture-[a-f0-9]{6}\n/gu,
+        ),
+      ].map((match) => match[1]);
+    // Freshness passed and the worktree's `app` twin kept the project registered at `owner/app`:
+    // the hire got as far as choosing a harness.
+    expect(await hireElsewhere()).toMatchObject({
+      op: "spawn_seat",
+      result: { reason: "harness_unavailable" },
+    });
+    const [first] = await hireWorktrees();
+    expect(first).toBeDefined();
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+    // That launch is still unresolved, so retrying it returns to its worktree, never a second one.
+    const receipts = join(elsewhereState, "herdr-watches.json.hire-receipts.json");
+    await writeFile(
+      receipts,
+      JSON.stringify({
+        [JSON.stringify(["local", "codex", join(first!, "app"), "new"])]: {
+          messageId: "fixture-uncertain-launch",
+          fingerprint: "",
+        },
+      }),
+    );
+    await hireElsewhere();
+    expect(await hireWorktrees()).toEqual([first]);
+    // Once that launch is resolved, the next hire from the still-dirty checkout gets its own.
+    await rm(receipts);
+    await hireElsewhere();
+    expect(await hireWorktrees()).toHaveLength(2);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
     service = await createClankieApp({
       captain,
       authenticateOperator: async (request) =>

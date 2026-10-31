@@ -58,7 +58,9 @@ import {
   hireWorktreeStart,
   projectPathContains,
   projectRoleForPersona,
+  type HireCheckoutFreshness,
 } from "@clankie/settings";
+import { HireWorktrees, hireWorktreeScope, type HireWorktreeRelocation } from "./hire-worktrees.ts";
 import { recordBulkOperation } from "@clankie/fleet-resources";
 import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
 import {
@@ -2801,7 +2803,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
     );
   };
-  const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
+  const hireWorktrees = new HireWorktrees(join(options.stateDir, "hire-worktrees.json"));
+  // One admission per start folder at a time, so two attempts never relocate to two worktrees.
+  const startsAdmitting = new Set<string>();
+  const admitHire: HireSeat = async (request, brief, source, autonomous) => {
     const taskBrief = brief !== undefined;
     // The room shows the lead's own brief, not the preferences appended below.
     const leadBrief = brief;
@@ -2887,26 +2892,46 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             throw Error("Start checkout belongs to a live pane; preserve its HEAD");
         }
       };
+      // A retry of a launch that is still unresolved returns to the worktree its first attempt
+      // made, so the allocation and receipt checks below see it (ADR 0207, ADR 0306).
+      const scope = hireWorktreeScope(request);
+      let prior: HireWorktreeRelocation | undefined;
+      try {
+        prior = hireWorktrees.get(scope);
+      } catch (error) {
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: `Earlier hire worktrees are unreadable: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      const retained =
+        prior !== undefined &&
+        herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: prior.workingDirectory })
+          ? prior
+          : undefined;
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
-      const freshness = remote
-        ? shell
-          ? await verifyRemoteHireCheckout(
-              remote,
-              shell,
-              request.workingDirectory,
-              remoteDirectories,
-              request.title,
-            )
-          : {
-              outcome: "refused" as const,
-              path: request.workingDirectory,
-              reason: "Remote checkout observer unavailable",
-            }
-        : await verifyHireCheckout(request.workingDirectory, assertInactive, {
-            name: request.title,
-            refuse: managedRuntime,
-          });
+      const freshness: HireCheckoutFreshness = retained
+        ? { ...retained, outcome: "worktree", head: retained.remoteMain }
+        : remote
+          ? shell
+            ? await verifyRemoteHireCheckout(
+                remote,
+                shell,
+                request.workingDirectory,
+                remoteDirectories,
+                request.title,
+              )
+            : {
+                outcome: "refused" as const,
+                path: request.workingDirectory,
+                reason: "Remote checkout observer unavailable",
+              }
+          : await verifyHireCheckout(request.workingDirectory, assertInactive, {
+              name: request.title,
+              refuse: managedRuntime,
+            });
       if (freshness.outcome === "refused")
         return {
           outcome: "failed",
@@ -2922,6 +2947,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           .join("\n\n");
       if (freshness.outcome === "worktree") {
         // The start checkout keeps its own work; the hire runs in the new worktree.
+        if (!retained)
+          hireWorktrees.record(scope, {
+            workingDirectory: freshness.workingDirectory ?? freshness.path,
+            path: freshness.path,
+            branch: freshness.branch ?? "",
+            start: freshness.start ?? request.workingDirectory,
+            startReason: freshness.startReason ?? "",
+            remoteMain: freshness.remoteMain ?? "",
+            at: new Date().toISOString(),
+          });
         request = { ...request, workingDirectory: freshness.workingDirectory ?? freshness.path };
         brief = [
           brief,
@@ -3040,6 +3075,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           : undefined
         : adoptedRoleWrite;
     return { ...result, seat: adopted, ...(roleAssignment ? { roleAssignment } : {}) };
+  };
+  const hireSeat: HireSeat = async (request, ...rest) => {
+    if (request.resume !== undefined) return admitHire(request, ...rest);
+    const scope = hireWorktreeScope(request);
+    if (startsAdmitting.has(scope))
+      return {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: "Another hire from this start folder is still starting; no second hire began.",
+      };
+    startsAdmitting.add(scope);
+    try {
+      return await admitHire(request, ...rest);
+    } finally {
+      startsAdmitting.delete(scope);
+    }
   };
 
   const paneTidy: PaneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
