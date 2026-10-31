@@ -11,7 +11,7 @@ import {
 } from "./owner-settings.ts";
 import { isSkinDraftRoute } from "./skin-drafts.ts";
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
-import { hostedDiscordAllows } from "./hosted-discord.ts";
+import { DiscordDirectoryRequestSchema } from "./discord-directory.ts";
 export const HOSTED_OPERATOR_PATH = "/v1/hosted/operator";
 import { OperatorConversationServiceRequestSchema } from "./operator-service.ts";
 import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
@@ -32,8 +32,23 @@ import {
 } from "./fleet-roster.ts";
 import { ROUTINES_PATH } from "./routines.ts";
 import { RUNTIME_HEALTH_PATH } from "./runtime-health.ts";
-import { OFFICIAL_DISCORD_BODY_PATH } from "./official-discord.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
+
+/** Only canonical Discord routes; queries are admitted exclusively by the directory schema. */
+function discordAllows(method: string, path: string): boolean {
+  if (path === "/v1/discord/settings") return method === "GET" || method === "POST";
+  if (method !== "GET" || path.length > 2048 || !/^\/v1\/discord\/directory(?:\?|$)/u.test(path))
+    return false;
+  const url = new URL(path, "http://control");
+  if (url.hash || url.pathname !== "/v1/discord/directory") return false;
+  const keys = [...url.searchParams.keys()];
+  if (
+    keys.some((key) => !["kind", "guildId", "limit", "after"].includes(key)) ||
+    new Set(keys).size !== keys.length
+  )
+    return false;
+  return DiscordDirectoryRequestSchema.safeParse(Object.fromEntries(url.searchParams)).success;
+}
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
@@ -48,9 +63,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   if (path === CAPTAIN_SEAT_PATH) return method === "GET" || method === "POST";
   if (path === CAPTAIN_SEAT_START_PATH || path === CAPTAIN_SEAT_STATUS_PATH) return method === "POST";
   if (isSkinDraftRoute(method, path)) return true;
-  if (hostedDiscordAllows(method, path)) return true;
-  // A self-hosted machine's free official bot (VUH-1766); never the edge's web permits.
-  if (path === OFFICIAL_DISCORD_BODY_PATH) return method === "GET" || method === "POST";
+  if (discordAllows(method, path)) return true;
   // Only this explicit projection query is supported. Unknown, duplicated or
   // encoded queries never acquire authority through URL normalization.
   if (path === `${PROJECTS_PATH}?includeAutonomy=true`) return method === "GET";
