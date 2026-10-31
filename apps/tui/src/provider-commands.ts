@@ -21,11 +21,9 @@ import { createModelRegistry, type Catalog, type ModelEntry } from "@clankie/mod
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
-  MANAGED_CREDITS_ONLY,
   assertModelCredentialAllowed,
   modelCredentialAllowed,
   assertChatgptLoginAllowed,
-  isHostedModelEnvironment,
   captainReadiness,
   CODEX_PROVIDER_ID,
   XAI_PROVIDER_ID,
@@ -142,8 +140,7 @@ export function createProviderServices(options: {
       },
       async resolveSelection(config) {
         return resolvePiModelSelection(config, await runtime(), {
-          hasCodexSubscription:
-            !isHostedModelEnvironment(env) && (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+          hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
           catalog: await registry.catalog(),
         });
       },
@@ -260,10 +257,6 @@ export function buildProviderCommands(services: ProviderServices): FaceShellComm
             "Service connections moved to /connect (linear, email, discord). /auth stays provider keys and subscriptions.",
             "success",
           );
-          return;
-        }
-        if (isHostedModelEnvironment(services.env)) {
-          shell.insertCommandResult("/auth", MANAGED_CREDITS_ONLY, "error");
           return;
         }
         if (selector === "anthropic") {
@@ -552,8 +545,6 @@ function providerConnectionHint(
   now: number = Date.now(),
 ): string {
   const redacted = listed[id];
-  if (id === CODEX_PROVIDER_ID && isHostedModelEnvironment(env))
-    return "unavailable: managed bodies use AI credits only";
   if (redacted !== undefined) return describeCredentialKind(id, redacted, now);
   if (providerEnvConnected(id, env)) return "env";
   return "needs /auth";

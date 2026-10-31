@@ -3,8 +3,6 @@
  * body's user so its credentials land in the harness's own store. Only the
  * login link and code pass through here; they are never logged or persisted.
  */
-import { isHostedModelEnvironment } from "@clankie/model-provider";
-import { MANAGED_CREDITS_ONLY_MESSAGE } from "@clankie/protocol/harness-logins";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -91,7 +89,6 @@ export class HarnessSignIns {
 
   /** Secret-free status from each harness's own status command. */
   async list(): Promise<HarnessLoginsResponse> {
-    if (isHostedModelEnvironment(this.options.env)) return { harnesses: [] };
     const harnesses = await Promise.all(
       (["claude", "codex"] as const).map(async (harness) => ({ harness, ...(await this.signedIn(harness)) })),
     );
@@ -100,7 +97,6 @@ export class HarnessSignIns {
 
   /** Every account per harness, one row per signed-in identity plus each signed-out profile. */
   async accounts(): Promise<HarnessLoginAccountsResponse> {
-    if (isHostedModelEnvironment(this.options.env)) return { harnesses: [] };
     if (!this.options.accounts) throw new Error("Worker accounts are unavailable");
     const report = await this.options.accounts();
     return {
@@ -130,8 +126,6 @@ export class HarnessSignIns {
     principal: string,
     target: { readonly profile?: string; readonly add?: { readonly label?: string } } = {},
   ): Promise<HarnessAccountLoginResult> {
-    if (isHostedModelEnvironment(this.options.env))
-      return { ok: false, error: "managed_credits_only", message: MANAGED_CREDITS_ONLY_MESSAGE };
     this.prune();
     if (this.busy()) return { ok: false, error: "busy" };
     this.reserved = true;
@@ -202,8 +196,6 @@ export class HarnessSignIns {
   }
 
   status(sessionId: string, principal: string, cancel = false): HarnessLoginResult {
-    if (isHostedModelEnvironment(this.options.env))
-      return { ok: false, error: "managed_credits_only", message: MANAGED_CREDITS_ONLY_MESSAGE };
     this.prune();
     const job = this.jobs.get(sessionId);
     if (!job || job.principal !== principal) return { ok: false, error: "session_not_found" };
@@ -212,8 +204,6 @@ export class HarnessSignIns {
   }
 
   code(sessionId: string, principal: string, code: string): HarnessLoginResult {
-    if (isHostedModelEnvironment(this.options.env))
-      return { ok: false, error: "managed_credits_only", message: MANAGED_CREDITS_ONLY_MESSAGE };
     this.prune();
     const job = this.jobs.get(sessionId);
     if (!job || job.principal !== principal) return { ok: false, error: "session_not_found" };
@@ -231,8 +221,6 @@ export class HarnessSignIns {
    * standard homes are never removed: re-sign them instead.
    */
   async remove(harness: LoginHarness, label: string): Promise<HarnessLoginRemoveResult> {
-    if (isHostedModelEnvironment(this.options.env))
-      return { ok: false, error: "managed_credits_only", message: MANAGED_CREDITS_ONLY_MESSAGE };
     if (label === "default") return { ok: false, error: "default_profile" };
     this.prune();
     if (this.busy()) return { ok: false, error: "busy" };
