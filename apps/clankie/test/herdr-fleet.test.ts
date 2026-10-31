@@ -513,6 +513,21 @@ describe("fleet routing", () => {
       expect(later).toMatchObject({ status: "read", text: " Working" });
       expect(later.op === "terminal_read" && later.text).not.toContain("TOKEN");
     }
+
+    // The owner's last line had no newline yet, and the agent's output carries on from it: the
+    // held-back text stays out of that line, on every later read.
+    foreground = [408];
+    history = "$ cat .env\nTOKEN=owner-eighth";
+    screen = history;
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+    history = `${history}Claude Code\n Working`;
+    screen = history;
+    expect(await read()).toMatchObject({ status: "read", text: "Claude Code\n Working", detail: HIDDEN });
+    history = `${history}\n Done`;
+    screen = history;
+    const carried = await read();
+    expect(carried).toMatchObject({ text: "Claude Code\n Working\n Done" });
+    expect(carried.op === "terminal_read" && carried.text).not.toContain("TOKEN");
   });
 
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {

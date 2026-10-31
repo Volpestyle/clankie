@@ -37,7 +37,10 @@ agent showed.
   few non-empty history lines above the screen and keeps the text of every
   line the pane held. That read and every later one return only lines written
   after the anchor, with every line whose text was in that first read removed,
-  so an anchor scrolled out or redrawn away still reveals nothing older. While
+  so an anchor scrolled out or redrawn away still reveals nothing older. The
+  first read's last line may have had no newline yet, so output written after
+  it can land on that same line; a line that starts with its text has that text
+  cut off. While
   anything is held back the read carries the detail "Earlier screen hidden
   until this agent prints something new." The connector's `read_agent` passes
   it on as `note`, so a lead sees why the read is empty instead of taking it

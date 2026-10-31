@@ -60,6 +60,8 @@ export class AgentReadScope {
       readonly anchor: readonly string[];
       /** Text the pane held at this occupant's first read, never shown for it. */
       readonly earlier: ReadonlySet<string>;
+      /** That read's last line, which output written after it can extend in place. */
+      readonly tail: string;
     }
   >();
 
@@ -70,18 +72,22 @@ export class AgentReadScope {
         occupant: occupant.key,
         anchor: anchorAbove(history, screen),
         earlier: written(history.split("\n")),
+        tail: compact(history.split("\n").findLast((line) => line.trim().length > 0) ?? ""),
       };
       this.anchors.set(terminalId, entry);
     }
     // Held back line by line, so an anchor scrolled or redrawn away still reveals nothing older.
     const lines = (after(history, entry.anchor) ?? history).split("\n");
-    const earlier = entry.earlier;
-    const shown = lines.filter((line) => !earlier.has(compact(line)));
+    const { earlier, tail } = entry;
+    // A line that carries on the first read's last line keeps that line's text hidden too.
+    const kept = lines.filter((line) => !earlier.has(compact(line)));
+    const shown = kept.map((line) => withoutPrefix(line, tail));
     // Blank lines left above the first shown one were the held-back text's spacing.
     const first = shown.findIndex((line) => line.trim().length > 0);
+    const held = shown.length < lines.length || shown.some((line, index) => line !== kept[index]);
     return {
       text: (first < 0 ? [] : shown.slice(first)).join("\n"),
-      ...(shown.length < lines.length ? { detail: EARLIER_SCREEN_HIDDEN } : {}),
+      ...(held ? { detail: EARLIER_SCREEN_HIDDEN } : {}),
     };
   }
 
@@ -104,6 +110,24 @@ export function agentReadScope(runner: HerdrWatchRunner): AgentReadScope {
 }
 
 const compact = (line: string) => line.replace(/\s+/gu, "");
+
+/**
+ * The line without a leading run of `prefix`'s text, spacing aside. Output written after a
+ * line that had no newline yet lands on that same line, so the line read later starts with
+ * text that was held back.
+ */
+function withoutPrefix(line: string, prefix: string): string {
+  if (prefix.length === 0) return line;
+  let matched = 0;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]!;
+    if (/\s/u.test(char)) continue;
+    if (char !== prefix[matched]) return line;
+    matched += 1;
+    if (matched === prefix.length) return line.slice(index + 1);
+  }
+  return line;
+}
 
 /** Every non-empty line's text, ignoring spacing a redraw can change. */
 function written(lines: readonly string[]): ReadonlySet<string> {
