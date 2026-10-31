@@ -69,7 +69,7 @@ import {
   type TrustedOperatorIdentity,
 } from "./types.ts";
 /** The pairing link as QR modules, row by row, for an app that draws it (ADR 0314). */
-export function pairingQr(deepLink: string): { size: number; modules: string } {
+function pairingQr(deepLink: string): { size: number; modules: string } {
   const { modules } = QRCode.create(deepLink, { errorCorrectionLevel: "M" });
   let bits = "";
   for (let i = 0; i < modules.size * modules.size; i += 1) bits += modules.data[i] ? "1" : "0";
