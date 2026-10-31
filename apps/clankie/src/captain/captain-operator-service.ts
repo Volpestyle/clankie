@@ -22,6 +22,7 @@ import { projectsRevision, SettingsStore, type ClankieSettings } from "@clankie/
 import { FleetMembershipReadError } from "../fleet-project-membership.ts";
 import { splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
+import { agentReadScope, liveAgentOccupant } from "./agent-read-scope.ts";
 import type { createAgentWorkStore } from "./agent-work.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { LeadStore } from "./lead.ts";
@@ -751,14 +752,34 @@ export function createOperatorService(
         // Herdr's own pane list names the pane; the routed runner reaches it over ssh when it's on a PC.
         const pane = await ctx.herdrRunner.resolveTerminal(address);
         if (pane === undefined) return unavailable("Herdr has no pane with that terminal now.");
+        // Only a live coding agent's pane is read, and only what that agent showed (ADR 0307).
+        const scope = agentReadScope(ctx.herdrRunner);
+        const occupant = await liveAgentOccupant(
+          ctx.herdrRunner,
+          pane,
+          scope.occupantPid(request.terminalId),
+        );
+        if (occupant === undefined) {
+          scope.forget(request.terminalId);
+          return unavailable("No coding agent is running in that pane now.");
+        }
         // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
-        const text = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+        const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+        const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
+        // The pane is read only if the same agent held it on both sides of the reads.
+        const after = await liveAgentOccupant(ctx.herdrRunner, pane, occupant.pid);
+        if (after?.key !== occupant.key) {
+          scope.forget(request.terminalId);
+          return unavailable("The agent in that pane changed while it was read; read it again.");
+        }
+        const { text, detail } = scope.bound(request.terminalId, occupant, history, screen);
         return {
           op: "terminal_read",
           schemaVersion: 1,
           terminalId: request.terminalId,
           status: "read",
           text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
+          ...(detail === undefined ? {} : { detail }),
         };
       } catch (error) {
         return unavailable(
@@ -842,6 +863,9 @@ export function createOperatorService(
         request.prompt,
         {
           owner: { conversationId: lead },
+          // The owner granted this place; Clankie's thread only leads the seat, so its own
+          // agent's project doesn't decide where the new one works.
+          connectorPlace: { projectId: chosen.projectId },
           current: () => ctx.conversations.runsCaptainTurns(lead),
           authorize: async () => ctx.conversations.runsCaptainTurns(lead),
         },

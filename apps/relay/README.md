@@ -194,8 +194,12 @@ devices carry for that op alone. The tools go through the session-source layer o
 `@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids
 read `herdr:<id>`. `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
-Against an older service it falls back to the tail stream, which reaches this
-Mac's panes only. `list_agents` asks the catalog to probe each linked machine
+It answers only for a pane with a live coding agent, and only with what that
+agent showed after the line that launched it (ADR 0307); its refusal is final.
+When that line can't be found, the agent's first screen is held back and the
+read carries a `note` saying so. Only
+against an older service without `terminal_read` does it fall back to the tail
+stream, which reaches this Mac's panes only. `list_agents` asks the catalog to probe each linked machine
 (`includeMachines`). It names every linked machine, even one running no
 agents, lists agents the owner opened by hand on a PC as well as Clankie's
 hires (readable there, not messageable), marks a machine that doesn't answer as `unreachable` on its agents, and
