@@ -4,7 +4,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { CLAUDE_WORKER_PLUGIN, CLAUDE_WORKER_PLUGIN_ID } from "@clankie/protocol";
+import {
+  CLAUDE_WORKER_INSTALLED_PLUGIN_ID,
+  CLAUDE_WORKER_PLUGIN,
+  CLAUDE_WORKER_PLUGIN_ID,
+} from "@clankie/protocol";
 import { SEAT_PLUGIN_ID } from "./seat.ts";
 import { JoinedWorkerLaunchSchema } from "@clankie/protocol/machine-join";
 import { MAXIMUM_TRUST_CODEX_CONFIG } from "@clankie/protocol/owner-settings";
@@ -159,14 +163,20 @@ export function joinedWorkerPorts(
         : [
             "--session-id",
             launch.sessionId,
-            // The installed worker plugin, as on any hire: an owner-approved channel
-            // (managed allowedChannelPlugins), never a development channel whose
-            // warning nobody is there to answer (VUH-2607).
+            // The worker plugin for this session only, as on any hire (ADR 0314): an
+            // owner-approved channel (managed allowedChannelPlugins), never a development
+            // channel whose warning nobody is there to answer (VUH-2607).
+            "--plugin-dir",
+            shippedWorkerFile(),
             "--channels",
             `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
             "--settings",
             JSON.stringify({
-              enabledPlugins: { [SEAT_PLUGIN_ID]: false, [CLAUDE_WORKER_PLUGIN_ID]: true },
+              enabledPlugins: {
+                [SEAT_PLUGIN_ID]: false,
+                [CLAUDE_WORKER_PLUGIN_ID]: true,
+                [CLAUDE_WORKER_INSTALLED_PLUGIN_ID]: false,
+              },
               permissions: {
                 defaultMode: "auto",
                 allow: [`mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_worker`],

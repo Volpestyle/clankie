@@ -18,7 +18,6 @@
  */
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   claudeMcpServerSources,
@@ -67,53 +66,17 @@ function claudePolicyEntry(name: string, entry: McpServerEntry): ClaudeMcpPolicy
   return CLAUDE_POLICY_NAME.test(name) ? { serverName: name } : undefined;
 }
 
-/**
- * Where Claude runs the `clankie-worker` plugin from: the directory
- * marketplace Clankie registers, or a copied install. The pane may not share
- * the service's CLAUDE_CONFIG_DIR, so the launch's, the service's and the
- * default profile all count; an entry for a root Claude does not use is inert.
- */
-function claudeWorkerPluginRoots(env: Readonly<Record<string, string | undefined>>): string[] {
-  const profiles = new Set(
-    [env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR, join(env.HOME ?? homedir(), ".claude")].filter(
-      (profile): profile is string => typeof profile === "string" && profile.length > 0,
-    ),
-  );
-  const roots = new Set<string>();
-  for (const profile of profiles) {
-    const marketplace = readJson(join(profile, "plugins", "known_marketplaces.json"))?.clankie as
-      | { source?: { source?: unknown; path?: unknown }; installLocation?: unknown }
-      | undefined;
-    if (marketplace?.source?.source === "directory") {
-      const location = marketplace.source.path ?? marketplace.installLocation;
-      if (typeof location === "string") roots.add(join(location, "worker"));
-    }
-    const installed = readJson(join(profile, "plugins", "installed_plugins.json"))?.plugins as
-      | Record<string, unknown>
-      | undefined;
-    const entries = installed?.["clankie-worker@clankie"];
-    if (Array.isArray(entries))
-      for (const entry of entries as { scope?: unknown; installPath?: unknown }[])
-        if (entry.scope === "user" && typeof entry.installPath === "string") roots.add(entry.installPath);
-  }
-  return [...roots];
-}
-
 /** The worker plugin's own servers, with `${CLAUDE_PLUGIN_ROOT}` as Claude expands it. */
-function claudeWorkerPluginEntries(
-  env: Readonly<Record<string, string | undefined>>,
-): ClaudeMcpPolicyEntry[] {
+function claudeWorkerPluginEntries(root: string): ClaudeMcpPolicyEntry[] {
+  const servers = readJson(join(root, ".mcp.json"))?.mcpServers;
+  if (typeof servers !== "object" || servers === null) return [];
   const entries: ClaudeMcpPolicyEntry[] = [];
-  for (const root of claudeWorkerPluginRoots(env)) {
-    const servers = readJson(join(root, ".mcp.json"))?.mcpServers;
-    if (typeof servers !== "object" || servers === null) continue;
-    for (const [name, entry] of Object.entries(servers as Record<string, McpServerEntry>)) {
-      const expanded = JSON.parse(
-        JSON.stringify(entry ?? {}).replaceAll("${CLAUDE_PLUGIN_ROOT}", root.replaceAll("\\", "\\\\")),
-      ) as McpServerEntry;
-      const policy = claudePolicyEntry(name, expanded);
-      if (policy) entries.push(policy);
-    }
+  for (const [name, entry] of Object.entries(servers as Record<string, McpServerEntry>)) {
+    const expanded = JSON.parse(
+      JSON.stringify(entry ?? {}).replaceAll("${CLAUDE_PLUGIN_ROOT}", root.replaceAll("\\", "\\\\")),
+    ) as McpServerEntry;
+    const policy = claudePolicyEntry(name, expanded);
+    if (policy) entries.push(policy);
   }
   return entries;
 }
@@ -129,9 +92,11 @@ export function claudeWorkerMcpAllowlist(
   cwd: string,
   env: Readonly<Record<string, string | undefined>>,
   optIns: readonly string[],
+  /** The worker plugin's directory this launch loads with `--plugin-dir`. */
+  workerRoot: string,
 ): ClaudeMcpPolicyEntry[] | undefined {
   const { owner, project } = claudeMcpServerSources(cwd, { ...process.env, ...env });
-  const entries = claudeWorkerPluginEntries(env);
+  const entries = claudeWorkerPluginEntries(workerRoot);
   if (entries.length === 0) {
     console.warn("hire_agent.worker_mcp_unrestricted: the clankie-worker plugin's server was not found");
     return undefined;

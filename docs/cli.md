@@ -7490,13 +7490,16 @@ survive normal completion until they are answered.
 A supplied `hire_agent` brief goes through the harness's own interface when a
 seat adapter drives that harness locally ([ADR 0187](adr/0187-clankie-hires-his-own-seats.md),
 VUH-1458). A Claude hire starts the real interactive TUI with the
-`clankie-worker@clankie` plugin enabled for that session: the brief and later
+`clankie-worker` plugin loaded for that session only, from Clankie's own files
+(`--plugin-dir`, channel `plugin:clankie-worker@inline`;
+[ADR 0314](adr/0314-a-claude-hire-loads-its-worker-plugin-for-that-session.md)): the brief and later
 `message_seat` messages arrive as channel notifications, a message counts as
 delivered only once it appears whole in the native transcript, and the plugin's
 Stop and StopFailure hooks settle `herdr_watch` with Claude's own final text.
 The worker is never swapped for a headless process; the owner can type into its
-pane at any time. This needs the owner's one-time consent: the plugin installed
-and disabled, and its channel approved in managed settings (see the
+pane at any time. This needs the owner's one-time consent: the
+`{ "marketplace": "inline", "plugin": "clankie-worker" }` channel approved in
+managed settings with `disableSideloadFlags` unset (see the
 [plugin README](../integrations/claude-plugin/README.md#worker-channel-plugin-clankie-worker)).
 Until then the hire reports unavailable control with `consent_required` and the
 owner's fix. It does not launch a second worker or type the brief into the pane.
@@ -8025,8 +8028,9 @@ that agent (a DM from the app, or a group-chat turn) arrives as
 instead of being typed into the pane. Identity is `HERDR_PANE_ID`. On a local
 machine the `clankie-worker` Claude plugin's `worker` server runs this command,
 handing it Claude's argv, and it polls only when that session approved
-`plugin:clankie-worker@clankie` through `--channels`. Hires and hand-started
-panes use that plugin channel.
+`plugin:clankie-worker@inline` (a hire) or `plugin:clankie-worker@clankie` (an
+installed copy) through `--channels`. Hires and hand-started panes use that
+plugin channel.
 
 Registering `clankie-seat` yourself (`claude mcp add -s user clankie-seat --
 clankie mcp --seat`, then starting Claude with

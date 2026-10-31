@@ -1,5 +1,11 @@
 # Owner-managed channel consent: prepared, not applied
 
+> **Current worker entry (ADR 0314):** a Claude hire loads the worker with
+> `--plugin-dir`, so the approved pair is
+> `{ "marketplace": "inline", "plugin": "clankie-worker" }`, with
+> `"channelsEnabled": true` and `disableSideloadFlags` unset. The
+> `clankie-worker@clankie` pair below is this record's history.
+
 This is the next VUH-1380 experiment. **No managed policy was written and no
 managed-policy channel success is claimed.** The probe uses the same exact
 custom plugin/marketplace pair that failed the default allowlist test. Its server

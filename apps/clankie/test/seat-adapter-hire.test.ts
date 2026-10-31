@@ -368,7 +368,7 @@ it.each([
       expect(consent).toHaveBeenCalledOnce();
       expect(runner.startAgent).toHaveBeenCalledWith(
         expect.objectContaining({
-          args: expect.arrayContaining(["--channels", "plugin:clankie-worker@clankie", "--model", "haiku"]),
+          args: expect.arrayContaining(["--channels", "plugin:clankie-worker@inline", "--model", "haiku"]),
         }),
       );
       expect(runner.promptAgent).not.toHaveBeenCalled();

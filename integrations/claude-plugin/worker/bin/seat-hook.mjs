@@ -80,7 +80,7 @@ async function reportOverLink(link, pane) {
     if (!approvesWorkerChannel(argv) && !/(?:^|\s)(?:--print(?:=\S+)?|-p)(?:\s|$)/u.test(argv))
       process.stdout.write(
         JSON.stringify({
-          systemMessage: `${argv ? "Clankie's live messages are off in this pane." : "Clankie cannot confirm live messages in this pane."} Restart this session with: claude --resume ${hook.session_id} --channels plugin:clankie-worker@clankie`,
+          systemMessage: `${argv ? "Clankie's live messages are off in this pane." : "Clankie cannot confirm live messages in this pane."} Restart this session with: ${restartCommand(hook.session_id)}`,
         }) + "\n",
       );
   }
@@ -223,4 +223,12 @@ async function reportOverLink(link, pane) {
     process.stderr.write(`clankie-worker: ${error instanceof Error ? error.message : String(error)}\n`);
   }
   process.exit(0);
+}
+
+/** The resume command for this session: the launch's own copy, or an older install's. */
+function restartCommand(sessionId) {
+  const root = process.env.CLAUDE_PLUGIN_ROOT?.trim();
+  return root && !/[\\/]plugins[\\/]cache[\\/]/u.test(root)
+    ? `claude --resume ${sessionId} --plugin-dir "${root}" --channels plugin:clankie-worker@inline`
+    : `claude --resume ${sessionId} --channels plugin:clankie-worker@clankie`;
 }

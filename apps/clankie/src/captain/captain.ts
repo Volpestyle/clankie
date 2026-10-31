@@ -795,7 +795,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     "hooks" | "agent" | "transcript" | "pane" | "mailbox" | "hookQuestions"
   >;
   const claudeWorkerSeats = createClaudeWorkerSeatAdapter({
-    consent: (env) => claudeWorkerChannelConsent(env === undefined ? {} : { env }),
+    consent: () => claudeWorkerChannelConsent(),
     fleetGates: localFleetGates,
     ...claudeWorkerDeps,
   });
