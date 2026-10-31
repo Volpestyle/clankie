@@ -110,6 +110,17 @@ async function main() {
           include: [],
           // Moving the leaf config must not move Node's implicit @types search roots.
           compilerOptions: {
+            // Each program keeps its compiler state between runs, so a later check
+            // of the same project rechecks only what changed. CI caches the
+            // directory; deleting it costs one full check.
+            incremental: true,
+            tsBuildInfoFile: join(
+              root,
+              ".local",
+              "tsbuildinfo",
+              project || "root",
+              `${program.name}.tsbuildinfo`,
+            ),
             // The empty run directory permits absolute explicit type directives
             // even when none of the original implicit @types directories exist.
             typeRoots: [

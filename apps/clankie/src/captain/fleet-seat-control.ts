@@ -575,7 +575,7 @@ export function createFleetSeatControl(
   };
   /**
    * One look at the pane's current session after a send was not confirmed
-   * (ADR 0308). A message already there is reconciled and not sent again. An
+   * (ADR 0312). A message already there is reconciled and not sent again. An
    * idle session that does not contain it may be sent once (`release` drops
    * the uncertain receipt first). Anything less is a specific not-sent.
    */

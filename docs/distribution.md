@@ -245,9 +245,9 @@ ships `docs/bundled-skills.md`, the pinned process-skill manifest and MIT licens
 `infra/hosted/README.md` for the installed skills' operational references.
 Other repository documentation does not ship.
 
-The public gateway is not part of the Mac release; its source, Cognito accounts,
-and deployment live in the private `clankie-ops` repository
-([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)).
+The public gateway is not part of the Mac release. Its source is `apps/gateway`;
+its Cognito accounts and deployment live in the private `clankie-ops` repository
+([ADR 0311](adr/0311-the-doorway-source-is-public.md)).
 The release contains the outbound connector, passwordless `/gateway` setup
 wizard, and launch-at-login command. Tailscale remains an optional direct
 development lane and is not required by an App Store client.

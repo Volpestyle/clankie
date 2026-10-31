@@ -136,7 +136,7 @@ code. The lines carry the device ID but never audio or bearers.
 The owner turns multiplexer discovery on or off with `clankie connector detect`
 (Herdr is the first adapter), and turns the connector on or off per app with
 `clankie connector serve`
-([ADR 0308](../../docs/adr/0308-a-cleared-session-is-rediscovered.md)). An app
+([ADR 0312](../../docs/adr/0312-a-cleared-session-is-rediscovered.md)). An app
 that is off is refused. Herdr off lists no sessions and says so. A message
 that still cannot be confirmed after one rediscovery is an error that says why,
 not an ambiguous unconfirmed.
@@ -193,16 +193,23 @@ calls nothing on the service. Each fleet call checks the bearer against
 `GET /v1/devices/self`, requires a `scope: "connector"` device, and runs through
 this relay's own `/operator/v1/dispatch` and `/operator/v1/terminal-tail` with
 that bearer, so the connector meets the same allowlist a hand-built request
-does: fleet, terminal catalog, read and tail, `start_agent`, `app_notes`,
-`prompt_answer`, the `lead` status and inbox, a lead thread's reports while
-the apps lead, and
+does: fleet, terminal catalog, read and tail, the herdr-core list and read,
+`start_agent`, `app_notes`, `prompt_answer`, the `lead` status and inbox, a
+lead thread's reports while the apps lead, and
 get, create and send on persona threads only. `start_agent` needs `steer`, which connector
 devices carry for that op alone. The tools go through the session-source layer of
-`@clankie/agent-hosts/sessions`, with Herdr as the one source, so agent ids
-read `herdr:<id>`. `read_agent` asks the service's `terminal_read` op first:
+`@clankie/agent-hosts/sessions`, so agent ids read `herdr:<id>` for Herdr and
+`herdr-core:<terminal>` for the Herdr desktop app's agents on this Mac. Those
+are read-only: `message_agent` refuses them, because herdr-core can only type
+into their terminal (ADR 0207), and their reads pass through the same
+agent-only scope as Herdr's (ADR 0307). `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
-Against an older service it falls back to the tail stream, which reaches this
-Mac's panes only. `list_agents` asks the catalog to probe each linked machine
+It answers only for a pane with a live coding agent, and only with what that
+agent showed after the line that launched it (ADR 0307); its refusal is final.
+When that line can't be found, the agent's first screen is held back and the
+read carries a `note` saying so. Only
+against an older service without `terminal_read` does it fall back to the tail
+stream, which reaches this Mac's panes only. `list_agents` asks the catalog to probe each linked machine
 (`includeMachines`). It names every linked machine, even one running no
 agents, lists agents the owner opened by hand on a PC as well as Clankie's
 hires (readable there, not messageable), marks a machine that doesn't answer as `unreachable` on its agents, and

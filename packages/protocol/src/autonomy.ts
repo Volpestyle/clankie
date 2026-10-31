@@ -76,6 +76,16 @@ export type AutonomyLevelFleet = FleetGates & {
   push: FleetAutonomyMode;
   release: { mode: "lead" } | { mode: "owner" };
 };
+/**
+ * Watch, the step below Off (ADR 0308). Not an {@link AutonomyLevel}: it is
+ * stored beside the leaves, which read Off, so a client that predates it shows Off.
+ */
+export const WATCH_LEVEL = {
+  label: "Watch",
+  description:
+    "Clankie only watches: he shows your sessions and workers and changes nothing. No AI model runs, no hires, no messages to workers, no tracker writes.",
+} as const;
+
 export const AUTONOMY_LEVELS = {
   off: {
     label: "Off",
@@ -248,6 +258,11 @@ export const AutonomySettingsSchema = z
     fleet: FleetAutonomySchema.default(() => FleetAutonomySchema.parse({})),
     /** When the owner first chose a level explicitly; set by the service, never by a default (VUH-2725). */
     confirmedAt: z.iso.datetime().optional(),
+    /**
+     * Watch, the step below Off (ADR 0308): Clankie reads sessions and
+     * transcripts and changes nothing. Stored only while on; the leaves read Off.
+     */
+    watch: z.literal(true).optional(),
   })
   .strict();
 export type AutonomySettings = z.infer<typeof AutonomySettingsSchema>;

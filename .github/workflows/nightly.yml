@@ -1,0 +1,88 @@
+name: Nightly
+# The whole suite on main once a night, release-only tests included. Pull
+# requests run only what their change selects (ADR 0310), so this is where a
+# failure nothing selected shows up. A red run is a bug to file at the front of
+# the queue, not a gate.
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  full-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          filter: blob:none
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy, rustfmt
+      # Same system tools as the landing gate.
+      - run: sudo apt-get install -y --no-install-recommends nasm ffmpeg zsh
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/vox/target
+          key: landing-cargo-${{ runner.os }}-${{ hashFiles('apps/vox/Cargo.lock') }}
+          restore-keys: landing-cargo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache/restore@v4
+        with:
+          path: .local/tsbuildinfo
+          key: tsbuildinfo-${{ runner.os }}-main-${{ github.sha }}
+          restore-keys: tsbuildinfo-${{ runner.os }}-main-
+      - run: pnpm herdr:build
+      - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
+      - name: Typecheck
+        env:
+          CLANKIE_TYPECHECK_JOBS: 3
+        run: pnpm exec turbo run typecheck --concurrency=1 --filter=!@clankie/vox
+      - name: Every test
+        if: ${{ !cancelled() }}
+        env:
+          CLANKIE_RELEASE_TEST_REPORT: ${{ github.workspace }}/.local/nightly-run.json
+        run: >-
+          pnpm exec vitest run --config vitest.config.ts --bail 0
+          --reporter=default --reporter=./scripts/testing/release-test-reporter.mjs
+      - name: Name the failures
+        if: ${{ failure() }}
+        run: |
+          test -f .local/nightly-run.json || exit 0
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync(".local/nightly-run.json", "utf8"));
+            const lines = ["### Failing on main tonight", ""];
+            for (const f of r.files)
+              if (f.state === "failed") {
+                const tests = f.tests.filter((t) => t.state === "failed").map((t) => t.name);
+                lines.push(`- ${f.path}${tests.length ? ": " + tests.join("; ") : " (outside a test)"}`);
+              }
+            for (const e of r.errors) lines.push(`- unhandled: ${e.name}: ${e.message}`);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+            console.log(lines.join("\n"));
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-suite
+          include-hidden-files: true
+          path: .local/nightly-run.json
+          retention-days: 14

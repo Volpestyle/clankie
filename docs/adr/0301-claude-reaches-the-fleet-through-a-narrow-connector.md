@@ -32,7 +32,9 @@ own `/mcp` on a trusted network.
   places are the projects' registered workspaces, and a linked machine's also
   need the owner's exact-directory grant (ADR 0193). Clankie's own thread
   leads the new seat, as it leads his own hires, so a connector never owns a
-  worker. Connector devices now carry `steer`, which the op allowlist lets
+  worker. The granted place, not that thread, decides the new seat's project
+  (2026-10-31), so a change of Clankie's own agent, as after a restart, doesn't
+  refuse the start. Connector devices now carry `steer`, which the op allowlist lets
   reach `start_agent` alone; a connector signed in before this change signs in
   again to get it. `list_places` lists the places without starting anything, so an
   app's own permission check can tell a listing from a start.
@@ -68,6 +70,14 @@ own `/mcp` on a trusted network.
   `unreachable` rather than showing their last status, and says in a notice
   when a machine's Herdr is older than the one Clankie ships (added
   2026-10-30).
+- **The Herdr desktop app is a second source.** It runs agents in its own
+  terminal server, herdr-core (`hc`), not in the terminal Herdr. The service
+  reads that server's socket on the Mac (`herdr_core_list`, `herdr_core_read`
+  and `herdr_core_focus` ops) and the `herdr-core` source lists and reads its
+  agents beside Herdr's, with ids like `herdr-core:t3`. Its reads are bound
+  as a Herdr pane's are (ADR 0307). Its agents can't be messaged: herdr-core's
+  only way in is typing into the terminal, which ADR 0207 rules out (added
+  2026-10-31).
 - **Through session sources, not Herdr.** The tools talk to the session-source
   layer in `packages/agent-hosts/src/sessions/`. A source is any app that holds
   agent sessions and answers four things: list its sessions, read one, send one
@@ -98,7 +108,7 @@ own `/mcp` on a trusted network.
   discovery on or off, and `clankie connector serve` turns the connector on or
   off per connected app. With Herdr on, a cleared or restarted session is
   rediscovered and an unconfirmed operator message is sent once more, or the
-  error says why ([ADR 0308](0308-a-cleared-session-is-rediscovered.md)).
+  error says why ([ADR 0312](0312-a-cleared-session-is-rediscovered.md)).
 - **Plaintext through the doorway, for this route only.** The gateway carries
   the connector's discovery, OAuth and `/mcp` calls in plaintext, with the
   `authorization` header only on `/mcp` and a query only on the sign-in link.

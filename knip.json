@@ -31,6 +31,8 @@
         "scripts/testing/evidence-landing-guard.mjs",
         "scripts/check-swallowed-rejections.mjs",
         "scripts/check-changed-tests.mjs",
+        "scripts/testing/baseline-failures.mjs",
+        "scripts/pre-push.mjs",
         "scripts/testing/landing-graph-reporter.mjs",
         "scripts/testing/release-test-reporter.mjs",
         "docs/testing/2026-10-12-vuh-2163/flows/prove.mjs",

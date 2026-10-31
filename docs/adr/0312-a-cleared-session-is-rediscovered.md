@@ -1,4 +1,4 @@
-# ADR 0308: A cleared session is rediscovered, and the connector's detection is the owner's
+# ADR 0312: A cleared session is rediscovered, and the connector's detection is the owner's
 
 Status: Accepted by James, 2026-10-31. Amends
 [ADR 0301](0301-claude-reaches-the-fleet-through-a-narrow-connector.md). Narrows

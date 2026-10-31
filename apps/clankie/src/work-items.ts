@@ -1,3 +1,4 @@
+import { WATCH_REFUSAL } from "./watch.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
@@ -336,7 +337,7 @@ export interface WorkItemsServiceOptions {
   readonly githubApiBase?: string;
   readonly clock?: () => Date;
   /** The check every outward tracker write passes (ADR 0302); absent, writes are not checked. */
-  readonly posting?: Pick<TrackerPostingGate, "admit">;
+  readonly posting?: Pick<TrackerPostingGate, "admit"> & Partial<Pick<TrackerPostingGate, "watching">>;
 }
 
 export type WorkResult =
@@ -795,9 +796,19 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
-  const tracker = async (path: string, record: boolean, requireRecorded = false, local = true) => {
+  const tracker = async (
+    path: string,
+    record: boolean,
+    requireRecorded = false,
+    local = true,
+    beforeWrite?: () => Promise<void>,
+  ) => {
     try {
-      return await resolveTracker(path, await deps(path, local), { record, requireRecorded });
+      return await resolveTracker(
+        path,
+        { ...(await deps(path, local)), ...(beforeWrite === undefined ? {} : { beforeWrite }) },
+        { record, requireRecorded },
+      );
     } catch (error) {
       if (error instanceof ConventionNeededError)
         throw new WorkRequestError("needs_decision", error.message, {
@@ -815,7 +826,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
    * (VUH-2805): the shared store scoped to that project, whatever repo the caller stands in.
    * An item outside the project is not found there; writes are scope-checked again.
    */
-  const builtInProjectItem = async (project: string, id: string) => {
+  const builtInProjectItem = async (project: string, id: string, beforeWrite?: () => Promise<void>) => {
     const store = openBuiltIn();
     // The store's own lookup misses are answers; any other failure propagates.
     const lookup = async (name: string, args: Record<string, unknown>, missing: string) => {
@@ -865,6 +876,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         builtIn,
         actor: CLANKIE_FOR_OWNER,
         scopedWrites: true,
+        ...(beforeWrite === undefined ? {} : { beforeWrite }),
       }),
     };
   };
@@ -1407,6 +1419,17 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       .map((project) => project.id);
   };
 
+  const refuseWhileWatching = async () => {
+    if ((await options.posting?.watching?.()) === true)
+      throw new WorkRequestError("posting_refused", WATCH_REFUSAL);
+  };
+  /**
+   * Watch asked again as a work-item write commits, so a write waiting on the tracker's
+   * lock when Watch is chosen changes nothing (ADR 0308). An owner-approved write is his.
+   */
+  const watchedWrite = (posting: typeof TRACKER_POSTING_ADMITTED | undefined) =>
+    posting === TRACKER_POSTING_ADMITTED ? undefined : refuseWhileWatching;
+
   /** `clankie work create|update|attach` on an outward tracker is Clankie posting (ADR 0302). */
   const checkWorkPosting = async (
     request: WorkRequest,
@@ -1418,7 +1441,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if (posting === TRACKER_POSTING_ADMITTED) return assertDestination(convention, destination);
     if (!options.posting) return;
     const tracker = await outwardTracker(convention);
-    if (tracker === undefined) return;
+    // Watch refuses every tracker write that is not the owner's (ADR 0308). An outward
+    // tracker's admission already refuses it; a local tracker has no admission, so ask here.
+    if (tracker === undefined) return await refuseWhileWatching();
     const admission = await options.posting.admit({
       tracker,
       ...destinationOf(convention),
@@ -1859,6 +1884,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           // A seat's own issue status is Clankie writing for this project (ADR 0302).
           const tracker =
             options.posting && isTrackerWriteTool(name) ? await outwardTracker(convention) : undefined;
+          // Watch (ADR 0308): a local tracker has no admission to refuse it, so ask here.
+          if (options.posting && isTrackerWriteTool(name) && tracker === undefined)
+            await refuseWhileWatching();
+          // Asked again as the write commits, so bookkeeping that waited on the tracker's lock
+          // when Watch was chosen changes nothing (ADR 0308).
+          const writing = async () => {
+            await beforeWrite();
+            if (options.posting && isTrackerWriteTool(name)) await refuseWhileWatching();
+          };
           if (options.posting && tracker !== undefined)
             assertAdmitted(
               await options.posting.admit({
@@ -1877,7 +1911,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             ...(builtIn ? { builtIn } : {}),
             scopedWrites: true,
             actor: CLANKIE_FOR_OWNER,
-            beforeWrite,
+            beforeWrite: writing,
             ...(convention.backend !== "linear"
               ? {}
               : {
@@ -1892,7 +1926,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                       // `call` below checked posting for this project first (ADR 0302).
                       posting: TRACKER_POSTING_ADMITTED,
                       fence: async () => {
-                        await beforeWrite();
+                        await writing();
                         await assertLinear();
                         return () => target?.assertCurrent();
                       },
@@ -1903,7 +1937,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                   },
                 }),
           });
-          const result = await tools.call(name, args, { beforeWrite, actor: CLANKIE_FOR_OWNER });
+          const result = await tools.call(name, args, { beforeWrite: writing, actor: CLANKIE_FOR_OWNER });
           await beforeWrite();
           await assertLinear();
           return result;
@@ -2200,6 +2234,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           ...callbacks,
           beforeWrite: async () => {
             await callbacks.beforeWrite?.();
+            // A saved view is a tracker write too: Watch refuses it unless it is the owner's (ADR 0308).
+            if (posting !== TRACKER_POSTING_ADMITTED && !ownerActor(callbacks.actor))
+              await refuseWhileWatching();
             validate();
           },
           onDispatch: () => {
@@ -2247,6 +2284,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         !ownerActor(callbacks.actor)
           ? await outwardTracker(convention)
           : undefined;
+      // Watch refuses every tracker write that is not the owner's (ADR 0308). An outward
+      // tracker's admission already refuses it; a local tracker has no admission, so ask here.
+      const watchApplies =
+        posting !== TRACKER_POSTING_ADMITTED && isTrackerWriteTool(name) && !ownerActor(callbacks.actor);
+      const refuseWatching = async () => {
+        if (watchApplies && (await options.posting?.watching?.()) === true)
+          assertAdmitted({ outcome: "refused", message: WATCH_REFUSAL });
+      };
+      if (outward === undefined) await refuseWatching();
       if (options.posting && outward !== undefined)
         assertAdmitted(
           await options.posting.admit({
@@ -2268,6 +2314,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       const beforeWrite = async () => {
         await validate?.();
         await callbacks.beforeWrite?.();
+        // Asked again at the write itself, so a write waiting on the tracker's lock when Watch
+        // is chosen changes nothing.
+        await refuseWatching();
         await assertAccountCurrent();
       };
       const scopedDependencies: TrackerDeps = {
@@ -2366,7 +2415,16 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (itemRequest && itemProject !== undefined) {
         // An explicit project wins over whatever repo, or repo reference, the caller names.
         if (!local) throw new WorkRequestError("invalid", "Devices read work items through their repo");
-        const { repo, backend } = await builtInProjectItem(itemProject, request.id);
+        const { repo, backend } = await builtInProjectItem(
+          itemProject,
+          request.id,
+          request.action === "update" || request.action === "attach" ? watchedWrite(posting) : undefined,
+        );
+        if (
+          (request.action === "update" || request.action === "attach") &&
+          posting !== TRACKER_POSTING_ADMITTED
+        )
+          await refuseWhileWatching();
         try {
           switch (request.action) {
             case "show": {
@@ -2558,7 +2616,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "create": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend, convention } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           const item = await backend.create({
             title: request.title,
@@ -2573,7 +2631,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "update": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend, convention } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return {
@@ -2588,7 +2646,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         }
         case "attach": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
-          const { backend, convention } = await tracker(entry.path, true);
+          const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return { repo: await describe(entry), item: await backend.attach(request.id, request.evidence) };

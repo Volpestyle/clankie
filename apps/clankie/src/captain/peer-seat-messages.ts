@@ -96,7 +96,7 @@ export interface PeerDeliveryOptions {
   readonly conversationId?: string;
   readonly fence?: ((agent: HerdrAgentSnapshot | undefined) => Promise<boolean>) & CurrentCheck;
   /**
-   * Operator rediscovery (ADR 0308). `true` may redeliver once after the current
+   * Operator rediscovery (ADR 0312). `true` may redeliver once after the current
    * session's transcript is read and does not contain the message. `"final"` is
    * that one redelivery; it is never followed by another.
    */

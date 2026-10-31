@@ -80,7 +80,7 @@ export interface RegisterConnectorRoutesContext {
   readonly devices: DeviceRegistry;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   readonly promptAnswers: ConnectorPromptAnswers;
-  /** Which multiplexers are discovered, and which apps the connector serves (ADR 0308). */
+  /** Which multiplexers are discovered, and which apps the connector serves (ADR 0312). */
   readonly detection: ConnectorDetection;
 }
 
@@ -432,7 +432,7 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
     return context.json(promptAnswerApps());
   });
 
-  // --- Discovery and which apps are served (ADR 0308) --------------------------
+  // --- Discovery and which apps are served (ADR 0312) --------------------------
 
   const detectionStatus = (): ConnectorDetectionResponse => ({
     multiplexers: ctx.detection.multiplexers(),

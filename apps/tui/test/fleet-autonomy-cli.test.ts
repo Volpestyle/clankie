@@ -18,7 +18,7 @@ import { runProjectSettingsCommand } from "../src/command/project-settings.ts";
 import { herdrFleetRuntimeArgs } from "../src/command/herdr.ts";
 import { runRuntimeCommand } from "../src/command/runtime.ts";
 import { machineSetupContext } from "../src/command/machine-setup.ts";
-import { FleetAutonomySchema } from "@clankie/protocol";
+import { FLEET_SETTINGS_PATH, FleetAutonomySchema } from "@clankie/protocol";
 import { formatWorkingPreferences } from "../src/command/working-preferences.ts";
 
 const roots: string[] = [];
@@ -645,4 +645,27 @@ it("the autonomy CLI names drift and explicit level writes use the shared owner 
     expect(saved.drift).toBeUndefined();
     expect((await runAutonomyCommand([], options)).level).toBe(level);
   }
+});
+
+it("Watch sits below Off: older clients read Off, and any level leaves it (ADR 0308)", async () => {
+  const f = await fixture();
+  const options = fleetSettingsClient(f.settings);
+  const watching = await runAutonomyCommand(["watch"], options);
+  expect(watching.level).toBe("watch");
+  expect(watching.description).toMatch(/^Watch: /u);
+  expect((await f.settings.load()).autonomy).toMatchObject({ watch: true, confirmedAt: expect.any(String) });
+  expect((await runAutonomyCommand([], options)).level).toBe("watch");
+
+  // A client that predates Watch never asks for it and reads the Off leaves Watch wrote.
+  const older = await options.fetchImpl(`${options.host}${FLEET_SETTINGS_PATH}`, {
+    headers: { authorization: `Bearer ${options.env.CLANKIE_OPERATOR_TOKEN}` },
+  });
+  const snapshot = (await older.json()) as Record<string, unknown>;
+  expect(snapshot.autonomyLevel).toBe("off");
+  expect(snapshot).not.toHaveProperty("watch");
+
+  // So the level it sends next leaves Watch, as the dial's own Low does.
+  const low = await runAutonomyCommand(["low"], options);
+  expect(low.level).toBe("low");
+  expect((await f.settings.load()).autonomy.watch).toBeUndefined();
 });

@@ -136,6 +136,27 @@ landing, give it a standing reviewer rather than relaying reviews yourself
 bundle checks follow `work-items`. Nothing unlanded is closed or forgotten
 silently (`tidy`).
 
+## Never wait on CI
+
+In every project you lead, CI is a checkpoint on the side, never a gate the
+fleet stands behind
+([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)).
+
+- Keep workers pushing, iterating, restarting and finding bugs while CI runs.
+  A seat idle on a run is a fault to fix.
+- File each bug as an issue in the project's tracker at the front of the queue,
+  ordered by how badly it blocks the current goals, and staff it.
+- Run the full checks once, when the work is ready to merge: open pull requests
+  as drafts and mark them ready when done, or follow the project's own trigger.
+- A failure already on the main branch never blocks other work. File it and
+  get it fixed there; don't hold unrelated changes behind it.
+- Each change gets its full checks once, in one place: CI for a pull request,
+  or the project's local landing gate for a change pushed straight to main.
+  Brief workers to run only the tests for what they changed while they
+  iterate, and to leave the full suite and typecheck to that one place.
+- Where a project's CI reruns everything on every push or lets main's failures
+  block others, file that as a bug too; clankie's CI is the worked example.
+
 ## Keep the fleet efficient
 
 On each watch wake and periodic round, check **every seat you own**

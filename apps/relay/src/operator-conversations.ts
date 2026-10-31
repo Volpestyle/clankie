@@ -800,7 +800,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       // The owner's per-app switch, checked by the service, is what lets keys through.
       serviceRequest.op === "prompt_answer" ||
       // Reading who leads and what is held for the apps (ADR 0304).
-      (serviceRequest.op === "lead" && serviceRequest.command.action !== "set")
+      (serviceRequest.op === "lead" && serviceRequest.command.action !== "set") ||
+      serviceRequest.op === "herdr_core_list" ||
+      serviceRequest.op === "herdr_core_read"
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -812,7 +814,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             autoOnOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input" ||
-            serviceRequest.op === "terminal_focus"
+            serviceRequest.op === "terminal_focus" ||
+            serviceRequest.op === "herdr_core_focus"
           ? "terminalControl"
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||
@@ -1737,6 +1740,8 @@ const CONNECTOR_OPS = new Set([
   "work_items",
   "work_item_activity",
   "issue_write",
+  "herdr_core_list",
+  "herdr_core_read",
   "get",
   "create",
   "send",

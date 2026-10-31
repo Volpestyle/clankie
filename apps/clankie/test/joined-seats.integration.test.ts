@@ -372,6 +372,50 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
               deliveryIds: [deliveryId],
             });
             expect(acknowledged.structuredContent).toMatchObject({ acknowledged: true, unanswered: [] });
+            // Watch holds the joined machine at Portal: its lead's message to a worker is refused,
+            // and the lead and worker stay bound for when Clankie may act again (ADR 0308).
+            const watch = (on: boolean) =>
+              settings.update((current) => {
+                const { watch: _watch, ...autonomy } = current.autonomy;
+                return { ...current, autonomy: on ? { ...autonomy, watch: true } : autonomy };
+              });
+            // A message already waiting for the worker when Watch is chosen is refused at its
+            // next poll, never handed over to start a native turn.
+            await worker.pollEvents(1);
+            const waiting = upstream.callTool("message_seat", {
+              seat: `${credential.lease.machineId}/worker-proof`,
+              message: "Queued before watching",
+            });
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            await watch(true);
+            expect(await worker.pollEvents(300)).toEqual([]);
+            const refusedWaiting = JSON.stringify(await waiting);
+            expect(refusedWaiting).not.toContain('\\"delivered\\"');
+            expect(refusedWaiting).toContain("aborted");
+            const watched = await upstream
+              .callTool("message_seat", {
+                seat: `${credential.lease.machineId}/worker-proof`,
+                message: "Not while watching",
+              })
+              .then(
+                (result) => JSON.stringify(result),
+                (error: unknown) => String(error),
+              );
+            expect(watched).toContain("only watching");
+            // A poll parked while watching does not refuse a message sent after Watch ends: it
+            // returns at once, and the worker's next poll takes the message.
+            const parked = worker.pollEvents(5000);
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            await watch(false);
+            const after = upstream.callTool("message_seat", {
+              seat: `${credential.lease.machineId}/worker-proof`,
+              message: "Back from watching",
+            });
+            expect(await parked).toEqual([]);
+            const afterEvents = await worker.pollEvents(2000);
+            expect(afterEvents.map((event) => event.content)).toEqual(["Back from watching"]);
+            expect(await worker.acknowledge!(afterEvents[0]!.id)).toBe(true);
+            expect(JSON.stringify(await after)).toContain("delivered");
           } finally {
             await worker.close();
           }

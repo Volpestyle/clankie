@@ -29,7 +29,7 @@ it("slow health records exactly one alarm and one recovery in the default conver
         response.writeHead(200, { "content-type": "application/json" });
         response.end('{"ok":true}');
       },
-      slow ? 250 : 0,
+      slow ? 900 : 0,
     );
   });
   server.listen(0, "127.0.0.1");
@@ -63,7 +63,9 @@ it("slow health records exactly one alarm and one recovery in the default conver
       enabled: true,
       // Process CPU stays out of this case; the real busy-loop case is runtime-health-observer.
       cpuPercent: 1000,
-      healthLatencyMs: 100,
+      // Far above a loaded runner's local reply time, so a recovered sample
+      // cannot read as slow again before the case checks it (CI history).
+      healthLatencyMs: 400,
       sustainedMs: 300,
       sampleIntervalMs: 100,
       cooldownMs: 60_000,
@@ -81,11 +83,19 @@ it("slow health records exactly one alarm and one recovery in the default conver
   // Keep the incident sustained across further samples: still one alarm.
   await new Promise((resolve) => setTimeout(resolve, 400));
   slow = false;
-  await vi.waitFor(() => expect(observer.snapshot().lastRecoveryAt).toBeDefined(), {
-    timeout: 5_000,
-    interval: 50,
-  });
-  expect(observer.snapshot()).toMatchObject({ state: "healthy", delivery: "unavailable", recorded: true });
+  // Wait for the recovered state itself, then stop sampling: on a starved runner a
+  // later sample's event-loop lag alone can read as slow again (CI history).
+  await vi.waitFor(
+    () => {
+      expect(observer.snapshot().lastRecoveryAt).toBeDefined();
+      expect(observer.snapshot()).toMatchObject({
+        state: "healthy",
+        delivery: "unavailable",
+        recorded: true,
+      });
+    },
+    { timeout: 5_000, interval: 50 },
+  );
   observer.stop();
 
   const conversationId = "global-default";
@@ -100,7 +110,7 @@ it("slow health records exactly one alarm and one recovery in the default conver
   );
   expect(notices).toHaveLength(2);
   expect(notices[0]).toMatch(/^Runtime health alarm: health held for \d+ms/u);
-  expect(notices[0]).toContain("threshold 100ms");
+  expect(notices[0]).toContain("threshold 400ms");
   expect(notices[1]).toContain(
     `Runtime health recovered after ${observer.snapshot().lastIncidentDurationMs}ms`,
   );

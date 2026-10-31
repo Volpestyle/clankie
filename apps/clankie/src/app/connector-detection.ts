@@ -13,17 +13,17 @@ const PersistedSchema = z
     schemaVersion: z.literal(1),
     /**
      * Adapter id to enabled. A record, so a later adapter's key still parses.
-     * Absent `herdr` means on (ADR 0308).
+     * Absent `herdr` means on (ADR 0312).
      */
     multiplexers: z.record(z.string(), z.boolean()),
-    /** Device ids the owner turned off. Absent means served (ADR 0308). */
+    /** Device ids the owner turned off. Absent means served (ADR 0312). */
     unserved: z.array(z.string().min(1).max(256)).max(256),
   })
   .strict();
 
 /**
  * Which multiplexers the connector discovers, and which connected apps it
- * serves (ADR 0308). Herdr detection is on and every app is served until the
+ * serves (ADR 0312). Herdr detection is on and every app is served until the
  * owner says otherwise, including when the file is missing or unreadable, so
  * a bad file does not hide the fleet. Without a path (tests) the switches
  * live in memory. Mode 0600, same as the other connector owner files.

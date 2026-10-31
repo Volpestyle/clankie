@@ -146,9 +146,9 @@ credentials, tool authority, and device access.
 - [Library index](docs/README.md): every subsystem's canonical guide
 - [CLI](docs/cli.md) and [HTTP catalog](apps/clankie/openapi.yaml): command and route contracts
 
-This repository holds the service, console, relay, and public contracts. The
-Clankie app and the public gateway are private
-([ADR 0300](docs/adr/0300-clankie-runs-only-on-the-owners-machine.md)).
+This repository holds the service, console, relay, phone gateway, and public
+contracts. The Clankie app and the gateway's deployment are private
+([ADR 0311](docs/adr/0311-the-doorway-source-is-public.md)).
 
 ## Contribute
 

@@ -10,6 +10,7 @@ import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-age
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { materializeOwnerAttachments, modelImagesForOwnerAttachments } from "../owner-attachments.ts";
+import { WATCH_TURN_REFUSAL, WatchingError } from "../watch.ts";
 import { AutonomyStore, WakeHeldError } from "./autonomy.ts";
 import type { LeadStore } from "./lead.ts";
 import { createDraftPacer } from "./captain-draft.ts";
@@ -213,6 +214,12 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             // Surface names are caller claims; only the host-verified principal
             // makes this an ordinary owner turn. Recheck after attachment setup.
             if (kind === "turn") await authorizeQuestion(context.ownerAuthority);
+            // Watch (ADR 0308): a native lead sends what it hears to its own model, so
+            // nothing goes into the seat while Clankie is only watching.
+            if ((await ctx.settings()).autonomy?.watch === true) {
+              context.deliveryOutcome?.({ state: "rejected", detail: WATCH_TURN_REFUSAL });
+              throw new WatchingError(WATCH_TURN_REFUSAL);
+            }
             const delivery = await selectedOutbox.deliver({
               ...(original
                 ? {

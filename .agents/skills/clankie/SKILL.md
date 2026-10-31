@@ -67,7 +67,12 @@ work requires. A subagent profile in your hire brief overrides that. A child's
 result or roster status alone does not prove your deliverable is complete.
 
 Follow the workspace's own landing and test rules and the gate assignment in
-your brief. Publish raw captures through `clankie evidence push` as
+your brief. Run each change's full checks once, in one place, never twice: on
+a pull request that is CI's job when the pull request is marked ready; on a
+change you land straight on the main branch it is the project's local landing
+gate, run once before you push. While you iterate, run only the tests for what
+you changed. Don't run the whole suite or the full typecheck as a habit
+([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)). Publish raw captures through `clankie evidence push` as
 [work-items](../work-items/SKILL.md) rule 3 describes, and cite the printed
 `clankie://evidence` links.
 
