@@ -1,0 +1,59 @@
+// The landing gate's test selection on its own: Vitest's changed-file selection
+// against a base, plus the declared consumers of changed filesystem inputs that
+// Vitest's import graph cannot see (scripts/testing/landing-fs-inputs.mjs). The
+// owner's Mac runs it in CI so macOS-only cases of those consumers run too.
+//
+//   node scripts/check-changed-tests.mjs --base <commit>
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { fsInputScope } from "./testing/landing-fs-inputs.mjs";
+
+const args = process.argv.slice(2);
+if (args.length !== 2 || args[0] !== "--base")
+  throw new Error("Usage: check-changed-tests.mjs --base <commit>");
+const root = resolve(fileURLToPath(new URL("../", import.meta.url)));
+const git = (...command) => execFileSync("git", command, { cwd: root, encoding: "utf8" }).trim();
+const base = git("rev-parse", "--verify", `${args[1]}^{commit}`);
+const changed = [
+  ...new Set([
+    ...git("diff", "--name-only", "-z", base).split("\0").filter(Boolean),
+    ...git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean),
+  ]),
+].sort();
+const vitest = (...rest) =>
+  spawnSync("pnpm", ["exec", "vitest", ...rest], {
+    cwd: root,
+    stdio: "inherit",
+    env: { ...process.env, CLANKIE_LANDING_TESTS: "1" },
+  }).status ?? 1;
+
+const { tests } = fsInputScope(root, changed, base);
+let selection = ["--changed", base];
+if (tests.length) {
+  // Listing files runs no tests; the one run below keeps the config's lanes and exclusions.
+  const directory = mkdtempSync(join(tmpdir(), "changed-tests-"));
+  try {
+    const listing = join(directory, "selection.json");
+    const status = vitest(
+      "list",
+      "--config",
+      "vitest.config.ts",
+      "--changed",
+      base,
+      "--filesOnly",
+      `--json=${listing}`,
+    );
+    if (status !== 0) throw new Error(`vitest list exited ${status}`);
+    const imported = JSON.parse(readFileSync(listing, "utf8"));
+    selection = [
+      ...new Set([...imported.map(({ file }) => relative(root, file).replaceAll("\\", "/")), ...tests]),
+    ].sort();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  console.log(`[changed-tests] filesystem-input tests: ${tests.join(", ")}`);
+}
+process.exit(vitest("run", "--config", "vitest.config.ts", ...selection, "--passWithNoTests"));
