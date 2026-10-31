@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import { spawn, type ChildProcess } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -62,6 +62,9 @@ async function eventually<T>(
       throw new Error(`Owned CLI exited ${exited} before it was ready: ${owner!.output.join("")}`);
     await delay(40);
   }
+}
+function linuxPython() {
+  return execFileSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
 }
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "clankie-resources-cli-"));
@@ -133,6 +136,9 @@ async function fixture() {
     CLANKIE_CONTROL_PLANE_URL: host,
   };
   await mkdir(env.PATH);
+  // Darwin pins the fleet helper's Python to /usr/bin/python3; Linux finds python3 on PATH,
+  // so the otherwise empty bin holds just that one interpreter.
+  if (process.platform !== "darwin") await symlink(linuxPython(), join(env.PATH, "python3"));
   const options = {
     settings,
     resourceGovernor: governor,

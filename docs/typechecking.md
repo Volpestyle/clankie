@@ -18,6 +18,14 @@ configs, compiler output, memory measurement, wall time and result under
 directory alongside their QA reports, including after failure. Turbo hashes the
 shared supervisor; changing it selects every project in the landing gate.
 
+Each program is incremental: its compiler state lives in
+`.local/tsbuildinfo/<project>/<program>.tsbuildinfo`, so a later check of the
+same project rechecks only the files that changed and what depends on them. The
+first check, or one after deleting that directory, is a full one. Pull request
+CI restores the state from that pull request's last run, else from the latest
+push to `main`, which seeds it (ADR 0310); on `apps/clankie` that took a check
+from 292 s cold to 48 s warm.
+
 ## Program boundaries
 
 Projects with more than 48 test roots get one source program and test programs

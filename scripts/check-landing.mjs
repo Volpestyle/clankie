@@ -19,8 +19,11 @@ const args = process.argv.slice(2);
 const separator = args.indexOf("--");
 const revalidate = (separator < 0 ? args : args.slice(0, separator)).includes("--revalidate");
 const retryTests = (separator < 0 ? args : args.slice(0, separator)).includes("--retry-failed-tests");
+// Run every selected test instead of stopping at the first failure, so CI can
+// tell a change's own failures from ones its base already has (ADR 0310).
+const keepGoing = (separator < 0 ? args : args.slice(0, separator)).includes("--keep-going");
 const options = (separator < 0 ? args : args.slice(0, separator)).filter(
-  (arg) => !["--revalidate", "--retry-failed-tests"].includes(arg),
+  (arg) => !["--revalidate", "--retry-failed-tests", "--keep-going"].includes(arg),
 );
 const vitestArgs = separator < 0 ? [] : args.slice(separator + 1);
 for (let index = 0; index < options.length; index += 2)
@@ -254,7 +257,7 @@ run(
     "vitest.config.ts",
     ...testSelection,
     "--bail",
-    retryTests ? "0" : "1",
+    retryTests || keepGoing ? "0" : "1",
     "--passWithNoTests",
     ...(vitestArgs.some((argument) => argument.startsWith("--reporter")) ? [] : ["--reporter=default"]),
     "--reporter=./scripts/testing/landing-graph-reporter.mjs",
