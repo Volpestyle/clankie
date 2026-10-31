@@ -140,6 +140,12 @@ const STREAM_OPENING_DEADLINE_MS = 10_000;
 const STREAM_OPENING_CHARS_MAX = 16 * 1024;
 /** Downlink a phone has not read yet; past it the call is too far behind to be a call. */
 const STREAM_DOWNLINK_BUFFER_BYTES_MAX = 1024 * 1024;
+/**
+ * The Mac's tunnel backlog past which a device's uplink record is refused. The
+ * tunnel is shared with ordinary requests (bodies up to 2 MiB, as base64), so
+ * the cap leaves room for those; a call this far behind is not a call anyway.
+ */
+const STREAM_UPLINK_HOST_BUFFER_BYTES_MAX = 4 * 1024 * 1024;
 
 const REQUEST_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST);
 const RESPONSE_HEADER_ALLOWLIST = new Set(PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST);
@@ -1023,6 +1029,11 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     }
     if (!isBinary || bytes.byteLength === 0) {
       endStream(stream, 1008, "gateway");
+      return;
+    }
+    // A stalled or slow Mac must not let a device queue gateway memory without bound.
+    if (stream.host.socket.bufferedAmount > STREAM_UPLINK_HOST_BUFFER_BYTES_MAX) {
+      endStream(stream, 1013, "gateway");
       return;
     }
     stream.upBytes += bytes.byteLength;

@@ -50,7 +50,9 @@ health route.
   for a Mac that doesn't carry calls, 503 for no Mac, 400 for a bearer, and 429
   for no room or opens over budget (12 in a burst per host, 24 per client).
   Close codes are passed through `sendableStreamCloseCode` before use, and a
-  Mac that goes away ends its calls with 1001.
+  Mac that goes away ends its calls with 1001. A stream ends with 1013 when the
+  phone is more than 1 MiB behind on downlink, or the Mac's tunnel has more than
+  4 MiB queued when an uplink record arrives.
 - `POST /gateway/v1/push/registrations` and `/gateway/v1/push/registrations/clear`
   carry delivery metadata and a one-use encrypted device authorization proof.
 - `/h/{hostId}/v1/hooks/linear` carries separately signed third-party webhooks.

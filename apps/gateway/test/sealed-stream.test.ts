@@ -439,6 +439,32 @@ describe("the gateway's half of a sealed stream", () => {
     expect((await fetch(`${origin}/health`)).status).toBe(200);
   });
 
+  it("ends a call whose Mac stops reading, instead of queueing its uplink without bound", async () => {
+    const { origin } = await startGateway();
+    const mac = await scriptedMac(origin);
+    const phone = phoneSocket(origin);
+    await once(phone.socket, "open");
+    phone.socket.send('{"version":1}');
+    await until(() => mac.opened().length === 1, "the opening");
+    // The Mac's tunnel stops draining; the phone keeps talking at full rate.
+    mac.socket.pause();
+    const record = randomBytes(16 * 1024);
+    for (let sent = 0; sent < 4_000 && phone.closed() === undefined; sent += 1) {
+      phone.socket.send(record, { binary: true });
+      if (sent % 50 === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    await until(() => phone.closed() !== undefined, "the phone's close");
+    expect(phone.closed()).toBe(1013);
+    expect((await fetch(`${origin}/health`)).status).toBe(200);
+    // The Mac hears the stream end once it reads again.
+    mac.socket.resume();
+    await until(
+      () => mac.frames.some((frame) => frame.kind === "stream_close" && frame.code === 1013),
+      "the Mac hearing the stream end",
+      15_000,
+    );
+  });
+
   it("passes records through unread, and ends a stream that breaks the contract", async () => {
     const { origin } = await startGateway();
     const mac = await scriptedMac(origin);
