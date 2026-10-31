@@ -2211,6 +2211,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           ...callbacks,
           beforeWrite: async () => {
             await callbacks.beforeWrite?.();
+            // A saved view is a tracker write too: Watch refuses it unless it is the owner's (ADR 0307).
+            if (posting !== TRACKER_POSTING_ADMITTED && !ownerActor(callbacks.actor))
+              await refuseWhileWatching();
             validate();
           },
           onDispatch: () => {

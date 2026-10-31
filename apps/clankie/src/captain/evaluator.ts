@@ -24,6 +24,7 @@ import {
   type CaptainTurnSettledMetrics,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { WatchingError } from "../watch.ts";
 import { createHerdrWatchRunner, type HerdrWatchRunner, type HerdrAgentSnapshot } from "./herdr-watch.ts";
 
 const exec = promisify(execFile);
@@ -106,6 +107,10 @@ export class Evaluator {
   private readonly run: (args: string[]) => Promise<void>;
   private readonly socket: string;
   private readonly available: () => boolean;
+  /**
+   * Watch (ADR 0307), asked again before each pane effect, so Watch chosen during a tick
+   * stops it. Asked only where it is wired, so an evaluator without it keeps its timing.
+   */
   private readonly watching: (() => Promise<boolean>) | undefined;
 
   private readonly directory: string;
@@ -302,7 +307,6 @@ export class Evaluator {
     this.busy = true;
     let starting: EvaluationJob | undefined;
     try {
-      // Asked only where Watch is wired, so an evaluator without it keeps its timing.
       if (this.watching !== undefined && (await this.watching())) return;
       const running = this.state.jobs.find((job) => job.status === "running");
       if (running !== undefined) {
@@ -350,11 +354,14 @@ export class Evaluator {
         return;
       }
       // Pane trouble leaves the job queued: it is retried on a later tick, never failed.
-      if ((await this.releasePane(true)) === "busy") {
+      const released = await this.releasePane(true);
+      if (released === "watching") return;
+      if (released === "busy") {
         this.recordError(new Error("Evaluator pane is still busy; queued assessments wait for it."));
         return;
       }
-      if (!this.state.enabled || this.closed) return;
+      if (!this.state.enabled || this.closed || (this.watching !== undefined && (await this.watching())))
+        return;
       writeJson(
         join(next.directory, "previous-findings.json"),
         this.state.jobs.flatMap((job) => job.report?.findings ?? []),
@@ -369,6 +376,15 @@ export class Evaluator {
         `Read ${join(next.directory, "assignment.md")} and carry out this evaluation. Write report.json atomically in that directory when finished.`,
       );
     } catch (error) {
+      // Watch chosen before the agent was dispatched: nothing went out, so the assessment waits.
+      if (error instanceof WatchingError) {
+        if (starting !== undefined) {
+          starting.status = "queued";
+          delete starting.startedAt;
+          this.save();
+        }
+        return;
+      }
       const job = this.state.jobs.find((entry) => entry.status === "running") ?? starting;
       if (job !== undefined) {
         job.status = "failed";
@@ -412,7 +428,7 @@ export class Evaluator {
    * untouched and forgotten, so a user's agent is never closed and never blocks
    * the queue.
    */
-  private async releasePane(dispatch: boolean): Promise<"busy" | "reuse" | "free"> {
+  private async releasePane(dispatch: boolean): Promise<"busy" | "reuse" | "free" | "watching"> {
     const prior = this.state.pane;
     if (prior === undefined) return "free";
     if (prior.socket !== this.socket)
@@ -423,6 +439,7 @@ export class Evaluator {
     if (agent !== undefined && (await this.ownsAgent(agent))) {
       if (!["idle", "done"].includes(agent.status)) return "busy";
       if (!dispatch && !prior.used && agent.agent === this.state.harness) return "reuse";
+      if (this.watching !== undefined && (await this.watching())) return "watching";
       await this.runner.closePane!(prior.id);
     }
     delete this.state.pane;
@@ -437,12 +454,14 @@ export class Evaluator {
 
   private async startPane(prompt?: string): Promise<void> {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    if (this.watching !== undefined && (await this.watching())) throw new WatchingError();
     const id = await this.runner.createTab!({ cwd: this.directory, label: "Clankie evaluator" });
     const name = `clankie-eval-${randomUUID().slice(0, 8)}`;
     this.state.pane = { id, name, socket: this.socket, used: prompt !== undefined };
     this.state.excludedPanes.push(`${this.socket}:${id}`);
     this.save();
     if (!this.state.enabled || this.closed) throw new Error("Evaluator disabled before agent dispatch.");
+    if (this.watching !== undefined && (await this.watching())) throw new WatchingError();
     try {
       // Native startup arguments avoid racing a new TUI's first input buffer.
       await this.runner.startAgent!({

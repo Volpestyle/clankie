@@ -27,7 +27,13 @@ import {
 } from "@clankie/protocol/tracker-posting";
 import type { WorkConvention } from "@clankie/protocol/work-items";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker, readDrops, recordDropPosted, writeConvention } from "@clankie/work-items";
+import {
+  createLocalTracker,
+  readDrops,
+  recordDropPosted,
+  TRACKER_OWNER,
+  writeConvention,
+} from "@clankie/work-items";
 import { createAccounts } from "../src/accounts.ts";
 import { createClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -1497,4 +1503,60 @@ it("Watch refuses Clankie's unscoped writes to the built-in tracker, and the own
   expect((await call("/v1/tracker/owner/call", "save_issue", { team, title: "Owner's own" })).status).toBe(
     200,
   );
+});
+
+it("Watch refuses a worker's or lead's saved-view changes on the built-in tracker, and the owner's still save", async () => {
+  const f = await fixture();
+  // The beds track their work in the built-in tracker, with one bound project.
+  const beds = await repo(f.root, "beds", { ...decided, backend: "builtin" });
+  const tracker = createLocalTracker({ directory: join(f.root, "work-state", "tracker") });
+  const team = ((await tracker.call("list_teams", {})) as { teams: { id: string }[] }).teams[0]!.id;
+  const project = ((await tracker.call("save_project", { name: "Beds", addTeams: [team] })) as { id: string })
+    .id;
+  const storeId = await tracker.storeId();
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ...ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "beds",
+              name: "Beds",
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: beds }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+              trackerProjectId: project,
+            },
+          ],
+        }).projects,
+      ],
+    },
+  }));
+  const save = (name: string, actor?: Parameters<typeof f.workItems.callTracker>[2]["actor"]) =>
+    f.workItems.callTracker(
+      "save_issue_view",
+      { project, storeId, schemaVersion: 1, name, filter: {} },
+      { repo: beds, local: true, ...(actor === undefined ? {} : { actor }) },
+    );
+  const saved = (await save("Before Watch")) as { id: string };
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  await expect(save("During Watch")).rejects.toThrow("only watching");
+  await expect(
+    f.workItems.callTracker(
+      "post_delete_issue_view",
+      { project, storeId, id: saved.id },
+      { repo: beds, local: true },
+    ),
+  ).rejects.toThrow("only watching");
+  // The owner saving a view himself is not Clankie acting.
+  await expect(save("Owner's own", { ...TRACKER_OWNER, onBehalfOf: [] })).resolves.toBeDefined();
+  // Reading stays open while watching, and nothing Clankie tried landed.
+  const views = JSON.stringify(
+    await f.workItems.callTracker("list_issue_views", { project, storeId }, { repo: beds, local: true }),
+  );
+  expect(views).toContain("Before Watch");
+  expect(views).toContain("Owner's own");
+  expect(views).not.toContain("During Watch");
 });
