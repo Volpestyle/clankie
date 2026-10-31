@@ -49,6 +49,10 @@ full gate in front of `main`.
   state (`.local/tsbuildinfo`), so a later check rechecks only what changed.
   CI caches it per pull request, seeded from every push to `main`.
 
+An opt-in pre-push hook (`pnpm hooks:install`) formats and lints only the
+files a branch changed before each push, so a typo doesn't cost a CI round. It
+runs neither the typecheck nor the tests, which stay in their one place.
+
 For leads and workers: push often and keep working while CI runs; nobody waits
 idle on a run. Open pull requests as drafts and mark one ready when its work is
 done, so the full checks run once before merge. Run them in one place, never
