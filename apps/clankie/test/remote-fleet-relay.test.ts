@@ -4,7 +4,7 @@ import { createConnection, createServer, type Socket } from "node:net";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RemoteFleetRelay } from "../src/remote-fleet-relay.ts";
-import { windowsFleetRelayCommand } from "../src/windows-fleet-relay.ts";
+import { windowsFleetRelayLaunch } from "../src/windows-fleet-relay.ts";
 
 function frame(kind: number, id: number, body = Buffer.alloc(0)) {
   const bytes = Buffer.alloc(9 + body.length);
@@ -306,8 +306,9 @@ describe("trusted remote SSH relay", () => {
   });
 
   it("ships a relay that derives endpoints exclusively from accepted kernel sockets", () => {
-    const command = windowsFleetRelayCommand(1234);
-    const script = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
+    const { stdin } = windowsFleetRelayLaunch(1234);
+    expect(stdin.readUInt32LE(0)).toBe(stdin.length - 4);
+    const script = stdin.subarray(4).toString("utf8");
     expect(script).toContain("AcceptTcpClient");
     expect(script).toContain("client.Client.RemoteEndPoint");
     expect(script).toContain("Console.OpenStandardOutput");

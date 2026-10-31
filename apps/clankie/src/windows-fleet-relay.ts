@@ -6,10 +6,25 @@ import { powershellScriptCommand } from "./herdr-fleet.ts";
  * PATH a fresh login would see: a remote install or PATH change applies without replacing the relay
  * and moving its published port (VUH-1658, VUH-2050).
  */
-export function windowsFleetRelayCommand(returnPort: number): string {
+export interface WindowsFleetRelayLaunch {
+  /** A short remote command that reads the relay from stdin and runs it. */
+  readonly command: string;
+  /** The relay script, length-prefixed, to write to the command's stdin before anything else. */
+  readonly stdin: Buffer;
+}
+
+/**
+ * The relay script is far longer than the 8,191 characters cmd.exe accepts on one command line,
+ * and cmd.exe is Windows OpenSSH's default shell, so on such a machine an encoded command
+ * fails with "The command line is too long." The command line carries only a short loader;
+ * the relay itself arrives on stdin, which it never reads again (requests come back over the
+ * response channel).
+ */
+export function windowsFleetRelayLaunch(returnPort: number): WindowsFleetRelayLaunch {
   if (!Number.isInteger(returnPort) || returnPort < 1 || returnPort > 65535)
     throw new Error("Invalid relay return port");
-  const encoded = powershellScriptCommand(String.raw`
+  const script = Buffer.from(
+    String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
@@ -162,8 +177,27 @@ while ([ClankieRelay]::Running) {
     [ClankieRelay]::Result($command.Id, 'null')
   }
 }
-`)
-    .split(" ")
-    .at(-1)!;
-  return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
+`,
+    "utf8",
+  );
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(script.length);
+  return { command: powershellScriptCommand(RELAY_LOADER), stdin: Buffer.concat([header, script]) };
 }
+
+/** Reads exactly the length-prefixed relay from raw stdin and runs it in this scope. */
+const RELAY_LOADER = String.raw`
+$in = [Console]::OpenStandardInput()
+function Read-Exactly([int] $length) {
+  $bytes = [byte[]]::new($length); $offset = 0
+  while ($offset -lt $length) {
+    $count = $in.Read($bytes, $offset, $length - $offset)
+    if ($count -le 0) { [Console]::Error.WriteLine('Clankie relay script ended early'); exit 1 }
+    $offset += $count
+  }
+  return ,$bytes
+}
+$length = [BitConverter]::ToInt32((Read-Exactly 4), 0)
+if ($length -le 0 -or $length -gt 1048576) { [Console]::Error.WriteLine('Clankie relay script has an invalid length'); exit 1 }
+. ([scriptblock]::Create([Text.Encoding]::UTF8.GetString((Read-Exactly $length))))
+`;

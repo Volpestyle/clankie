@@ -13,7 +13,7 @@ import {
   type HerdrFleet,
 } from "../src/herdr-fleet.ts";
 import { RemoteFleetRelay } from "../src/remote-fleet-relay.ts";
-import { windowsFleetRelayCommand } from "../src/windows-fleet-relay.ts";
+import { windowsFleetRelayLaunch } from "../src/windows-fleet-relay.ts";
 
 // Manual only: uses the caller's authenticated SSH destination and installed
 // Windows PowerShell/Herdr. It starts its own relay, publishes no link file,
@@ -61,6 +61,7 @@ test.skipIf(!process.env.WINDOWS_CENSUS_HOST)(
           if (port) finish(undefined, Number(port));
         });
       });
+      const launch = windowsFleetRelayLaunch(remoteReturnPort);
       const child = spawn(
         "ssh",
         [
@@ -71,11 +72,12 @@ test.skipIf(!process.env.WINDOWS_CENSUS_HOST)(
           "ControlPath=none",
           "--",
           fleet.ssh.host,
-          windowsFleetRelayCommand(remoteReturnPort),
+          launch.command,
         ],
         { stdio: "pipe" },
       );
       children.push(child);
+      child.stdin!.write(launch.stdin);
       let stderr = "";
       child.stderr!.on("data", (chunk: Buffer) => {
         stderr = (stderr + chunk.toString()).slice(-4_096);
