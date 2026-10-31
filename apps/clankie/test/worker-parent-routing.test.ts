@@ -699,7 +699,7 @@ it.each([false, true])(
     expect((await current()).messageReceiver?.state).toBe("unverified");
     // SessionStart is sufficient: no adoption or queued message is necessary.
     await hook(f.service, parent);
-    const resume = `claude --resume ${parent.agent_session.value} --channels plugin:clankie-worker@clankie`;
+    const resume = `claude --resume ${parent.agent_session.value} --plugin-dir <that machine's Clankie worker plugin folder> --channels plugin:clankie-worker@inline`;
     const receiver = FleetSeatMessageReceiverSchema.parse((await current()).messageReceiver);
     expect(receiver.state).toBe("next-turn-only");
     expect(receiver.detail).toContain(resume);

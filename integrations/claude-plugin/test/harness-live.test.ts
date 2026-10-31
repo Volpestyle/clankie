@@ -235,8 +235,10 @@ it("reports missing Claude bridges with the profile/plugin fix", async () => {
   });
   expect(report.panes[0]).toMatchObject({
     status: "missing",
-    remediation: expect.stringContaining("claude plugin enable clankie-worker@clankie"),
+    remediation: expect.stringContaining("--channels plugin:clankie-worker@inline"),
   });
+  // The fix names this install's worker files, not an installed copy.
+  expect(report.panes[0]?.remediation).toMatch(/--plugin-dir "[^"]*claude-plugin[\\/]worker"/u);
 });
 it("joins hired dedicated servers by the exact remote/listen socket, not claimed pane or shell", async () => {
   const report = await observer({

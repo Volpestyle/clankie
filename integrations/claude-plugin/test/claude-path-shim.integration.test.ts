@@ -19,7 +19,17 @@ import { installPaneShell, preparePaneShell, inspectPaneShim } from "../../herdr
 
 const exec = promisify(execFile);
 const roots: string[] = [];
-const worker = "clankie-worker@clankie";
+const worker = "clankie-worker@inline";
+// This checkout's worker plugin, which the installed launcher hands to every launch (ADR 0314).
+const workerRoot = new URL("../worker", import.meta.url).pathname.replace(/\/$/u, "");
+const loaded = [
+  "--plugin-dir",
+  workerRoot,
+  "--channels",
+  `plugin:${worker}`,
+  "--settings",
+  '{"enabledPlugins":{"clankie-worker@clankie":false}}',
+];
 async function fixture() {
   const home = await realpath(await mkdtemp("/tmp/clankie-claude-shim-"));
   roots.push(home);
@@ -98,6 +108,10 @@ it.skipIf(process.platform !== "darwin")(
     const asset = join(release, "integrations/herdr-plugin/claude-path-shim.mjs");
     await mkdir(join(release, "integrations/herdr-plugin"), { recursive: true });
     await copyFile(new URL("../../herdr-plugin/claude-path-shim.mjs", import.meta.url), asset);
+    // A release carries its worker plugin beside the shim.
+    const releaseWorker = join(release, "integrations/claude-plugin/worker");
+    await mkdir(join(releaseWorker, ".claude-plugin"), { recursive: true });
+    await writeFile(join(releaseWorker, ".claude-plugin/plugin.json"), "{}");
     const entry = join(release, "apps/clankie/src/index.mjs");
     await build({
       stdin: {
@@ -115,8 +129,7 @@ it.skipIf(process.platform !== "darwin")(
     ]);
     expect(await readFile(join(f.root, "claude-path-shim.mjs"), "utf8")).toBe(await readFile(asset, "utf8"));
     expect((await f.launch(["--resume", "released-session"])).args).toEqual([
-      "--channels",
-      `plugin:${worker}`,
+      ...loaded.with(1, releaseWorker),
       "--resume",
       "released-session",
     ]);
@@ -140,7 +153,7 @@ it.skipIf(process.platform !== "darwin")(
       ["--model", "sonnet", "--", "a prompt with 'quotes' $and `text`"],
     ]) {
       expect(await f.launch(args)).toMatchObject({
-        args: ["--channels", `plugin:${worker}`, ...args],
+        args: [...loaded, ...args],
         cwd: f.home,
       });
     }
@@ -177,6 +190,12 @@ it.skipIf(process.platform !== "darwin")(
       JSON.stringify({ enabledPlugins: { [worker]: false } }),
     );
     expect((await f.launch(args)).args).toEqual(args);
+    // Switching off the older installed copy's name opts out the same way.
+    await writeFile(
+      join(f.home, ".claude/settings.json"),
+      JSON.stringify({ enabledPlugins: { "clankie-worker@clankie": false } }),
+    );
+    expect((await f.launch(args)).args).toEqual(args);
     await writeFile(
       join(f.home, ".claude/settings.json"),
       JSON.stringify({ enabledPlugins: { [worker]: true } }),
@@ -207,7 +226,7 @@ it.skipIf(process.platform !== "darwin")(
     await symlink(join(second, "bin/claude"), join(alias, "claude"));
     expect(
       (await f.launch([], { PATH: `${f.root}/bin:${alias}:${second}/bin:${f.bin}:/usr/bin:/bin` })).args,
-    ).toEqual(["--channels", `plugin:${worker}`]);
+    ).toEqual(loaded);
     const missing = await exec(join(f.root, "bin/claude"), [], {
       env: { ...f.env, PATH: `${f.root}/bin:${alias}` },
     }).catch((error) => error);
@@ -262,9 +281,7 @@ os.waitpid(pid, 0)
         timeout: 10_000,
       },
     );
-    expect(stdout).toContain(
-      '"args":["--channels","plugin:clankie-worker@clankie","--resume","original-session"]',
-    );
+    expect(stdout).toContain(`"args":${JSON.stringify([...loaded, "--resume", "original-session"])}`);
     expect(stdout).toContain('"rc":"loaded","login":"loaded"');
     expect(stdout).toContain(`"zd":"${ownerConfig}"`);
     expect(stdout).toContain('"seatHarness":null,"seatSession":null,"seatParent":null');

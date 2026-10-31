@@ -80,12 +80,13 @@ of these observations grants tool authority. Roster samples live five seconds;
   `missing`/`pane-mismatch`, `unownedBridges`). Save affected sessions; the owner
   can stop the daemon and resume each with `codex --no-daemon resume <SESSION>`.
   Do not stop another agent's daemon as a diagnostic step.
-- A hand-started Claude pane reporting `missing` needs the worker plugin in that
-  pane's own profile: `claude plugin install clankie-worker@clankie --scope user`,
-  `claude plugin enable clankie-worker@clankie --scope user` (after `claude plugin
-marketplace add <repoRoot>/integrations/claude-plugin` if absent), then
-  restart/resume and verify the fresh catalog lists `message_clankie`,
-  `clankie_tools` and `clankie_call`. Preserve source-owned settings and symlinks.
+- A hand-started Claude pane reporting `missing` was started without Clankie's
+  worker. Claude loads it for one session (ADR 0314); nothing is installed in the
+  profile. A prepared Mac pane's `claude` adds it itself. Elsewhere the owner
+  resumes with `claude --resume SESSION --plugin-dir <Clankie's
+integrations/claude-plugin/worker> --channels plugin:clankie-worker@inline`, then
+  verify the fresh catalog lists `message_clankie`, `clankie_tools` and
+  `clankie_call`.
 - After an owner-authorized same-thread Codex reattach, `clankie agents readopt
 SEAT --conversation ID` repairs the owning conversation's binding.
 - A Codex seat on a worker plugin older than 0.6.5 shows `restart needed`;
@@ -140,10 +141,11 @@ per-profile receipts, since a healthy update can still report
 `harness-refresh-incomplete` or `source-manager-required`. Generated or symlinked
 Codex configuration needs its source-owned setup (`clankie herdr prepare NAME
 --codex-source-setup ABSOLUTE_REMOTE_SCRIPT`), never TOML appends; never replace a
-settings symlink to work around a refusal. A symlinked Claude profile installs
-once its owning source (for example dotfiles) enables `clankie-worker@clankie` and
-registers the clankie marketplace directory itself; the refusal names both entries,
-and that source is edited through its owner. Preparation is incomplete while native
+settings symlink to work around a refusal. Claude profiles get nothing installed:
+setup removes an older `clankie-worker@clankie` copy (ADR 0314). A symlinked
+profile whose owning source (for example dotfiles) still declares that copy or the
+clankie marketplace is left alone; the refusal names those entries, and that
+source is edited through its owner. Preparation is incomplete while native
 version, activation, bridge, identity forwarding or skill checks fail. Read
 `clankie doctor --machine NAME` afterwards: installed files are static proof, so
 do not restart another lane's pane or claim native tools were tested. OpenCode,

@@ -315,24 +315,13 @@ export async function inspectHarnessBridges(
             "Register clankie mcp --fleet through the source that owns Codex configSource; preserve generated configuration symlinks.",
           ]
         : []),
-      ...(!claudeInstalled
-        ? [
-            "claude plugin marketplace add <Clankie repoRoot>/integrations/claude-plugin",
-            "claude plugin install clankie-worker@clankie --scope user",
-          ]
-        : []),
-      ...(claudeInstalled && settings.enabledPlugins?.["clankie-worker@clankie"] !== true
-        ? ["claude plugin enable clankie-worker@clankie --scope user"]
-        : []),
-      // An installed but outdated plugin still loads, so it is drift doctor must name.
+      // Claude hires load the worker from Clankie's own files (ADR 0314); an older
+      // installed copy still loads in hand-started sessions, so doctor names it.
       ...profiles.claude
-        .filter(
-          (profile) =>
-            profile.installed && (profile.versionMatches === false || !profile.bridge || !profile.hooks),
-        )
+        .filter((profile) => profile.installed)
         .map(
           (profile) =>
-            `Update clankie-worker ${profile.version ?? "unknown"} in ${profile.profile} to ${profile.expectedVersion ?? "the bundled version"}: clankie harness install`,
+            `Remove the old clankie-worker ${profile.version ?? "unknown"} copy from ${profile.profile}: clankie harness install`,
         ),
       ...(profiles.codex.pluginInstalled && profiles.codex.versionMatches === false
         ? [

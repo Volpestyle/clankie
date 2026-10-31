@@ -38,7 +38,7 @@ import {
  *
  * Profiles are the machine's default home plus every `~/.claude-<label>` and
  * `~/.codex-<label>` directory, the same convention `clankie herdr prepare`
- * uses to install the worker plugin into each Claude profile.
+ * uses to set up each Codex profile.
  */
 
 export type WorkerAccountHarness = "claude" | "codex" | "pi" | "prime";
@@ -86,7 +86,11 @@ export interface WorkerAccountStatus {
   readonly resetsAt?: string;
   /** The windows behind `headroom`, with their source and observation time. */
   readonly usage?: AccountUsage;
-  /** Claude: whether Clankie's worker plugin is installed in this profile. */
+  /**
+   * Retired: Claude hires load the worker for each session (ADR 0314), so a
+   * profile's install state no longer decides whether it can hire. Kept so a
+   * machine running older code still parses.
+   */
   readonly workerPlugin?: boolean;
   /** The owner set this account aside from automatic choice. */
   readonly held?: { readonly reason?: string };
@@ -197,11 +201,6 @@ const claude = async (profile) => {
   const o = c && status && status.loggedIn && c.oauthAccount && c.oauthAccount.emailAddress == status.email &&
     (typeof status.accountId !== "string" || c.oauthAccount.accountUuid === status.accountId) &&
     (typeof status.orgId !== "string" || c.oauthAccount.organizationUuid === status.orgId) ? c.oauthAccount : {};
-  let plugin = false;
-  try {
-    const registry = JSON.parse(fs.readFileSync(path.join(profile.home, "plugins", "installed_plugins.json"), "utf8"));
-    plugin = Array.isArray(registry.plugins && registry.plugins["clankie-worker@clankie"]);
-  } catch {}
   return {
     harness: "claude", label: profile.label, home: profile.home, aliases: profile.aliases, nativeDefault: profile.nativeDefault === true,
     identityId: status && status.loggedIn && typeof status.accountId === "string" ? status.accountId : undefined,
@@ -209,7 +208,6 @@ const claude = async (profile) => {
     signedIn: status && typeof status.loggedIn === "boolean" ? status.loggedIn : null,
     identity: status && status.loggedIn && typeof status.email === "string" ? status.email : undefined,
     plan: status && status.loggedIn && typeof status.subscriptionType === "string" ? status.subscriptionType : (status && status.loggedIn && typeof status.authMethod === "string" ? status.authMethod : undefined),
-    workerPlugin: plugin,
     onboarded: c ? c.hasCompletedOnboarding === true : undefined, tier: o.organizationRateLimitTier,
     ...usage,
   };
@@ -525,14 +523,7 @@ function judgeWorkerAccount(
     (entry) =>
       entry.machine === machine && entry.harness === account.harness && entry.label === account.label,
   );
-  const fix = accountFix(
-    machine,
-    shell,
-    account.harness,
-    account.label,
-    account.home,
-    account.workerPlugin !== true,
-  );
+  const fix = accountFix(machine, shell, account.harness, account.label, account.home);
   let reason: string | undefined;
   if (account.signedIn === false) reason = `not signed in. ${fix}`;
   else if (account.signedIn === null) reason = `sign-in state unknown (its CLI did not answer). ${fix}`;
@@ -542,8 +533,6 @@ function judgeWorkerAccount(
     reason = `usage exhausted${resetsAt ? ` until ${resetsAt}` : ""}; choose another account or wait`;
   else if (account.harness === "claude" && account.onboarded === false)
     reason = `Claude's first-run setup (theme, security notes, folder trust) is unfinished in this profile, so a hire would stall at it. ${claudeSetupFix(machine, shell, account.label, account.home)}`;
-  else if (account.harness === "claude" && account.workerPlugin === false)
-    reason = `Clankie's worker plugin is not installed in this profile. Run clankie herdr prepare ${machine}`;
   return {
     harness: account.harness,
     label: account.label,
@@ -619,8 +608,6 @@ function accountFix(
   harness: WorkerAccountHarness,
   label: string,
   home: string,
-  /** Claude: whether the worker plugin still has to be installed in that profile. */
-  prepare = true,
 ): string {
   const key = harness === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
   const login = harness === "claude" ? "claude auth login" : "codex login";
@@ -630,7 +617,7 @@ function accountFix(
       : shell === "powershell"
         ? `$env:${key}='${home.replaceAll("'", "''")}'; ${login}`
         : `${key}='${home.replaceAll("'", "'\\''")}' ${login}`;
-  return `Sign it in on ${machine}: ${command}${harness === "claude" && prepare ? `, then clankie herdr prepare ${machine}` : ""}.`;
+  return `Sign it in on ${machine}: ${command}.`;
 }
 
 export type WorkerAccountChoice =

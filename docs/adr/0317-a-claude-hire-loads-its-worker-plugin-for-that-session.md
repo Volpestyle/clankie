@@ -53,6 +53,13 @@ and the plugin named in `--channels`. Managed `disableSideloadFlags` drops
   install to drift.
 - A machine needs its managed policy updated before it runs this code, or its
   hires stop at `consent_required` with the exact entry to add.
-- Hand-started sessions and the Mac PATH shim still use the installed plugin
-  until the installer stops installing it. Removing that install and every
-  existing copy is the follow-up.
+- The installer no longer installs the plugin in any Claude profile. Setup and
+  every update refresh remove an existing `clankie-worker@clankie` copy (and the
+  `clankie` marketplace when no other Clankie plugin uses it) with the owner's
+  per-profile consent, on this Mac and through `clankie herdr prepare` on fleet
+  machines; a profile whose settings an outside source owns is named, not
+  edited. The managed policy's old `clankie` pair is dropped the same way.
+- The Mac PATH shim loads the worker the same way for hand-started `claude` and
+  `claude --resume` in prepared panes. A hand-started session elsewhere (a
+  Windows machine, an unprepared pane) has no worker until it is resumed with
+  the two flags; a Windows shim is a follow-up.

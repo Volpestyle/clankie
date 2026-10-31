@@ -12,8 +12,11 @@ board, console, and status report one keystroke from any herdr workspace.
 ## Hand-started Claude on Mac
 
 In prepared Mac zsh panes, typing `claude` or `claude --resume ID` selects
-Clankie's PATH shim, which adds `--channels plugin:clankie-worker@clankie` when
-the worker plugin is enabled. The shim is independent of the optional UI plugin.
+Clankie's PATH shim, which loads Clankie's worker for that session (ADR 0314):
+`--plugin-dir` with this install's `integrations/claude-plugin/worker` and
+`--channels plugin:clankie-worker@inline`, and switches off an older installed
+copy for that launch. A settings layer that sets `clankie-worker@inline` (or the
+older `clankie-worker@clankie`) to `false` opts out. The shim is independent of the optional UI plugin.
 Bundled zsh panes are prepared at service start. For the active linked local
 Herdr session:
 

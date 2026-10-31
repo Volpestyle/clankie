@@ -13,6 +13,8 @@ export interface HarnessInstallResult {
     | "installed"
     | "updated"
     | "source-setup-completed"
+    /** An older installed Claude worker copy was removed (ADR 0314). */
+    | "removed"
     | "declined"
     | "absent"
     | "source-manager-required"
@@ -23,7 +25,7 @@ export function installHarnessBridges(options: {
   repoRoot?: string;
   marketplaceRoot?: string;
   env?: NodeJS.ProcessEnv;
-  /** Refresh only existing links; never opt a new profile in or enable a disabled Claude plugin. */
+  /** Refresh only existing links; never opt a new profile in. Claude profiles only lose an older worker copy. */
   linkedOnly?: boolean;
   codexHomes?: readonly string[];
   /** Results of a refresh that just ran; profiles it completed are not asked about again. */
@@ -37,16 +39,6 @@ export function installHarnessBridges(options: {
   prepareSkills?(workerRoot: string): Promise<void>;
   codexSourceSetup?: { command: string; args: readonly string[] };
 }): Promise<HarnessInstallResult[]>;
-
-/** Read-only confirmation using native exit metadata and fresh settings from the same profile. */
-export function confirmClaudeWorkerEnabled(
-  error: unknown,
-  options: {
-    profile: string;
-    source: string;
-    configBefore: string | undefined;
-  },
-): Promise<boolean>;
 
 export function codexSourceSetupCommand(
   script: string,

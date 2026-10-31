@@ -134,14 +134,16 @@ inventory. Settlement never replays the brief or claims it was delivered.
 Claude sessions with an observed, process/session-bound worker prompt hook can
 receive held replies once at the next `UserPromptSubmit` without `--channels`.
 A live channel can deliver immediately only when Claude was launched with
-`--channels plugin:clankie-worker@clankie` and the policy allows it; installing
-or reconnecting the plugin alone does not enable a channel in an original
-process. The roster's `messageReceiver` names `live` (an exact-session native
+Clankie's worker loaded for that session (`--plugin-dir` with
+`--channels plugin:clankie-worker@inline`, ADR 0314) and the policy allows it;
+reconnecting the plugin alone does not enable a channel in an original process. The roster's `messageReceiver` names `live` (an exact-session native
 poll, not model awareness), `next-turn-only` (an observed prompt hook without
 a live poll), or `unverified`. Next-turn-only is an idle-wake limitation even
 with no queued mail; it stays visible in the TUI and in the adoption/message
 receipt. Its detail gives the original session's channel-enabled resume command:
-`claude --resume SESSION_ID --channels plugin:clankie-worker@clankie`.
+`claude --resume SESSION_ID --plugin-dir <that machine's Clankie worker plugin
+folder> --channels plugin:clankie-worker@inline` (a prepared Mac pane's
+`claude --resume SESSION_ID` adds both).
 Coordinate stopping/resuming that session with the owner, retaining its original
 cwd and account/config home; never launch a duplicate of a still-running session.
 An absent live poll can also mean a disconnected bridge, so inspect before

@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -99,14 +99,7 @@ export async function runHarnessCommand(
   const codexExists = await stat(codexProfile)
     .then((entry) => entry.isDirectory())
     .catch(() => false);
-  const claudeSource = await realpath(join(claudeProfile, "settings.json")).catch(() =>
-    join(claudeProfile, "settings.json"),
-  );
   const marketplace = join(options.repoRoot, "integrations", "claude-plugin");
-  const selectedClaudeDetails = [
-    `Install and enable clankie-worker@clankie from ${marketplace} for profile ${claudeProfile} (bridge, native hooks and packaged skills).`,
-    `Update the existing clankie-worker cache for alias profile ${claudeProfile}; shared settings at ${claudeSource} stay unchanged.`,
-  ];
   const selectedConsent: Parameters<typeof installHarnessBridges>[0]["consent"] = async (
     harness,
     detail,
@@ -118,7 +111,12 @@ export async function runHarnessCommand(
         context?.profile === codexProfile &&
         (approved || (await automaticCodexConsent(detail, context, marketplace)))
       );
-    return claudeExists && context?.profile === claudeProfile && selectedClaudeDetails.includes(detail);
+    // Claude needs no install (ADR 0314); setup only removes an older worker copy from the selected profile.
+    return (
+      claudeExists &&
+      context?.profile === claudeProfile &&
+      detail.startsWith("Remove the old clankie-worker@clankie copy")
+    );
   };
   if (refreshLinked) {
     const refreshSettings = options.settings ?? new SettingsStore(defaultSettingsPath(options.env));

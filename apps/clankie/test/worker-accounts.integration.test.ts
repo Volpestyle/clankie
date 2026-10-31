@@ -832,13 +832,8 @@ describe("the probe reads each Claude home as a hire launches it (VUH-2241)", ()
     const bin = join(home, "..", "bin");
     const log = join(home, "..", "claude-calls.log");
     await mkdir(bin, { recursive: true });
-    for (const profile of [".claude", ".claude-expired"]) {
-      await mkdir(join(home, profile, "plugins"), { recursive: true });
-      await writeFile(
-        join(home, profile, "plugins", "installed_plugins.json"),
-        JSON.stringify({ plugins: { "clankie-worker@clankie": [{ scope: "user" }] } }),
-      );
-    }
+    for (const profile of [".claude", ".claude-expired"])
+      await mkdir(join(home, profile), { recursive: true });
     // Claude keeps the default home's settings beside it, and a chosen home's inside it.
     for (const settings of [join(home, ".claude.json"), join(home, ".claude-expired", ".claude.json")])
       await writeFile(settings, JSON.stringify({ hasCompletedOnboarding: true }));

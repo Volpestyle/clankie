@@ -162,7 +162,9 @@ it.each([
       added = join(home, ".claude-new");
     await mkdir(join(linked, "plugins"), { recursive: true });
     await writeFile(join(linked, "plugins", "known_marketplaces.json"), JSON.stringify({ clankie: {} }));
-    await mkdir(added);
+    // Both profiles still hold an older worker copy for setup to remove.
+    await mkdir(join(added, "plugins"), { recursive: true });
+    await writeFile(join(added, "plugins", "known_marketplaces.json"), JSON.stringify({ clankie: {} }));
     try {
       const asked: (string | undefined)[] = [];
       await installHarnessBridges({
