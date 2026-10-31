@@ -41,6 +41,16 @@ health route.
 - `POST /h/{hostId}/v1/gateway/encrypted` carries authenticated ciphertext for
   pairing, device self/refresh, push reference, conversation/control, artifact
   downloads and native terminal traffic. No device bearer appears outside it.
+- `GET /h/{hostId}/v1/gateway/stream` upgrades to a phone's call socket
+  ([ADR 0289](../../docs/adr/0289-a-call-through-the-gateway-is-a-sealed-stream.md)).
+  It carries no bearer. The first message is the device's sealed opening, as
+  text, and every later message both ways is one sealed binary record of at most
+  16 KiB, passed on unread. Only a Mac that connected with
+  `x-clankie-gateway-streams: 1` is offered one, two at a time. Refusals: 404
+  for a Mac that doesn't carry calls, 503 for no Mac, 400 for a bearer, and 429
+  for no room or opens over budget (12 in a burst per host, 24 per client).
+  Close codes are passed through `sendableStreamCloseCode` before use, and a
+  Mac that goes away ends its calls with 1001.
 - `POST /gateway/v1/push/registrations` and `/gateway/v1/push/registrations/clear`
   carry delivery metadata and a one-use encrypted device authorization proof.
 - `/h/{hostId}/v1/hooks/linear` carries separately signed third-party webhooks.

@@ -5,8 +5,9 @@ Status: accepted for [VUH-2761](https://linear.app/vuhlp/issue/VUH-2761)
 [ADR 0173](0173-the-gateway-cannot-read-device-traffic.md) (the gateway cannot
 read device traffic) and extends
 [ADR 0288](0288-a-device-call-is-a-voice-body-of-the-same-session.md) (a device
-call). The gateway half is in `clankie-ops/apps/gateway` and ships as its own
-owner deploy.
+call). The gateway half is in [`apps/gateway`](../../apps/gateway/README.md),
+public since [ADR 0311](0311-the-doorway-source-is-public.md), and ships as its
+own owner deploy.
 
 ## Context
 
@@ -100,7 +101,9 @@ sequenceDiagram
   The gateway refuses the phone's upgrade with a status that says why: 404
   for a Mac that doesn't carry calls yet (the phone says to update Clankie on
   the Mac), and 403 for a hosted body (the phone says calls need the Mac's
-  own connection).
+  own connection). Hosted bodies are gone from the gateway, so it no longer
+  sends 403; it sends 503 for a Mac that isn't connected and 429 when the Mac
+  has no room or the opens are over budget.
 
 - **A credential refresh waits for the call.** The Mac reconnects to the gateway
   to refresh its account credential, and a reconnect would drop every stream.
