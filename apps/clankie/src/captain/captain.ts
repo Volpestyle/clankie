@@ -8986,7 +8986,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
       // A message queued before Watch is refused here, so it starts no native turn (ADR 0307).
-      mailbox.watching(await watch.watching());
+      await mailbox.readWatch(() => watch.watching());
       const pending = mailbox.poll(waitMs, signal, binding);
       if (binding && !live) fleetChanges.touch();
       const events = await pending;

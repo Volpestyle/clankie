@@ -1132,6 +1132,14 @@ export class SeatOutbox {
     if (watching) this.refuseUntaken();
   }
 
+  /**
+   * Reads Watch only when an event is waiting for this poll. A poll with nothing waiting
+   * binds the seat at once instead of waiting on the read; anything sent after that passed
+   * its own Watch check when it was sent.
+   */
+  public async readWatch(watching: () => Promise<boolean>): Promise<void> {
+    if (this.queued.some((pending) => !pending.taken && !pending.settled)) this.watching(await watching());
+  }
   private refuseUntaken(): void {
     for (const pending of this.queued.slice())
       if (!pending.taken && !pending.settled) pending.settle({ outcome: "aborted" });
