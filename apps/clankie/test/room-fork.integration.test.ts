@@ -95,7 +95,7 @@ async function fixture() {
     ...current,
     discord: {
       ...current.discord,
-      servers: [{ serverId: GUILD, role: "participant", owners: "me" }],
+      servers: [{ serverId: GUILD, role: "admin", owners: "me" }],
       ownerUserId: OWNER,
     },
   }));
