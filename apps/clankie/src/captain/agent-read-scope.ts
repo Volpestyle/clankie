@@ -72,33 +72,32 @@ export class AgentReadScope {
       const cut = after(history, anchor);
       if (anchor.length > 0 && cut !== undefined) {
         const above = history.split("\n").length - cut.split("\n").length;
-        entry = { ...entry, anchor, rows: Math.max(0, entry.rows - above) };
+        entry = { ...entry, anchor, rows: entry.rows.slice(above) };
         this.anchors.set(terminalId, entry);
       }
     }
     const cut = after(history, entry.anchor);
     if (cut === undefined) {
       // The anchor is gone, scrolled out or redrawn away, so where this read starts can't be
-      // placed. Show nothing now and anchor again above the current screen, holding every row
+      // placed. Show nothing now and anchor again above the current screen, holding the rows
       // there; the text held at the first read stays held.
       this.anchors.set(terminalId, { ...entry, ...placed(history, screen) });
       return { text: "", detail: EARLIER_SCREEN_HIDDEN };
     }
     const lines = cut.split("\n");
     const { earlier, tail, rows } = entry;
-    // Rows the first read saw stay hidden whatever they hold now: an agent can overwrite part of
-    // one in place, leaving the rest of the owner's text there. Only rows below them are new.
-    const fresh = lines.slice(rows);
+    // Rows the first read saw stay hidden until the agent has drawn over them: a full-screen
+    // agent redraws its own rows in place, and what it draws there is its output. A row that
+    // still carries a run of its first-read text stays hidden, since an agent can overwrite only
+    // part of one and leave the rest of the owner's text there.
+    const fresh = lines.filter((line, index) => index >= rows.length || redrawn(compact(line), rows[index]!));
     // Held back line by line too, and a line that carries on the first read's last line keeps
     // that line's text hidden, for reads placed after the anchor was lost.
     const kept = fresh.filter((line) => !earlier.has(compact(line)));
     const shown = kept.map((line) => withoutPrefix(line, tail));
     // Blank lines left above the first shown one were the held-back text's spacing.
     const first = shown.findIndex((line) => line.trim().length > 0);
-    const held =
-      shown.length < lines.length ||
-      lines.slice(0, rows).some((line) => line.trim().length > 0) ||
-      shown.some((line, index) => line !== kept[index]);
+    const held = shown.length < lines.length || shown.some((line, index) => line !== kept[index]);
     return {
       text: (first < 0 ? [] : shown.slice(first)).join("\n"),
       ...(held ? { detail: EARLIER_SCREEN_HIDDEN } : {}),
@@ -115,22 +114,41 @@ interface Anchor {
   readonly occupant: string;
   /** The few history lines above the screen when this occupant was placed. */
   readonly anchor: readonly string[];
-  /** How many rows below the anchor held text then; they are never shown for this occupant. */
-  readonly rows: number;
+  /** The rows below the anchor then, by text; each stays hidden until it is drawn over. */
+  readonly rows: readonly string[];
   /** Text the pane held at this occupant's first read, never shown for it. */
   readonly earlier: ReadonlySet<string>;
   /** That read's last line, which output written after it can extend in place. */
   readonly tail: string;
 }
 
-/** An anchor above the screen, and how many rows below it hold text now. */
+/** An anchor above the screen, and the rows below it up to the last that holds text now. */
 function placed(
   history: string,
   screen: string,
-): { readonly anchor: readonly string[]; readonly rows: number } {
+): { readonly anchor: readonly string[]; readonly rows: readonly string[] } {
   const anchor = anchorAbove(history, screen);
   const below = (after(history, anchor) ?? history).split("\n");
-  return { anchor, rows: below.findLastIndex((line) => line.trim().length > 0) + 1 };
+  return {
+    anchor,
+    rows: below.slice(0, below.findLastIndex((line) => line.trim().length > 0) + 1).map(compact),
+  };
+}
+
+/** Shortest run of a held row's text that keeps the row hidden where it still stands. */
+const REMNANT = 4;
+
+/**
+ * Whether a row, by text, has been drawn over since it held `before`: it shares no run of
+ * `REMNANT` characters with that text (or, for shorter text, doesn't contain it). A blank row
+ * held nothing.
+ */
+function redrawn(now: string, before: string): boolean {
+  if (before.length === 0) return true;
+  if (before.length < REMNANT) return !now.includes(before);
+  for (let start = 0; start + REMNANT <= before.length; start += 1)
+    if (now.includes(before.slice(start, start + REMNANT))) return false;
+  return true;
 }
 
 const scopes = new WeakMap<HerdrWatchRunner, AgentReadScope>();

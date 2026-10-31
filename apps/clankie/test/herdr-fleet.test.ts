@@ -542,6 +542,29 @@ describe("fleet routing", () => {
       expect(carried.op === "terminal_read" && carried.text).not.toContain("owner-eighth");
     }
 
+    // A full-screen agent below the owner's shell work redraws its own rows in place: what it
+    // draws over them comes through, rows it hasn't changed stay hidden, and the shell work above
+    // stays out.
+    foreground = [411];
+    const frame = (status: string) =>
+      [
+        "╭─ Claude Code ──────────────────────╮",
+        "│ > fix the build                    │",
+        `│ ${status.padEnd(34)} │`,
+        "╰────────────────────────────────────╯",
+      ].join("\n");
+    screen = frame("Thinking…");
+    history = `$ cat .env\nTOKEN=owner-tui\n$ cc\n${screen}`;
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+    screen = frame("Build fixed: 3 files changed");
+    history = `$ cat .env\nTOKEN=owner-tui\n$ cc\n${screen}`;
+    const redrawnRead = await read();
+    expect(redrawnRead).toMatchObject({ status: "read", text: "│ Build fixed: 3 files changed       │" });
+    expect(redrawnRead.op === "terminal_read" && redrawnRead.text).not.toContain("TOKEN");
+    screen = frame("Running the tests");
+    history = `$ cat .env\nTOKEN=owner-tui\n$ cc\n${screen}`;
+    expect(await read()).toMatchObject({ status: "read", text: "│ Running the tests                  │" });
+
     // The agent exits and the shell takes the pane while it is being read: nothing read in that
     // gap is returned, and whoever comes next starts from their own first read.
     midRead = () => {

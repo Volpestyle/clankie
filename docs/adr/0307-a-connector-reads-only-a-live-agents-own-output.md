@@ -36,17 +36,20 @@ agent showed.
   launch run inside a longer command or a multiline block, or an older launch
   by the agent's own name with the owner's shell work below it. So the service
   never guesses a launch line. At an occupant's first read it anchors on the
-  few non-empty history lines above the screen, counts the rows below them
-  that hold text, and keeps the text of every line the pane held. That read
-  and every later one return only rows below the counted ones, whatever the
-  counted rows hold by then, since an agent can overwrite part of one in place
-  (a carriage return, or output carried on from a line with no newline) and
-  leave the rest of the owner's text there. When the whole first screen fit
-  with nothing above it, rows are counted from the window's top until a later
+  few non-empty history lines above the screen, keeps the rows below them up
+  to the last that holds text, and keeps the text of every line the pane held.
+  That read and every later one return rows below the kept ones, and a kept
+  row only once the agent has drawn over it: a full-screen agent redraws its
+  own rows in place, and what it draws there is its output. A kept row that
+  still carries any run of four characters of its first-read text, spacing
+  aside, stays hidden, since an agent can overwrite only part of a row (a
+  carriage return, or output carried on from a line with no newline) and leave
+  the rest of the owner's text there. When the whole first screen fit with
+  nothing above it, rows are counted from the window's top until a later
   read finds lines above the screen to anchor on. Lines whose text was in that
   first read are also removed. When the anchor is gone, scrolled out or
   redrawn away, that read shows nothing and anchors again above the screen,
-  counting every row there; the text held at the first read stays held. While
+  keeping every row there the same way; the text held at the first read stays held. While
   anything is held back the read carries the detail "Earlier screen hidden
   until this agent prints something new." The connector's `read_agent` passes
   it on as `note`, so a lead sees why the read is empty instead of taking it
@@ -66,9 +69,10 @@ agent showed.
 - An agent that clears its own scrollback loses its anchor: that read shows
   nothing, and later reads show what it writes below the rows then.
 - The first read of an agent is empty, and an agent's output from before
-  anything first read it stays hidden. Output the agent later draws into rows
-  its first read counted (its own redrawn prompt, say) stays hidden too; only
-  rows below them come through. A lead reads again once the agent has printed
+  anything first read it stays hidden. A kept row the agent redraws with text
+  close to what it held (a status line that changes a word, a border) stays
+  hidden until it changes more, and up to three characters of a first-read row
+  can show in a row the agent drew over. A lead reads again once the agent has printed
   something.
 - When the exact anchor lines appear more than once, the read is cut at their
   last appearance, which can drop some of the agent's own lines but never adds
@@ -82,7 +86,7 @@ agent showed.
   mid-session. Exact provenance would come from a host-proven boundary, such
   as reading a Claude Code or Codex agent's own session transcript instead of
   its screen, left as a follow-up.
-- A line from the first read that comes back below the counted rows with
+- A line from the first read that comes back below the kept rows with
   different text (reprinted with a prefix, or reflowed by a resize) no longer
   matches what is held back and can be shown. The read uses unwrapped history, which a resize should not
   reflow, but this hasn't been checked against real Herdr. It and the suspend
