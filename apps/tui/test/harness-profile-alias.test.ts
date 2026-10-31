@@ -107,3 +107,70 @@ it.each([
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it.each(["install", "no-marketplace", "other-marketplace", "generated", "changed-by-native"])(
+  "installs a dotfiles-managed Claude profile only when its own source enables the worker: %s",
+  async (kind) => {
+    const home = await mkdtemp(join(tmpdir(), "clankie-source-enabled-"));
+    const profile = join(home, ".claude-james"),
+      market = join(home, "market"),
+      dotfiles = join(home, "dotfiles", ".local", "agents", "personal");
+    const source = join(dotfiles, "claude-settings.json"),
+      target = join(profile, "settings.json");
+    const commands: string[][] = [];
+    try {
+      for (const path of [profile, market, dotfiles]) await mkdir(path, { recursive: true });
+      const bytes = JSON.stringify({
+        ...(kind === "generated" ? { note: "Generated; do not edit" } : {}),
+        enabledPlugins: { "clankie-worker@clankie": true },
+        ...(kind === "no-marketplace"
+          ? {}
+          : {
+              extraKnownMarketplaces: {
+                clankie: {
+                  source: { source: "directory", path: kind === "other-marketplace" ? dotfiles : market },
+                },
+              },
+            }),
+      });
+      await writeFile(source, bytes);
+      await symlink(source, target);
+      let currentProfile: string | undefined;
+      const result = await installHarnessBridges({
+        prepareSkills: async () => {},
+        repoRoot: home,
+        marketplaceRoot: market,
+        env: { HOME: home },
+        consent: async () => currentProfile === profile,
+        execute: async (command, args, env) => {
+          if (command !== "claude") throw new Error("absent");
+          currentProfile = env?.CLAUDE_CONFIG_DIR;
+          if (env?.CLAUDE_CONFIG_DIR === profile && args[0] !== "--version") {
+            commands.push([...args]);
+            if (kind === "changed-by-native") await writeFile(source, "{}");
+          }
+        },
+      });
+      const row = result.find((entry) => entry.profile === profile)!;
+      if (kind === "install") {
+        expect(commands).toEqual([
+          ["plugin", "marketplace", "add", market],
+          ["plugin", "install", "clankie-worker@clankie", "--scope", "user"],
+          ["plugin", "update", "clankie-worker@clankie", "--scope", "user"],
+        ]);
+        expect(row.status).toBe("installed");
+        expect(await realpath(target)).toBe(await realpath(source));
+        expect(await readFile(source, "utf8")).toBe(bytes);
+      } else if (kind === "changed-by-native") {
+        expect(commands).toEqual([["plugin", "marketplace", "add", market]]);
+        expect(row.status).toBe("failed");
+      } else {
+        expect(commands).toEqual([]);
+        expect(row.status).toBe("source-manager-required");
+        if (kind === "no-marketplace") expect(row.detail).toContain("extraKnownMarketplaces.clankie");
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+);

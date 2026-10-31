@@ -158,6 +158,29 @@ async function updatableClaudeAlias(profile, profiles, source, marketplace, relo
     return false;
   }
 }
+/** The owner's settings source already enables the worker and registers this marketplace, so only the profile's own plugin cache needs installing. */
+async function sourceEnabledClaude(profile, source, marketplace) {
+  try {
+    if (!(await lstat(join(profile, "settings.json"))).isSymbolicLink() || !(await lstat(source)).isFile())
+      return false;
+    const bytes = await readFile(source, "utf8");
+    const settings = JSON.parse(bytes);
+    const registered = settings.extraKnownMarketplaces?.clankie?.source;
+    return (
+      !managedText(bytes) &&
+      settings.enabledPlugins?.["clankie-worker@clankie"] === true &&
+      registered?.source === "directory" &&
+      typeof registered.path === "string" &&
+      (await realpath(registered.path)) === (await realpath(marketplace))
+    );
+  } catch {
+    return false;
+  }
+}
+/** What a symlinked Claude settings source must say before Clankie can install into its profile. */
+function claudeSourceSetup(source, marketplace) {
+  return `Enable the worker in ${source} itself: set enabledPlugins["clankie-worker@clankie"] to true and extraKnownMarketplaces.clankie to {"source":{"source":"directory","path":${JSON.stringify(marketplace)}}}, then run setup again; Clankie then installs only this profile's plugin cache and leaves that file unchanged.`;
+}
 async function installHarnessBridges(options) {
   const env = options.env ?? process.env;
   const run =
@@ -294,16 +317,23 @@ async function installHarnessBridges(options) {
       harness === "claude" &&
       managed &&
       (await updatableClaudeAlias(profile, profiles, source, marketplace, options.linkedOnly));
+    const sourceEnabled =
+      harness === "claude" &&
+      managed &&
+      !aliasUpdate &&
+      (await sourceEnabledClaude(profile, source, marketplace));
     const pluginId = harness === "claude" ? "clankie-worker@clankie" : "clankie-worker@clankie-fleet";
     const detail = aliasUpdate
       ? `Update the existing clankie-worker cache for alias profile ${profile}; shared settings at ${source} stay unchanged.`
-      : harness === "claude" && !managed
-        ? `Install and enable clankie-worker@clankie from ${marketplace} for profile ${profile} (bridge, native hooks and packaged skills).`
-        : managed
-          ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
-          : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
+      : sourceEnabled
+        ? `Install clankie-worker@clankie from ${marketplace} into profile ${profile}'s plugin cache; its settings at ${source} already enable it and stay unchanged.`
+        : harness === "claude" && !managed
+          ? `Install and enable clankie-worker@clankie from ${marketplace} for profile ${profile} (bridge, native hooks and packaged skills).`
+          : managed
+            ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
+            : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
     // Missing source setup is a setup refusal, not a declined consent prompt.
-    if (managed && !sourceSetup && !aliasUpdate) {
+    if (managed && !sourceSetup && !aliasUpdate && !sourceEnabled) {
       results.push({
         harness,
         profile: harness === "codex" ? codexProfile : profile,
@@ -311,7 +341,7 @@ async function installHarnessBridges(options) {
         detail:
           harness === "codex"
             ? `source-managed: needs setup in ${codexProfile}. Configuration source: ${source}. Have its owner provide a source-owned script, then run clankie harness install --codex-source-setup /absolute/source-owned/script --approve in this profile. Preserve the configuration link.`
-            : `source-managed: needs setup in ${profile}. Apply the worker plugin setup through the owner of ${source}; preserve the configuration link.`,
+            : `source-managed: needs setup in ${profile}. ${wasSymlink ? claudeSourceSetup(source, marketplace) : `Apply the worker plugin setup through the owner of ${source}; preserve the configuration link.`}`,
       });
       continue;
     }
@@ -361,6 +391,38 @@ async function installHarnessBridges(options) {
         await checkAlias();
         await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
         await checkAlias();
+      } else if (sourceEnabled) {
+        const checkSource = async () => {
+          if (
+            (await realpath(config)) !== source ||
+            !(await lstat(config)).isSymbolicLink() ||
+            (await readlink(config)) !== linkBefore ||
+            (await readFile(source, "utf8")) !== configBefore ||
+            !(await sourceEnabledClaude(profile, source, marketplace))
+          )
+            throw new Error(
+              `Native setup changed the Claude settings source ${source}; inspect it through its owner before continuing`,
+            );
+        };
+        await checkSource();
+        const known = JSON.parse(
+          await readFile(join(profile, "plugins", "known_marketplaces.json"), "utf8").catch(() => "{}"),
+        );
+        const registered = known.clankie?.source;
+        if (
+          registered?.source === "directory" &&
+          // allow-swallowed-rejection -- A registered folder that no longer exists is added again below.
+          (await realpath(registered.path).catch(() => undefined)) === (await realpath(marketplace))
+        )
+          await execute(harness, ["plugin", "marketplace", "update", "clankie"]);
+        else await execute(harness, ["plugin", "marketplace", "add", marketplace]);
+        await checkSource();
+        if (!options.linkedOnly) {
+          await execute(harness, ["plugin", "install", "clankie-worker@clankie", "--scope", "user"]);
+          await checkSource();
+        }
+        await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
+        await checkSource();
       } else if (managed) {
         await run(sourceSetup.command, sourceSetup.args, {
           ...targetEnv,
@@ -448,9 +510,9 @@ async function installHarnessBridges(options) {
         harness,
         profile,
         status:
-          aliasUpdate || (options.linkedOnly && !managed)
+          aliasUpdate || (options.linkedOnly && (!managed || sourceEnabled))
             ? "updated"
-            : managed
+            : managed && !sourceEnabled
               ? "source-setup-completed"
               : "installed",
         detail:

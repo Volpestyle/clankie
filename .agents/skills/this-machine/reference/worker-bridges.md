@@ -140,7 +140,10 @@ per-profile receipts, since a healthy update can still report
 `harness-refresh-incomplete` or `source-manager-required`. Generated or symlinked
 Codex configuration needs its source-owned setup (`clankie herdr prepare NAME
 --codex-source-setup ABSOLUTE_REMOTE_SCRIPT`), never TOML appends; never replace a
-settings symlink to work around a refusal. Preparation is incomplete while native
+settings symlink to work around a refusal. A symlinked Claude profile installs
+once its owning source (for example dotfiles) enables `clankie-worker@clankie` and
+registers the clankie marketplace directory itself; the refusal names both entries,
+and that source is edited through its owner. Preparation is incomplete while native
 version, activation, bridge, identity forwarding or skill checks fail. Read
 `clankie doctor --machine NAME` afterwards: installed files are static proof, so
 do not restart another lane's pane or claim native tools were tested. OpenCode,
