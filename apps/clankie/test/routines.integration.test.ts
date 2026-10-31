@@ -2,18 +2,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import type { OperatorSeatSpawnResult, RoutineCommand, RoutinesStatus } from "@clankie/protocol";
-import { runRoutinesCommand } from "../../tui/src/command/routines.ts";
-import { createClankieApp } from "../src/app.ts";
-import { createStubCaptain } from "../src/captain/port.ts";
+import type { OperatorSeatSpawnResult } from "@clankie/protocol";
 import { createRoutineRunner } from "../src/captain/routine-runner.ts";
 import { RoutineStore, type RoutineActor } from "../src/captain/routines.ts";
 
 // VUH-2018 / ADR 0265: routines survive restarts with no double runs, and a
 // Mac that slept through runs follows the routine's missed-run policy. Real
-// state files, real cron in a real time zone, the real runner, HTTP route and
-// CLI. The conversation turn and the hire are the recorded boundary; a check
-// runs a real child process through a stand-in for `clankie heavy`.
+// state files, real cron in a real time zone and the real runner. The
+// conversation turn and the hire are the recorded boundary; a check runs a real
+// child process through a stand-in for `clankie heavy`. The CLI and HTTP route
+// are proved by the real-app run's routine flow (ADR 0309).
 
 const cleanup: Array<() => void> = [];
 afterEach(() => {
@@ -285,67 +283,4 @@ it("hires and checks run as their conversation, and leads only reach their own r
       "could not hire Busy, so no seat was started: at_capacity: 4 of 4 hired agents are running.",
     ),
   });
-});
-
-it("the CLI manages routines through the authenticated API", async () => {
-  const f = fixture("2026-10-12T12:00:00.000Z");
-  const store = f.open();
-  const { app } = await createClankieApp({
-    captain: createStubCaptain({ routineCommand: (command) => store.command(command, OWNER) }),
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer owner-token" ? { operatorId: "owner" } : undefined,
-  });
-  const cli = (args: string[]) =>
-    runRoutinesCommand(args, {
-      env: { CLANKIE_OPERATOR_TOKEN: "owner-token" },
-      host: "http://clankie.test",
-      fetchImpl: ((url: string, init?: RequestInit) => app.request(url, init)) as typeof fetch,
-    });
-  const ok = async (args: string[]): Promise<RoutinesStatus> => {
-    const result = await cli(args);
-    if (!result.ok) throw new Error(result.error);
-    return result.status;
-  };
-
-  const added = await ok([
-    "add",
-    "Morning triage",
-    "--when",
-    "every weekday at 9:00",
-    "--tz",
-    "America/Chicago",
-    "--turn",
-    "Triage.",
-  ]);
-  const id = added.routine!.id;
-  expect(added.routine).toMatchObject({
-    schedule: { cron: "0 9 * * 1-5" },
-    enabled: true,
-    missed: "catch_up",
-  });
-  expect((await ok(["pause", id])).routine).toMatchObject({ enabled: false });
-  expect((await ok(["edit", id, "--when", "every monday at 8am", "--missed", "skip"])).routine).toMatchObject(
-    {
-      schedule: { cron: "0 8 * * 1", timeZone: "America/Chicago" },
-      missed: "skip",
-    },
-  );
-  expect((await ok(["resume", id])).routine).toMatchObject({
-    enabled: true,
-    nextRunAt: "2026-10-12T13:00:00.000Z",
-  });
-  await ok(["run-now", id]);
-  expect((await ok(["history", id])).runs).toMatchObject([{ trigger: "manual", status: "running" }]);
-  f.turns[0]!.finish();
-  await store.settled();
-  expect((await ok(["history"])).runs).toMatchObject([{ status: "succeeded" }]);
-
-  const refused = await cli(["add", "Bad", "--when", "whenever you like", "--turn", "x"]);
-  expect(refused).toMatchObject({ ok: false, error: expect.stringContaining("Schedule not understood") });
-  const unauthenticated = await app.request("http://clankie.test/v1/captain/routines");
-  expect(unauthenticated.status).toBe(401);
-
-  expect((await ok(["remove", id])).routines).toEqual([]);
-  const command: RoutineCommand = { action: "list" };
-  expect((await store.command(command, OWNER)).routines).toEqual([]);
 });

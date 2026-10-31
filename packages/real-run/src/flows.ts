@@ -275,7 +275,8 @@ export const flows: readonly Flow[] = [
   },
   {
     name: "routine",
-    proves: "a check routine runs now through the fleet's heavy permits and records its result",
+    proves:
+      "a check routine runs now through the fleet's heavy permits and records its result, and the owner adds, pauses, edits, resumes and removes routines through the CLI",
     run: (stack, state) =>
       Effect.gen(function* () {
         const added = yield* stack.cliJson(
@@ -308,6 +309,80 @@ export const flows: readonly Flow[] = [
           { timeoutMs: 120_000, intervalMs: 1_000 },
         );
         yield* check(run.status === "succeeded", "the routine's run succeeded", run);
+
+        // The owner's routine controls, on a turn routine that never runs here.
+        type Routine = { id: string; name: string; enabled: boolean; missed: string; nextRunAt?: string };
+        type Schedule = { cron: string; timeZone: string };
+        const one = (status: Record<string, any>) => status.routine as Routine & { schedule: Schedule };
+        const turn = one(
+          yield* stack.cliJson(
+            "routines",
+            "add",
+            "Morning triage",
+            "--when",
+            "every weekday at 9:00",
+            "--tz",
+            "America/Chicago",
+            "--turn",
+            "Triage.",
+            "--json",
+          ),
+        );
+        yield* check(
+          turn.schedule.cron === "0 9 * * 1-5" && turn.enabled && turn.missed === "catch_up",
+          "a plain-language schedule becomes a weekday routine that catches up",
+          turn,
+        );
+        const paused = one(yield* stack.cliJson("routines", "pause", turn.id, "--json"));
+        yield* check(!paused.enabled, "pause stops the routine", paused);
+        const edited = one(
+          yield* stack.cliJson(
+            "routines",
+            "edit",
+            turn.id,
+            "--when",
+            "every monday at 8am",
+            "--missed",
+            "skip",
+            "--json",
+          ),
+        );
+        yield* check(
+          edited.schedule.cron === "0 8 * * 1" &&
+            edited.schedule.timeZone === "America/Chicago" &&
+            edited.missed === "skip",
+          "an edit changes the schedule and keeps its time zone",
+          edited,
+        );
+        const resumed = one(yield* stack.cliJson("routines", "resume", turn.id, "--json"));
+        yield* check(
+          resumed.enabled && Date.parse(resumed.nextRunAt ?? "") > Date.now(),
+          "resume schedules the next run ahead",
+          resumed,
+        );
+        const refused = yield* stack.cli(
+          "routines",
+          "add",
+          "Bad",
+          "--when",
+          "whenever you like",
+          "--turn",
+          "x",
+          "--json",
+        );
+        yield* check(
+          refused.code !== 0 && /Schedule not understood/u.test(refused.stdout + refused.stderr),
+          "a schedule it cannot read is refused by name",
+          { exit: refused.code, stdout: refused.stdout, stderr: refused.stderr },
+        );
+        const anonymous = yield* stack.http("/v1/captain/routines");
+        yield* check(anonymous.status === 401, "routines need the owner's credential", anonymous.status);
+        const removed = yield* stack.cliJson("routines", "remove", turn.id, "--json");
+        yield* check(
+          !(removed.routines as Routine[]).some((r) => r.id === turn.id),
+          "remove deletes the routine",
+          removed,
+        );
       }),
   },
   {
