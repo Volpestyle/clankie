@@ -27,7 +27,7 @@ import { TRACKER_POSTS_PATH, TrackerPostsRequestSchema } from "@clankie/protocol
 
 const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
-  "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]",
+  "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--previous linear|none] [--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]",
   "  | project | project-details | list [--status S,S] [--owner O] [--label L] | show ID [--project P] | activity ID [--project P] | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S] [--priority 0..4|none|urgent|high|medium|low]",
   "  | update ID [--project P] [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
@@ -156,6 +156,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         ...(one(parsed, "--linear-label") === undefined
           ? {}
           : { linearLabel: one(parsed, "--linear-label") }),
+        ...(one(parsed, "--previous") === undefined ? {} : { previous: one(parsed, "--previous") }),
         ...(one(parsed, "--release-source") === undefined
           ? {}
           : { releaseSource: one(parsed, "--release-source") }),

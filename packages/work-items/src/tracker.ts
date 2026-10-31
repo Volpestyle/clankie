@@ -239,6 +239,7 @@ export function trackerToolsFor(
   convention: WorkConvention,
   deps: TrackerDeps,
 ): TrackerToolBackend {
+  if (convention.previous === "linear") return movingOffLinearToolsFor(root, convention, deps);
   if (convention.backend === "builtin") return builtInToolsFor(convention, deps);
   if (convention.backend === "linear") {
     const local = deps.linear === undefined ? localTrackerFor(root, convention, deps) : undefined;
@@ -324,6 +325,102 @@ export function trackerToolsFor(
         directory: deps.trackerDirectory ?? join(root, ".local", "tracker"),
         ...(deps.clock === undefined ? {} : { clock: deps.clock }),
       }).call(name, args);
+    },
+  };
+}
+
+/** A Linear issue key (`VUH-123`) or id: an item that still lives in the previous tracker. */
+const PREVIOUS_LINEAR_ITEM =
+  /^(?:[A-Za-z][A-Za-z0-9]{0,9}-\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
+const CURRENT_PAGE = "current:";
+const PREVIOUS_PAGE = "previous:";
+
+interface IssuePage {
+  issues: unknown[];
+  hasNextPage?: boolean;
+  cursor?: string;
+}
+const isIssuePage = (value: unknown): value is IssuePage =>
+  value !== null && typeof value === "object" && Array.isArray((value as IssuePage).issues);
+
+/**
+ * A repo moving off Linear (#81): one tool surface over two trackers. Lists page
+ * through the current tracker, then the previous one. A call naming a Linear item
+ * goes to Linear, so its existing issues keep being worked where they are. Every
+ * other call, and every new issue, goes to the current tracker: Linear gets none.
+ */
+function movingOffLinearToolsFor(
+  root: string,
+  convention: WorkConvention,
+  deps: TrackerDeps,
+): TrackerToolBackend {
+  const { previous: _previous, ...rest } = convention;
+  const current = trackerToolsFor(root, rest, deps);
+  const linear = trackerToolsFor(
+    root,
+    {
+      schemaVersion: 1,
+      backend: "linear",
+      linear: convention.linear!,
+      decidedBy: convention.decidedBy,
+      decidedAt: convention.decidedAt,
+    },
+    deps,
+  );
+  const previousItem = (value: unknown) => typeof value === "string" && PREVIOUS_LINEAR_ITEM.test(value);
+  return {
+    catalog: () => current.catalog(),
+    async call(name, args, callbacks) {
+      if (name === "list_issues" || name === "search_issues") {
+        const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
+        const limit = typeof args.limit === "number" ? args.limit : 50;
+        // The current tracker's project and team names mean nothing in Linear's scope.
+        const { cursor: _cursor, project: _project, team: _team, ...shared } = args;
+        const fromLinear = async (after: string | undefined, wanted: number): Promise<IssuePage> => {
+          const page = await linear.call(
+            name,
+            { ...shared, limit: wanted, ...(after ? { cursor: after } : {}) },
+            callbacks,
+          );
+          if (!isIssuePage(page)) return { issues: [], hasNextPage: false };
+          return {
+            issues: page.issues,
+            hasNextPage: page.hasNextPage === true,
+            ...(page.hasNextPage === true && page.cursor !== undefined
+              ? { cursor: `${PREVIOUS_PAGE}${page.cursor}` }
+              : {}),
+          };
+        };
+        if (cursor?.startsWith(PREVIOUS_PAGE))
+          return fromLinear(cursor.slice(PREVIOUS_PAGE.length) || undefined, limit);
+        const page = await current.call(
+          name,
+          {
+            ...args,
+            ...(cursor === undefined
+              ? {}
+              : { cursor: cursor.startsWith(CURRENT_PAGE) ? cursor.slice(CURRENT_PAGE.length) : cursor }),
+          },
+          callbacks,
+        );
+        if (!isIssuePage(page)) return page;
+        if (page.hasNextPage === true && page.cursor !== undefined)
+          return { ...page, cursor: `${CURRENT_PAGE}${page.cursor}` };
+        const room = limit - page.issues.length;
+        if (room <= 0) return { ...page, hasNextPage: true, cursor: PREVIOUS_PAGE };
+        // A project filter names the current tracker's project; Linear's items are outside it.
+        if (args.project !== undefined) return page;
+        const rest = await fromLinear(undefined, room);
+        const { cursor: _done, ...settled } = page;
+        return {
+          ...settled,
+          issues: [...page.issues, ...rest.issues],
+          hasNextPage: rest.hasNextPage === true,
+          ...(rest.cursor === undefined ? {} : { cursor: rest.cursor }),
+        };
+      }
+      const item = name === "get_issue" || name === "save_issue" ? args.id : args.issueId;
+      return previousItem(item) ? linear.call(name, args, callbacks) : current.call(name, args, callbacks);
     },
   };
 }
