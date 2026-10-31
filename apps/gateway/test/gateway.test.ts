@@ -137,6 +137,31 @@ describe("public gateway", () => {
     expect(await (await live).text()).toBe("still connected");
   });
 
+  it("drops a host that sends a response header value Node cannot write, and stays up", async () => {
+    const { origin } = await startGateway([]);
+    const host = await connectHost(origin);
+    openSockets.push(host);
+    const answer = fetch(`${origin}/h/${hostId}/v1/gateway/challenge`);
+    const request = await nextRequest(host);
+    const closed = once(host, "close");
+    send(host, {
+      schemaVersion: 1,
+      kind: "response_start",
+      requestId: request.requestId,
+      status: 200,
+      headers: [{ name: "content-type", value: "text/plain\r\nx-injected: yes" }],
+    });
+    const [code] = (await closed) as [number];
+    expect(code).toBe(1008);
+    expect((await answer).status).toBe(503);
+
+    const replacement = await connectHost(origin);
+    openSockets.push(replacement);
+    const retry = fetch(`${origin}/h/${hostId}/v1/gateway/challenge`);
+    respond(replacement, await nextRequest(replacement), 200, "gateway still up");
+    expect(await (await retry).text()).toBe("gateway still up");
+  });
+
   it("carries a Linear delivery's signature and raw body to the Mac unaltered", async () => {
     const { origin } = await startGateway([]);
     const host = await connectHost(origin);
