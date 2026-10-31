@@ -27,7 +27,13 @@ import {
 } from "@clankie/protocol/tracker-posting";
 import type { WorkConvention } from "@clankie/protocol/work-items";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker, readDrops, recordDropPosted, writeConvention } from "@clankie/work-items";
+import {
+  createLocalTracker,
+  readDrops,
+  recordDropPosted,
+  TRACKER_OWNER,
+  writeConvention,
+} from "@clankie/work-items";
 import { createAccounts } from "../src/accounts.ts";
 import { createClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -1364,4 +1370,378 @@ it("a drop posted before its file was marked is marked on retry and on restart, 
     await new Promise((r) => setTimeout(r, 10));
   expect(await marked("The bell is cracked")).toMatchObject({ tracker: "linear" });
   expect(f.mutations("issueCreate")).toBe(2);
+});
+
+it("Watch refuses every write by Clankie, a lead or a worker, holds nothing, and the owner's own write still goes", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "allow");
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  for (const call of [f.lead, f.worker]) {
+    const refused = await call("save_comment", comment("Landed."));
+    expect(refused).toMatchObject({ outcome: "refused", possiblyDispatched: false });
+    if (refused.outcome !== "refused") throw new Error("expected a refusal");
+    expect(refused.detail).toContain("only watching");
+  }
+  // The built-in tracker standing in for Linear is a write too.
+  expect(await f.lead("save_issue", { title: "New idea", team: "VUH" })).toMatchObject({
+    outcome: "refused",
+  });
+  const cli = await f.work("create", "From the CLI");
+  expect(cli.ok).toBe(false);
+  expect(cli.body).toMatchObject({ detail: expect.stringContaining("only watching") });
+  expect(f.mutations("Create")).toBe(0);
+  expect(f.mutations("commentCreate")).toBe(0);
+  // Nothing waits in the owner's feed to go out later.
+  const listed = await f.posts({ action: "list", state: "all" });
+  expect(parseProtocolResponse(TrackerPostsResultSchema, listed.body)).toMatchObject({ posts: [] });
+
+  // The owner speaking as himself is not Clankie acting.
+  const own = await f.request("/v1/tracker/owner/call", {
+    name: "save_comment",
+    repo: f.garden,
+    arguments: comment("The owner's own note."),
+  });
+  expect(own.status).toBe(200);
+  expect(f.mutations("commentCreate")).toBe(1);
+
+  // Leaving Watch lets Clankie write again under the project's setting.
+  await f.settings.update((current) => {
+    const { watch: _watch, ...autonomy } = current.autonomy;
+    return { ...current, autonomy };
+  });
+  expect(await f.lead("save_comment", comment("Back at it."))).toMatchObject({
+    outcome: "ok",
+    isError: false,
+  });
+  expect(f.mutations("commentCreate")).toBe(2);
+});
+
+it("Watch chosen while a keyed post waits its turn behind another post refuses it", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "allow");
+  // The second post's first look at the settings is the last one before Watch is chosen.
+  let chooseWatchAfterNextLoad = false;
+  const settings = {
+    load: async () => {
+      const loaded = await f.settings.load();
+      if (chooseWatchAfterNextLoad) {
+        chooseWatchAfterNextLoad = false;
+        await f.settings.update((current) => ({
+          ...current,
+          autonomy: { ...current.autonomy, watch: true },
+        }));
+      }
+      return loaded;
+    },
+  };
+  const posting = createTrackerPosting({
+    ...f.postingOptions,
+    statePath: join(f.root, "state", "queued-posts.json"),
+    settings,
+  });
+  cleanups.push(() => posting.close());
+  const sent: string[] = [];
+  let releaseFirst!: () => void;
+  const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+  posting.bind({
+    execute: async (route) => {
+      sent.push(JSON.stringify(route));
+      if (sent.length === 1) await firstHeld;
+      return { ok: true, result: {} };
+    },
+    repoTarget: (ref) => f.workItems.postingTarget(ref),
+    afterPosted: async () => {},
+  });
+  posting.start();
+  const write = (key: string, body: string) =>
+    posting.admit({
+      tracker: "linear",
+      route: { kind: "linear", tool: "save_comment", arguments: comment(body) },
+      asker: { kind: "lead" },
+      projectIds: ["garden"],
+      key,
+    });
+  const first = write("queued-first", "Posting before Watch.");
+  await f.settle(() => sent.length === 1);
+  chooseWatchAfterNextLoad = true;
+  const second = write("queued-second", "Waiting its turn.");
+  await f.settle(() => !chooseWatchAfterNextLoad);
+  releaseFirst();
+  expect(await first).toMatchObject({ outcome: "posted" });
+  expect(await second).toMatchObject({
+    outcome: "refused",
+    message: expect.stringContaining("only watching"),
+  });
+  expect(sent).toHaveLength(1);
+});
+
+it("Watch keeps a post held for Clankie from going out when he approves it, until Watch is off", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "lead");
+  const held = await f.worker("save_comment", comment("Held before Watch."));
+  if (held.outcome !== "refused") throw new Error("expected a hold");
+  const id = /post ([0-9a-f-]{36})/u.exec(held.detail)![1]!;
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  const approved = await f.work("posts", "approve", id);
+  expect(approved.ok).toBe(false);
+  expect(JSON.stringify(approved.body)).toContain("only watching");
+  expect(f.mutations("commentCreate")).toBe(0);
+  expect(f.posting.read(id)?.state).toBe("waiting");
+  await f.settings.update((current) => {
+    const { watch: _watch, ...autonomy } = current.autonomy;
+    return { ...current, autonomy };
+  });
+  expect(await f.work("posts", "approve", id)).toMatchObject({
+    ok: true,
+    body: { changed: true, post: { state: "posted" } },
+  });
+  expect(f.mutations("commentCreate")).toBe(1);
+});
+
+it("Watch refuses writes to private issue files too, through the work route and seat bookkeeping", async () => {
+  const f = await fixture();
+  const created = await f.workItems.handle(
+    { action: "create", repo: f.orchard, title: "Before Watch" },
+    true,
+  );
+  if (!("item" in created) || created.item === undefined) throw new Error("expected an item");
+  const id = (created.item as { id: string }).id;
+  const files = async () => (await readdir(join(f.orchard, ".clankie/work"))).sort();
+  const before = await files();
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  for (const body of [
+    { action: "create", repo: f.orchard, title: "During Watch" },
+    { action: "update", repo: f.orchard, id, status: "done" },
+    {
+      action: "attach",
+      repo: f.orchard,
+      id,
+      evidence: { kind: "link", url: "https://example.com/during-watch", caption: "During Watch" },
+    },
+  ]) {
+    const response = await f.request("/v1/work", body);
+    expect(response.status).not.toBe(200);
+    expect(JSON.stringify(await response.json())).toContain("only watching");
+  }
+  // A hire that exits while watching leaves its issue as it was: no automatic bookkeeping either.
+  const seatScope = await f.workItems.prepareSeatIssueTracker("orchard", async () => {});
+  await expect(seatScope.call("get_issue", { id }, "background")).resolves.toBeDefined();
+  await expect(
+    seatScope.call("save_comment", { issueId: id, body: "During Watch" }, "background"),
+  ).rejects.toThrow("only watching");
+  await expect(seatScope.call("save_issue", { id, state: "done" }, "background")).rejects.toThrow(
+    "only watching",
+  );
+  expect(await files()).toEqual(before);
+  const shown = await f.workItems.handle({ action: "show", repo: f.orchard, id }, true);
+  expect(shown).toMatchObject({ item: { title: "Before Watch" } });
+  expect(JSON.stringify(shown)).not.toContain("During Watch");
+  expect(JSON.stringify(shown)).not.toContain('"done"');
+});
+
+it("Watch refuses Clankie's unscoped writes to the built-in tracker, and the owner's own route still writes", async () => {
+  const f = await fixture();
+  const call = async (path: string, name: string, args: Record<string, unknown>) => {
+    const response = await f.request(path, { name, arguments: args });
+    return { status: response.status, body: JSON.stringify(await response.json()) };
+  };
+  const teams = await call("/v1/tracker/call", "list_teams", {});
+  expect(teams.status).toBe(200);
+  const team = (JSON.parse(teams.body) as { result: { teams: { key: string }[] } }).result.teams[0]!.key;
+  expect((await call("/v1/tracker/call", "save_issue", { team, title: "Before Watch" })).status).toBe(200);
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  const during = await call("/v1/tracker/call", "save_issue", { team, title: "During Watch" });
+  expect(during.status).not.toBe(200);
+  expect(during.body).toContain("only watching");
+  // Reading stays open, and nothing Clankie tried landed.
+  const listed = await call("/v1/tracker/call", "list_issues", {});
+  expect(listed.status).toBe(200);
+  expect(listed.body).toContain("Before Watch");
+  expect(listed.body).not.toContain("During Watch");
+  // The owner speaking as himself is not Clankie acting.
+  expect((await call("/v1/tracker/owner/call", "save_issue", { team, title: "Owner's own" })).status).toBe(
+    200,
+  );
+});
+
+it("Watch chosen while a repo's built-in tracker write waits for the store stops it, and the owner's still write", async () => {
+  const f = await fixture();
+  const beds = await repo(f.root, "beds", { ...decided, backend: "builtin" });
+  const tracker = createLocalTracker({ directory: join(f.root, "work-state", "tracker") });
+  const teams = ((await tracker.call("list_teams", {})) as { teams: { id: string; key: string }[] }).teams;
+  const team = teams[0]!.key;
+  const project = (
+    (await tracker.call("save_project", { name: "Beds", addTeams: [teams[0]!.id] })) as { id: string }
+  ).id;
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ...ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "beds",
+              name: "Beds",
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: beds }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+              trackerProjectId: project,
+            },
+          ],
+        }).projects,
+      ],
+    },
+  }));
+  const watch = async () => {
+    await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  };
+  // Watch is chosen after the call's own check passed, while the write is about to commit.
+  const write = (title: string, actor?: Parameters<typeof f.workItems.callTracker>[2]["actor"]) =>
+    f.workItems.callTracker(
+      "save_issue",
+      { team, title, project },
+      { repo: beds, local: true, beforeWrite: watch, ...(actor === undefined ? {} : { actor }) },
+    );
+  await expect(write("Chosen meanwhile")).rejects.toThrow("only watching");
+  // The owner writing himself is not Clankie acting.
+  await expect(write("Owner's own", { ...TRACKER_OWNER, onBehalfOf: [] })).resolves.toBeDefined();
+  const listed = JSON.stringify(
+    await f.workItems.callTracker("list_issues", {}, { repo: beds, local: true }),
+  );
+  expect(listed).toContain("Owner's own");
+  expect(listed).not.toContain("Chosen meanwhile");
+});
+
+it("Watch chosen after a work-item write's own check stops it as it commits", async () => {
+  const f = await fixture();
+  const beds = await repo(f.root, "beds", { ...decided, backend: "builtin" });
+  const tracker = createLocalTracker({ directory: join(f.root, "work-state", "tracker") });
+  const team = ((await tracker.call("list_teams", {})) as { teams: { id: string }[] }).teams[0]!.id;
+  const project = ((await tracker.call("save_project", { name: "Beds", addTeams: [team] })) as { id: string })
+    .id;
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ...ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "beds",
+              name: "Beds",
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: beds }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+              trackerProjectId: project,
+            },
+          ],
+        }).projects,
+      ],
+    },
+  }));
+  const created = await f.workItems.handle({ action: "create", repo: beds, title: "Before Watch" }, true);
+  if (!("item" in created) || created.item === undefined) throw new Error("expected an item");
+  const id = (created.item as { id: string }).id;
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  // Each write's own first Watch check reads Off, as when Watch is chosen just after it while
+  // the write waits on the tracker's lock; every later read sees Watch.
+  let reads = 0;
+  const work = createWorkItemsService({
+    stateDirectory: join(f.root, "work-state"),
+    projects: async () => (await f.settings.load()).projects,
+    projectsFence: async () => {
+      const snapshot = await f.settings.loadFenced();
+      return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
+    },
+    localMachineId: "local",
+    run: defaultRun,
+    posting: { ...f.posting, watching: async () => (reads++ === 0 ? false : f.posting.watching()) },
+  });
+  // A create from the repo, an update named by its project, and evidence attached from the repo.
+  for (const request of [
+    { action: "create" as const, repo: beds, title: "Chosen meanwhile" },
+    { action: "update" as const, repo: beds, project, id, status: "in_progress" as const },
+    {
+      action: "attach" as const,
+      repo: beds,
+      id,
+      evidence: { kind: "link" as const, url: "https://example.com/meanwhile", caption: "Chosen meanwhile" },
+    },
+  ]) {
+    reads = 0;
+    await expect(work.handle(request, true)).rejects.toThrow("only watching");
+  }
+  // A hire's automatic issue notes, waiting the same way, are refused as they commit too.
+  const seat = await work.prepareSeatIssueTracker("beds", async () => {});
+  for (const [name, args] of [
+    ["save_comment", { issueId: id, body: "Chosen meanwhile" }],
+    ["save_issue", { id, state: "In Progress" }],
+  ] as const) {
+    reads = 0;
+    await expect(seat.call(name, args, "background")).rejects.toThrow("only watching");
+  }
+  const shown = JSON.stringify(await f.workItems.handle({ action: "show", repo: beds, id }, true));
+  expect(shown).toContain("Before Watch");
+  expect(shown).not.toContain("Chosen meanwhile");
+  expect(shown).not.toContain('"in_progress"');
+  expect(JSON.stringify(await f.workItems.handle({ action: "list", repo: beds }, true))).not.toContain(
+    "Chosen meanwhile",
+  );
+});
+
+it("Watch refuses a worker's or lead's saved-view changes on the built-in tracker, and the owner's still save", async () => {
+  const f = await fixture();
+  // The beds track their work in the built-in tracker, with one bound project.
+  const beds = await repo(f.root, "beds", { ...decided, backend: "builtin" });
+  const tracker = createLocalTracker({ directory: join(f.root, "work-state", "tracker") });
+  const team = ((await tracker.call("list_teams", {})) as { teams: { id: string }[] }).teams[0]!.id;
+  const project = ((await tracker.call("save_project", { name: "Beds", addTeams: [team] })) as { id: string })
+    .id;
+  const storeId = await tracker.storeId();
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ...ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "beds",
+              name: "Beds",
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: beds }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+              trackerProjectId: project,
+            },
+          ],
+        }).projects,
+      ],
+    },
+  }));
+  const save = (name: string, actor?: Parameters<typeof f.workItems.callTracker>[2]["actor"]) =>
+    f.workItems.callTracker(
+      "save_issue_view",
+      { project, storeId, schemaVersion: 1, name, filter: {} },
+      { repo: beds, local: true, ...(actor === undefined ? {} : { actor }) },
+    );
+  const saved = (await save("Before Watch")) as { id: string };
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  await expect(save("During Watch")).rejects.toThrow("only watching");
+  await expect(
+    f.workItems.callTracker(
+      "post_delete_issue_view",
+      { project, storeId, id: saved.id },
+      { repo: beds, local: true },
+    ),
+  ).rejects.toThrow("only watching");
+  // The owner saving a view himself is not Clankie acting.
+  await expect(save("Owner's own", { ...TRACKER_OWNER, onBehalfOf: [] })).resolves.toBeDefined();
+  // Reading stays open while watching, and nothing Clankie tried landed.
+  const views = JSON.stringify(
+    await f.workItems.callTracker("list_issue_views", { project, storeId }, { repo: beds, local: true }),
+  );
+  expect(views).toContain("Before Watch");
+  expect(views).toContain("Owner's own");
+  expect(views).not.toContain("During Watch");
 });

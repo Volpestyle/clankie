@@ -17,6 +17,7 @@ import {
   formatFleetAutonomyGuidance,
   type FleetAutonomy,
   AUTONOMY_LEVELS,
+  WATCH_LEVEL,
   AutonomyLevelSchema,
   type AutonomyLevel,
   type AutonomyLevelReading,
@@ -451,15 +452,16 @@ export async function fleetUpdate(
   };
 }
 
-const AUTONOMY_USAGE = `Usage: clankie autonomy [status|${AutonomyLevelSchema.options.join("|")}]`;
+const AUTONOMY_USAGE = `Usage: clankie autonomy [status|watch|${AutonomyLevelSchema.options.join("|")}]`;
 
 export interface AutonomyCommandResult {
   readonly ok: true;
   readonly workTracker?: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
   readonly revision: string;
-  readonly level: AutonomyLevelReading;
+  /** `watch` while Clankie only watches (ADR 0308); otherwise the dial read from the leaves. */
+  readonly level: AutonomyLevelReading | "watch";
   readonly description: string;
-  readonly levels: Record<AutonomyLevel, string>;
+  readonly levels: Record<AutonomyLevel, string> & { readonly watch?: string };
   readonly drift?: AutonomyDrift;
   readonly confirmedAt?: string;
 }
@@ -473,37 +475,46 @@ export async function runAutonomyCommand(
   if (args.length > 1) throw new Error(AUTONOMY_USAGE);
   const api = await ownerSettingsApi(options);
   const snapshot = await api.get(
-    `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true`,
+    `${FLEET_SETTINGS_PATH}?includeWorkPolicy=true&includeWatch=true`,
     FleetSettingsSnapshotSchema,
   );
   if (snapshot.autonomyLevel === undefined)
     throw new Error("This Clankie service predates the autonomy dial. Update it, then try again.");
   let report = snapshot;
   if (verb !== "status") {
-    const level = AutonomyLevelSchema.safeParse(verb);
-    if (!level.success) throw new Error(AUTONOMY_USAGE);
+    const level = verb === "watch" ? undefined : AutonomyLevelSchema.safeParse(verb);
+    if (level?.success === false) throw new Error(AUTONOMY_USAGE);
+    if (level === undefined && snapshot.watch === undefined)
+      throw new Error("This Clankie service predates Watch. Update it, then try again.");
     report = await api.write(
-      FLEET_SETTINGS_PATH,
+      `${FLEET_SETTINGS_PATH}?includeWatch=true`,
       {
         schemaVersion: 1,
         expectedRevision: snapshot.revision,
-        changes: { autonomyLevel: level.data },
+        // A level leaves Watch on the service itself (ADR 0308).
+        changes: level === undefined ? { watch: true } : { autonomyLevel: level.data },
       },
       FleetSettingsSnapshotSchema,
     );
   }
   if (report.autonomyLevel === undefined)
     throw new Error("This Clankie service predates the autonomy dial. Update it, then try again.");
+  const watching = report.watch === true;
   return {
     ok: true,
     revision: report.revision,
-    level: report.autonomyLevel,
-    description: autonomyLevelDescription(report.autonomyLevel, report.autonomyDrift),
+    level: watching ? "watch" : report.autonomyLevel,
+    description: watching
+      ? `${WATCH_LEVEL.label}: ${WATCH_LEVEL.description}`
+      : autonomyLevelDescription(report.autonomyLevel, report.autonomyDrift),
     ...(report.autonomyDrift === undefined ? {} : { drift: report.autonomyDrift }),
     ...(report.autonomyConfirmedAt === undefined ? {} : { confirmedAt: report.autonomyConfirmedAt }),
-    levels: Object.fromEntries(
-      AutonomyLevelSchema.options.map((level) => [level, AUTONOMY_LEVELS[level].description]),
-    ) as Record<AutonomyLevel, string>,
+    levels: {
+      watch: WATCH_LEVEL.description,
+      ...(Object.fromEntries(
+        AutonomyLevelSchema.options.map((level) => [level, AUTONOMY_LEVELS[level].description]),
+      ) as Record<AutonomyLevel, string>),
+    },
   };
 }
 

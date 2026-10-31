@@ -36,7 +36,7 @@ import {
   type JoinedSeatRequest,
   type JoinedSeatResponse,
 } from "@clankie/protocol/machine-join";
-import { machineAccessLevel, refuseMachineAccess } from "./machine-access.ts";
+import { machineAccessLevel, refuseMachineAccess, refuseWhileWatching } from "./machine-access.ts";
 import { privateDirectory, readPrivateJson, writePrivateJson } from "../../tui/bin/update-files.ts";
 
 const credentialName = (id: string) => `clankie-joined-host-${id}`;
@@ -97,6 +97,16 @@ export class MachineJoins {
           directories: record.directories,
           authorize: this.workersAuthority(record),
         };
+  }
+  /**
+   * Watch holds every machine at Portal (ADR 0308): a hire or a message for a worker on a
+   * joined machine is refused at the moment it would go, whoever leads it.
+   */
+  async watching(): Promise<boolean> {
+    return (await this.options.settings.load()).autonomy?.watch === true;
+  }
+  async refuseWatching(id: string): Promise<void> {
+    refuseWhileWatching(await this.options.settings.load(), id, "workers");
   }
   /** Current registration and a live level of at least workers, or a named refusal. */
   private workersAuthority(record: Registration) {
@@ -375,7 +385,9 @@ export class MachineJoins {
     }
     const settings = await this.options.settings.load();
     if (!this.has(record.id)) throw Error("revoked");
-    const accessLevel = machineAccessLevel(settings, record.id, this);
+    // Watch holds every machine at Portal (ADR 0308): the joined host stops what it is running for him.
+    const watching = settings.autonomy?.watch === true;
+    const accessLevel = watching ? "portal" : machineAccessLevel(settings, record.id, this);
     const previous = this.seen.get(record.id);
     const now = this.now();
     this.seen.set(record.id, now);
@@ -384,6 +396,12 @@ export class MachineJoins {
     const requests = [...this.work.values()]
       .filter((work) => work.machineId === record.id && !work.claimed)
       .slice(0, 16);
+    if (watching) {
+      // Every joined operation needs more than Portal, so work queued before Watch is refused, never sent.
+      for (const work of requests)
+        work.settle({ id: work.request.id, ok: false, error: "machine_access_refused" });
+      requests.length = 0;
+    }
     for (const work of requests) work.claimed = true; // Lost delivery is never replayed.
     return {
       policy: { machineId: record.id, accessLevel, directories: record.directories },

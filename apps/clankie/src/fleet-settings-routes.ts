@@ -30,6 +30,7 @@ function fleetSettingsSnapshot(
   settings: ClankieSettings,
   includeWorkPolicy = false,
   includeMaximumTrust = false,
+  includeWatch = false,
 ): FleetSettingsSnapshot {
   const fleet = {
     ...settings.fleet,
@@ -39,6 +40,9 @@ function fleetSettingsSnapshot(
     ...settings.autonomy.fleet,
   };
   const drift = autonomyDrift(settings.autonomy.fleet);
+  const covered = includeMaximumTrust ? { fleet, maximumTrustMode: settings.maximumTrustMode } : fleet;
+  // Watch changes no leaf, so it joins the revision while on: a client that read Off before
+  // another chose Watch gets a conflict, not a silent exit. Off of Watch hashes as before.
   return {
     schemaVersion: 1,
     workingPreferences: true,
@@ -53,9 +57,7 @@ function fleetSettingsSnapshot(
     fleetGates: true,
     resourceMachines: ["local", ...settings.machines.map((machine) => machine.id)],
     revision: createHash("sha256")
-      .update(
-        JSON.stringify(includeMaximumTrust ? { fleet, maximumTrustMode: settings.maximumTrustMode } : fleet),
-      )
+      .update(JSON.stringify(settings.autonomy.watch === true ? { covered, watch: true } : covered))
       .digest("hex"),
     fleet,
     autonomyLevel: matchingAutonomyLevel(settings.autonomy.fleet),
@@ -63,6 +65,7 @@ function fleetSettingsSnapshot(
       ? {}
       : { autonomyConfirmedAt: settings.autonomy.confirmedAt }),
     ...(includeMaximumTrust ? { maximumTrustMode: settings.maximumTrustMode } : {}),
+    ...(includeWatch ? { watch: settings.autonomy.watch === true } : {}),
     ...(drift === undefined ? {} : { autonomyDrift: drift }),
   };
 }
@@ -105,6 +108,7 @@ export function createFleetSettingsRoutes(
         current,
         context.req.query("includeWorkPolicy") === "true",
         context.req.query("includeMaximumTrust") === "true",
+        context.req.query("includeWatch") === "true",
       ),
     );
   });
@@ -143,6 +147,7 @@ export function createFleetSettingsRoutes(
             hire,
             autonomyLevel,
             autonomyConfirmed,
+            watch,
             maximumTrustMode,
             ...preferences
           } = input.data.changes;
@@ -158,6 +163,10 @@ export function createFleetSettingsRoutes(
               value ?? defaults[field as keyof typeof defaults],
             ]),
           );
+          // Watch writes Off's leaves; any level the owner picks leaves it (ADR 0308).
+          const watching = watch ?? (autonomyLevel === undefined ? current.autonomy.watch === true : false);
+          const level = watch === true ? "off" : autonomyLevel;
+          const { watch: _previousWatch, ...autonomy } = current.autonomy;
           return {
             ...current,
             ...(maximumTrustMode === undefined ? {} : { maximumTrustMode }),
@@ -189,16 +198,17 @@ export function createFleetSettingsRoutes(
               ...(hire === undefined ? {} : { hire: hire ?? undefined }),
             },
             autonomy: {
-              ...current.autonomy,
-              // Only an owner's level choice confirms; a hand-set leaf or a default never does.
-              ...(autonomyLevel === undefined && autonomyConfirmed === undefined
+              ...autonomy,
+              // Only an owner's level or Watch choice confirms; a hand-set leaf or a default never does.
+              ...(level === undefined && autonomyConfirmed === undefined && watch === undefined
                 ? {}
                 : { confirmedAt: current.autonomy.confirmedAt ?? new Date().toISOString() }),
               fleet: FleetAutonomySchema.parse({
                 ...current.autonomy.fleet,
-                ...(autonomyLevel === undefined ? {} : autonomyLevelFleet(autonomyLevel)),
+                ...(level === undefined ? {} : autonomyLevelFleet(level)),
                 ...resolved,
               }),
+              ...(watching ? { watch: true as const } : {}),
             },
           };
         },
@@ -216,6 +226,7 @@ export function createFleetSettingsRoutes(
           updated,
           context.req.query("includeWorkPolicy") === "true",
           context.req.query("includeMaximumTrust") === "true",
+          context.req.query("includeWatch") === "true",
         ),
       );
     } catch {

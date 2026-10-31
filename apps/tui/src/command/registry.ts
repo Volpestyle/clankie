@@ -476,8 +476,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["autonomy"],
     lines: [
-      "  autonomy [status|off|low|high|full]",
-      "                           Read or set how many decisions Clankie takes on his own (JSON)",
+      "  autonomy [status|watch|off|low|high|full]",
+      "                           Read or set how many decisions Clankie takes on his own; watch changes nothing (JSON)",
     ],
   },
   {

@@ -236,3 +236,35 @@ it("keeps work queued while its own pane is busy", async () => {
   await evaluator.tick();
   expect(evaluator.status().jobs[0]?.status).toBe("running");
 });
+
+it("Watch chosen while an assessment's pane opens dispatches nothing, and the assessment waits queued", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const directory = mkdtempSync(join(tmpdir(), "clankie-evaluator-watch-"));
+  roots.push(directory);
+  const { runner, run } = setup();
+  let watching = false;
+  const evaluator = new Evaluator(directory, {
+    runner,
+    run,
+    socket: "/test.sock",
+    watching: async () => watching,
+  });
+  await evaluator.command({ action: "enable" });
+  const panes = vi.mocked(runner.createTab!).mock.calls.length;
+  const dispatched = vi.mocked(runner.startAgent!).mock.calls.length;
+  evaluator.capture({ conversationId: "c1", runId: "r1", context: {} });
+  vi.setSystemTime(Date.now() + 61_000);
+  // The owner chooses Watch while the tick is closing the idle pane to make room.
+  vi.mocked(runner.closePane!).mockImplementationOnce(async () => {
+    watching = true;
+  });
+  await evaluator.tick();
+  expect(vi.mocked(runner.createTab!).mock.calls).toHaveLength(panes);
+  expect(vi.mocked(runner.startAgent!).mock.calls).toHaveLength(dispatched);
+  expect(evaluator.status().jobs[0]?.status).toBe("queued");
+  // Once Clankie may act again, the same assessment goes out.
+  watching = false;
+  await evaluator.tick();
+  expect(vi.mocked(runner.startAgent!).mock.calls).toHaveLength(dispatched + 1);
+  expect(evaluator.status().jobs[0]?.status).toBe("running");
+});
