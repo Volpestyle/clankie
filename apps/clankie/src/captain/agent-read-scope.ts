@@ -81,7 +81,7 @@ function named(process: { readonly name: string }): string {
 }
 
 /** Whether a process is a shell, by its name or argv0. */
-function isShell(process: { readonly name: string; readonly argv0?: string }): boolean {
+export function isShell(process: { readonly name: string; readonly argv0?: string }): boolean {
   return [process.name, process.argv0].some((value) => SHELLS.has(named({ name: value ?? "" })));
 }
 

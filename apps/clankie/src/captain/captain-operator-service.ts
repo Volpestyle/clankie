@@ -911,7 +911,7 @@ export function createOperatorService(
           };
     }
     if (request.op === "herdr_core_read") {
-      const read = await herdrCore().read(request.terminal, request.lines ?? 0);
+      const read = await herdrCore().read(request.terminal);
       return { op: "herdr_core_read", schemaVersion: 1, terminal: request.terminal, ...read };
     }
     if (request.op === "herdr_core_focus") {

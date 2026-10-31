@@ -70,8 +70,11 @@ runs in its own terminal server, herdr-core (`hc`), on Clankie's Mac. It speaks
 the `herdr_core_list`, `herdr_core_read` and `herdr_core_focus` operator ops,
 which the service answers from the core's socket (`HC_SOCKET`, else
 `$XDG_STATE_HOME/herdr-core/<HC_SESSION or default>/…sock`). List is the
-terminals whose program reports a status (hc's own definition of an agent),
-read is the screen plus history, open asks `herdr-app` to focus the pane. Send
+terminals with a live agent in them now: the program reports a status (hc's
+own definition of an agent) and the process in front isn't a shell. Read is
+bound as a Herdr pane's `terminal_read` is (ADR 0307): only that agent, only
+what it showed since its first read, with a `note` while earlier screen is held
+back. Open asks `herdr-app` to focus the pane. Send
 always refuses: herdr-core's only way to message an agent is pasting into its
 terminal (ADR 0207). No core running lists nothing; nothing starts one.
 
