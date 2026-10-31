@@ -11,6 +11,8 @@ import {
 import type { CaptainReadiness } from "@clankie/model-provider";
 import type { MachineWorkerAccounts } from "@clankie/protocol/worker-accounts";
 import type { AutonomyCommandResult } from "./command/fleet.ts";
+import type { HerdrCommandResult } from "./command/herdr.ts";
+import { describeHerdrBinding } from "./shell/footer.ts";
 import type { InstallDoctorReport } from "./install-doctor.ts";
 import type { AutostartCommandResult } from "./command/autostart.ts";
 import { readCaptainReadiness, runThinkingSetup, type ProviderServices } from "./provider-commands.ts";
@@ -30,6 +32,8 @@ export interface SetupCommandServices {
   readonly workspace: () => string;
   readonly pair: (shell: ClankieFaceShell) => Promise<number>;
   readonly autostart: (verb: "status" | "enable") => Promise<AutostartCommandResult>;
+  /** The Herdr session in settings beside the one the running service watches (`clankie herdr status`). */
+  readonly herdr: () => Promise<Pick<HerdrCommandResult, "herdr" | "active" | "unavailable" | "restart">>;
   /** Every console command, read when an entry opens one, so `/setup` never duplicates a wizard. */
   readonly commands: () => readonly FaceShellCommand[];
   readonly restartCaptain?: () => Promise<void>;
@@ -283,11 +287,43 @@ async function runAutonomySetup(
 async function runWatchSetup(shell: ClankieFaceShell, services: SetupCommandServices): Promise<void> {
   shell.insertCommandResult("/setup", "2 of 3 · Pick the Herdr session Clankie should watch.", "success");
   await openSetupCommand(shell, services, "herdr");
+  // `/herdr` returns the same way after a pick, a cancel or an error: ask what is saved and what runs.
+  const status = await services.herdr().catch((error: unknown) => ({
+    unavailable: error instanceof Error ? error.message : String(error),
+  }));
+  const saved = "herdr" in status ? status.herdr : undefined;
+  const active = "active" in status ? status.active : undefined;
+  if (saved?.runtime === "disabled" || active === undefined) {
+    shell.insertMarkdown(
+      [
+        "**2 of 3 · No Herdr session to watch yet**",
+        "",
+        saved?.runtime === "disabled"
+          ? "Herdr is turned off for Clankie, so there is nothing for him to show."
+          : `Clankie can't see a Herdr session${status.unavailable ? `: ${status.unavailable}` : "."}`,
+        "Run `/herdr` to pick or create one, then `/setup` again.",
+      ].join("\n"),
+    );
+    return;
+  }
+  const pending =
+    (saved?.runtime === "bundled" && active.runtime !== "bundled") ||
+    (saved?.runtime === "external" && (active.runtime !== "external" || active.session !== saved.session));
+  if (pending) {
+    shell.insertMarkdown(
+      [
+        "**2 of 3 · Your pick starts after a restart**",
+        "",
+        `Clankie still watches ${describeHerdrBinding(active)}. Run \`${"restart" in status ? status.restart : "clankie restart captain"}\` to switch to ${saved.runtime === "bundled" ? "Clankie’s own session" : saved.session}, then \`/setup\` again.`,
+      ].join("\n"),
+    );
+    return;
+  }
   shell.insertMarkdown(
     [
-      "**3 of 3 · Clankie is watching**",
+      `**3 of 3 · Clankie is watching ${describeHerdrBinding(active)}**`,
       "",
-      "He shows your sessions and workers and changes nothing. No AI model runs, so there is nothing more to set up.",
+      "He shows its sessions and workers and changes nothing. No AI model runs, so there is nothing more to set up.",
       "`/agents` shows the team. When you want him to act, run `/autonomy` and pick a level; `/setup` then adds a model.",
     ].join("\n"),
   );

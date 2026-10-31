@@ -1,12 +1,30 @@
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  createFauxCore,
+  fauxAssistantMessage,
+  fauxToolCall,
+  InMemoryCredentialStore,
+  type Api,
+  type Model,
+} from "@earendil-works/pi-ai";
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  defineTool,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { afterEach, expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { WatchingMachineRefused } from "@clankie/protocol";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { createCaptainModelRuntime } from "../src/captain/model.ts";
 import { routeLaneRun } from "../src/captain/lane-route.ts";
+import { guardWatchedRequests } from "../src/captain/watch-request.ts";
 import type { LaneSession } from "../src/captain/captain-types.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import { WATCH_TURN_REFUSAL, createWatchGate } from "../src/watch.ts";
@@ -141,4 +159,94 @@ it("Watch joins the settings revision, so a client that read Off before Watch ge
   });
   expect(write.status).toBe(409);
   expect((await f.settings.load()).autonomy.watch).toBe(true);
+});
+
+it("Watch stops a turn already running and its compaction: nothing after the switch reaches the provider", async () => {
+  const f = await fixture();
+  const core = createFauxCore({ provider: "watched", api: "faux-watched", models: [{ id: "default" }] });
+  const sent: string[] = [];
+  const runtime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+    refreshOnCreate: false,
+  });
+  runtime.registerProvider("watched", {
+    api: "faux-watched" as Api,
+    baseUrl: "http://127.0.0.1:1/v1",
+    apiKey: "loopback",
+    // As a real transport does: shape the body, then send only on a live signal.
+    streamSimple: (model, context, options) => {
+      const body = { model: model.id, messages: context.messages.length };
+      void Promise.resolve(options?.onPayload?.(body, model)).then(() => {
+        if (options?.signal?.aborted !== true) sent.push(`request with ${String(body.messages)} message(s)`);
+      });
+      return core.streamSimple(model, context, options);
+    },
+    models: [
+      {
+        id: "default",
+        name: "default",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 100_000,
+        maxTokens: 4_000,
+      },
+    ],
+  });
+  const watch = createWatchGate(f.settings);
+  // Keep almost nothing recent, so this short session has history to compact.
+  const settingsManager = SettingsManager.inMemory({ compaction: { keepRecentTokens: 1 } });
+  const loader = new DefaultResourceLoader({
+    cwd: f.root,
+    agentDir: f.root,
+    systemPrompt: "You are under test.",
+    noExtensions: true,
+    noPromptTemplates: true,
+    settingsManager,
+  });
+  await loader.reload();
+  // The owner turns Watch on while the turn's tool is running.
+  const look = defineTool({
+    name: "look",
+    label: "Look",
+    description: "Looks around.",
+    parameters: Type.Object({}),
+    execute: async () => {
+      await f.dial("watch");
+      return { content: [{ type: "text" as const, text: "seen" }], details: undefined };
+    },
+  });
+  const { session } = await createAgentSession({
+    cwd: f.root,
+    model: runtime.getModel("watched", "default") as Model<Api>,
+    thinkingLevel: "off",
+    modelRuntime: runtime,
+    customTools: [look],
+    resourceLoader: loader,
+    sessionManager: SessionManager.inMemory(f.root),
+    settingsManager,
+    noTools: "builtin",
+  });
+  guardWatchedRequests(session, watch);
+  await session.bindExtensions({ mode: "print" });
+  core.setResponses([
+    fauxAssistantMessage(fauxToolCall("look", {})),
+    fauxAssistantMessage("answered"),
+    fauxAssistantMessage("summary"),
+  ]);
+  await session.prompt("look around", { expandPromptTemplates: false }).catch(() => undefined);
+  await session.waitForIdle();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  // Compaction sends the whole history to a model, so it is refused too.
+  const compacted = await session.compact().then(
+    () => "compacted",
+    (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  );
+  expect(compacted).not.toBe("compacted");
+  // Only the request from before Watch went out; the tool result stayed home.
+  expect(sent).toEqual([expect.stringMatching(/^request with/)]);
+  expect(
+    session.sessionManager.getEntries().some((entry: { type: string }) => entry.type === "compaction"),
+  ).toBe(false);
 });

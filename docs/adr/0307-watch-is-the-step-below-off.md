@@ -45,8 +45,10 @@ changes nothing.
 
 - **Model turns.** The captain's model runtime refuses before choosing a
   model, so chat, wakes, routines, Auto rounds, Discord and Linear turns reach
-  no provider. A session waiting to be compacted keeps waiting: compaction
-  sends its history to a model. Chat says Clankie is only watching.
+  no provider. Each session also asks again before every request it sends, so
+  a turn already running when Watch starts stops at its next tool result,
+  retry or steered message. A session waiting to be compacted keeps waiting:
+  compaction sends its history to a model. Chat says Clankie is only watching.
 - **Machines act at Portal.** Machine access treats every machine as Portal
   (ADR 0244), so hires, moves, deliveries into a worker, question answers,
   lead launches and anything else above Portal are refused. These refusals

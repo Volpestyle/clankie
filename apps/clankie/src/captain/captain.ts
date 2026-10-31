@@ -363,6 +363,7 @@ import {
 } from "./remote-codex-app-server.ts";
 import { createRemoteCodexGoals } from "./remote-codex-goals.ts";
 import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
+import { guardWatchedRequests } from "./watch-request.ts";
 import { RoomHandoffBursts } from "./room-handoff-bursts.ts";
 import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
@@ -2017,6 +2018,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           // noTools: "builtin" only changes the initial active loadout.
         });
         preparingSession = created.session;
+        guardWatchedRequests(created.session, watch);
         if (run?.signal.aborted) {
           disposePreparingSession();
           run.signal.throwIfAborted();

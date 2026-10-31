@@ -5138,9 +5138,11 @@ Off, Low, High or Full using the same descriptions and API. The choice is
 confirmed before model setup can become ready; cancelling leaves the saved
 leaves untouched and does not advance setup. A ready console's `/setup` also
 asks before pairing or hiring. Choosing Watch makes setup three steps: Clankie
-is installed, `/herdr` picks the session to watch, and he watches. No model,
-phone, connection or hire is asked for; pick a level later and `/setup` adds
-them.
+is installed, `/herdr` picks the session to watch, and he watches. Setup says
+he is watching only once the running service watches that session; a new pick
+that waits on `clankie restart captain`, a cancelled picker or no Herdr session
+says so instead. No model, phone, connection or hire is asked for; pick a level
+later and `/setup` adds them.
 
 <a id="auto-switch"></a>
 
