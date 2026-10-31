@@ -2263,14 +2263,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           : undefined;
       // Watch refuses every tracker write that is not the owner's (ADR 0307). An outward
       // tracker's admission already refuses it; a local tracker has no admission, so ask here.
-      if (
-        outward === undefined &&
-        posting !== TRACKER_POSTING_ADMITTED &&
-        isTrackerWriteTool(name) &&
-        !ownerActor(callbacks.actor) &&
-        (await options.posting?.watching?.()) === true
-      )
-        assertAdmitted({ outcome: "refused", message: WATCH_REFUSAL });
+      const watchApplies =
+        posting !== TRACKER_POSTING_ADMITTED && isTrackerWriteTool(name) && !ownerActor(callbacks.actor);
+      const refuseWatching = async () => {
+        if (watchApplies && (await options.posting?.watching?.()) === true)
+          assertAdmitted({ outcome: "refused", message: WATCH_REFUSAL });
+      };
+      if (outward === undefined) await refuseWatching();
       if (options.posting && outward !== undefined)
         assertAdmitted(
           await options.posting.admit({
@@ -2292,6 +2291,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       const beforeWrite = async () => {
         await validate?.();
         await callbacks.beforeWrite?.();
+        // Asked again at the write itself, so a write waiting on the tracker's lock when Watch
+        // is chosen changes nothing.
+        await refuseWatching();
         await assertAccountCurrent();
       };
       const scopedDependencies: TrackerDeps = {

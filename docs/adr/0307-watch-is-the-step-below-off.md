@@ -65,7 +65,8 @@ changes nothing.
   health alert is sent into a seat.
 - **Restarts and tidying.** Lead relaunches (fresh restart, failover,
   failback), hired-seat restarts, auto-tidy closes and worktree prunes, the
-  operator's close, and the evaluator all stop. A prune asked for by name
+  operator's close, and the evaluator all stop. A lead relaunch asks again
+  right before it ends the current session, which keeps running. A prune asked for by name
   through the service is refused too, before any tree is touched, and a close
   already under way asks again right before the worker exits. The evaluator
   asks again before each pane it closes, opens or starts, and an assessment it
@@ -76,8 +77,8 @@ changes nothing.
   him, outward, to the built-in tracker or to a repo's private issue files.
   That covers `clankie work`, tracker calls with or without a repository,
   saved views, and the automatic notes a hire's issue gets when the hire
-  exits. Nothing is held
-  for later either.
+  exits. A write waiting on the tracker asks again as it commits. Nothing is
+  held for later either.
   The owner's own writes (`clankie work owner`, or a post he approves) are
   his. A post held for Clankie before Watch was chosen keeps waiting; only the
   owner can let it out meanwhile. The Discord forum view binds no forum, so it copies nothing into the

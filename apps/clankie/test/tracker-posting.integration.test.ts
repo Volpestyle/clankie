@@ -1564,6 +1564,55 @@ it("Watch refuses Clankie's unscoped writes to the built-in tracker, and the own
   );
 });
 
+it("Watch chosen while a repo's built-in tracker write waits for the store stops it, and the owner's still write", async () => {
+  const f = await fixture();
+  const beds = await repo(f.root, "beds", { ...decided, backend: "builtin" });
+  const tracker = createLocalTracker({ directory: join(f.root, "work-state", "tracker") });
+  const teams = ((await tracker.call("list_teams", {})) as { teams: { id: string; key: string }[] }).teams;
+  const team = teams[0]!.key;
+  const project = (
+    (await tracker.call("save_project", { name: "Beds", addTeams: [teams[0]!.id] })) as { id: string }
+  ).id;
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        ...ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "beds",
+              name: "Beds",
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: beds }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+              trackerProjectId: project,
+            },
+          ],
+        }).projects,
+      ],
+    },
+  }));
+  const watch = async () => {
+    await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  };
+  // Watch is chosen after the call's own check passed, while the write is about to commit.
+  const write = (title: string, actor?: Parameters<typeof f.workItems.callTracker>[2]["actor"]) =>
+    f.workItems.callTracker(
+      "save_issue",
+      { team, title, project },
+      { repo: beds, local: true, beforeWrite: watch, ...(actor === undefined ? {} : { actor }) },
+    );
+  await expect(write("Chosen meanwhile")).rejects.toThrow("only watching");
+  // The owner writing himself is not Clankie acting.
+  await expect(write("Owner's own", { ...TRACKER_OWNER, onBehalfOf: [] })).resolves.toBeDefined();
+  const listed = JSON.stringify(
+    await f.workItems.callTracker("list_issues", {}, { repo: beds, local: true }),
+  );
+  expect(listed).toContain("Owner's own");
+  expect(listed).not.toContain("Chosen meanwhile");
+});
+
 it("Watch refuses a worker's or lead's saved-view changes on the built-in tracker, and the owner's still save", async () => {
   const f = await fixture();
   // The beds track their work in the built-in tracker, with one bound project.

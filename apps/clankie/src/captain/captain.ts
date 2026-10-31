@@ -5802,6 +5802,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (herdrRunner.readPane === undefined) throw new Error("Herdr pane reads are unavailable");
       return herdrRunner.readPane(paneId, "visible", "ansi");
     },
+    watching: () => watch.watching(),
     runInPane: async (paneId, argv) => {
       if (herdrRunner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
       // Every lead relaunch (fresh restart, failover, failback) types its command here.
