@@ -206,3 +206,45 @@ jobs:
           base="$BEFORE"
           if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=$(git rev-parse HEAD^1); fi
           $HEAVY node scripts/check-changed-tests.mjs --base "$base"
+
+  # The real app on James's Mac (ADR 0309): this checkout's service and relay in a
+  # scratch home with his own private Herdr, driven through the CLI and HTTP as an
+  # agent or the app would, every outcome checked through the API, the files and
+  # the service's own logs. Same fork rule as the mac job: never code from a fork
+  # on that machine.
+  real-run:
+    if: >-
+      vars.CLANKIE_MAC_RUNNER == 'true' &&
+      (github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: [self-hosted, macOS, james-mac]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+      - name: Share the machine's heavy-work permits
+        run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
+      - run: $HEAVY pnpm install --frozen-lockfile
+      # His bundled fleet starts from the pinned offline Herdr.
+      - run: pnpm herdr:build
+      - name: Real-app run
+        run: $HEAVY pnpm real-run --out "$RUNNER_TEMP/real-run"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-run
+          include-hidden-files: true
+          path: |
+            ${{ runner.temp }}/real-run/report.json
+            ${{ runner.temp }}/real-run/run.jsonl
+            ${{ runner.temp }}/real-run/home/service.log
+            ${{ runner.temp }}/real-run/home/relay.log
+          retention-days: 7

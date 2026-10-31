@@ -45,7 +45,8 @@
     "test:windows-observation": "CLANKIE_COMPUTER_INTEGRATION=1 vitest run --config vitest.config.ts apps/clankie/test/computer-windows.integration.test.ts",
     "computer:windows:fixture": "pnpm --filter @clankie/clankie exec tsx ../../scripts/manual/windows-computer/check.ts",
     "computer:windows:build": "node scripts/build-windows-computer.mjs",
-    "test:computer-integration": "CLANKIE_COMPUTER_INTEGRATION=1 vitest run --config vitest.config.ts apps/clankie/test/computer-body.integration.test.ts"
+    "test:computer-integration": "CLANKIE_COMPUTER_INTEGRATION=1 vitest run --config vitest.config.ts apps/clankie/test/computer-body.integration.test.ts",
+    "real-run": "node packages/real-run/src/main.ts"
   },
   "devDependencies": {
     "esbuild": "0.28.1",

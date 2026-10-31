@@ -34,6 +34,15 @@ a change runs the root `pnpm check:landing` before pushing
 ([ADR 0240](../../../docs/adr/0240-changes-land-directly-on-main.md)); the full
 `pnpm check` runs for releases and on request.
 
+The real-app run is the first check for any change to how Clankie starts,
+answers or keeps state: `clankie heavy -- pnpm real-run` starts this checkout's
+real service, relay and private Herdr in a scratch home and checks the owner's
+key flows through the CLI, HTTP, files and the service's own log
+([ADR 0309](../../../docs/adr/0309-the-real-app-runs-on-every-change.md)). The Mac
+runs it on every change. A new owner-facing flow adds a flow to
+[`packages/real-run`](../../../packages/real-run/README.md) instead of a mocked test;
+read `report.json` and `run.jsonl` in its output directory when it fails.
+
 Report advertised capabilities as `live`, `refused`, or `absent`. A receipt
 that fails because a promised capability is absent is useful evidence; do not
 weaken the expectation to make the instrument green.
