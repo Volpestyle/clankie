@@ -28,6 +28,7 @@ import {
   prepareFreeAgentIntent as prepareFreeIntent,
 } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
+import { WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
 import {
   joinedMachineShellTool,
   joinedHireTools,
@@ -440,6 +441,8 @@ const LEAD_HANDOFF_REQUEST = [
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
+  // Watch (ADR 0307): machine access holds every machine at Portal; this gate covers the rest.
+  const watch = createWatchGate(settingsStore);
   const requireAccess =
     options.requireMachineAccess ??
     ((fleet, required) => requireRuntimeMachineAccess(settingsStore, fleet, required));
@@ -482,6 +485,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     get settings() {
       return settings;
     },
+    watching: () => watch.watching(),
     get deps() {
       return deps;
     },
@@ -1229,10 +1233,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
         }),
   });
-  const evaluator = new Evaluator(
-    join(options.stateDir, "evaluator"),
-    deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable },
-  );
+  const evaluator = new Evaluator(join(options.stateDir, "evaluator"), {
+    ...(deps.herdrAvailable === undefined ? {} : { available: deps.herdrAvailable }),
+    watching: () => watch.watching(),
+  });
   const evaluationStarts = new Map<string, () => EvaluationCapture>();
   const turnSettled = new TurnSettledLog(turnSettledLogPath(options.stateDir), (metrics) => {
     const capture = evaluationStarts.get(metrics.runId);
@@ -1617,7 +1621,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (modelRuntime === undefined) {
       const created =
         options.evalSessionBoundary === undefined
-          ? createCaptainModelRuntime(options.repoRoot)
+          ? createCaptainModelRuntime(options.repoRoot, {
+              refuse: () => watch.refuse(WATCH_TURN_REFUSAL),
+            })
           : Promise.resolve(options.evalSessionBoundary.runtime);
       modelRuntime = created;
       modelRuntimeReady = false;
@@ -4919,6 +4925,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (shutdown.signal.aborted || !text.trim() || text.length > 4000)
         return outcome(false, "stopped_or_invalid");
       if (!(await validateConversationOwner(owner))) return outcome(false, "owner_unavailable");
+      // Watch sends nothing into a seat, a lead's included (ADR 0307).
+      if (await watch.watching()) return outcome(false, "watching");
       await guard();
       await conversations.waitForDriverAdmission(owner.conversationId, shutdown.signal);
       await guard();
@@ -5620,7 +5628,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (id) => milestoneSignals(autoMeasurements.get(id)),
     );
   const stopAutoRounds = autoCadence.start(async () => {
-    if (shutdown.signal.aborted || !autonomy.enabled) return;
+    if (shutdown.signal.aborted || !autonomy.enabled || (await watch.watching())) return;
     await projectMirrors
       .refresh((await settings()).projects.projects)
       .catch((error: unknown) => console.warn("Project mirrors unavailable", String(error)));
@@ -5806,6 +5814,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     runInPane: async (paneId, argv) => {
       if (herdrRunner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
+      // Every lead relaunch (fresh restart, failover, failback) types its command here.
+      await watch.refuse();
       await herdrRunner.runInPane(paneId, argv);
     },
     idle: (conversationId) => {
@@ -5969,13 +5979,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }, options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS);
   const hiredSeatRestarts = createHiredSeatRestarts({
     path: join(options.stateDir, "hired-seat-restart-policy.json"),
-    enabled: async () => (await settings()).fleet.seatRestarts !== "off",
+    enabled: async () => (await settings()).fleet.seatRestarts !== "off" && !(await watch.watching()),
     candidates: () => herdrWatches.freshRestartCandidates(),
     receipts: () => herdrWatches.hiredRestartReceipts(),
     observe: readHiredRestartObservation,
     authority: async (candidate) => {
       if (shutdown.signal.aborted || !(await validateConversationOwner(candidate.owner)))
         throw new RestartRefusal("authority_unavailable");
+      if (await watch.watching()) throw new RestartRefusal("watching");
     },
     resources: async (candidate) => {
       const guard = await options.fleetResources?.restartGuard(candidate.agent);
@@ -6184,7 +6195,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // VUH-2392: finished, harvested, landed hires close on their own, and landed worktrees in
   // enrolled roots go, through the same guarded close and prune a lead uses.
   const autoTidy = createAutoTidy({
-    setting: async () => (await settings()).fleet.autoTidy,
+    // Watch closes nothing and prunes nothing (ADR 0307).
+    setting: async () => ((await watch.watching()) ? "off" : (await settings()).fleet.autoTidy),
     runner: herdrRunner,
     tidy: paneTidy,
     reviewerSeats: async () => reviewerSeatIds((await settings()).projects),
@@ -7656,6 +7668,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       runner: herdrRunner,
       ownerAskPending: (seatId) => conversations.ownerAskPendingFor(seatId),
       record: (app, text) => fleetRoom.postAppNote(app, text),
+      watching: () => watch.watching(),
     }),
     recordInbound: (arrival) => noteFleetRoom(inboundFleetRoomRecord(arrival)),
     readWorkerAccounts,

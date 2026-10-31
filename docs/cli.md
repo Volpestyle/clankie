@@ -5087,7 +5087,7 @@ The existing owner API accepts category leaves in the revision-fenced
 
 <a id="autonomy-dial"></a>
 
-### `autonomy [status|off|low|high|full]`
+### `autonomy [status|watch|off|low|high|full]`
 
 One dial over all of the above: how much Clankie decides without asking
 ([ADR 0263](adr/0263-one-autonomy-dial-over-the-decision-leaves.md)). `off`
@@ -5118,6 +5118,20 @@ card show this passive indicator; reads never change saved authority. A snapshot
 service, so the CLI refuses to set a level there. In the console, `/autonomy
 LEVEL` sets the dial and `/autonomy clear` cancels the selected chat's scheduled
 wake.
+
+`watch` is the step below Off
+([ADR 0307](adr/0307-watch-is-the-step-below-off.md)). Clankie reads the fleet,
+sessions and transcripts and changes nothing: no model turn reaches a provider,
+every machine acts at Portal (no hire, delivery, question answer, restart or
+close), no wake or health alert reaches a seat, connected apps cannot answer
+prompts, Auto rounds and auto-tidy stop, and no tracker write by Clankie, a lead
+or a worker goes through him. Stop, every read, settings and the owner's own
+tracker writes still work. The command reports `level: "watch"`. The API is
+`changes.watch` (`true` turns it on and writes Off's leaves; `false` leaves it);
+any `changes.autonomyLevel` leaves Watch too, so a client that predates Watch,
+which reads Off, moves up with its next choice. Snapshots carry `watch` only
+on `?includeWatch=true`; its absence there means the service cannot watch, and
+the CLI refuses `watch` against it.
 
 First-run `/setup` explicitly asks for Off, Low, High or Full using the same
 descriptions and API. The choice is confirmed before model setup can become

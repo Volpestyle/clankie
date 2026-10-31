@@ -1,3 +1,4 @@
+import { WATCH_REFUSAL } from "./watch.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -907,6 +908,8 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
 
   async function admit(write: PostingWrite): Promise<PostingAdmission> {
     const settings = await options.settings.load();
+    // Watch writes nothing to a tracker and holds nothing for later (ADR 0307).
+    if (settings.autonomy.watch === true) return { outcome: "refused", message: WATCH_REFUSAL };
     const projects = await projectsFor(write, settings);
     const setting = postingOf(projects);
     if (write.key !== undefined) {

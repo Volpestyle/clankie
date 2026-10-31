@@ -62,6 +62,11 @@ export const FleetSettingsSnapshotSchema = z
     /** Present once the owner has chosen a level, from any device; clients ask only while it is absent (VUH-2725). */
     autonomyConfirmedAt: z.iso.datetime().optional(),
     autonomyDrift: AutonomyDriftSchema.optional(),
+    /**
+     * Opt-in read (`includeWatch=true`): whether Clankie is only watching (ADR 0307).
+     * Absent on an older service, which cannot watch.
+     */
+    watch: z.boolean().optional(),
     /** Opt-in read; writes can change trust and autonomy together under one revision. */
     maximumTrustMode: z.boolean().optional(),
   })
@@ -98,6 +103,11 @@ export const UpdateFleetSettingsSchema = z
          * without changing a leaf (VUH-2725). A level change records it too.
          */
         autonomyConfirmed: z.literal(true).optional(),
+        /**
+         * Turns Watch on or off (ADR 0307). On writes Off's leaves and records the
+         * choice; a level change without it leaves Watch.
+         */
+        watch: z.boolean().optional(),
         maximumTrustMode: z.boolean().optional(),
       })
       .refine(

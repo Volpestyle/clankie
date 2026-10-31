@@ -1365,3 +1365,47 @@ it("a drop posted before its file was marked is marked on retry and on restart, 
   expect(await marked("The bell is cracked")).toMatchObject({ tracker: "linear" });
   expect(f.mutations("issueCreate")).toBe(2);
 });
+
+it("Watch refuses every write by Clankie, a lead or a worker, holds nothing, and the owner's own write still goes", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "allow");
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  for (const call of [f.lead, f.worker]) {
+    const refused = await call("save_comment", comment("Landed."));
+    expect(refused).toMatchObject({ outcome: "refused", possiblyDispatched: false });
+    if (refused.outcome !== "refused") throw new Error("expected a refusal");
+    expect(refused.detail).toContain("only watching");
+  }
+  // The built-in tracker standing in for Linear is a write too.
+  expect(await f.lead("save_issue", { title: "New idea", team: "VUH" })).toMatchObject({
+    outcome: "refused",
+  });
+  const cli = await f.work("create", "From the CLI");
+  expect(cli.ok).toBe(false);
+  expect(cli.body).toMatchObject({ detail: expect.stringContaining("only watching") });
+  expect(f.mutations("Create")).toBe(0);
+  expect(f.mutations("commentCreate")).toBe(0);
+  // Nothing waits in the owner's feed to go out later.
+  const listed = await f.posts({ action: "list", state: "all" });
+  expect(parseProtocolResponse(TrackerPostsResultSchema, listed.body)).toMatchObject({ posts: [] });
+
+  // The owner speaking as himself is not Clankie acting.
+  const own = await f.request("/v1/tracker/owner/call", {
+    name: "save_comment",
+    repo: f.garden,
+    arguments: comment("The owner's own note."),
+  });
+  expect(own.status).toBe(200);
+  expect(f.mutations("commentCreate")).toBe(1);
+
+  // Leaving Watch lets Clankie write again under the project's setting.
+  await f.settings.update((current) => {
+    const { watch: _watch, ...autonomy } = current.autonomy;
+    return { ...current, autonomy };
+  });
+  expect(await f.lead("save_comment", comment("Back at it."))).toMatchObject({
+    outcome: "ok",
+    isError: false,
+  });
+  expect(f.mutations("commentCreate")).toBe(2);
+});

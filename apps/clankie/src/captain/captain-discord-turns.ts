@@ -67,6 +67,8 @@ export interface CreateDiscordTurnsContext {
   ) => Promise<LaneSession>;
   readonly workingDirectory: string;
   readonly options: CaptainOptions;
+  /** Watch (ADR 0307): no wake reaches a lead, native or service, while Clankie only watches. */
+  readonly watching?: () => Promise<boolean>;
   readonly durableSession: (
     key: string,
     lane: CaptainSessionLaneV2,
@@ -296,6 +298,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     original?: HerdrWatchWakeContext,
   ): Promise<boolean> {
     const owner = ConversationOwnerSchema.parse(input);
+    if ((await ctx.watching?.()) === true) return false;
     if (!(await validateConversationOwner(owner, mode))) return false;
     if (original?.receipt) {
       const expected = original.receipt;

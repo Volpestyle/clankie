@@ -23,6 +23,7 @@
  * - **Untrusted text.** A server's own tool descriptions become prompt text, so
  *   they are length-capped here rather than trusted to be reasonable.
  */
+import { WATCH_REFUSAL } from "./watch.ts";
 import {
   captureConversationAuthority,
   captureNativeSeatAuthority,
@@ -1630,6 +1631,20 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             }
           }
         }
+        // Watch (ADR 0307): no tracker write by Clankie, a lead or a worker, outward or local.
+        // An owner-admitted write (his own, or a post he approved) is his.
+        if (
+          server.id === "linear" &&
+          input.posting !== TRACKER_POSTING_ADMITTED &&
+          (graphqlPlan ? graphqlPlan.mutation : isTrackerWriteTool(input.tool)) &&
+          (await options.settings.load()).autonomy.watch === true
+        )
+          return {
+            outcome: "refused",
+            reason: "posting_refused",
+            possiblyDispatched: false,
+            detail: WATCH_REFUSAL,
+          };
         // "Posting to your tracker" (ADR 0302): an outward write by Clankie or a worker passes
         // its project's setting first. A repo on private issue files or the built-in tracker,
         // and the built-in tracker standing in for Linear, stay on this Mac and pass freely.

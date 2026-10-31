@@ -1,3 +1,4 @@
+import { WATCH_REFUSAL } from "../watch.ts";
 import { createHash } from "node:crypto";
 import type { PromptAnswerResult, PromptAnswerStep } from "@clankie/protocol/connector";
 import type { HerdrBoundPane, HerdrWatchRunner } from "./herdr-watch.ts";
@@ -13,6 +14,8 @@ export interface PromptAnswerDeps {
   readonly ownerAskPending: (seatId: string) => boolean;
   /** The note board line that records the answer; never blocks it. */
   readonly record: (app: string, text: string) => unknown;
+  /** Watch (ADR 0307): no key reaches a pane while Clankie only watches. */
+  readonly watching?: () => Promise<boolean>;
 }
 
 export interface PromptAnswerInput {
@@ -102,6 +105,8 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
           why: "answering was turned off for this app",
           message: "Answering prompts was turned off for this app, or it was disconnected.",
         };
+      if ((await deps.watching?.()) === true)
+        return { ok: false, outcome: "refused", why: "Clankie is only watching", message: WATCH_REFUSAL };
       return { ok: true, screen };
     };
     let sent = 0;

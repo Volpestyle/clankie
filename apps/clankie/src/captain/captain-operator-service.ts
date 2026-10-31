@@ -1,3 +1,4 @@
+import { WatchingError } from "../watch.ts";
 import {
   hireDeliveryStage,
   OPERATOR_SEAT_HARNESSES,
@@ -979,6 +980,8 @@ export function createOperatorService(
       };
     }
     if (request.op === "close_seat") {
+      // Watch closes nothing through Clankie (ADR 0307); the owner can still close it in Herdr.
+      if ((await ctx.settings()).autonomy.watch === true) throw new WatchingError();
       // The same hold as close_worker_pane: unlanded work stays unless a reason is recorded.
       const tidy = ctx.herdrWatches.tidy;
       const held = (await tidy?.seatWorktreeHold(request.seatId)) ?? [];

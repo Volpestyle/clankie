@@ -35,6 +35,19 @@ export class MachineAccessRefused extends Error {
   }
 }
 
+/**
+ * Watch (ADR 0307) holds every machine at Portal: Clankie sees it and acts on
+ * nothing there. Refused like any other access level, but the fix is the dial,
+ * not the machine's level.
+ */
+export class WatchingMachineRefused extends MachineAccessRefused {
+  readonly watching = true;
+  constructor(machine: string, required: MachineAccessLevel) {
+    super(machine, "portal", required);
+    this.message = `Clankie is only watching, so he acts on nothing on ${machine}. Pick a level other than Watch to let him act.`;
+  }
+}
+
 export const MachineAccessRefusalSchema = z
   .object({
     machine: z.string(),
