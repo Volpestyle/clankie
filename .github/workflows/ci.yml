@@ -20,13 +20,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: TEMPORARY procfs mount diagnosis (removed before merge)
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "mounts under /proc/:"; awk '$5 ~ "^/proc/" {print}' /proc/self/mountinfo
-          git show origin/main:integrations/fleet-proof/linux-process-proof.py > "$RUNNER_TEMP/old-proof.py"
-          echo "main's helper:"; /usr/bin/python3 -I "$RUNNER_TEMP/old-proof.py" --cwd $$ --diagnostics || true
-          echo "this branch's helper:"; /usr/bin/python3 -I integrations/fleet-proof/linux-process-proof.py --cwd $$ --diagnostics || true
       - uses: pnpm/action-setup@v4
         with:
           version: 11.11.0
