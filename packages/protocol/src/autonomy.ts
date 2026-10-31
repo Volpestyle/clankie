@@ -77,7 +77,7 @@ export type AutonomyLevelFleet = FleetGates & {
   release: { mode: "lead" } | { mode: "owner" };
 };
 /**
- * Watch, the step below Off (ADR 0307). Not an {@link AutonomyLevel}: it is
+ * Watch, the step below Off (ADR 0308). Not an {@link AutonomyLevel}: it is
  * stored beside the leaves, which read Off, so a client that predates it shows Off.
  */
 export const WATCH_LEVEL = {
@@ -259,7 +259,7 @@ export const AutonomySettingsSchema = z
     /** When the owner first chose a level explicitly; set by the service, never by a default (VUH-2725). */
     confirmedAt: z.iso.datetime().optional(),
     /**
-     * Watch, the step below Off (ADR 0307): Clankie reads sessions and
+     * Watch, the step below Off (ADR 0308): Clankie reads sessions and
      * transcripts and changes nothing. Stored only while on; the leaves read Off.
      */
     watch: z.literal(true).optional(),

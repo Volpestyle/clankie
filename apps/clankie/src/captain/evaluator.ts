@@ -108,7 +108,7 @@ export class Evaluator {
   private readonly socket: string;
   private readonly available: () => boolean;
   /**
-   * Watch (ADR 0307), asked again before each pane effect, so Watch chosen during a tick
+   * Watch (ADR 0308), asked again before each pane effect, so Watch chosen during a tick
    * stops it. Asked only where it is wired, so an evaluator without it keeps its timing.
    */
   private readonly watching: (() => Promise<boolean>) | undefined;
@@ -122,7 +122,7 @@ export class Evaluator {
       run?: (args: string[]) => Promise<void>;
       socket?: string;
       available?: () => boolean;
-      /** Watch (ADR 0307): no evaluator pane opens or is typed into while Clankie only watches. */
+      /** Watch (ADR 0308): no evaluator pane opens or is typed into while Clankie only watches. */
       watching?: () => Promise<boolean>;
     } = {},
   ) {

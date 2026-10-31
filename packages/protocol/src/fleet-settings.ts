@@ -63,7 +63,7 @@ export const FleetSettingsSnapshotSchema = z
     autonomyConfirmedAt: z.iso.datetime().optional(),
     autonomyDrift: AutonomyDriftSchema.optional(),
     /**
-     * Opt-in read (`includeWatch=true`): whether Clankie is only watching (ADR 0307).
+     * Opt-in read (`includeWatch=true`): whether Clankie is only watching (ADR 0308).
      * Absent on an older service, which cannot watch.
      */
     watch: z.boolean().optional(),
@@ -104,7 +104,7 @@ export const UpdateFleetSettingsSchema = z
          */
         autonomyConfirmed: z.literal(true).optional(),
         /**
-         * Turns Watch on or off (ADR 0307). On writes Off's leaves and records the
+         * Turns Watch on or off (ADR 0308). On writes Off's leaves and records the
          * choice; a level change without it leaves Watch.
          */
         watch: z.boolean().optional(),

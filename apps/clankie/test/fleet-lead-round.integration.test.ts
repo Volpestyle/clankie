@@ -485,7 +485,7 @@ it("refuses a parent native health message behind its durable fleet mailbox with
   ).toBe(false);
 });
 
-// Watch (ADR 0307): a message already waiting in a seat's mailbox when Watch is chosen is
+// Watch (ADR 0308): a message already waiting in a seat's mailbox when Watch is chosen is
 // refused at the seat's next poll, so it starts no native turn.
 it("refuses a message waiting for a fleet seat once Watch is chosen, and hands it nothing", async () => {
   const f = await fixture(60 * 60_000, undefined, false, true, async (_root, rows) => {

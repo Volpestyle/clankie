@@ -99,7 +99,7 @@ export class MachineJoins {
         };
   }
   /**
-   * Watch holds every machine at Portal (ADR 0307): a hire or a message for a worker on a
+   * Watch holds every machine at Portal (ADR 0308): a hire or a message for a worker on a
    * joined machine is refused at the moment it would go, whoever leads it.
    */
   async watching(): Promise<boolean> {
@@ -385,7 +385,7 @@ export class MachineJoins {
     }
     const settings = await this.options.settings.load();
     if (!this.has(record.id)) throw Error("revoked");
-    // Watch holds every machine at Portal (ADR 0307): the joined host stops what it is running for him.
+    // Watch holds every machine at Portal (ADR 0308): the joined host stops what it is running for him.
     const watching = settings.autonomy?.watch === true;
     const accessLevel = watching ? "portal" : machineAccessLevel(settings, record.id, this);
     const previous = this.seen.get(record.id);

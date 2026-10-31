@@ -67,7 +67,7 @@ export interface CreateDiscordTurnsContext {
   ) => Promise<LaneSession>;
   readonly workingDirectory: string;
   readonly options: CaptainOptions;
-  /** Watch (ADR 0307): no wake reaches a lead, native or service, while Clankie only watches. */
+  /** Watch (ADR 0308): no wake reaches a lead, native or service, while Clankie only watches. */
   readonly watching?: () => Promise<boolean>;
   readonly durableSession: (
     key: string,

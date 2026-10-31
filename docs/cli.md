@@ -5120,7 +5120,7 @@ LEVEL` sets the dial and `/autonomy clear` cancels the selected chat's scheduled
 wake.
 
 `watch` is the step below Off
-([ADR 0307](adr/0307-watch-is-the-step-below-off.md)). Clankie reads the fleet,
+([ADR 0308](adr/0308-watch-is-the-step-below-off.md)). Clankie reads the fleet,
 sessions and transcripts and changes nothing: no model turn reaches a provider,
 every machine acts at Portal (no hire, delivery, question answer, restart or
 close), no wake or health alert reaches a seat, connected apps cannot answer

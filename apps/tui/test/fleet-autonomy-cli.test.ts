@@ -647,7 +647,7 @@ it("the autonomy CLI names drift and explicit level writes use the shared owner 
   }
 });
 
-it("Watch sits below Off: older clients read Off, and any level leaves it (ADR 0307)", async () => {
+it("Watch sits below Off: older clients read Off, and any level leaves it (ADR 0308)", async () => {
   const f = await fixture();
   const options = fleetSettingsClient(f.settings);
   const watching = await runAutonomyCommand(["watch"], options);

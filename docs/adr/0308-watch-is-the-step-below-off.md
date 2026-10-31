@@ -1,4 +1,4 @@
-# ADR 0307: Watch is the step below Off
+# ADR 0308: Watch is the step below Off
 
 Status: Accepted, 2026-10-31, on James's word approving the plan to make
 Watch a level below Off and setup three steps ("yes we can use this order").

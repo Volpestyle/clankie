@@ -458,7 +458,7 @@ export interface AutonomyCommandResult {
   readonly ok: true;
   readonly workTracker?: Awaited<ReturnType<typeof workTrackerSettings>> | undefined;
   readonly revision: string;
-  /** `watch` while Clankie only watches (ADR 0307); otherwise the dial read from the leaves. */
+  /** `watch` while Clankie only watches (ADR 0308); otherwise the dial read from the leaves. */
   readonly level: AutonomyLevelReading | "watch";
   readonly description: string;
   readonly levels: Record<AutonomyLevel, string> & { readonly watch?: string };
@@ -491,7 +491,7 @@ export async function runAutonomyCommand(
       {
         schemaVersion: 1,
         expectedRevision: snapshot.revision,
-        // A level leaves Watch on the service itself (ADR 0307).
+        // A level leaves Watch on the service itself (ADR 0308).
         changes: level === undefined ? { watch: true } : { autonomyLevel: level.data },
       },
       FleetSettingsSnapshotSchema,

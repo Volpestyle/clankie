@@ -1440,7 +1440,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           beforeWrite: async () => {
             if (!(await authority.authorize()) || !authority.current())
               throw new Error("Owner authority expired");
-            // Watch (ADR 0307): this is Clankie writing for the owner, so it waits. The owner's
+            // Watch (ADR 0308): this is Clankie writing for the owner, so it waits. The owner's
             // own route (`clankie work owner`) and his app still write.
             if (actor === CLANKIE_FOR_OWNER && watch !== undefined) await watch.refuse(WATCH_REFUSAL);
             if (ownerApp && !ownerAppDevice(ownerApp.deviceId))

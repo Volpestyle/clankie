@@ -229,7 +229,7 @@ export function createRejectedCredentialRefresh(
 export async function createCaptainModelRuntime(
   repoRoot: string,
   options: {
-    /** Refuses before any selection while Clankie only watches (ADR 0307), so no turn reaches a provider. */
+    /** Refuses before any selection while Clankie only watches (ADR 0308), so no turn reaches a provider. */
     readonly refuse?: () => Promise<void>;
   } = {},
 ): Promise<CaptainModelRuntime> {

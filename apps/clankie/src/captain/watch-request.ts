@@ -2,7 +2,7 @@ import { type AgentSession } from "@earendil-works/pi-coding-agent";
 import { WATCH_TURN_REFUSAL, type WatchGate } from "../watch.ts";
 
 /**
- * Watch's last stop before a provider (ADR 0307). Choosing a model is refused
+ * Watch's last stop before a provider (ADR 0308). Choosing a model is refused
  * while watching, but a turn already running keeps its model across tool
  * results, retries and steered messages, and Pi compacts on its own. Every one
  * of those goes through the session's stream function, so this asks again

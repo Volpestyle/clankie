@@ -1,7 +1,7 @@
 import type { SettingsStore } from "@clankie/settings";
 
 /**
- * Watch, the step below Off (ADR 0307). Clankie keeps reading sessions and
+ * Watch, the step below Off (ADR 0308). Clankie keeps reading sessions and
  * transcripts and showing them, and changes nothing: no model turn, no hire,
  * no message into a worker, no pane closed, no tracker write. Every write path
  * asks here at the moment it would act, so turning Watch on stops work that

@@ -252,7 +252,7 @@ async function runAutonomySetup(
   flow.begin("setup · autonomy");
   try {
     const current = await autonomy([]);
-    // Watch comes first where the service can watch (ADR 0307): it needs no model.
+    // Watch comes first where the service can watch (ADR 0308): it needs no model.
     const canWatch = current.levels.watch !== undefined;
     const choice = await flow.readSelect({
       message: "How much should Clankie do?",

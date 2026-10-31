@@ -214,7 +214,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             // Surface names are caller claims; only the host-verified principal
             // makes this an ordinary owner turn. Recheck after attachment setup.
             if (kind === "turn") await authorizeQuestion(context.ownerAuthority);
-            // Watch (ADR 0307): a native lead sends what it hears to its own model, so
+            // Watch (ADR 0308): a native lead sends what it hears to its own model, so
             // nothing goes into the seat while Clankie is only watching.
             if ((await ctx.settings()).autonomy?.watch === true) {
               context.deliveryOutcome?.({ state: "rejected", detail: WATCH_TURN_REFUSAL });

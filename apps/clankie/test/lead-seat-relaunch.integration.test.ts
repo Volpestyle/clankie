@@ -152,7 +152,7 @@ it.each([false, true])(
   },
 );
 
-// Watch (ADR 0307): a failback or fresh restart ends no lead session while Clankie only
+// Watch (ADR 0308): a failback or fresh restart ends no lead session while Clankie only
 // watches, even when Watch is chosen after the first checks passed.
 it("leaves the lead running when Watch is chosen before its session would end", async () => {
   let reads = 0;

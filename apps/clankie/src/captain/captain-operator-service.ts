@@ -980,7 +980,7 @@ export function createOperatorService(
       };
     }
     if (request.op === "close_seat") {
-      // Watch closes nothing through Clankie (ADR 0307); the owner can still close it in Herdr.
+      // Watch closes nothing through Clankie (ADR 0308); the owner can still close it in Herdr.
       // It asks again just before the exit, so Watch chosen meanwhile stops a close under way.
       const refuseWhileWatching = async () => {
         if ((await ctx.settings()).autonomy?.watch === true) throw new WatchingError();

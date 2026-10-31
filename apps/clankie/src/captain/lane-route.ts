@@ -6,7 +6,7 @@ const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to com
 
 /**
  * Resolve an idle lane's route for its next run, then compact if the last run was trimmed.
- * The route comes first: resolving it refuses while Clankie only watches (ADR 0307), and
+ * The route comes first: resolving it refuses while Clankie only watches (ADR 0308), and
  * compaction sends the session's history to a model, so nothing reaches a provider then.
  */
 export async function routeLaneRun(

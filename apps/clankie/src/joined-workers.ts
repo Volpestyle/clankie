@@ -163,7 +163,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       },
       pollEvents: async (wait, signal) => {
         if (!worker.paneId) return [];
-        // A message queued before Watch is refused here, so it starts no native turn (ADR 0307).
+        // A message queued before Watch is refused here, so it starts no native turn (ADR 0308).
         await outbox.readWatch(() => input.joins.watching());
         return outbox.poll(wait, signal, binding);
       },
@@ -270,7 +270,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     }
   };
   /**
-   * Watch holds every machine at Portal (ADR 0307). Asked before a joined lead's hire or
+   * Watch holds every machine at Portal (ADR 0308). Asked before a joined lead's hire or
    * message, its refusal is a definite answer: nothing was sent, so nothing needs reconciling.
    */
   const refusedWhileWatching = async (machineId: string) => {

@@ -75,7 +75,7 @@ export async function requireRuntimeMachineAccess(
 }
 
 /**
- * Watch holds every machine at Portal (ADR 0307). It leaves no refusal
+ * Watch holds every machine at Portal (ADR 0308). It leaves no refusal
  * observation: the owner chose Watch, and the fix is the dial, not the machine.
  */
 export function refuseWhileWatching(

@@ -373,7 +373,7 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
             });
             expect(acknowledged.structuredContent).toMatchObject({ acknowledged: true, unanswered: [] });
             // Watch holds the joined machine at Portal: its lead's message to a worker is refused,
-            // and the lead and worker stay bound for when Clankie may act again (ADR 0307).
+            // and the lead and worker stay bound for when Clankie may act again (ADR 0308).
             const watch = (on: boolean) =>
               settings.update((current) => {
                 const { watch: _watch, ...autonomy } = current.autonomy;

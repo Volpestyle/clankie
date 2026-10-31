@@ -1631,7 +1631,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             }
           }
         }
-        // Watch (ADR 0307): no tracker write by Clankie, a lead or a worker, outward or local.
+        // Watch (ADR 0308): no tracker write by Clankie, a lead or a worker, outward or local.
         // An owner-admitted write (his own, or a post he approved) is his.
         if (
           server.id === "linear" &&

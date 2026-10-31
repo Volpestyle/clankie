@@ -112,7 +112,7 @@ export interface LeadSeatRelaunchDeps {
   readonly deliverBrief: (conversationId: string, text: string, binding: string) => Promise<boolean>;
   readonly notice: (conversationId: string, text: string) => void;
   readonly signal?: (pid: number, signal: NodeJS.Signals) => void;
-  /** Watch (ADR 0307): while Clankie only watches, no lead session is ended or launched. */
+  /** Watch (ADR 0308): while Clankie only watches, no lead session is ended or launched. */
   readonly watching?: () => Promise<boolean>;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;

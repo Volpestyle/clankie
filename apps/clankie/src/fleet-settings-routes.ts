@@ -163,7 +163,7 @@ export function createFleetSettingsRoutes(
               value ?? defaults[field as keyof typeof defaults],
             ]),
           );
-          // Watch writes Off's leaves; any level the owner picks leaves it (ADR 0307).
+          // Watch writes Off's leaves; any level the owner picks leaves it (ADR 0308).
           const watching = watch ?? (autonomyLevel === undefined ? current.autonomy.watch === true : false);
           const level = watch === true ? "off" : autonomyLevel;
           const { watch: _previousWatch, ...autonomy } = current.autonomy;

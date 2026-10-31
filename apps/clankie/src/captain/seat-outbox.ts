@@ -1123,7 +1123,7 @@ export class SeatOutbox {
   }
 
   /**
-   * Watch (ADR 0307), read fresh before each poll: while it holds, every event the seat has
+   * Watch (ADR 0308), read fresh before each poll: while it holds, every event the seat has
    * not taken is refused, never sent, so nothing queued before Watch starts a native turn.
    * A delivery during a poll parked while watching ends that poll, so the next one decides.
    */
@@ -1364,7 +1364,7 @@ export class SeatOutbox {
     const [first] = this.pollers;
     if (first === undefined) return;
     // A poll parked while watching ends at once, so the seat's next poll reads Watch afresh:
-    // leaving Watch lets a new message straight through, and staying refuses it (ADR 0307).
+    // leaving Watch lets a new message straight through, and staying refuses it (ADR 0308).
     if (this.watched) return first.finish([], "wake");
     const ready = this.take(first.recipientBinding, first.capabilities);
     if (ready.length > 0) first.finish(ready, "wake");

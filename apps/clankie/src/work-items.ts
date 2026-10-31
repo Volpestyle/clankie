@@ -1425,7 +1425,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   };
   /**
    * Watch asked again as a work-item write commits, so a write waiting on the tracker's
-   * lock when Watch is chosen changes nothing (ADR 0307). An owner-approved write is his.
+   * lock when Watch is chosen changes nothing (ADR 0308). An owner-approved write is his.
    */
   const watchedWrite = (posting: typeof TRACKER_POSTING_ADMITTED | undefined) =>
     posting === TRACKER_POSTING_ADMITTED ? undefined : refuseWhileWatching;
@@ -1441,7 +1441,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if (posting === TRACKER_POSTING_ADMITTED) return assertDestination(convention, destination);
     if (!options.posting) return;
     const tracker = await outwardTracker(convention);
-    // Watch refuses every tracker write that is not the owner's (ADR 0307). An outward
+    // Watch refuses every tracker write that is not the owner's (ADR 0308). An outward
     // tracker's admission already refuses it; a local tracker has no admission, so ask here.
     if (tracker === undefined) return await refuseWhileWatching();
     const admission = await options.posting.admit({
@@ -1884,11 +1884,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           // A seat's own issue status is Clankie writing for this project (ADR 0302).
           const tracker =
             options.posting && isTrackerWriteTool(name) ? await outwardTracker(convention) : undefined;
-          // Watch (ADR 0307): a local tracker has no admission to refuse it, so ask here.
+          // Watch (ADR 0308): a local tracker has no admission to refuse it, so ask here.
           if (options.posting && isTrackerWriteTool(name) && tracker === undefined)
             await refuseWhileWatching();
           // Asked again as the write commits, so bookkeeping that waited on the tracker's lock
-          // when Watch was chosen changes nothing (ADR 0307).
+          // when Watch was chosen changes nothing (ADR 0308).
           const writing = async () => {
             await beforeWrite();
             if (options.posting && isTrackerWriteTool(name)) await refuseWhileWatching();
@@ -2234,7 +2234,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           ...callbacks,
           beforeWrite: async () => {
             await callbacks.beforeWrite?.();
-            // A saved view is a tracker write too: Watch refuses it unless it is the owner's (ADR 0307).
+            // A saved view is a tracker write too: Watch refuses it unless it is the owner's (ADR 0308).
             if (posting !== TRACKER_POSTING_ADMITTED && !ownerActor(callbacks.actor))
               await refuseWhileWatching();
             validate();
@@ -2284,7 +2284,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         !ownerActor(callbacks.actor)
           ? await outwardTracker(convention)
           : undefined;
-      // Watch refuses every tracker write that is not the owner's (ADR 0307). An outward
+      // Watch refuses every tracker write that is not the owner's (ADR 0308). An outward
       // tracker's admission already refuses it; a local tracker has no admission, so ask here.
       const watchApplies =
         posting !== TRACKER_POSTING_ADMITTED && isTrackerWriteTool(name) && !ownerActor(callbacks.actor);

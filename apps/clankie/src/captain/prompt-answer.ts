@@ -14,7 +14,7 @@ export interface PromptAnswerDeps {
   readonly ownerAskPending: (seatId: string) => boolean;
   /** The note board line that records the answer; never blocks it. */
   readonly record: (app: string, text: string) => unknown;
-  /** Watch (ADR 0307): no key reaches a pane while Clankie only watches. */
+  /** Watch (ADR 0308): no key reaches a pane while Clankie only watches. */
   readonly watching?: () => Promise<boolean>;
 }
 

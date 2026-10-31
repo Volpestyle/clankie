@@ -36,7 +36,7 @@ export class MachineAccessRefused extends Error {
 }
 
 /**
- * Watch (ADR 0307) holds every machine at Portal: Clankie sees it and acts on
+ * Watch (ADR 0308) holds every machine at Portal: Clankie sees it and acts on
  * nothing there. Refused like any other access level, but the fix is the dial,
  * not the machine's level.
  */

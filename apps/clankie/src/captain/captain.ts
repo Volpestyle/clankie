@@ -440,7 +440,7 @@ const LEAD_HANDOFF_REQUEST = [
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
-  // Watch (ADR 0307): machine access holds every machine at Portal; this gate covers the rest.
+  // Watch (ADR 0308): machine access holds every machine at Portal; this gate covers the rest.
   const watch = createWatchGate(settingsStore);
   const requireAccess =
     options.requireMachineAccess ??
@@ -2693,7 +2693,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const pruneGuard =
     (current: Awaited<ReturnType<typeof settings>>, guard: () => Promise<void>) => async () => {
-      // Watch removes no worktree (ADR 0307), asked again before every tree's removal.
+      // Watch removes no worktree (ADR 0308), asked again before every tree's removal.
       await watch.refuse(WATCH_REFUSAL);
       await guard();
       const latest = await settings();
@@ -4915,7 +4915,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (shutdown.signal.aborted || !text.trim() || text.length > 4000)
         return outcome(false, "stopped_or_invalid");
       if (!(await validateConversationOwner(owner))) return outcome(false, "owner_unavailable");
-      // Watch sends nothing into a seat, a lead's included (ADR 0307).
+      // Watch sends nothing into a seat, a lead's included (ADR 0308).
       if (await watch.watching()) return outcome(false, "watching");
       await guard();
       await conversations.waitForDriverAdmission(owner.conversationId, shutdown.signal);
@@ -6186,7 +6186,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // VUH-2392: finished, harvested, landed hires close on their own, and landed worktrees in
   // enrolled roots go, through the same guarded close and prune a lead uses.
   const autoTidy = createAutoTidy({
-    // Watch closes nothing and prunes nothing (ADR 0307).
+    // Watch closes nothing and prunes nothing (ADR 0308).
     setting: async () => ((await watch.watching()) ? "off" : (await settings()).fleet.autoTidy),
     runner: herdrRunner,
     tidy: paneTidy,
@@ -8440,7 +8440,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               polledSource = source;
               if (source !== undefined) await rememberOperatorSource(binding.conversationId, source);
               // A turn waiting from before Watch is refused, not held for later, so it reaches
-              // no model; the poll itself is then refused below Portal (ADR 0307).
+              // no model; the poll itself is then refused below Portal (ADR 0308).
               outbox.watching(await watch.watching());
               await admit();
             },
@@ -8985,7 +8985,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       const binding = native?.terminalId === seatId ? inboundBinding(native) : undefined;
       const live = binding !== undefined && mailbox.boundTo(binding);
-      // A message queued before Watch is refused here, so it starts no native turn (ADR 0307).
+      // A message queued before Watch is refused here, so it starts no native turn (ADR 0308).
       await mailbox.readWatch(() => watch.watching());
       const pending = mailbox.poll(waitMs, signal, binding);
       if (binding && !live) fleetChanges.touch();
