@@ -191,6 +191,32 @@ describe("clankie claude (the operator seat)", () => {
     }
   });
 
+  it("launches a character without replacing the owner's resume record", async () => {
+    const env = await stateEnv();
+    const roomId = `room-${"a".repeat(24)}`;
+    const contexts = (id: string) =>
+      id === roomId
+        ? { conversationId: roomId, cwd: join(env.XDG_STATE_HOME!, "character"), participantRoom: true }
+        : { conversationId: "global-default", cwd: process.cwd() };
+    const options = {
+      repoRoot,
+      env,
+      execFileImpl: fakeExec({}),
+      fetchImpl: (async (input) =>
+        Response.json(
+          contexts(new URL(String(input)).searchParams.get("conversationId") ?? "global-default"),
+        )) as typeof fetch,
+      spawnImpl: async () => 0,
+      stdout: outputBuffer().stream,
+      stderr: outputBuffer().stream,
+    };
+    expect(await runSeatCommand(["--conversation", "global-default"], options)).toBe(0);
+    const recordPath = join(env.XDG_STATE_HOME!, "clankie", "seat.json");
+    const before = await readFile(recordPath, "utf8");
+    expect(await runSeatCommand(["--conversation", roomId], options)).toBe(0);
+    expect(await readFile(recordPath, "utf8")).toBe(before);
+  });
+
   it("launches, names the herdr pane clankie, records the session, and resumes it", async () => {
     const env = await stateEnv({
       HERDR_ENV: "1",

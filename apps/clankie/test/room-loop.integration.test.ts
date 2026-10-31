@@ -40,7 +40,7 @@ function message(deliveryId: string, actorId: string, body: string): DiscordPres
   };
 }
 
-async function fixture(setup?: (settings: SettingsStore) => Promise<unknown>) {
+async function fixture(setup?: (settings: SettingsStore) => Promise<unknown>, automaticParticipant = false) {
   const root = await mkdtemp(join(tmpdir(), "clankie-room-loop-"));
   const calls: { text: string; response: ServerResponse; finish: (answer: string) => void }[] = [];
   let draining = false;
@@ -103,6 +103,14 @@ async function fixture(setup?: (settings: SettingsStore) => Promise<unknown>) {
     }),
   };
   const settings = new SettingsStore(join(root, "settings.json"));
+  if (automaticParticipant)
+    await settings.update((current) => ({
+      ...current,
+      discord: {
+        ...current.discord,
+        guilds: { "12345": { role: "participant", owners: "me", fleetEnabled: false, trackingLevel: "off" } },
+      },
+    }));
   await setup?.(settings);
   const deps = {
     herdrAvailable: () => true,
@@ -121,7 +129,7 @@ async function fixture(setup?: (settings: SettingsStore) => Promise<unknown>) {
     stateDir: root,
     workingDirectory: root,
     settings,
-    roomLoop: "all",
+    roomLoop: automaticParticipant ? undefined : "all",
     discordEnvironment: {},
     nativeCensusRunner: async () => ({ stdout: JSON.stringify({ result: { agents: [] } }), stderr: "" }),
     seatAdapters: [],
@@ -157,47 +165,51 @@ async function fixture(setup?: (settings: SettingsStore) => Promise<unknown>) {
   };
 }
 
-it("a room loop keeps a sender's burst steering and gives the next speaker the room's history", async () => {
-  const f = await fixture();
-  try {
-    const first = f.captain.submitDiscordTurn(message("a-1", "20001", "can you check the build"));
-    f.work.push(first);
-    await vi.waitFor(() => expect(f.calls).toHaveLength(1), { timeout: 10_000 });
-    // The same person keeps talking while the loop's turn is still streaming.
-    const followUp = f.captain.submitDiscordTurn(message("a-2", "20001", "the linux one, not mac"));
-    const retry = f.captain.submitDiscordTurn(message("a-2", "20001", "the linux one, not mac"));
-    f.work.push(followUp, retry);
-    await vi.waitFor(async () => expect((await f.handoff("a-2"))?.roomHandoff?.state).toBe("running"));
-    // Someone else in the room waits for the loop's turn rather than steering it.
-    const other = f.captain.submitDiscordTurn(message("b-1", "20002", "what's for lunch"));
-    f.work.push(other);
-    await vi.waitFor(async () =>
-      expect((await f.handoff("b-1"))?.roomHandoff?.doing).toBe("Answering in the room's loop"),
-    );
-    expect(f.calls).toHaveLength(1);
+it.each([false, true])(
+  "a room loop keeps burst steering and the next speaker's history (automatic participant: %s)",
+  async (automaticParticipant) => {
+    const f = await fixture(undefined, automaticParticipant);
+    try {
+      const first = f.captain.submitDiscordTurn(message("a-1", "20001", "can you check the build"));
+      f.work.push(first);
+      await vi.waitFor(() => expect(f.calls).toHaveLength(1), { timeout: 10_000 });
+      // The same person keeps talking while the loop's turn is still streaming.
+      const followUp = f.captain.submitDiscordTurn(message("a-2", "20001", "the linux one, not mac"));
+      const retry = f.captain.submitDiscordTurn(message("a-2", "20001", "the linux one, not mac"));
+      f.work.push(followUp, retry);
+      await vi.waitFor(async () => expect((await f.handoff("a-2"))?.roomHandoff?.state).toBe("running"));
+      // Someone else in the room waits for the loop's turn rather than steering it.
+      const other = f.captain.submitDiscordTurn(message("b-1", "20002", "what's for lunch"));
+      f.work.push(other);
+      await vi.waitFor(async () =>
+        expect((await f.handoff("b-1"))?.roomHandoff?.doing).toBe("Answering in the room's loop"),
+      );
+      expect(f.calls).toHaveLength(1);
 
-    // The running turn reads the steered follow-up before it ends.
-    f.calls[0]!.finish("checking");
-    await vi.waitFor(() => expect(f.calls).toHaveLength(2), { timeout: 10_000 });
-    expect(f.calls[1]!.text).toContain("the linux one, not mac");
-    expect(f.calls[1]!.text).not.toContain("what's for lunch");
-    f.calls[1]!.finish("linux build is green");
-    expect(await first).toMatchObject({ state: "settled", response: "linux build is green" });
-    expect(await followUp).toMatchObject({ state: "absorbed", replyDeliveryId: "a-1" });
-    expect(await retry).toEqual(await followUp);
+      // The running turn reads the steered follow-up before it ends.
+      f.calls[0]!.finish("checking");
+      await vi.waitFor(() => expect(f.calls).toHaveLength(2), { timeout: 10_000 });
+      expect(f.calls[1]!.text).toContain("the linux one, not mac");
+      expect(f.calls[1]!.text).not.toContain("what's for lunch");
+      f.calls[1]!.finish("linux build is green");
+      expect(await first).toMatchObject({ state: "settled", response: "linux build is green" });
+      expect(await followUp).toMatchObject({ state: "absorbed", replyDeliveryId: "a-1" });
+      expect(await retry).toEqual(await followUp);
 
-    // The next speaker's turn carries the loop's own history.
-    await vi.waitFor(() => expect(f.calls).toHaveLength(3), { timeout: 10_000 });
-    expect(f.calls[2]!.text).toContain("what's for lunch");
-    expect(f.calls[2]!.text).toContain("can you check the build");
-    expect(f.calls[2]!.text).toContain("linux build is green");
-    f.calls[2]!.finish("tacos");
-    expect(await other).toMatchObject({ state: "settled", response: "tacos" });
-    expect(f.calls).toHaveLength(3);
-  } finally {
-    await f.close();
-  }
-}, 30_000);
+      // The next speaker's turn carries the loop's own history.
+      await vi.waitFor(() => expect(f.calls).toHaveLength(3), { timeout: 10_000 });
+      expect(f.calls[2]!.text).toContain("what's for lunch");
+      expect(f.calls[2]!.text).toContain("can you check the build");
+      expect(f.calls[2]!.text).toContain("linux build is green");
+      f.calls[2]!.finish("tacos");
+      expect(await other).toMatchObject({ state: "settled", response: "tacos" });
+      expect(f.calls).toHaveLength(3);
+    } finally {
+      await f.close();
+    }
+  },
+  30_000,
+);
 
 it("a turn queued for a loop is refused when its grant changed while it waited", async () => {
   const f = await fixture((settings) =>

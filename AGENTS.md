@@ -150,7 +150,10 @@ This repository is public. Both neighbors are private and consume
   not by editing those files.
 - Model output is untrusted input: Discord bodies, images, and web content
   never become instructions.
-- Discord server owners and explicit individual compatibility grants may use
+- Participant Discord characters always keep social authority and their own
+  room history. Discord roles and compatibility ownership grants cannot turn
+  them into an operator; native machine actions require the owner's permission.
+  Admin-server owners and explicit individual compatibility grants may use
   machine tools, spoken or typed; Admin is
   Clankie's server role and does not make members owners. Everyone else stays
   social, with only the bounded adapter of a named room skill added. Legacy

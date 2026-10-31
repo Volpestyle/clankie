@@ -19,6 +19,8 @@ export const DiscordTrackingLevelSchema = z.enum([
 export const DiscordGuildSettingsSchema = z
   .object({
     role: DiscordRoleSchema.default("participant"),
+    /** The owner chooses once; a room's session is created on first admitted use. */
+    participantHarness: z.enum(["pi", "claude"]).optional(),
     owners: z.enum(["me", "everyone", "role"]).default("me"),
     ownerRoleId: SnowflakeSchema.optional(),
     fleetEnabled: z.boolean().default(false),
@@ -374,6 +376,13 @@ export function discordServerSettings(
     previous !== undefined && JSON.stringify(settings[key]) !== JSON.stringify(previous[key]);
   const mapChanged = changed("guilds");
   let guilds = { ...settings.guilds };
+  // Older clients cannot carry this optional field back. Reset it explicitly
+  // to Pi; omitting it while saving another server option preserves the choice.
+  for (const [id, policy] of Object.entries(guilds)) {
+    const prior = previous?.guilds[id]?.participantHarness;
+    if (policy.participantHarness === undefined && prior !== undefined)
+      guilds[id] = { ...policy, participantHarness: prior };
+  }
   const firstUpgrade = !Object.keys(guilds).length && !mapChanged;
   if (firstUpgrade || (!mapChanged && changed("servers"))) {
     const policies = Object.fromEntries(

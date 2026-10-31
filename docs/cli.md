@@ -9216,6 +9216,13 @@ can still carry a live explicit statement; absence means unknown.
 
 Return stored and effective non-secret Discord configuration:
 
+`discord server --server ID --role participant --participant-harness pi|claude`
+chooses the room character's harness once. The first admitted message creates
+its isolated session; subsequent messages reuse it. Pi is the default. Claude
+uses an interactive Herdr pane with a reply-only room bridge and owner permission
+prompts for machine work. Participant mode cannot inherit owner or fleet tools
+from Discord roles or compatibility grants. See [participant sessions](discord-rooms.md).
+
 Server ownership and room skill grants use the same revision-fenced Discord
 settings API. `discord owners --server ID --owners me|everyone|role
 [--owner-role ID] [--role participant|admin]` sets one server policy;

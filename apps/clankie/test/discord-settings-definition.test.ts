@@ -59,6 +59,40 @@ function fixture(machineName = "James’s Mac") {
   });
   return { app, settings, client, fetchImpl };
 }
+it("the owner chooses a character harness through the CLI and an older guild writer preserves it", async () => {
+  const { client, settings, fetchImpl } = fixture();
+  await runDiscordCommand(
+    ["server", "--server", "12345", "--role", "participant", "--participant-harness", "claude"],
+    {
+      settings,
+      env: { CLANKIE_OPERATOR_TOKEN: "fixture-operator" },
+      host: "http://fixture.invalid",
+      fetchImpl,
+    },
+  );
+  const selected = await client.discordSettings();
+  expect(selected.settings.guilds["12345"]?.participantHarness).toBe("claude");
+  const { participantHarness: _unknown, ...oldGuild } = selected.settings.guilds["12345"]!;
+  const saved = await client.updateDiscordSettings({
+    expectedRevision: selected.revision,
+    settings: {
+      ...selected.settings,
+      guilds: { "12345": { ...oldGuild, trackingLevel: "project_updates" } },
+    },
+  });
+  expect(saved.settings.guilds["12345"]).toMatchObject({
+    participantHarness: "claude",
+    trackingLevel: "project_updates",
+  });
+  await runDiscordCommand(["server", "--server", "12345", "--participant-harness", "pi"], {
+    settings,
+    env: { CLANKIE_OPERATOR_TOKEN: "fixture-operator" },
+    host: "http://fixture.invalid",
+    fetchImpl,
+  });
+  expect((await client.discordSettings()).settings.guilds["12345"]?.participantHarness).toBe("pi");
+});
+
 it("an old-shape client reads the new host definition response and still revision-checks writes", async () => {
   const { client, fetchImpl, settings } = fixture();
   await settings.update((current) => ({

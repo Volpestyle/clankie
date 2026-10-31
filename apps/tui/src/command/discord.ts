@@ -31,7 +31,7 @@ const DISCORD_USAGE = [
   "       clankie discord rooms",
   "       clankie discord definition",
   "       clankie discord setup [check | choices connect|fleet|tracking]",
-  "       clankie discord server --server ID [--role participant|admin] [--owners me|everyone|role] [--owner-role ID] [--fleet on|off] [--fleet-channel ID|none] [--tracking LEVEL]",
+  "       clankie discord server --server ID [--role participant|admin] [--participant-harness pi|claude] [--owners me|everyone|role] [--owner-role ID] [--fleet on|off] [--fleet-channel ID|none] [--tracking LEVEL]",
   "       clankie discord owners --server ID --owners me|everyone|role [--owner-role ID] [--role participant|admin]",
   "       clankie discord room-skill --server ID --channel ID --skill house-hunting|off",
   "       clankie discord forum bind --server ID --forum ID --project TRACKER_PROJECT_ID [--member-posts auto|owner_tag] [--member-limit N] --confirm-audience",
@@ -109,7 +109,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     showList("main conversation channels", settings.mainConversationChannelIds),
     ...settings.servers.map(
       (entry) =>
-        `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}; fleet ${settings.guilds[entry.serverId]?.fleetEnabled ? "on" : "off"}; tracking ${settings.guilds[entry.serverId]?.trackingLevel ?? "off"}`,
+        `server ${entry.serverId}: ${entry.role}; owners ${entry.owners}${entry.ownerRoleId ? ` (${entry.ownerRoleId})` : ""}; character ${settings.guilds[entry.serverId]?.participantHarness ?? "pi"}; fleet ${settings.guilds[entry.serverId]?.fleetEnabled ? "on" : "off"}; tracking ${settings.guilds[entry.serverId]?.trackingLevel ?? "off"}`,
     ),
     ...settings.roomSkills.map((entry) => `room ${entry.serverId}/${entry.channelId}: ${entry.skill}`),
     ...settings.trackerForums.map(
@@ -303,6 +303,7 @@ export async function runDiscordCommand(
       options: {
         server: { type: "string" },
         role: { type: "string" },
+        "participant-harness": { type: "string" },
         owners: { type: "string" },
         "owner-role": { type: "string" },
         fleet: { type: "string" },
@@ -323,6 +324,9 @@ export async function runDiscordCommand(
             trackingLevel: "off",
             ...current.guilds[values.server!],
             ...(values.role ? { role: values.role as "participant" | "admin" } : {}),
+            ...(values["participant-harness"]
+              ? { participantHarness: values["participant-harness"] as "pi" | "claude" }
+              : {}),
             ...(values.owners
               ? {
                   owners: values.owners as "me" | "everyone" | "role",

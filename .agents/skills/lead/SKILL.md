@@ -41,6 +41,14 @@ uncertainty notice preserves the original receipt: inspect it, never repeat the
 restart. A definitely superseded handoff retires to history before one fresh
 nonce is requested.
 
+Participant Discord characters have their own session and no fleet authority.
+The owner selects `clankie discord server --server ID --participant-harness
+pi|claude`; admitted room messages create and reuse it automatically. Claude
+characters run visibly in Herdr with a reply-only bridge and native owner
+permission prompts. Do not attach them to an operator session or treat a
+Discord role as permission to approve commands. Inspect an uncertain original
+launch instead of creating another. Details: [Discord rooms](../../../docs/discord-rooms.md).
+
 ## Each turn
 
 1. Answer the owner's message, if there is one.

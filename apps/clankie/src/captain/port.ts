@@ -447,7 +447,7 @@ export interface CaptainPort {
   syncSeatTranscript(conversationId: string, transcript: SeatTranscriptUpload): boolean;
   seatContext(
     conversationId?: string,
-  ): { conversationId: string; cwd: string; machineId?: string } | undefined;
+  ): { conversationId: string; cwd: string; machineId?: string; participantRoom?: true } | undefined;
   /** Exact transcript/profile recovery; never substitutes the last seat.json or another session. */
   operatorSeatRecovery?(
     conversationId: string,
