@@ -1,6 +1,7 @@
 import {
   AUTONOMY_LEVELS,
   AutonomyLevelSchema,
+  WATCH_LEVEL,
   type OperatorAutonomyCommand,
   type OperatorAutonomyStatus,
 } from "@clankie/protocol";
@@ -16,7 +17,7 @@ export interface AutonomyCommandServices {
   readonly formatWakes?: (status: OperatorAutonomyStatus) => string;
 }
 
-const USAGE = `Usage: /autonomy [status|${AutonomyLevelSchema.options.join("|")}|clear]`;
+const USAGE = `Usage: /autonomy [status|watch|${AutonomyLevelSchema.options.join("|")}|clear]`;
 
 /**
  * `/autonomy` is the dial: off, low, high or full sets how much Clankie decides
@@ -30,7 +31,7 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
     name: "autonomy",
     aliases: [],
     description: "Set how many decisions Clankie takes on his own",
-    argumentHint: "[off|low|high|full|clear]",
+    argumentHint: "[watch|off|low|high|full|clear]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {
       if (level === undefined && wakes === undefined) {
@@ -48,6 +49,18 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
               ...(status === undefined ? [] : [formatWakes(status).split("\n").join(" · ")]),
             ].join(" · "),
             actions: [
+              ...(level === undefined
+                ? []
+                : [
+                    {
+                      value: "watch",
+                      label: WATCH_LEVEL.label,
+                      hint: dial?.level === "watch" ? "current" : WATCH_LEVEL.description,
+                      async run() {
+                        return (await level(["watch"])).description;
+                      },
+                    },
+                  ]),
               ...(level === undefined
                 ? []
                 : AutonomyLevelSchema.options.map((option) => ({
@@ -90,7 +103,8 @@ export function autonomyCommand(services: AutonomyCommandServices): FaceShellCom
         return;
       }
       try {
-        const chosen = AutonomyLevelSchema.safeParse(input);
+        const chosen =
+          input === "watch" ? { success: true as const, data: input } : AutonomyLevelSchema.safeParse(input);
         if (chosen.success && level !== undefined) {
           shell.insertCommandResult("/autonomy", (await level([chosen.data])).description, "success");
           return;

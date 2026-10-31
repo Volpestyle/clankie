@@ -1792,7 +1792,9 @@ const discordForum = new DiscordForumMirror({
   path: join(stateRoot, "discord-forum.json"),
   tracker: builtInTracker,
   bindings: async () => {
-    const { discord } = await settingsStore.load();
+    const { discord, autonomy } = await settingsStore.load();
+    // Watch (ADR 0308) binds no forum, so nothing is copied into the tracker.
+    if (autonomy.watch === true) return [];
     const forums = resolveDiscordSettings(discord, captainDiscordEnvironment).settings.trackerForums;
     const bound = await Promise.all(
       forums.map(async (forum) => {

@@ -67,7 +67,8 @@ type LeadSeatRelaunchRefusal =
   | "trust_required"
   | "invalid_target"
   | "in_progress"
-  | "launch_failed";
+  | "launch_failed"
+  | "watching";
 
 export type RelaunchLeadSeatResult =
   | {
@@ -111,6 +112,8 @@ export interface LeadSeatRelaunchDeps {
   readonly deliverBrief: (conversationId: string, text: string, binding: string) => Promise<boolean>;
   readonly notice: (conversationId: string, text: string) => void;
   readonly signal?: (pid: number, signal: NodeJS.Signals) => void;
+  /** Watch (ADR 0308): while Clankie only watches, no lead session is ended or launched. */
+  readonly watching?: () => Promise<boolean>;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   /** How long the old session gets to exit, and the new one to bind. */
@@ -140,6 +143,7 @@ const RESTART_REFUSALS: Readonly<Record<string, string>> = {
   invalid_target: "the launch could not be expressed in the pane",
   in_progress: "another relaunch was running",
   launch_failed: "the old session could not be signalled",
+  watching: "Clankie was only watching",
 };
 const LAUNCH_COMMAND = /^(claude|codex)(\d*)$/u;
 
@@ -436,6 +440,13 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
     input: RelaunchLeadSeatInput,
     seat: LeadSeatPane,
   ): Promise<RelaunchLeadSeatResult | undefined> {
+    // Read again just before the session is ended, so Watch chosen meanwhile stops it.
+    if ((await deps.watching?.()) === true)
+      return {
+        outcome: "refused",
+        reason: "watching",
+        detail: "Clankie is only watching. The current session was left running.",
+      };
     if (input.harness === "claude") {
       // Claude Code 2.1.310 deliberately accepts home-directory trust for only
       // the current session. Never end that session for an unattended launch

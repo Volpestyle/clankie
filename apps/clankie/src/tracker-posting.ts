@@ -1,3 +1,4 @@
+import { WATCH_REFUSAL } from "./watch.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -798,6 +799,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         );
         return { post: publicPost(record), changed: true, message: "Sent back; nothing was posted." };
       }
+      // Watch (ADR 0308): a post held before it was turned on waits; only the owner can let it out.
+      if (by === "lead" && (await options.settings.load()).autonomy.watch === true)
+        throw new TrackerPostingStopped("posting_held", WATCH_REFUSAL);
       const setting = await recheck(record);
       if (setting === "read_only") {
         record.state = "refused";
@@ -907,6 +911,8 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
 
   async function admit(write: PostingWrite): Promise<PostingAdmission> {
     const settings = await options.settings.load();
+    // Watch writes nothing to a tracker and holds nothing for later (ADR 0308).
+    if (settings.autonomy.watch === true) return { outcome: "refused", message: WATCH_REFUSAL };
     const projects = await projectsFor(write, settings);
     const setting = postingOf(projects);
     if (write.key !== undefined) {
@@ -942,6 +948,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         message: `This is too long to show the owner whole before it posts (${String(detail.length)} characters; 2,000 fit). Nothing was posted: post a shorter version, and keep the rest in the issue file.`,
       };
     return serial(async () => {
+      // Watch may have been chosen while this write waited its turn (ADR 0308).
+      if ((await options.settings.load()).autonomy.watch === true)
+        return { outcome: "refused" as const, message: WATCH_REFUSAL };
       const fingerprint = fingerprintOf(write, projects, decider);
       const same = state.posts.find(
         (entry) => entry.state === "waiting" && entry.fingerprint === fingerprint,
@@ -1001,6 +1010,8 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
 
   return {
     admit,
+    /** Watch (ADR 0308): no tracker write by Clankie, a lead or a worker, local ones included. */
+    watching: async () => (await options.settings.load()).autonomy.watch === true,
     start,
     /** Binds what exists only after the tracker routes do. */
     bind(next: TrackerPostingBinding) {
