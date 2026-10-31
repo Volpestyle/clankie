@@ -28,7 +28,7 @@ import {
   prepareFreeAgentIntent as prepareFreeIntent,
 } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
-import { WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
+import { WATCH_REFUSAL, WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
 import { routeLaneRun } from "./lane-route.ts";
 import {
   joinedMachineShellTool,
@@ -2693,6 +2693,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const pruneGuard =
     (current: Awaited<ReturnType<typeof settings>>, guard: () => Promise<void>) => async () => {
+      // Watch removes no worktree (ADR 0307), asked again before every tree's removal.
+      await watch.refuse(WATCH_REFUSAL);
       await guard();
       const latest = await settings();
       if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))

@@ -72,6 +72,7 @@ import {
   TrackerPostsRequestSchema,
   TrackerPostsResultSchema,
 } from "@clankie/protocol/tracker-posting";
+import { WATCH_REFUSAL, createWatchGate } from "../watch.ts";
 import { logger } from "./log.ts";
 import { type ClankieAppDependencies, type DeviceAuthDenial, type TrustedDeviceIdentity } from "./types.ts";
 export interface RegisterConversationRoutesContext {
@@ -1382,6 +1383,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
    * owner (LOCAL-VUH-1). `/v1/tracker/owner/call` (`clankie work owner`) is the owner
    * speaking as himself (VUH-1917): owner activity that verifies, reopens and wakes.
    */
+  const watch = ctx.dependencies.settings ? createWatchGate(ctx.dependencies.settings) : undefined;
   const trackerCall = (path: string, operatorActor: TrackerActor) =>
     ctx.app.post(path, async (context) => {
       const tracker = ctx.dependencies.builtInTracker;
@@ -1438,6 +1440,9 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           beforeWrite: async () => {
             if (!(await authority.authorize()) || !authority.current())
               throw new Error("Owner authority expired");
+            // Watch (ADR 0307): this is Clankie writing for the owner, so it waits. The owner's
+            // own route (`clankie work owner`) and his app still write.
+            if (actor === CLANKIE_FOR_OWNER && watch !== undefined) await watch.refuse(WATCH_REFUSAL);
             if (ownerApp && !ownerAppDevice(ownerApp.deviceId))
               throw new Error("Owner app authority expired");
           },

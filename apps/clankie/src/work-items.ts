@@ -1423,10 +1423,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   ) => {
     if (posting === TRACKER_POSTING_ADMITTED) return assertDestination(convention, destination);
     if (!options.posting) return;
-    // Watch refuses every tracker write that is not the owner's, local trackers included (ADR 0307).
-    await refuseWhileWatching();
     const tracker = await outwardTracker(convention);
-    if (tracker === undefined) return;
+    // Watch refuses every tracker write that is not the owner's (ADR 0307). An outward
+    // tracker's admission already refuses it; a local tracker has no admission, so ask here.
+    if (tracker === undefined) return await refuseWhileWatching();
     const admission = await options.posting.admit({
       tracker,
       ...destinationOf(convention),
@@ -1867,6 +1867,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           // A seat's own issue status is Clankie writing for this project (ADR 0302).
           const tracker =
             options.posting && isTrackerWriteTool(name) ? await outwardTracker(convention) : undefined;
+          // Watch (ADR 0307): a local tracker has no admission to refuse it, so ask here.
+          if (options.posting && isTrackerWriteTool(name) && tracker === undefined)
+            await refuseWhileWatching();
           if (options.posting && tracker !== undefined)
             assertAdmitted(
               await options.posting.admit({
@@ -2246,14 +2249,6 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         };
       }
       if (posting === TRACKER_POSTING_ADMITTED) assertDestination(convention, destination);
-      // Watch refuses every tracker write that is not the owner's, local trackers included (ADR 0307).
-      if (
-        posting !== TRACKER_POSTING_ADMITTED &&
-        isTrackerWriteTool(name) &&
-        !ownerActor(callbacks.actor) &&
-        (await options.posting?.watching?.()) === true
-      )
-        assertAdmitted({ outcome: "refused", message: WATCH_REFUSAL });
       // "Posting to your tracker" (ADR 0302): Clankie's and his workers' writes to an
       // outward tracker pass the project's setting; the owner's own writes are his.
       const outward =
@@ -2263,6 +2258,16 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         !ownerActor(callbacks.actor)
           ? await outwardTracker(convention)
           : undefined;
+      // Watch refuses every tracker write that is not the owner's (ADR 0307). An outward
+      // tracker's admission already refuses it; a local tracker has no admission, so ask here.
+      if (
+        outward === undefined &&
+        posting !== TRACKER_POSTING_ADMITTED &&
+        isTrackerWriteTool(name) &&
+        !ownerActor(callbacks.actor) &&
+        (await options.posting?.watching?.()) === true
+      )
+        assertAdmitted({ outcome: "refused", message: WATCH_REFUSAL });
       if (options.posting && outward !== undefined)
         assertAdmitted(
           await options.posting.admit({

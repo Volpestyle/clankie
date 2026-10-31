@@ -1433,7 +1433,7 @@ it("Watch keeps a post held for Clankie from going out when he approves it, unti
   expect(f.mutations("commentCreate")).toBe(1);
 });
 
-it("Watch refuses writes to private issue files too, through the work route", async () => {
+it("Watch refuses writes to private issue files too, through the work route and seat bookkeeping", async () => {
   const f = await fixture();
   const created = await f.workItems.handle(
     { action: "create", repo: f.orchard, title: "Before Watch" },
@@ -1458,9 +1458,43 @@ it("Watch refuses writes to private issue files too, through the work route", as
     expect(response.status).not.toBe(200);
     expect(JSON.stringify(await response.json())).toContain("only watching");
   }
+  // A hire that exits while watching leaves its issue as it was: no automatic bookkeeping either.
+  const seatScope = await f.workItems.prepareSeatIssueTracker("orchard", async () => {});
+  await expect(seatScope.call("get_issue", { id }, "background")).resolves.toBeDefined();
+  await expect(
+    seatScope.call("save_comment", { issueId: id, body: "During Watch" }, "background"),
+  ).rejects.toThrow("only watching");
+  await expect(seatScope.call("save_issue", { id, state: "done" }, "background")).rejects.toThrow(
+    "only watching",
+  );
   expect(await files()).toEqual(before);
   const shown = await f.workItems.handle({ action: "show", repo: f.orchard, id }, true);
   expect(shown).toMatchObject({ item: { title: "Before Watch" } });
   expect(JSON.stringify(shown)).not.toContain("During Watch");
   expect(JSON.stringify(shown)).not.toContain('"done"');
+});
+
+it("Watch refuses Clankie's unscoped writes to the built-in tracker, and the owner's own route still writes", async () => {
+  const f = await fixture();
+  const call = async (path: string, name: string, args: Record<string, unknown>) => {
+    const response = await f.request(path, { name, arguments: args });
+    return { status: response.status, body: JSON.stringify(await response.json()) };
+  };
+  const teams = await call("/v1/tracker/call", "list_teams", {});
+  expect(teams.status).toBe(200);
+  const team = (JSON.parse(teams.body) as { result: { teams: { key: string }[] } }).result.teams[0]!.key;
+  expect((await call("/v1/tracker/call", "save_issue", { team, title: "Before Watch" })).status).toBe(200);
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  const during = await call("/v1/tracker/call", "save_issue", { team, title: "During Watch" });
+  expect(during.status).not.toBe(200);
+  expect(during.body).toContain("only watching");
+  // Reading stays open, and nothing Clankie tried landed.
+  const listed = await call("/v1/tracker/call", "list_issues", {});
+  expect(listed.status).toBe(200);
+  expect(listed.body).toContain("Before Watch");
+  expect(listed.body).not.toContain("During Watch");
+  // The owner speaking as himself is not Clankie acting.
+  expect((await call("/v1/tracker/owner/call", "save_issue", { team, title: "Owner's own" })).status).toBe(
+    200,
+  );
 });

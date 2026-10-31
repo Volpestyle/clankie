@@ -1637,7 +1637,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           server.id === "linear" &&
           input.posting !== TRACKER_POSTING_ADMITTED &&
           (graphqlPlan ? graphqlPlan.mutation : isTrackerWriteTool(input.tool)) &&
-          (await options.settings.load()).autonomy.watch === true
+          (await options.settings.load()).autonomy?.watch === true
         )
           return {
             outcome: "refused",

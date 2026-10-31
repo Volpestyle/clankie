@@ -57,12 +57,15 @@ changes nothing.
   health alert is sent into a seat.
 - **Restarts and tidying.** Lead relaunches (fresh restart, failover,
   failback), hired-seat restarts, auto-tidy closes and worktree prunes, the
-  operator's close, and the evaluator all stop.
+  operator's close, and the evaluator all stop. A prune asked for by name
+  through the service is refused too, before any tree is touched.
 - **Connected apps.** A connected app cannot answer a prompt in a worker's
   pane.
 - **Trackers.** No tracker write by Clankie, a lead or a worker goes through
   him, outward, to the built-in tracker or to a repo's private issue files.
-  Nothing is held for later either.
+  That covers `clankie work`, tracker calls with or without a repository, and
+  the automatic notes a hire's issue gets when the hire exits. Nothing is held
+  for later either.
   The owner's own writes (`clankie work owner`, or a post he approves) are
   his. A post held for Clankie before Watch was chosen keeps waiting; only the
   owner can let it out meanwhile. The Discord forum view binds no forum, so it copies nothing into the

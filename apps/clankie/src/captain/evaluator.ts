@@ -106,7 +106,7 @@ export class Evaluator {
   private readonly run: (args: string[]) => Promise<void>;
   private readonly socket: string;
   private readonly available: () => boolean;
-  private readonly watching: () => Promise<boolean>;
+  private readonly watching: (() => Promise<boolean>) | undefined;
 
   private readonly directory: string;
 
@@ -122,7 +122,7 @@ export class Evaluator {
     } = {},
   ) {
     this.directory = directory;
-    this.watching = options.watching ?? (async () => false);
+    this.watching = options.watching;
     this.available = options.available ?? (() => true);
     this.runner = options.runner ?? createHerdrWatchRunner(this.available);
     const run =
@@ -302,7 +302,8 @@ export class Evaluator {
     this.busy = true;
     let starting: EvaluationJob | undefined;
     try {
-      if (await this.watching()) return;
+      // Asked only where Watch is wired, so an evaluator without it keeps its timing.
+      if (this.watching !== undefined && (await this.watching())) return;
       const running = this.state.jobs.find((job) => job.status === "running");
       if (running !== undefined) {
         const pane = this.state.pane;

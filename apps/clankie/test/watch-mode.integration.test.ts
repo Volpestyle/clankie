@@ -1,6 +1,8 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   createFauxCore,
   fauxAssistantMessage,
@@ -19,8 +21,16 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, expect, it } from "vitest";
-import { SettingsStore } from "@clankie/settings";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import {
+  addProjectWorktreeRoot,
+  observeLocalProjectWorktreeRoot,
+  projectsRevision,
+  SettingsStore,
+} from "@clankie/settings";
 import { WatchingMachineRefused } from "@clankie/protocol";
+import { createCaptain } from "../src/captain/captain.ts";
+import type { CaptainDeps } from "../src/captain/deps.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { createCaptainModelRuntime } from "../src/captain/model.ts";
 import { routeLaneRun } from "../src/captain/lane-route.ts";
@@ -249,4 +259,63 @@ it("Watch stops a turn already running and its compaction: nothing after the swi
   expect(
     session.sessionManager.getEntries().some((entry: { type: string }) => entry.type === "compaction"),
   ).toBe(false);
+});
+
+it("Watch removes no worktree, even through the prune route a lead or worker can call", async () => {
+  const exec = promisify(execFile);
+  const git = (cwd: string, args: string[]) => exec("git", ["-C", cwd, ...args]);
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-watch-prune-")));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const repo = join(root, "repo");
+  const agents = join(root, "agents");
+  await mkdir(repo);
+  await mkdir(agents);
+  await git(repo, ["init", "--quiet", "--initial-branch=main"]);
+  await git(repo, ["config", "user.name", "Watch fixture"]);
+  await git(repo, ["config", "user.email", "fixture@example.invalid"]);
+  await writeFile(join(repo, "source.txt"), "retained\n");
+  await git(repo, ["add", "."]);
+  await git(repo, ["commit", "--quiet", "-m", "fixture baseline"]);
+  await git(repo, ["clone", "--quiet", "--bare", repo, join(root, "origin.git")]);
+  await git(repo, ["remote", "add", "origin", join(root, "origin.git")]);
+  await git(repo, ["fetch", "--quiet", "origin"]);
+  let projects = ProjectsSettingsSchema.parse({
+    projects: [
+      {
+        id: "watched",
+        name: "Watched",
+        workspaces: [{ id: "owner", machineId: "local", platform: "posix", path: repo }],
+      },
+    ],
+  });
+  const request = {
+    projectId: "watched",
+    machineId: "local",
+    platform: "posix" as const,
+    path: agents,
+    repoPath: repo,
+    expectedRevision: projectsRevision(projects),
+  };
+  projects = addProjectWorktreeRoot(projects, request, (await observeLocalProjectWorktreeRoot(request))!);
+  await writeFile(join(root, "settings.json"), JSON.stringify({ schemaVersion: 1, projects }));
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const tree = join(agents, "landed");
+  await git(repo, ["worktree", "add", "--quiet", "--detach", tree, "main"]);
+  const captain = createCaptain(
+    {
+      herdrAvailable: () => false,
+      presence: { listSessions: async () => [] },
+      embodiment: { getLiveSession: async () => undefined },
+    } as unknown as CaptainDeps,
+    { repoRoot: root, stateDir: join(root, "state"), workingDirectory: root, settings },
+  );
+  cleanups.push(() => captain.close());
+  await runAutonomyCommand(["watch"], fleetSettingsClient(settings));
+  const pruned = await captain.pruneWorktree!(repo, tree).catch((error: unknown) => ({
+    outcome: "refused",
+    detail: error instanceof Error ? error.message : String(error),
+  }));
+  expect(pruned).not.toMatchObject({ outcome: "removed" });
+  expect(JSON.stringify(pruned)).toContain("only watching");
+  await expect(stat(tree)).resolves.toBeDefined();
 });
