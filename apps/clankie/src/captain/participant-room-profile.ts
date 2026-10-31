@@ -1,6 +1,8 @@
 import { join } from "node:path";
 
 export const PARTICIPANT_SESSION_ENV = "CLANKIE_PARTICIPANT_SESSION";
+/** Host launch intent can only narrow a launcher; it never grants authority. */
+export const PARTICIPANT_LAUNCH_ENV = "CLANKIE_PARTICIPANT_LAUNCH";
 const ASK_TOOLS = ["Bash", "PowerShell", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Skill"];
 
 /** A room's files and native history never share a project with the owner's work. */

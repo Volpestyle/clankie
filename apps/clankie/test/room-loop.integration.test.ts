@@ -330,3 +330,26 @@ it.each(["everyone", "role"] as const)(
     }
   },
 );
+
+it("an automatic Pi participant voice room reuses its isolated history across speakers", async () => {
+  const f = await fixture(undefined, true);
+  const voice = (id: string, actor: string, body: string): DiscordPresenceChannelTurnRequest => {
+    const request = message(id, actor, body);
+    return { ...request, trigger: { ...request.trigger, kind: "voice_event" } };
+  };
+  try {
+    const first = f.captain.submitDiscordTurn(voice("voice-first", "20001", "Remember the blue balloon."));
+    f.work.push(first);
+    await vi.waitFor(() => expect(f.calls).toHaveLength(1), { timeout: 10_000 });
+    f.calls[0]!.finish("The blue balloon is here.");
+    expect(await first).toMatchObject({ state: "settled" });
+    const second = f.captain.submitDiscordTurn(voice("voice-second", "20002", "What did you just say?"));
+    f.work.push(second);
+    await vi.waitFor(() => expect(f.calls).toHaveLength(2), { timeout: 10_000 });
+    expect(f.calls[1]!.text).toContain("The blue balloon is here.");
+    f.calls[1]!.finish("We were talking about the blue balloon.");
+    expect(await second).toMatchObject({ state: "settled" });
+  } finally {
+    await f.close();
+  }
+});

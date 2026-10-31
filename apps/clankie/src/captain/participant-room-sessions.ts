@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import type { HerdrWatchRunner, HerdrAgentSnapshot } from "./herdr-watch.ts";
-import { isParticipantRoomProfile } from "./participant-room-profile.ts";
+import { isParticipantRoomProfile, PARTICIPANT_LAUNCH_ENV } from "./participant-room-profile.ts";
 import { nativeSessionId } from "./native-session-resume.ts";
 
 const LaunchSchema = z
@@ -115,11 +115,13 @@ export class ParticipantRoomSessions {
     let launch = this.launches[input.conversationId];
     if (matches[0]) {
       await this.assertProfile(matches[0], input.cwd);
-      launch = { phase: "waiting", paneId: matches[0].paneId };
+      launch = { phase: launch?.phase === "ready" ? "ready" : "waiting", paneId: matches[0].paneId };
       this.save(input.conversationId, launch);
     }
     let paneExists = launch?.paneId ? await runner.resolveTerminal(launch.paneId) : undefined;
     await input.guard();
+    if (launch?.phase === "waiting" && (!paneExists || paneExists.agent === "shell"))
+      throw new Error("participant_start_failed_inspect_original_pane");
     if (paneExists?.agent === "shell") paneExists = undefined;
     if (!paneExists) {
       if (launch?.phase === "starting" || launch?.phase === "uncertain")
@@ -143,6 +145,7 @@ export class ParticipantRoomSessions {
         const paneId = await runner.createTab({
           cwd: input.cwd,
           label: "Clankie · Discord character",
+          env: { [PARTICIPANT_LAUNCH_ENV]: "1" },
           command: [
             "clankie",
             "claude",

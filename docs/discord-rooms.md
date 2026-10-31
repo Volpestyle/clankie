@@ -251,7 +251,9 @@ clankie discord server --server SERVER_ID --role participant --participant-harne
 ```
 
 `discord.guilds[SERVER_ID].participantHarness` is `pi` by default; `claude`
-starts the native interactive Claude Code TUI in Herdr. Its private character
+starts the native interactive Claude Code TUI in Herdr. Character execution has
+a separate conversation record from the public room, so switching an Admin
+room to Participant does not resume or replace its old owner session. Its private character
 directory and native history are separate from owner projects. The projected
 plugin contains public persona, the room channel and transcript synchronization. It has
 no owner memory hooks, fleet skills, inherited MCP servers or account tools;
@@ -267,6 +269,9 @@ There is no automatic redispatch through Pi or the owner's session. A changed
 native occupant or configuration withholds the reply. Up to four live native
 characters may be allocated; close an unused character in Herdr to make room.
 A native startup/trust prompt may need the owner before the channel connects.
+If a launch ends in a shell before binding, later messages hold that original
+launch instead of opening more tabs. Private service handoffs, held owner wakes
+and worker reports are not replayed into the character.
 The service never answers that prompt from Discord text. Pi participant loops
 start automatically too and retain existing explicitly granted room-skill
 adapters; native Claude characters currently expose only their reply channel.
@@ -276,7 +281,9 @@ adapters; native Claude characters currently expose only their reply channel.
 The private journal is `<stateDir>/participant-room-launches.json`, normally
 `~/.clankie/captain/participant-room-launches.json`; `CLANKIE_STATE` changes the
 body state root, with `captain` below it. `starting` or `uncertain` without a
-reconciled pane blocks a second launch. A malformed journal blocks every native
+reconciled pane blocks a second launch; `waiting` is held if its process ended
+before the channel bound. Use the hash from the character execution directory,
+which is distinct from the public room record. A malformed journal blocks every native
 participant launch while leaving other service work available.
 
 First inspect the complete Herdr inventory (`herdr agent list` and
@@ -298,7 +305,7 @@ import json, os, pathlib, re, shutil, sys, time
 path, room = pathlib.Path(sys.argv[1]), sys.argv[2]
 assert re.fullmatch(r"room-[a-f0-9]{24}", room)
 entries = json.loads(path.read_text())
-assert entries[room]["phase"] in ("starting", "uncertain")
+assert entries[room]["phase"] in ("starting", "waiting", "uncertain")
 shutil.copy2(path, path.with_name(path.name + f".backup-{time.time_ns()}"))
 del entries[room]
 temporary = path.with_name(path.name + ".owner-repair")

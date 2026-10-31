@@ -7405,6 +7405,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   await resolveGrant();
                 if (participant?.harness === "claude") {
                   burst?.close();
+                  // The public room may retain a private owner attachment from
+                  // an earlier Admin policy. Never reuse its history or mailbox.
+                  const characterId = conversations.roomConversation(
+                    lane,
+                    `${targetId}:participant-character`,
+                  );
+                  conversations.nameRoomConversation(
+                    characterId,
+                    `Clankie · character · ${request.room?.channelName ?? "Discord room"}`,
+                  );
                   // A public character keeps one native history, independent of
                   // who speaks. Its exact original reply alone reaches Discord.
                   return roomLoops.serialize(`native-participant:${parentId}`, async () => {
@@ -7414,11 +7424,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       if ((await resolveGrant()).key !== key)
                         throw new Error("participant_authority_changed");
                     };
-                    const cwd = participantRoomDirectory(options.stateDir, parentId);
-                    await participantRooms.ensure({ conversationId: parentId, cwd, guard });
+                    const cwd = participantRoomDirectory(options.stateDir, characterId);
+                    await participantRooms.ensure({ conversationId: characterId, cwd, guard });
                     await guard();
-                    await participantRooms.assertCurrent(parentId, cwd);
-                    const source = conversations.nativeSource(parentId);
+                    await participantRooms.assertCurrent(characterId, cwd);
+                    const source = conversations.nativeSource(characterId);
                     const binding = inboundBinding(source);
                     if (!binding) throw new Error("participant_session_unavailable");
                     const heard = await normalizeDiscordTurn(request, deps, {
@@ -7432,9 +7442,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       doing: "Answering in the room's character session",
                       ...(source === undefined ? {} : { nativeChildSessionId: nativeSessionId(source) }),
                     });
-                    const delivered = await seatOutbox(parentId).deliver({
+                    const delivered = await seatOutbox(characterId).deliver({
                       kind: "escalation",
-                      conversationId: parentId,
+                      conversationId: characterId,
                       source: "discord-participant",
                       content: heard.prompt,
                       wantsReply: true,
@@ -7446,10 +7456,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       signal: shutdown.signal,
                     });
                     await guard();
-                    await participantRooms.assertCurrent(parentId, cwd);
-                    if (inboundBinding(conversations.nativeSource(parentId)) !== binding)
+                    await participantRooms.assertCurrent(characterId, cwd);
+                    if (inboundBinding(conversations.nativeSource(characterId)) !== binding)
                       throw new Error("participant_session_changed");
-                    const result = roomSeatTurnResult(delivered, parentId, child.conversationId);
+                    const result = roomSeatTurnResult(delivered, characterId, child.conversationId);
                     if (result === undefined) throw new Error("participant_session_unavailable");
                     if (result.state === "settled")
                       conversations.publishRoomEvent(child.conversationId, {
@@ -7554,7 +7564,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 // ADR 0291: a social text room answers in its durable loop for this exact grant.
                 // Machine turns keep their own sessions; in a mixed room they stay one-shot (ADR 0251).
                 const loopKey =
-                  lane === "discord_presence" &&
+                  (lane === "discord_presence" || participant !== undefined) &&
                   plan.kind === "social" &&
                   (participant !== undefined ||
                     roomLoops.accepts(`${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`))
@@ -8688,9 +8698,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const askedAt = Date.now();
       const arrived = outbox.pollArriving();
       // Owner asks remain pending in their source conversation across driver takeover.
-      void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+      if (!binding.participantRoom) void recoverWorkerReports(binding.conversationId).catch(() => undefined);
       // A wake held after model failures can go to the seat that just bound.
-      autonomy.releaseHeldWake(binding.conversationId);
+      if (!binding.participantRoom) autonomy.releaseHeldWake(binding.conversationId);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
       let machineFleet: string | undefined;
       try {
@@ -8711,15 +8721,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 capabilities,
               );
               arrived();
-              deliverServiceHandoff(binding.conversationId);
+              if (!binding.participantRoom) deliverServiceHandoff(binding.conversationId);
               // Like the service handoff, a relaunch's kept brief waits for the bound poll (VUH-2860).
-              if (polledSource !== undefined && outbox.usageLimited() === undefined)
+              if (
+                !binding.participantRoom &&
+                polledSource !== undefined &&
+                outbox.usageLimited() === undefined
+              )
                 void leadSeats
                   .handOff(binding.conversationId, leadSeatPane(polledSource))
                   .catch((error: unknown) => {
                     console.warn("Lead relaunch handoff unavailable", binding.conversationId, String(error));
                   });
-              void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+              if (!binding.participantRoom)
+                void recoverWorkerReports(binding.conversationId).catch(() => undefined);
               return pending;
             },
             pollSignal,

@@ -9,6 +9,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { CaptainPort } from "../src/captain/port.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
+import { ParticipantRoomSessions } from "../src/captain/participant-room-sessions.ts";
 import { planSeat, parseSeatArgs } from "../../tui/src/command/seat.ts";
 
 vi.mock("../src/captain/model.ts", () => ({
@@ -33,7 +34,7 @@ it.each([false, true, "absent"] as const)(
         systemActorUserIds: ["22222"],
         guilds: {
           "12345": {
-            role: "participant",
+            role: "admin",
             owners: "everyone",
             participantHarness: "claude",
             fleetEnabled: false,
@@ -44,19 +45,34 @@ it.each([false, true, "absent"] as const)(
     }));
     let captain: CaptainPort;
     let native: HerdrAgentSnapshot | undefined;
+    const ownerSession = randomUUID();
+    const ownerNative: HerdrAgentSnapshot = {
+      paneId: "owner:p1",
+      terminalId: "owner-terminal",
+      agent: "claude",
+      status: "idle",
+      title: "Existing owner session",
+      workingDirectory: join(root, "owner-private"),
+      session: { source: "herdr:claude", kind: "id", value: ownerSession },
+    };
+    let ownerRoomId = "";
     let argv: readonly string[] = [];
     let launches = 0;
     let roomId = "";
     let bridge: Promise<void> | undefined;
     let bridgeStop = new AbortController();
     const messages: string[] = [];
+    const unexpectedSources: string[] = [];
     let replyGate: Promise<void> | undefined;
     const runBridge = () => {
       bridge = (async () => {
         while (!bridgeStop.signal.aborted) {
           const events = await captain.pollSeatEvents(1000, bridgeStop.signal, roomId);
           for (const event of events) {
-            if (event.source !== "discord-participant") continue;
+            if (event.source !== "discord-participant") {
+              unexpectedSources.push(event.source);
+              continue;
+            }
             messages.push(event.content);
             await replyGate;
             await captain.acknowledgeSeatEvent(event.id, roomId);
@@ -70,13 +86,18 @@ it.each([false, true, "absent"] as const)(
       });
     };
     const runner: HerdrWatchRunner = {
-      list: async () => (native ? [native] : []),
-      get: async () => {
+      list: async () => [ownerNative, ...(native ? [native] : [])],
+      get: async (id) => {
+        if ([ownerNative.paneId, ownerNative.terminalId].includes(id)) return ownerNative;
         if (!native) throw Error("No character");
         return native;
       },
       resolveTerminal: async (id) =>
-        native && [native.paneId, native.terminalId].includes(id) ? native : undefined,
+        [ownerNative.paneId, ownerNative.terminalId].includes(id)
+          ? ownerNative
+          : native && [native.paneId, native.terminalId].includes(id)
+            ? native
+            : undefined,
       wait: async () => {
         throw Error("No fleet worker wait expected");
       },
@@ -85,6 +106,9 @@ it.each([false, true, "absent"] as const)(
         launches += 1;
         expect(input.command?.slice(0, 3)).toEqual(["clankie", "claude", "--conversation"]);
         roomId = input.command![3]!;
+        expect(roomId).not.toBe(ownerRoomId);
+        expect(input.command).not.toContain(ownerSession);
+        expect(input.env?.CLANKIE_PARTICIPANT_LAUNCH).toBe("1");
         if (loseLaunchResponse === "absent" && launches === 1)
           throw Error("Uncertain launch with no native allocation");
         const context = captain.seatContext(roomId)!;
@@ -101,6 +125,7 @@ it.each([false, true, "absent"] as const)(
               XDG_STATE_HOME: root,
               CLAUDE_CONFIG_DIR: root,
               CLANKIE_OPERATOR_TOKEN: `clankie_op_${"a".repeat(43)}`,
+              ...input.env,
             },
             fetchImpl: async (input) => {
               const sessionId = new URL(String(input)).searchParams.get("sessionId");
@@ -155,23 +180,24 @@ it.each([false, true, "absent"] as const)(
       },
     };
     const census = async (_command: string, args: readonly string[]) => {
-      const wire = native
-        ? {
-            pane_id: native.paneId,
-            terminal_id: native.terminalId,
-            agent: native.agent,
-            agent_status: native.status,
-            title: native.title,
-            cwd: native.workingDirectory,
-            agent_session: native.session,
-          }
-        : undefined;
+      const wires = [ownerNative, ...(native ? [native] : [])].map((pane) => ({
+        pane_id: pane.paneId,
+        terminal_id: pane.terminalId,
+        agent: pane.agent,
+        agent_status: pane.status,
+        title: pane.title,
+        cwd: pane.workingDirectory,
+        agent_session: pane.session,
+      }));
       const result =
         args[1] === "list"
-          ? { agents: wire ? [wire] : [] }
+          ? { agents: wires }
           : args[1] === "snapshot"
-            ? { snapshot: { workspaces: [], tabs: [], panes: wire ? [wire] : [] } }
-            : { agent: wire };
+            ? { snapshot: { workspaces: [], tabs: [], panes: wires } }
+            : {
+                agent:
+                  wires.find((pane) => pane.pane_id === args[2] || pane.terminal_id === args[2]) ?? wires[0],
+              };
       return { stdout: JSON.stringify({ result }), stderr: "" };
     };
     const make = () =>
@@ -224,6 +250,29 @@ it.each([false, true, "absent"] as const)(
     });
     captain = make();
     try {
+      ownerRoomId = captain.bodyRoomConversation("discord_presence", "12345:67890");
+      expect(
+        captain.syncSeatTranscript(ownerRoomId, {
+          sessionId: ownerSession,
+          entries: [],
+          activity: "waiting",
+        }),
+      ).toBe(true);
+      const ownerPollStop = new AbortController();
+      const ownerPoll = captain.pollSeatEvents(1000, ownerPollStop.signal, ownerRoomId);
+      await vi.waitFor(() => expect(captain.operatorSeatReady?.(ownerRoomId)).toBe(true));
+      ownerPollStop.abort();
+      await ownerPoll;
+      await settings.update((current) => ({
+        ...current,
+        discord: {
+          ...current.discord,
+          guilds: {
+            ...current.discord.guilds,
+            "12345": { ...current.discord.guilds["12345"]!, role: "participant" },
+          },
+        },
+      }));
       const first = await captain.submitDiscordTurn(request(1));
       expect(first.state).toBe(loseLaunchResponse ? "failed" : "settled");
       if (loseLaunchResponse === "absent") {
@@ -231,7 +280,11 @@ it.each([false, true, "absent"] as const)(
         expect(launches).toBe(1);
         await captain.close();
         // Owner recovery only after a complete inventory confirms no process.
-        expect(await runner.list!()).toEqual([]);
+        expect(
+          (await runner.list!()).filter(
+            (pane) => pane.workingDirectory === join(root, "participant-rooms", roomId),
+          ),
+        ).toEqual([]);
         const journalPath = join(root, "participant-room-launches.json");
         const journal = JSON.parse(await readFile(journalPath, "utf8"));
         expect(journal[roomId].phase).toBe("uncertain");
@@ -248,6 +301,8 @@ it.each([false, true, "absent"] as const)(
         response: `character answer ${nextAnswer}`,
       });
       expect(launches).toBe(launchBase);
+      expect(unexpectedSources).toEqual([]);
+      expect(captain.seatSessionState?.(ownerRoomId, ownerSession)).toBe("current");
       expect((await captain.laneToolBank("operator", roomId)).tools).toEqual([]);
       expect(
         await captain.lanePrompt({ lane: "operator", conversationId: roomId, sections: ["persona"] }),
@@ -355,6 +410,23 @@ it.each([false, true, "absent"] as const)(
       expect(ownerPlan.cwd).toBe(join(root, "owner-private"));
       expect(ownerPlan.args).not.toContain("--restricted");
       expect(ownerPlan.skills.length).toBeGreaterThan(0);
+      await expect(
+        planSeat(
+          { resume: false, dryRun: true, conversationId: roomId },
+          {
+            repoRoot: join(import.meta.dirname, "../../.."),
+            env: {
+              HOME: root,
+              CLAUDE_CONFIG_DIR: root,
+              XDG_STATE_HOME: root,
+              CLANKIE_OPERATOR_TOKEN: `clankie_op_${"a".repeat(43)}`,
+              CLANKIE_PARTICIPANT_LAUNCH: "1",
+            },
+            execFileImpl: async () => ({ stdout: "2.1.316 (Claude Code)", stderr: "" }),
+            fetchImpl: async () => Response.json(captain.seatContext(roomId)),
+          },
+        ),
+      ).rejects.toThrow("Participant configuration changed");
     } finally {
       bridgeStop.abort();
       await captain.close();
@@ -364,3 +436,53 @@ it.each([false, true, "absent"] as const)(
   },
   20_000,
 );
+
+it("holds a native launch that ends before binding instead of opening a tab per message", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-character-failure-"));
+  const conversationId = `room-${"b".repeat(24)}`;
+  const cwd = join(root, "participant-rooms", conversationId);
+  let launches = 0;
+  const shell: HerdrAgentSnapshot = {
+    paneId: "failed:p1",
+    terminalId: "failed-terminal",
+    agent: "shell",
+    status: "idle",
+    title: "Failed character",
+    workingDirectory: cwd,
+  };
+  const runner: HerdrWatchRunner = {
+    list: async () => (launches ? [shell] : []),
+    get: async () => shell,
+    resolveTerminal: async () => (launches ? shell : undefined),
+    wait: async () => {
+      throw Error("No native wait expected");
+    },
+    paneProcesses: async () => [],
+    createTab: async () => {
+      launches += 1;
+      return shell.paneId;
+    },
+  };
+  const sessions = new ParticipantRoomSessions({
+    stateDir: root,
+    runner,
+    signal: new AbortController().signal,
+    startupMs: 1,
+    sessionId: () => undefined,
+    bound: () => false,
+    retire: () => {},
+    attach: () => {},
+  });
+  try {
+    await expect(sessions.ensure({ conversationId, cwd, guard: async () => {} })).rejects.toThrow(
+      "participant_session_starting",
+    );
+    for (let index = 0; index < 3; index++)
+      await expect(sessions.ensure({ conversationId, cwd, guard: async () => {} })).rejects.toThrow(
+        "participant_start_failed",
+      );
+    expect(launches).toBe(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

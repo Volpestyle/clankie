@@ -35,6 +35,7 @@ import { bindLaunchedHarness, mintBridgeNonce, type SeatBinding } from "./seat-b
 import { projectParticipantPlugin } from "./claude-participant.ts";
 import {
   participantRoomSettings,
+  PARTICIPANT_LAUNCH_ENV,
   PARTICIPANT_INSTRUCTIONS,
 } from "../../../clankie/src/captain/participant-room-profile.ts";
 
@@ -480,6 +481,8 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   });
   const { conversationId } = context;
   const participant = context.participantRoom === true;
+  if (env[PARTICIPANT_LAUNCH_ENV] === "1" && !participant)
+    throw new Error("Participant configuration changed before launch; no operator session was started.");
   if (participant && (flags.pluginDir !== undefined || (flags.mcpServers?.length ?? 0) > 0))
     throw new Error(
       "Participant sessions use only their isolated room channel; operator plugins and MCP opt-ins are unavailable.",

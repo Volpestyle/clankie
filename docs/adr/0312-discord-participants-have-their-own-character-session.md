@@ -7,7 +7,10 @@ participant session, automatic creation when absent, and owner-only real work.
 
 A participant is Clankie acting in one public Discord room. Its persistent
 character history belongs to that room, independent of the current speaker.
-The owner chooses Pi or Claude once in the server settings. The first admitted
+Native character execution has its own conversation record and mailbox; an
+Admin-to-Participant switch leaves any previous owner attachment and its
+history alone. Private handoffs, held owner wakes and worker reports do not
+enter the character. The owner chooses Pi or Claude once in the server settings. The first admitted
 message creates the session. Subsequent messages reuse it; a closed native
 process resumes the same history. Pi participant loops no longer require the
 experimental room-loop switch.
@@ -23,7 +26,8 @@ fleet skills or account tools. The owner's ordinary resume pointer is preserved.
 Pi retains only its existing owner-configured bounded room-skill adapters.
 
 The service journals launches before allocation. Lost responses are reconciled
-against the original native inventory; uncertain launches are never duplicated.
+against the original native inventory; uncertain launches are never duplicated. A launch that ends before binding is
+held for owner recovery, so room traffic cannot open unlimited failed tabs.
 Every dispatch proves the exact native occupant and restrictive argv. The same
 proof and current configuration gate publication. Replies return only to their
 original message; other harness output is not mirrored into Discord. A failed

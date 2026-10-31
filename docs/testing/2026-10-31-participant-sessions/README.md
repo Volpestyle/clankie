@@ -16,7 +16,8 @@ pinned TLC 1.7.4. Pele 1.9.0 rendered [the character chart](chart.svg), whose
 These are finite design models, not proofs of the native harness or of all
 routing code. The participant model bounds the conversation to two turns and
 abstracts process identity, auth, network timing, attachment formats, permission
-UI internals, and multiple rooms. The routing model abstracts delivery receipts
+UI internals, failed-start repair details, pre-existing owner attachments and
+multiple rooms. The routing model abstracts delivery receipts
 and the implementation of each executor. No rule violations were found in
 these runs; there are no bug paths to replay from the final models.
 
@@ -28,7 +29,10 @@ same UUID in a new pane, uncertain launch reconciliation, replaced occupants,
 configuration revocation before reply publication, reply-only MCP denial,
 owner resume-record preservation, Pi ownership-grant refusal, Admin attachment
 preservation, owner recovery of an absent uncertain launch, the local machine
-ceiling and old-client setting preservation. Existing
+ceiling and old-client setting preservation. Native tests also seed a live
+Admin owner attachment before switching to Participant, and prove a separate
+character conversation/UUID without private service messages. Failed startup
+is held instead of opening one tab per message. Existing
 real Pi-loop tests also cover automatic participant loops without the rollout
 switch. No live Discord or real Claude permission-prompt claim is made.
 
