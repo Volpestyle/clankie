@@ -720,3 +720,25 @@ it("Watch keeps an owner message out of an attached native lead's seat, so nothi
   expect(await captain.pollSeatEvents(500, undefined, id)).toEqual([]);
   expect(fake.prompts).toEqual([]);
 });
+
+it("Watch refuses an owner message already waiting for a native lead's next poll", async () => {
+  const { captain, id, send, root } = await fixture();
+  // A poll that parks and ends leaves the lead bound, so the message waits for its next poll.
+  expect(await captain.pollSeatEvents(300, undefined, id)).toEqual([]);
+  const waiting = send("Owner asks just before watching");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new SettingsStore(join(root, "settings.json")).update((value) => ({
+    ...value,
+    autonomy: { ...value.autonomy, watch: true },
+  }));
+  // The lead's next poll is refused while watching, and the waiting message with it.
+  await expect(captain.pollSeatEvents(300, undefined, id)).rejects.toThrow("only watching");
+  expect(await waiting).toMatchObject({ result: { status: "seat_undelivered", deliveryStage: "rejected" } });
+  // Nothing was held for later: leaving Watch hands the lead nothing.
+  await new SettingsStore(join(root, "settings.json")).update((value) => {
+    const { watch: _watch, ...autonomy } = value.autonomy;
+    return { ...value, autonomy };
+  });
+  expect(await captain.pollSeatEvents(500, undefined, id)).toEqual([]);
+  expect(fake.prompts).toEqual([]);
+});

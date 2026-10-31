@@ -102,6 +102,9 @@ export class MachineJoins {
    * Watch holds every machine at Portal (ADR 0307): a hire or a message for a worker on a
    * joined machine is refused at the moment it would go, whoever leads it.
    */
+  async watching(): Promise<boolean> {
+    return (await this.options.settings.load()).autonomy?.watch === true;
+  }
   async refuseWatching(id: string): Promise<void> {
     refuseWhileWatching(await this.options.settings.load(), id, "workers");
   }

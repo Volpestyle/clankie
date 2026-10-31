@@ -57,8 +57,10 @@ changes nothing.
   joined machines too, for Clankie's own hires and for a joined lead's hires and
   messages to its workers; the lead and its workers stay bound for when Watch
   ends. A joined machine polls at Portal, so it stops what it was running for
-  Clankie, and work queued for it before Watch is refused, never sent. These
-  refusals leave no doctor item: the fix is the dial, not the machine.
+  Clankie, and work queued for it before Watch is refused, never sent. A message
+  already waiting for a seat, a lead's or a worker's, local or joined, is
+  refused at that seat's next poll rather than held for later. These refusals
+  leave no doctor item: the fix is the dial, not the machine.
 - **Wakes and alerts.** No wake reaches a lead, native or service, and no
   health alert is sent into a seat.
 - **Restarts and tidying.** Lead relaunches (fresh restart, failover,

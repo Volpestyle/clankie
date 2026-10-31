@@ -259,6 +259,7 @@ export class SeatOutbox {
   /** Until a seat polls this process, a seat present before the restart is presumed bound. */
   private reconnectUntil: number | undefined;
   private closed = false;
+  private watched = false;
   private turnActive = false;
   private turnSessionId: string | undefined;
   private turnObservedAt = 0;
@@ -1121,6 +1122,20 @@ export class SeatOutbox {
     return this.acknowledge(original.messageId, original.recipientBinding);
   }
 
+  /**
+   * Watch (ADR 0307), read fresh before each poll: while it holds, every event the seat has
+   * not taken is refused, never sent, so nothing queued before Watch starts a native turn.
+   */
+  public watching(watching: boolean): void {
+    this.watched = watching;
+    if (watching) this.refuseUntaken();
+  }
+
+  private refuseUntaken(): void {
+    for (const pending of this.queued.slice())
+      if (!pending.taken && !pending.settled) pending.settle({ outcome: "aborted" });
+  }
+
   /** Explicit launcher departure; unlike service shutdown it cannot reconnect. */
   public release(): void {
     this.close();
@@ -1231,6 +1246,10 @@ export class SeatOutbox {
   }
 
   private take(recipientBinding?: string, capabilities?: OperatorSeatCapabilities): OperatorSeatEvent[] {
+    if (this.watched) {
+      this.refuseUntaken();
+      return [];
+    }
     // The owner is heard first; wakes, watches and reports follow (VUH-2874).
     const taken = [...this.queued].sort((left, right) => ownerFirst(left) - ownerFirst(right));
     const events: OperatorSeatEvent[] = [];

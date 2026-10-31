@@ -379,7 +379,19 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
                 const { watch: _watch, ...autonomy } = current.autonomy;
                 return { ...current, autonomy: on ? { ...autonomy, watch: true } : autonomy };
               });
+            // A message already waiting for the worker when Watch is chosen is refused at its
+            // next poll, never handed over to start a native turn.
+            await worker.pollEvents(1);
+            const waiting = upstream.callTool("message_seat", {
+              seat: `${credential.lease.machineId}/worker-proof`,
+              message: "Queued before watching",
+            });
+            await new Promise((resolve) => setTimeout(resolve, 300));
             await watch(true);
+            expect(await worker.pollEvents(300)).toEqual([]);
+            const refusedWaiting = JSON.stringify(await waiting);
+            expect(refusedWaiting).not.toContain('\\"delivered\\"');
+            expect(refusedWaiting).toContain("aborted");
             const watched = await upstream
               .callTool("message_seat", {
                 seat: `${credential.lease.machineId}/worker-proof`,

@@ -163,6 +163,8 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       },
       pollEvents: async (wait, signal) => {
         if (!worker.paneId) return [];
+        // A message queued before Watch is refused here, so it starts no native turn (ADR 0307).
+        outbox.watching(await input.joins.watching());
         return outbox.poll(wait, signal, binding);
       },
       acknowledge: async (id) => outbox.acknowledge(id, binding),
