@@ -524,3 +524,4 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
     await rm(root, { recursive: true, force: true });
   }
 });
+// Landing probe for the #52 test selection; reverted before merge.

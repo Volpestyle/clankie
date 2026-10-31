@@ -928,3 +928,4 @@ void loadConfig({ env: process.env, cwd: repoRoot })
   .catch(() => {
     // Config problems surface in /model and /auth; the face still boots.
   });
+// Landing probe for the #52 test selection; reverted before merge.

@@ -284,3 +284,4 @@ export async function createCaptainModelRuntime(repoRoot: string): Promise<Capta
     },
   };
 }
+// Landing probe for the #52 test selection; reverted before merge.

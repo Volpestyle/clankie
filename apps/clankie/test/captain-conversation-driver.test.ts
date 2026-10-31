@@ -685,3 +685,4 @@ it("native seat polling leaves an unanswered owner action pending with no resolu
     '"type":"input_resolved"',
   );
 });
+// Landing probe for the #52 test selection; reverted before merge.

@@ -45,3 +45,4 @@ export const MachineAccessRefusalSchema = z
   })
   .strict();
 export type MachineAccessRefusal = z.infer<typeof MachineAccessRefusalSchema>;
+// Landing probe for the #52 test selection; reverted before merge.

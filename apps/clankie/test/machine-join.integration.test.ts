@@ -872,3 +872,4 @@ test("joined shell is offered only in the owner console lane, never Discord", ()
     false,
   );
 });
+// Landing probe for the #52 test selection; reverted before merge.

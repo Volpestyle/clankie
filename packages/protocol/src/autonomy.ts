@@ -358,3 +358,4 @@ export function formatFleetAutonomyGuidance(policy: FleetAutonomy): string[] {
     ),
   ];
 }
+// Landing probe for the #52 test selection; reverted before merge.

@@ -646,3 +646,4 @@ it("the autonomy CLI names drift and explicit level writes use the shared owner 
     expect((await runAutonomyCommand([], options)).level).toBe(level);
   }
 });
+// Landing probe for the #52 test selection; reverted before merge.

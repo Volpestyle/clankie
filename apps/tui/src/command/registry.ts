@@ -751,3 +751,4 @@ export function commandHelp(): string {
     "Full reference: docs/cli.md (at `clankie doctor`'s repoRoot on every install).",
   ].join("\n");
 }
+// Landing probe for the #52 test selection; reverted before merge.

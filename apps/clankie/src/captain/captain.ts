@@ -9193,3 +9193,4 @@ export {
   runTurnWithStallWatchdog,
 } from "./captain-session.ts";
 export { type CaptainOptions } from "./captain-types.ts";
+// Landing probe for the #52 test selection; reverted before merge.

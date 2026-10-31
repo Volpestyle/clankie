@@ -1669,3 +1669,4 @@ const TrackerOwnerCallSchema = z
     arguments: z.record(z.string(), z.unknown()).default({}),
   })
   .strict();
+// Landing probe for the #52 test selection; reverted before merge.

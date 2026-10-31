@@ -1519,3 +1519,4 @@ function startAgentRefusalWords(reason: string): string {
       return `Clankie couldn't start it (${reason}).`;
   }
 }
+// Landing probe for the #52 test selection; reverted before merge.

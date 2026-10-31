@@ -818,3 +818,4 @@ it("reads a Claude session's start and latest main-thread context, unknown after
   );
   expect(await readClaudeSessionUsage(path)).toEqual({ startedAt: Date.parse("2026-10-14T00:05:32.699Z") });
 });
+// Landing probe for the #52 test selection; reverted before merge.

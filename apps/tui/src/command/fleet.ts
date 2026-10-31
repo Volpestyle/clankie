@@ -727,3 +727,4 @@ export async function runFleetCommand(
   }
   throw new Error(FLEET_USAGE);
 }
+// Landing probe for the #52 test selection; reverted before merge.

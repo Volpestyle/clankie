@@ -2873,3 +2873,4 @@ async function loadDiscordPresenceRuntime(
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
+// Landing probe for the #52 test selection; reverted before merge.
