@@ -9,7 +9,9 @@ exit 3, green checks waiting for the standing reviewer, passes there, and
 macOS-only tests run in the `mac` job on the owner's Mac runner: install, the
 pinned Herdr and the changed tests, for pushes and same-repository pull requests
 only, never forks. It stays off until the `CLANKIE_MAC_RUNNER` repository
-variable is `true`. The landing job restores the Vox cargo cache a
+variable is `true`. The `codex-clean` commit status, posted when Codex edits
+its review summary, passes only once Codex has reviewed a pull request's head
+commit and left no open findings; a new push waits for `@codex review`. The landing job restores the Vox cargo cache a
 push to main saves, and checks three TypeScript programs at once. Run the
 complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,
