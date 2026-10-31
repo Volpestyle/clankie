@@ -2807,6 +2807,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // Hires from one start folder queue through checkout preparation; one that relocates keeps
   // its place until it returns, so an overlapping attempt sees its launch fenced (ADR 0306).
   const startQueues = new Map<string, Promise<void>>();
+  // Hires admitted in their start folder itself and not yet returned, by scope: until their
+  // allocation or receipt exists, these keep an overlapping attempt from relocating.
+  const inPlaceStarts = new Map<string, number>();
   const queueStart = async (scope: string) => {
     const previous = startQueues.get(scope) ?? Promise.resolve();
     let release!: () => void;
@@ -2819,11 +2822,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   };
   const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
-    const place: { release?: () => void } = {};
+    const place: { release?: () => void; inPlace?: string } = {};
     try {
       return await admitHire(request, brief, source, autonomous, place);
     } finally {
       place.release?.();
+      if (place.inPlace !== undefined) {
+        const remaining = (inPlaceStarts.get(place.inPlace) ?? 1) - 1;
+        if (remaining > 0) inPlaceStarts.set(place.inPlace, remaining);
+        else inPlaceStarts.delete(place.inPlace);
+      }
     }
   };
   const admitHire = async (
@@ -2831,7 +2839,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     brief: Parameters<HireSeat>[1],
     source: Parameters<HireSeat>[2],
     autonomous: Parameters<HireSeat>[3],
-    place: { release?: () => void },
+    place: { release?: () => void; inPlace?: string },
   ): ReturnType<HireSeat> => {
     const taskBrief = brief !== undefined;
     // The room shows the lead's own brief, not the preferences appended below.
@@ -2937,11 +2945,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: prior.workingDirectory })
           ? prior
           : undefined;
-      // A launch still fenced in the start folder itself is checked there the old way, never
-      // moved, so its retry meets that folder's own allocation and receipt (ADR 0207).
+      // A launch still fenced, or still being admitted, in the start folder itself is checked
+      // there the old way, never moved, so its retry meets that folder's own allocation and
+      // receipt (ADR 0207).
       const inPlace =
         retained === undefined &&
-        herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: request.workingDirectory });
+        ((inPlaceStarts.get(scope) ?? 0) > 0 ||
+          herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: request.workingDirectory }));
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
       const freshness: HireCheckoutFreshness = retained
@@ -2966,6 +2976,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               inPlace ? undefined : { name: request.title, refuse: managedRuntime },
             );
       if (freshness.outcome !== "worktree") {
+        inPlaceStarts.set(scope, (inPlaceStarts.get(scope) ?? 0) + 1);
+        place.inPlace = scope;
         place.release();
         delete place.release;
       }

@@ -781,3 +781,85 @@ it("a retry whose launch is still fenced in its clean start folder is never move
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("an overlapping hire while a clean in-place hire is still being admitted is never moved once the folder turns dirty", async () => {
+  const { vi } = await import("vitest");
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { HerdrWatchStore, createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-hire-admitting-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner");
+  let captain: ReturnType<typeof createCaptain> | undefined;
+  let admit!: () => void;
+  const admitted = new Promise<void>((resolve) => (admit = resolve));
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    // Only the native launch is stood in for: the first one is held before any allocation or
+    // receipt exists, the window in which nothing in the herdr store fences its folder yet.
+    const launched: string[] = [];
+    vi.spyOn(HerdrWatchStore.prototype, "hireRetained").mockReturnValue(false);
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
+      launched.push(seat.workingDirectory);
+      await admitted;
+      return { outcome: "failed", reason: "start_unconfirmed", detail: "fixture launch unconfirmed" };
+    });
+    captain = createCaptain({ herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps, {
+      repoRoot: join(root, "runtime"),
+      stateDir: join(root, "state"),
+      settings: new SettingsStore(join(root, "settings.json")),
+      nativeHerdrRunner: createHerdrWatchRunner(() => false),
+    });
+    const hire = () =>
+      captain!.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "spawn_seat",
+        conversationId: "global-default",
+        seat: {
+          schemaVersion: 1,
+          harness: "codex",
+          title: "Fixture",
+          workingDirectory: owner,
+          effort: "low",
+          effortReason: "A fixture hire only needs to reach the native launch.",
+        },
+        brief: "implement",
+      });
+    const first = hire();
+    await vi.waitFor(() => expect(launched).toEqual([owner]));
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+    expect(await hire()).toMatchObject({
+      op: "spawn_seat",
+      result: {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: expect.stringContaining("Start checkout is dirty"),
+      },
+    });
+    admit();
+    await first;
+    expect(launched).toEqual([owner]);
+    expect(await checkoutGit(owner, ["worktree", "list", "--porcelain"])).not.toMatch(/wt-fixture-/u);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    admit();
+    vi.restoreAllMocks();
+    await captain?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -61,8 +61,9 @@ instead of a refusal.
   place until it returns, so an overlapping attempt finds the first launch
   fenced instead of making a second worktree. Hires that run in the start
   folder itself still overlap as before. A hire whose earlier launch is still
-  fenced in the start folder itself is never moved: that folder is checked the
-  old way, so a retry meets its own allocation and receipt or the old refusal.
+  fenced in the start folder itself, or is still being admitted there and so has
+  no allocation or receipt yet, is never moved: that folder is checked the old
+  way, so a retry meets its own allocation and receipt or the old refusal.
 
 A worktree left by a hire that failed later is clean at `origin/main`, so the
 usual tidy removes it once no pane or process is in it. Calling
