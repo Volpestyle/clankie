@@ -213,7 +213,8 @@ async function decode(
           "-sn",
           "-dn",
           "-vf",
-          `fps=${FRAME_RATE},scale=640:640:force_original_aspect_ratio=decrease`,
+          // Fit within 640, never enlarging: an upscaled small clip can outgrow the frame cap.
+          `fps=${FRAME_RATE},scale='min(640,iw)':'min(640,ih)':force_original_aspect_ratio=decrease`,
           "-threads",
           "1",
           "-c:v",
