@@ -1,6 +1,11 @@
 import { realpath } from "node:fs/promises";
 import { win32 } from "node:path";
-import { projectPathContains, resolveProjectMembership, type ClankieSettings } from "@clankie/settings";
+import {
+  hireWorktreeStart,
+  projectPathContains,
+  resolveProjectMembership,
+  type ClankieSettings,
+} from "@clankie/settings";
 import type { Project, ProjectsSettings } from "@clankie/protocol/projects";
 import { autoProjectRounds } from "./auto-projects.ts";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
@@ -59,16 +64,25 @@ export function remoteWorkspaceProject(
 ): string | undefined {
   const target = remoteHireMachine(settings, fleet);
   if (target === undefined) return undefined;
-  const matches = projects.projects
-    .filter((project) =>
-      project.workspaces.some(
-        (workspace) =>
-          target.ids.has(workspace.machineId) &&
-          workspace.platform === target.platform &&
-          projectPathContains(workspace.path, directory, target.platform),
-      ),
-    )
-    .map((project) => project.id);
+  const registered = (path: string) =>
+    projects.projects
+      .filter((project) =>
+        project.workspaces.some(
+          (workspace) =>
+            target.ids.has(workspace.machineId) &&
+            workspace.platform === target.platform &&
+            projectPathContains(workspace.path, path, target.platform),
+        ),
+      )
+      .map((project) => project.id);
+  let matches = registered(directory);
+  // A hire's own worktree (`<start>/.local/wt-*`, ADR 0306) belongs to its start checkout's project.
+  for (
+    let start = hireWorktreeStart(directory);
+    matches.length === 0 && start;
+    start = hireWorktreeStart(start)
+  )
+    matches = registered(start);
   if (requested !== undefined && matches.includes(requested)) return requested;
   if (matches.length > 1)
     throw new Error(

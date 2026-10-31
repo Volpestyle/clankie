@@ -845,9 +845,20 @@ export function createOperatorService(
           authorize: async () => ctx.conversations.runsCaptainTurns(lead),
         },
       );
-      return hired.outcome === "spawned"
-        ? answer("started", { seatId: hired.seat.seatId })
-        : answer("refused", { detail: startAgentRefusal(hired.reason) });
+      if (hired.outcome === "spawned") return answer("started", { seatId: hired.seat.seatId });
+      // The app and the owner both need the real cause, so a refusal keeps its detail and
+      // leaves a trace in the service log.
+      logger.warn(
+        {
+          event: "connector.start_agent.refused",
+          reason: hired.reason,
+          ...(hired.detail === undefined ? {} : { detail: hired.detail }),
+          machine: chosen.fleet ?? "local",
+          workingDirectory: chosen.place.workingDirectory,
+        },
+        "A connected app's start_agent was refused",
+      );
+      return answer("refused", { detail: startAgentRefusal(hired.reason, hired.detail) });
     }
     if (request.op === "terminal_focus") {
       return {
@@ -1479,8 +1490,18 @@ function startAgentPlaces(settings: ClankieSettings): {
   );
 }
 
-function startAgentRefusal(reason: string): string {
+function startAgentRefusal(reason: string, detail?: string): string {
+  const words = startAgentRefusalWords(reason);
+  const why = detail?.trim();
+  if (!why) return words;
+  const full = `${words} Clankie said: ${why.endsWith(".") ? why : `${why}.`}`;
+  return full.length <= 1_200 ? full : `${full.slice(0, 1_199)}…`;
+}
+
+function startAgentRefusalWords(reason: string): string {
   switch (reason) {
+    case "not_ready":
+      return "That checkout isn't ready to start an agent from.";
     case "unknown_directory":
       return "That directory isn't there, or isn't one Clankie may start agents in on that machine.";
     case "harness_unavailable":
@@ -1495,6 +1516,6 @@ function startAgentRefusal(reason: string): string {
     case "start_unconfirmed":
       return "The agent may have started but didn't confirm. List the agents before trying again.";
     default:
-      return "Clankie couldn't start it right now.";
+      return `Clankie couldn't start it (${reason}).`;
   }
 }

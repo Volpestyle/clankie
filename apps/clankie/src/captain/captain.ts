@@ -55,9 +55,12 @@ import {
   ownerCheckout,
   syncOwnerCheckout,
   verifyHireCheckout,
+  hireWorktreeStart,
   projectPathContains,
   projectRoleForPersona,
+  type HireCheckoutFreshness,
 } from "@clankie/settings";
+import { HireWorktrees, hireWorktreeScope, type HireWorktreeRelocation } from "./hire-worktrees.ts";
 import { recordBulkOperation } from "@clankie/fleet-resources";
 import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
 import {
@@ -859,8 +862,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // Remote paths cannot be canonicalized by this host. A proven source project remains
     // pinned; without one, only an owner-registered workspace on the fleet's machine counts.
     let destination: string | undefined;
-    if (input.fleet === undefined) destination = await localProject(input.workingDirectory);
-    else if ((source === undefined || configuredProject !== undefined) && projects.projects.length > 0) {
+    if (input.fleet === undefined) {
+      destination = await localProject(input.workingDirectory);
+      // A hire's own worktree (`<start>/.local/wt-*`, ADR 0306) belongs to its start checkout's project.
+      for (
+        let start = hireWorktreeStart(input.workingDirectory);
+        destination === undefined && start;
+        start = hireWorktreeStart(start)
+      )
+        destination = await localProject(start);
+    } else if ((source === undefined || configuredProject !== undefined) && projects.projects.length > 0) {
       const current = await settings();
       destination = remoteWorkspaceProject(
         current,
@@ -2792,7 +2803,44 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
     );
   };
+  const hireWorktrees = new HireWorktrees(join(options.stateDir, "hire-worktrees.json"));
+  // Hires from one start folder queue through checkout preparation; one that relocates keeps
+  // its place until it returns, so an overlapping attempt sees its launch fenced (ADR 0306).
+  const startQueues = new Map<string, Promise<void>>();
+  // Hires admitted in their start folder itself and not yet returned, by scope: until their
+  // allocation or receipt exists, these keep an overlapping attempt from relocating.
+  const inPlaceStarts = new Map<string, number>();
+  const queueStart = async (scope: string) => {
+    const previous = startQueues.get(scope) ?? Promise.resolve();
+    let release!: () => void;
+    const tail = previous.then(() => new Promise<void>((resolve) => (release = resolve)));
+    startQueues.set(scope, tail);
+    await previous;
+    return () => {
+      release();
+      if (startQueues.get(scope) === tail) startQueues.delete(scope);
+    };
+  };
   const hireSeat: HireSeat = async (request, brief, source, autonomous) => {
+    const place: { release?: () => void; inPlace?: string } = {};
+    try {
+      return await admitHire(request, brief, source, autonomous, place);
+    } finally {
+      place.release?.();
+      if (place.inPlace !== undefined) {
+        const remaining = (inPlaceStarts.get(place.inPlace) ?? 1) - 1;
+        if (remaining > 0) inPlaceStarts.set(place.inPlace, remaining);
+        else inPlaceStarts.delete(place.inPlace);
+      }
+    }
+  };
+  const admitHire = async (
+    request: Parameters<HireSeat>[0],
+    brief: Parameters<HireSeat>[1],
+    source: Parameters<HireSeat>[2],
+    autonomous: Parameters<HireSeat>[3],
+    place: { release?: () => void; inPlace?: string },
+  ): ReturnType<HireSeat> => {
     const taskBrief = brief !== undefined;
     // The room shows the lead's own brief, not the preferences appended below.
     const leadBrief = brief;
@@ -2863,27 +2911,76 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ),
         ];
       };
-      const assertInactive = async (root: string) => {
+      const managedRuntime = async (root: string) => {
         for (const managed of await managedWorktreePaths({ runtimeRoot: options.repoRoot })) {
           if (projectPathContains(managed, root, "posix") || projectPathContains(root, managed, "posix"))
-            throw Error("Start checkout is a managed runtime; preserve its pinned HEAD");
+            return "Start checkout is a managed runtime; preserve its pinned HEAD";
         }
+        return undefined;
+      };
+      const assertInactive = async (root: string) => {
+        const managed = await managedRuntime(root);
+        if (managed) throw Error(managed);
         for (const directory of await paneDirectories()) {
           if (projectPathContains(root, await realpath(directory), "posix"))
             throw Error("Start checkout belongs to a live pane; preserve its HEAD");
         }
       };
+      // A retry of a launch that is still unresolved returns to the worktree its first attempt
+      // made, so the allocation and receipt checks below see it (ADR 0207, ADR 0306).
+      const scope = hireWorktreeScope(request);
+      place.release = await queueStart(scope);
+      let prior: HireWorktreeRelocation | undefined;
+      try {
+        prior = hireWorktrees.get(scope);
+      } catch (error) {
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: `Earlier hire worktrees are unreadable: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      const retained =
+        prior !== undefined &&
+        herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: prior.workingDirectory })
+          ? prior
+          : undefined;
+      // A launch still fenced, or still being admitted, in the start folder itself is checked
+      // there the old way, never moved, so its retry meets that folder's own allocation and
+      // receipt (ADR 0207).
+      const inPlace =
+        retained === undefined &&
+        ((inPlaceStarts.get(scope) ?? 0) > 0 ||
+          herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: request.workingDirectory }));
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
-      const freshness = remote
-        ? shell
-          ? await verifyRemoteHireCheckout(remote, shell, request.workingDirectory, remoteDirectories)
-          : {
-              outcome: "refused" as const,
-              path: request.workingDirectory,
-              reason: "Remote checkout observer unavailable",
-            }
-        : await verifyHireCheckout(request.workingDirectory, assertInactive);
+      const freshness: HireCheckoutFreshness = retained
+        ? { ...retained, outcome: "worktree", head: retained.remoteMain }
+        : remote
+          ? shell
+            ? await verifyRemoteHireCheckout(
+                remote,
+                shell,
+                request.workingDirectory,
+                remoteDirectories,
+                inPlace ? undefined : request.title,
+              )
+            : {
+                outcome: "refused" as const,
+                path: request.workingDirectory,
+                reason: "Remote checkout observer unavailable",
+              }
+          : await verifyHireCheckout(
+              request.workingDirectory,
+              assertInactive,
+              inPlace ? undefined : { name: request.title, refuse: managedRuntime },
+            );
+      if (freshness.outcome !== "worktree") {
+        inPlaceStarts.set(scope, (inPlaceStarts.get(scope) ?? 0) + 1);
+        place.inPlace = scope;
+        place.release();
+        delete place.release;
+      }
       if (freshness.outcome === "refused")
         return {
           outcome: "failed",
@@ -2897,6 +2994,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ]
           .filter(Boolean)
           .join("\n\n");
+      if (freshness.outcome === "worktree") {
+        // The start checkout keeps its own work; the hire runs in the new worktree.
+        if (!retained)
+          hireWorktrees.record(
+            scope,
+            {
+              workingDirectory: freshness.workingDirectory ?? freshness.path,
+              path: freshness.path,
+              branch: freshness.branch ?? "",
+              start: freshness.start ?? request.workingDirectory,
+              startReason: freshness.startReason ?? "",
+              remoteMain: freshness.remoteMain ?? "",
+              at: new Date().toISOString(),
+            },
+            (fleet, entry) => herdrWatches.hireRetained({ fleet, workingDirectory: entry.workingDirectory }),
+          );
+        request = { ...request, workingDirectory: freshness.workingDirectory ?? freshness.path };
+        brief = [
+          brief,
+          `Your start checkout ${freshness.start} was left exactly as it was (${freshness.startReason}). You are in a new worktree at ${freshness.path}, on branch ${freshness.branch}, made from fetched origin/main ${freshness.remoteMain}. Work and commit here.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+      }
     }
     if (request.harness === "claude" && namedLocal.some((entry) => entry.id === request.fleet))
       return {

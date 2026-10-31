@@ -463,6 +463,7 @@ describe("fleet routing", () => {
     });
     const hires: { seat: Record<string, unknown>; brief?: string; lead: string }[] = [];
     let leading = true;
+    let nextHire: Record<string, unknown> | undefined;
     const serve = createOperatorService({
       deps: {
         herdrAvailable: () => true,
@@ -484,7 +485,7 @@ describe("fleet routing", () => {
         authority: { owner: { conversationId: string } },
       ) => {
         hires.push({ seat, ...(brief === undefined ? {} : { brief }), lead: authority.owner.conversationId });
-        return { outcome: "spawned", seat: { seatId: "pc/term_new" } };
+        return nextHire ?? { outcome: "spawned", seat: { seatId: "pc/term_new" } };
       },
     } as unknown as CreateOperatorServiceContext);
 
@@ -528,12 +529,21 @@ describe("fleet routing", () => {
         lead: "global-default",
       },
     ]);
+    // A refused hire says why, in the app's answer, not only "couldn't start it".
+    nextHire = { outcome: "failed", reason: "not_ready", detail: "Start checkout is dirty" };
+    expect(
+      await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
+    ).toMatchObject({
+      status: "refused",
+      detail: "That checkout isn't ready to start an agent from. Clankie said: Start checkout is dirty.",
+    });
+    nextHire = undefined;
     // With nobody to lead it, nothing starts.
     leading = false;
     expect(
       await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
     ).toMatchObject({ status: "refused" });
-    expect(hires).toHaveLength(1);
+    expect(hires).toHaveLength(2);
   });
 
   it("finds a pane made since the shared poll, such as a seat just hired (VUH-1527)", async () => {
@@ -884,6 +894,11 @@ describe("registering an ssh fleet", () => {
       ).rejects.toThrow(/exact directories/u);
       expect(await runtimes.remoteWorkspace("pc", "c:/src/rivals/")).toBe(true);
       expect(await runtimes.remoteWorkspace("pc", "C:\\src")).toBe(false);
+      // A hire's own worktree inside the granted checkout, and its twin of a granted subfolder.
+      expect(await runtimes.remoteWorkspace("pc", "C:/src/Rivals/.local/wt-nell-1a2b3c")).toBe(true);
+      expect(await runtimes.remoteWorkspace("pc", "C:\\src\\.local\\wt-nell-1a2b3c\\Rivals")).toBe(true);
+      expect(await runtimes.remoteWorkspace("pc", "C:\\src\\.local\\wt-nell-1a2b3c")).toBe(false);
+      expect(await runtimes.remoteWorkspace("pc", "C:\\src\\Rivals\\.local\\notes")).toBe(false);
       expect(await runtimes.fleets()).toEqual([
         { id: "pc", session: "default", ssh: { host: "volpe@supedupsilly", shell: "powershell" } },
       ]);

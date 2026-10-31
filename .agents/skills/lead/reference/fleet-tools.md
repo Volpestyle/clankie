@@ -50,10 +50,11 @@ to the owner rather than signing anything in yourself.
 
 An uncertain hire is inspected, never retried with a changed model, harness or
 project; a resume cannot change its recorded role or launch a second agent. A
-dirty, divergent or live-pane start refusal names its blocking paths or pane
-(checkout rules: `tidy`'s
-[owner checkout sync](../../tidy/reference/mechanics.md#owner-checkout-sync)):
-inspect the named pane instead of retrying the hire or removing its checkout.
+dirty, divergent or live-pane start is left as it is and the hire works in a
+fresh `origin/main` worktree under the start's `.local` (checkout rules: `tidy`'s
+[owner checkout sync](../../tidy/reference/mechanics.md#owner-checkout-sync)).
+A refusal now means no fresh `origin/main` or a managed runtime: fix that
+instead of retrying the hire or removing its checkout.
 High load never blocks a hire, only its heavy steps (read the receipt's
 `resourceNotice`); low memory refuses one.
 

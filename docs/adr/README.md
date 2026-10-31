@@ -209,3 +209,4 @@ scope is archived; readers should follow the successor for its implementation.
 - [0303: Connected apps answer the prompts open in agents' panes](0303-connected-apps-answer-agents-prompts.md) — `answer_prompt`, off until the owner turns it on per app. Amends ADR 0301.
 - [0304: The owner hands Clankie's lead to the connected apps](0304-the-owner-hands-the-lead-to-connected-apps.md) — `clankie connector lead apps` holds his own turns for the apps' `read_inbox`; only the owner hands it back.
 - [0305: Connected apps write the owner's issues as agents](0305-connected-apps-write-issues-as-agents.md) — `save_issue` and `comment_issue` pass the project's posting setting; issue files are written right away. Amends ADR 0301.
+- [0306: A hire never waits on its start checkout](0306-a-hire-never-waits-on-its-start-checkout.md) — a dirty, diverged or pane-owned start checkout is left alone and the hire gets a fresh `origin/main` worktree in its `.local`.

@@ -34,3 +34,35 @@ it("a remote Windows author's forward-slash toplevel names its registered projec
   // A seat with no named checkout and no directory has no project.
   expect(await reviewCheckoutProject(settings, "pc/term_author", undefined)).toBeUndefined();
 });
+// ADR 0306: a hire's own worktree inside a start checkout belongs to that checkout's project,
+// including the twin of a registered subfolder and a hire started inside another hire's worktree.
+it("a hire's own worktree keeps the project of the workspace it started from", () => {
+  const settings = ClankieSettingsSchema.parse({
+    ...emptySettings(),
+    machines: [{ id: "pc", ssh: "james@pc", shell: "powershell" }],
+    execution: {
+      ...emptySettings().execution,
+      connections: [
+        { id: "pc", machine: "pc", session: "default", ssh: { host: "james@pc", shell: "powershell" } },
+      ],
+    },
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "game",
+          name: "Game",
+          workspaces: [
+            { id: "pc", machineId: "pc", platform: "windows", path: "C:\\Users\\james\\repo\\apps\\game" },
+          ],
+        },
+      ],
+    }),
+  });
+  const project = (directory: string) => remoteWorkspaceProject(settings, settings.projects, "pc", directory);
+  expect(project("C:\\Users\\james\\repo\\.local\\wt-nell-1a2b3c\\apps\\game")).toBe("game");
+  expect(project("C:\\Users\\james\\repo\\.local\\wt-nell-1a2b3c\\apps\\game\\.local\\wt-ari-4d5e6f")).toBe(
+    "game",
+  );
+  expect(project("C:\\Users\\james\\repo\\.local\\wt-nell-1a2b3c")).toBeUndefined();
+  expect(project("C:\\Users\\james\\repo\\.local\\wt-nell-1a2b3c\\apps\\other")).toBeUndefined();
+});

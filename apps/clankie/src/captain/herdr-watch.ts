@@ -2255,6 +2255,38 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public leadHireMembershipOwner(pane: string, seat: string, occupant: string) {
     return this.hireOwners.hiredProjectContext(pane, seat, occupant);
   }
+  /**
+   * Whether a new launch into this folder is still unresolved or was settled by recovery, under
+   * any harness. A retry of that launch must arrive at the same folder (ADR 0207, ADR 0306).
+   */
+  public hireRetained(input: {
+    readonly fleet?: string | undefined;
+    readonly workingDirectory: string;
+  }): boolean {
+    if (this.projectHires.unresolved(input)) return true;
+    let receipts: ReturnType<DeliveryFence["all"]>;
+    try {
+      receipts = this.hireReceipts.all();
+    } catch {
+      return true;
+    }
+    return receipts.some(([key]) => {
+      let parts: unknown;
+      try {
+        parts = JSON.parse(key);
+      } catch {
+        return false;
+      }
+      if (!Array.isArray(parts)) return false;
+      const [fleet, , workingDirectory, session] = parts as unknown[];
+      return (
+        fleet === (input.fleet ?? "local") &&
+        workingDirectory === input.workingDirectory &&
+        session === "new" &&
+        (this.hireReceipts.pending(key) !== undefined || this.hireReceipts.settled(key) !== undefined)
+      );
+    });
+  }
   /** The title this seat was hired under, from Clankie's own hire ledger (LOCAL-VUH-59). */
   public hireTitle(seat: { readonly paneId: string; readonly occupantId: string }): string | undefined {
     const fleet = splitFleetQualified(seat.paneId)?.fleet ?? "default";
