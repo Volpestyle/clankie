@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, createServer, type AddressInfo, type Socket } from "node:net";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
@@ -32,8 +32,85 @@ interface Reply {
 const helper = fleetProcessHelper();
 const nonce = "a".repeat(64);
 
+/**
+ * The Linux census refuses the whole observation while any thread run by this
+ * account (real or effective UID) has an FD table this account cannot read,
+ * because that table could hold the seat's socket (integrations/fleet-proof/README.md).
+ * GitHub's hosted Linux runners always have two: systemd's non-dumpable
+ * (sd-pam) and the runner's own root sudo. There the binding cannot be proven,
+ * so the refusal is what this file proves.
+ */
+function unreadableSameAccountThreads(): string[] {
+  if (process.platform !== "linux") return [];
+  const uid = process.getuid!();
+  const found: string[] = [];
+  for (const pid of readdirSync("/proc").filter((name) => /^\d+$/u.test(name))) {
+    let threads: string[];
+    try {
+      threads = readdirSync(`/proc/${pid}/task`);
+    } catch {
+      continue; // Exited between listings.
+    }
+    for (const tid of threads) {
+      try {
+        const status = readFileSync(`/proc/${pid}/task/${tid}/status`, "utf8");
+        const ids = /^Uid:\s+(\d+)\s+(\d+)/mu.exec(status);
+        if (!ids || (Number(ids[1]) !== uid && Number(ids[2]) !== uid)) continue;
+        try {
+          // The helper reads every descriptor's target, not only the listing.
+          const table = `/proc/${pid}/task/${tid}/fd`;
+          for (const fd of readdirSync(table)) {
+            try {
+              readlinkSync(`${table}/${fd}`);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            }
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "EACCES")
+            found.push(`${pid} ${/^Name:\s+(.*)$/mu.exec(status)?.[1] ?? "unknown"}`);
+        }
+      } catch {
+        continue; // Exited between listings.
+      }
+    }
+  }
+  return found;
+}
+const unreadable = unreadableSameAccountThreads();
+
+describe.runIf(existsSync(helper) && unreadable.length > 0)(
+  "operator seat native census beside unreadable same-account FD tables",
+  () => {
+    it("refuses a real loopback socket instead of guessing its owner", async () => {
+      const server = createServer();
+      server.listen(0, "127.0.0.1");
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      const accepted = new Promise<Socket>((resolve) => server.once("connection", resolve));
+      const client = connect((server.address() as AddressInfo).port, "127.0.0.1");
+      const socket = await accepted;
+      try {
+        const reasons: string[] = [];
+        expect(
+          await observeSocketProcess(socket, helper, undefined, (event) => reasons.push(event.reason)),
+        ).toBeUndefined();
+        // Names the unreadable threads, so a failure says which ones they were.
+        expect(reasons, `unreadable: ${unreadable.join(", ")}`).toContain("fd_list_unavailable");
+      } finally {
+        client.destroy();
+        socket.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+  },
+);
+
+// Off Darwin and Linux, or beside such a table, the census cannot be complete,
+// so the binding below cannot be proven there.
+const unprovable = !["darwin", "linux"].includes(process.platform) || unreadable.length > 0;
+
 // Missing native proof is explicitly unavailable; never silently replace it with fake births.
-describe.skipIf(!existsSync(helper) || !["darwin", "linux"].includes(process.platform))(
+describe.skipIf(!existsSync(helper) || unprovable)(
   "operator seat real native socket boundary (requires native helper)",
   () => {
     it("binds only the launcher child and its nonce-bearing bridge, across refresh, restart and exits", async () => {
