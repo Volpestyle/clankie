@@ -343,6 +343,7 @@ async function startConnectorRelay(
           terminal: request.terminal,
           status: "read",
           text: "Updated the pricing cards.\nAll 12 checks passed.\n",
+          detail: "Earlier screen hidden until this agent prints something new.",
         };
       default:
         throw new Error(`unexpected ${request.op}`);
@@ -516,8 +517,13 @@ describe("Claude connector MCP endpoint", () => {
     const desktop = JSON.parse(
       textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr-core:t3", lines: 1 } })),
     );
-    expect(desktop).toEqual({ agent: "herdr-core:t3", text: "All 12 checks passed." });
-    expect(relay.seen).toContainEqual({ op: "herdr_core_read", schemaVersion: 1, terminal: "t3", lines: 1 });
+    // The service bounds the read to the agent's own output (ADR 0307); its note comes through.
+    expect(desktop).toEqual({
+      agent: "herdr-core:t3",
+      text: "All 12 checks passed.",
+      note: "Earlier screen hidden until this agent prints something new.",
+    });
+    expect(relay.seen).toContainEqual({ op: "herdr_core_read", schemaVersion: 1, terminal: "t3" });
     // It can't be messaged: herdr-core would type into its terminal (ADR 0207).
     const refused = await client.callTool({
       name: "message_agent",

@@ -774,11 +774,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
-      /** The text on one herdr-core agent's screen, with `lines` of history above it. Read-only. */
+      /**
+       * What the live agent in one herdr-core terminal showed since its first read, newest
+       * lines last, under the same scope as `terminal_read` (ADR 0307). Read-only.
+       */
       op: z.literal("herdr_core_read"),
       schemaVersion: z.literal(1),
       terminal: HerdrCoreTerminalSchema,
-      lines: z.number().int().min(0).max(2_000).optional(),
     })
     .strict(),
   z

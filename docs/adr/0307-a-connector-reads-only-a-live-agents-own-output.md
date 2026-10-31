@@ -59,6 +59,18 @@ agent showed.
   it on as `note`, so a lead sees why the read is empty instead of taking it
   for an empty pane. A new occupant gets a new anchor. Anchors live in the
   service's memory, per Herdr runner and terminal.
+- **The Herdr desktop app's agents are read the same way.** Its terminal
+  server, herdr-core (`hc`), keeps a status a program reported until the
+  terminal's own program ends, so an agent that exits back to its shell
+  leaves its last word behind. A herdr-core terminal has a live agent when its
+  program reported a status that still stands and the process in front is not
+  a shell (`terminal.get`'s `pid`, `argv` and `foreground`); the agent is the
+  terminal's own program unless that is a shell, else the process in front.
+  The occupant is the terminal, its root process and the agent's pid, checked
+  again after the read. `herdr_core_read` reads history and screen and passes
+  them through the same scope, with anchors kept per core and terminal, and
+  `herdr_core_list` lists only terminals that hold such an agent (added
+  2026-10-31).
 - **A refusal is final.** The connector's Herdr session source used to stream
   the screen when `terminal_read` did not answer `read`. It now streams only
   for a service that has no `terminal_read` at all; any answer from that op,
