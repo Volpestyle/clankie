@@ -481,9 +481,8 @@ describe("fleet routing", () => {
     expect(next.op === "terminal_read" && next.text).not.toContain("owner-again");
 
     // Once the lines it was anchored on are gone, scrolled out or redrawn, where the read starts
-    // can't be placed: that read shows nothing and anchors again. Later reads show what follows,
-    // with the pane's text from the first read still held back line by line, an agent line
-    // repeating that text included.
+    // can't be placed: that read shows nothing and anchors again, holding every row it saw.
+    // Later reads show only rows written below them.
     history = "TOKEN=owner-again\n Claude Code\n> hello\n Hi! What are we building?\n All done";
     screen = history;
     expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
@@ -491,7 +490,7 @@ describe("fleet routing", () => {
     screen = history;
     expect(await read()).toMatchObject({
       status: "read",
-      text: " Hi! What are we building?\n All done\n Next step",
+      text: " Next step",
       detail: HIDDEN,
     });
 
@@ -523,20 +522,25 @@ describe("fleet routing", () => {
       expect(later.op === "terminal_read" && later.text).not.toContain("TOKEN");
     }
 
-    // The owner's last line had no newline yet, and the agent's output carries on from it: the
-    // held-back text stays out of that line, on every later read.
-    foreground = [408];
-    history = "$ cat .env\nTOKEN=owner-eighth";
-    screen = history;
-    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
-    history = `${history}Claude Code\n Working`;
-    screen = history;
-    expect(await read()).toMatchObject({ status: "read", text: "Claude Code\n Working", detail: HIDDEN });
-    history = `${history}\n Done`;
-    screen = history;
-    const carried = await read();
-    expect(carried).toMatchObject({ text: "Claude Code\n Working\n Done" });
-    expect(carried.op === "terminal_read" && carried.text).not.toContain("TOKEN");
+    // The owner's last line had no newline yet, and the agent's output carries on from it or
+    // overwrites only its start: rows the first read saw stay hidden whatever they hold now.
+    for (const [pid, changed] of [
+      [408, (text: string) => `${text}Claude Code\n Working`],
+      [409, (text: string) => `${text.replace("TOKEN=owner-eighth", "HiKEN=owner-eighth")}\n Working`],
+    ] as const) {
+      foreground = [pid];
+      history = "$ cat .env\nTOKEN=owner-eighth";
+      screen = history;
+      expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+      history = changed(history);
+      screen = history;
+      expect(await read()).toMatchObject({ status: "read", text: " Working", detail: HIDDEN });
+      history = `${history}\n Done`;
+      screen = history;
+      const carried = await read();
+      expect(carried).toMatchObject({ text: " Working\n Done" });
+      expect(carried.op === "terminal_read" && carried.text).not.toContain("owner-eighth");
+    }
 
     // The agent exits and the shell takes the pane while it is being read: nothing read in that
     // gap is returned, and whoever comes next starts from their own first read.
@@ -549,7 +553,7 @@ describe("fleet routing", () => {
     expect(swapped).toMatchObject({ status: "unavailable" });
     expect(JSON.stringify(swapped)).not.toContain("TOKEN");
     midRead = undefined;
-    foreground = [409];
+    foreground = [410];
     expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
   });
 

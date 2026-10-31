@@ -53,46 +53,52 @@ const EARLIER_SCREEN_HIDDEN = "Earlier screen hidden until this agent prints som
  * so while anything is held back. A new occupant gets a new anchor.
  */
 export class AgentReadScope {
-  private readonly anchors = new Map<
-    string,
-    {
-      readonly occupant: string;
-      readonly anchor: readonly string[];
-      /** Text the pane held at this occupant's first read, never shown for it. */
-      readonly earlier: ReadonlySet<string>;
-      /** That read's last line, which output written after it can extend in place. */
-      readonly tail: string;
-    }
-  >();
+  private readonly anchors = new Map<string, Anchor>();
 
   public bound(terminalId: string, occupant: LiveAgentOccupant, history: string, screen: string): AgentRead {
     let entry = this.anchors.get(terminalId);
     if (entry?.occupant !== occupant.key) {
       entry = {
         occupant: occupant.key,
-        anchor: anchorAbove(history, screen),
+        ...placed(history, screen),
         earlier: written(history.split("\n")),
         tail: compact(history.split("\n").findLast((line) => line.trim().length > 0) ?? ""),
       };
       this.anchors.set(terminalId, entry);
+    } else if (entry.anchor.length === 0) {
+      // Everything fit on the first read's screen, so its rows were counted from the window's
+      // top. Once lines stand above the screen, anchor on them before the window can scroll.
+      const anchor = anchorAbove(history, screen);
+      const cut = after(history, anchor);
+      if (anchor.length > 0 && cut !== undefined) {
+        const above = history.split("\n").length - cut.split("\n").length;
+        entry = { ...entry, anchor, rows: Math.max(0, entry.rows - above) };
+        this.anchors.set(terminalId, entry);
+      }
     }
     const cut = after(history, entry.anchor);
     if (cut === undefined) {
       // The anchor is gone, scrolled out or redrawn away, so where this read starts can't be
-      // placed. Show nothing now and anchor again above the current screen; the text held at
-      // the first read stays held.
-      this.anchors.set(terminalId, { ...entry, anchor: anchorAbove(history, screen) });
+      // placed. Show nothing now and anchor again above the current screen, holding every row
+      // there; the text held at the first read stays held.
+      this.anchors.set(terminalId, { ...entry, ...placed(history, screen) });
       return { text: "", detail: EARLIER_SCREEN_HIDDEN };
     }
-    // Held back line by line too, so a line the first read held is never shown for this agent.
     const lines = cut.split("\n");
-    const { earlier, tail } = entry;
-    // A line that carries on the first read's last line keeps that line's text hidden too.
-    const kept = lines.filter((line) => !earlier.has(compact(line)));
+    const { earlier, tail, rows } = entry;
+    // Rows the first read saw stay hidden whatever they hold now: an agent can overwrite part of
+    // one in place, leaving the rest of the owner's text there. Only rows below them are new.
+    const fresh = lines.slice(rows);
+    // Held back line by line too, and a line that carries on the first read's last line keeps
+    // that line's text hidden, for reads placed after the anchor was lost.
+    const kept = fresh.filter((line) => !earlier.has(compact(line)));
     const shown = kept.map((line) => withoutPrefix(line, tail));
     // Blank lines left above the first shown one were the held-back text's spacing.
     const first = shown.findIndex((line) => line.trim().length > 0);
-    const held = shown.length < lines.length || shown.some((line, index) => line !== kept[index]);
+    const held =
+      shown.length < lines.length ||
+      lines.slice(0, rows).some((line) => line.trim().length > 0) ||
+      shown.some((line, index) => line !== kept[index]);
     return {
       text: (first < 0 ? [] : shown.slice(first)).join("\n"),
       ...(held ? { detail: EARLIER_SCREEN_HIDDEN } : {}),
@@ -103,6 +109,28 @@ export class AgentReadScope {
   public forget(terminalId: string): void {
     this.anchors.delete(terminalId);
   }
+}
+
+interface Anchor {
+  readonly occupant: string;
+  /** The few history lines above the screen when this occupant was placed. */
+  readonly anchor: readonly string[];
+  /** How many rows below the anchor held text then; they are never shown for this occupant. */
+  readonly rows: number;
+  /** Text the pane held at this occupant's first read, never shown for it. */
+  readonly earlier: ReadonlySet<string>;
+  /** That read's last line, which output written after it can extend in place. */
+  readonly tail: string;
+}
+
+/** An anchor above the screen, and how many rows below it hold text now. */
+function placed(
+  history: string,
+  screen: string,
+): { readonly anchor: readonly string[]; readonly rows: number } {
+  const anchor = anchorAbove(history, screen);
+  const below = (after(history, anchor) ?? history).split("\n");
+  return { anchor, rows: below.findLastIndex((line) => line.trim().length > 0) + 1 };
 }
 
 const scopes = new WeakMap<HerdrWatchRunner, AgentReadScope>();
