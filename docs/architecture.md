@@ -3,8 +3,9 @@
 Clankie is a persistent agent with a personality, implemented as one service
 plus the clients and connections around it. The service owns his built-in pi runtime,
 conversations, Auto, memory, tools, credentials, and authority. The React Native
-app in the private `clankie-app` repository reaches this service; the public
-gateway and accounts live in private `clankie-ops`. The service runs only on
+app in the private `clankie-app` repository reaches this service through the
+public gateway in `apps/gateway`, which private `clankie-ops` deploys beside the
+accounts ([ADR 0311](adr/0311-the-doorway-source-is-public.md)). The service runs only on
 machines the owner controls: their Mac, or a Linux host they run themselves
 ([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)). The app and
 console are clients of that service; a worker runtime and a work tracker are independent connections.
@@ -132,8 +133,9 @@ host-route table and transport boundary.
 Account sign-in (`clankie login` or `clankie remote-access on`) enrolls the host
 at that doorway. The service-side contracts are documented in
 [credentials](credentials.md) and [Linux deployment](../infra/hosted/README.md).
-Account and gateway deployment belong in the private operations repository
-([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)).
+The gateway source is `apps/gateway`; account and gateway deployment belong in
+the private operations repository
+([ADR 0311](adr/0311-the-doorway-source-is-public.md)).
 
 One body holds Clankie at a time
 ([ADR 0286](adr/0286-one-body-holds-clankie-at-a-time.md)). The self record
