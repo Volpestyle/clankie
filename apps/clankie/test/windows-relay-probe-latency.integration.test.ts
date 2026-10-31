@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { linkSshArgs } from "../src/fleet-link.ts";
 import { createHerdrFleetRun } from "../src/herdr-fleet.ts";
 import { RemoteFleetRelay } from "../src/remote-fleet-relay.ts";
-import { windowsFleetRelayCommand } from "../src/windows-fleet-relay.ts";
+import { windowsFleetRelayLaunch } from "../src/windows-fleet-relay.ts";
 import { windowsProcessCommand } from "../src/windows-process-probe.ts";
 
 // Manual, read-only: starts a private resident relay on an explicitly supplied
@@ -34,13 +34,11 @@ test.skipIf(!host)(
         });
         link.once("exit", () => reject(new Error("SSH link exited")));
       });
-      const child = spawn(
-        "ssh",
-        ["-T", "-o", "BatchMode=yes", "--", host!, windowsFleetRelayCommand(forwarded)],
-        {
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      );
+      const launch = windowsFleetRelayLaunch(forwarded);
+      const child = spawn("ssh", ["-T", "-o", "BatchMode=yes", "--", host!, launch.command], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      child.stdin.write(launch.stdin);
       child.stderr.resume();
       await new Promise<number>((ready) => {
         relay = new RemoteFleetRelay({ child, localPort: 9, ready, responseServer: server });

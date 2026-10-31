@@ -12,6 +12,14 @@ if (script.includes("[Console]::In.ReadLine()")) {
   let input = "";
   for await (const chunk of process.stdin) input += chunk.toString();
   script = Buffer.from(input, "base64").toString("utf8");
+} else if (script.includes("[Console]::OpenStandardInput()")) {
+  // The link relay's loader: a length-prefixed script on stdin, which stays open afterwards.
+  let input = Buffer.alloc(0);
+  for await (const chunk of process.stdin) {
+    input = Buffer.concat([input, chunk]);
+    if (input.length >= 4 && input.length >= 4 + input.readUInt32LE(0)) break;
+  }
+  script = input.subarray(4, 4 + input.readUInt32LE(0)).toString("utf8");
 }
 const entered = /clankie-entered-[a-f0-9]{16}/u.exec(script)?.[0];
 if (entered) process.stderr.write(entered + "\n");

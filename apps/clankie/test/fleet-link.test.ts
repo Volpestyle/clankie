@@ -273,7 +273,18 @@ describe("a fleet link (VUH-1527)", () => {
     const argv = vi.mocked(launch).mock.calls[0]![1] as string[];
     const reverse = argv[argv.indexOf("-R") + 1]!;
     const returnPort = Number(reverse.split(":").at(-1));
+    const delivered: Buffer[] = [];
+    remote.stdin.on("data", (chunk: Buffer) => delivered.push(chunk));
     forward.stderr.write("Allocated port 55000 for remote forward\n");
+    await vi.waitFor(() => expect(stream).toHaveBeenCalledOnce());
+    // cmd.exe, Windows OpenSSH's default shell, refuses a command line over 8,191 characters.
+    const relayCommand = (stream.mock.calls[0] as unknown as [string])[0];
+    expect(relayCommand.length).toBeLessThan(8_191);
+    expect(decoded(relayCommand)).toContain("OpenStandardInput");
+    await vi.waitFor(() => expect(delivered.length).toBeGreaterThan(0));
+    const script = Buffer.concat(delivered);
+    expect(script.readUInt32LE(0)).toBe(script.length - 4);
+    expect(script.subarray(4).toString("utf8")).toContain("[ClankieRelay]::Start(55000)");
     const frame = (kind: number, payload: Buffer, id = 0) => {
       const value = Buffer.alloc(9 + payload.length);
       value[0] = kind;
