@@ -106,6 +106,8 @@ jobs:
           key: landing-cargo-${{ runner.os }}-${{ hashFiles('apps/vox/Cargo.lock') }}
           restore-keys: landing-cargo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
+      # The gate's skills phase installs the pinned Herdr here; tests spawn it by name.
+      - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
       - name: Landing gate checks against the pull request's base
         run: |
           status=0
