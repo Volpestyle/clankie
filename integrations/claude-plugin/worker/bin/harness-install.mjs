@@ -411,6 +411,7 @@ async function installHarnessBridges(options) {
         const registered = known.clankie?.source;
         if (
           registered?.source === "directory" &&
+          // allow-swallowed-rejection -- A registered folder that no longer exists is added again below.
           (await realpath(registered.path).catch(() => undefined)) === (await realpath(marketplace))
         )
           await execute(harness, ["plugin", "marketplace", "update", "clankie"]);
