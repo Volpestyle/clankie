@@ -97,7 +97,7 @@ export interface CreateOperatorServiceContext {
   readonly fleetSnapshot: (options?: {
     includeCheckouts?: boolean;
   }) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
-  /** What the fleet can afford, from accounts and permits Clankie already tracks (ADR 0309). */
+  /** What the fleet can afford, from accounts and permits Clankie already tracks (ADR 0313). */
   readonly fleetCapacity?: () => Promise<
     Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]
   >;

@@ -1,4 +1,4 @@
-# ADR 0309: The connector can read what the fleet can afford
+# ADR 0313: The connector can read what the fleet can afford
 
 Status: Accepted by James, 2026-10-31. Amends
 [ADR 0301](0301-claude-reaches-the-fleet-through-a-narrow-connector.md).

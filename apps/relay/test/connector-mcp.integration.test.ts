@@ -952,6 +952,12 @@ describe("Claude connector MCP endpoint", () => {
       tier: "unknown",
     });
     expect(capacity.panes[0].contextTokens).toBe(1000);
+    // The same id list_agents gives, so read_agent takes it as it is.
+    expect(capacity.panes[0].agent).toBe("herdr:pc1/kh2");
+    const listed = JSON.parse(textOf(await client.callTool({ name: "list_agents", arguments: {} })));
+    expect(listed.agents.map((agent: { agent: string }) => agent.agent)).toContain(capacity.panes[0].agent);
+    const read = await client.callTool({ name: "read_agent", arguments: { agent: capacity.panes[0].agent } });
+    expect(read.isError).not.toBe(true);
     expect(capacity.heavy).toBe("unknown");
     expect(capacity.tracker).toBe("unknown");
   });

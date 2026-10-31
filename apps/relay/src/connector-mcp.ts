@@ -643,7 +643,13 @@ function connectorServer(
           throw new Error(`Unexpected ${result.op} result for fleet_capacity`);
         const capacity = FleetCapacitySchema.safeParse(result.result);
         if (!capacity.success) return failure("Clankie couldn't read fleet capacity.");
-        if (gate.herdr) return text(capacity.data);
+        // Pane rows name Herdr seats; qualify them the way list_agents does, so
+        // read_agent and message_agent take them as they are.
+        if (gate.herdr)
+          return text({
+            ...capacity.data,
+            panes: capacity.data.panes.map((pane) => ({ ...pane, agent: `herdr:${pane.agent}` })),
+          });
         return text({
           ...capacity.data,
           panes: [],

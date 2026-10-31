@@ -2,7 +2,7 @@ import { z } from "zod";
 import { FLEET_REVIEW_BUDGET } from "./worker-accounts.ts";
 
 /**
- * What a connected lead can read before it hires (ADR 0309). Every number is
+ * What a connected lead can read before it hires (ADR 0313). Every number is
  * one Clankie already recorded. A figure he does not have is the string
  * "unknown", never a filled-in estimate. Homes, emails, account keys and
  * credentials are not in this shape.

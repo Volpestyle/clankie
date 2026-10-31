@@ -705,7 +705,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       waitMs: z.number().int().min(0).max(OPERATOR_FLEET_WAIT_MS_MAX).optional(),
     })
     .strict(),
-  /** What the fleet can afford before a hire (ADR 0309). Read only. */
+  /** What the fleet can afford before a hire (ADR 0313). Read only. */
   z.object({ op: z.literal("fleet_capacity"), schemaVersion: z.literal(1) }).strict(),
   z
     .object({
