@@ -5,7 +5,9 @@ import { readdirSync, readFileSync, readlinkSync } from "node:fs";
  * account (real or effective UID) has an FD table this account cannot read,
  * because that table could hold the seat's socket (integrations/fleet-proof/README.md).
  * GitHub's hosted Linux runners always have two: systemd's non-dumpable
- * (sd-pam) and the runner's own root sudo. There a seat binding cannot be proven.
+ * (sd-pam) and the runner's own root sudo. There the binding cannot be proven,
+ * so a test that needs a proven socket owner skips there, and
+ * operator-seat-binding-native proves the refusal instead.
  */
 export function unreadableSameAccountThreads(): string[] {
   if (process.platform !== "linux") return [];

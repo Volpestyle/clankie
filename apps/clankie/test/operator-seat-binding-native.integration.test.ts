@@ -17,7 +17,7 @@ import {
   observeSocketProcess,
 } from "../src/local-fleet-process.ts";
 import { OperatorSeatBindings, seatNonceHash } from "../src/operator-seat-bindings.ts";
-import { unreadableSameAccountThreads } from "./helpers/native-census.ts";
+import { unreadableSameAccountThreads } from "./helpers/linux-census.ts";
 
 interface Fixture {
   role: string;
@@ -33,7 +33,8 @@ interface Reply {
 const helper = fleetProcessHelper();
 const nonce = "a".repeat(64);
 
-// GitHub's hosted Linux runners always have such threads, so there the refusal is what this file proves.
+// GitHub's hosted Linux runners always have such unreadable tables, so there the
+// binding cannot be proven, and the refusal is what this file proves.
 const unreadable = unreadableSameAccountThreads();
 
 describe.runIf(existsSync(helper) && unreadable.length > 0)(

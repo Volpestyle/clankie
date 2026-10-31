@@ -15,7 +15,7 @@ import type { ClankieAppDependencies } from "../src/app/types.ts";
 import { OperatorSeatBindings, seatNonceHash } from "../src/operator-seat-bindings.ts";
 import { OperatorSeatMigrations } from "../src/operator-seat-migrations.ts";
 import { SeatCallReceipts } from "../src/seat-call-receipts.ts";
-import { unreadableSameAccountThreads } from "./helpers/native-census.ts";
+import { unreadableSameAccountThreads } from "./helpers/linux-census.ts";
 import {
   fleetProcessHelper,
   observeNativeBirth,
