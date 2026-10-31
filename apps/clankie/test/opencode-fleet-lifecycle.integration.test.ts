@@ -250,7 +250,9 @@ async function fixture(
         // This fixture owns both TCP ends in this PID. Keep the real positive
         // socket ownership proof; skip unrelated filesystem stat/readlink probes
         // with -b because cwd and process birth are already golden inputs above.
-        sample = execute(file, ["-b", "-p", String(process.pid), ...args]).then((result) => result.stdout);
+        // The host is pinned to Darwin's /usr/sbin/lsof; Linux ships it in /usr/bin.
+        const lsof = file === "/usr/sbin/lsof" && process.platform === "linux" ? "/usr/bin/lsof" : file;
+        sample = execute(lsof, ["-b", "-p", String(process.pid), ...args]).then((result) => result.stdout);
         socketSamples.set(key, sample);
       }
       return sample;
@@ -622,102 +624,90 @@ async function fixture(
   };
 }
 
-// The native host here runs as on darwin and its sockets live under /private/tmp (the 104-byte
-// UNIX socket bound), so these run on the owner's Mac and in release checks, not on Linux.
-const darwinTest = test.skipIf(process.platform !== "darwin");
+test("a hire without an explicit brief delivers resolved working preferences through the real native channel once", async () => {
+  const f = await fixture({ preferencesOnly: true });
+  expect(f.hired.deliveryStage).toBe("consumed");
+  expect(f.receivedBriefs).toHaveLength(1);
+  const brief = f.receivedBriefs[0]!;
+  expect(brief).toContain("Working preferences for this assignment:");
+  expect(brief).toContain("Commit: owner.");
+  expect(brief).toContain("Push: lead.");
+  expect(brief).toContain("Release: time_rule.");
+  expect(brief).toContain("After one week with changes.");
+  expect(brief).not.toContain("Verification:");
+  expect(brief).not.toContain("Reporting style:");
+  expect(brief).toContain("not tool, account or machine authority");
+  expect(brief).toContain("Do not run evals");
+  expect(
+    brief.match(/report in the resolved reporting style that the lead can act on without your transcript/gu),
+  ).toHaveLength(1);
+  const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+  expect(roster.op).toBe("roster");
+  expect(f.receivedBriefs).toHaveLength(1);
+});
 
-darwinTest(
-  "a hire without an explicit brief delivers resolved working preferences through the real native channel once",
-  async () => {
-    const f = await fixture({ preferencesOnly: true });
-    expect(f.hired.deliveryStage).toBe("consumed");
-    expect(f.receivedBriefs).toHaveLength(1);
-    const brief = f.receivedBriefs[0]!;
-    expect(brief).toContain("Working preferences for this assignment:");
-    expect(brief).toContain("Commit: owner.");
-    expect(brief).toContain("Push: lead.");
-    expect(brief).toContain("Release: time_rule.");
-    expect(brief).toContain("After one week with changes.");
-    expect(brief).not.toContain("Verification:");
-    expect(brief).not.toContain("Reporting style:");
-    expect(brief).toContain("not tool, account or machine authority");
-    expect(brief).toContain("Do not run evals");
-    expect(
-      brief.match(
-        /report in the resolved reporting style that the lead can act on without your transcript/gu,
-      ),
-    ).toHaveLength(1);
+test("native prepared hire survives real census/roster reconciliation and exits only its original TUI", async () => {
+  const f = await fixture({ preferencesOnly: true });
+  const expected = f.hired.seat;
+  expect(f.pane.name).toBeDefined();
+  expect(f.pane.label).toBe("Oriana Vale · tester");
+  for (const title of ["OC | native-integration", "OC | Changed native task title"]) {
+    f.pane.terminal_title = title;
     const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
-    expect(roster.op).toBe("roster");
-    expect(f.receivedBriefs).toHaveLength(1);
-  },
-);
-
-darwinTest(
-  "native prepared hire survives real census/roster reconciliation and exits only its original TUI",
-  async () => {
-    const f = await fixture({ preferencesOnly: true });
-    const expected = f.hired.seat;
-    expect(f.pane.name).toBeDefined();
-    expect(f.pane.label).toBe("Oriana Vale · tester");
-    for (const title of ["OC | native-integration", "OC | Changed native task title"]) {
-      f.pane.terminal_title = title;
-      const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
-      if (roster.op !== "roster") throw new Error("roster expected");
-      expect(roster.seats).toHaveLength(2);
-      const own = roster.seats.find((seat) => seat.seatId === expected.seatId);
-      expect(own).toMatchObject({
-        seatId: expected.seatId,
-        personaId: expected.personaId,
-        conversationId: expected.conversationId,
-        title: "Oriana Vale",
-      });
-      // Census injection deliberately skips ambient enrichment in Captain tests.
-      // Cross the registered native DB/enrichment boundary with those real rows.
-      const observed = await readFleet({ runCommand: f.census, summaries: {} });
-      const enriched = await withSeatSubagents(
-        roster.seats,
-        observed.seats,
-        (seat) => seat.conversationId === expected.conversationId,
-        undefined,
-        (session) => f.sessions.subagents!(`local:${session.value}`),
-      );
-      const ownEnriched = enriched.find((seat) => seat.seatId === expected.seatId);
-      const other = enriched.find((seat) => seat.seatId === "term_unaddressed456");
-      expect(other?.subagents).toBeUndefined();
-      expect(other?.conversationId).toBeUndefined();
-      expect(ownEnriched?.subagents).toMatchObject({
-        recent: [
-          {
-            id: "call_YDhIpf2dXavUjmaEQVxAtG76",
-            label: "general: Lifecycle proof",
-            startedAt: "2026-10-04T21:04:56.370Z",
-            status: title === "OC | native-integration" ? "running" : "done",
-          },
-        ],
-      });
-      if (title === "OC | native-integration") {
-        expect(ownEnriched?.subagents?.running).toBe(1);
-        f.completeTask();
-      } else {
-        expect(ownEnriched?.subagents?.running).toBe(0);
-        expect(ownEnriched?.subagents?.recent[0]?.endedAt).toBe("2026-10-04T21:06:04.419Z");
-      }
+    if (roster.op !== "roster") throw new Error("roster expected");
+    expect(roster.seats).toHaveLength(2);
+    const own = roster.seats.find((seat) => seat.seatId === expected.seatId);
+    expect(own).toMatchObject({
+      seatId: expected.seatId,
+      personaId: expected.personaId,
+      conversationId: expected.conversationId,
+      title: "Oriana Vale",
+    });
+    // Census injection deliberately skips ambient enrichment in Captain tests.
+    // Cross the registered native DB/enrichment boundary with those real rows.
+    const observed = await readFleet({ runCommand: f.census, summaries: {} });
+    const enriched = await withSeatSubagents(
+      roster.seats,
+      observed.seats,
+      (seat) => seat.conversationId === expected.conversationId,
+      undefined,
+      (session) => f.sessions.subagents!(`local:${session.value}`),
+    );
+    const ownEnriched = enriched.find((seat) => seat.seatId === expected.seatId);
+    const other = enriched.find((seat) => seat.seatId === "term_unaddressed456");
+    expect(other?.subagents).toBeUndefined();
+    expect(other?.conversationId).toBeUndefined();
+    expect(ownEnriched?.subagents).toMatchObject({
+      recent: [
+        {
+          id: "call_YDhIpf2dXavUjmaEQVxAtG76",
+          label: "general: Lifecycle proof",
+          startedAt: "2026-10-04T21:04:56.370Z",
+          status: title === "OC | native-integration" ? "running" : "done",
+        },
+      ],
+    });
+    if (title === "OC | native-integration") {
+      expect(ownEnriched?.subagents?.running).toBe(1);
+      f.completeTask();
+    } else {
+      expect(ownEnriched?.subagents?.running).toBe(0);
+      expect(ownEnriched?.subagents?.recent[0]?.endedAt).toBe("2026-10-04T21:06:04.419Z");
     }
-    expect(
-      await f.captain.serveOperatorConversation({
-        schemaVersion: 1,
-        op: "close_seat",
-        seatId: expected.seatId,
-      }),
-    ).toMatchObject({ closed: true });
-    expect(f.counts()).toEqual({ exitCommands: 1, physicalCloses: 0 });
-    const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
-    expect(roster).toMatchObject({ seats: [{ seatId: "term_unaddressed456" }] });
-  },
-);
+  }
+  expect(
+    await f.captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "close_seat",
+      seatId: expected.seatId,
+    }),
+  ).toMatchObject({ closed: true });
+  expect(f.counts()).toEqual({ exitCommands: 1, physicalCloses: 0 });
+  const roster = await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+  expect(roster).toMatchObject({ seats: [{ seatId: "term_unaddressed456" }] });
+});
 
-darwinTest("a switched native session cannot exit through the previously hired seat", async () => {
+test("a switched native session cannot exit through the previously hired seat", async () => {
   const f = await fixture();
   f.switchRoute();
   expect(
@@ -749,78 +739,83 @@ async function remoteFollowup(f: Awaited<ReturnType<typeof fixture>>, brief = "S
   return result;
 }
 
-darwinTest(
-  "SSH native hire, API history and follow-up reuse the original controller without local allocation",
-  async () => {
-    const f = await fixture({ remote: true });
-    const host = f.ssh!.fleet.id;
-    expect(f.hired.seat.seatId).toBe(host + "/term_native123");
-    expect(f.hired.control).toMatchObject({ mode: "adapter" });
-    expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
-    const db = new DatabaseSync(f.database);
-    try {
-      db.exec("PRAGMA foreign_keys=OFF");
-      db.prepare("INSERT INTO message VALUES(?,?,?,?,?)").run(
-        "msg_remoteText123",
-        "ses_nativeWorker123",
-        3,
-        3,
-        JSON.stringify({ role: "assistant", time: { created: 3, completed: 4 } }),
-      );
-      db.prepare("INSERT INTO part VALUES(?,?,?,?,?,?)").run(
-        "prt_remoteText123",
-        "msg_remoteText123",
-        "ses_nativeWorker123",
-        3,
-        3,
-        JSON.stringify({ type: "text", text: "Remote stored fixture" }),
-      );
-    } finally {
-      db.close();
-    }
-    const page = await f.sessions.read(host + ":ses_nativeWorker123");
-    expect(page.session).toMatchObject({ ref: host + ":ses_nativeWorker123", host, harness: "opencode" });
-    expect(
-      page.entries.some((entry) => entry.type === "message" && entry.text === "Remote stored fixture"),
-    ).toBe(true);
-    expect((await f.sessions.list({ host })).sessions).toEqual([
-      expect.objectContaining({ ref: host + ":ses_nativeWorker123", host, harness: "opencode" }),
-    ]);
-    // Resume must observe native pickup too, rather than spending the pickup
-    // window on a fixture SDK that remains idle forever.
-    f.startNextPrompt();
-    const reused = await remoteFollowup(f);
-    expect(reused).toMatchObject({ result: { outcome: "spawned", seat: { seatId: f.hired.seat.seatId } } });
-    expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
-    expect(f.reportedStates).toContain("working");
-    f.finishPrompt();
-    expect(
-      f.ssh!.commands.some(
-        (command) => command.includes("ControlPath=none") && command.includes("127.0.0.1:0:127.0.0.1:"),
-      ),
-    ).toBe(true);
-    expect(f.ssh!.commands.some((command) => command.includes("opencode serve"))).toBe(false);
-    const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
-    const message = bank.tools.find((tool) => tool.name === "message_seat")!;
-    // Model native pickup at the SDK boundary, then let the real controller
-    // report it to Herdr. An eternally idle fixture spends the full pickup wait.
-    f.startNextPrompt();
-    const receipt = await message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
-    expect(receipt.isError).not.toBe(true);
-    expect(JSON.parse((receipt.content[0] as { text: string }).text)).toMatchObject({
-      outcome: "delivered",
-      deliveryStage: "consumed",
-      seatId: f.hired.seat.seatId,
-      status: "working",
-    });
-    expect(f.reportedStates).toContain("working");
-    // VUH-2036: a lead's messages to a hire arrive numbered.
-    expect(f.receivedBriefs.at(-1)).toMatch(
-      /^\[Lead message #1 from conversation .+\]\n\nNative remote message$/u,
+// The remote helper serves only a Darwin remote host (remote-opencode-helper.ts
+// refuses `initialize` elsewhere), and this fixture runs it in this process. So
+// the SSH cases below can prove something only on a Mac; elsewhere they would
+// only test that refusal.
+const notMac = process.platform !== "darwin";
+const REMOTE_HELPER_DARWIN_ONLY = "the remote OpenCode helper serves only a Darwin host";
+
+test("SSH native hire, API history and follow-up reuse the original controller without local allocation", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+  const f = await fixture({ remote: true });
+  const host = f.ssh!.fleet.id;
+  expect(f.hired.seat.seatId).toBe(host + "/term_native123");
+  expect(f.hired.control).toMatchObject({ mode: "adapter" });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+  const db = new DatabaseSync(f.database);
+  try {
+    db.exec("PRAGMA foreign_keys=OFF");
+    db.prepare("INSERT INTO message VALUES(?,?,?,?,?)").run(
+      "msg_remoteText123",
+      "ses_nativeWorker123",
+      3,
+      3,
+      JSON.stringify({ role: "assistant", time: { created: 3, completed: 4 } }),
     );
-    expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
-  },
-);
+    db.prepare("INSERT INTO part VALUES(?,?,?,?,?,?)").run(
+      "prt_remoteText123",
+      "msg_remoteText123",
+      "ses_nativeWorker123",
+      3,
+      3,
+      JSON.stringify({ type: "text", text: "Remote stored fixture" }),
+    );
+  } finally {
+    db.close();
+  }
+  const page = await f.sessions.read(host + ":ses_nativeWorker123");
+  expect(page.session).toMatchObject({ ref: host + ":ses_nativeWorker123", host, harness: "opencode" });
+  expect(
+    page.entries.some((entry) => entry.type === "message" && entry.text === "Remote stored fixture"),
+  ).toBe(true);
+  expect((await f.sessions.list({ host })).sessions).toEqual([
+    expect.objectContaining({ ref: host + ":ses_nativeWorker123", host, harness: "opencode" }),
+  ]);
+  // Resume must observe native pickup too, rather than spending the pickup
+  // window on a fixture SDK that remains idle forever.
+  f.startNextPrompt();
+  const reused = await remoteFollowup(f);
+  expect(reused).toMatchObject({ result: { outcome: "spawned", seat: { seatId: f.hired.seat.seatId } } });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
+  expect(f.reportedStates).toContain("working");
+  f.finishPrompt();
+  expect(
+    f.ssh!.commands.some(
+      (command) => command.includes("ControlPath=none") && command.includes("127.0.0.1:0:127.0.0.1:"),
+    ),
+  ).toBe(true);
+  expect(f.ssh!.commands.some((command) => command.includes("opencode serve"))).toBe(false);
+  const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
+  const message = bank.tools.find((tool) => tool.name === "message_seat")!;
+  // Model native pickup at the SDK boundary, then let the real controller
+  // report it to Herdr. An eternally idle fixture spends the full pickup wait.
+  f.startNextPrompt();
+  const receipt = await message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
+  expect(receipt.isError).not.toBe(true);
+  expect(JSON.parse((receipt.content[0] as { text: string }).text)).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "consumed",
+    seatId: f.hired.seat.seatId,
+    status: "working",
+  });
+  expect(f.reportedStates).toContain("working");
+  // VUH-2036: a lead's messages to a hire arrive numbered.
+  expect(f.receivedBriefs.at(-1)).toMatch(
+    /^\[Lead message #1 from conversation .+\]\n\nNative remote message$/u,
+  );
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 3 });
+});
 
 function waitForPendingReport<T>(waiting: Promise<void>, sending: Promise<T>): Promise<void> {
   return Promise.race([
@@ -831,61 +826,59 @@ function waitForPendingReport<T>(waiting: Promise<void>, sending: Promise<T>): P
   ]);
 }
 
-darwinTest(
-  "SSH native follow-up keeps its original controller while a valid Herdr reply is pending",
-  async (context) => {
-    const started = performance.now();
-    const stages: { stage: string; elapsedMs: number }[] = [];
-    const stage = (name: string) => {
-      const observation = { stage: name, elapsedMs: performance.now() - started };
-      stages.push(observation);
-      if (process.env.LIFECYCLE_STAGE_TRACE) console.log(JSON.stringify(observation));
-    };
-    context.onTestFailed(() => console.error("Pending SSH follow-up stages", JSON.stringify(stages)));
-    const f = await fixture({ remote: true });
-    stage("hired");
-    // This message is the follow-up whose pending native reply we exercise.
-    // The preceding SSH case separately proves resume and history reuse.
-    const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
-    const message = bank.tools.find((tool) => tool.name === "message_seat")!;
-    const before = f.ssh!.transportState().filter((entry) => !entry.closed);
-    expect(before.some((entry) => entry.kind === "helper")).toBe(true);
-    expect(before.some((entry) => entry.kind === "forward")).toBe(true);
-    const barrier = f.pauseNextReport();
-    f.startNextPrompt();
-    const sending = message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
-    void sending.catch(() => {});
-    try {
-      stage("sending");
-      await waitForPendingReport(barrier.waiting, sending);
-      stage("report-pending");
-      // Herdr permits ten seconds for this native request. A valid response
-      // after four seconds must not retire its otherwise unchanged controller.
-      await new Promise((resolve) => setTimeout(resolve, 4_250));
-      stage("delay-finished");
-      const held = f.ssh!.transportState();
-      barrier.resume();
-      const receipt = await sending;
-      stage("delivered");
-      const delivery = JSON.parse((receipt.content[0] as { text: string }).text);
-      for (const entry of before)
-        expect(held.find((current) => current.id === entry.id)).toMatchObject({ closed: false });
-      expect(receipt.isError).not.toBe(true);
-      expect(delivery).toMatchObject({
-        outcome: "delivered",
-        deliveryStage: "consumed",
-        seatId: f.hired.seat.seatId,
-        status: "working",
-      });
-      expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
-    } finally {
-      barrier.resume();
-      await sending.catch(() => undefined);
-    }
-  },
-);
+test("SSH native follow-up keeps its original controller while a valid Herdr reply is pending", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+  const started = performance.now();
+  const stages: { stage: string; elapsedMs: number }[] = [];
+  const stage = (name: string) => {
+    const observation = { stage: name, elapsedMs: performance.now() - started };
+    stages.push(observation);
+    if (process.env.LIFECYCLE_STAGE_TRACE) console.log(JSON.stringify(observation));
+  };
+  context.onTestFailed(() => console.error("Pending SSH follow-up stages", JSON.stringify(stages)));
+  const f = await fixture({ remote: true });
+  stage("hired");
+  // This message is the follow-up whose pending native reply we exercise.
+  // The preceding SSH case separately proves resume and history reuse.
+  const bank = await f.captain.laneToolBank("operator", f.created.conversation.conversationId);
+  const message = bank.tools.find((tool) => tool.name === "message_seat")!;
+  const before = f.ssh!.transportState().filter((entry) => !entry.closed);
+  expect(before.some((entry) => entry.kind === "helper")).toBe(true);
+  expect(before.some((entry) => entry.kind === "forward")).toBe(true);
+  const barrier = f.pauseNextReport();
+  f.startNextPrompt();
+  const sending = message.call({ seat: f.hired.seat.seatId, message: "Native remote message" });
+  void sending.catch(() => {});
+  try {
+    stage("sending");
+    await waitForPendingReport(barrier.waiting, sending);
+    stage("report-pending");
+    // Herdr permits ten seconds for this native request. A valid response
+    // after four seconds must not retire its otherwise unchanged controller.
+    await new Promise((resolve) => setTimeout(resolve, 4_250));
+    stage("delay-finished");
+    const held = f.ssh!.transportState();
+    barrier.resume();
+    const receipt = await sending;
+    stage("delivered");
+    const delivery = JSON.parse((receipt.content[0] as { text: string }).text);
+    for (const entry of before)
+      expect(held.find((current) => current.id === entry.id)).toMatchObject({ closed: false });
+    expect(receipt.isError).not.toBe(true);
+    expect(delivery).toMatchObject({
+      outcome: "delivered",
+      deliveryStage: "consumed",
+      seatId: f.hired.seat.seatId,
+      status: "working",
+    });
+    expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
+  } finally {
+    barrier.resume();
+    await sending.catch(() => undefined);
+  }
+});
 
-darwinTest.each([
+test.for([
   "birth",
   "uid",
   "socket-owner",
@@ -895,117 +888,113 @@ darwinTest.each([
   "windows",
   "link-loss",
   "session",
-])("remote %s change refuses follow-up/reuse without another writer or local fallback", async (mode) => {
-  const f = await fixture({ remote: true });
-  if (mode === "session") f.switchRoute();
-  else f.ssh!.mutate(mode);
-  const result = await remoteFollowup(f);
-  expect(result).toMatchObject({ result: { outcome: "failed" } });
-  if (result.op === "spawn_seat" && result.result.outcome === "failed")
-    expect(result.result.detail).not.toContain("Hire from a project conversation");
-  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
-  expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
-});
-
-darwinTest(
-  "the global operator seat hires on a linked machine only into a registered project workspace",
-  async () => {
-    // Live repro on 4b9c935f: the operator seat has no project of its own, so the remote
-    // destination is proven by the owner's registration on the fleet's machine.
-    const f = await fixture({ remote: true, operatorSeat: true });
-    expect(f.created.conversation.scope).toEqual({ kind: "global" });
-    expect(f.hired.seat.seatId).toBe(f.ssh!.fleet.id + "/term_native123");
-    expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
-
-    const hire = (workingDirectory: string, projectId?: string) =>
-      f.captain.serveOperatorConversation({
-        schemaVersion: 1,
-        op: "spawn_seat",
-        conversationId: f.created.conversation.conversationId,
-        seat: {
-          schemaVersion: 1,
-          harness: "opencode",
-          title: "Remote Stranger",
-          model: "openai/gpt-6-sol",
-          effort: "low",
-          effortReason: "Verify refusal outside the registered remote project workspace.",
-          workingDirectory,
-          fleet: f.ssh!.fleet.id,
-          ...(projectId === undefined ? {} : { projectId }),
-        },
-        brief: "Must not launch",
-      });
-    // A registered path named under another project is not re-labelled.
-    expect(await hire(f.root, "home")).toMatchObject({
-      result: { outcome: "failed", reason: "not_ready", detail: expect.stringContaining("does not match") },
-    });
-    // Once the owner's registration no longer covers this folder, nothing proves its project.
-    await f.settings.update((current) => ({
-      ...current,
-      projects: {
-        ...current.projects,
-        projects: current.projects.projects.map((project) =>
-          project.id === "remote-app"
-            ? { ...project, workspaces: [{ ...project.workspaces[0]!, path: join(f.root, "nested") }] }
-            : project,
-        ),
-      },
-    }));
-    const refused = await hire(f.root);
-    expect(refused).toMatchObject({ result: { outcome: "failed", reason: "not_ready" } });
-    if (refused.op !== "spawn_seat" || refused.result.outcome !== "failed")
-      throw new Error("refusal expected");
-    expect(refused.result.detail).toContain(
-      `clankie project add PROJECT --workspace "${f.root}" --machine ${f.ssh!.fleet.id} --platform posix`,
-    );
+])(
+  "remote %s change refuses follow-up/reuse without another writer or local fallback",
+  async (mode, context) => {
+    context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+    const f = await fixture({ remote: true });
+    if (mode === "session") f.switchRoute();
+    else f.ssh!.mutate(mode);
+    const result = await remoteFollowup(f);
+    expect(result).toMatchObject({ result: { outcome: "failed" } });
+    if (result.op === "spawn_seat" && result.result.outcome === "failed")
+      expect(result.result.detail).not.toContain("Hire from a project conversation");
     expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
     expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
   },
 );
 
-darwinTest(
-  "conflicting host and fleet SSH identities refuse every native history API before transport",
-  async () => {
-    const f = await fixture({ remote: true });
-    const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
-    await f.settings.update((current) => ({
-      ...current,
-      agentHosts: { connections: [{ id: f.ssh!.fleet.id, ssh: "fixture@other", shell: "posix" }] },
-    }));
-    const count = f.ssh!.commands.length;
-    await expect(f.sessions.hosts()).rejects.toThrow("identities conflict");
-    await expect(f.sessions.list()).rejects.toThrow("identities conflict");
-    await expect(f.sessions.read(ref)).rejects.toThrow("identities conflict");
-    await expect(f.sessions.resolve(ref)).rejects.toThrow("identities conflict");
-    expect(f.ssh!.commands).toHaveLength(count);
-  },
-);
+test("the global operator seat hires on a linked machine only into a registered project workspace", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+  // Live repro on 4b9c935f: the operator seat has no project of its own, so the remote
+  // destination is proven by the owner's registration on the fleet's machine.
+  const f = await fixture({ remote: true, operatorSeat: true });
+  expect(f.created.conversation.scope).toEqual({ kind: "global" });
+  expect(f.hired.seat.seatId).toBe(f.ssh!.fleet.id + "/term_native123");
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
 
-darwinTest(
-  "lost native send receipt over SSH is not replayed by a repeated live-session follow-up",
-  async () => {
-    const f = await fixture({ remote: true });
-    f.loseSend();
-    expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
-    expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
-    expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
-  },
-);
+  const hire = (workingDirectory: string, projectId?: string) =>
+    f.captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "spawn_seat",
+      conversationId: f.created.conversation.conversationId,
+      seat: {
+        schemaVersion: 1,
+        harness: "opencode",
+        title: "Remote Stranger",
+        model: "openai/gpt-6-sol",
+        effort: "low",
+        effortReason: "Verify refusal outside the registered remote project workspace.",
+        workingDirectory,
+        fleet: f.ssh!.fleet.id,
+        ...(projectId === undefined ? {} : { projectId }),
+      },
+      brief: "Must not launch",
+    });
+  // A registered path named under another project is not re-labelled.
+  expect(await hire(f.root, "home")).toMatchObject({
+    result: { outcome: "failed", reason: "not_ready", detail: expect.stringContaining("does not match") },
+  });
+  // Once the owner's registration no longer covers this folder, nothing proves its project.
+  await f.settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: current.projects.projects.map((project) =>
+        project.id === "remote-app"
+          ? { ...project, workspaces: [{ ...project.workspaces[0]!, path: join(f.root, "nested") }] }
+          : project,
+      ),
+    },
+  }));
+  const refused = await hire(f.root);
+  expect(refused).toMatchObject({ result: { outcome: "failed", reason: "not_ready" } });
+  if (refused.op !== "spawn_seat" || refused.result.outcome !== "failed") throw new Error("refusal expected");
+  expect(refused.result.detail).toContain(
+    `clankie project add PROJECT --workspace "${f.root}" --machine ${f.ssh!.fleet.id} --platform posix`,
+  );
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+  expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
+});
 
-darwinTest(
-  "stored remote history grants no cold controller adoption, and unknown hosts do not read local history",
-  async () => {
-    const f = await fixture({ remote: true });
-    const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
-    f.ssh!.mutate("link-loss");
-    expect(await f.sessions.read(ref)).toMatchObject({ session: { ref, harness: "opencode" } });
-    await expect(f.sessions.read("unknown:ses_nativeWorker123")).rejects.toThrow("Unknown remote");
-    expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
-    expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
-  },
-);
+test("conflicting host and fleet SSH identities refuse every native history API before transport", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+  const f = await fixture({ remote: true });
+  const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
+  await f.settings.update((current) => ({
+    ...current,
+    agentHosts: { connections: [{ id: f.ssh!.fleet.id, ssh: "fixture@other", shell: "posix" }] },
+  }));
+  const count = f.ssh!.commands.length;
+  await expect(f.sessions.hosts()).rejects.toThrow("identities conflict");
+  await expect(f.sessions.list()).rejects.toThrow("identities conflict");
+  await expect(f.sessions.read(ref)).rejects.toThrow("identities conflict");
+  await expect(f.sessions.resolve(ref)).rejects.toThrow("identities conflict");
+  expect(f.ssh!.commands).toHaveLength(count);
+});
 
-darwinTest("history-first native hire keeps Captain admission during a prepare drop and return", async () => {
+test("lost native send receipt over SSH is not replayed by a repeated live-session follow-up", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+  const f = await fixture({ remote: true });
+  f.loseSend();
+  expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
+  expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 2 });
+});
+
+test("stored remote history grants no cold controller adoption, and unknown hosts do not read local history", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
+  const f = await fixture({ remote: true });
+  const ref = f.ssh!.fleet.id + ":ses_nativeWorker123";
+  f.ssh!.mutate("link-loss");
+  expect(await f.sessions.read(ref)).toMatchObject({ session: { ref, harness: "opencode" } });
+  await expect(f.sessions.read("unknown:ses_nativeWorker123")).rejects.toThrow("Unknown remote");
+  expect(await remoteFollowup(f)).toMatchObject({ result: { outcome: "failed" } });
+  expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
+});
+
+test("history-first native hire keeps Captain admission during a prepare drop and return", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   // Cache admission is independent of concurrent project role journal writes.
   const f = await fixture({ remote: true, historyFirst: true, assignRole: false });
   const ssh = f.ssh!;
@@ -1040,7 +1029,8 @@ darwinTest("history-first native hire keeps Captain admission during a prepare d
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
 });
 
-darwinTest("Captain-first history works after a reconnect without adopting its old controller", async () => {
+test("Captain-first history works after a reconnect without adopting its old controller", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true, assignRole: false });
   const ssh = f.ssh!;
   const ref = ssh.fleet.id + ":ses_nativeWorker123";
@@ -1057,7 +1047,8 @@ darwinTest("Captain-first history works after a reconnect without adopting its o
   expect(f.deliveries()).toEqual({ layouts: 1, messages: 1 });
 });
 
-darwinTest("advancing a fleet revision closes and evicts the old helper and SSH forward", async () => {
+test("advancing a fleet revision closes and evicts the old helper and SSH forward", async (context) => {
+  context.skip(notMac, REMOTE_HELPER_DARWIN_ONLY);
   const f = await fixture({ remote: true, historyFirst: true, assignRole: false });
   const ssh = f.ssh!;
   const old = ssh.workers.forFleet(ssh.fleet, async () => {}, 0);
