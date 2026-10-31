@@ -30,6 +30,10 @@ import {
 } from "@clankie/settings";
 import { WatchingMachineRefused } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
+import {
+  createOperatorService,
+  type CreateOperatorServiceContext,
+} from "../src/captain/captain-operator-service.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { createCaptainModelRuntime } from "../src/captain/model.ts";
@@ -319,3 +323,48 @@ it("Watch removes no worktree, even through the prune route a lead or worker can
   expect(JSON.stringify(pruned)).toContain("only watching");
   await expect(stat(tree)).resolves.toBeDefined();
 });
+
+it.each([
+  ["with unlanded work still to check", undefined],
+  ["with a recorded reason to leave unlanded work", "landed elsewhere"],
+])(
+  "Watch chosen while a seat close is under way stops it before the exit (%s)",
+  async (_, unlandedReason) => {
+    const { settings, dial } = await fixture();
+    const exits: string[] = [];
+    const serve = createOperatorService({
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: settings,
+      settings: () => settings.load(),
+      deps: {},
+      herdrWatches: {
+        tidy: {
+          // The owner chooses Watch while the close waits on its worktree check.
+          seatWorktreeHold: async () => {
+            await dial("watch");
+            return [];
+          },
+        },
+        // Herdr's own close: the guard runs right before the exit, and a refusal closes nothing.
+        closeSeat: async (seatId: string, guard?: () => Promise<void>) => {
+          try {
+            await guard?.();
+          } catch {
+            return false;
+          }
+          exits.push(seatId);
+          return true;
+        },
+      },
+    } as unknown as CreateOperatorServiceContext);
+    const result = await serve({
+      op: "close_seat",
+      schemaVersion: 1,
+      seatId: "w1:p1",
+      ...(unlandedReason === undefined ? {} : { unlandedReason }),
+    });
+    expect(result).toMatchObject({ op: "close_seat", closed: false });
+    expect(exits).toEqual([]);
+  },
+);

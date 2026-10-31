@@ -58,7 +58,8 @@ changes nothing.
 - **Restarts and tidying.** Lead relaunches (fresh restart, failover,
   failback), hired-seat restarts, auto-tidy closes and worktree prunes, the
   operator's close, and the evaluator all stop. A prune asked for by name
-  through the service is refused too, before any tree is touched.
+  through the service is refused too, before any tree is touched, and a close
+  already under way asks again right before the worker exits.
 - **Connected apps.** A connected app cannot answer a prompt in a worker's
   pane.
 - **Trackers.** No tracker write by Clankie, a lead or a worker goes through
