@@ -9,7 +9,9 @@
 // same test files on the base commit in a scratch worktree, and exits 0 only
 // when every failure also fails there. A failure the base does not have, a test
 // file the base does not have, or a report it cannot read exits 1, so a change
-// still fails on anything it newly breaks. Failures the base shares are printed
+// still fails on anything it newly breaks. So does a file that failed outside
+// any test (a load error or a failed hook): the report cannot say which error
+// it was, so it is never matched with the base. Failures the base shares are printed
 // as warnings: they belong to main, and the lead files and fixes them there.
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -27,6 +29,7 @@ const git = (...command) => execFileSync("git", command, { cwd: root, encoding: 
 const base = git("rev-parse", "--verify", `${value("--base")}^{commit}`);
 const reportPath = resolve(value("--report"));
 
+const FILE_FAILURE = "> (failed outside a test)";
 const reporter = join(root, "scripts", "testing", "release-test-reporter.mjs");
 
 /** Failed tests in a complete run report, as `file > full name`, plus files that failed outside a test. */
@@ -54,7 +57,7 @@ const failures = (path) => {
     const tests = (file.tests ?? []).filter((test) => test.state === "failed");
     for (const test of tests) failed.add(`${file.path} > ${test.name}`);
     // A suite that failed to load or failed in a hook has no failed test to name.
-    if (file.state === "failed" && !tests.length) failed.add(`${file.path} > (file)`);
+    if (file.state === "failed" && !tests.length) failed.add(`${file.path} ${FILE_FAILURE}`);
   }
   return failed;
 };
@@ -122,8 +125,10 @@ if (present.length) {
   }
 }
 
-const shared = [...changeFailed].filter((key) => baseline.has(key)).sort();
-const own = [...changeFailed].filter((key) => !baseline.has(key)).sort();
+// Two different errors outside a test look the same here, so such a failure stays this change's.
+const matches = (key) => baseline.has(key) && !key.endsWith(FILE_FAILURE);
+const shared = [...changeFailed].filter(matches).sort();
+const own = [...changeFailed].filter((key) => !matches(key)).sort();
 const summary = [
   "### Test failures compared with the base",
   "",

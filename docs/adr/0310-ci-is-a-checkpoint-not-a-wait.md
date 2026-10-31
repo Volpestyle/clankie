@@ -34,8 +34,9 @@ full gate in front of `main`.
   instead of stopping at the first failure. When tests fail, CI reruns the
   failed files on the base commit in a scratch worktree, on the same runner. A
   failure the base shares is a warning on the run and does not fail the change;
-  a failure the base does not have, or a test file the base does not have,
-  still fails it. Nothing is skipped or quarantined. The lead files each shared
+  a failure the base does not have, a test file the base does not have, a
+  file that failed outside any test, or a run with an unhandled error still
+  fails it. Nothing is skipped or quarantined. The lead files each shared
   failure as an issue at the front of the queue.
 - **The Mac runs only when it has tests to run.** A free Linux job works out
   the Mac job's changed-test selection first; when it selects nothing, the Mac
