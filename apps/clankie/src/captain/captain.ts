@@ -8700,7 +8700,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const askedAt = Date.now();
       const arrived = outbox.pollArriving();
       // Owner asks remain pending in their source conversation across driver takeover.
-      if (!binding.participantRoom) void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+      if (!binding.participantRoom)
+        void recoverWorkerReports(binding.conversationId).catch((error: unknown) => {
+          console.warn("Worker report recovery unavailable", binding.conversationId, String(error));
+        });
       // A wake held after model failures can go to the seat that just bound.
       if (!binding.participantRoom) autonomy.releaseHeldWake(binding.conversationId);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
@@ -8736,7 +8739,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     console.warn("Lead relaunch handoff unavailable", binding.conversationId, String(error));
                   });
               if (!binding.participantRoom)
-                void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+                void recoverWorkerReports(binding.conversationId).catch((error: unknown) => {
+                  console.warn("Worker report recovery unavailable", binding.conversationId, String(error));
+                });
               return pending;
             },
             pollSignal,
