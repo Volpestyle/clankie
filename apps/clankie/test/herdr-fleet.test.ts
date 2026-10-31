@@ -90,6 +90,24 @@ function decodePowerShellArgv(command: string): string[] {
   return parseWindowsCommandLine(Buffer.from(line!, "base64").toString("utf8"));
 }
 
+/** `herdr pane process-info`: the pane's shell and its foreground processes. */
+function processInfo(paneId: string, shellPid: number, foreground: readonly number[]): string {
+  return JSON.stringify({
+    result: {
+      process_info: {
+        pane_id: paneId,
+        shell_pid: shellPid,
+        foreground_process_group_id: foreground[0] ?? shellPid,
+        foreground_processes: (foreground.length === 0 ? [shellPid] : foreground).map((pid) => ({
+          pid,
+          name: pid === shellPid ? "zsh" : "claude",
+          argv: [pid === shellPid ? "zsh" : "claude"],
+        })),
+      },
+    },
+  });
+}
+
 function pane(paneId: string, terminalId: string, status: string, extra: Record<string, unknown> = {}) {
   return {
     pane_id: paneId,
@@ -285,7 +303,9 @@ describe("fleet routing", () => {
       calls.push([...args]);
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "working")] } });
-      if (args[0] === "pane" && args[1] === "read") return "Building kh2\r\nCompiling...done\r\n";
+      if (args[0] === "pane" && args[1] === "read")
+        return "PS C:\\kh2> claude\r\nBuilding kh2\r\nCompiling...done\r\n";
+      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, [401]);
       if (args[0] === "api") return JSON.stringify({ result: { snapshot: { version: "0.9.5" } } });
       throw new Error(`unexpected ${args.join(" ")}`);
     };
@@ -343,6 +363,168 @@ describe("fleet routing", () => {
     });
   });
 
+  it("reads only a live agent's pane, and only what its current agent showed", async () => {
+    // One PC pane over the real remote runner and operator service; only Herdr's answers are stood in.
+    let agent = "claude";
+    let session = "session-one";
+    let foreground: number[] = [401];
+    let history = "";
+    let screen = "";
+    const run: HerdrFleetRun = async (args) => {
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              pane("w2:p1J", "term_abc", "working", {
+                agent,
+                agent_session: { source: "herdr:claude", kind: "id", value: session },
+              }),
+            ],
+          },
+        });
+      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, foreground);
+      if (args[0] === "pane" && args[1] === "read") return args[4] === "visible" ? screen : history;
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: { list: [pc], run: () => run, remoteWorkspace: async () => false },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      herdrRunner: routeHerdrFleets(
+        localRunner(),
+        // No shared poll: each read sees the pane as Herdr answers now.
+        new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 0 })]]),
+      ),
+    } as unknown as CreateOperatorServiceContext);
+    const read = () => serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" });
+
+    // A plain shell, by Herdr's detection or by its foreground, is never read.
+    agent = "unknown";
+    history = "$ cat .env\nTOKEN=owner-secret\n$ ";
+    screen = history;
+    expect(await read()).toMatchObject({
+      status: "unavailable",
+      detail: "No coding agent is running in that pane now.",
+    });
+    agent = "claude";
+    foreground = [];
+    expect(await read()).toMatchObject({
+      status: "unavailable",
+      detail: "No coding agent is running in that pane now.",
+    });
+    // The connector's session source takes that refusal as final, never streaming the screen instead.
+    let tailed = false;
+    const source = createHerdrSessionSource(
+      {
+        dispatch: async (request) => serve(request),
+        terminalTail: async () => {
+          tailed = true;
+          throw new Error("tailed");
+        },
+        tailRefusal: async () => new Error("tailed"),
+      },
+      { surfaceClientId: "connector" },
+    );
+    await expect(source.read("pc/term_abc", 20)).rejects.toThrow(
+      "No coding agent is running in that pane now.",
+    );
+    expect(tailed).toBe(false);
+
+    // The agent starts below the owner's earlier shell work, still on its screen: its reads start
+    // after the line that launched it.
+    foreground = [401];
+    history = "$ cat .env\nTOKEN=owner-secret\n$ claude\n\n Claude Code\n> fix the build";
+    screen = history;
+    expect(await read()).toMatchObject({ status: "read", text: "\n Claude Code\n> fix the build" });
+
+    // A new occupant (here a new native session) starts over after its own launch, even where
+    // the shell work above it repeats the lines it is cut at.
+    session = "session-two";
+    history = `${"$ cat .env\nTOKEN=owner-secret\n".repeat(3)}$ claude\n\n Claude Code\n> fix the build`;
+    screen = "$ claude\n\n Claude Code\n> fix the build";
+    expect(await read()).toMatchObject({ status: "read", text: "\n Claude Code\n> fix the build" });
+
+    // Later reads add what it wrote since, and still never the shell work above it.
+    history = `${history}\n Reading files\n Build fixed`;
+    screen = " Claude Code\n> fix the build\n Reading files\n Build fixed";
+    const later = await read();
+    expect(later).toMatchObject({ status: "read" });
+    expect(later.op === "terminal_read" && later.text).toBe(
+      "\n Claude Code\n> fix the build\n Reading files\n Build fixed",
+    );
+
+    session = "session-three";
+    history = `${history}\n$ claude --resume\n Claude Code\n> next task`;
+    screen = "$ claude --resume\n Claude Code\n> next task";
+    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> next task" });
+
+    // While only part of the history it was cut at has scrolled out, the cut still holds.
+    history = " Build fixed\n$ claude --resume\n Claude Code\n> next task\n Done";
+    screen = " Claude Code\n> next task\n Done";
+    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> next task\n Done" });
+
+    // The agent exits, the owner works in the shell, and the same native session is resumed:
+    // a new process is a new occupant, so the shell work stays out.
+    foreground = [];
+    expect(await read()).toMatchObject({ status: "unavailable" });
+    foreground = [402];
+    history = `${history}\n$ cat .env\nTOKEN=owner-again\n$ claude --resume\n Claude Code\n> back`;
+    screen = "$ claude --resume\n Claude Code\n> back";
+    expect(await read()).toMatchObject({ status: "read", text: " Claude Code\n> back" });
+
+    // Once the line it was cut at is gone, scrolled out or redrawn, the pane's text from before
+    // it stays out line by line, an agent line repeating that text included.
+    history = "TOKEN=owner-again\n Claude Code\n> back\n All done";
+    screen = history;
+    expect(await read()).toMatchObject({ status: "read", text: "> back\n All done" });
+
+    // Started under a name its launch line doesn't show (an alias), the agent's first screen is
+    // held back whole, and the read says why; what it writes next is shown.
+    foreground = [403];
+    history = "$ cat .env\nTOKEN=owner-third\n$ cc\n Claude Code\n> hello";
+    screen = history;
+    const hidden = await read();
+    expect(hidden).toMatchObject({
+      status: "read",
+      text: "",
+      detail: "Earlier screen hidden until this agent prints something new.",
+    });
+    history = `${history}\n Hi! What are we building?`;
+    screen = history;
+    expect(await read()).toMatchObject({
+      status: "read",
+      text: " Hi! What are we building?",
+      detail: "Earlier screen hidden until this agent prints something new.",
+    });
+    // The connector's session source passes that note on with the text.
+    expect(await source.read("pc/term_abc", 20)).toEqual({
+      id: "pc/term_abc",
+      text: " Hi! What are we building?",
+      note: "Earlier screen hidden until this agent prints something new.",
+    });
+
+    // A launch line that may have run other commands first is no boundary, whether they share
+    // its line or the line above carries on into it: their output is held back the same way.
+    for (const [pid, launched] of [
+      [404, "$ cat .env && claude\nTOKEN=owner-fourth"],
+      [405, "$ cat .env && \\\n> claude\nTOKEN=owner-fifth"],
+    ] as const) {
+      foreground = [pid];
+      history = `${launched}\n Claude Code\n> hi`;
+      screen = history;
+      expect(await read()).toMatchObject({
+        status: "read",
+        text: "",
+        detail: "Earlier screen hidden until this agent prints something new.",
+      });
+    }
+  });
+
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {
     // PC2 is reached by two connections to one Herdr session; Clankie hired nothing on it.
     const pc2: HerdrFleet = {
@@ -375,7 +557,8 @@ describe("fleet routing", () => {
       if (args[0] === "api") return snapshot;
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w1:p1", "term_claude", "idle")] } });
-      if (args[0] === "pane" && args[1] === "read") return "Mapped 3 save slots\r\n";
+      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w1:p1", 400, [401]);
+      if (args[0] === "pane" && args[1] === "read") return "PS C:\\kh2> claude\r\nMapped 3 save slots\r\n";
       throw new Error(`unexpected ${args.join(" ")}`);
     };
     const serve = createOperatorService({

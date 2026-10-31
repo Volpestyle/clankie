@@ -786,6 +786,82 @@ it("hires into the routed project while an open relaunch's successor has no sess
   expect(spawn).toHaveBeenCalledOnce();
 });
 
+// 2026-10-31: after the owner's Mac restart, Clankie's own thread came back on a new
+// session, and a connected app's start_agent was refused as "The conversation's
+// original agent has changed". That thread only leads a connector's hire; the owner's
+// granted place decides its project (ADR 0301), so its own agent's change can't block it.
+it("starts a connected app's agent in a granted place after Clankie's own agent changed", async () => {
+  const f = await leadChatFixture(false, cleanup, {
+    nativeSourceProof: true,
+    defaultLead: true,
+    projectHireIdentity: async (fleet, pane) => {
+      const occupant = f.current();
+      return {
+        fleet,
+        pane,
+        nativeOccupantId:
+          occupant.session === undefined
+            ? `process-${occupant.terminalId}`
+            : occupantIdForHerdrSession(occupant.session),
+        binding: { socketPath: join(f.root, "herdr.sock") },
+        processes: [{ pid: process.pid, startTime: "fixture" }],
+        shell: { pid: process.pid, startTime: "fixture" },
+      };
+    },
+  });
+  const conversation = "global-default";
+  await f.captain.pollSeatEvents(50, undefined, conversation, capabilities);
+  await mkdir(join(f.root, "elsewhere"));
+  const elsewhere = await realpath(join(f.root, "elsewhere"));
+  await f.settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "elsewhere",
+          name: "Elsewhere",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: elsewhere }],
+        },
+      ],
+    }),
+  }));
+  const spawn = vi.spyOn(HerdrWatchStore.prototype, "spawnSeat");
+  const start = () =>
+    f.captain.serveOperatorConversation({
+      op: "start_agent",
+      schemaVersion: 1,
+      machine: "local",
+      workingDirectory: elsewhere,
+      harness: "codex",
+    });
+  // Clankie's own thread now runs another session than the one it stored.
+  f.occupy({ sessionId: randomUUID() });
+  const bank = await f.captain.laneToolBank("operator", conversation);
+  const own = await bank.tools
+    .find((tool) => tool.name === "hire_agent")!
+    .call({
+      harness: "codex",
+      effort: "medium",
+      effortReason: "A bounded check.",
+      title: "Iris",
+      role: "builder",
+      workingDirectory: elsewhere,
+      projectId: "elsewhere",
+      brief: "Check one thing.",
+    });
+  // His own hire from that thread is still checked against its changed agent.
+  expect(JSON.stringify(own.content)).toContain("original agent has changed");
+  expect(spawn).not.toHaveBeenCalled();
+
+  // The connected app's start passes project admission and stops only because this
+  // fixture has no harness adapter.
+  const started = await start();
+  expect(started).toMatchObject({ op: "start_agent", status: "refused" });
+  expect(JSON.stringify(started)).not.toContain("original agent has changed");
+  expect(started).toMatchObject({ detail: expect.stringContaining("isn't installed or signed in") });
+  expect(spawn).toHaveBeenCalledOnce();
+});
+
 it("reads a Claude session's start and latest main-thread context, unknown after a compaction", async () => {
   const root = await mkdtemp(join(tmpdir(), "lead-seat-usage-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
