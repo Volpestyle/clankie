@@ -8,9 +8,9 @@
 // With --list it runs nothing: it writes the selected test files to <file> as a
 // JSON array, so CI can leave the Mac idle when a change selects none (ADR 0310).
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fsInputScope } from "./testing/landing-fs-inputs.mjs";
 
@@ -61,6 +61,7 @@ if (tests.length || listPath) {
   if (tests.length) console.log(`[changed-tests] filesystem-input tests: ${tests.join(", ")}`);
 }
 if (listPath) {
+  mkdirSync(dirname(listPath), { recursive: true });
   writeFileSync(listPath, JSON.stringify(selection) + "\n");
   console.log(`[changed-tests] ${selection.length} selected test file(s)`);
   process.exit(0);
