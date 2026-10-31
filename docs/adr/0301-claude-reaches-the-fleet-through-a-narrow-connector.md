@@ -32,7 +32,9 @@ own `/mcp` on a trusted network.
   places are the projects' registered workspaces, and a linked machine's also
   need the owner's exact-directory grant (ADR 0193). Clankie's own thread
   leads the new seat, as it leads his own hires, so a connector never owns a
-  worker. Connector devices now carry `steer`, which the op allowlist lets
+  worker. The granted place, not that thread, decides the new seat's project
+  (2026-10-31), so a change of Clankie's own agent, as after a restart, doesn't
+  refuse the start. Connector devices now carry `steer`, which the op allowlist lets
   reach `start_agent` alone; a connector signed in before this change signs in
   again to get it. `list_places` lists the places without starting anything, so an
   app's own permission check can tell a listing from a start.

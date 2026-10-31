@@ -810,7 +810,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         )
       ).projectId;
     let source: string | undefined;
-    const origin = authority?.owner.conversationId;
+    // A connector start is placed by the owner's grant, not by the leading conversation's
+    // agent (ADR 0301), so only its folder and the granted project count.
+    const placed = authority?.connectorPlace;
+    if (placed !== undefined) {
+      if (input.projectId !== placed.projectId)
+        throw new Error("The selected project does not match the place this agent was started in.");
+    }
+    const origin = placed === undefined ? authority?.owner.conversationId : undefined;
     const configuredProject = await leadHireProject(
       projects,
       (await settings()).linearWebhook.projectChats,

@@ -850,6 +850,9 @@ export function createOperatorService(
         request.prompt,
         {
           owner: { conversationId: lead },
+          // The owner granted this place; Clankie's thread only leads the seat, so its own
+          // agent's project doesn't decide where the new one works.
+          connectorPlace: { projectId: chosen.projectId },
           current: () => ctx.conversations.runsCaptainTurns(lead),
           authorize: async () => ctx.conversations.runsCaptainTurns(lead),
         },
