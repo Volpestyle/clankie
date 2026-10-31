@@ -20,6 +20,8 @@ import { createWorkItemsService } from "../../clankie/src/work-items.ts";
 const execute = promisify(execFile);
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../bin/clankie.ts");
 
+// Each CLI call boots the real launcher: about 14 s alone, past the 30 s default
+// when a full landing run is still importing hundreds of files (CI history).
 it("persists guided Git and patch reviews through ordinary CLI and production authenticated HTTP", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "guided-review-cli-")));
   let server: Server | undefined;
@@ -457,4 +459,4 @@ it("persists guided Git and patch reviews through ordinary CLI and production au
     if (server) await new Promise<void>((done) => server!.close(() => done()));
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 90_000);
