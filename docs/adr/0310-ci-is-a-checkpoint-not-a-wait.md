@@ -47,7 +47,12 @@ full gate in front of `main`.
 
 For leads and workers: push often and keep working while CI runs; nobody waits
 idle on a run. Open pull requests as drafts and mark one ready when its work is
-done, so the full checks run once before merge. A red check is a bug to file
+done, so the full checks run once before merge. Run them in one place, never
+twice: CI for a pull request, the local landing gate for a direct landing on
+`main` (ADR 0240). While iterating, a worker runs only the tests for what it
+changed. CI does not skip a check because a worker already ran it: a required
+check is proven on CI's own checkout of the exact head, and the warm typecheck
+is the reuse that is safe. A red check is a bug to file
 and order by how badly it blocks the current goals, not a reason to stop.
 
 ## Part of Clankie core

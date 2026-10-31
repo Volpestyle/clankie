@@ -150,6 +150,10 @@ fleet stands behind
   as drafts and mark them ready when done, or follow the project's own trigger.
 - A failure already on the main branch never blocks other work. File it and
   get it fixed there; don't hold unrelated changes behind it.
+- Each change gets its full checks once, in one place: CI for a pull request,
+  or the project's local landing gate for a change pushed straight to main.
+  Brief workers to run only the tests for what they changed while they
+  iterate, and to leave the full suite and typecheck to that one place.
 - Where a project's CI reruns everything on every push or lets main's failures
   block others, file that as a bug too; clankie's CI is the worked example.
 

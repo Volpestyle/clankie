@@ -89,7 +89,10 @@ This repository is public. Both neighbors are private and consume
   the queue, ordered by how badly it blocks the current goals. Open pull
   requests as drafts: a draft gets the quick checks on every push, and marking
   it ready runs the landing gate and the Mac job once before merge. A test that
-  already fails on `main` warns and does not block a pull request; file it.
+  already fails on `main` warns and does not block a pull request; file it. A
+  change gets its full checks in one place, never twice: CI for a pull request,
+  `pnpm check:landing` for a direct landing. While iterating, run only the tests
+  for what you changed.
 - On a pull request, keep its branch current with `main` and resolve conflicts
   yourself before asking anyone to look. Take each Codex review round as a batch:
   fix every finding together in one push, reply on and resolve each thread you
