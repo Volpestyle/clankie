@@ -1,3 +1,5 @@
+// The service process routes fetch through its pinned HTTP client; so does this stack.
+import "../src/fetch-dispatcher.ts";
 import { serve } from "@hono/node-server";
 import { DiscordPresenceSession } from "@clankie/discord-presence-core";
 import { DiscordBotPresenceRuntime } from "../../discord-bridge/src/bot-presence-runtime.ts";

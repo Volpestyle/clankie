@@ -1,3 +1,4 @@
+import "./fetch-dispatcher.ts";
 import { createInboundReportMigrationGate } from "./captain/conversations/inbound-report-migration.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { readProjectWorkQueue } from "./project-work-queue.ts";
