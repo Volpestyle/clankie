@@ -5728,7 +5728,14 @@ A machine is where agents run; a device is a paired phone or desktop portal.
 `machines` prints one row per machine: access level, Herdr sessions, state and worker count
 (`?` when unavailable). `--json` returns `{ observedAt, machines }` from
 `GET /v1/machines`. Discovery reads local Herdr sessions and literal aliases in
-the owner's SSH config (including bounded `Include` expansion). Probes use BatchMode and strict known-host checking,
+the owner's SSH config (including bounded `Include` expansion), and the online
+computers on the owner's tailnet from `tailscale status --json`
+([ADR 0314](adr/0314-setup-adds-the-phone-and-the-tailnet.md)). A tailnet
+machine is listed by its MagicDNS name with Tailscale's own name and platform.
+A Tailscale SSH machine is probed with the host keys Tailscale reports for it;
+`machines add` writes those keys to the service user's `known_hosts` only then,
+and leaves an entry already there for that name alone. A machine running its own
+sshd still needs its key in `known_hosts`. Probes use BatchMode and strict known-host checking,
 never prompt, start a server or install remote software. Four probes run at
 most concurrently, with a three-second probe deadline and a 6.5-second listing
 budget. Unreachable and still-discovering candidates remain visible. Results
