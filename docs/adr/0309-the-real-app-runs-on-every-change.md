@@ -27,8 +27,9 @@ The run uses Effect for its own steps and logging only: each flow is a traced
 span, and every line, CLI call included, is JSON in `run.jsonl` beside the
 service and relay logs and `report.json`. The service keeps its pino logger.
 
-It runs as the `real-run` job on James's Mac runner for every push and every
-same-repository pull request, under the fork rule of the `mac` job.
+It runs as the `real-run` job on James's Mac runner for every ready
+same-repository pull request, and never for code from a fork. Main does not
+rerun it after the merge (ADR 0310).
 
 No AWS emulator is needed. Since the reshape (ADR 0300) nothing Clankie runs talks
 to AWS: evidence defaults to local files, and the phone's doorway is the relay,
