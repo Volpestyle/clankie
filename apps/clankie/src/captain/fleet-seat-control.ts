@@ -318,7 +318,7 @@ export function createFleetSeatControl(
     begin: () => void,
     clear: () => void,
     /** A bound mailbox can work even while terminal discovery is unavailable. */
-    uncontrolled?: () => Promise<FleetSeatDelivery>,
+    uncontrolled?: (attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>,
     options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> => {
     const authorized =
@@ -337,7 +337,7 @@ export function createFleetSeatControl(
         return modeUnavailable(options.delivery);
       if (authorized && !(await authorized())) return refused();
       if (options.stableReceiptKey !== undefined) begin();
-      return uncontrolled();
+      return uncontrolled(options);
     }
     const control = current === undefined ? undefined : await attach(current);
     // Codex's native queue is distinct from app-server turn/steer, including
@@ -399,7 +399,7 @@ export function createFleetSeatControl(
     if (uncontrolled !== undefined) {
       if (authorized && !(await authorized())) return refused();
       if (options?.stableReceiptKey !== undefined) begin();
-      return uncontrolled();
+      return uncontrolled(options);
     }
     return isMessageableSeat(current)
       ? {
@@ -557,6 +557,105 @@ export function createFleetSeatControl(
       detail: "Original acknowledgment is unresolved; nothing was sent.",
     };
   };
+  // The current session, not the one a receipt was filed against. `undefined`
+  // means the transcript could not be read, so it proves neither arrival nor absence.
+  // Any copy in a different session than the original counts. In the original
+  // session only a copy newer than the send's baseline does, so an older
+  // identical message never proves arrival; with no baseline it proves nothing.
+  const currentArrival = async (
+    text: string,
+    live: HerdrAgentSnapshot | undefined,
+    pending: UncertainReceipt | undefined,
+  ) => {
+    if (!live?.session || runner.transcript === undefined) return undefined;
+    const pi = live.agent === "pi" || live.session.source === "herdr:pi";
+    const liveSessionId = pi
+      ? nativeSessionId(live)
+      : (nativeSessionId(live) ?? basename(live.session.value, ".jsonl"));
+    const original = pending?.sessionId !== undefined && liveSessionId === pending.sessionId;
+    if (original && pending.beforeIds === undefined && pending.beganAt === undefined) return undefined;
+    const transcript = await runner.transcript(live).catch(() => undefined);
+    if (transcript === undefined) return undefined;
+    const fingerprint = deliveryFingerprint(text);
+    return {
+      matched: transcript.entries.find(
+        (entry) =>
+          entry.type === "message" &&
+          entry.role === "operator" &&
+          (!original ||
+            (pending.beforeIds !== undefined
+              ? !pending.beforeIds.includes(entry.id)
+              : entry.occurredAt !== undefined && Date.parse(entry.occurredAt) > pending.beganAt!)) &&
+          deliveryFingerprint(channelBody(entry.text) ?? entry.text) === fingerprint,
+      ),
+    };
+  };
+  /**
+   * One look at the pane's current session after a send was not confirmed
+   * (ADR 0312). A message already there is reconciled and not sent again. An
+   * idle session that does not contain it may be sent once (`release` drops
+   * the uncertain receipt first). Anything less is a specific not-sent.
+   */
+  const rediscoverDelivery = async (
+    seatId: string,
+    text: string,
+    pending: UncertainReceipt | undefined,
+    release: boolean,
+  ): Promise<{ action: "send" } | FleetSeatDelivery> => {
+    const live = await runner.resolveTerminal(seatId).catch(() => undefined);
+    if (pending?.messageId === "unreadable-receipts")
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail:
+          "The delivery receipt file can't be read, so it isn't known whether the message arrived. Nothing was sent again.",
+      };
+    const pendingKey =
+      pending === undefined
+        ? undefined
+        : fence.entries().find(([, receipt]) => receipt.messageId === pending.messageId)?.[0];
+    const pane = live?.paneId ?? pending?.paneId ?? seatId;
+    const earlier = pending?.sessionId === undefined ? "" : ` (the earlier session was ${pending.sessionId})`;
+    if (!isMessageableSeat(live) || live.session === undefined)
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: `No coding session is running in pane ${pane}${earlier}. Nothing was sent again.`,
+      };
+    const sessionLabel = nativeSessionId(live) ?? live.session.value;
+    const observed = await currentArrival(text, live, pending);
+    if (observed === undefined)
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: `Couldn't read the current session ${sessionLabel} in pane ${pane}, so it isn't known whether the message arrived. Nothing was sent again.`,
+      };
+    if (observed.matched) {
+      if (pending !== undefined && pendingKey !== undefined) {
+        if (pending.seatId)
+          fence.complete(pendingKey, pending.messageId, {
+            messageId: observed.matched.id,
+            state: "started",
+            deliveryStage: "consumed",
+          });
+        else fence.reconcile(pendingKey, pending.messageId);
+      }
+      return {
+        outcome: "delivered",
+        deliveryStage: "consumed",
+        messageId: observed.matched.id,
+        detail: `The message is already in session ${sessionLabel}, so it was not sent again.`,
+      };
+    }
+    if (live.status !== "idle" && live.status !== "done" && live.status !== "resting")
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: `${live.agent} in pane ${pane} is ${live.status}, so a message that wasn't confirmed was not sent again. Read the agent before trying once more.`,
+      };
+    if (release && pending !== undefined && pendingKey !== undefined) settleUnarrived(pendingKey, pending);
+    return { action: "send" };
+  };
   const control = {
     inputCapabilities,
     async settled(
@@ -691,7 +790,7 @@ export function createFleetSeatControl(
     async deliverToSeat(
       seatId: string,
       text: string,
-      uncontrolled?: () => Promise<FleetSeatDelivery>,
+      uncontrolled?: (attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>,
       options?: PeerDeliveryOptions,
     ): Promise<FleetSeatDelivery> {
       const agent = await runner.resolveTerminal(seatId).catch(() => undefined);
@@ -844,7 +943,30 @@ export function createFleetSeatControl(
       };
       if (pending !== undefined) {
         const resolved = await resolvePending(pending);
-        if (resolved !== "settled") return resolved;
+        if (resolved !== "settled") {
+          if (
+            resolved.outcome === "unconfirmed" &&
+            (options?.rediscover === true || options?.rediscover === "final") &&
+            options.stableReceiptKey === undefined
+          ) {
+            if (pending.rediscovered === true) {
+              const healed = await rediscoverDelivery(seatId, text, pending, false);
+              if ("action" in healed)
+                return {
+                  outcome: "undelivered",
+                  deliveryStage: "unavailable",
+                  detail: `Already sent again once to session ${pending.sessionId ?? "the previous one"} in pane ${pending.paneId ?? seatId} and it still wasn't confirmed. Nothing further was sent.`,
+                };
+              return healed;
+            }
+            if (options.rediscover === true) {
+              const healed = await rediscoverDelivery(seatId, text, pending, true);
+              if (!("action" in healed)) return healed;
+              return control.deliverToSeat(seatId, text, uncontrolled, { ...options, rediscover: "final" });
+            }
+          }
+          return resolved;
+        }
       }
       if (options?.reconcileOnly) {
         // A completed native receipt may have been cleared before the peer journal
@@ -906,9 +1028,12 @@ export function createFleetSeatControl(
           ? { nativeSessionPath: session.value }
           : {}),
         ...(transcript === undefined ? {} : { beforeIds: transcript.entries.map((entry) => entry.id) }),
+        ...(options?.rediscover === "final" ? { rediscovered: true as const } : {}),
       };
       let receipt: ReturnType<DeliveryFence["begin"]> | undefined;
       let ownsActiveDelivery = false;
+      let outcome: FleetSeatDelivery | undefined;
+      let rediscoverAfter = false;
       const begin = () => {
         // Attachment and authority checks await. Reserve the recipient again at
         // the actual dispatch boundary, including deliveries with distinct keys.
@@ -947,7 +1072,26 @@ export function createFleetSeatControl(
           options?.delivery === undefined && result.outcome === "undelivered"
             ? "unavailable"
             : (result.deliveryStage ?? fleetDeliveryStage(result));
-        return { ...result, deliveryStage };
+        const stamped = { ...result, deliveryStage };
+        if (
+          stamped.outcome === "unconfirmed" &&
+          options?.rediscover === "final" &&
+          options.stableReceiptKey === undefined
+        )
+          outcome = {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            ...(stamped.messageId === undefined ? {} : { messageId: stamped.messageId }),
+            detail: `Sent again to the current session ${sessionId ?? "unknown"} in pane ${agent?.paneId ?? seatId} and it still wasn't confirmed (${stamped.detail ?? "no receipt"}). Nothing further was sent.`,
+          };
+        else if (
+          stamped.outcome === "unconfirmed" &&
+          options?.rediscover === true &&
+          options.stableReceiptKey === undefined
+        ) {
+          rediscoverAfter = true;
+          outcome = stamped;
+        } else outcome = stamped;
       } catch (error) {
         if (receipt === undefined) {
           if (
@@ -964,15 +1108,38 @@ export function createFleetSeatControl(
             };
           throw error;
         }
-        return {
-          outcome: "unconfirmed",
-          deliveryStage: "uncertain",
-          ...(receipt === undefined ? {} : { messageId: receipt.messageId }),
+        const failed = {
+          outcome: "unconfirmed" as const,
+          deliveryStage: "uncertain" as const,
+          messageId: receipt.messageId,
           detail: String(error),
         };
+        if (options?.rediscover === "final" && options.stableReceiptKey === undefined)
+          outcome = {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            messageId: receipt.messageId,
+            detail: `Sent again to the current session ${sessionId ?? "unknown"} in pane ${agent?.paneId ?? seatId} and it still wasn't confirmed (${failed.detail}). Nothing further was sent.`,
+          };
+        else if (options?.rediscover === true && options.stableReceiptKey === undefined) {
+          rediscoverAfter = true;
+          outcome = failed;
+        } else outcome = failed;
       } finally {
         if (ownsActiveDelivery) active.delete(seatId);
       }
+      if (rediscoverAfter) {
+        const pendingNow =
+          fence.pending(key) ??
+          fence.pending(seatId) ??
+          fence.entries().find(([, value]) => value.seatId === seatId)?.[1];
+        const healed = await rediscoverDelivery(seatId, text, pendingNow, true);
+        if (!("action" in healed)) return healed;
+        // The turn lock is held by the exported wrapper. Recurse on this inner
+        // function so the one redelivery does not wait on itself.
+        return control.deliverToSeat(seatId, text, uncontrolled, { ...options, rediscover: "final" });
+      }
+      return outcome!;
     },
   };
   const deliverNow = control.deliverToSeat;

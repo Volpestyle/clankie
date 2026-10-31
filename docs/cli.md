@@ -1918,7 +1918,7 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
-### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector lead [clankie|apps]`
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
 a remote MCP server that lets Claude list your agents, read their screens and
@@ -1943,7 +1943,13 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
-`start_agent` existed sign in again to use it. `list_issues` and `read_issue`
+`start_agent` existed sign in again to use it. `fleet_capacity` reads what
+the fleet can afford before a hire
+([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
+each metered account's plan, usage, remaining limit and reset, heavy-work
+permits, tracker request budgets, and each live pane's context against its
+budget. A number Clankie does not have is `"unknown"`. It does not include
+homes, emails or credentials, and it hires nothing. `list_issues` and `read_issue`
 read your projects' issues, wherever each project tracks them. `save_issue`
 and `comment_issue` write them as that app, never as you: issue files are
 written right away, and Linear or GitHub follow the project's "Posting to your
@@ -1966,6 +1972,25 @@ when two share the name. An app that is on presses keys only while the agent
 waits on input and the prompt it read is still on screen, once per prompt, and
 never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
+
+`clankie connector detect` says whether Herdr sessions are discovered
+([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you
+turn it off: `Herdr: on`, and `clankie connector detect off herdr` stops
+listing and reaching those sessions, including one you just cleared. `on herdr`
+turns discovery back on. While it is on, a message that cannot be confirmed is
+checked against the agent's current session and sent once more only when that
+session is idle and does not already contain it; if that still fails, the tool
+errors and says why. JSON: `{ "ok": true, "multiplexers": [{ "id": "herdr",
+"enabled": true }], "apps": […] }`. The list is adapters; Herdr is the first
+this service knows. Exit 1 with status `unknown_multiplexer` for an id this
+install does not detect (today, anything other than `herdr`).
+
+`clankie connector serve` says which connected apps the connector serves. Every
+app is on until you turn it off: `NAME: on|off  (DEVICE_ID)`, and `clankie
+connector serve off APP` refuses that app's tools until `serve on APP`. Name it
+by its approved name or device id. JSON is the same shape as `detect`. Exit 1
+with status `unknown_app` when no connected app matches, or `ambiguous_app`
+when two share the name.
 
 `clankie connector lead` says who leads Clankie's lead threads
 ([ADR 0304](adr/0304-the-owner-hands-the-lead-to-connected-apps.md)): Clankie
@@ -5679,9 +5704,9 @@ requested working directory; an authorized shell command still runs as the
 owner and can address other paths. The explicit local macOS envelope described
 below does not confine these joined receivers.
 
-The public service and client contract is implemented. Production gateway
-bootstrap/channel routing and admission/rate limits belong to `clankie-ops` and
-has separate source and rollout evidence; real Mac/Windows driving remains an
+The public service and client contract is implemented. Gateway
+bootstrap/channel routing and admission/rate limits live in `apps/gateway`; their
+production rollout belongs to `clankie-ops`; real Mac/Windows driving remains an
 owner-run live gap.
 Do not treat a loopback relay fixture as a live gateway deployment. The gateway
 cannot read or forge joined-host capabilities, commands or results

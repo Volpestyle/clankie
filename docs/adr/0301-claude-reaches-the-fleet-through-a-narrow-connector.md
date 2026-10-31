@@ -104,6 +104,14 @@ own `/mcp` on a trusted network.
   device only at `GET /v1/devices/self`. The relay holds it to its op
   allowlist, and confirms each send or read is for a persona thread before it
   dispatches.
+- **Detection is the owner's.** `clankie connector detect` turns Herdr
+  discovery on or off, and `clankie connector serve` turns the connector on or
+  off per connected app. With Herdr on, a cleared or restarted session is
+  rediscovered and an unconfirmed operator message is sent once more, or the
+  error says why ([ADR 0312](0312-a-cleared-session-is-rediscovered.md)).
+- **Capacity is a read.** `fleet_capacity` shows what the fleet can afford
+  before a hire, from numbers Clankie already tracks. A missing number is
+  `"unknown"` ([ADR 0313](0313-the-connector-can-read-what-the-fleet-can-afford.md)).
 - **Plaintext through the doorway, for this route only.** The gateway carries
   the connector's discovery, OAuth and `/mcp` calls in plaintext, with the
   `authorization` header only on `/mcp` and a query only on the sign-in link.

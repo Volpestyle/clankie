@@ -5,6 +5,10 @@ import { resolveCaptainCredential } from "@clankie/credential-broker";
 import { ControlPlaneDeviceAuthorizer } from "./device-auth.ts";
 import { createVoiceCallUpgrade } from "./voice-call.ts";
 import { ClankieGuide } from "./connector-guide.ts";
+import {
+  CONNECTOR_DETECTION_PATH,
+  ConnectorDetectionResponseSchema,
+} from "../../../packages/protocol/src/connector.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "./connector-mcp.ts";
 import {
   createCaptainConversationDispatch,
@@ -76,6 +80,23 @@ const connectorHandler = createConnectorMcpHandler({
   localAuthorizationServer: controlPlaneUrl,
   version: "0.1.0",
   guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
+  ...(captainToken === undefined
+    ? {}
+    : {
+        policy: async (device) => {
+          const response = await fetch(new URL(CONNECTOR_DETECTION_PATH, controlPlaneUrl), {
+            headers: { authorization: `Bearer ${captainToken}` },
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (!response.ok) throw new Error("detection unavailable");
+          const body = ConnectorDetectionResponseSchema.parse(await response.json());
+          const app = body.apps.find((candidate) => candidate.deviceId === device.deviceId);
+          return {
+            herdr: body.multiplexers.find((entry) => entry.id === "herdr")?.enabled !== false,
+            served: app?.served !== false,
+          };
+        },
+      }),
 });
 const server = createServer((request, response) => {
   void handleHttp(request, response);

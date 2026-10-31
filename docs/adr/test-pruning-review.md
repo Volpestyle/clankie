@@ -726,10 +726,11 @@ and Herdr in a scratch home on every change. A test goes only when a flow proves
 its whole claim against the real app; a test that also guards a refusal, a race or
 a replay the run does not reach stays.
 
-| Removed case                                                                                                     | Proved now by                                                                                                                                                                                              |
-| ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/clankie/test/http-journey.test.ts`: serves health and enforces operator authority before and after restart | `boot` (real `/health`), `authority` (pairing offer refused without the operator bearer), `restart` (state and authority across a real stop and start).                                                    |
-| `apps/clankie/test/routines.integration.test.ts`: the CLI manages routines through the authenticated API         | `routine`: the real CLI adds a plain-language weekday schedule, pauses, edits with the time zone kept, resumes with the next run ahead, refuses an unreadable schedule, needs the credential, and removes. |
+| Removed case                                                                                                       | Proved now by                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/clankie/test/http-journey.test.ts`: serves health and enforces operator authority before and after restart   | `boot` (real `/health`), `authority` (pairing offer refused without the operator bearer), `restart` (state and authority across a real stop and start).                                                                                |
+| `apps/clankie/test/routines.integration.test.ts`: the CLI manages routines through the authenticated API           | `routine`: the real CLI adds a plain-language weekday schedule, pauses, edits with the time zone kept, resumes with the next run ahead, refuses an unreadable schedule, needs the credential, and removes.                             |
+| `apps/relay/test/scratch-stack.integration.test.ts`: boots a real paired scratch service and relay from one preset | `boot` (its own ports, apart from the live ones), `relay`: `clankie pair` mints an offer, the app redeems and completes it with no echo of the code, reads the owner's settings through the relay, and a used code pairs nothing more. |
 
 Kept in those files: pairing codes staying operator-only after a device pairs,
 and the routine runner's restart, missed-run and conversation-ownership cases,
@@ -737,7 +738,8 @@ which use a fixed clock and recorded boundaries the real run cannot reach.
 
 Reviewed and kept although the run touches their happy path: `feed-drop`,
 `feed-check`, `feed`, `project-create`, `fleet-autonomy-cli` and the relay's
-`scratch-stack` integration tests, which prove refusals, idempotency and broker
+remaining `scratch-stack` cases (live-port refusals and the private broker's
+refusals and revocation), which prove refusals, idempotency and broker
 boundaries; the seat binding tests and `integrations/fleet-proof/linux-process-proof.py`
 as trust-boundary proofs.
 

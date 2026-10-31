@@ -274,7 +274,9 @@ jobs:
           fetch-depth: 0
           filter: blob:none
       # Each Mac runner installs pnpm in its own temp folder: the default
-      # ~/setup-pnpm is shared by every runner on the machine.
+      # ~/setup-pnpm is shared by every runner on the machine, and setup
+      # empties it. The package store stays shared and outside it (install
+      # below), where pnpm handles parallel installs and it survives the job.
       - uses: pnpm/action-setup@v4
         with:
           version: 11.11.0
@@ -284,10 +286,11 @@ jobs:
           node-version: 26.7.0
       # The Mac is shared with the owner's agents: heavy steps take a permit
       # from Clankie's fleet scheduler when its CLI is installed. The pnpm
-      # store stays on the Mac between runs, so there is no Actions cache.
+      # store stays on the Mac between runs (~/Library/pnpm/store), so there
+      # is no Actions cache.
       - name: Share the machine's heavy-work permits
         run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
-      - run: $HEAVY pnpm install --frozen-lockfile
+      - run: $HEAVY pnpm install --frozen-lockfile --store-dir "$HOME/Library/pnpm/store"
       # Tests spawn the pinned Herdr by name; activity tests decode media with
       # the Mac's own ffmpeg.
       - name: Pinned Herdr
@@ -326,7 +329,9 @@ jobs:
         with:
           filter: blob:none
       # Each Mac runner installs pnpm in its own temp folder: the default
-      # ~/setup-pnpm is shared by every runner on the machine.
+      # ~/setup-pnpm is shared by every runner on the machine, and setup
+      # empties it. The package store stays shared and outside it (install
+      # below), where pnpm handles parallel installs and it survives the job.
       - uses: pnpm/action-setup@v4
         with:
           version: 11.11.0
@@ -336,7 +341,7 @@ jobs:
           node-version: 26.7.0
       - name: Share the machine's heavy-work permits
         run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
-      - run: $HEAVY pnpm install --frozen-lockfile
+      - run: $HEAVY pnpm install --frozen-lockfile --store-dir "$HOME/Library/pnpm/store"
       # His bundled fleet starts from the pinned offline Herdr.
       - run: pnpm herdr:build
       - name: Real-app run

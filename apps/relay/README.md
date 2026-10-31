@@ -132,14 +132,23 @@ code. The lines carry the device ID but never audio or bearers.
 
 ## Claude connector
 
-`POST /mcp` is a remote MCP server Claude adds as a custom connector
+`POST /mcp` is a remote MCP server Claude adds as a custom connector.
+The owner turns multiplexer discovery on or off with `clankie connector detect`
+(Herdr is the first adapter), and turns the connector on or off per app with
+`clankie connector serve`
+([ADR 0312](../../docs/adr/0312-a-cleared-session-is-rediscovered.md)). An app
+that is off is refused. Herdr off lists no sessions and says so. A message
+that still cannot be confirmed after one rediscovery is an error that says why,
+not an ambiguous unconfirmed.
 ([ADR 0301](../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)),
 stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
 (`machine` optional), `read_agent` (`agent`, `lines` up to 400),
 `message_agent` (`agent`, `message`), `list_places` (the places an agent can
 start; it starts nothing), `start_agent` (`machine`, `workingDirectory`,
 `harness` claude or codex, `prompt`; with no machine and directory it lists the
-places too), `post_note` (`text`, up to 2,000 characters),
+places too), `fleet_capacity` (read only: plans, usage, permits, tracker
+budgets and live context; a missing number is `"unknown"`), `post_note`
+(`text`, up to 2,000 characters),
 `read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),
 `read_inbox` (`after` optional), `read_reports` (`thread`), `acknowledge_reports`
 (`thread`, `ids`, `summary` optional), `list_issues` (`project` and `label`

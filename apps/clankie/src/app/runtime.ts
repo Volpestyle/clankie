@@ -133,6 +133,7 @@ import { authenticateCaptain, authenticateOperator, captainTransportKind, readJs
 import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
+import { ConnectorDetection } from "./connector-detection.ts";
 import { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import { registerConnectorRoutes } from "./connector-routes.ts";
 import { withSerializedLock } from "./request-state.ts";
@@ -2792,6 +2793,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     },
   });
   const promptAnswers = new ConnectorPromptAnswers(dependencies.connectorPromptAnswersPath);
+  const detection = dependencies.connectorDetection ?? new ConnectorDetection();
   registerConnectorRoutes({
     dependencies,
     app,
@@ -2803,6 +2805,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     deviceLocks,
     devices,
     promptAnswers,
+    detection,
   });
   const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
     get app() {

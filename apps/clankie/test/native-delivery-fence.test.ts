@@ -67,6 +67,9 @@ function fixture() {
     setSession: (value: string) => {
       agent = { ...agent, session: { source: "herdr:claude", kind: "id", value } };
     },
+    setStatus: (status: string) => {
+      agent = { ...agent, status };
+    },
   };
 }
 function barrier() {
@@ -481,6 +484,123 @@ it("allows a deliberate follow-up after definite pre-dispatch transport failure 
   });
   expect(send).toHaveBeenCalledTimes(2);
 });
+it("rediscovers a cleared session and delivers once when the new transcript does not have the message", async () => {
+  const { create, entries, send, setSession } = fixture();
+  send.mockImplementation(async () => {
+    if (send.mock.calls.length === 1) {
+      setSession("session-after-clear");
+      entries.splice(0, entries.length);
+      return { outcome: "unconfirmed", messageId: "native-id", detail: "session ended" };
+    }
+    return { outcome: "accepted", messageId: "landed", state: "queued" };
+  });
+  await expect(
+    create().deliverToSeat("seat1", "hello there", undefined, { rediscover: true }),
+  ).resolves.toMatchObject({ outcome: "delivered", messageId: "landed", state: "queued" });
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls.map(([text]) => text)).toEqual(["hello there", "hello there"]);
+});
+
+it("does not send again when the cleared session already contains the message", async () => {
+  const { create, entries, send, setSession } = fixture();
+  send.mockImplementation(async () => {
+    setSession("session-after-clear");
+    entries.splice(0, entries.length, {
+      type: "message",
+      role: "operator",
+      id: "landed",
+      text: "hello there",
+    });
+    return { outcome: "unconfirmed", messageId: "native-id", detail: "lost receipt" };
+  });
+  await expect(
+    create().deliverToSeat("seat1", "hello there", undefined, { rediscover: true }),
+  ).resolves.toMatchObject({
+    outcome: "delivered",
+    messageId: "landed",
+    detail: expect.stringContaining("already in session session-after-clear"),
+  });
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+it("does not take an older identical message in the same session as proof the new one arrived", async () => {
+  const { create, entries, send } = fixture();
+  entries.push({ type: "message", role: "operator", id: "earlier", text: "hello there" });
+  send.mockImplementation(async () =>
+    send.mock.calls.length === 1
+      ? { outcome: "unconfirmed", messageId: "native-id", detail: "lost receipt" }
+      : { outcome: "accepted", messageId: "landed", state: "queued" },
+  );
+  const delivered = await create().deliverToSeat("seat1", "hello there", undefined, { rediscover: true });
+  expect(delivered).not.toMatchObject({ messageId: "earlier" });
+  expect(delivered).toMatchObject({ outcome: "delivered", messageId: "landed" });
+  expect(send).toHaveBeenCalledTimes(2);
+});
+
+it("hands the mailbox fallback the final attempt's options when it sends once more", async () => {
+  const { create, entries, adapter, setSession } = fixture();
+  adapter.attach = async () => undefined;
+  const mailbox = vi.fn<(attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>>(async () => {
+    if (mailbox.mock.calls.length > 1) return { outcome: "delivered", messageId: "landed" };
+    setSession("session-after-clear");
+    entries.splice(0, entries.length);
+    return { outcome: "unconfirmed", messageId: "native-id", detail: "session ended" };
+  });
+  await expect(
+    create().deliverToSeat("seat1", "hello there", mailbox, { rediscover: true }),
+  ).resolves.toMatchObject({ outcome: "delivered", messageId: "landed" });
+  expect(mailbox.mock.calls.map(([attempt]) => attempt?.rediscover)).toEqual([true, "final"]);
+});
+
+it("says why a rediscovery failed and does not send a third time", async () => {
+  const { create, entries, send, setSession, runner } = fixture();
+  send.mockImplementation(async () => {
+    setSession("session-after-clear");
+    entries.splice(0, entries.length);
+    return { outcome: "unconfirmed", messageId: "native-id", detail: "still no receipt" };
+  });
+  const native = create();
+  await expect(
+    native.deliverToSeat("seat1", "hello there", undefined, { rediscover: true }),
+  ).resolves.toMatchObject({
+    outcome: "undelivered",
+    detail: expect.stringContaining("Sent again to the current session session-after-clear"),
+  });
+  expect(send).toHaveBeenCalledTimes(2);
+  await expect(
+    native.deliverToSeat("seat1", "hello there", undefined, { rediscover: true }),
+  ).resolves.toMatchObject({
+    outcome: "undelivered",
+    detail: expect.stringContaining("Already sent again once"),
+  });
+  expect(send).toHaveBeenCalledTimes(2);
+
+  const unread = fixture();
+  unread.runner.transcript = async () => {
+    throw new Error("transcript unavailable");
+  };
+  unread.send.mockResolvedValue({ outcome: "unconfirmed", messageId: "native-id", detail: "lost receipt" });
+  await expect(
+    unread.create().deliverToSeat("seat1", "hello there", undefined, { rediscover: true }),
+  ).resolves.toMatchObject({
+    outcome: "undelivered",
+    detail: expect.stringContaining("Couldn't read the current session"),
+  });
+  expect(unread.send).toHaveBeenCalledTimes(1);
+
+  const busy = fixture();
+  busy.setStatus("working");
+  busy.send.mockResolvedValue({ outcome: "unconfirmed", messageId: "native-id", detail: "lost receipt" });
+  await expect(
+    busy.create().deliverToSeat("seat1", "not in the transcript", undefined, { rediscover: true }),
+  ).resolves.toMatchObject({
+    outcome: "undelivered",
+    detail: expect.stringContaining("is working"),
+  });
+  expect(busy.send).toHaveBeenCalledTimes(1);
+  expect(runner.transcript).toBeTypeOf("function");
+});
+
 it("retains a dispatch fence for an ambiguous SSH disconnect", async () => {
   const { create, send } = fixture();
   send.mockRejectedValueOnce(new HerdrFleetError("fleet_command_failed", "Connection reset by peer"));

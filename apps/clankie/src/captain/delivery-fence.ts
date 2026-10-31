@@ -62,6 +62,12 @@ export const ReceiptSchema = z
     sessionId: z.string().optional(),
     /** Original native occupant observed by the host, never inferred from pane/name. */
     occupantId: z.string().optional(),
+    /**
+     * This receipt is the one rediscovery of an operator message whose first
+     * send was not confirmed (ADR 0312). A later send of the same text is not
+     * dispatched again until the receipt is settled.
+     */
+    rediscovered: z.literal(true).optional(),
     paneId: z.string().optional(),
     agentName: z.string().optional(),
     /** Exact native channel event returned to the caller, distinct from the control fence key. */

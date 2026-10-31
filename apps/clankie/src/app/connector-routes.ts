@@ -4,6 +4,7 @@ import {
   CONNECTOR_AUTHORIZATION_SERVER_PATH,
   CONNECTOR_AUTHORIZE_PATH,
   CONNECTOR_AUTHORIZE_STATUS_PATH,
+  CONNECTOR_DETECTION_PATH,
   CONNECTOR_MCP_PATH,
   CONNECTOR_PROMPT_ANSWERS_PATH,
   CONNECTOR_PUBLIC_BASE_HEADER,
@@ -12,8 +13,10 @@ import {
   CONNECTOR_SIGN_IN_APPROVE_PATH,
   CONNECTOR_SIGN_IN_DENY_PATH,
   CONNECTOR_TOKEN_PATH,
+  ConnectorDetectionRequestSchema,
   ConnectorPromptAnswersRequestSchema,
   ConnectorSignInDecisionRequestSchema,
+  type ConnectorDetectionResponse,
   type ConnectorPromptAnswersResponse,
   connectorRedirectHost,
   connectorRedirectUriAllowed,
@@ -26,9 +29,10 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { mintDeviceSessionClaims, type DeviceSessionSigner } from "../device-session.ts";
 import { applyDeviceEvent, type DeviceRegistry } from "../devices.ts";
+import type { ConnectorDetection } from "./connector-detection.ts";
 import type { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import { ownerAppRecord } from "./conversation-routes.ts";
-import { authenticateOperator, readJson } from "./http-auth.ts";
+import { authenticateCaptain, authenticateOperator, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { withSerializedLock } from "./request-state.ts";
 import type {
@@ -76,6 +80,8 @@ export interface RegisterConnectorRoutesContext {
   readonly devices: DeviceRegistry;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   readonly promptAnswers: ConnectorPromptAnswers;
+  /** Which multiplexers are discovered, and which apps the connector serves (ADR 0312). */
+  readonly detection: ConnectorDetection;
 }
 
 interface PendingSignIn {
@@ -424,6 +430,61 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
       "connector prompt answers changed",
     );
     return context.json(promptAnswerApps());
+  });
+
+  // --- Discovery and which apps are served (ADR 0312) --------------------------
+
+  const detectionStatus = (): ConnectorDetectionResponse => ({
+    multiplexers: ctx.detection.multiplexers(),
+    apps: [...ctx.devices.values()]
+      .filter((record) => record.status === "active" && record.scope === "connector")
+      .slice(0, 256)
+      .map((record) => ({
+        deviceId: record.deviceId,
+        name: record.name.slice(0, 64),
+        served: ctx.detection.served(record.deviceId),
+      })),
+  });
+
+  ctx.app.get(CONNECTOR_DETECTION_PATH, async (context) => {
+    context.header("cache-control", "no-store");
+    const authorized = await owner(context);
+    if (!(authorized instanceof Response)) return context.json(detectionStatus());
+    // The relay reads this with the captain bearer; it cannot change it.
+    const captain = await authenticateCaptain(context.req.raw, ctx.dependencies);
+    if (captain !== undefined && captain !== "unavailable") return context.json(detectionStatus());
+    return authorized;
+  });
+
+  ctx.app.post(CONNECTOR_DETECTION_PATH, bodyLimit({ maxSize: 1024 }), async (context) => {
+    context.header("cache-control", "no-store");
+    const authorized = await owner(context);
+    if (authorized instanceof Response) return authorized;
+    const parsed = ConnectorDetectionRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "malformed" }, 400);
+    if ("multiplexer" in parsed.data) {
+      if (!ctx.detection.setMultiplexer(parsed.data.multiplexer, parsed.data.enabled))
+        return context.json({ error: "unknown_multiplexer" }, 400);
+      logger.info(
+        {
+          event: "connector.detection.multiplexer",
+          multiplexer: parsed.data.multiplexer,
+          enabled: parsed.data.enabled,
+        },
+        "connector multiplexer detection changed",
+      );
+      return context.json(detectionStatus());
+    }
+    const record = ctx.devices.get(parsed.data.deviceId);
+    if (record === undefined || record.scope !== "connector")
+      return context.json({ error: "not_found" }, 404);
+    if (parsed.data.served && record.status !== "active") return context.json({ error: "not_found" }, 404);
+    ctx.detection.setServed(parsed.data.deviceId, parsed.data.served);
+    logger.info(
+      { event: "connector.detection.served", deviceId: parsed.data.deviceId, served: parsed.data.served },
+      "connector app serving changed",
+    );
+    return context.json(detectionStatus());
   });
 
   // --- Token endpoint ----------------------------------------------------------

@@ -7,6 +7,7 @@ import { basename, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { claudeProfileHomes } from "@clankie/agent-hosts";
 import {
+  FLEET_REVIEW_BUDGET,
   FleetUsageQuerySchema,
   FleetUsageReportSchema,
   type FleetUsageQuery,
@@ -365,7 +366,7 @@ export async function readFleetTokenLedger(
               harness: profile.harness,
               ...binding,
               ...(subagentId ? { subagentId } : {}),
-              budgetTokens: binding.role === "lead" ? 250_000 : 300_000,
+              budgetTokens: binding.role === "lead" ? FLEET_REVIEW_BUDGET.lead : FLEET_REVIEW_BUDGET.worker,
             });
           // Response identity comes from the native record; context itself always comes from token_count.
           if (profile.harness === "codex" && entry.type === "token_usage_record")

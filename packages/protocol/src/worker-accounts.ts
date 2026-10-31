@@ -388,6 +388,9 @@ const FleetUsageMetricsSchema = z.object({
   compactions: z.number().int().nonnegative(),
   foregroundSleepCalls: z.number().int().nonnegative(),
 });
+/** Clankie's review budgets for a lead pane and a hired worker (cost evidence). */
+export const FLEET_REVIEW_BUDGET = { lead: 250_000, worker: 300_000 } as const;
+
 export const FleetUsageReportSchema = z.object({
   schemaVersion: z.literal(1),
   source: z.literal("local-native-transcripts"),
@@ -395,7 +398,10 @@ export const FleetUsageReportSchema = z.object({
   since: z.iso.datetime(),
   until: z.iso.datetime(),
   dayBoundary: z.literal("UTC"),
-  budgets: z.object({ lead: z.literal(250000), worker: z.literal(300000) }),
+  budgets: z.object({
+    lead: z.literal(FLEET_REVIEW_BUDGET.lead),
+    worker: z.literal(FLEET_REVIEW_BUDGET.worker),
+  }),
   totals: FleetUsageMetricsSchema,
   seats: z
     .array(

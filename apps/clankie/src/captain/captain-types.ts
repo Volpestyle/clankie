@@ -60,6 +60,15 @@ export interface CaptainOptions {
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   /** Machine-wide resource admission and cached fleet metadata; never project-local policy. */
   readonly fleetResources?: FleetResourceRuntime;
+  /**
+   * Herdr session detection for the connector (ADR 0312). When it returns true,
+   * an operator message that cannot be confirmed is rediscovered once, and a
+   * lead whose session was cleared or restarted in the same pane rebinds.
+   * Absent means off, so existing deliveries keep the uncertain-receipt fence.
+   */
+  readonly connectorSessionDetection?: () => boolean;
+  /** Per-actor tracker request budgets, for the connector's capacity read (ADR 0313). */
+  readonly trackerRequestBudget?: () => import("@clankie/protocol/tracker-request-budget").TrackerRequestBudgetReport;
   readonly projectHireIdentity?: (
     fleet: string,
     pane: string,

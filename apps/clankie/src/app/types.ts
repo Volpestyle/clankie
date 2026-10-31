@@ -162,6 +162,11 @@ export interface ClankieAppDependencies {
   feedCheckReceiptPath?: string;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   connectorPromptAnswersPath?: string;
+  /**
+   * Shared with the captain so operator delivery and the connector routes see
+   * one Herdr detection switch (ADR 0312). Absent: an in-memory store, on.
+   */
+  connectorDetection?: import("./connector-detection.ts").ConnectorDetection;
   discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** Worker harness sign-in with each harness's own login (Claude, Codex). */
