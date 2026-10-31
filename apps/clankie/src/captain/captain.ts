@@ -3435,16 +3435,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat needs a structured lane.
-    const fallback = async (): Promise<FleetSeatDelivery> => {
+    // `attempt` is the delivery attempt that fell back here: the rediscovery's
+    // final resend passes its own options, not the first attempt's.
+    const fallback = async (attempt?: { readonly rediscover?: boolean | "final" }): Promise<FleetSeatDelivery> => {
       const live = fleetMailboxes.get(seatId);
+      const rediscover = attempt?.rediscover ?? deliveryOptions?.rediscover;
       // A cleared session leaves the mailbox certain of an occupant that is gone.
       // Release that one receipt so the rediscovery can send once. A poll still
       // bound to the current session keeps its receipt until the transcript
       // proves the message absent, which is the final attempt.
       if (
         live &&
-        (deliveryOptions?.rediscover === "final" ||
-          (deliveryOptions?.rediscover === true && !live.boundTo(inboundBinding(current) ?? "")))
+        (rediscover === "final" || (rediscover === true && !live.boundTo(inboundBinding(current) ?? "")))
       )
         live.releaseAbsent(message);
       if (live?.boundTo(inboundBinding(current) ?? "") || live?.uncertain()) {

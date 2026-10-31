@@ -1627,7 +1627,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public async deliverToSeat(
     seatId: string,
     text: string,
-    uncontrolled?: () => Promise<FleetSeatDelivery>,
+    uncontrolled?: (attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>,
     options?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
     if (this.requireWorkerAccess) {

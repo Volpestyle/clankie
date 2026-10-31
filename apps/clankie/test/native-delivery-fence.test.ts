@@ -523,6 +523,37 @@ it("does not send again when the cleared session already contains the message", 
   expect(send).toHaveBeenCalledTimes(1);
 });
 
+it("does not take an older identical message in the same session as proof the new one arrived", async () => {
+  const { create, entries, send } = fixture();
+  entries.push({ type: "message", role: "operator", id: "earlier", text: "hello there" });
+  send.mockImplementation(async () =>
+    send.mock.calls.length === 1
+      ? { outcome: "unconfirmed", messageId: "native-id", detail: "lost receipt" }
+      : { outcome: "accepted", messageId: "landed", state: "queued" },
+  );
+  const delivered = await create().deliverToSeat("seat1", "hello there", undefined, { rediscover: true });
+  expect(delivered).not.toMatchObject({ messageId: "earlier" });
+  expect(delivered).toMatchObject({ outcome: "delivered", messageId: "landed" });
+  expect(send).toHaveBeenCalledTimes(2);
+});
+
+it("hands the mailbox fallback the final attempt's options when it sends once more", async () => {
+  const { create, entries, adapter, setSession } = fixture();
+  adapter.attach = async () => undefined;
+  const mailbox = vi.fn<(attempt?: PeerDeliveryOptions) => Promise<FleetSeatDelivery>>(
+    async () => {
+      if (mailbox.mock.calls.length > 1) return { outcome: "delivered", messageId: "landed" };
+      setSession("session-after-clear");
+      entries.splice(0, entries.length);
+      return { outcome: "unconfirmed", messageId: "native-id", detail: "session ended" };
+    },
+  );
+  await expect(
+    create().deliverToSeat("seat1", "hello there", mailbox, { rediscover: true }),
+  ).resolves.toMatchObject({ outcome: "delivered", messageId: "landed" });
+  expect(mailbox.mock.calls.map(([attempt]) => attempt?.rediscover)).toEqual([true, "final"]);
+});
+
 it("says why a rediscovery failed and does not send a third time", async () => {
   const { create, entries, send, setSession, runner } = fixture();
   send.mockImplementation(async () => {
