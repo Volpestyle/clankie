@@ -83,6 +83,13 @@ This repository is public. Both neighbors are private and consume
   [`scripts/testing/landing-test-policy.ts`](scripts/testing/landing-test-policy.ts));
   never report that as a green gate. The full `pnpm check` runs for releases and
   on request; `clankie integrate` is optional.
+- Work never waits on CI ([ADR 0310](docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)).
+  Keep pushing, iterating, restarting and finding bugs while CI checkpoints on
+  the side; nobody sits idle on a run. File each bug as an issue at the front of
+  the queue, ordered by how badly it blocks the current goals. Open pull
+  requests as drafts: a draft gets the quick checks on every push, and marking
+  it ready runs the landing gate and the Mac job once before merge. A test that
+  already fails on `main` warns and does not block a pull request; file it.
 - On a pull request, keep its branch current with `main` and resolve conflicts
   yourself before asking anyone to look. Take each Codex review round as a batch:
   fix every finding together in one push, reply on and resolve each thread you
