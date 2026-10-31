@@ -2946,15 +2946,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (freshness.outcome === "worktree") {
         // The start checkout keeps its own work; the hire runs in the new worktree.
         if (!retained)
-          hireWorktrees.record(scope, {
-            workingDirectory: freshness.workingDirectory ?? freshness.path,
-            path: freshness.path,
-            branch: freshness.branch ?? "",
-            start: freshness.start ?? request.workingDirectory,
-            startReason: freshness.startReason ?? "",
-            remoteMain: freshness.remoteMain ?? "",
-            at: new Date().toISOString(),
-          });
+          hireWorktrees.record(
+            scope,
+            {
+              workingDirectory: freshness.workingDirectory ?? freshness.path,
+              path: freshness.path,
+              branch: freshness.branch ?? "",
+              start: freshness.start ?? request.workingDirectory,
+              startReason: freshness.startReason ?? "",
+              remoteMain: freshness.remoteMain ?? "",
+              at: new Date().toISOString(),
+            },
+            (fleet, entry) => herdrWatches.hireRetained({ fleet, workingDirectory: entry.workingDirectory }),
+          );
         request = { ...request, workingDirectory: freshness.workingDirectory ?? freshness.path };
         brief = [
           brief,

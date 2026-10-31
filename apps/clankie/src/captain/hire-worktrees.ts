@@ -39,10 +39,22 @@ export class HireWorktrees {
     return this.read()[scope];
   }
 
-  public record(scope: string, relocation: HireWorktreeRelocation): void {
+  /**
+   * Records a relocation. An older entry is dropped only once it is past retention and `retained`
+   * says its launch no longer needs it, so a fenced launch always keeps its way back.
+   */
+  public record(
+    scope: string,
+    relocation: HireWorktreeRelocation,
+    retained: (fleet: string | undefined, entry: HireWorktreeRelocation) => boolean,
+  ): void {
     const now = Date.now();
     const state = Object.fromEntries(
-      Object.entries(this.read()).filter(([, entry]) => now - Date.parse(entry.at) < RETENTION_MS),
+      Object.entries(this.read()).filter(([key, entry]) => {
+        if (now - Date.parse(entry.at) < RETENTION_MS) return true;
+        const fleet = (JSON.parse(key) as [string, string])[0];
+        return retained(fleet === "local" ? undefined : fleet, entry);
+      }),
     );
     state[scope] = relocation;
     mkdirSync(dirname(this.path), { recursive: true });

@@ -399,7 +399,7 @@ it("the real captain starts a dirty hire in a fresh worktree, refuses one in its
     });
     // The service's own runtime holds no hire worktree; any other dirty checkout gets one.
     const elsewhereState = join(root, "state-elsewhere");
-    const hireElsewhere = async () => {
+    const hireElsewhere = async (workingDirectory = join(owner, "app")) => {
       const elsewhere = createCaptain(
         { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
         {
@@ -418,7 +418,7 @@ it("the real captain starts a dirty hire in a fresh worktree, refuses one in its
             schemaVersion: 1,
             harness: "codex",
             title: "Fixture",
-            workingDirectory: join(owner, "app"),
+            workingDirectory,
             projectId: "checkout-fixture",
             effort: "low",
             effortReason: "A fixture hire only needs to reach the native launch.",
@@ -457,10 +457,23 @@ it("the real captain starts a dirty hire in a fresh worktree, refuses one in its
     );
     await hireElsewhere();
     expect(await hireWorktrees()).toEqual([first]);
+    // Age alone never drops the way back to a launch that is still fenced: another start
+    // folder's relocation is recorded, and the retry still returns to the first worktree.
+    const ledger = join(elsewhereState, "hire-worktrees.json");
+    const aged = Object.fromEntries(
+      Object.entries(JSON.parse(await readFile(ledger, "utf8")) as Record<string, { at: string }>).map(
+        ([scope, entry]) => [scope, { ...entry, at: "2026-01-01T00:00:00.000Z" }],
+      ),
+    );
+    await writeFile(ledger, JSON.stringify(aged));
+    await hireElsewhere(owner);
+    expect(await hireWorktrees()).toHaveLength(2);
+    await hireElsewhere();
+    expect(await hireWorktrees()).toHaveLength(2);
     // Once that launch is resolved, the next hire from the still-dirty checkout gets its own.
     await rm(receipts);
     await hireElsewhere();
-    expect(await hireWorktrees()).toHaveLength(2);
+    expect(await hireWorktrees()).toHaveLength(3);
     expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
     service = await createClankieApp({
       captain,
