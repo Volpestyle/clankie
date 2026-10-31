@@ -760,6 +760,12 @@ export function createOperatorService(
         // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
         const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
         const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
+        // The pane is read only if the same agent held it on both sides of the reads.
+        const after = await liveAgentOccupant(ctx.herdrRunner, pane);
+        if (after?.key !== occupant.key) {
+          agentReadScope(ctx.herdrRunner).forget(request.terminalId);
+          return unavailable("The agent in that pane changed while it was read; read it again.");
+        }
         const { text, detail } = agentReadScope(ctx.herdrRunner).bound(
           request.terminalId,
           occupant,

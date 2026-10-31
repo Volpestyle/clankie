@@ -377,6 +377,7 @@ describe("fleet routing", () => {
     let foreground: number[] = [401];
     let history = "";
     let screen = "";
+    let midRead: (() => void) | undefined;
     const run: HerdrFleetRun = async (args) => {
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({
@@ -390,7 +391,10 @@ describe("fleet routing", () => {
           },
         });
       if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, foreground);
-      if (args[0] === "pane" && args[1] === "read") return args[4] === "visible" ? screen : history;
+      if (args[0] === "pane" && args[1] === "read") {
+        midRead?.();
+        return args[4] === "visible" ? screen : history;
+      }
       throw new Error(`unexpected ${args.join(" ")}`);
     };
     const serve = createOperatorService({
@@ -476,13 +480,18 @@ describe("fleet routing", () => {
     expect(next).toMatchObject({ status: "read", text: " Hi! What are we building?" });
     expect(next.op === "terminal_read" && next.text).not.toContain("owner-again");
 
-    // Once the lines it was anchored on are gone, scrolled out or redrawn, the pane's text from
-    // its first read stays out line by line, an agent line repeating that text included.
+    // Once the lines it was anchored on are gone, scrolled out or redrawn, where the read starts
+    // can't be placed: that read shows nothing and anchors again. Later reads show what follows,
+    // with the pane's text from the first read still held back line by line, an agent line
+    // repeating that text included.
     history = "TOKEN=owner-again\n Claude Code\n> hello\n Hi! What are we building?\n All done";
+    screen = history;
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+    history = `${history}\n Next step`;
     screen = history;
     expect(await read()).toMatchObject({
       status: "read",
-      text: " Hi! What are we building?\n All done",
+      text: " Hi! What are we building?\n All done\n Next step",
       detail: HIDDEN,
     });
 
@@ -528,6 +537,20 @@ describe("fleet routing", () => {
     const carried = await read();
     expect(carried).toMatchObject({ text: "Claude Code\n Working\n Done" });
     expect(carried.op === "terminal_read" && carried.text).not.toContain("TOKEN");
+
+    // The agent exits and the shell takes the pane while it is being read: nothing read in that
+    // gap is returned, and whoever comes next starts from their own first read.
+    midRead = () => {
+      foreground = [];
+      history = `${history}\n$ cat .env\nTOKEN=owner-ninth`;
+      screen = history;
+    };
+    const swapped = await read();
+    expect(swapped).toMatchObject({ status: "unavailable" });
+    expect(JSON.stringify(swapped)).not.toContain("TOKEN");
+    midRead = undefined;
+    foreground = [409];
+    expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
   });
 
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {

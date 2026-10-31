@@ -76,8 +76,16 @@ export class AgentReadScope {
       };
       this.anchors.set(terminalId, entry);
     }
-    // Held back line by line, so an anchor scrolled or redrawn away still reveals nothing older.
-    const lines = (after(history, entry.anchor) ?? history).split("\n");
+    const cut = after(history, entry.anchor);
+    if (cut === undefined) {
+      // The anchor is gone, scrolled out or redrawn away, so where this read starts can't be
+      // placed. Show nothing now and anchor again above the current screen; the text held at
+      // the first read stays held.
+      this.anchors.set(terminalId, { ...entry, anchor: anchorAbove(history, screen) });
+      return { text: "", detail: EARLIER_SCREEN_HIDDEN };
+    }
+    // Held back line by line too, so a line the first read held is never shown for this agent.
+    const lines = cut.split("\n");
     const { earlier, tail } = entry;
     // A line that carries on the first read's last line keeps that line's text hidden too.
     const kept = lines.filter((line) => !earlier.has(compact(line)));

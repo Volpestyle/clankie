@@ -27,7 +27,9 @@ agent showed.
   native session when Herdr knows one, and its oldest non-shell foreground
   process, which is the agent itself. A different occupant is a different
   agent, so an agent resumed into the same native session after the shell had
-  the pane starts over. A refused read also drops the pane's anchor.
+  the pane starts over. A refused read also drops the pane's anchor. The
+  occupant is checked again after the pane is read; if it changed in between,
+  nothing read is returned.
 - **Nothing the pane held at the first read is shown.** Scrollback carries no
   author per line, and the line that launched an agent can't be told from an
   older one by its text: an alias (`cc`), a wrapper script (`start-coding`), a
@@ -36,8 +38,10 @@ agent showed.
   never guesses a launch line. At an occupant's first read it anchors on the
   few non-empty history lines above the screen and keeps the text of every
   line the pane held. That read and every later one return only lines written
-  after the anchor, with every line whose text was in that first read removed,
-  so an anchor scrolled out or redrawn away still reveals nothing older. The
+  after the anchor, with every line whose text was in that first read removed.
+  When the anchor is gone, scrolled out or redrawn away, that read shows
+  nothing and anchors again above the screen then; the text held at the first
+  read stays held. The
   first read's last line may have had no newline yet, so output written after
   it can land on that same line; a line that starts with its text has that text
   cut off. While
@@ -74,3 +78,8 @@ agent showed.
   mid-session. Exact provenance would come from a host-proven boundary, such
   as reading a Claude Code or Codex agent's own session transcript instead of
   its screen, left as a follow-up.
+- A line from the first read that comes back with different text (reprinted
+  with a prefix, or reflowed by a resize) no longer matches what is held back
+  and can be shown. The read uses unwrapped history, which a resize should not
+  reflow, but this hasn't been checked against real Herdr. It and the suspend
+  case are tracked as VUH-2979.
