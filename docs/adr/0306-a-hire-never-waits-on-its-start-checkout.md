@@ -42,6 +42,11 @@ instead of a refusal.
   directory grant also covers the hire's worktree inside it
   (`<granted>/.local/wt-*`, or the twin of a granted subfolder), since that is
   the granted checkout's own work.
+- **The worktree keeps its start's project.** Project resolution, local and on
+  a PC, falls back from the worktree directory to its start checkout, so a
+  project registered at a subfolder still owns that subfolder's twin. A hire
+  started inside another hire's worktree gets its own nested one, and grants
+  and projects walk out through each start.
 
 A worktree left by a hire that failed later is clean at `origin/main`, so the
 usual tidy removes it once no pane or process is in it. Calling

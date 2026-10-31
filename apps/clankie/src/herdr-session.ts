@@ -409,8 +409,9 @@ export class ExecutionConnections {
   async remoteWorkspace(fleetId: string, directory: string): Promise<boolean> {
     if (await this.grantedWorkspace(fleetId, directory)) return true;
     // A hire's own worktree inside a granted start checkout (`<start>/.local/wt-*`) is that workspace.
-    const start = hireWorktreeStart(directory);
-    return start !== undefined && (await this.grantedWorkspace(fleetId, start));
+    for (let start = hireWorktreeStart(directory); start; start = hireWorktreeStart(start))
+      if (await this.grantedWorkspace(fleetId, start)) return true;
+    return false;
   }
 
   private async grantedWorkspace(fleetId: string, directory: string): Promise<boolean> {

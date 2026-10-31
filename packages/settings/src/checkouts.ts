@@ -330,9 +330,13 @@ export function hireWorktreeSlug(name: string): string {
       .replace(/-+$/u, "") || "worker"
   );
 }
-/** The start checkout this hire worktree's folder sits in: `<start>/.local/wt-<slug>-<hex>[/<sub>]`. */
+/**
+ * The start checkout this hire worktree's folder sits in: `<start>/.local/wt-<slug>-<hex>[/<sub>]`.
+ * The innermost worktree wins, so a hire started inside another hire's worktree names that one;
+ * call it again on the answer to walk out to the first start.
+ */
 export function hireWorktreeStart(directory: string): string | undefined {
-  const match = /^(.+?)[\\/]\.local[\\/]wt-[a-z0-9-]{1,24}-[a-f0-9]{6}([\\/].*)?$/u.exec(directory);
+  const match = /^(.+)[\\/]\.local[\\/]wt-[a-z0-9-]{1,24}-[a-f0-9]{6}([\\/].*)?$/u.exec(directory);
   if (!match || /(?:^|[\\/])\.\.(?:[\\/]|$)/u.test(directory)) return undefined;
   return `${match[1]}${match[2] ?? ""}`.replace(/[\\/]+$/u, "") || undefined;
 }

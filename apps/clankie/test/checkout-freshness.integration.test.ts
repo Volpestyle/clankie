@@ -338,7 +338,9 @@ it("the real captain starts a dirty hire in a fresh worktree, refuses one in its
     await checkoutGit(owner, ["config", "user.name", "Fixture"]);
     await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
     await writeFile(join(owner, "base.txt"), "base\n");
-    await checkoutGit(owner, ["add", "base.txt"]);
+    await mkdir(join(owner, "app"));
+    await writeFile(join(owner, "app", "main.txt"), "app\n");
+    await checkoutGit(owner, ["add", "base.txt", "app/main.txt"]);
     await checkoutGit(owner, [
       "-c",
       "core.hooksPath=/dev/null",
@@ -364,7 +366,7 @@ it("the real captain starts a dirty hire in a fresh worktree, refuses one in its
                 id: "owner",
                 machineId: "local",
                 platform: process.platform === "win32" ? "windows" : "posix",
-                path: owner,
+                path: join(owner, "app"),
               },
             ],
           }),
@@ -414,13 +416,15 @@ it("the real captain starts a dirty hire in a fresh worktree, refuses one in its
           schemaVersion: 1,
           harness: "codex",
           title: "Fixture",
-          workingDirectory: owner,
+          workingDirectory: join(owner, "app"),
+          projectId: "checkout-fixture",
           effort: "low",
           effortReason: "A fixture hire only needs to reach the native launch.",
         },
         brief: "implement",
       });
-      // Freshness passed: the hire got as far as choosing a harness, from a new worktree.
+      // Freshness passed and the worktree's `app` twin kept the project registered at `owner/app`:
+      // the hire got as far as choosing a harness.
       expect(hired).toMatchObject({ op: "spawn_seat", result: { reason: "harness_unavailable" } });
       const registered = await checkoutGit(owner, ["worktree", "list", "--porcelain"]);
       expect(registered).toMatch(
@@ -519,6 +523,15 @@ it("remote observer starts a hire in a fresh worktree beside a dirty, divergent 
     expect(await readFile(join(owner, ".git", "info", "exclude"), "utf8")).toContain("/.local/\n");
     expect((await checkoutGit(owner, ["rev-parse", "HEAD"])).trim()).toBe(before);
     expect(await readFile(join(dirty.path, "base.txt"), "utf8")).toBe("remote\n");
+    // A hire started inside that dirty worktree gets its own, nested one.
+    await writeFile(join(dirty.path, "scratch.txt"), "worker scratch\n");
+    const nested = await verifyRemoteHireCheckout(fleet, shell, dirty.path, [], "Ari");
+    expect(nested).toMatchObject({
+      outcome: "worktree",
+      start: dirty.path,
+      path: expect.stringMatching(/\/\.local\/wt-nell-[a-f0-9]{6}\/\.local\/wt-ari-[a-f0-9]{6}$/u),
+    });
+    await rm(join(dirty.path, "scratch.txt"));
     // Without a worktree name the guard still refuses.
     expect(await verifyRemoteHireCheckout(fleet, shell, owner, [])).toMatchObject({
       outcome: "refused",
@@ -565,7 +578,9 @@ it("remote observer starts a hire in a fresh worktree beside a dirty, divergent 
       reason: expect.stringContaining("Managed runtime checkout"),
     });
     expect(
-      (await checkoutGit(owner, ["worktree", "list", "--porcelain"])).match(/\.local\/wt-nell-/gu),
+      (await checkoutGit(owner, ["worktree", "list", "--porcelain"])).match(
+        /\.local\/wt-nell-[a-f0-9]{6}\n/gu,
+      ),
     ).toHaveLength(3);
   } finally {
     await rm(root, { recursive: true, force: true });

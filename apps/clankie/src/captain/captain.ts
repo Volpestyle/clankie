@@ -55,6 +55,7 @@ import {
   ownerCheckout,
   syncOwnerCheckout,
   verifyHireCheckout,
+  hireWorktreeStart,
   projectPathContains,
   projectRoleForPersona,
 } from "@clankie/settings";
@@ -859,8 +860,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     // Remote paths cannot be canonicalized by this host. A proven source project remains
     // pinned; without one, only an owner-registered workspace on the fleet's machine counts.
     let destination: string | undefined;
-    if (input.fleet === undefined) destination = await localProject(input.workingDirectory);
-    else if ((source === undefined || configuredProject !== undefined) && projects.projects.length > 0) {
+    if (input.fleet === undefined) {
+      destination = await localProject(input.workingDirectory);
+      // A hire's own worktree (`<start>/.local/wt-*`, ADR 0306) belongs to its start checkout's project.
+      for (
+        let start = hireWorktreeStart(input.workingDirectory);
+        destination === undefined && start;
+        start = hireWorktreeStart(start)
+      )
+        destination = await localProject(start);
+    } else if ((source === undefined || configuredProject !== undefined) && projects.projects.length > 0) {
       const current = await settings();
       destination = remoteWorkspaceProject(
         current,

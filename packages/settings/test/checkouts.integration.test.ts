@@ -432,6 +432,10 @@ it("names a hire worktree's start checkout only for Clankie's own worktree folde
   expect(hireWorktreeStart("C:\\Users\\volpe\\repos\\kh2\\.local\\wt-nell-fix-1a2b3c")).toBe(
     "C:\\Users\\volpe\\repos\\kh2",
   );
+  // The innermost worktree names its own start; walking again reaches the first start.
+  expect(hireWorktreeStart("/repos/kh2/.local/wt-nell-1a2b3c/.local/wt-ari-4d5e6f")).toBe(
+    "/repos/kh2/.local/wt-nell-1a2b3c",
+  );
   expect(hireWorktreeStart("/repos/kh2/.local/wt-nell-1a2b3c/../../other")).toBeUndefined();
   expect(hireWorktreeStart("/repos/kh2/.local/notes")).toBeUndefined();
   expect(hireWorktreeStart("/repos/kh2")).toBeUndefined();
