@@ -225,14 +225,6 @@ Admin grants full control of a dedicated server, with server deletion and
 ownership transfer refused at the adapter. Machine grants remain separate.
 [ADR 0227](adr/0227-discord-connects-a-server-with-a-role.md) supersedes the
 four-sentence setup.
-Managed hosts also return optional `managedPolicy` status: `synced`, `pending`,
-`conflict`, `unavailable` or `disconnected`. A saved revision is distinct from
-the revision acknowledged by the edge. Policy writes also compare a monotonic
-sequence so an old write cannot succeed after a revision changes and reverts.
-Conflicts reread the edge fence and retry
-the body's current policy; the persisted settings are reconciled after restart.
-`managedPolicy.revision` fingerprints the effective policy, including environment
-overrides; `revision` on the settings snapshot still fences the stored owner edit.
 
 The role-correct invitation requests Administrator for Admin and normal member
 text/thread/voice permissions for Participant. Optional `setup.checks` reports

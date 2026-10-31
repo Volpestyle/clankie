@@ -32,7 +32,10 @@ It removes the managed body and its runtime provider, hosted pairing, support
 and device security, wake keys, the hosted operator bridge, managed and official
 Discord ingress, the hosted Activity runtime and viewer, and the CLI's hosted
 mode. `packages/protocol` keeps its hosted modules for now, because the app and
-the gateway still import them; they go when those consumers do.
+the gateway still import them; they go when those consumers do. Update
+(2026-10-31): the wake, hosted pairing, hosted browser-session and hosted,
+managed and official Discord modules are gone; `hosted-operator`,
+`support-access` and `hosted-mail` remain.
 
 ## Consequences
 
