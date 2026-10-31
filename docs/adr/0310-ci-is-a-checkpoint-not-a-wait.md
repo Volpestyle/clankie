@@ -41,6 +41,10 @@ full gate in front of `main`.
 - **The Mac runs only when it has tests to run.** A free Linux job works out
   the Mac job's changed-test selection first; when it selects nothing, the Mac
   job is skipped and passes. If that job fails, the Mac job runs anyway.
+- **Main gets the whole suite nightly.** A pull request runs only the tests
+  its change selects, so the `Nightly` workflow runs every test on `main` once
+  a night, release-only tests included, and names each failure in its summary.
+  A red night is a bug to file at the front of the queue, not a gate.
 - **The typecheck starts warm.** The typecheck keeps each program's compiler
   state (`.local/tsbuildinfo`), so a later check rechecks only what changed.
   CI caches it per pull request, seeded from every push to `main`.
