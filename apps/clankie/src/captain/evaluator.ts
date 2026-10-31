@@ -499,4 +499,3 @@ Write report.json through a temporary file and atomic rename. Include evaluation
     clearInterval(this.timer);
   }
 }
-// Landing probe for the #52 test selection; reverted before merge.

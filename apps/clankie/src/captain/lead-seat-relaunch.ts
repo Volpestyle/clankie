@@ -804,4 +804,3 @@ export async function readClaudeSessionUsage(
     await handle.close();
   }
 }
-// Landing probe for the #52 test selection; reverted before merge.

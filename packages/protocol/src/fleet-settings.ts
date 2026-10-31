@@ -326,4 +326,3 @@ export const LeadRestartStatusSchema = z
   .strict();
 export type LeadRestartStatus = z.infer<typeof LeadRestartStatusSchema>;
 export type LeadRestartWait = NonNullable<LeadRestartStatus["waiting"]>;
-// Landing probe for the #52 test selection; reverted before merge.

@@ -570,4 +570,3 @@ function doorwayHint(state: InstallDoctorReport["doorway"]["state"]): string {
       return "off";
   }
 }
-// Landing probe for the #52 test selection; reverted before merge.

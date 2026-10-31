@@ -337,4 +337,3 @@ it("names the missing harnesses and their install steps when no harness can take
     noHarnessReady({ ...fresh, accounts: [{ ...signedOut, usable: true, signedIn: true }] }),
   ).toBeUndefined();
 });
-// Landing probe for the #52 test selection; reverted before merge.

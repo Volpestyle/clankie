@@ -125,4 +125,3 @@ export async function readMachineAccessRefusals(
     (record) => !machineAccessAllows(machineAccessLevel(policy, record.machine, joined), record.required),
   );
 }
-// Landing probe for the #52 test selection; reverted before merge.

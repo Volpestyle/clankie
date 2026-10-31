@@ -1371,4 +1371,3 @@ export function withMediaNote(message: string, note: string): string {
   const suffix = `\n\n${note}`;
   return `${message.slice(0, 16_384 - suffix.length)}${suffix}`;
 }
-// Landing probe for the #52 test selection; reverted before merge.

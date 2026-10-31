@@ -1365,4 +1365,3 @@ it("a drop posted before its file was marked is marked on retry and on restart, 
   expect(await marked("The bell is cracked")).toMatchObject({ tracker: "linear" });
   expect(f.mutations("issueCreate")).toBe(2);
 });
-// Landing probe for the #52 test selection; reverted before merge.

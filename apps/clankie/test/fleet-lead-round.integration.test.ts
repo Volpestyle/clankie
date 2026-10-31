@@ -1751,4 +1751,3 @@ it("delivers an aged owner question to its own lead even without current workers
   expect(await f.captain.pollSeatEvents(0, undefined, f.other)).toEqual([]);
   await f.finish(event!.id);
 });
-// Landing probe for the #52 test selection; reverted before merge.

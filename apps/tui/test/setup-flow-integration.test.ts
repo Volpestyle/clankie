@@ -181,4 +181,3 @@ it("cancelling autonomy keeps saved custom leaves and does not advance first-run
   expect(f.shell.getDraft()).toBe("");
   expect((await runAutonomyCommand([], fleetSettingsClient(f.settings))).level).toBe("custom");
 });
-// Landing probe for the #52 test selection; reverted before merge.

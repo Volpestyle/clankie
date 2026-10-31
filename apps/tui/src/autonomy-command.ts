@@ -166,4 +166,3 @@ export function autoCommand(
     },
   };
 }
-// Landing probe for the #52 test selection; reverted before merge.

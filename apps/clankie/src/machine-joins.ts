@@ -475,4 +475,3 @@ export interface JoinedSeatMachine {
   readonly directories: readonly string[];
   authorize(): Promise<void>;
 }
-// Landing probe for the #52 test selection; reverted before merge.

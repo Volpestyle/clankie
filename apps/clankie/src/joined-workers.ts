@@ -398,4 +398,3 @@ function approvedDirectory(machine: JoinedSeatMachine, directory: string): boole
     })
   );
 }
-// Landing probe for the #52 test selection; reverted before merge.

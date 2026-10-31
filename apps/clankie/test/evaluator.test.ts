@@ -236,4 +236,3 @@ it("keeps work queued while its own pane is busy", async () => {
   await evaluator.tick();
   expect(evaluator.status().jobs[0]?.status).toBe("running");
 });
-// Landing probe for the #52 test selection; reverted before merge.
