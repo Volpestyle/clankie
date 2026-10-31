@@ -56,7 +56,8 @@ changes nothing.
   lead launches and anything else above Portal are refused. That holds on
   joined machines too, for Clankie's own hires and for a joined lead's hires and
   messages to its workers; the lead and its workers stay bound for when Watch
-  ends. These refusals leave no doctor item: the fix is the dial, not the
+  ends. A joined machine polls at Portal, so it stops what it was running for
+  Clankie, and work queued for it before Watch is refused, never sent. These refusals leave no doctor item: the fix is the dial, not the
   machine.
 - **Wakes and alerts.** No wake reaches a lead, native or service, and no
   health alert is sent into a seat.

@@ -382,7 +382,9 @@ export class MachineJoins {
     }
     const settings = await this.options.settings.load();
     if (!this.has(record.id)) throw Error("revoked");
-    const accessLevel = machineAccessLevel(settings, record.id, this);
+    // Watch holds every machine at Portal (ADR 0307): the joined host stops what it is running for him.
+    const watching = settings.autonomy?.watch === true;
+    const accessLevel = watching ? "portal" : machineAccessLevel(settings, record.id, this);
     const previous = this.seen.get(record.id);
     const now = this.now();
     this.seen.set(record.id, now);
@@ -391,6 +393,12 @@ export class MachineJoins {
     const requests = [...this.work.values()]
       .filter((work) => work.machineId === record.id && !work.claimed)
       .slice(0, 16);
+    if (watching) {
+      // Every joined operation needs more than Portal, so work queued before Watch is refused, never sent.
+      for (const work of requests)
+        work.settle({ id: work.request.id, ok: false, error: "machine_access_refused" });
+      requests.length = 0;
+    }
     for (const work of requests) work.claimed = true; // Lost delivery is never replayed.
     return {
       policy: { machineId: record.id, accessLevel, directories: record.directories },
