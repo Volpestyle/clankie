@@ -718,3 +718,29 @@ TUI typecheck (source plus four test partitions), TUI package lint, repository
 deadcode and formatting of the three test files plus the complete shared
 review passed through `clankie heavy`. A normal Knip configuration hint about
 an unmatched entry glob remains informational; no unused-code exemption was added.
+
+## Real-app run batch (ADR 0309)
+
+[ADR 0309](0309-the-real-app-runs-on-every-change.md) runs the real service, relay
+and Herdr in a scratch home on every change. A test goes only when a flow proves
+its whole claim against the real app; a test that also guards a refusal, a race or
+a replay the run does not reach stays.
+
+| Removed case                                                                                                     | Proved now by                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/clankie/test/http-journey.test.ts`: serves health and enforces operator authority before and after restart | `boot` (real `/health`), `authority` (pairing offer refused without the operator bearer), `restart` (state and authority across a real stop and start).                                                    |
+| `apps/clankie/test/routines.integration.test.ts`: the CLI manages routines through the authenticated API         | `routine`: the real CLI adds a plain-language weekday schedule, pauses, edits with the time zone kept, resumes with the next run ahead, refuses an unreadable schedule, needs the credential, and removes. |
+
+Kept in those files: pairing codes staying operator-only after a device pairs,
+and the routine runner's restart, missed-run and conversation-ownership cases,
+which use a fixed clock and recorded boundaries the real run cannot reach.
+
+Reviewed and kept although the run touches their happy path: `feed-drop`,
+`feed-check`, `feed`, `project-create`, `fleet-autonomy-cli` and the relay's
+`scratch-stack` integration tests, which prove refusals, idempotency and broker
+boundaries; the seat binding tests and `integrations/fleet-proof/linux-process-proof.py`
+as trust-boundary proofs.
+
+Measured on the landing gate before this batch: tests take about two minutes of a
+twelve- to fifteen-minute landing and typechecking most of the rest, so removing
+tests is for honesty about coverage, not speed.
