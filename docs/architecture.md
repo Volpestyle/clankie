@@ -1122,7 +1122,9 @@ Git observations, safe fast-forward, and new-hire freshness admission.
 pushes and main runtime updates persist checkout-sync results. Fresh hires
 verify fetched main on their actual machine before any launch. Clean behind-only
 starts, including detached HEAD, fast-forward after a live-pane census; dirty, divergent,
-managed-runtime, live or unverified starts stay protected. Saved resumes retain
+live or unadvanceable starts stay untouched and the hire runs in a new
+`.local/wt-*` worktree from fetched main (ADR 0306). Managed-runtime and
+unverified starts refuse. Saved resumes retain
 their directory. The service's `owner-checkout-sync.ts` observes enrolled local
 owner refs every five seconds and fetches once a minute: direct pushes trigger
 the same safe sync, including catch-up on startup. Blocking edits and ages

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { remoteProgramCommand, type HerdrFleet } from "../../src/herdr-fleet.ts";
 import { remoteCheckoutProgram } from "../../src/captain/checkout-freshness.ts";
+import { hireWorktreeSlug } from "@clankie/settings";
 import { RemoteOpenCodeWorkers } from "../../src/captain/remote-opencode-workers.ts";
 import { createRemoteOpenCodeHelper } from "../../src/captain/remote-opencode-helper.ts";
 import {
@@ -225,11 +226,20 @@ export async function remoteOpenCodeFixture(options: {
     // Checkout admission runs the exact remote program against the real fixture
     // directory. This workspace is intentionally non-Git; preserve that actual
     // observation rather than manufacturing a fresh checkout receipt.
+    // The program carries the hire's worktree slug, named from its title, except for a retry
+    // whose earlier launch is still fenced in this folder (ADR 0306).
+    const launch = (value: string) =>
+      value.replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture");
     if (
-      command.replaceAll(/clankie-launch-[a-f0-9]{16}/gu, "clankie-launch-fixture") ===
-      remoteProgramCommand(fleet.ssh.shell, "node", ["-e", remoteCheckoutProgram(root, [root])]).replaceAll(
-        /clankie-launch-[a-f0-9]{16}/gu,
-        "clankie-launch-fixture",
+      [undefined, "Oriana Vale", "Remote Stranger"].some(
+        (title) =>
+          launch(command) ===
+          launch(
+            remoteProgramCommand(fleet.ssh.shell, "node", [
+              "-e",
+              remoteCheckoutProgram(root, [root], title === undefined ? "" : hireWorktreeSlug(title)),
+            ]),
+          ),
       )
     ) {
       const { stdout } = await execute("/bin/sh", ["-c", command], {

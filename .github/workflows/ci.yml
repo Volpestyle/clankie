@@ -97,8 +97,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy, rustfmt
-      # Vox's turbojpeg-sys builds libjpeg-turbo's SIMD code with NASM.
-      - run: sudo apt-get install -y --no-install-recommends nasm
+      # Vox's turbojpeg-sys builds libjpeg-turbo's SIMD code with NASM; the activity-sharing
+      # tests decode real MP4 and GIF media with ffmpeg.
+      - run: sudo apt-get install -y --no-install-recommends nasm ffmpeg
       - uses: actions/cache@v4
         with:
           path: |

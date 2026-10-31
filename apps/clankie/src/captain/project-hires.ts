@@ -204,7 +204,10 @@ export class ProjectHires {
       unlinkSync(`${this.path}.lock`);
     }
   }
-  public unresolved(input: SpawnOperatorSeat): boolean {
+  public unresolved(input: {
+    readonly fleet?: string | undefined;
+    readonly workingDirectory: string;
+  }): boolean {
     return this.read().allocations.some(
       (a) =>
         !a.gone &&

@@ -117,11 +117,13 @@ results name files and their age; preserve those files and report the blocker.
 checkout Git work. Sync and hire admission require a successful fetch.
 New hires fetch `origin/main` on that machine. A clean behind-only start,
 including detached HEAD, fast-forwards after checking its live pane census.
-Dirty and divergent starts refuse. Live and managed-runtime checkouts never auto-advance. Ignored files
-are never overwritten, stashed or deleted. Fresh topic branches are accepted.
-A dirty-start refusal names up to 20 blocking paths, including
-untracked directories. Preserve those files; create a fresh owned deliverable
-worktree from fetched `origin/main`. Resuming a saved session keeps its exact directory.
+A dirty, divergent or live-pane start is left exactly as it is and the hire
+runs in a new worktree, `<start>/.local/wt-<name>-<hex>` on branch
+`clankie/<name>-<hex>`, made from fetched `origin/main` (ADR 0306); its brief
+names both. Live and managed-runtime checkouts never auto-advance, and a managed
+runtime gets no worktree. Ignored files are never overwritten, stashed or
+deleted. Fresh topic branches are accepted. Only an unverifiable `origin/main`
+or a managed runtime refuses a hire. Resuming a saved session keeps its exact directory.
 
 ## Reclaiming caches
 
