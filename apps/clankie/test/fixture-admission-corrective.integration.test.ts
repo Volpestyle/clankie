@@ -20,12 +20,13 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
-import { beforeAll, expect, it } from "vitest";
+import { beforeAll, beforeEach, expect, it } from "vitest";
 import { NativeFixtureAdmissions, type FixtureOriginalVerifier } from "../src/native-fixture-admissions.ts";
 import { createFixtureBootstrap, type OwnedFixture } from "../src/fixture-admission-bootstrap.ts";
 import { FixtureRequestIndex } from "../src/fixture-request-index.ts";
 import { fleetProcessHelper, nativeProcessStart } from "../src/local-fleet-process.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
+import { unreadableSameAccountThreads } from "./helpers/linux-census.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const auditPath = join(repoRoot, ".local/fixture-corrective-roots.jsonl");
@@ -34,6 +35,12 @@ beforeAll(async () => {
   for (const script of ["build-fleet-proof.mjs", "build-fixture-read.mjs"])
     await promisify(execFile)(process.execPath, [join(repoRoot, "scripts", script)], { timeout: 120_000 });
 }, 130_000);
+// Every case admits its caller through the real native socket census, which refuses
+// beside a same-account FD table it cannot read (see helpers/linux-census.ts).
+const unreadable = unreadableSameAccountThreads();
+beforeEach((context) =>
+  context.skip(unreadable.length > 0, `native census incomplete beside ${unreadable.join(", ")}`),
+);
 const privateRoot = async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "fixture-corrective-")));
   await appendFile(auditPath, `${JSON.stringify({ event: "test-root-created", root, pid: process.pid })}\n`);
