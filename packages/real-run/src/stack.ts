@@ -97,6 +97,8 @@ export const makeStack = (directory: string) =>
     let relay: ChildProcess | undefined;
     let boots = 0;
 
+    /** Each launched process, settled once it exited and its log file holds all it wrote. */
+    const drained = new WeakMap<ChildProcess, Promise<void>>();
     const launch = (name: "clankie" | "relay", logPath: string) => {
       const child = spawn(process.execPath, [scratchStack, "run", directory, name], {
         cwd: repoRoot,
@@ -104,22 +106,66 @@ export const makeStack = (directory: string) =>
         detached: true,
       });
       const log = createWriteStream(logPath, { flags: "a" });
-      child.stdout?.pipe(log);
-      child.stderr?.pipe(log);
+      child.stdout?.pipe(log, { end: false });
+      child.stderr?.pipe(log, { end: false });
+      // "close" fires once the process exited and both its pipes ended.
+      drained.set(child, new Promise<void>((done) => child.once("close", () => log.end(() => done()))));
       return child;
     };
     const stop = (child: ChildProcess | undefined, what: string) =>
       Effect.tryPromise({
         try: async () => {
-          if (!child || child.exitCode !== null || child.signalCode !== null) return;
-          const exited = new Promise<void>((done) => child.once("exit", () => done()));
-          process.kill(-child.pid!, "SIGTERM");
-          const timer = setTimeout(() => process.kill(-child.pid!, "SIGKILL"), 15_000);
-          await exited;
-          clearTimeout(timer);
+          if (!child) return;
+          if (child.exitCode === null && child.signalCode === null) {
+            process.kill(-child.pid!, "SIGTERM");
+            const timer = setTimeout(() => process.kill(-child.pid!, "SIGKILL"), 15_000);
+            await drained.get(child);
+            clearTimeout(timer);
+          }
+          await drained.get(child);
         },
         catch: (cause) => new ProcessFailed({ what: `stop ${what}`, cause }),
       });
+    // The service's supervisor stops its Herdr server on SIGTERM, but the server runs
+    // in its own process group so that it outlives a service restart (ADR 0164), and
+    // a supervisor that died first leaves it running. The end of the run asks it to
+    // stop through its socket, then reaps any server still running from this home's
+    // own copy of Herdr (the service always runs it from STATE/herdr/bin/herdr).
+    const herdrRoot = join(env.CLANKIE_STATE!, "herdr");
+    const herdrBinary = join(herdrRoot, "bin/herdr");
+    const run = (file: string, args: string[], options: { env?: NodeJS.ProcessEnv } = {}) =>
+      new Promise<string>((done) =>
+        execFile(file, args, { timeout: 15_000, ...options }, (_error, stdout) => done(stdout)),
+      );
+    const herdrServers = async () =>
+      (await run("ps", ["-axo", "pid=,args="]))
+        .split("\n")
+        .map((line) => /^\s*(\d+)\s+(.*)$/u.exec(line))
+        .filter((match) => match?.[2]?.startsWith(`${herdrBinary} server`))
+        .map((match) => Number(match![1]));
+    const stopHerdr = Effect.tryPromise({
+      try: async () => {
+        const socketPath = join(herdrRoot, "herdr.sock");
+        if (existsSync(socketPath) && existsSync(herdrBinary))
+          await run(herdrBinary, ["server", "stop"], {
+            env: {
+              ...process.env,
+              XDG_CONFIG_HOME: herdrRoot,
+              XDG_STATE_HOME: herdrRoot,
+              XDG_RUNTIME_DIR: herdrRoot,
+              HERDR_SOCKET_PATH: socketPath,
+            },
+          });
+        for (let attempt = 0; attempt < 20; attempt++) {
+          const left = await herdrServers();
+          if (!left.length) return;
+          for (const pid of left) process.kill(pid, attempt < 10 ? "SIGTERM" : "SIGKILL");
+          await new Promise((done) => setTimeout(done, 500));
+        }
+        throw new Error(`still running: ${(await herdrServers()).join(", ")}`);
+      },
+      catch: (cause) => new ProcessFailed({ what: "stop the scratch Herdr server", cause }),
+    });
     const healthy = (url: string) => () =>
       fetch(`${url}/health`, { signal: AbortSignal.timeout(2_000) }).then(async (response) =>
         response.ok ? ((await response.json()) as Record<string, unknown>) : undefined,
@@ -211,9 +257,13 @@ export const makeStack = (directory: string) =>
               }
             })
         : [];
+    /** Stops everything the run started and waits until their logs are complete. */
     const close = Effect.suspend(() =>
-      Effect.all([stop(service, "the service"), stop(relay, "the relay")]),
-    ).pipe(Effect.ignore);
+      Effect.all([stop(service, "the service"), stop(relay, "the relay")]).pipe(
+        Effect.ignore,
+        Effect.andThen(stopHerdr.pipe(Effect.catch((error) => Effect.logError(error.message)))),
+      ),
+    ).pipe(Effect.withSpan("stack.close"));
     return {
       directory,
       env,

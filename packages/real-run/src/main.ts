@@ -47,7 +47,8 @@ interface FlowReport {
   failure?: string;
 }
 
-const program = Effect.gen(function* () {
+/** Runs the selected flows, then stops everything it started before returning. */
+const runFlows = Effect.gen(function* () {
   const stack = yield* Effect.acquireRelease(makeStack(join(out, "home")), (stack) => stack.close);
   const state: RunState = {};
   const reports: FlowReport[] = [];
@@ -81,7 +82,15 @@ const program = Effect.gen(function* () {
       );
     }
   }
-  // Whatever the flows saw, the service must not have logged an error doing it.
+  return { stack, reports, failed };
+}).pipe(Effect.scoped);
+
+const program = Effect.gen(function* () {
+  const run = yield* runFlows;
+  const { stack, reports } = run;
+  let { failed } = run;
+  // Whatever the flows saw, the service must not have logged an error doing it,
+  // shutdown included: the processes have stopped and their logs are complete here.
   const errors = stack
     .serviceLog()
     .filter((line) => (line.level ?? 0) >= 50)
@@ -111,9 +120,7 @@ const program = Effect.gen(function* () {
   return report;
 });
 
-const exit = await Effect.runPromiseExit(
-  program.pipe(Effect.scoped, Effect.provide(runLoggers(join(out, "run.jsonl")))),
-);
+const exit = await Effect.runPromiseExit(program.pipe(Effect.provide(runLoggers(join(out, "run.jsonl")))));
 if (Exit.isFailure(exit)) {
   console.error(Cause.pretty(exit.cause));
   process.exitCode = 1;
