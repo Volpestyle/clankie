@@ -54,6 +54,8 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Pair a device / list / revoke          | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                                                                              |
 | Claude connector URL / sign-ins        | `clankie connector --json`, `clankie connector approve CODE --json` (only a code the owner sees on their own sign-in page)                                         |
 | Apps that may answer agents' prompts   | `clankie connector prompts --json`, `clankie connector prompts on\|off APP --json` (owner's choice; ADR 0303)                                                      |
+| Multiplexer session detection (Herdr first) | `clankie connector detect --json`, `clankie connector detect on\|off herdr --json` (Herdr on until the owner turns it off; ADR 0312)                             |
+| Which connected apps the connector serves | `clankie connector serve --json`, `clankie connector serve on\|off APP --json` (every app until the owner turns one off; ADR 0312)                                 |
 | Who leads: Clankie or connected apps   | `clankie connector lead --json`, `clankie connector lead clankie\|apps --json` (owner's choice; ADR 0304)                                                          |
 | Rotate operator credential             | `clankie operator-credential rotate --json`                                                                                                                        |
 | Restart / stop a service               | `clankie start`, `stop` or `restart [service]`                                                                                                                     |

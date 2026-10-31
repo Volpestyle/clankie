@@ -847,13 +847,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           ? // allow-swallowed-rejection -- an unreadable pane proves nothing; the unchanged guard below refuses.
             await herdrRunner.get(native.paneId).catch(() => undefined)
           : undefined;
+      // A cleared or restarted session keeps the pane and harness and replaces
+      // the session. With Herdr detection on, that is the same agent: rebind the
+      // lead to the session now in the pane (ADR 0312). A different harness,
+      // terminal, or a missing proof still refuses.
+      let expectedOccupant =
+        native.session === undefined ? undefined : occupantIdForHerdrSession(native.session);
+      if (
+        options.connectorSessionDetection?.() === true &&
+        origin !== undefined &&
+        proof?.nativeSessionPending !== true &&
+        native.session !== undefined &&
+        expectedOccupant !== proof?.nativeOccupantId
+      ) {
+        const live = await herdrRunner.get(native.paneId).catch(() => undefined);
+        if (
+          live?.session &&
+          live.terminalId === native.terminalId &&
+          live.paneId === native.paneId &&
+          live.agent === native.agent &&
+          occupantIdForHerdrSession(live.session) === proof?.nativeOccupantId
+        ) {
+          conversations.rememberNativeSource(origin, live);
+          expectedOccupant = proof?.nativeOccupantId;
+        }
+      }
       source =
         pending !== undefined &&
         leadSeats.pendingReceipt(origin!, leadSeatPane(native), leadSeatPane(pending)) !== undefined
           ? configuredProject
           : await nativeHireProject(
               projects,
-              native.session === undefined ? undefined : occupantIdForHerdrSession(native.session),
+              expectedOccupant,
               proof,
               (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
               options.projectHireWorkspace,
@@ -3374,6 +3399,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       await deliveryOptions.guard!();
     }
     const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+    if (
+      context.source === "operator" &&
+      options.connectorSessionDetection?.() === true &&
+      deliveryOptions?.reconcileOnly !== true &&
+      deliveryOptions?.rediscover === undefined
+    )
+      deliveryOptions = { ...deliveryOptions, rediscover: true };
     deliveryOptions = {
       ...deliveryOptions,
       conversationId: context.conversationId,
@@ -3403,8 +3435,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     }
     // An adapter-driven seat takes its message through the adapter, which
     // waits for the harness's own receipt; any other seat needs a structured lane.
-    const fallback = async (): Promise<FleetSeatDelivery> => {
+    // `attempt` is the delivery attempt that fell back here: the rediscovery's
+    // final resend passes its own options, not the first attempt's.
+    const fallback = async (attempt?: { readonly rediscover?: boolean | "final" }): Promise<FleetSeatDelivery> => {
       const live = fleetMailboxes.get(seatId);
+      const rediscover = attempt?.rediscover ?? deliveryOptions?.rediscover;
+      // A cleared session leaves the mailbox certain of an occupant that is gone.
+      // Release that one receipt so the rediscovery can send once. A poll still
+      // bound to the current session keeps its receipt until the transcript
+      // proves the message absent, which is the final attempt.
+      if (
+        live &&
+        (rediscover === "final" || (rediscover === true && !live.boundTo(inboundBinding(current) ?? "")))
+      )
+        live.releaseAbsent(message);
       if (live?.boundTo(inboundBinding(current) ?? "") || live?.uncertain()) {
         let staged: Awaited<ReturnType<typeof stageWindowsMessage>> | undefined;
         let dispatched = false;

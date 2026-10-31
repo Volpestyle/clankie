@@ -264,6 +264,7 @@ import {
   type TrackerActor,
 } from "@clankie/work-items";
 import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
+import { ConnectorDetection } from "./app/connector-detection.ts";
 import { CLANKIE_VERSION } from "./app/log.ts";
 
 const logger = createLogger({ service: "clankie", version: CLANKIE_VERSION });
@@ -1451,6 +1452,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
 const operatorSeatMigrations = new OperatorSeatMigrations(
   join(stateRoot, "operator-migrations", "migrations.json"),
 );
+const connectorDetection = new ConnectorDetection(join(stateRoot, "connector-detection.json"));
 const captain = createCaptain(
   {
     inboundReportMigrationReady:
@@ -1710,6 +1712,7 @@ const captain = createCaptain(
       ? {}
       : { workingDirectory: startupSettings.captain.workingDirectory }),
     stateDir: join(stateRoot, "captain"),
+    connectorSessionDetection: () => connectorDetection.multiplexer("herdr"),
     operatorSeatMigrationHeld: (conversationId) => operatorSeatMigrations.held(conversationId),
     ...(process.env.CLANKIE_DURABLE_PI_ROOM === undefined
       ? {}
@@ -2359,6 +2362,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
+  connectorDetection,
   evidenceStore,
   builtInTracker,
   discordForum: { receive: (event) => discordForum.accept(event, discordForumOwner) },

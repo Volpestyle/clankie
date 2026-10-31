@@ -226,6 +226,8 @@ export function createHerdrSessionSource(
           };
         if (result.status === "seat_undelivered")
           return { id, status: "not_delivered", detail: `Nothing was sent: ${result.detail}` };
+        if (result.status === "seat_delivery_unconfirmed")
+          return { id, status: "unconfirmed", detail: result.detail };
         return {
           id,
           status: "unconfirmed",

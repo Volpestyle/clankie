@@ -618,6 +618,19 @@ export class SeatOutbox {
     return this.conflict({ content }) !== undefined;
   }
 
+  /**
+   * Drop one unresolved receipt for this exact content so a rediscovery can
+   * send it once (ADR 0312). An unreadable journal and a delivery still in
+   * flight stay put. Returns whether a receipt was released.
+   */
+  public releaseAbsent(content: string): boolean {
+    const match = this.conflict({ content });
+    if (match === undefined || match[0] === "unreadable-receipts") return false;
+    if (this.active.has(match[1].messageId)) return false;
+    this.abandonUnknown(match[1].messageId);
+    return true;
+  }
+
   /** Unresolved receipts, oldest first, for doctor and the owner settle path. */
   public unresolvedDeliveries(): UnresolvedSeatReceipt[] {
     return this.unresolved()

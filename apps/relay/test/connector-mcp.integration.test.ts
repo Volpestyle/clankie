@@ -97,6 +97,10 @@ async function startConnectorRelay(
     readonly machines?: readonly OperatorTerminalMachine[];
     // False for a service from before `terminal_read`, which only streams this Mac's panes.
     readonly terminalRead?: boolean;
+    readonly policy?: (device: { readonly deviceId: string; readonly name: string }) => Promise<{
+      readonly herdr: boolean;
+      readonly served: boolean;
+    }>;
   } = {},
 ) {
   const machines = linked.machines ?? [{ id: "pc1", reachable: true, herdrVersion: "0.9.3" }];
@@ -359,6 +363,7 @@ async function startConnectorRelay(
     version: "test",
     // This checkout's own shipped skills.
     guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
+    ...(linked.policy === undefined ? {} : { policy: linked.policy }),
   });
   const server = createServer((request, response) => {
     void (async () => {
@@ -850,5 +855,38 @@ describe("Claude connector MCP endpoint", () => {
       body: "{}",
     });
     expect(refused.status).toBe(403);
+  });
+
+  it("refuses an app the owner turned off, and hides Herdr sessions when detection is off", async () => {
+    const off = await startConnectorRelay(
+      { authorized: true, device: connectorDevice },
+      {
+        policy: async () => ({ herdr: true, served: false }),
+      },
+    );
+    const client = await connect(off.url);
+    const refused = await client.callTool({ name: "list_agents", arguments: {} });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain('clankie connector serve on "Claude"');
+
+    const hidden = await startConnectorRelay(
+      { authorized: true, device: connectorDevice },
+      {
+        policy: async () => ({ herdr: false, served: true }),
+      },
+    );
+    const reader = await connect(hidden.url);
+    const listed = JSON.parse(textOf(await reader.callTool({ name: "list_agents", arguments: {} })));
+    expect(listed.agents).toEqual([]);
+    expect(listed.notices[0]).toContain("clankie connector detect on herdr");
+    const unread = await reader.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } });
+    expect(unread.isError).toBe(true);
+    expect(textOf(unread)).toContain("isn't reachable");
+    const unsent = await reader.callTool({
+      name: "message_agent",
+      arguments: { agent: "herdr:pc1/kh2", message: "run the tests" },
+    });
+    expect(unsent.isError).toBe(true);
+    expect(textOf(unsent)).toContain("isn't reachable");
   });
 });
