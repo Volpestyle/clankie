@@ -61,6 +61,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "roster" }
   | { op: "fleet" }
   | { op: "fleet_capacity" }
+  | { op: "seat_image" }
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }
@@ -118,6 +119,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "roster" }
   | { op: "fleet" }
   | { op: "fleet_capacity" }
+  | { op: "seat_image" }
   | { op: "readopt_seat" }
   | { op: "worker_reports" }
   | { op: "acknowledge_worker_reports" }
