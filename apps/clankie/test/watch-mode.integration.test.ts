@@ -6,6 +6,8 @@ import { SettingsStore } from "@clankie/settings";
 import { WatchingMachineRefused } from "@clankie/protocol";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { createCaptainModelRuntime } from "../src/captain/model.ts";
+import { routeLaneRun } from "../src/captain/lane-route.ts";
+import type { LaneSession } from "../src/captain/captain-types.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import { WATCH_TURN_REFUSAL, createWatchGate } from "../src/watch.ts";
 import { runAutonomyCommand } from "../../tui/src/command/fleet.ts";
@@ -94,4 +96,49 @@ it("Watch refuses a model turn before any model is chosen, so nothing reaches a 
   // Leaving Watch lifts the refusal; whatever the machine's model setup says comes next.
   await f.dial("off");
   await expect(watch.refuse(WATCH_TURN_REFUSAL)).resolves.toBeUndefined();
+});
+
+it("Watch compacts no session: a trimmed lane keeps its compaction for when Clankie acts again", async () => {
+  const f = await fixture();
+  const watch = createWatchGate(f.settings);
+  const models = await createCaptainModelRuntime(f.root, { refuse: () => watch.refuse(WATCH_TURN_REFUSAL) });
+  const compactions: string[] = [];
+  const lane = {
+    purpose: "operator" as const,
+    budget: { compactBeforeNextRun: true },
+    // Compaction sends the session's history to a model; it is the only call this lane can make.
+    session: { compact: async () => void compactions.push("compacted") } as unknown as LaneSession["session"],
+  };
+  await f.dial("watch");
+  await expect(routeLaneRun(lane, models)).rejects.toThrow(WATCH_TURN_REFUSAL);
+  expect(compactions).toEqual([]);
+  expect(lane.budget.compactBeforeNextRun).toBe(true);
+});
+
+it("Watch joins the settings revision, so a client that read Off before Watch gets a conflict", async () => {
+  const f = await fixture();
+  const client = fleetSettingsClient(f.settings);
+  const read = async () =>
+    (await (
+      await client.fetchImpl(`${client.host}/v1/operator/fleet-settings`, {
+        headers: { authorization: `Bearer ${client.env.CLANKIE_OPERATOR_TOKEN}` },
+      })
+    ).json()) as { revision: string };
+  await f.dial("off");
+  const stale = await read();
+  await f.dial("watch");
+  const write = await client.fetchImpl(`${client.host}/v1/operator/fleet-settings`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${client.env.CLANKIE_OPERATOR_TOKEN}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      expectedRevision: stale.revision,
+      changes: { autonomyLevel: "off" },
+    }),
+  });
+  expect(write.status).toBe(409);
+  expect((await f.settings.load()).autonomy.watch).toBe(true);
 });

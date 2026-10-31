@@ -45,9 +45,3 @@ export function createWatchGate(settings: Pick<SettingsStore, "load">): WatchGat
     },
   };
 }
-
-/** For callers built without settings, such as tests and the dormant body: never watching. */
-export const NEVER_WATCHING: WatchGate = {
-  watching: async () => false,
-  refuse: async () => undefined,
-};

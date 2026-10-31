@@ -1409,3 +1409,26 @@ it("Watch refuses every write by Clankie, a lead or a worker, holds nothing, and
   });
   expect(f.mutations("commentCreate")).toBe(2);
 });
+
+it("Watch keeps a post held for Clankie from going out when he approves it, until Watch is off", async () => {
+  const f = await fixture();
+  await f.setPosting("garden", "lead");
+  const held = await f.worker("save_comment", comment("Held before Watch."));
+  if (held.outcome !== "refused") throw new Error("expected a hold");
+  const id = /post ([0-9a-f-]{36})/u.exec(held.detail)![1]!;
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  const approved = await f.work("posts", "approve", id);
+  expect(approved.ok).toBe(false);
+  expect(JSON.stringify(approved.body)).toContain("only watching");
+  expect(f.mutations("commentCreate")).toBe(0);
+  expect(f.posting.read(id)?.state).toBe("waiting");
+  await f.settings.update((current) => {
+    const { watch: _watch, ...autonomy } = current.autonomy;
+    return { ...current, autonomy };
+  });
+  expect(await f.work("posts", "approve", id)).toMatchObject({
+    ok: true,
+    body: { changed: true, post: { state: "posted" } },
+  });
+  expect(f.mutations("commentCreate")).toBe(1);
+});

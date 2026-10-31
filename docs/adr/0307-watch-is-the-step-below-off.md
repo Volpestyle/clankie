@@ -33,7 +33,8 @@ changes nothing.
   `?includeWatch=true`: the snapshot schema is strict, and an app that
   predates Watch would refuse a snapshot with a key it does not know. A
   snapshot without `watch` on that read comes from a service that cannot
-  watch.
+  watch. While Watch is on it joins the snapshot revision, so a client that
+  read Off before Watch was chosen gets a conflict instead of leaving it.
 - **Every surface.** `clankie autonomy watch` and `/autonomy watch` set it,
   and status reports `level: "watch"`. The app shows Watch below Off.
 - **Global.** Project overrides cannot lift it. Every refusal is checked when
@@ -44,7 +45,8 @@ changes nothing.
 
 - **Model turns.** The captain's model runtime refuses before choosing a
   model, so chat, wakes, routines, Auto rounds, Discord and Linear turns reach
-  no provider. Chat says Clankie is only watching.
+  no provider. A session waiting to be compacted keeps waiting: compaction
+  sends its history to a model. Chat says Clankie is only watching.
 - **Machines act at Portal.** Machine access treats every machine as Portal
   (ADR 0244), so hires, moves, deliveries into a worker, question answers,
   lead launches and anything else above Portal are refused. These refusals
@@ -59,7 +61,8 @@ changes nothing.
 - **Trackers.** No tracker write by Clankie, a lead or a worker goes through
   him, outward or to the built-in tracker. Nothing is held for later either.
   The owner's own writes (`clankie work owner`, or a post he approves) are
-  his. The Discord forum view binds no forum, so it copies nothing into the
+  his. A post held for Clankie before Watch was chosen keeps waiting; only the
+  owner can let it out meanwhile. The Discord forum view binds no forum, so it copies nothing into the
   tracker. A change made meanwhile reaches the forum the next time its issue
   changes.
 - **Auto.** Auto rounds do not run. The Auto switch keeps its saved value.

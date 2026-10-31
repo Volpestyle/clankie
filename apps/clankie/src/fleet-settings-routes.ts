@@ -40,6 +40,9 @@ function fleetSettingsSnapshot(
     ...settings.autonomy.fleet,
   };
   const drift = autonomyDrift(settings.autonomy.fleet);
+  const covered = includeMaximumTrust ? { fleet, maximumTrustMode: settings.maximumTrustMode } : fleet;
+  // Watch changes no leaf, so it joins the revision while on: a client that read Off before
+  // another chose Watch gets a conflict, not a silent exit. Off of Watch hashes as before.
   return {
     schemaVersion: 1,
     workingPreferences: true,
@@ -54,9 +57,7 @@ function fleetSettingsSnapshot(
     fleetGates: true,
     resourceMachines: ["local", ...settings.machines.map((machine) => machine.id)],
     revision: createHash("sha256")
-      .update(
-        JSON.stringify(includeMaximumTrust ? { fleet, maximumTrustMode: settings.maximumTrustMode } : fleet),
-      )
+      .update(JSON.stringify(settings.autonomy.watch === true ? { covered, watch: true } : covered))
       .digest("hex"),
     fleet,
     autonomyLevel: matchingAutonomyLevel(settings.autonomy.fleet),

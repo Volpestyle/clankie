@@ -799,6 +799,9 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
         );
         return { post: publicPost(record), changed: true, message: "Sent back; nothing was posted." };
       }
+      // Watch (ADR 0307): a post held before it was turned on waits; only the owner can let it out.
+      if (by === "lead" && (await options.settings.load()).autonomy.watch === true)
+        throw new TrackerPostingStopped("posting_held", WATCH_REFUSAL);
       const setting = await recheck(record);
       if (setting === "read_only") {
         record.state = "refused";

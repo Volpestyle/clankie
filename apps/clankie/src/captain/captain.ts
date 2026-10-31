@@ -29,6 +29,7 @@ import {
 } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
 import { WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
+import { routeLaneRun } from "./lane-route.ts";
 import {
   joinedMachineShellTool,
   joinedHireTools,
@@ -403,9 +404,6 @@ import { voiceCallHandoff, voiceCallTranscript } from "./voice-call-handoff.ts";
  */
 const WORKER_RESULT_BRIEF =
   "End each finished turn with a report in the resolved reporting style that the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
-
-/** Pi's answers to a compaction request that leave nothing to do. */
-const BENIGN_COMPACTION_REFUSALS = new Set(["Already compacted", "Nothing to compact (session too small)"]);
 
 /** How long a head seat stays held after a completed poll; see the seat outbox. */
 const HEAD_BOUND_GRACE_MS = 30_000;
@@ -2059,19 +2057,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * next run must start routine again.
    */
   async function syncModel(lane: LaneSession): Promise<void> {
-    if (lane.budget.compactBeforeNextRun) {
-      lane.budget.compactBeforeNextRun = false;
-      // A request had to be trimmed to fit the included-usage limit: compact now,
-      // while idle, so this run's requests fit whole.
-      await lane.session.compact().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        // Pi's own threshold may already have compacted, or the bytes were
-        // images that compaction cannot shrink; the request budget still holds.
-        if (BENIGN_COMPACTION_REFUSALS.has(message)) return;
-        console.warn("Compaction before the next run failed:", message);
-      });
-    }
-    lane.route.current = await (await runtime()).resolveRoute(lane.purpose);
+    lane.route.current = await routeLaneRun(lane, await runtime());
     const selection = lane.route.current.selection;
     const current = lane.session.model;
     if (
