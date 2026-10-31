@@ -23,6 +23,7 @@ it("the actual scheduled detached process survives its fixture service process g
   const ready = join(home, "ready.json"),
     completed = join(home, "completed.json"),
     helperReady = join(home, "helper-ready.json");
+  // The fixtures publish each record by rename: inotify reports a plain write's empty create.
   // Subscribe before either process starts. Startup is a condition, not a
   // two-second assumption; the unchanged test deadline still catches a hang.
   const pendingFiles = [ready, helperReady, completed].map((path) => {
@@ -42,11 +43,11 @@ it("the actual scheduled detached process survives its fixture service process g
     service = join(home, "fake-service.mjs");
   writeFileSync(
     helper,
-    `import { writeFileSync } from 'node:fs';\nconst parent=Number(process.argv[2]);\nwriteFileSync(${JSON.stringify(helperReady)},JSON.stringify({pid:process.pid}));\nconst timer=setInterval(()=>{try{process.kill(parent,0);}catch{writeFileSync(${JSON.stringify(completed)},JSON.stringify({survived:true,pid:process.pid}));clearInterval(timer);}},20);\nsetTimeout(()=>process.exit(2),4000).unref();\n`,
+    `import { renameSync, writeFileSync } from 'node:fs';\nconst publish=(path,data)=>{writeFileSync(path+'.tmp',data);renameSync(path+'.tmp',path);};\nconst parent=Number(process.argv[2]);\npublish(${JSON.stringify(helperReady)},JSON.stringify({pid:process.pid}));\nconst timer=setInterval(()=>{try{process.kill(parent,0);}catch{publish(${JSON.stringify(completed)},JSON.stringify({survived:true,pid:process.pid}));clearInterval(timer);}},20);\nsetTimeout(()=>process.exit(2),4000).unref();\n`,
   );
   writeFileSync(
     service,
-    `import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\nimport { createRuntimeUpdater } from ${JSON.stringify(resolve(import.meta.dirname, "../bin/runtime-updater.ts"))};\nconst updater=createRuntimeUpdater({repoRoot:${JSON.stringify(pin)},env:{HOME:${JSON.stringify(home)}},run:(_command,args)=>args.includes('--git-common-dir')?${JSON.stringify(common)}:args.includes('--verify')?'a'.repeat(40):'',spawnHelper:(_command,_args,options)=>{const child=spawn(process.execPath,[${JSON.stringify(helper)},String(process.pid)],options);writeFileSync(${JSON.stringify(ready)},JSON.stringify({helper:child.pid,service:process.pid,detached:options.detached}));return child;}});\nawait updater.request('main',{guard:async()=>{},current:()=>true});\nsetInterval(()=>{},1000);\n`,
+    `import { spawn } from 'node:child_process';\nimport { renameSync, writeFileSync } from 'node:fs';\nconst publish=(path,data)=>{writeFileSync(path+'.tmp',data);renameSync(path+'.tmp',path);};\nimport { createRuntimeUpdater } from ${JSON.stringify(resolve(import.meta.dirname, "../bin/runtime-updater.ts"))};\nconst updater=createRuntimeUpdater({repoRoot:${JSON.stringify(pin)},env:{HOME:${JSON.stringify(home)}},run:(_command,args)=>args.includes('--git-common-dir')?${JSON.stringify(common)}:args.includes('--verify')?'a'.repeat(40):'',spawnHelper:(_command,_args,options)=>{const child=spawn(process.execPath,[${JSON.stringify(helper)},String(process.pid)],options);publish(${JSON.stringify(ready)},JSON.stringify({helper:child.pid,service:process.pid,detached:options.detached}));return child;}});\nawait updater.request('main',{guard:async()=>{},current:()=>true});\nsetInterval(()=>{},1000);\n`,
   );
   const child = spawn(process.execPath, [service], {
     cwd: home,
