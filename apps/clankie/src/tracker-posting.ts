@@ -1007,6 +1007,8 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
 
   return {
     admit,
+    /** Watch (ADR 0307): no tracker write by Clankie, a lead or a worker, local ones included. */
+    watching: async () => (await options.settings.load()).autonomy.watch === true,
     start,
     /** Binds what exists only after the tracker routes do. */
     bind(next: TrackerPostingBinding) {

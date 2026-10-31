@@ -1,3 +1,4 @@
+import { WATCH_REFUSAL } from "./watch.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
@@ -336,7 +337,7 @@ export interface WorkItemsServiceOptions {
   readonly githubApiBase?: string;
   readonly clock?: () => Date;
   /** The check every outward tracker write passes (ADR 0302); absent, writes are not checked. */
-  readonly posting?: Pick<TrackerPostingGate, "admit">;
+  readonly posting?: Pick<TrackerPostingGate, "admit"> & Partial<Pick<TrackerPostingGate, "watching">>;
 }
 
 export type WorkResult =
@@ -1407,6 +1408,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       .map((project) => project.id);
   };
 
+  const refuseWhileWatching = async () => {
+    if ((await options.posting?.watching?.()) === true)
+      throw new WorkRequestError("posting_refused", WATCH_REFUSAL);
+  };
+
   /** `clankie work create|update|attach` on an outward tracker is Clankie posting (ADR 0302). */
   const checkWorkPosting = async (
     request: WorkRequest,
@@ -1417,6 +1423,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   ) => {
     if (posting === TRACKER_POSTING_ADMITTED) return assertDestination(convention, destination);
     if (!options.posting) return;
+    // Watch refuses every tracker write that is not the owner's, local trackers included (ADR 0307).
+    await refuseWhileWatching();
     const tracker = await outwardTracker(convention);
     if (tracker === undefined) return;
     const admission = await options.posting.admit({
@@ -2238,6 +2246,14 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         };
       }
       if (posting === TRACKER_POSTING_ADMITTED) assertDestination(convention, destination);
+      // Watch refuses every tracker write that is not the owner's, local trackers included (ADR 0307).
+      if (
+        posting !== TRACKER_POSTING_ADMITTED &&
+        isTrackerWriteTool(name) &&
+        !ownerActor(callbacks.actor) &&
+        (await options.posting?.watching?.()) === true
+      )
+        assertAdmitted({ outcome: "refused", message: WATCH_REFUSAL });
       // "Posting to your tracker" (ADR 0302): Clankie's and his workers' writes to an
       // outward tracker pass the project's setting; the owner's own writes are his.
       const outward =
@@ -2367,6 +2383,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         // An explicit project wins over whatever repo, or repo reference, the caller names.
         if (!local) throw new WorkRequestError("invalid", "Devices read work items through their repo");
         const { repo, backend } = await builtInProjectItem(itemProject, request.id);
+        if (
+          (request.action === "update" || request.action === "attach") &&
+          posting !== TRACKER_POSTING_ADMITTED
+        )
+          await refuseWhileWatching();
         try {
           switch (request.action) {
             case "show": {

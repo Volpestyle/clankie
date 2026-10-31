@@ -1432,3 +1432,35 @@ it("Watch keeps a post held for Clankie from going out when he approves it, unti
   });
   expect(f.mutations("commentCreate")).toBe(1);
 });
+
+it("Watch refuses writes to private issue files too, through the work route", async () => {
+  const f = await fixture();
+  const created = await f.workItems.handle(
+    { action: "create", repo: f.orchard, title: "Before Watch" },
+    true,
+  );
+  if (!("item" in created) || created.item === undefined) throw new Error("expected an item");
+  const id = (created.item as { id: string }).id;
+  const files = async () => (await readdir(join(f.orchard, ".clankie/work"))).sort();
+  const before = await files();
+  await f.settings.update((current) => ({ ...current, autonomy: { ...current.autonomy, watch: true } }));
+  for (const body of [
+    { action: "create", repo: f.orchard, title: "During Watch" },
+    { action: "update", repo: f.orchard, id, status: "done" },
+    {
+      action: "attach",
+      repo: f.orchard,
+      id,
+      evidence: { kind: "link", url: "https://example.com/during-watch", caption: "During Watch" },
+    },
+  ]) {
+    const response = await f.request("/v1/work", body);
+    expect(response.status).not.toBe(200);
+    expect(JSON.stringify(await response.json())).toContain("only watching");
+  }
+  expect(await files()).toEqual(before);
+  const shown = await f.workItems.handle({ action: "show", repo: f.orchard, id }, true);
+  expect(shown).toMatchObject({ item: { title: "Before Watch" } });
+  expect(JSON.stringify(shown)).not.toContain("During Watch");
+  expect(JSON.stringify(shown)).not.toContain('"done"');
+});

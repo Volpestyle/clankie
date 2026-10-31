@@ -59,7 +59,8 @@ changes nothing.
 - **Connected apps.** A connected app cannot answer a prompt in a worker's
   pane.
 - **Trackers.** No tracker write by Clankie, a lead or a worker goes through
-  him, outward or to the built-in tracker. Nothing is held for later either.
+  him, outward, to the built-in tracker or to a repo's private issue files.
+  Nothing is held for later either.
   The owner's own writes (`clankie work owner`, or a post he approves) are
   his. A post held for Clankie before Watch was chosen keeps waiting; only the
   owner can let it out meanwhile. The Discord forum view binds no forum, so it copies nothing into the
