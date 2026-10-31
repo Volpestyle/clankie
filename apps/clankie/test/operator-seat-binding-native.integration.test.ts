@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ import {
   observeSocketProcess,
 } from "../src/local-fleet-process.ts";
 import { OperatorSeatBindings, seatNonceHash } from "../src/operator-seat-bindings.ts";
+import { unreadableSameAccountThreads } from "./helpers/native-census.ts";
 
 interface Fixture {
   role: string;
@@ -32,51 +33,7 @@ interface Reply {
 const helper = fleetProcessHelper();
 const nonce = "a".repeat(64);
 
-/**
- * The Linux census refuses the whole observation while any thread run by this
- * account (real or effective UID) has an FD table this account cannot read,
- * because that table could hold the seat's socket (integrations/fleet-proof/README.md).
- * GitHub's hosted Linux runners always have two: systemd's non-dumpable
- * (sd-pam) and the runner's own root sudo. There the binding cannot be proven,
- * so the refusal is what this file proves.
- */
-function unreadableSameAccountThreads(): string[] {
-  if (process.platform !== "linux") return [];
-  const uid = process.getuid!();
-  const found: string[] = [];
-  for (const pid of readdirSync("/proc").filter((name) => /^\d+$/u.test(name))) {
-    let threads: string[];
-    try {
-      threads = readdirSync(`/proc/${pid}/task`);
-    } catch {
-      continue; // Exited between listings.
-    }
-    for (const tid of threads) {
-      try {
-        const status = readFileSync(`/proc/${pid}/task/${tid}/status`, "utf8");
-        const ids = /^Uid:\s+(\d+)\s+(\d+)/mu.exec(status);
-        if (!ids || (Number(ids[1]) !== uid && Number(ids[2]) !== uid)) continue;
-        try {
-          // The helper reads every descriptor's target, not only the listing.
-          const table = `/proc/${pid}/task/${tid}/fd`;
-          for (const fd of readdirSync(table)) {
-            try {
-              readlinkSync(`${table}/${fd}`);
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-            }
-          }
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "EACCES")
-            found.push(`${pid} ${/^Name:\s+(.*)$/mu.exec(status)?.[1] ?? "unknown"}`);
-        }
-      } catch {
-        continue; // Exited between listings.
-      }
-    }
-  }
-  return found;
-}
+// GitHub's hosted Linux runners always have such threads, so there the refusal is what this file proves.
 const unreadable = unreadableSameAccountThreads();
 
 describe.runIf(existsSync(helper) && unreadable.length > 0)(
