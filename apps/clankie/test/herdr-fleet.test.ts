@@ -96,6 +96,7 @@ function processInfo(
   shellPid: number,
   foreground: readonly number[],
   rootName = "zsh",
+  names: Readonly<Record<number, string>> = {},
 ): string {
   return JSON.stringify({
     result: {
@@ -105,8 +106,8 @@ function processInfo(
         foreground_process_group_id: foreground[0] ?? shellPid,
         foreground_processes: (foreground.length === 0 ? [shellPid] : foreground).map((pid) => ({
           pid,
-          name: pid === shellPid ? rootName : "claude",
-          argv: [pid === shellPid ? rootName : "claude"],
+          name: names[pid] ?? (pid === shellPid ? rootName : "claude"),
+          argv: [names[pid] ?? (pid === shellPid ? rootName : "claude")],
         })),
       },
     },
@@ -384,6 +385,7 @@ describe("fleet routing", () => {
     let screen = "";
     let midRead: (() => void) | undefined;
     let root = { pid: 400, name: "zsh" };
+    let names: Record<number, string> = {};
     const run: HerdrFleetRun = async (args) => {
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({
@@ -397,7 +399,7 @@ describe("fleet routing", () => {
           },
         });
       if (args[0] === "pane" && args[1] === "process-info")
-        return processInfo("w2:p1J", root.pid, foreground, root.name);
+        return processInfo("w2:p1J", root.pid, foreground, root.name, names);
       if (args[0] === "pane" && args[1] === "read") {
         midRead?.();
         return args[4] === "visible" ? screen : history;
@@ -584,6 +586,28 @@ describe("fleet routing", () => {
     screen = history;
     expect(await read()).toMatchObject({ status: "read", text: " Planning the change" });
     root = { pid: 400, name: "zsh" };
+
+    // A subprocess with a lower pid than the agent (Windows reuses low pids) starts and ends: the
+    // agent stays the occupant, so nothing it showed is held back again.
+    for (const [agentPid, child, childFirst] of [
+      [900, 300, false],
+      [920, 310, true],
+    ] as const) {
+      names = { [child]: "rg" };
+      foreground = childFirst ? [agentPid, child] : [agentPid];
+      history = " Claude Code\n> go";
+      screen = history;
+      expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
+      foreground = [agentPid, child];
+      history = `${history}\n Searching`;
+      screen = history;
+      expect(await read()).toMatchObject({ status: "read", text: " Searching" });
+      foreground = [agentPid];
+      history = `${history}\n Found it`;
+      screen = history;
+      expect(await read()).toMatchObject({ status: "read", text: " Searching\n Found it" });
+    }
+    names = {};
 
     // The agent exits and the shell takes the pane while it is being read: nothing read in that
     // gap is returned, and whoever comes next starts from their own first read.

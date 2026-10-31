@@ -7,6 +7,8 @@ const ANCHOR_LINES = 3;
 /** A live agent in a pane, by its identity. */
 export interface LiveAgentOccupant {
   readonly key: string;
+  /** The agent's own process. */
+  readonly pid: number;
 }
 
 /**
@@ -18,6 +20,8 @@ export interface LiveAgentOccupant {
 export async function liveAgentOccupant(
   runner: HerdrWatchRunner,
   pane: HerdrAgentSnapshot,
+  /** The process taken for the agent at the last read, kept while it is still in the foreground. */
+  previous?: number,
 ): Promise<LiveAgentOccupant | undefined> {
   if (NOT_AN_AGENT.has(pane.agent.trim().toLowerCase())) return undefined;
   if (runner.paneShell === undefined) return undefined;
@@ -28,9 +32,16 @@ export async function liveAgentOccupant(
   const occupants =
     root !== undefined && !isShell(root) ? [root] : live.filter(({ pid }) => pid !== shellPid);
   if (occupants.length === 0) return undefined;
-  // The oldest foreground process is the agent itself; its own subprocesses come after it.
-  const agent = occupants.reduce((oldest, process) => (process.pid < oldest.pid ? process : oldest));
+  // The agent is the process taken for it last time while that is still here, else one named for
+  // the agent, else the lowest pid. Pids don't order processes by age everywhere (Windows reuses
+  // low ones), so a subprocess starting or ending must not move the occupant.
+  const agentName = pane.agent.trim().toLowerCase();
+  const agent =
+    occupants.find(({ pid }) => pid === previous) ??
+    occupants.find((process) => named(process) === agentName) ??
+    occupants.reduce((lowest, process) => (process.pid < lowest.pid ? process : lowest));
   return {
+    pid: agent.pid,
     key: JSON.stringify(
       pane.session === undefined
         ? [pane.agent, "process", agent.pid]
@@ -59,16 +70,19 @@ const SHELLS = new Set([
   "cmd",
 ]);
 
-/** Whether a process is a shell, by its name or argv0 (a login shell's leading `-` and a `.exe` aside). */
+/** A process's executable name, without directory, a login shell's leading `-` or `.exe`. */
+function named(process: { readonly name: string }): string {
+  return process.name
+    .split(/[\\/]/u)
+    .pop()!
+    .replace(/^-/u, "")
+    .replace(/\.exe$/iu, "")
+    .toLowerCase();
+}
+
+/** Whether a process is a shell, by its name or argv0. */
 function isShell(process: { readonly name: string; readonly argv0?: string }): boolean {
-  return [process.name, process.argv0].some((value) => {
-    const base = (value ?? "")
-      .split(/[\\/]/u)
-      .pop()!
-      .replace(/^-/u, "")
-      .replace(/\.exe$/iu, "");
-    return SHELLS.has(base.toLowerCase());
-  });
+  return [process.name, process.argv0].some((value) => SHELLS.has(named({ name: value ?? "" })));
 }
 
 /** What a connected app may read now, and why some of the pane is held back. */
@@ -96,6 +110,7 @@ export class AgentReadScope {
     if (entry?.occupant !== occupant.key) {
       entry = {
         occupant: occupant.key,
+        pid: occupant.pid,
         ...placed(history, screen),
         earlier: written(history.split("\n")),
         tail: compact(history.split("\n").findLast((line) => line.trim().length > 0) ?? ""),
@@ -140,6 +155,11 @@ export class AgentReadScope {
     };
   }
 
+  /** The process taken for the agent in that pane at its last read. */
+  public occupantPid(terminalId: string): number | undefined {
+    return this.anchors.get(terminalId)?.pid;
+  }
+
   /** The pane has no live agent now; whoever comes next starts from their own screen. */
   public forget(terminalId: string): void {
     this.anchors.delete(terminalId);
@@ -148,6 +168,7 @@ export class AgentReadScope {
 
 interface Anchor {
   readonly occupant: string;
+  readonly pid: number;
   /** The few history lines above the screen when this occupant was placed. */
   readonly anchor: readonly string[];
   /** The rows below the anchor then, by text; each stays hidden until it is drawn over. */

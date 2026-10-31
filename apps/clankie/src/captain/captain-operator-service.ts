@@ -752,26 +752,26 @@ export function createOperatorService(
         const pane = await ctx.herdrRunner.resolveTerminal(address);
         if (pane === undefined) return unavailable("Herdr has no pane with that terminal now.");
         // Only a live coding agent's pane is read, and only what that agent showed (ADR 0307).
-        const occupant = await liveAgentOccupant(ctx.herdrRunner, pane);
+        const scope = agentReadScope(ctx.herdrRunner);
+        const occupant = await liveAgentOccupant(
+          ctx.herdrRunner,
+          pane,
+          scope.occupantPid(request.terminalId),
+        );
         if (occupant === undefined) {
-          agentReadScope(ctx.herdrRunner).forget(request.terminalId);
+          scope.forget(request.terminalId);
           return unavailable("No coding agent is running in that pane now.");
         }
         // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
         const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
         const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
         // The pane is read only if the same agent held it on both sides of the reads.
-        const after = await liveAgentOccupant(ctx.herdrRunner, pane);
+        const after = await liveAgentOccupant(ctx.herdrRunner, pane, occupant.pid);
         if (after?.key !== occupant.key) {
-          agentReadScope(ctx.herdrRunner).forget(request.terminalId);
+          scope.forget(request.terminalId);
           return unavailable("The agent in that pane changed while it was read; read it again.");
         }
-        const { text, detail } = agentReadScope(ctx.herdrRunner).bound(
-          request.terminalId,
-          occupant,
-          history,
-          screen,
-        );
+        const { text, detail } = scope.bound(request.terminalId, occupant, history, screen);
         return {
           op: "terminal_read",
           schemaVersion: 1,

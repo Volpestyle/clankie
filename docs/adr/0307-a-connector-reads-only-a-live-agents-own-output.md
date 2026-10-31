@@ -25,8 +25,11 @@ agent showed.
   "No coding agent is running in that pane now." This holds on every machine;
   `process-info` is one of the verbs the fleet runner may run over ssh.
 - **The occupant is named by native identity.** The agent Herdr detects, its
-  native session when Herdr knows one, and its oldest non-shell foreground
-  process, which is the agent itself. A different occupant is a different
+  native session when Herdr knows one, and the agent's own foreground process:
+  the one taken for it at the last read while it is still there, else one
+  named for the agent, else the lowest non-shell pid. Pids don't order
+  processes by age everywhere (Windows reuses low ones), so a subprocess
+  starting or ending doesn't move the occupant. A different occupant is a different
   agent, so an agent resumed into the same native session after the shell had
   the pane starts over. A refused read also drops the pane's anchor. The
   occupant is checked again after the pane is read; if it changed in between,
