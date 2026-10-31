@@ -83,3 +83,13 @@ agent showed.
   that older line, so the shell work between them is shown. The launch line
   can't be told from such a line by its text; the owner avoids it by starting
   agents by their own name, or in a fresh pane.
+- Two more cases show the owner's own shell work, because terminal text has no
+  author per line and the launch line is a heuristic. An agent suspended
+  (Ctrl-Z), with shell commands run and then brought back with `fg`, keeps its
+  process and session, so its cut holds and the shell work in between is read.
+  A multiline block that launches it (`if …; then`, `cat .env`, `claude`,
+  `fi`) is echoed whole before it runs, so the output of commands before the
+  agent follows its launch line. Both need the owner to print private text in
+  an agent's pane mid-session. Exact provenance would come from reading a
+  Claude Code or Codex agent's own session transcript instead of its screen,
+  left as a follow-up.
