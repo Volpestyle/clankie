@@ -20,7 +20,10 @@ pnpm cli:install
 clankie
 ```
 
-`pnpm cli:install` links the launcher into `~/.local/bin`. If agents edit this
+`pnpm cli:install` links the launcher into `~/.local/bin` and refreshes linked
+harness profiles. A source-managed Codex profile (a dotfiles-managed config) is
+printed as skipped, not failed; set it up with its source owner as
+[`docs/cli.md`](docs/cli.md) describes. If agents edit this
 checkout while Clankie runs from it, use `pnpm cli:install --pinned` instead: the
 launcher and the service it starts then run from a detached worktree at `main`
 (`~/.clankie/pinned`, with its own install), so uncommitted edits or a stale

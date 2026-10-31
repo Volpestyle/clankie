@@ -61,7 +61,31 @@ if (!onPath) {
 
 const refreshed = await refreshLinkedHarnesses({ repoRoot: root });
 console.log(JSON.stringify(refreshed));
-if (!refreshed.ok) process.exitCode = 1;
+// A profile whose configuration a dotfiles manager owns is that source's to
+// set up. Report it as skipped; it is not a failed install.
+const sourceManaged = (entry) => entry.status === "source-manager-required";
+const settled = (entries) =>
+  entries.every(
+    (entry) =>
+      sourceManaged(entry) || ["installed", "updated", "source-setup-completed"].includes(entry.status),
+  );
+const skipped = [
+  ...refreshed.local.filter(sourceManaged).map((entry) => ({ machine: "local", ...entry })),
+  ...refreshed.fleets.flatMap(({ fleet, result }) =>
+    Array.isArray(result?.installations)
+      ? result.installations.filter(sourceManaged).map((entry) => ({ machine: fleet, ...entry }))
+      : [],
+  ),
+];
+for (const entry of skipped)
+  console.log(
+    `Skipped ${entry.harness} profile ${entry.profile} on ${entry.machine}: ${entry.detail ?? "source-managed"}`,
+  );
+const fleetsSettled = refreshed.fleets.every(
+  ({ ok, error, result }) =>
+    ok || (!error && Array.isArray(result?.installations) && settled(result.installations)),
+);
+if (!(settled(refreshed.local) && fleetsSettled)) process.exitCode = 1;
 // Consent is per new harness. Existing links were refreshed above.
 if (process.stdin.isTTY && process.stdout.isTTY) {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
