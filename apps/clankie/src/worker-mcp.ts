@@ -48,7 +48,7 @@ import {
 } from "./worker-video.ts";
 import { DurableReceiptStore } from "./durable-receipt-store.ts";
 import { REVIEW_TOOLS } from "../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
-import { canonicalJson } from "@clankie/play";
+import { canonicalJson } from "@clankie/protocol/canonical-json";
 
 const minecraftWorkerSchemas = {
   clankie_minecraft_observe: z.strictObject({}),

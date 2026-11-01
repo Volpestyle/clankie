@@ -63,7 +63,7 @@ import {
   type ProviderAccount,
 } from "@clankie/credential-broker";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
-import { canonicalJson } from "@clankie/play";
+import { canonicalJson } from "@clankie/protocol/canonical-json";
 import { GoogleAccountProviderSchema, type GoogleAccountProvider } from "@clankie/protocol/accounts";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import type { ProviderRequestBudget, TrackerGraphqlPlan, TrackerMcpAdapter } from "./ports/tracker-mcp.ts";

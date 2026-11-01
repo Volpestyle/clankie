@@ -73,8 +73,6 @@
     "captain/tools.ts -> world/operations.ts (world)",
     "event-log.ts -> discord-presence-session.ts (persona)",
     "game-extension-modules.ts -> discord-active-body.ts (persona)",
-    "mcp-host.ts -> @clankie/play (world)",
-    "worker-mcp.ts -> @clankie/play (world)",
     "worker-mcp.ts -> minecraft.ts (minecraft)"
   ]
 }
