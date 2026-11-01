@@ -138,10 +138,16 @@ const EXTENSION_ROUTES = [
 
 /**
  * Operator tools a switched-on extension adds: voice's join, leave and screen
- * shares are listed; media's diagrams wait in the deferred catalog.
+ * shares are listed; media's diagrams and Minecraft's play and setup wait in
+ * the deferred catalog.
  */
 const LISTED_EXTENSION_TOOLS = ["voice_join", "voice_leave", "observe_share"];
-const DEFERRED_EXTENSION_TOOLS = ["draw_er_diagram", "draw_sequence_diagram"];
+const DEFERRED_EXTENSION_TOOLS = [
+  "draw_er_diagram",
+  "draw_sequence_diagram",
+  "minecraft_join",
+  "minecraft_configure",
+];
 
 async function freePort(): Promise<number> {
   for (;;) {
