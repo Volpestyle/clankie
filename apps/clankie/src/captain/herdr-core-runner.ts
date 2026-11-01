@@ -21,6 +21,13 @@ export const HERDR_CORE_FLEET = DESKTOP_SEAT_FLEET;
 
 /** Labels a hire's terminal carries once its harness starts, so they outlive Clankie's restarts. */
 const AGENT_LABEL = "clankie.agent";
+/**
+ * The agent name Clankie minted for the hire, unique among live seats as a Herdr agent's
+ * name is. The seat label is only what the desktop app shows, and many hires share one
+ * ("clankie · Work"), so it never names a seat: a shared name merged every hire into one
+ * character and sent one hire's messages to another (#208).
+ */
+const NAME_LABEL = "clankie.name";
 
 /** The harnesses a desktop-app terminal can start so far, by the binary its owner runs. */
 const HARNESS_BINARIES: Readonly<Record<string, string>> = { claude: "claude" };
@@ -177,12 +184,12 @@ export function createHerdrCoreRunner(
       labeled === undefined
         ? undefined
         : { source: `herdr:${terminal.labels[AGENT_LABEL] ?? "claude"}`, kind: "id", value: labeled };
-    const seat = terminal.labels[SEAT_LABEL];
+    const name = terminal.labels[NAME_LABEL];
     const live = terminal.state === "live";
     return {
       paneId: terminal.address,
       terminalId: terminal.address,
-      ...(seat === undefined ? {} : { name: seat }),
+      ...(name === undefined ? {} : { name }),
       agent: live ? agentOf(terminal.app ?? terminal.labels[AGENT_LABEL]) : "unknown",
       status: statusOf(terminal, session),
       title: terminal.title ?? "",
@@ -314,7 +321,7 @@ export function createHerdrCoreRunner(
       pending.set(address, handoff);
       return address;
     },
-    startAgent: async ({ kind, paneId, args = [] }) => {
+    startAgent: async ({ name, kind, paneId, args = [] }) => {
       const handoff = pending.get(paneId);
       if (handoff === undefined)
         throw new Error(`Desktop-app terminal ${paneId} is not waiting for a harness`);
@@ -344,6 +351,7 @@ export function createHerdrCoreRunner(
       const named = args.findIndex((arg) => arg === "--session-id" || arg === "--resume");
       const session = named < 0 ? undefined : args[named + 1];
       await seats.label(paneId, {
+        [NAME_LABEL]: name,
         [AGENT_LABEL]: kind,
         ...(session === undefined ? {} : { [SESSION_LABEL]: session }),
       });

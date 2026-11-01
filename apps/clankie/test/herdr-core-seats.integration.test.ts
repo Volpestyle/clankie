@@ -164,7 +164,9 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   expect(identity.socket).toMatch(/\.sock$/u);
 
   const seen = await runner.get(address);
-  expect(seen).toMatchObject({ paneId: address, terminalId: address, name: "grace" });
+  expect(seen).toMatchObject({ paneId: address, terminalId: address });
+  // The label the app shows names no seat; only the agent name a hire's start gives does (#208).
+  expect(seen.name).toBeUndefined();
   expect(seen.status).not.toBe("offline");
   await until(async () =>
     (await runner.readPane(address, "visible", "text")).includes("hello from the desktop app"),
@@ -200,7 +202,8 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   const address = await runner.createTab({ cwd: work, label: "ada · fix the login", harness: "claude" });
   expect(address).toMatch(/^t[0-9a-z]+$/u);
   // Waiting at the launcher, the terminal is Clankie's but holds no harness yet.
-  expect(await runner.get(address)).toMatchObject({ name: "ada · fix the login", status: "unknown" });
+  expect(await runner.get(address)).toMatchObject({ status: "unknown" });
+  expect((await runner.get(address)).name).toBeUndefined();
   expect(await runner.paneShell!(address)).toEqual({ foreground: [] });
 
   const session = "0b9f3c5e-1d2a-4c8b-9e7f-6a5b4c3d2e1f";
@@ -220,6 +223,7 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   // The harness took the launcher's place: the terminal's own process is Claude.
   expect((await seats.get(address))?.pid).toBe(started.pid);
   expect(await runner.get(address)).toMatchObject({
+    name: "ada",
     agent: "claude",
     status: "idle",
     session: { kind: "id", value: session },
