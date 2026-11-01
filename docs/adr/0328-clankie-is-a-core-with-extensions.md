@@ -20,6 +20,13 @@ core keeps through the route host's `discordBody`). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app shows and flips the same switches in Settings → Extensions.
+The core-only end-to-end test (`apps/clankie/test/core-only-composition.integration.test.ts`)
+starts the real service with every switch off and hires, messages, reads and
+hears from an agent in a scratch Herdr; with `voice` off, joining voice and
+watching screen shares now leave his tools too. Still reached with every switch
+off: image and video generation and skin drafts (the appearance question below),
+Minecraft (no switch yet), the persona's music and room tools, and `linear_wake`
+(built inside the captain's tracker wakes).
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside
