@@ -341,6 +341,8 @@ export interface HerdrWatchRunner {
     readonly paneLabel?: string;
     readonly pipeline?: string;
     readonly group?: string;
+    /** The verified project's name, when the hire has one; the desktop app's space is named for it. */
+    readonly project?: string;
     readonly placement?: "new-tab" | "split";
     readonly env?: Readonly<Record<string, string>>;
     /** Initial native argv, never terminal input. Only prepared adapters use this. */
@@ -5030,9 +5032,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           );
       }
       if (authority !== undefined) await assertConversationAuthority(authority);
-      const group = this.projectContexts.get(input)?.projectName ?? input.deliverable;
+      const project = this.projectContexts.get(input)?.projectName;
+      const group = project ?? input.deliverable;
       paneId = await createTab({
         ...(group === undefined ? {} : { group }),
+        ...(project === undefined ? {} : { project }),
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),
         cwd: input.workingDirectory,

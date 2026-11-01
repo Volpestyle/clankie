@@ -204,6 +204,7 @@ import { FleetCensusBreaker } from "./fleet-census-breaker.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
 import { HERDR_CORE_FLEET, createHerdrCoreRunner, herdrCoreCensusFleet } from "./herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./herdr-core-seats.ts";
+import { createHerdrWindow } from "./herdr-window.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
   createHerdrWatchRunner,
@@ -493,6 +494,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const herdrCoreSeats = createHerdrCoreSeats();
   const herdrCoreRunner = createHerdrCoreRunner({
     seats: herdrCoreSeats,
+    window: createHerdrWindow(),
     launchDirectory: join(options.stateDir, "desktop-launches"),
     seatDirectory: join(options.stateDir, "desktop-seats"),
     // The same installed harness the seat's process proof resolves (installedLauncher).

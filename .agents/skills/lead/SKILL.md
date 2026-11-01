@@ -32,8 +32,9 @@ session-only in Claude Code. Follow its owner workdir/trust action; never edit
 trust flags or answer a trust prompt for the owner.
 
 `clankie fleet set --seat-host desktop` starts this machine's new Claude hires
-in the Herdr desktop app's terminals, in its Clankie space (ADR 0319); their
-seat ids read `herdr-core/t7`. `auto` (the default) and `herdr` keep hires in
+in the Herdr desktop app's terminals (ADR 0319): one space per project
+(`clankie workers`), one tab per hire named for it, and a pipeline's hires three
+to a tab. Their seat ids read `herdr-core/t7`. `auto` (the default) and `herdr` keep hires in
 Herdr panes.
 
 Hired seats have their own default-on `seatRestarts`

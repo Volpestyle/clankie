@@ -36,6 +36,10 @@ interface HerdrCoreSeatStart {
   readonly seat: string;
   /** A tab shared with other terminals, such as a project's pipeline; the hire's own by default. */
   readonly tab?: string;
+  /** The space this terminal shows in; Clankie's one space by default. */
+  readonly space?: string;
+  /** Extra labels, such as the names the window should give its space and tab. */
+  readonly labels?: Readonly<Record<string, string>>;
 }
 
 export interface HerdrCoreTerminal {
@@ -105,7 +109,8 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
         cwd: request.cwd,
         env,
         labels: {
-          [SPACE_LABEL]: CLANKIE_SPACE,
+          ...request.labels,
+          [SPACE_LABEL]: request.space ?? CLANKIE_SPACE,
           [TAB_LABEL]: request.tab ?? request.seat,
           [SEAT_LABEL]: request.seat,
         },
