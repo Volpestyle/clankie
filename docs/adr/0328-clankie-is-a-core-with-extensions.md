@@ -122,7 +122,8 @@ Each of these becomes an extension:
 | `world`            | PokeAgents play, the Activity watch surface, World and desktop-pet surfaces' routes                 |
 | `minecraft`, games | Already `GameExtension`s; they keep that contract as a specialization of this one                   |
 | `watch`            | Nothing in this service yet: the Watch app is in `clankie-app` and reads the feed the phone reads   |
-| `tracker-linear`   | Linear import, mirror, cutover, webhooks and publishing                                             |
+| `tracker-linear`   | Linear import, mirror, cutover, request budget and publishing                                       |
+| `linear-wake`      | Linear webhook, wake rules, routing and notification-read receipts                                  |
 | `tracker-github`   | The GitHub issues backend                                                                           |
 | `relay`            | The clankie.bot gateway connector and phone doorway                                                 |
 | `computer`         | Computer use on the Mac and the PCs                                                                 |
