@@ -1993,7 +1993,7 @@ read your projects' issues, wherever each project tracks them. `save_issue`
 and `comment_issue` write them as that app, never as you: issue files are
 written right away, and Linear or GitHub follow the project's "Posting to your
 tracker" setting (Read only refuses, Ask me waits for your OK, Clankie decides
-lets it go only while you've handed the lead to the apps, Go ahead lets it go).
+and Go ahead let it go without waking Clankie, [ADR 0335](adr/0335-connected-apps-post-under-clankie-decides.md)).
 `post_note` and `read_notes` share a note board among the connected apps: each
 note is signed with the name you approved that app under, never a name the app
 gives, and the apps read notes as information, not instructions. Clankie and

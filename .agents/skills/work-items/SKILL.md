@@ -183,9 +183,8 @@ its **Posting to your tracker** setting (`clankie project settings P` shows it):
   project's issue files (`.clankie/work`) or your own notes instead.
 - **Ask me**: your post waits in the owner's feed, showing exactly what would go
   where, and goes out once he says Post it.
-- **Clankie decides**: Clankie's own posts go out; a worker's wait for him. A
-  connected app's write (`save_issue`, `comment_issue`) goes out only while the
-  owner has handed the lead to the apps, and otherwise waits for Clankie.
+- **Clankie decides**: Clankie's own posts and a connected app's writes
+  (`save_issue`, `comment_issue`) go out without waking him; a worker's wait for him.
 - **Go ahead**: posts go out.
 
 A held post comes back as `posting_held`, and a refused one as

@@ -34,7 +34,9 @@ onBehalfOf: [owner]}`. The owner's own writes (his app, `clankie work owner`)
   - Read only refuses it.
   - Ask me holds it as a check in the owner's feed, naming the app.
   - Clankie decides lets it go while the owner has handed the lead to the
-    apps, and otherwise holds it for Clankie, who leads.
+    apps, and otherwise holds it for Clankie, who leads. (Amended by
+    [ADR 0335](0335-connected-apps-post-under-clankie-decides.md): it lets an
+    app's write go whoever leads.)
   - Go ahead lets it go.
     A held write answers with the post's id; nothing reaches the tracker until
     someone approves it, and an approved post goes out as the posting replay
