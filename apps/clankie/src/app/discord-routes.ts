@@ -433,6 +433,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
     const parsed = DiscordStreamWatchReportSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_discord_stream_watch_report" }, 400);
+    if (ctx.dependencies.streamWatch === undefined) return context.json({ error: "world_unavailable" }, 503);
     ctx.discordStreamWatch.apply(parsed.data, ctx.clock());
     return context.body(null, 204);
   });
