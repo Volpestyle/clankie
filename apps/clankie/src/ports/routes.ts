@@ -12,7 +12,7 @@ export interface OwnerComputerRecovery {
 }
 
 /** A paired device with chat access, proved by this body for one request. */
-export interface ChatDeviceAuthority {
+interface ChatDeviceAuthority {
   readonly deviceId: string;
   readonly sessionExpiresAtMs: number;
   readonly support: boolean;

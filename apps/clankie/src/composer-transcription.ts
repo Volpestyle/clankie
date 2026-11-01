@@ -397,7 +397,7 @@ export class ComposerTranscriptions {
   }
 }
 
-export function createComposerTranscriptionRoutes(
+function createComposerTranscriptionRoutes(
   service: ComposerTranscriptions | undefined,
   authorize: (request: Request) => Promise<ComposerDeviceAuthority | undefined>,
 ) {
