@@ -30,7 +30,6 @@ import type { AccountsPort } from "../accounts.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { BodyLeaseRouter } from "../body-lease-router.ts";
 import type { BodyLeaseStore } from "../body-leases.ts";
-import type { BodyPlaySessions } from "../body-play-sessions.ts";
 import type { BodyVoiceStays } from "../body-voice-stays.ts";
 import { CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
@@ -307,7 +306,14 @@ export interface ClankieAppDependencies {
     publishChannelId?: string;
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
-  bodyPlaySessions?: BodyPlaySessions;
+  /** Admits an operator's play intent for the conversation that asked; World's play sessions fill it (ADR 0328). */
+  bodyPlaySessions?: {
+    submit(
+      intent: import("@clankie/protocol").EmbodimentIntent,
+      identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
+      manager: EmbodimentManager,
+    ): Promise<import("@clankie/protocol").EmbodimentSubmitResult>;
+  };
   guidePokemonPlay?: (
     text: string,
     identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
