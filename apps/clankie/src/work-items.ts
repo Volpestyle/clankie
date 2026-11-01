@@ -1908,7 +1908,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         call: async (
           name: string,
           args: Record<string, unknown>,
-          requestPriority: import("./linear-request-budget.ts").LinearRequestPriority,
+          requestPriority: import("./tracker-request-priority.ts").LinearRequestPriority,
         ) => {
           await beforeWrite();
           await assertLinear();
