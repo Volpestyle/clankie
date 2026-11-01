@@ -31,6 +31,13 @@ hire's conversation owner was captured. The owner's own app showed only
   The work read and the unnegotiated read keep their shapes for shipped apps.
   The relay and the sealed gateway client admit the new path as an exact
   GET, like the work path. The CLI and the shared API client request it.
+- **Connected apps see it too.** A `fleet` read with `includeStarters: true`
+  adds the same `startedBy` to each seat; without it the seat has none, so
+  older strict readers are unchanged. The connector's `list_agents` asks for
+  it and says who started each agent in words ("the owner", "Clankie", an
+  app's device name, or an agent's name), and falls back to a plain fleet read
+  on a Clankie from before it. The app layer gives the captain the paired
+  devices' names, so every read names an app the same way.
 - **Display only.** `startedBy` grants nothing and ranks nothing. Who may
   message, retire or answer an agent stays where it was: the hire's owning
   conversation and the owner's permissions. No starter takes precedence over

@@ -20,6 +20,12 @@ export interface Session {
   readonly title?: string;
   /** What it last said it's doing. */
   readonly doing?: string;
+  /**
+   * Who started it, as Clankie records it (ADR 0321): "the owner", "Clankie",
+   * a connected app's device name, or the agent that started it. Says who asked,
+   * never who may act.
+   */
+  readonly startedBy?: string;
   readonly canMessage: boolean;
 }
 

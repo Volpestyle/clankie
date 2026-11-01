@@ -97,6 +97,14 @@ export interface CreateOperatorServiceContext {
   readonly fleetSnapshot: (options?: {
     includeCheckouts?: boolean;
   }) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
+  /** Who started each agent in a fleet read (ADR 0321). */
+  readonly seatStarters?: (
+    snapshot: import("@clankie/protocol").OperatorFleetSnapshot,
+  ) => (
+    seatId: string,
+    occupantId: string,
+    machineId: string,
+  ) => import("@clankie/protocol/fleet-roster").FleetRosterStarter;
   /** What the fleet can afford, from accounts and permits Clankie already tracks (ADR 0313). */
   readonly fleetCapacity?: () => Promise<
     Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]
@@ -500,7 +508,7 @@ export function createOperatorService(
       const { closedPanes: _closed, ...withoutHistory } = snapshot.snapshot;
       const full = request.includeClosedPanes ? snapshot : { ...snapshot, snapshot: withoutHistory };
       const { goals: _goals, assignments: _assignments, ...legacy } = full.snapshot;
-      const result =
+      const worked =
         request.includeWork === true
           ? full
           : {
@@ -508,6 +516,20 @@ export function createOperatorService(
               snapshot: {
                 ...legacy,
                 seats: legacy.seats.map(({ goal: _goal, assignment: _assignment, ...seat }) => seat),
+              },
+            };
+      const starters = request.includeStarters === true ? ctx.seatStarters?.(worked.snapshot) : undefined;
+      const result =
+        starters === undefined
+          ? worked
+          : {
+              ...worked,
+              snapshot: {
+                ...worked.snapshot,
+                seats: worked.snapshot.seats.map((seat) => ({
+                  ...seat,
+                  startedBy: starters(seat.seatId, seat.occupantId, seat.fleet ?? "local"),
+                })),
               },
             };
       return request.view === "home" ? { ...result, snapshot: operatorFleetHome(result.snapshot) } : result;

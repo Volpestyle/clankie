@@ -165,7 +165,6 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           await ctx.dependencies.captain.fleetRoster({
             includeWork: context.req.query("includeWork") === "true",
             includeStarters: context.req.query("includeStarters") === "true",
-            appName: (deviceId) => ctx.devices.get(deviceId)?.name,
           }),
         );
       const parsed = (

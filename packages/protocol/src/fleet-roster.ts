@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   ClosedWorkerPaneSchema,
   OPERATOR_FLEET_ROSTER_MAX,
+  OperatorAgentStarterSchema,
   OperatorFleetReadWarningsSchema,
 } from "./operator-conversations.ts";
 
@@ -29,12 +30,7 @@ export const FleetRosterCountsSchema = z
  * Who started an agent (ADR 0321): the owner by hand or from their app, Clankie on his own,
  * a connected app through start_agent, or another agent. No starter outranks another.
  */
-export const FleetRosterStarterSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("owner") }).strict(),
-  z.object({ kind: z.literal("clankie") }).strict(),
-  z.object({ kind: z.literal("app"), name: z.string().min(1).max(256) }).strict(),
-  z.object({ kind: z.literal("agent"), name: z.string().min(1).max(256) }).strict(),
-]);
+export const FleetRosterStarterSchema = OperatorAgentStarterSchema;
 export const FleetRosterAgentSchema = z
   .object({
     seatId: Ref,

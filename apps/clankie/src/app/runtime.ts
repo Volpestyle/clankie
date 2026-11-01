@@ -204,6 +204,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   // Projections rebuilt from the durable log.
   const devices: DeviceRegistry = new Map<string, DeviceRecord>();
+  // A hire a connected app asked for is named by that app's paired device (ADR 0321).
+  dependencies.captain.setDeviceNames?.((deviceId) => devices.get(deviceId)?.name);
   const supportGrants = new SupportGrantStore({
     events: storedEvents,
     recordEvent,

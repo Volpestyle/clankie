@@ -698,6 +698,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       schemaVersion: z.literal(1),
       /** Opt-in keeps older strict response schemas usable. */
       includeWork: z.boolean().optional(),
+      /** Adds each seat's `startedBy` (ADR 0321). */
+      includeStarters: z.boolean().optional(),
       includeClosedPanes: z.boolean().optional(),
       includeCheckouts: z.boolean().optional(),
       /** Omitted preserves the full durable directory for existing clients. */
