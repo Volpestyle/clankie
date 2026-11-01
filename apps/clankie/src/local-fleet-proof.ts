@@ -248,7 +248,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
     if (!["darwin", "linux"].includes(options.platform ?? process.platform))
       return refuse("unsupported_platform");
     // A Herdr pane, or one of Clankie's own terminals in the Herdr desktop app (ADR 0319).
-    const core = /^herdr-core\/(t\d+)$/u.exec(pane)?.[1];
+    const core = /^herdr-core\/(t[0-9a-z]+)$/u.exec(pane)?.[1];
     if (
       core === undefined
         ? !/^w[\w]+:p[\w]+$/u.test(pane)
@@ -625,7 +625,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     };
     if (!["darwin", "linux"].includes(options.platform ?? process.platform))
       return refuse("unsupported_platform");
-    const core = /^herdr-core\/(t\d+)$/u.exec(pane)?.[1];
+    const core = /^herdr-core\/(t[0-9a-z]+)$/u.exec(pane)?.[1];
     if (core !== undefined)
       return options.coreBinding === undefined || options.coreSeat === undefined
         ? refuse("invalid_pane")

@@ -71,7 +71,7 @@ export interface DesktopSeatRecord {
 }
 
 const recordPath = (directory: string, address: string) => {
-  if (!/^t\d+$/u.test(address)) throw new Error(`Not a desktop-app terminal: ${address}`);
+  if (!/^t[0-9a-z]+$/u.test(address)) throw new Error(`Not a desktop-app terminal: ${address}`);
   return join(directory, `${address}.json`);
 };
 

@@ -358,7 +358,7 @@ export function createProjectProcessObserver(options: {
                 : "observation_failure",
             at,
           );
-    const core = /^herdr-core\/(t\d+)$/u.exec(pane)?.[1];
+    const core = /^herdr-core\/(t[0-9a-z]+)$/u.exec(pane)?.[1];
     if (
       fleet !== "default" ||
       !["darwin", "linux"].includes(options.platform ?? process.platform) ||

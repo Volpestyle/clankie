@@ -3,11 +3,14 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { realpath } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { readDesktopSeat } from "../src/captain/herdr-core-runner.ts";
 import { localProjectProof } from "../src/local-fleet-proof.ts";
 import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
@@ -95,25 +98,30 @@ processIt("proves a desktop-app hire when Clankie confirms it, the way a pane hi
   // only the core's terminal, Clankie's record of it, and the kernel's view of its process.
   const seat = spawn(process.execPath, [script, "9"], { stdio: ["pipe", "ignore", "ignore"] });
   await once(seat, "spawn");
+  const records = await mkdtemp(join(tmpdir(), "desktop-seats-"));
   try {
     const binding = { runtime: "external" as const, session: "herdr-core", socketPath: "/tmp/core.sock" };
     const session = "0b9f3c5e-1d2a-4c8b-9e7f-6a5b4c3d2e1f";
     let record = { pid: seat.pid!, agent: "claude", session };
+    // Herdr counts terminals past t29 as t2a, t2b, ...: a lettered address is a desktop terminal
+    // too, from the proof through Clankie's own record file of it.
+    const keep = async () => writeFile(join(records, "t2c.json"), JSON.stringify(record));
+    await keep();
     const observe = (launcher: { executable: string; script?: string }) =>
       createProjectProcessObserver({
         binding: async () => undefined,
         herdrBinary: "herdr",
         processHelper: helper,
         coreBinding: async () => binding,
-        coreSeat: async (_binding, address) => (address === "t3" ? record : null),
+        coreSeat: async (_binding, address) => (await readDesktopSeat(records, address)) ?? null,
         launcher: async () => launcher,
       });
     const installed = observe({ executable: await realpath(process.execPath), script });
 
     // The proof a hire waits on names the same occupant its own session does.
-    expect(await installed("default", "herdr-core/t3")).toMatchObject({
+    expect(await installed("default", "herdr-core/t2c")).toMatchObject({
       fleet: "default",
-      pane: "herdr-core/t3",
+      pane: "herdr-core/t2c",
       nativeOccupantId: occupantIdForHerdrSession({ source: "herdr:claude", kind: "id", value: session }),
       binding: { socketPath: binding.socketPath, session: "herdr-core" },
       shell: { pid: process.pid },
@@ -122,18 +130,20 @@ processIt("proves a desktop-app hire when Clankie confirms it, the way a pane hi
 
     // Another terminal, another machine, a record naming another process, or a launcher
     // other than the installed harness proves nothing.
-    expect(await installed("default", "herdr-core/t4")).toBeUndefined();
-    expect(await installed("pc", "herdr-core/t3")).toBeUndefined();
+    expect(await installed("default", "herdr-core/t2d")).toBeUndefined();
+    expect(await installed("pc", "herdr-core/t2c")).toBeUndefined();
     expect(
-      await observe({ executable: "/usr/local/bin/claude" })("default", "herdr-core/t3"),
+      await observe({ executable: "/usr/local/bin/claude" })("default", "herdr-core/t2c"),
     ).toBeUndefined();
     record = { ...record, pid: process.pid };
-    expect(await installed("default", "herdr-core/t3")).toBeUndefined();
+    await keep();
+    expect(await installed("default", "herdr-core/t2c")).toBeUndefined();
     // Without the core wired in, a desktop pane is out of scope, as before.
     const paneOnly = createProjectProcessObserver({ binding: async () => binding, herdrBinary: "herdr" });
-    expect(await paneOnly("default", "herdr-core/t3")).toBeUndefined();
+    expect(await paneOnly("default", "herdr-core/t2c")).toBeUndefined();
   } finally {
     seat.stdin?.end();
     seat.kill();
+    await rm(records, { recursive: true, force: true });
   }
 });
