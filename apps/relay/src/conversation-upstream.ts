@@ -32,7 +32,7 @@ export function createCaptainConversationDispatch(
         "content-type": "application/json",
       },
       body: JSON.stringify(request),
-      signal: dispatchSignal(signal),
+      signal: dispatchSignal(signal, request.op),
     });
     if (!response.ok) {
       const restarting = await upstreamRestarting(response);
@@ -161,7 +161,7 @@ export function createDeviceConversationDispatch(options: {
     if (request.op === "app_notes" && request.action !== "read")
       throw new Error("Only a connector app posts a note");
     const hosted = authority.controlScope === "hosted";
-    const requestSignal = dispatchSignal(signal);
+    const requestSignal = dispatchSignal(signal, request.op);
     requestSignal.throwIfAborted();
     const response = await fetcher(
       new URL(hosted ? HOSTED_OPERATOR_PATH : OPERATOR_CONVERSATION_DISPATCH_PATH, base),
@@ -193,8 +193,14 @@ export function createDeviceConversationDispatch(options: {
   };
 }
 
-function dispatchSignal(signal?: AbortSignal): AbortSignal {
-  const deadline = AbortSignal.timeout(30_000);
+/**
+ * A hire answers only once its agent has started and settled, which a desktop hire alone can
+ * take 30s to do, so start_agent waits longer than other requests before its answer is lost.
+ */
+export const START_AGENT_DISPATCH_MS = 120_000;
+
+function dispatchSignal(signal?: AbortSignal, op?: string): AbortSignal {
+  const deadline = AbortSignal.timeout(op === "start_agent" ? START_AGENT_DISPATCH_MS : 30_000);
   return signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
 }
 

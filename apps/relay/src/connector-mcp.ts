@@ -32,6 +32,7 @@ import {
   createHerdrSessionSource,
 } from "@clankie/agent-hosts/sessions";
 import type { ClankieGuide } from "./connector-guide.ts";
+import { START_AGENT_DISPATCH_MS } from "./conversation-upstream.ts";
 import { ConnectorImageRefusal, connectorImages, type ConnectorImageOptions } from "./connector-images.ts";
 import type { RelayDeviceAuthorizer } from "./device-auth.ts";
 
@@ -1052,7 +1053,12 @@ export function createLoopbackConnectorOperator(
     });
   return {
     async dispatch(request, bearer) {
-      const response = await post("/operator/v1/dispatch", request, bearer);
+      const response = await post(
+        "/operator/v1/dispatch",
+        request,
+        bearer,
+        request.op === "start_agent" ? AbortSignal.timeout(START_AGENT_DISPATCH_MS) : undefined,
+      );
       if (!response.ok) throw new ConnectorRefusal(response.status, await errorCode(response));
       return OperatorConversationServiceResultSchema.parse(await response.json());
     },
