@@ -190,6 +190,13 @@ function prepare(repo, pr) {
   const mergeBase = git(["merge-base", `refs/codex-review/base-${info.base.ref}`, head], mirror);
   const worktree = join(home, `${name}-pr${pr}-${short(head)}`);
   if (!existsSync(worktree)) git(["worktree", "add", "--quiet", "--detach", worktree, head], mirror);
+  // Each round reviews a new head in a new worktree; drop this pull request's
+  // older ones so the Mac's disk does not fill with stale checkouts.
+  const older = join(home, `${name}-pr${pr}-`);
+  for (const line of git(["worktree", "list", "--porcelain"], mirror).split("\n")) {
+    const path = line.startsWith("worktree ") ? line.slice("worktree ".length) : "";
+    if (path.startsWith(older) && path !== worktree) git(["worktree", "remove", "--force", path], mirror);
+  }
   const findings = `${worktree}.findings.json`;
   if (!existsSync(findings))
     writeFileSync(findings, `${JSON.stringify({ summary: "", findings: [] }, null, 2)}\n`);
