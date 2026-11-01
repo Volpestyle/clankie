@@ -239,3 +239,60 @@ it("does not promote a pending role for an identity that never persisted", async
   );
   await replacement.close();
 });
+it("drops the role tags of characters whose agent is gone, and only theirs (#181)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "persona-sweep-"));
+  roots.push(root);
+  const now = Date.now();
+  const longAgo = new Date(now - 60 * 86_400_000).toISOString();
+  const yesterday = new Date(now - 86_400_000).toISOString();
+  const character = (personaId: string, updatedAt = longAgo) => ({
+    schemaVersion: 1,
+    personaId,
+    name: personaId,
+    role: "builder",
+    appearance: { variant: "teal", accessory: "none", shape: "circle" },
+    harness: "codex",
+    createdAt: longAgo,
+    updatedAt,
+  });
+  // Ended hires, a live seat quiet for weeks, a character changed yesterday and one still talking.
+  writeFileSync(
+    join(root, "personas.json"),
+    JSON.stringify({
+      schemaVersion: 2,
+      personas: [
+        character("ended-1"),
+        character("ended-2"),
+        character("live"),
+        character("recent", yesterday),
+        character("talking"),
+      ],
+      bindings: [],
+    }),
+  );
+  const settings = new SettingsStore(join(root, "owner", "settings.json"));
+  const store = new PersonaStore(root);
+  await store.ready(settings);
+  // A tag left by a character no longer on file.
+  await settings.update((s) => ({ ...s, projects: setDefaultProjectRole(s.projects, "orphan", "builder") }));
+  expect((await settings.load()).projects.assignments).toHaveLength(6);
+  const live = [{ personaId: "live" }];
+  const activity = (personaId: string) => (personaId === "talking" ? yesterday : undefined);
+
+  // The first sweep waits an hour after start, so every machine is read first.
+  expect(await store.sweepGoneRoles(live, activity, now)).toBe(0);
+  expect((await settings.load()).projects.assignments).toHaveLength(6);
+  expect(await store.sweepGoneRoles(live, activity, now + 2 * 3_600_000)).toBe(3);
+  expect((await settings.load()).projects.assignments.map((entry) => entry.personaId).sort()).toEqual([
+    "live",
+    "recent",
+    "talking",
+  ]);
+  expect(
+    store.all([], () => undefined).find((persona) => persona.personaId === "ended-1"),
+  ).not.toHaveProperty("role");
+  // A character seen since start keeps its tag after it leaves the census.
+  expect(await store.sweepGoneRoles([], activity, now + 4 * 3_600_000)).toBe(0);
+  expect(projectRoleForPersona((await settings.load()).projects, "live")).toBe("builder");
+  await store.close();
+});

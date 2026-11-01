@@ -846,6 +846,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(dependencies.captain.projectStatus
         ? { status: (projects) => dependencies.captain.projectStatus!(projects) }
         : {}),
+      ...(dependencies.captain.projectHealth
+        ? { health: (projects) => dependencies.captain.projectHealth!(projects) }
+        : {}),
       ...(dependencies.builtInTracker
         ? {
             trackerStoreId: () => dependencies.builtInTracker!.storeId(),

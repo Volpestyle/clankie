@@ -57,6 +57,8 @@ export async function runProjectSettingsCommand(
     operatorCredentialStore?: CredentialStore;
     includeAutonomy?: boolean;
     includeWorkPolicy?: boolean;
+    /** Ask for the project view's warnings (stale reviewer seat, questions outside every project). */
+    includeHealth?: boolean;
   } = {},
 ) {
   if (args[0] === "settings") return runProjectFleetSettings(args, options);
@@ -147,6 +149,7 @@ export async function runProjectSettingsCommand(
                 includeTrackerPosting: "true",
               }
             : {}),
+          ...(options.includeHealth ? { includeHealth: "true" } : {}),
         },
       ).toString()}`,
       commandHost(options),
@@ -217,7 +220,7 @@ interface ProjectFleetSettingsResult extends ProjectsSnapshot {
 }
 
 /** Change only the selected project leaves, using the latest revision and owner API. */
-async function runProjectFleetSettings(
+export async function runProjectFleetSettings(
   args: readonly string[],
   options: Parameters<typeof runProjectSettingsCommand>[1],
 ): Promise<ProjectFleetSettingsResult> {
@@ -343,7 +346,7 @@ async function runProjectFleetSettings(
   }
   if (Object.keys(changes).length) FleetAutonomyPatchSchema.parse(changes);
   const client = { ...options, includeAutonomy: true };
-  let snapshot = await runProjectSettingsCommand(["list"], client);
+  let snapshot = await runProjectSettingsCommand(["list"], { ...client, includeHealth: true });
   if (!snapshot || !("settings" in snapshot) || snapshot.autonomyDefaults === undefined)
     throw new Error(
       "This service does not expose current fleet autonomy settings; update it before editing project autonomy.",

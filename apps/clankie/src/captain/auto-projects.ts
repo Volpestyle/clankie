@@ -33,6 +33,16 @@ function countInside(project: Project, directories: readonly (string | undefined
   ).length;
 }
 
+/** Pending owner questions raised inside no project's local workspaces, which no status line counts. */
+export function countOutsideProjects(
+  projects: readonly Project[],
+  questionWorkspaces: readonly (string | undefined)[],
+): number {
+  return questionWorkspaces.filter(
+    (workspace) => !projects.some((project) => countInside(project, [workspace]) > 0),
+  ).length;
+}
+
 /** Projects on Auto with their measured census, grouped by the selected lead. */
 function autoProjectStates(
   projects: readonly Project[],

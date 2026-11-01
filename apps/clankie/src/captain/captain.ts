@@ -98,7 +98,7 @@ import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { createKeyPresser, createPromptAnswerer } from "./prompt-answer.ts";
 import { LeadStore } from "./lead.ts";
-import { projectStatuses } from "./auto-projects.ts";
+import { countOutsideProjects, projectStatuses } from "./auto-projects.ts";
 import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
@@ -5409,6 +5409,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return {
         projects: await projectStatuses(projects, seats, questions, new Date(), projectMirrors),
         needsYou: questions.length,
+      };
+    },
+    projectHealth: async (projects) => {
+      const reviewSeatLive: Record<string, boolean> = {};
+      for (const project of projects)
+        if (project.review !== undefined && "seat" in project.review) {
+          // Resolved as the review gate resolves it: a seat Herdr cannot reach takes no candidate.
+          // allow-swallowed-rejection -- An unresolvable seat is exactly the stale reviewer this reports.
+          const seat = await Promise.race([
+            herdrRunner.resolveTerminal(project.review.seat).catch(() => undefined),
+            new Promise<undefined>((done) => setTimeout(() => done(undefined), 5_000).unref?.()),
+          ]);
+          reviewSeatLive[project.id] = seat?.session !== undefined;
+        }
+      return {
+        needsYouOutsideProjects: countOutsideProjects(
+          projects,
+          conversations.pendingOwnerQuestionWorkspaces(),
+        ),
+        reviewSeatLive,
       };
     },
     leadHireMembershipProject: async (_fleet, pane, seat, occupant, allowTrackerReads = true) => {

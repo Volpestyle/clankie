@@ -9004,6 +9004,19 @@ worktree roots), `landedToday` (commits on each local workspace's fetched
 `origin` default branch since local midnight, absent without one) and `needsYou`
 (pending owner questions raised in its workspaces), plus a top-level `needsYou`
 counting every pending owner question.
+Adding `includeHealth=true` also returns `needsYouOutsideProjects` (pending owner
+questions raised in no project's local workspaces, so a total above the per-project
+counts says where the rest are) and `reviewSeatLive`, for each project naming a
+reviewer seat, whether a live seat answers to it, resolved as the review gate
+resolves it. Plain views omit both.
+
+`clankie project settings PROJECT` with no change flags prints a short plain read
+of one project: its tracker, focus, Auto, reviewer, posting setting, linked repos,
+gates, this project's own overrides and what is happening now. It flags a focus
+that names a tracker other than the one the project now uses (Auto follows the
+focus, so the line says to set a new one), a reviewer seat no live seat answers to,
+and owner questions waiting outside every project. `--json` prints the full saved
+snapshot instead, for agents. Change flags print the updated read the same way.
 `productPaths` is an optional list of 1–32 repository-relative POSIX globs,
 each at most 256 characters. Absolute paths, backslashes, `..` and control
 characters are refused. A directory such as `inject/` includes its descendants;
