@@ -440,6 +440,8 @@ it("returns the exact native queue input identity without waiting for its turn",
   expect(delivered).toEqual({
     outcome: "delivered",
     state: "queued",
+    // Held in Codex's queue: acknowledged, not yet read.
+    deliveryStage: "delivered",
     messageId: `codex-input:${String(sent.params!.clientUserMessageId)}`,
   });
   expect(f.requests.filter((r) => r.method === "thread/queue/add")).toHaveLength(1);

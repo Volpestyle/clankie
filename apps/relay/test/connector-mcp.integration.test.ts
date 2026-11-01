@@ -78,6 +78,22 @@ const SCREEN =
 // What `herdr pane read --format text` prints for the same pane: plain text, padded rows.
 const PANE_TEXT = "Building kh2   \r\n> cargo build\r\nCompiling...done\r\n      \r\n\r\n";
 
+// A desktop-app hire's terminal after Claude redrew a tall screen: what it said scrolled
+// above a screenful of empty rows, with its input box at the bottom.
+const DESKTOP_HIRE_TEXT = [
+  "⏺ I'm up in clankie/clankie-9c9571 and waiting for your message.",
+  "",
+  "> ping",
+  "",
+  "⏺ pong",
+  ...Array.from({ length: 120 }, () => ""),
+  "────────────────────────────────────────",
+  "> ",
+  "────────────────────────────────────────",
+  "  ⏵⏵ bypass permissions on · ← 6 agents",
+  "",
+].join("\n");
+
 const HISTORY = Array.from({ length: 10 }, (_, index) => `\u001b[2mline ${index + 1}\u001b[0m\r\n`).join("");
 
 // The leading bytes the store and the connector check, and enough after them to be a file.
@@ -233,6 +249,14 @@ async function startConnectorRelay(
             ...(request.turn.message === "after your goal"
               ? { seatDelivery: { state: "queued" as const, detail: "Bram is mid-goal; the message waits." } }
               : {}),
+            // A Claude hire whose own session already shows the message.
+            ...(request.turn.message === "ping"
+              ? { deliveryStage: "consumed" as const, seatDelivery: { state: "queued" as const } }
+              : {}),
+            // A Codex queue that acknowledged it but hasn't run it.
+            ...(request.turn.message === "when you're done"
+              ? { deliveryStage: "delivered" as const, seatDelivery: { state: "queued" as const } }
+              : {}),
           },
         } as OperatorConversationServiceResult;
       case "fleet_capacity":
@@ -323,7 +347,9 @@ async function startConnectorRelay(
           text:
             terminalId === "term-loose"
               ? `${Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\r\n")}\r\n${PANE_TEXT}`
-              : PANE_TEXT,
+              : terminalId === "herdr-core/t2h"
+                ? DESKTOP_HIRE_TEXT
+                : PANE_TEXT,
         };
       }
       case "terminal_tail": {
@@ -569,6 +595,24 @@ describe("Claude connector MCP endpoint", () => {
       ),
     );
     expect(loose.text).toBe("line 9\nline 10\nBuilding kh2\n> cargo build\nCompiling...done");
+    // Empty rows between a hire's reply and its input box don't push the reply out of the read.
+    const hire = JSON.parse(
+      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr:herdr-core/t2h" } })),
+    );
+    expect(hire.text).toBe(
+      [
+        "⏺ I'm up in clankie/clankie-9c9571 and waiting for your message.",
+        "",
+        "> ping",
+        "",
+        "⏺ pong",
+        "",
+        "────────────────────────────────────────",
+        ">",
+        "────────────────────────────────────────",
+        "  ⏵⏵ bypass permissions on · ← 6 agents",
+      ].join("\n"),
+    );
 
     const sent = JSON.parse(
       textOf(
@@ -592,6 +636,19 @@ describe("Claude connector MCP endpoint", () => {
       status: "queued",
       detail: "Bram is mid-goal; the message waits.",
     });
+    const tell = async (message: string) =>
+      JSON.parse(
+        textOf(
+          await client.callTool({ name: "message_agent", arguments: { agent: "herdr:pc1/kh2", message } }),
+        ),
+      );
+    // In the agent's own session is delivered, never "busy".
+    const inSession = await tell("ping");
+    expect(inSession).toMatchObject({ status: "delivered" });
+    expect(inSession.detail).toMatch(/has the message in its session/u);
+    const waiting = await tell("when you're done");
+    expect(waiting).toMatchObject({ status: "queued" });
+    expect(waiting.detail).toMatch(/waiting in its queue/u);
     const send = relay.seen.find((request) => request.op === "send");
     expect(send).toMatchObject({
       turn: {
@@ -623,7 +680,7 @@ describe("Claude connector MCP endpoint", () => {
     });
     expect(refused.isError).toBe(true);
     expect(textOf(refused)).toMatch(/can be read but not messaged/u);
-    expect(relay.seen.filter((request) => request.op === "send")).toHaveLength(2);
+    expect(relay.seen.filter((request) => request.op === "send")).toHaveLength(4);
     await client.close();
   });
 
