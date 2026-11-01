@@ -366,8 +366,8 @@ async function fixture(
     if (!found?.question || found.revision === undefined) throw new Error("no pending ask");
     return { question: found.question, revision: found.revision };
   };
-  const answer = async (label: string) => {
-    const { question, revision } = await pendingAsk();
+  const answer = async (label: string, shown?: { question: ConversationQuestion; revision: number }) => {
+    const { question, revision } = shown ?? (await pendingAsk());
     const option = question.options.find((entry) => entry.label === label)!;
     const result = await dispatch({
       op: "input_answer",
@@ -411,15 +411,19 @@ async function fixture(
     pendingAsk,
     answer,
     main,
+    wakeLead: (text: string) => store.submitInternal(main, text, "watch").status === "accepted",
     wakes: () => turns.map((turn) => turn.message),
   };
 }
 
 const comment = (body: string) => ({ issueId: ISSUE_ID, body });
 
-it("go ahead posts Clankie's and a worker's writes to the project's Linear at once", async () => {
+it("go ahead, the default, posts Clankie's and a worker's writes to the project's Linear at once", async () => {
   const f = await fixture();
-  await f.setPosting("garden", "allow");
+  // No saved setting: Go ahead (ADR 0302, amended 2026-11-01).
+  expect((await f.settings.load()).projects.projects.find((p) => p.id === "garden")).not.toHaveProperty(
+    "trackerPosting",
+  );
   expect(await f.lead("save_comment", comment("Landed the gate fix."))).toMatchObject({
     outcome: "ok",
     isError: false,
@@ -513,7 +517,7 @@ it("Clankie decides: his own writes post; a worker's waits for him and posts exa
 
 it("ask me holds the write as a check in the owner's feed; Post it posts it once, Send it back posts nothing", async () => {
   const f = await fixture();
-  // No saved setting: Linear starts on ask me.
+  await f.setPosting("garden", "ask");
   const held = await f.lead("save_comment", comment("Shipped in 1.4: the gate latches."));
   expect(held).toMatchObject({ outcome: "refused", reason: "posting_held" });
   if (held.outcome !== "refused") throw new Error("expected a hold");
@@ -535,6 +539,8 @@ it("ask me holds the write as a check in the owner's feed; Post it posts it once
   // Exactly what would be posted, and where.
   expect(check.check.question.prompt).toContain("Shipped in 1.4: the gate latches.");
   expect(check.check.question.prompt).toContain(`issueId: ${ISSUE_ID}`);
+  // The exact text is fenced after the summary, so the app folds it behind "Show details".
+  expect(check.check.question.prompt).toMatch(/^Post a comment on [\s\S]*posted:\n\n(`{3,})\n[\s\S]*\n\1$/u);
   expect(check.check.question.options.map((option) => option.label)).toEqual(["Post it", "Send it back"]);
 
   // Clankie can't let the owner's ask through himself.
@@ -560,7 +566,14 @@ it("ask me holds the write as a check in the owner's feed; Post it posts it once
   // Send it back: nothing is posted, and Clankie hears it.
   const back = await f.lead("save_comment", comment("Wrong issue."));
   const backId = /post ([0-9a-f-]{36})/u.exec(back.outcome === "refused" ? back.detail : "")![1]!;
-  await f.answer("Send it back");
+  const shown = (await f.feed()).items.find((item) => item.kind === "check");
+  if (shown?.kind !== "check") throw new Error("expected a check");
+  // A wake moves the lead chat on between the feed read and the owner's tap; his answer
+  // to the same ask still lands (#118).
+  expect(f.wakeLead("A worker reported in.")).toBe(true);
+  const moved = (await f.feed()).items.find((item) => item.kind === "check");
+  expect(moved?.kind === "check" && moved.check.revision > shown.check.revision).toBe(true);
+  await f.answer("Send it back", { question: shown.check.question, revision: shown.check.revision });
   await f.settle(() => f.posting.read(backId)?.state === "sent_back");
   expect(f.mutations("commentCreate")).toBe(1);
   await f.settle(() => f.wakes().some((text) => text.includes(backId) && text.includes("sent back")));
@@ -614,7 +627,7 @@ it("the CLI saves, reads and clears the setting through the owner API", async ()
       operatorCredentialStore: f.credentials,
       fetchImpl: async (input, init) => f.service.app.fetch(new Request(input, init)),
     });
-  expect(await cli()).toMatchObject({ posting: { saved: "default", effective: "ask", label: "Ask me" } });
+  expect(await cli()).toMatchObject({ posting: { saved: "default", effective: "allow", label: "Go ahead" } });
   expect(await cli("--posting", "read-only")).toMatchObject({
     posting: { saved: "read_only", effective: "read_only", label: "Read only" },
   });
@@ -627,7 +640,7 @@ it("the CLI saves, reads and clears the setting through the owner API", async ()
   });
   expect(await cli("--posting", "allow")).toMatchObject({ posting: { saved: "allow", label: "Go ahead" } });
   expect(await cli("--posting", "default")).toMatchObject({
-    posting: { saved: "default", effective: "ask" },
+    posting: { saved: "default", effective: "allow" },
   });
   expect((await f.settings.load()).projects.projects.find((p) => p.id === "garden")).not.toHaveProperty(
     "trackerPosting",
@@ -770,6 +783,7 @@ it("a full record of decided posts drops its oldest, so a waiting post survives 
     fingerprint: `earlier-${String(index)}`,
   }));
   const f = await fixture({ posts: decided });
+  await f.setPosting("garden", "ask");
   const held = await f.worker("save_comment", comment("Waits across a restart."));
   expect(held).toMatchObject({ outcome: "refused", reason: "posting_held" });
   const id = /post ([0-9a-f-]{36})/u.exec(held.outcome === "refused" ? held.detail : "")![1]!;
@@ -1143,6 +1157,7 @@ it("a held write that meets every Linear project's setting survives a restart wi
           id: `field-${String(index)}`,
           name: `Field ${String(index)}`,
           linearProjectBinding: { provider: "linear", projectId: randomUUID() },
+          trackerPosting: "ask" as const,
         })),
       ],
     }),

@@ -3373,7 +3373,7 @@ Set it with [`project settings PROJECT --posting`](#project-list-project-setting
 | `lead`      | Clankie decides | Clankie's own writes post; a worker's wait for him                        |
 | `allow`     | Go ahead        | It posts                                                                  |
 
-A project with no saved value is on `ask`. Reads are never held. Private issue
+A project with no saved value is on `allow` (ADR 0302, amended 2026-11-01). Reads are never held. Private issue
 files (`.clankie/work`), committed issue files and the built-in tracker stay on
 the owner's Mac, so they are always writable; so is the local store Linear tools
 use while Linear is disconnected. The owner's own writes (the app, `work owner`,
@@ -3384,7 +3384,7 @@ delegated worker, `POST /v1/tracker/call` and repo-routed tracker calls,
 `clankie work create|update|attach` on a Linear or GitHub repo, the seat issue
 status Clankie keeps, and drops. When a write could belong to several projects
 (no repo, project or issue that names one), the strictest of them applies; when
-it names none Clankie can match, it is held as on `ask`.
+it names none Clankie can match, the default applies.
 
 - **Held for the owner.** The write becomes a check in his feed, "Post a comment
   on VUH-12 to Linear" with the exact text, answered **Post it** or **Send it
@@ -8576,7 +8576,10 @@ HTTP clients use `POST /operator/v1/dispatch` with `schemaVersion: 1` and
 `{questions: [ConversationQuestionResult, ...]}`, newest first. A conversation
 can have several open asks, each with its own `waitingOn` and immutable ID.
 Answering or cancelling one leaves the others open. Revision is shared by the
-conversation: after `revision_conflict`, refresh and answer the same request ID.
+conversation, but an ask is immutable under its request ID, so an answer or
+cancellation lands even after other turns moved the conversation on (#118).
+Only a project confirmation, whose proposal can change under the same ID,
+returns `revision_conflict` for an older revision: refresh and answer again.
 Pending asks and uncertain native claims are protected; creation refuses at
 256 records or 512,000 serialized bytes per conversation instead of evicting them.
 `input_get`, `input_answer` and
@@ -9082,7 +9085,7 @@ a service without `projectReview` refuses the flags. The `/project` menu has a
 decides before Clankie or a worker writes to the project's Linear or GitHub
 issues ([above](#posting-to-your-tracker-work-posts);
 [ADR 0302](adr/0302-posting-to-your-tracker-is-the-owners-call.md)). `default`
-clears the saved value, which means `ask`. The output's `posting` shows the
+clears the saved value, which means `allow`. The output's `posting` shows the
 saved and effective value and its label. The JSON update takes
 `trackerPosting` as `"read_only"`, `"ask"`, `"lead"` or `"allow"`, or `null` to
 clear. Readers opt in with `includeTrackerPosting=true` and see `trackerPosting`

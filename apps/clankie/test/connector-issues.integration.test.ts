@@ -362,7 +362,8 @@ it("writes issues: issue files right away, Linear and GitHub under the project's
     refused: expect.stringContaining("Name something to change"),
   });
 
-  // GitHub, on the default "Ask me": held for the owner's OK, nothing posted.
+  // GitHub, on "Ask me": held for the owner's OK, nothing posted.
+  await setPosting("ask");
   const asked = await write("save_issue", { project: pondId, title: "Net the leaves" });
   expect(asked).toMatchObject({ outcome: "held", post: expect.any(String) });
   expect(created).toEqual([]);
