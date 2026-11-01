@@ -115,6 +115,14 @@ account, rather than an ambient `gh` login. Connected-provider dispatch retains
 its account and configuration fences. Dependencies remain prerequisite metadata; adding one
 never writes the referenced item.
 
+**GitHub writes fall back to the gh login (2026-10-31, #98).** James chose the
+owner's own `gh` login on the Mac as the default for GitHub writes from devices
+and connected apps, so a GitHub-tracked project works with no setup. The connected
+account still wins when there is one. Without it, the write is bound to the login
+`gh api user` names, checked again right before the write, so a switched account
+stops it. A hosted body has no `gh` login and still needs the connection. A
+Clankie GitHub App limited to issues is the narrower option to connect instead.
+
 **Delegated Linear writes (2026-10-18, VUH-2454).** James authorized workers to
 write across projects in the repo's saved Linear team. Delegated tool calls
 compare the fresh issue's canonical team UUID, without

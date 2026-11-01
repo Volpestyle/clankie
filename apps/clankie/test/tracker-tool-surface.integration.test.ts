@@ -555,17 +555,32 @@ it("keeps clankie work and Markdown issues on the canonical tools with priority,
   }
 });
 
-it("requires a bound GitHub account for delegated tools while keeping the owner CLI's ambient gh access", async () => {
+it("binds delegated tools to the owner's gh login, or to the connected GitHub account when there is one", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-tracker-github-"));
   const ambientLog = join(root, "ambient-gh.jsonl");
   const ambientCommand = join(root, "ambient-gh.mjs");
+  const ambientSignedIn = join(root, "ambient-gh-signed-in");
   await writeFile(ambientLog, "");
-  // A real subprocess records any attempted ambient command without using a
-  // developer's installed gh or authenticated GitHub workspace.
+  // A real subprocess records every ambient command without using a developer's
+  // installed gh or authenticated GitHub workspace. It is signed in once the marker exists.
   await writeFile(
     ambientCommand,
-    "import {appendFileSync} from 'node:fs'; appendFileSync(process.argv[2], JSON.stringify(process.argv.slice(3))+'\\n'); process.stdout.write('[[]]');\n",
+    [
+      "import {appendFileSync, existsSync} from 'node:fs';",
+      "const [log, signedIn, ...args] = process.argv.slice(2);",
+      "appendFileSync(log, JSON.stringify(args) + '\\n');",
+      "if (args[1] === 'user') {",
+      "  if (!existsSync(signedIn)) { process.stderr.write('To get started with GitHub CLI, please run: gh auth login'); process.exit(4); }",
+      "  process.stdout.write('fixture-owner\\n');",
+      "} else process.stdout.write('[[]]');",
+      "",
+    ].join("\n"),
   );
+  const ambientCalls = async () =>
+    (await readFile(ambientLog, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as string[]);
   const exec = promisify(execFile);
   const issue = {
     number: 42,
@@ -608,29 +623,43 @@ it("requires a bound GitHub account for delegated tools while keeping the owner 
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("No fixture port");
   const f = await surface(root, {
-    gh: async (args) => (await exec(process.execPath, [ambientCommand, ambientLog, ...args])).stdout,
+    gh: async (args) =>
+      (await exec(process.execPath, [ambientCommand, ambientLog, ambientSignedIn, ...args])).stdout,
     githubApiBase: `http://127.0.0.1:${String(address.port)}`,
   });
   try {
     await f.work(["init", "--backend", "github", "--github-repo", "fixture/tracker"]);
+    const listCommand = [
+      "api",
+      "--paginate",
+      "--slurp",
+      "repos/fixture/tracker/issues?state=all&per_page=100",
+    ];
+    // Signed out of gh and not connected: delegated tools are refused before reaching GitHub.
     for (const [name, args] of [
       ["linear_list_issues", {}],
       ["linear_save_issue", { team: "LOCAL", title: "Delegated issue" }],
     ] as const) {
       const refused = await f.tool("clankie_call", { name, arguments: { repo: "workspace", ...args } });
       expect(refused.isError).toBe(true);
-      expect(refused.content[0]?.text).toMatch(/connect GitHub/iu);
+      expect(refused.content[0]?.text).toContain("gh auth login");
     }
-    expect(await readFile(ambientLog, "utf8")).toBe("");
+    expect((await ambientCalls()).every((args) => args[1] === "user")).toBe(true);
     expect(seen).toEqual([]);
+    // The owner CLI's own read uses gh directly.
     expect((await f.work(["list"])).items).toEqual([]);
+    expect((await ambientCalls()).at(-1)).toEqual(listCommand);
+
+    // Signed in to gh, a delegated read goes through the owner's gh login (#98).
+    await writeFile(ambientSignedIn, "");
+    expect((await f.call("linear_list_issues", { repo: "workspace" })).issues).toEqual([]);
+    const lists = (await ambientCalls()).filter(
+      (args) => JSON.stringify(args) === JSON.stringify(listCommand),
+    );
+    expect(lists).toHaveLength(2);
+    expect(await ambientCalls()).toContainEqual(["api", "user", "--jq", ".login"]);
+    expect(seen).toEqual([]);
     const ownerCommand = await readFile(ambientLog, "utf8");
-    expect(JSON.parse(ownerCommand)).toEqual([
-      "api",
-      "--paginate",
-      "--slurp",
-      "repos/fixture/tracker/issues?state=all&per_page=100",
-    ]);
 
     await f.credentials.set("github", { type: "api", key: "isolated-github-account" });
     expect((await f.call("linear_list_issues", { repo: "workspace" })).issues).toEqual([]);
