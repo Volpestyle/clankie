@@ -66,6 +66,7 @@ export function createCheckoutMaintenance(ctx: CheckoutMaintenanceContext) {
           // Managed runtime snapshots are not anyone's work; every other linked tree is.
           const unreconciled = await unreconciledLinkedWorktrees(repository, isManaged)
             .then((found) => ctx.paneTidy.describeUnreconciled(found))
+            // allow-swallowed-rejection -- moved from captain.ts (ADR 0325); a checkout whose linked trees can't be listed reports without them.
             .catch(() => undefined);
           return unreconciled ? { ...status, unreconciled } : status;
         }),
