@@ -280,6 +280,17 @@ export function createHerdrSessionSource(
       if (result.op !== "prompt_answer") throw new Error("Clankie answered with something else.");
       return { id, status: result.result.outcome, detail: result.result.message };
     },
+
+    async press(id, keys) {
+      const result = await port.dispatch({
+        op: "key_press",
+        schemaVersion: 1,
+        terminalId: id,
+        keys: [...keys],
+      });
+      if (result.op !== "key_press") throw new Error("Clankie answered with something else.");
+      return { id, status: result.result.outcome, detail: result.result.message };
+    },
   };
 }
 

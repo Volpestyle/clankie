@@ -381,6 +381,16 @@ export interface CaptainPort {
     readonly expect: string;
     readonly steps: readonly import("@clankie/protocol/connector").PromptAnswerStep[];
   }): Promise<import("@clankie/protocol/connector").PromptAnswerResult>;
+  /**
+   * Press keys in an agent's terminal for a connected app the owner turned prompts and keys
+   * on for (ADR 0323), whatever the agent is doing, recorded on the note board.
+   */
+  pressKeys?(input: {
+    readonly app: string;
+    readonly current: () => boolean;
+    readonly terminalId: string;
+    readonly keys: readonly string[];
+  }): Promise<import("@clankie/protocol/connector").KeyPressResult>;
   /** Records a verified outside delivery in the fleet room (VUH-2403); never blocks or alters its handling. */
   recordInbound?(arrival: import("./fleet-room.ts").InboundArrival): void;
   /**
