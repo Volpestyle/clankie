@@ -32,6 +32,8 @@ import { createFileMemory } from "../src/memory.ts";
 import { VOICE_SELF_TOOL_MAX_CHARACTERS } from "../src/voice-self-tools.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
+import { minecraftTools } from "@clankie/minecraft/tools";
+import { minecraftHostTools } from "@clankie/minecraft/host-tools";
 import { buildLaneToolBank } from "../src/captain/lane-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { AutonomyStore } from "../src/captain/autonomy.ts";
@@ -1005,8 +1007,20 @@ it.each(CaptainSessionLaneV2Schema.options)("strict client contract: %s lane too
     ...bankDeps(),
     desktop: catalogOnly,
     bodyLeases: catalogOnly,
-    minecraft: catalogOnly,
-    minecraftHost: catalogOnly,
+    gameExtensions: {
+      projections: () => [
+        {
+          paths: [],
+          routes: () => {
+            throw new Error("Catalog-only game routes");
+          },
+          tools: (turn: Parameters<typeof minecraftTools>[1]) => [
+            ...minecraftTools(catalogOnly as never, turn),
+            ...minecraftHostTools(catalogOnly as never, turn),
+          ],
+        },
+      ],
+    },
     agentSessions: catalogOnly,
     workItems: catalogOnly,
     streamWatch: catalogOnly,

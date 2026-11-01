@@ -1538,8 +1538,6 @@ const captain = createCaptain(
         linear: tracker?.backend === "linear",
       };
     },
-    minecraft,
-    minecraftHost,
     gameExtensions,
     bodyLeases,
     browser: {
@@ -2380,8 +2378,6 @@ const clankie = await createClankieApp({
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
   bodyPlaySessions,
   guidePokemonPlay: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
-  minecraft,
-  minecraftHost,
   minecraftPrivateDelivery,
   extensionRoutes: [...routesOf(extensions), skinDraftRoutes(skinDrafts)],
   bodyLeases: {

@@ -70,8 +70,6 @@ export interface CaptainDeps {
   /** This captain's fresh settings and explicit environment, supplied by its host. */
   readonly discordSettings?: () => Promise<import("@clankie/protocol").DiscordSettings>;
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
-  readonly minecraft?: import("../minecraft.ts").MinecraftService;
-  readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
   readonly desktop?: import("./desktop.ts").DesktopExpressions;
   /** Retain the rollback reader's report layout until initial cutover is durably healthy. */
   readonly inboundReportMigrationReady?: () => boolean;

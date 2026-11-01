@@ -2,7 +2,7 @@ import type { CredentialStore } from "@clankie/credential-broker";
 import type { SettingsStore } from "@clankie/settings";
 import { describe, expect, it, vi } from "vitest";
 import type { BodyConversationIdentity } from "../src/body-lease-router.ts";
-import { minecraftHostTools, type MinecraftHostToolPort } from "../src/captain/minecraft-host-tools.ts";
+import { minecraftHostTools, type MinecraftHostToolPort } from "@clankie/minecraft/host-tools";
 import type { TurnContext } from "../src/captain/tools.ts";
 import { createMcpHost, MINECRAFT_BODY_ACCESS } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";

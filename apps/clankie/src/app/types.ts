@@ -46,7 +46,6 @@ import { type ExecutionConnections } from "../herdr-session.ts";
 import type { ComposerTranscriptions } from "../composer-transcription.ts";
 import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
-import type { MinecraftService } from "../minecraft.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import type { PersonaImageSource } from "../persona-images.ts";
@@ -325,12 +324,8 @@ export interface ClankieAppDependencies {
     identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
   ) => Promise<unknown>;
   gameExtensions?: Pick<InstalledGameExtensions, "catalog" | "projections">;
-  minecraft?: MinecraftService;
-  minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
-  minecraftPrivateDelivery?: Pick<
-    ReturnType<typeof import("../minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
-    "authorize"
-  >;
+  /** Checks a Discord body's private Minecraft login-code delivery; Minecraft's extension supplies it. */
+  minecraftPrivateDelivery?: { authorize(capability: string, payload: unknown): Promise<boolean> };
   /** Routes extensions add, such as computer use and skin drafts (ADR 0328). */
   extensionRoutes?: readonly import("../ports/routes.ts").ExtensionRoutes[];
   /**

@@ -35,10 +35,10 @@ import { trackerCatalogForRole } from "@clankie/work-items";
 import {
   MinecraftActionSchema,
   WorkerReportBridgeStatusSchema,
+  type MinecraftAction,
   type WorkerBridgeStatus,
   type WorkerReportBridgeStatus,
 } from "@clankie/protocol";
-import type { MinecraftService } from "./minecraft.ts";
 import {
   WORKER_VIDEO_TOOL,
   WorkerVideoSchema,
@@ -48,7 +48,7 @@ import {
 } from "./worker-video.ts";
 import { DurableReceiptStore } from "./durable-receipt-store.ts";
 import { REVIEW_TOOLS } from "../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
-import { canonicalJson } from "@clankie/play";
+import { canonicalJson } from "@clankie/protocol/canonical-json";
 
 const minecraftWorkerSchemas = {
   clankie_minecraft_observe: z.strictObject({}),
@@ -360,7 +360,17 @@ export class WorkerMcp {
     reportBridgeObserved?(fleet: string, pane: string, report: WorkerReportBridgeStatus): void;
     /** Canonical settings generation, checked without yielding at provider dispatch. */
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
-    minecraft?: Pick<MinecraftService, "workerCommand">;
+    /** Minecraft's worker driving, which its extension supplies (ADR 0328). */
+    minecraft?: {
+      workerCommand(
+        command: {
+          action: "observe" | "status" | "cancel" | "act";
+          request?: MinecraftAction | undefined;
+          actionId?: string | undefined;
+        },
+        worker: { readonly principalId: string; readonly guard: () => Promise<void | (() => void)> },
+      ): Promise<unknown>;
+    };
     video?: WorkerVideoPort;
     /** The app note board's read (ADR 0301); a worker never posts to it. */
     appNotes?: {
