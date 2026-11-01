@@ -35,40 +35,35 @@ const channel = (text: string) =>
   `<channel source="swarm" kind="message" conversation="conv-1" source="captain" event_id="seat-1">\n${text}\n</channel>`;
 
 describe("consent", () => {
-  it("reports a failed plugin inspection instead of claiming the plugin is missing", async () => {
-    expect(
-      await claudeWorkerChannelConsent({
-        listPlugins: async () => {
-          throw new Error("inspection timed out");
-        },
-      }),
-    ).toMatchObject({
-      approved: false,
-      detail: "Could not inspect installed Claude plugins: inspection timed out",
-    });
-  });
-  it("needs the installed plugin and an owner-approved channel, and names the fix for each", async () => {
+  it("needs the worker files on this machine and an owner-approved channel, and names the fix for each", async () => {
     const root = await scratch();
     const policy = join(root, "managed-settings.json");
-    const installed = async () => JSON.stringify([{ id: "clankie-worker@clankie", enabled: false }]);
-    const missing = await claudeWorkerChannelConsent({
-      managedSettingsPath: policy,
-      listPlugins: async () => "[]",
-    });
-    expect(missing).toMatchObject({ approved: false, detail: "clankie-worker@clankie is not installed." });
-    expect(missing.approved === false && missing.fix).toContain(
-      "claude plugin install clankie-worker@clankie",
-    );
+    const workerRoot = join(root, "worker");
+    const missing = await claudeWorkerChannelConsent({ managedSettingsPath: policy, workerRoot });
+    expect(missing).toMatchObject({ approved: false });
+    expect(missing.approved === false && missing.detail).toContain(workerRoot);
 
-    const unapproved = await claudeWorkerChannelConsent({
-      managedSettingsPath: policy,
-      listPlugins: installed,
-    });
-    expect(unapproved.approved === false && unapproved.fix).toContain('"allowedChannelPlugins"');
+    await mkdir(join(workerRoot, ".claude-plugin"), { recursive: true });
+    await writeFile(
+      join(workerRoot, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "clankie-worker" }),
+    );
+    const unapproved = await claudeWorkerChannelConsent({ managedSettingsPath: policy, workerRoot });
+    expect(unapproved.approved === false && unapproved.fix).toContain('"marketplace": "inline"');
+
+    // Approving only the identity an older installed copy used is not this launch's channel.
+    await writeFile(
+      policy,
+      JSON.stringify({
+        channelsEnabled: true,
+        allowedChannelPlugins: [{ marketplace: "clankie", plugin: "clankie-worker" }],
+      }),
+    );
+    expect(managedPolicyApprovesWorker(policy)).toBe(false);
 
     await writeFile(
       policy,
-      JSON.stringify({ allowedChannelPlugins: [{ marketplace: "clankie", plugin: "clankie-worker" }] }),
+      JSON.stringify({ allowedChannelPlugins: [{ marketplace: "inline", plugin: "clankie-worker" }] }),
     );
     // An allowlist without channels enabled approves nothing.
     expect(managedPolicyApprovesWorker(policy)).toBe(false);
@@ -78,31 +73,43 @@ describe("consent", () => {
       JSON.stringify({ channelsEnabled: true }),
     );
     expect(managedPolicyApprovesWorker(policy)).toBe(true);
-    expect(await claudeWorkerChannelConsent({ managedSettingsPath: policy, listPlugins: installed })).toEqual(
-      {
-        approved: true,
-      },
+    expect(await claudeWorkerChannelConsent({ managedSettingsPath: policy, workerRoot })).toEqual({
+      approved: true,
+    });
+    // A policy that drops launch-time plugin directories would drop the worker too.
+    await writeFile(
+      join(root, "managed-settings.d", "20-lockdown.json"),
+      JSON.stringify({ disableSideloadFlags: true }),
     );
+    expect(managedPolicyApprovesWorker(policy)).toBe(false);
     await writeFile(policy, "{not json");
     expect(managedPolicyApprovesWorker(policy)).toBe(false);
   });
 });
 
-it("a worker launch enables its plugin for this session only and asks for the approved channel", () => {
+it("a worker launch loads its plugin for this session only, switches off an installed copy, and asks for the approved channel", () => {
   expect(
-    claudeWorkerLaunchArgs({
-      harness: "claude",
-      cwd: "/w",
-      brief: "b",
-      model: "sonnet",
-      effort: "high",
-      harnessArgs: ["--plugin-dir", "/skills"],
-    }),
+    claudeWorkerLaunchArgs(
+      {
+        harness: "claude",
+        cwd: "/w",
+        brief: "b",
+        model: "sonnet",
+        effort: "high",
+        harnessArgs: ["--plugin-dir", "/skills"],
+      },
+      [],
+      undefined,
+      undefined,
+      "/opt/clankie/worker",
+    ),
   ).toEqual([
     "--settings",
-    '{"autoCompactWindow":500000,"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_worker","mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto"}}',
+    '{"autoCompactWindow":500000,"enabledPlugins":{"clankie-worker@inline":true,"clankie-worker@clankie":false},"permissions":{"allow":["mcp__plugin_clankie-worker_worker","mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto"}}',
+    "--plugin-dir",
+    "/opt/clankie/worker",
     "--channels",
-    "plugin:clankie-worker@clankie",
+    "plugin:clankie-worker@inline",
     "--model",
     "sonnet",
     "--effort",
@@ -116,7 +123,7 @@ it("a worker launch enables its plugin for this session only and asks for the ap
       "mcp__linear-server",
     ])[1],
   ).toBe(
-    '{"autoCompactWindow":500000,"enabledPlugins":{"clankie-worker@clankie":true},"permissions":{"allow":["mcp__plugin_clankie-worker_worker","mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto","deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
+    '{"autoCompactWindow":500000,"enabledPlugins":{"clankie-worker@inline":true,"clankie-worker@clankie":false},"permissions":{"allow":["mcp__plugin_clankie-worker_worker","mcp__plugin_clankie-worker_clankie"],"defaultMode":"auto","deny":["mcp__claude_ai_Linear","mcp__linear-server"]}}',
   );
   expect(channelBody(channel("line one\nline two"))).toBe("line one\nline two");
   expect(channelBody("plain prompt")).toBeUndefined();
@@ -320,7 +327,7 @@ it("a resumed hire starts the interactive TUI, briefs it over the channel, and w
   expect(started.outcome).toBe("started");
   expect(start).toHaveBeenCalledWith(
     "claude",
-    expect.arrayContaining(["--channels", "plugin:clankie-worker@clankie"]),
+    expect.arrayContaining(["--channels", "plugin:clankie-worker@inline"]),
   );
   expect(deliver).toHaveBeenCalledWith("term_0a1b2c", "BRIEF-1 do the thing");
   if (started.outcome !== "started") return;

@@ -156,10 +156,14 @@ export const FLEET_SEAT_MCP_SERVER = "clankie-seat";
 /**
  * The Claude worker plugin a hired seat is driven through (VUH-1458): its
  * channel carries the seat's mailbox, and its hooks report each settled turn.
- * The owner approves this exact installed identity in managed policy once.
+ * Each launch loads it from Clankie's own worker directory (`--plugin-dir`), so
+ * nothing is installed in a Claude profile and Claude names it `@inline` (ADR
+ * 0317). The owner approves this identity in managed policy once.
  */
-export const CLAUDE_WORKER_PLUGIN = { plugin: "clankie-worker", marketplace: "clankie" } as const;
+export const CLAUDE_WORKER_PLUGIN = { plugin: "clankie-worker", marketplace: "inline" } as const;
 export const CLAUDE_WORKER_PLUGIN_ID = `${CLAUDE_WORKER_PLUGIN.plugin}@${CLAUDE_WORKER_PLUGIN.marketplace}`;
+/** The copy older setups installed from Clankie's marketplace; a hire switches it off for its session. */
+export const CLAUDE_WORKER_INSTALLED_PLUGIN_ID = "clankie-worker@clankie";
 /**
  * One lifecycle hook from a hired seat's worker plugin, reported by
  * `clankie seat-hook` from inside its pane. `lastMessage` is the harness's own

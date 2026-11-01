@@ -19,7 +19,6 @@ import type { ClaudeHookQuestions } from "./claude-hook-questions.ts";
  * Until they approve it, `start` is `blocked` and the hire takes the terminal
  * lane, naming the one-time fix.
  */
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -37,6 +36,7 @@ import {
   type StopNativeTaskResult,
   CLAUDE_WORKER_PLUGIN,
   CLAUDE_WORKER_PLUGIN_ID,
+  CLAUDE_WORKER_INSTALLED_PLUGIN_ID,
   MAXIMUM_TRUST_HARNESS_ARGS,
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_CONVERSATION_SUMMARY_MAX,
@@ -48,6 +48,7 @@ import { resolveHerdrSeatTranscriptPath, type HerdrSeatTranscript } from "./herd
 import { paneInputLine } from "./pane-draft.ts";
 import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
 import { claudeWorkerMcpAllowlist, type ClaudeMcpPolicyEntry } from "./worker-mcp-profile.ts";
+import { shippedWorkerFile } from "../worker-plugin-path.ts";
 
 const defaultTrackerDeny = (cwd: string, env?: Readonly<Record<string, string>>) =>
   claudeTrackerDenyRules(cwd, { ...process.env, ...env });
@@ -65,8 +66,13 @@ export type ClaudeWorkerConsent =
   | { readonly approved: false; readonly detail: string; readonly fix: string };
 
 export interface ClaudeWorkerSeatDeps {
-  /** Consent for the profile this launch runs in (its CLAUDE_CONFIG_DIR, when one was chosen). */
+  /** Whether this machine can run a worker: its plugin files present and its channel approved. */
   readonly consent: (env?: Readonly<Record<string, string>>) => Promise<ClaudeWorkerConsent>;
+  /**
+   * The worker plugin's directory on the machine the seat runs on, loaded per launch with
+   * `--plugin-dir`. This install's own copy by default.
+   */
+  readonly workerRoot?: () => Promise<string>;
   readonly hooks: SeatHookLog;
   /** Current verified workspace policy; absent preserves native permission defaults. */
   readonly fleetGates?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<FleetGates>;
@@ -159,7 +165,8 @@ function claudeWorkerSettings(
   return JSON.stringify({
     // ADR 0293: a long turn or refused fresh restart still has a native backstop.
     autoCompactWindow: 500_000,
-    enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true },
+    // The launch's own copy (ADR 0317); an older installed copy would add its hooks twice.
+    enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true, [CLAUDE_WORKER_INSTALLED_PLUGIN_ID]: false },
     // A local hire's MCP profile (VUH-2388): Claude starts no other server.
     ...(allowedMcpServers === undefined ? {} : { allowedMcpServers }),
     permissions: {
@@ -176,10 +183,15 @@ export function claudeWorkerLaunchArgs(
   /** The settings JSON itself, or a path to a file holding it. */
   settings = claudeWorkerSettings(trackerDeny),
   startupPrompt?: string,
+  /** The worker plugin's directory on the seat's machine. */
+  workerRoot = shippedWorkerFile(),
 ): string[] {
   return [
     "--settings",
     settings,
+    // The worker plugin rides this session only (ADR 0317): nothing installed in a profile.
+    "--plugin-dir",
+    workerRoot,
     "--channels",
     `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
     ...(launch.resumeSessionId === undefined ? [] : ["--resume", launch.resumeSessionId]),
@@ -444,8 +456,7 @@ export class SeatHookLog {
   }
 }
 
-const INSTALL_FIX = `Install the worker plugin once from Clankie's marketplace, leaving it off by default (each hire enables it for its own session): claude plugin install ${CLAUDE_WORKER_PLUGIN_ID} && claude plugin disable ${CLAUDE_WORKER_PLUGIN_ID}`;
-const POLICY_FIX = `Approve its channel once as this machine's administrator: in ${CLAUDE_MANAGED_SETTINGS}, set "channelsEnabled": true and add { "marketplace": "${CLAUDE_WORKER_PLUGIN.marketplace}", "plugin": "${CLAUDE_WORKER_PLUGIN.plugin}" } to "allowedChannelPlugins", keeping any entries already there (docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).`;
+const POLICY_FIX = `Approve its channel once as this machine's administrator: in ${CLAUDE_MANAGED_SETTINGS}, set "channelsEnabled": true and add { "marketplace": "${CLAUDE_WORKER_PLUGIN.marketplace}", "plugin": "${CLAUDE_WORKER_PLUGIN.plugin}" } to "allowedChannelPlugins", keeping any entries already there, and leave "disableSideloadFlags" unset (docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).`;
 
 /** Whether managed policy approves the worker plugin's channel, from the main file and its drop-ins. */
 export function managedPolicyApprovesWorker(path = CLAUDE_MANAGED_SETTINGS): boolean {
@@ -470,12 +481,17 @@ export function managedPolicyApprovesWorker(path = CLAUDE_MANAGED_SETTINGS): boo
   );
 }
 
-/** The same answer from the policy files' contents, wherever they were read (VUH-1527). */
+/**
+ * The same answer from the policy files' contents, wherever they were read (VUH-1527): channels
+ * on, the worker's `@inline` identity allowed, and launch-time plugins not forbidden
+ * (`disableSideloadFlags` drops every `--plugin-dir` plugin).
+ */
 export function policiesApproveWorker(contents: readonly string[]): boolean {
   let enabled = false;
   let allowed = false;
+  let sideloadOff = false;
   for (const content of contents) {
-    let value: { channelsEnabled?: unknown; allowedChannelPlugins?: unknown };
+    let value: { channelsEnabled?: unknown; allowedChannelPlugins?: unknown; disableSideloadFlags?: unknown };
     try {
       value = JSON.parse(content) as typeof value;
     } catch {
@@ -483,6 +499,7 @@ export function policiesApproveWorker(contents: readonly string[]): boolean {
     }
     if (typeof value !== "object" || value === null) continue;
     if (value.channelsEnabled === true) enabled = true;
+    if (value.disableSideloadFlags === true) sideloadOff = true;
     if (
       Array.isArray(value.allowedChannelPlugins) &&
       value.allowedChannelPlugins.some(
@@ -493,45 +510,25 @@ export function policiesApproveWorker(contents: readonly string[]): boolean {
     )
       allowed = true;
   }
-  return enabled && allowed;
+  return enabled && allowed && !sideloadOff;
 }
 
-/** This Mac's answer: the plugin installed from Clankie's marketplace, and its channel approved. */
+/**
+ * This Mac's answer: the worker plugin present in this install (each launch loads it from there,
+ * so no Claude profile needs it installed), and its channel approved.
+ */
 export async function claudeWorkerChannelConsent(
   options: {
     readonly managedSettingsPath?: string;
-    readonly listPlugins?: () => Promise<string>;
+    readonly workerRoot?: string;
   } = {},
 ): Promise<ClaudeWorkerConsent> {
-  const list =
-    options.listPlugins ??
-    (() =>
-      new Promise<string>((resolve, reject) =>
-        execFile(
-          "claude",
-          ["plugin", "list", "--json"],
-          { timeout: 10_000, maxBuffer: 4 * 1024 * 1024 },
-          (error, stdout) => (error === null ? resolve(String(stdout)) : reject(error)),
-        ),
-      ));
-  let installed = false;
-  try {
-    const plugins = JSON.parse(await list()) as unknown;
-    installed =
-      Array.isArray(plugins) &&
-      plugins.some((entry) => (entry as { id?: unknown })?.id === CLAUDE_WORKER_PLUGIN_ID);
-  } catch (error) {
+  const root = options.workerRoot ?? shippedWorkerFile();
+  if (!existsSync(join(root, ".claude-plugin", "plugin.json")))
     return {
       approved: false,
-      detail: `Could not inspect installed Claude plugins: ${error instanceof Error ? error.message : String(error)}`,
-      fix: `Run claude plugin list --json in the service environment and resolve its error. ${INSTALL_FIX}`,
-    };
-  }
-  if (!installed)
-    return {
-      approved: false,
-      detail: `${CLAUDE_WORKER_PLUGIN_ID} is not installed.`,
-      fix: `${INSTALL_FIX}. ${POLICY_FIX}`,
+      detail: `This install has no worker plugin at ${root}.`,
+      fix: "Reinstall or update Clankie; the worker plugin ships with it under integrations/claude-plugin/worker.",
     };
   if (!managedPolicyApprovesWorker(options.managedSettingsPath))
     return {
@@ -1096,11 +1093,12 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
       let startError: unknown;
       try {
         const trackerDeny = await (deps.trackerDeny ?? defaultTrackerDeny)(launch.cwd, launch.env);
+        const workerRoot = await (deps.workerRoot ?? (async () => shippedWorkerFile()))();
         const settings = claudeWorkerSettings(
           trackerDeny,
           launch.mcpServers === undefined
             ? undefined
-            : claudeWorkerMcpAllowlist(launch.cwd, launch.env ?? {}, launch.mcpServers),
+            : claudeWorkerMcpAllowlist(launch.cwd, launch.env ?? {}, launch.mcpServers, workerRoot),
         );
         // A one-line JSON file also keeps control characters and arbitrarily
         // many brief lines out of Claude's text-file/binary and line limits.
@@ -1136,6 +1134,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           briefPath === undefined
             ? undefined
             : `Execute the assignment in the clankieBrief JSON field of @${briefPath}`,
+          workerRoot,
         );
         const unsafe = args.findIndex((argument) => /\p{Cc}/u.test(argument));
         if (unsafe >= 0)

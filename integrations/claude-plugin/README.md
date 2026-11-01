@@ -453,9 +453,13 @@ original session. Coordinate any stop/reconnect/resume with the owner, preserve
 its original cwd and account/config home, and never start a duplicate session.
 Installing a new plugin cannot enable channels in an already-running process.
 
-Clankie’s Claude hire enables the plugin for that session (`enabledPlugins`) and
-starts Claude Code with `--channels plugin:clankie-worker@clankie` for immediate
-delivery. In prepared Mac zsh panes, Clankie's [PATH shim](../herdr-plugin/README.md#hand-started-claude-on-mac)
+Clankie’s Claude hire loads the plugin for that session only from Clankie's own
+files and starts Claude Code with `--plugin-dir WORKER_DIR --channels
+plugin:clankie-worker@inline` for immediate delivery; an installed
+`clankie-worker@clankie` is switched off for that session
+([ADR 0317](../../docs/adr/0317-a-claude-hire-loads-its-worker-plugin-for-that-session.md)).
+On a fleet machine `WORKER_DIR` is the copy `clankie herdr prepare` stages at
+`~/.clankie/claude-plugin/worker`. In prepared Mac zsh panes, Clankie's [PATH shim](../herdr-plugin/README.md#hand-started-claude-on-mac)
 adds the channel to plain `claude` and `claude --resume ID` when the worker
 plugin is enabled. Explicit channels and settings always win. Other unprepared
 hand-started sessions without that flag use their observed synchronous prompt hook, which
@@ -466,16 +470,15 @@ Clankie learns each settled turn and its final text.
 
 Claude Code only runs a non-official channel plugin unattended when the owner's
 managed settings allow it. That is the owner's action, never the dispatcher's:
-the exact `allowedChannelPlugins` entry and probe are in
-[managed consent](../../docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).
-Install it disabled, like the seat:
+a hire needs `"channelsEnabled": true` and
+`{ "marketplace": "inline", "plugin": "clankie-worker" }` in
+`allowedChannelPlugins`, with `disableSideloadFlags` unset (background in
+[managed consent](../../docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md)).
+`clankie herdr prepare` writes it on a fleet machine; on the Mac it is the
+owner's administrator step. Hand-started sessions still use an installed copy
+for now.
 
-```bash
-claude plugin install clankie-worker@clankie
-claude plugin disable clankie-worker@clankie
-```
-
-Until both steps are done, a Claude hire reports `consent_required` with the
+Until the entry is there, a Claude hire reports `consent_required` with the
 missing step and unavailable control. It does not type the brief into the
 terminal or launch a replacement worker.
 
