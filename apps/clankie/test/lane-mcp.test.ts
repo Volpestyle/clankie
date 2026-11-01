@@ -27,6 +27,7 @@ import { createLocalTracker } from "@clankie/work-items";
 import { createCaptain } from "../src/captain/captain.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createCaptainMemory } from "../src/captain-memory.ts";
 import { createFileMemory } from "../src/memory.ts";
 import { VOICE_SELF_TOOL_MAX_CHARACTERS } from "../src/voice-self-tools.ts";
@@ -86,6 +87,7 @@ function bankFor(lane: CaptainSessionLaneV2): LaneToolBank {
 
 async function mcpApp() {
   return await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     operatorSeatBindings: permissiveSeatBindings(),
     captain: createStubCaptain({ laneToolBank: (lane) => Promise.resolve(bankFor(lane)) }),
     authenticateCaptain: (request) =>
@@ -179,6 +181,7 @@ describe("lane MCP endpoint", () => {
     );
     if (!definition) throw new Error("Missing fleet efficiency tool");
     const app = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       operatorSeatBindings: permissiveSeatBindings(),
       captain: createStubCaptain({
         laneToolBank: async (lane) => ({
@@ -641,6 +644,7 @@ it("initializes an operator MCP session with native and connected tools", async 
   );
   const binding = operatorSeatBindingFixture();
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     operatorSeatBindings: binding.registry,
     captain,
     authenticateOperator: async () => ({ operatorId: "operator-james" }),
@@ -752,6 +756,7 @@ it("serves every real Captain schema with MCP's object root without losing union
   const binding = operatorSeatBindingFixture();
   const conversationId = captain.seatContext()!.conversationId;
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     operatorSeatBindings: binding.registry,
     captain,
     authenticateOperator: async (request) =>
@@ -970,6 +975,7 @@ it("keeps Clankie's raw Minecraft motor out of direct and deferred lane MCP call
   ]);
   expect(call).not.toHaveBeenCalled();
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     operatorSeatBindings: permissiveSeatBindings(),
     captain: createStubCaptain({ laneToolBank: async () => bank }),
     authenticateOperator: async () => ({ operatorId: "operator" }),
@@ -1125,6 +1131,7 @@ it("serves realtime voice its own recall_episodes, get_self_state and remember_e
     },
   );
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     operatorSeatBindings: permissiveSeatBindings(),
     captain,
     authenticateCaptain: async (request) =>
@@ -1300,6 +1307,7 @@ it("serves an operator API and its first tool bank while a real remote MCP catal
   let piSession: AgentSession | undefined;
   const warm = mcp.warm();
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     operatorSeatBindings: permissiveSeatBindings(),
     captain,
     authenticateOperator: async () => ({ operatorId: "operator-james" }),

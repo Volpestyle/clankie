@@ -9,6 +9,7 @@ import { DiscordPresenceSession } from "@clankie/discord-presence-core";
 import type { DiscordPresenceWrite } from "@clankie/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { BodyLeaseStore } from "../src/body-leases.ts";
 import { BodyLeaseRouter } from "../src/body-lease-router.ts";
@@ -25,6 +26,7 @@ async function fixture(overrides: Partial<CaptainPort> = {}) {
   const receipts = new DiscordTurnReceipts(join(root, "receipts.json"));
   const router = new BodyLeaseRouter(store);
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain({
       ...overrides,
       submitDiscordTurn: async () => ({

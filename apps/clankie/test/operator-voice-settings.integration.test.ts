@@ -13,6 +13,7 @@ import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-sess
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it } from "vitest";
 import { createClankieApp, type ClankieAppDependencies } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
 
@@ -93,6 +94,7 @@ async function fixture(
     mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1_000), ttlSeconds: 600 }),
   );
   const service = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     ...(options.paired ? { eventLogPath, deviceSessionKey: deviceKey } : {}),
     settings: options.settings?.(settings) ?? settings,

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { SUPERVISE_GRANTS } from "@clankie/protocol";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DiscordRoomObservations } from "../src/discord-room-observations.ts";
 const cleanups: (() => void)[] = [];
@@ -29,6 +30,7 @@ it("paired steer guides only its dedicated route; generic captain hints never es
       ? { schemaVersion: 1, op: "get", conversation: room }
       : { schemaVersion: 1, op: "list", conversations: [room] };
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain,
     roomObservations: store,
     deviceSessionKey: Uint8Array.from(Buffer.alloc(32, 7)),
@@ -80,6 +82,7 @@ it("room evidence refuses settings revoked during fresh body authentication", as
   settings.discord = { ...settings.discord, textIngressEnabled: true, ingressGuildIds: ["12345"] };
   let calls = 0;
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     roomObservations: observations,
     discordEnvironment: {},
@@ -125,6 +128,7 @@ it("voice health requires the exact registered body and active physical stay, in
   const settings = emptySettings();
   settings.discord.voiceEnabled = true;
   const app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     roomObservations: store,
     bodyVoiceStays: voice,

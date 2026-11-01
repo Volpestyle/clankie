@@ -7,12 +7,22 @@ import type { DeployHolds } from "../deploy-holds.ts";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import {
   type ActivityObservationSnapshot,
+  type DiscordPresencePhaseEvent,
   type DiscordPresenceSessionRecord,
   type DiscordVoiceStay,
   type PlayStillRead,
   type PlayStoryRead,
 } from "@clankie/interactive-environment";
-import type { DiscordStreamWatchObservation } from "@clankie/protocol";
+import type {
+  CaptainChannelTurnResult,
+  DiscordChannelProjectionMessageResult,
+  DiscordPresenceChannelIdentity,
+  DiscordPresenceWriteResult,
+  DiscordStreamWatchObservation,
+  DiscordStreamWatchReport,
+  DiscordUserSessionOptIn,
+  DomainEvent,
+} from "@clankie/protocol";
 import {
   type BrowserToolCatalog,
   type CallBrowserToolRequest,
@@ -25,7 +35,7 @@ import {
 import type { HostPowerReport } from "@clankie/protocol/host-power";
 import { type PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
 import { type ClankieSettings } from "@clankie/settings";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { AccountsPort } from "../accounts.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { BodyLeaseRouter } from "../body-lease-router.ts";
@@ -39,6 +49,7 @@ import type { DeliveredFileStore } from "../delivered-files.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import { EmbodimentManager } from "../embodiment.ts";
+import type { RecentEvents } from "../event-log.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
@@ -395,4 +406,72 @@ export interface ClankieApp {
   ): boolean;
   stopBodyRequests(): Promise<void>;
   close(): Promise<void>;
+}
+
+/**
+ * The Discord body's live state. The core keeps it for its own admission
+ * checks (body routes, voice leases) and hands it to the persona extension's
+ * routes through the route host (ADR 0328).
+ */
+export interface DiscordBodyRouteState {
+  readonly dependencies: ClankieAppDependencies;
+  readonly instanceId: `${string}-${string}-${string}-${string}-${string}`;
+  /** This machine's display name, shown in Discord setup. */
+  readonly machineName: string;
+  readonly captainPresence: CaptainPresenceManager;
+  readonly discordPresenceSessions: {
+    apply(event: DiscordPresencePhaseEvent): DiscordPresenceSessionRecord;
+    resolve(
+      identity: Pick<DiscordPresenceChannelIdentity, "characterId" | "credentialRef" | "transportKind">,
+    ): DiscordPresenceSessionRecord | undefined;
+    list(): DiscordPresenceSessionRecord[];
+  };
+  readonly discordStreamWatch: {
+    apply(report: DiscordStreamWatchReport, now?: Date): DiscordStreamWatchObservation;
+    current(): DiscordStreamWatchObservation;
+  };
+  readonly embodiment: EmbodimentManager;
+  readonly recordEvent: (
+    type: string,
+    streamId: string,
+    occurredAt: string,
+    data: Record<string, unknown>,
+    envelope?: { correlationId?: string },
+  ) => DomainEvent;
+  readonly idFactory: () => string;
+  readonly discordPresenceLiveSessions: Map<string, DiscordPresenceSessionRecord>;
+  /** The owner's durable acceptance of user-session transport risk (ADR 0048). */
+  readonly discordUserSessionOptIns: {
+    apply(event: DomainEvent): void;
+    resolve(): DiscordUserSessionOptIn | undefined;
+    resolveActive(profileHash: string): DiscordUserSessionOptIn | undefined;
+  };
+  readonly discordPresenceSessionLocks: Map<string, Promise<unknown>>;
+  readonly recentEvents: RecentEvents;
+  readonly appendEvent: (event: DomainEvent) => void;
+  readonly discordVoiceHistory: { list(limit: number): DiscordVoiceStay[] };
+  readonly voiceTranscriptStore: DiscordVoiceTranscriptStore;
+  readonly authenticateCaptainOrOperator: (
+    context: Context,
+  ) => Promise<{ principal: { kind: "captain" | "operator"; id: string } } | { denial: Response }>;
+  readonly discordPresenceLocks: Map<string, Promise<unknown>>;
+  readonly discordPresenceResults: Map<
+    string,
+    { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
+  >;
+  readonly discordTurnReceipts: DiscordTurnReceipts;
+  readonly captainTurnResults: Map<
+    string,
+    {
+      fingerprint: string;
+      lane: "discord_text" | "discord_voice";
+      result: Promise<CaptainChannelTurnResult>;
+      settled?: CaptainChannelTurnResult;
+      rejected?: boolean;
+    }
+  >;
+  readonly channelProjectionResults: Map<
+    string,
+    { result: DiscordChannelProjectionMessageResult; expiresAtMs: number }
+  >;
 }

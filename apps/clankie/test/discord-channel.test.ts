@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import { describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 
 /**
@@ -16,6 +17,7 @@ describe("Discord channel turn routes", () => {
   it("authenticates, deduplicates, and submits ambient Discord turns", async () => {
     let submissions = 0;
     const { app } = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain({
         submitDiscordTurn: async () => {
           submissions += 1;
@@ -62,6 +64,7 @@ describe("Discord channel turn routes", () => {
     }) => void;
     let submissions = 0;
     const { app } = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain({
         submitDiscordTurn: () => {
           submissions += 1;
@@ -114,6 +117,7 @@ describe("Discord channel turn routes", () => {
   it("admits voice only from a Discord voice bridge identity and preserves text authority", async () => {
     const submitted: DiscordPresenceChannelTurnRequest[] = [];
     const { app } = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain({
         submitDiscordTurn: async (request) => {
           submitted.push(request);
@@ -140,6 +144,7 @@ describe("Discord channel turn routes", () => {
   it("retains a typed failure without dispatching the same delivery again", async () => {
     let calls = 0;
     const { app } = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain({
         submitDiscordTurn: async () => {
           calls += 1;
@@ -164,6 +169,7 @@ describe("Discord channel turn routes", () => {
   it("settles a rejected turn as uncertain and never dispatches the same delivery again", async () => {
     let calls = 0;
     const { app } = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain({
         submitDiscordTurn: async () => {
           calls += 1;
@@ -198,6 +204,7 @@ describe("Discord channel turn routes", () => {
     let calls = 0;
     let now = new Date("2026-10-01T00:00:00Z");
     const dependencies = {
+      extensionRoutes: [personaRoutes()],
       discordTurnReceiptPath: path,
       clock: () => now,
       captain: createStubCaptain({
@@ -262,6 +269,7 @@ describe("Discord channel turn routes", () => {
         trigger: { ...turnRequest().trigger, id: "1556651594169323582", messageId: "1556651594169323582" },
       };
       const dependencies = {
+        extensionRoutes: [personaRoutes()],
         discordTurnReceiptPath: path,
         clock: () => new Date("2026-10-06T21:00:00Z"),
         captain: createStubCaptain({
@@ -325,6 +333,7 @@ describe("Discord channel turn routes", () => {
       const directory = mkdtempSync(join(tmpdir(), "discord-receipts-"));
       let calls = 0;
       const dependencies = {
+        extensionRoutes: [personaRoutes()],
         discordTurnReceiptPath: join(directory, "receipts.json"),
         captain: createStubCaptain({
           submitDiscordTurn: async () => {
@@ -362,6 +371,7 @@ describe("Discord channel turn routes", () => {
     try {
       for (const path of [malformed, join(directory, "blocked", "child.json")]) {
         const { app } = await createClankieApp({
+          extensionRoutes: [personaRoutes()],
           discordTurnReceiptPath: path,
           captain: createStubCaptain({
             submitDiscordTurn: async () => {
@@ -451,6 +461,7 @@ describe("Discord channel projection route (ADR 0146)", () => {
   ) =>
     (
       await createClankieApp({
+        extensionRoutes: [personaRoutes()],
         captain: createStubCaptain({
           submitChannelProjectionMessage: async (request) => {
             const result = await submit(request);

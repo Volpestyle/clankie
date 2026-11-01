@@ -1,5 +1,6 @@
 import { startFixtureServer } from "../../clankie/test/owner-settings-surface-fixture.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
+import { personaRoutes } from "../../clankie/src/persona-extension.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../../clankie/src/operator-auth.ts";
@@ -225,6 +226,7 @@ describe("headless clankie commands", () => {
     const credentials = new FileCredentialStore(credentialPath);
     await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
     const service = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain(),
       settings,
       roomObservations: new DiscordRoomObservations(join(root, "rooms.json")),

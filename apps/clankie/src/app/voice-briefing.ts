@@ -10,19 +10,15 @@ import { personaImageBriefing } from "@clankie/persona-images";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 import {
   type DiscordPersonMemoryFact,
-  type DomainEvent,
   type EmbodimentEnvironmentId,
   type EmbodimentSession,
 } from "@clankie/protocol";
 import { personaInstructions, resolveDiscordSettings, type ClankieSettings } from "@clankie/settings";
 import { Hono } from "hono";
 import { z } from "zod";
-import { CaptainPresenceManager, type CaptainPresenceLease } from "../captain-presence.ts";
-import { DiscordPresenceSessionProjection } from "../discord-presence-session.ts";
-import { EmbodimentManager } from "../embodiment.ts";
-import { DiscordStreamWatchProjection } from "../stream-watch-observation.ts";
+import type { CaptainPresenceLease } from "../captain-presence.ts";
 import { authenticateCaptain, readJson } from "./http-auth.ts";
-import { type ClankieAppDependencies } from "./types.ts";
+import { type ClankieAppDependencies, type DiscordBodyRouteState } from "./types.ts";
 /** Discord snowflakes only: the voice-briefing request carries ids, never content. */
 const DiscordSnowflakeSchema = z.string().regex(/^\d{5,32}$/u, "must be a numeric Discord id");
 
@@ -200,23 +196,19 @@ function renderVoiceBriefingPersonMemory(
   return lines.join("\n");
 }
 
-export interface VoiceBriefingRouteContext {
+export interface VoiceBriefingRouteContext extends Pick<
+  DiscordBodyRouteState,
+  | "dependencies"
+  | "captainPresence"
+  | "discordPresenceSessions"
+  | "discordStreamWatch"
+  | "embodiment"
+  | "recordEvent"
+  | "idFactory"
+> {
   readonly app: Hono;
-  readonly dependencies: ClankieAppDependencies;
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
-  readonly captainPresence: CaptainPresenceManager;
-  readonly discordPresenceSessions: DiscordPresenceSessionProjection;
-  readonly discordStreamWatch: DiscordStreamWatchProjection;
-  readonly embodiment: EmbodimentManager;
-  readonly recordEvent: (
-    type: string,
-    streamId: string,
-    occurredAt: string,
-    data: Record<string, unknown>,
-    envelope?: { correlationId?: string },
-  ) => DomainEvent;
-  readonly idFactory: () => string;
 }
 
 /**

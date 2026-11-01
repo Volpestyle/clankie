@@ -19,6 +19,7 @@ import { createActivityLaunches, createSelfHostedActivityAdmission } from "../sr
 import { ActivityPlaySource } from "../src/activity-play-source.ts";
 import { ActivitySharing } from "../src/activity-sharing.ts";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { activityRoutes } from "../src/activity-routes.ts";
 import { activityTools } from "../src/activity-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
@@ -205,6 +206,7 @@ async function stack(
   const service = await createClankieApp({
     captain: createStubCaptain(),
     extensionRoutes: [
+      personaRoutes(),
       activityRoutes({
         activitySharing: sharing,
         activityAdmission: { token: async () => PRODUCER_BEARER, admit: (input) => admission.admit(input) },
