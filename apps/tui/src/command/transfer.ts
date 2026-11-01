@@ -185,8 +185,18 @@ export async function runTransferCommand(
   if (source.url === destination.url) throw new Error("Source and destination are the same body");
   if (action === "abort") {
     const transferId = BodyTransferIdSchema.parse(values["transfer-id"]);
+    const frozenFor = (await status(source)).transfers?.[transferId]?.peer;
+    if (frozenFor !== undefined && frozenFor !== destination.label)
+      throw new Error(`${transferId} was frozen for ${frozenFor}; abort it with --to naming that body`);
     const discarded = await post(destination, BODY_TRANSFER_DISCARD_PATH, { transferId });
-    outputJson(stdout, await post(source, BODY_TRANSFER_ABORT_PATH, { transferId, discarded }));
+    outputJson(
+      stdout,
+      await post(source, BODY_TRANSFER_ABORT_PATH, {
+        transferId,
+        destination: destination.label,
+        discarded,
+      }),
+    );
     return 0;
   }
 
@@ -217,6 +227,11 @@ export async function runTransferCommand(
     }
   } else if (outgoing.role !== "source")
     throw new Error(`${transferId} is not an outgoing transfer at ${source.label}`);
+  else if (outgoing.peer !== destination.label)
+    // Staging the move at a second body could leave Clankie active on both.
+    throw new Error(
+      `${transferId} was frozen for ${outgoing.peer}; resume or abort it with --to naming that body`,
+    );
   if (from.transfers?.[transferId]?.outcome !== "released") {
     from = await waitFor(
       source,

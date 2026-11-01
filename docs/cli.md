@@ -5543,7 +5543,10 @@ destination to restart as Clankie. Only then is the source released.
 
 Each step is repeatable: rerun with the printed `--transfer-id` after any failure.
 The source stays frozen until the destination reports itself active with the same
-self id, epoch and transfer id.
+self id, epoch and transfer id. A rerun, `abort` included, must name the same
+`--to` the transfer froze for: the source takes a release or an abort only from
+that body, so an answer from a machine that never saw the move can't leave
+Clankie active on two.
 
 The destination admits a bundle only in three cases:
 
