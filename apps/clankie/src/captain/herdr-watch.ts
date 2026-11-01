@@ -117,7 +117,7 @@ import {
   type FleetSeatDelivery,
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
-import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
+import { HerdrFleetError, nativeProofLocation, splitFleetQualified } from "../herdr-fleet.ts";
 import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
 import {
   chooseWorkerAccount,
@@ -2496,7 +2496,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
   /** The title this seat was hired under, from Clankie's own hire ledger (LOCAL-VUH-59). */
   public hireTitle(seat: { readonly paneId: string; readonly occupantId: string }): string | undefined {
-    const fleet = splitFleetQualified(seat.paneId)?.fleet ?? "default";
+    const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.hireTitle(fleet, projectHirePane(fleet, seat.paneId), seat.occupantId);
   }
   public projectHireMembershipCandidate(fleet: string, pane: string) {
@@ -6849,7 +6849,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
 /** Remote allocations retain fleet-qualified keys; native census addresses are host-local. */
 function projectHirePane(fleet: string, pane: string): string | undefined {
   const qualified = splitFleetQualified(pane);
-  if (fleet === "default") return qualified === undefined ? pane : undefined;
+  // A desktop-app terminal is a hire on this machine, filed under its full pane (ADR 0319).
+  if (fleet === "default")
+    return qualified === undefined || qualified.fleet === HERDR_CORE_FLEET ? pane : undefined;
   if (qualified && qualified.fleet !== fleet) return undefined;
   const id = qualified?.id ?? pane;
   return /^w[\w]+:p[\w]+$/u.test(id) ? `${fleet}/${id}` : undefined;

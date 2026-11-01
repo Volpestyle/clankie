@@ -41,7 +41,7 @@ import type { PeerSeatAuthority } from "../captain/peer-seat-messages.ts";
 import { CAPTAIN_PROMPT_SECTIONS, type CaptainPromptSection } from "../captain/port.ts";
 import { INBOUND_REQUEST_DEADLINE_MS } from "../captain/inbound-seat-receipts.ts";
 import { createLaneMcpEndpoint } from "../lane-mcp.ts";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { nativeProofLocation } from "../herdr-fleet.ts";
 import { FLEET_CATALOG_REVISION_HEADER } from "../worker-mcp.ts";
 import { readJson } from "./http-auth.ts";
 import { type ClankieAppDependencies } from "./types.ts";
@@ -704,10 +704,10 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       );
       if (events === undefined) return context.json({ error: "unknown_seat" }, 404);
       if (worker) {
-        const qualified = splitFleetQualified(pane.paneId);
+        const location = nativeProofLocation(pane.paneId);
         context.header(
           FLEET_CATALOG_REVISION_HEADER,
-          await worker.catalogRevision(qualified?.fleet ?? "default", qualified?.id ?? pane.paneId),
+          await worker.catalogRevision(location.fleet, location.pane),
         );
       }
       const page: OperatorSeatEventsPage = { schemaVersion: 1, events: [...events] };
@@ -753,12 +753,8 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     if (identity && !(await identity.validate()))
       return context.json({ error: "native_session_required" }, 403);
     if (!ctx.dependencies.workerMcp) return context.json({ error: "worker_health_unavailable" }, 503);
-    const qualified = splitFleetQualified(pane.paneId);
-    ctx.dependencies.workerMcp.reportBridgeObserved(
-      qualified?.fleet ?? "default",
-      qualified?.id ?? pane.paneId,
-      parsed.data,
-    );
+    const location = nativeProofLocation(pane.paneId);
+    ctx.dependencies.workerMcp.reportBridgeObserved(location.fleet, location.pane, parsed.data);
     return context.json({ recorded: true }, 202);
   });
   ctx.app.get(FLEET_SEAT_MESSAGES_PATH, async (context) => {
@@ -848,10 +844,10 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const worker = ctx.dependencies.workerMcp;
     if (!worker) return context.json({ error: "worker_catalog_unavailable" }, 503);
     const wait = Number(context.req.query("wait") ?? 0);
-    const qualified = splitFleetQualified(pane.paneId);
+    const location = nativeProofLocation(pane.paneId);
     const revision = await worker.waitCatalogRevision(
-      qualified?.fleet ?? "default",
-      qualified?.id ?? pane.paneId,
+      location.fleet,
+      location.pane,
       context.req.query("revision"),
       Number.isFinite(wait) ? Math.min(Math.max(0, Math.trunc(wait)), OPERATOR_SEAT_EVENT_WAIT_MS_MAX) : 0,
       context.req.raw.signal,

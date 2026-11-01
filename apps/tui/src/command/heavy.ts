@@ -6,6 +6,7 @@ import {
   type ResourceSnapshot,
 } from "@clankie/fleet-resources";
 import type { Writable } from "./io.ts";
+import { seatIdentity } from "./seat-identity.ts";
 
 /** Executes locally even when this CLI is configured as a hosted client. */
 export async function runHeavyCommand(
@@ -14,7 +15,8 @@ export async function runHeavyCommand(
 ): Promise<number> {
   const env = options.env ?? process.env;
   let separator = 0;
-  let seatId = env.HERDR_PANE_ID;
+  // A Herdr pane, else the desktop-app terminal this command runs in (ADR 0319).
+  let seatId = seatIdentity(env).pane;
   let holderId = resourceHolderIdentity(env);
   let server = false;
   while (["--seat", "--holder", "--server"].includes(args[separator] ?? "")) {

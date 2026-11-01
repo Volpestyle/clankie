@@ -85,7 +85,12 @@ import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
-import { splitFleetQualified, type FleetShellRun, type HerdrFleet } from "../herdr-fleet.ts";
+import {
+  nativeProofLocation,
+  splitFleetQualified,
+  type FleetShellRun,
+  type HerdrFleet,
+} from "../herdr-fleet.ts";
 import { NativePaneNotFoundError, nativeRequest } from "../herdr-native-request.ts";
 import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
@@ -5961,12 +5966,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             turnStart: hook.event === "UserPromptSubmit",
           });
       const binding = inboundBinding(agent);
-      const qualified = splitFleetQualified(paneId);
       const receiver =
         session &&
         nextTurnReceiverProof(proof, {
-          fleet: qualified?.fleet ?? "default",
-          pane: qualified?.id ?? paneId,
+          ...nativeProofLocation(paneId),
           nativeOccupantId: occupantIdForHerdrSession(session),
         });
       if (binding && receiver) {

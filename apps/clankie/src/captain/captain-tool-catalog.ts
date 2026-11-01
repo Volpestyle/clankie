@@ -2,7 +2,7 @@ import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
 import { type ClankieSettings } from "@clankie/settings";
 import { basename } from "node:path";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { nativeProofLocation, splitFleetQualified } from "../herdr-fleet.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { type CaptainOptions } from "./captain-types.ts";
 import { createNativeSources } from "./captain-native-sources.ts";
@@ -69,13 +69,13 @@ export function createToolCatalogHealth(ctx: ToolCatalogHealthContext) {
     );
     if (!identity || identity.sessionId !== report.sessionId || identity.harness !== report.harness)
       return undefined;
-    const qualified = splitFleetQualified(paneId);
+    const location = nativeProofLocation(paneId);
     if (
       proof &&
       (proof.nativeSessionPending ||
         proof.nativeOccupantId !== identity.occupantId ||
-        proof.pane !== (qualified?.id ?? paneId) ||
-        proof.fleet !== (qualified?.fleet ?? "default"))
+        proof.pane !== location.pane ||
+        proof.fleet !== location.fleet)
     )
       return undefined;
     const currentSettings = await settings();

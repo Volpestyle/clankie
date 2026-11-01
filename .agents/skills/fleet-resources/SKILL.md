@@ -136,7 +136,8 @@ clankie simulator release '{"seatId":"SEAT","id":"LEASE_ID"}'
 ```
 
 `SEAT` accepts your exact terminal ID or pane ID, with a fleet prefix for a
-named local fleet. The service proves the native session and live processes;
+named local fleet. In a Herdr pane that is `$HERDR_PANE_ID`; in a desktop-app
+terminal (no `HERDR_PANE_ID`) it is `herdr-core/$HC_TERMINAL_ID`. The service proves the native session and live processes;
 Codex does not need a Claude `messageReceiver` entry. Fresh hires establish their
 own seat identity; never copy a lead's `CLANKIE_SEAT_*` values.
 
