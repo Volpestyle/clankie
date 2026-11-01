@@ -61,6 +61,11 @@ export interface SeatLaunch {
    */
   readonly maximumTrust?: boolean;
   /**
+   * The harness's own read-only mode (ADR 0316): it reads and reports, and
+   * refuses every other tool without asking. Never set with `maximumTrust`.
+   */
+  readonly readOnly?: boolean;
+  /**
    * A local hire's worker MCP profile (VUH-2388): the harness starts Clankie's
    * worker bridge, the servers its checkout declares and these owner servers,
    * and no other server from the owner's own configuration. Absent, the

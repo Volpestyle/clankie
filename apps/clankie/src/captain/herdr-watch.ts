@@ -2373,6 +2373,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
         reason: "not_ready",
         detail: "Owner app provenance must be verified by the owner service route.",
       };
+    // Only Claude has a read-only mode Clankie can start it in (ADR 0316). A
+    // resumed transcript keeps the mode it was saved under, so it never resumes.
+    if (inputRequest.readOnly === true && (inputRequest.harness !== "claude" || resume !== undefined))
+      return {
+        outcome: "failed",
+        reason: "harness_unavailable",
+        detail: "Only a new Claude hire can start read-only.",
+      };
     try {
       await this.requireWorkerAccess?.(inputRequest.fleet);
     } catch (error) {
@@ -4692,7 +4700,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(input.effort === undefined ? {} : { effort: input.effort }),
           ...(skillLaunch.env === undefined ? {} : { env: skillLaunch.env }),
           harnessArgs: skillLaunch.args,
-          ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
+          ...(input.readOnly === true
+            ? { readOnly: true }
+            : (await this.maximumTrustMode?.()) === true
+              ? { maximumTrust: true }
+              : {}),
           ...workerMcp,
         };
         await this.assertRemoteHireAuthority(input, receiptKey, authority);
@@ -4856,6 +4868,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
               detail: `No harness adapter selected: ${terminalReason}.`,
             }
           : { mode: input.harness === "claude" ? "channel" : "adapter" };
+      // Typed into a bare terminal, a hire would start in the harness's everyday mode.
+      if (input.readOnly === true && (adapter?.harness !== "claude" || brief === undefined))
+        throw new Error("A read-only hire needs Claude's own seat adapter and a brief");
       if (authority !== undefined) await assertConversationAuthority(authority);
       if (
         adapter !== undefined &&
@@ -4945,7 +4960,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(input.effort === undefined ? {} : { effort: input.effort }),
           ...(skillLaunch.env === undefined ? {} : { env: { ...skillLaunch.env } }),
           harnessArgs: [...skillLaunch.args, ...chromeArgs],
-          ...((await this.maximumTrustMode?.()) === true ? { maximumTrust: true } : {}),
+          ...(input.readOnly === true
+            ? { readOnly: true }
+            : (await this.maximumTrustMode?.()) === true
+              ? { maximumTrust: true }
+              : {}),
           ...workerMcp,
         };
         // Pin the canonical profile at original hire time, not at the later restart.

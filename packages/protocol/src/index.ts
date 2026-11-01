@@ -862,3 +862,4 @@ export * from "./fleet-room.ts";
 export * from "./work-tracker-settings.ts";
 export * from "./reviews.ts";
 export * from "./operator-seat-migration.ts";
+export * from "./setup-survey.ts";

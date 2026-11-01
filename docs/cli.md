@@ -168,7 +168,7 @@ fallback after an owner API error. See [ADR 0248](adr/0248-owner-settings-use-on
 | [Control Activity shares](#activity-shares)            | `share list`, `share request JSON`                          |
 | [Diagnose the installation](#diagnostics)              | `health`, `status`, `doctor`                                |
 | [Manage service lifecycle](#service-lifecycle)         | `start`, `stop`, `restart`, `recover`, `autostart`, `awake` |
-| [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`                                |
+| [Pair and manage devices](#device-setup)               | `pair`, `devices`, `gateway`, `setup-agent`                 |
 | [Connect accounts and track work](#account-setup)      | `accounts`, `work`, `evidence`                              |
 | [Build live views](#views)                             | `view`                                                      |
 | [List shipped skills](#skill-setup)                    | `skills`                                                    |
@@ -5732,6 +5732,31 @@ token hashes. Worker/shell outputs are bounded to 8,192 characters and report
 truncation. Structured screen results use a separate 65,536-character bound and
 never truncate; PNGs travel in 49,152-character chunks within the existing
 envelope/body caps. Oversized or stale screen data refuses.
+
+### `setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]`
+
+Setup's one read-only agent
+([ADR 0316](adr/0316-setup-starts-with-one-read-only-agent.md)), over the same
+owner API as the app (`GET`/`POST /v1/setup/survey`,
+`POST /v1/setup/survey/apply`, `POST /v1/setup/survey/cancel`). Every verb
+prints the survey snapshot as JSON.
+
+- `start` hires one Claude agent on `--account LABEL` (a signed-in Claude
+  account from `accounts workers`), or on the account Clankie would pick. It
+  starts in Claude's `dontAsk` mode with only reading, `git status|log|remote -v`,
+  `ls`, `tailscale status` and its report to Clankie allowed. If Watch is on, it
+  steps aside for this one agent and comes back when the survey ends.
+- `status` shows `surveying` until the agent's report carries a proposal, then
+  `proposed` with its summary, findings and lines.
+- `apply SURVEY LINE...` runs only the listed lines, declines the rest, closes
+  the agent and ends the survey. `add_machine`, `connect_session`,
+  `machine_access` and `autonomy` lines run through the same APIs as setup and
+  Settings; `pair_phone`, `connect_lead` and `owner_step` come back as `yours`,
+  steps only the owner can take. `apply SURVEY` with no lines declines them all.
+- `cancel SURVEY` closes the agent and changes nothing.
+
+One survey runs at a time; a second `start`, or `apply` before a proposal,
+exits with a conflict.
 
 ### `machines [list|discover] [--json]`
 
