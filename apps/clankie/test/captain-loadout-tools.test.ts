@@ -2,6 +2,7 @@ import { serviceInLoadout } from "@clankie/settings";
 import { describe, expect, it } from "vitest";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
+import { discordCaptainTools } from "../src/captain/discord-tools.ts";
 import { captainTools } from "../src/captain/tools.ts";
 
 const DISCORD_BODY_TOOLS = [
@@ -21,6 +22,7 @@ const DISCORD_BODY_TOOLS = [
 const unused = () => Promise.reject(new Error("unused"));
 const base = {
   embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused },
+  personaTools: discordCaptainTools,
 };
 
 function names(
@@ -50,6 +52,29 @@ describe("tools that need a Discord body", () => {
       expect(offered.filter((name) => DISCORD_BODY_TOOLS.includes(name))).toEqual([]);
       // The rest of his reach is untouched.
       expect(offered).toEqual(expect.arrayContaining(["generate_image", "get_self_state", "memory"]));
+    }
+  });
+
+  it("leaves only the persona's tools out while the persona is off", () => {
+    const withBody = {
+      discordMusic: {},
+      discordVoicePresence: {},
+      discordActions: {},
+      streamWatch: { current: unused },
+    };
+    for (const lane of ["operator", "discord_presence", "discord_voice"] as const) {
+      const on = names(withBody, lane);
+      const off = names({ ...withBody, personaTools: undefined }, lane);
+      const missing = on.filter((name) => !off.includes(name));
+      expect(off.every((name) => on.includes(name))).toBe(true);
+      expect(missing.length).toBeGreaterThan(0);
+      expect(missing).toEqual(
+        expect.arrayContaining(DISCORD_BODY_TOOLS.filter((name) => name !== "observe_share")),
+      );
+      expect(
+        missing.every((name) => /^(voice_|music_|youtube_|discord_|send_text_update$)/u.test(name)),
+      ).toBe(true);
+      expect(off).toContain("observe_share");
     }
   });
 

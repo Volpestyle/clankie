@@ -159,6 +159,7 @@ import { linearTrackerExtension } from "./linear-extension.ts";
 import { activityTools } from "./activity-tools.ts";
 import { voiceExtension } from "./voice-extension.ts";
 import { personaExtension } from "./persona-extension.ts";
+import { discordCaptainTools } from "./captain/discord-tools.ts";
 import { worldExtension } from "./world/extension.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
@@ -564,6 +565,8 @@ const activityPlay = new ActivityPlaySource();
 const activityArtifacts = createActivityArtifactSources({ files: deliveredFiles });
 /** World is one switch at start: its Activity routes and his World tools go together (ADR 0328). */
 const worldOn = switchedOn(startupSettings, "world");
+/** The persona is one switch at start: its routes and his Discord body tools go together (ADR 0328). */
+const personaOn = switchedOn(startupSettings, "persona");
 const activitySharing = new ActivitySharing({
   files: deliveredFiles,
   token: () => resolveActivityProducerCredential(),
@@ -1495,6 +1498,8 @@ const captain = createCaptain(
           playTools: pokeagentTools,
         }
       : {}),
+    // The persona's Discord body tools reach him only when the persona is on at start.
+    ...(personaOn ? { personaTools: discordCaptainTools } : {}),
     ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined
@@ -2299,7 +2304,7 @@ extensions.add(
   ),
   { enabled: switchedOn(startupSettings, "voice"), settings: undefined },
 );
-extensions.add(personaExtension(), { enabled: switchedOn(startupSettings, "persona"), settings: undefined });
+extensions.add(personaExtension(), { enabled: personaOn, settings: undefined });
 await extensions.start();
 const clankie = await createClankieApp({
   voiceCall: {
