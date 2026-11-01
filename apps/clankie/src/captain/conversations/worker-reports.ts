@@ -426,53 +426,126 @@ export function retryInboundReport(
   });
 }
 
-/** Sender events are retained with the original acceptance, independently of a live bridge. */
-export function senderReportEvents(
-  ctx: ConversationStore,
-  paneId: string,
-  binding: string,
-): OperatorSeatEvent[] {
-  return inboundReports(ctx, undefined, { includeRead: true, sender: { paneId, binding } })
-    .flatMap((report) => {
+type ReceiptStage = "stored" | "taken" | "acknowledged";
+interface PendingReceipt {
+  report: InboundReport;
+  stage: ReceiptStage;
+  at: string;
+  /** Earlier stages of the same report this one supersedes. */
+  covers: ReceiptStage[];
+}
+
+/**
+ * Each of this sender's reports, at its newest stage the worker hasn't been
+ * told. An earlier stage is never told once a later one has happened.
+ */
+function pendingReceipts(ctx: ConversationStore, paneId: string, binding: string): PendingReceipt[] {
+  return inboundReports(ctx, undefined, { includeRead: true, sender: { paneId, binding } }).flatMap(
+    (report) => {
       const delivery = report.reportDelivery;
       if (report.paneId !== paneId || report.binding !== binding || !delivery.senderNotifications) return [];
       const takenAt =
         delivery.takenAt ??
         delivery.offeredAt ??
         (["consumed", "responded"].includes(delivery.stage ?? "") ? delivery.deliveredAt : undefined);
-      const stages = [
-        ["stored", report.acceptedAt],
-        ["taken", takenAt],
-        ["acknowledged", delivery.readAt],
-      ] as const;
-      return stages.flatMap(([stage, at]) => {
-        if (!at || delivery.senderEventAcks?.includes(stage)) return [];
-        const receipt = delivery.acknowledgment;
-        // The lead's summary is free text and may say a question was answered.
-        // Relay it only once a reply actually reached this worker (VUH-2065).
-        const summary = delivery.repliedAt
-          ? receipt?.summary
-            ? ` ${receipt.summary}`
-            : ""
-          : " No reply from Clankie has reached you for it, so any question or blocker in it is still open.";
-        const content =
-          stage === "acknowledged"
-            ? `Clankie acknowledged report ${report.deliveryId}.${summary}${receipt?.links?.length ? `\n${receipt.links.join("\n")}` : ""}`
-            : `Report ${report.deliveryId}: ${stage === "stored" ? "stored" : "taken into a lead turn"}.`;
-        return [
-          {
-            schemaVersion: 1 as const,
-            id: `report:${report.deliveryId}:${stage}`,
-            kind: "message" as const,
-            conversationId: report.conversationId,
-            source: "worker-report-receipt",
-            content: `${content}\nReceipt only; no reply needed.`,
-            createdAt: at,
-          },
-        ];
-      });
-    })
-    .slice(0, 64);
+      const stages = (
+        [
+          ["stored", report.acceptedAt],
+          ["taken", takenAt],
+          ["acknowledged", delivery.readAt],
+        ] as const
+      ).filter(([, at]) => at !== undefined);
+      const newest = stages.at(-1);
+      if (!newest || delivery.senderEventAcks?.includes(newest[0])) return [];
+      const covers = stages
+        .slice(0, -1)
+        .map(([stage]) => stage)
+        .filter((stage) => !delivery.senderEventAcks?.includes(stage));
+      return [{ report, stage: newest[0], at: newest[1]!, covers }];
+    },
+  );
+}
+
+function receiptContent({ report, stage }: PendingReceipt): string {
+  if (stage !== "acknowledged")
+    return `Report ${report.deliveryId}: ${stage === "stored" ? "stored" : "taken into a lead turn"}.`;
+  const delivery = report.reportDelivery;
+  const receipt = delivery.acknowledgment;
+  // The lead's summary is free text and may say a question was answered.
+  // Relay it only once a reply actually reached this worker (VUH-2065).
+  const summary = delivery.repliedAt
+    ? receipt?.summary
+      ? ` ${receipt.summary}`
+      : ""
+    : " No reply from Clankie has reached you for it, so any question or blocker in it is still open.";
+  return `Clankie acknowledged report ${report.deliveryId}.${summary}${receipt?.links?.length ? `\n${receipt.links.join("\n")}` : ""}`;
+}
+
+const BATCH_PREFIX = "report:batch:";
+const BATCH_LISTED = 10;
+
+/** Several pending receipts reach the pane as one line per stage, never one per report (#97). */
+function batchContent(pending: PendingReceipt[]): string {
+  const lines: string[] = [];
+  const ids = (entries: PendingReceipt[]) => {
+    const listed = entries.slice(0, BATCH_LISTED).map((entry) => entry.report.deliveryId);
+    const more = entries.length - listed.length;
+    return `${listed.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+  };
+  const stored = pending.filter((entry) => entry.stage === "stored");
+  const taken = pending.filter((entry) => entry.stage === "taken");
+  const acknowledged = pending.filter((entry) => entry.stage === "acknowledged");
+  if (stored.length) lines.push(`Stored ${stored.length} of your reports: ${ids(stored)}.`);
+  if (taken.length) lines.push(`Took ${taken.length} of your reports into a lead turn: ${ids(taken)}.`);
+  if (acknowledged.length) {
+    lines.push(`Clankie acknowledged ${acknowledged.length} of your reports: ${ids(acknowledged)}.`);
+    const unanswered = acknowledged.filter((entry) => !entry.report.reportDelivery.repliedAt);
+    if (unanswered.length)
+      lines.push(
+        unanswered.length === acknowledged.length
+          ? "No reply from Clankie has reached you for them, so any question or blocker in them is still open."
+          : `No reply from Clankie has reached you for ${ids(unanswered)}, so any question or blocker in those is still open.`,
+      );
+    const answered = acknowledged.filter((entry) => entry.report.reportDelivery.repliedAt);
+    const notes = new Set(
+      answered.flatMap((entry) => entry.report.reportDelivery.acknowledgment?.summary ?? []),
+    );
+    const links = new Set(
+      answered.flatMap((entry) => entry.report.reportDelivery.acknowledgment?.links ?? []),
+    );
+    lines.push(...[...notes].slice(0, 3), ...[...links].slice(0, 5));
+  }
+  return lines.join("\n");
+}
+
+/** Sender events are retained with the original acceptance, independently of a live bridge. */
+export function senderReportEvents(
+  ctx: ConversationStore,
+  paneId: string,
+  binding: string,
+): OperatorSeatEvent[] {
+  const pending = pendingReceipts(ctx, paneId, binding);
+  if (pending.length === 0) return [];
+  const event = (id: string, entry: PendingReceipt, content: string): OperatorSeatEvent => ({
+    schemaVersion: 1 as const,
+    id,
+    kind: "message" as const,
+    conversationId: entry.report.conversationId,
+    source: "worker-report-receipt",
+    content: `${content}\nReceipt only; no reply needed.`,
+    createdAt: entry.at,
+  });
+  if (pending.length === 1)
+    return [
+      event(
+        `report:${pending[0]!.report.deliveryId}:${pending[0]!.stage}`,
+        pending[0]!,
+        receiptContent(pending[0]!),
+      ),
+    ];
+  const newest = pending.reduce((latest, entry) => (entry.at > latest.at ? entry : latest));
+  // The id names the newest receipt it covers; acknowledging it covers every one up to then.
+  return [event(`${BATCH_PREFIX}${newest.at}`, newest, batchContent(pending))];
 }
 
 /** Transport acknowledgment only: it never acknowledges the report on the lead's behalf. */
@@ -482,20 +555,46 @@ export function acknowledgeSenderReportEvent(
   binding: string,
   eventId: string,
 ): boolean {
-  const match = /^report:([a-f0-9-]{36}):(stored|taken|acknowledged)$/u.exec(eventId);
-  if (!match) return false;
-  const meta = [...ctx["metas"].values()].find((entry) => entry.inboundAcceptances?.[match[1]!]);
-  const report = meta?.inboundAcceptances?.[match[1]!];
-  if (!meta || !report || report.paneId !== paneId || report.binding !== binding) return false;
-  const stage = match[2] as "stored" | "taken" | "acknowledged";
-  if (report.reportDelivery?.senderEventAcks?.includes(stage)) return true;
-  if (!senderReportEvents(ctx, paneId, binding).some((event) => event.id === eventId)) return false;
-  const previous = report.reportDelivery;
-  report.reportDelivery = { ...previous!, senderEventAcks: [...(previous?.senderEventAcks ?? []), stage] };
+  const single = /^report:([a-f0-9-]{36}):(stored|taken|acknowledged)$/u.exec(eventId);
+  const through = eventId.startsWith(BATCH_PREFIX) ? eventId.slice(BATCH_PREFIX.length) : undefined;
+  if (!single && (through === undefined || Number.isNaN(Date.parse(through)))) return false;
+  const pending = pendingReceipts(ctx, paneId, binding);
+  const order: ReceiptStage[] = ["stored", "taken", "acknowledged"];
+  const acked = single
+    ? pending.flatMap((entry) => {
+        const stage = single[2] as ReceiptStage;
+        if (entry.report.deliveryId !== single[1]) return [];
+        if (entry.stage === stage) return [entry];
+        // A stage told before a later one superseded it.
+        if (!entry.covers.includes(stage)) return [];
+        const upTo = order.indexOf(stage);
+        return [{ ...entry, stage, covers: entry.covers.filter((s) => order.indexOf(s) < upTo) }];
+      })
+    : pending.filter((entry) => entry.at <= through!);
+  if (acked.length === 0) {
+    if (!single) return false;
+    const meta = [...ctx["metas"].values()].find((entry) => entry.inboundAcceptances?.[single[1]!]);
+    const report = meta?.inboundAcceptances?.[single[1]!];
+    return (
+      report?.paneId === paneId &&
+      report.binding === binding &&
+      report.reportDelivery?.senderEventAcks?.includes(single[2] as ReceiptStage) === true
+    );
+  }
+  const changes = acked.map((entry) => {
+    const meta = [...ctx["metas"].values()].find((m) => m.inboundAcceptances?.[entry.report.deliveryId])!;
+    const receipt = meta.inboundAcceptances![entry.report.deliveryId]!;
+    return { meta, receipt, previous: receipt.reportDelivery, stages: [...entry.covers, entry.stage] };
+  });
+  for (const { receipt, previous, stages } of changes)
+    receipt.reportDelivery = {
+      ...previous!,
+      senderEventAcks: [...new Set([...(previous?.senderEventAcks ?? []), ...stages])],
+    };
   try {
-    ctx["saveMeta"](meta);
+    for (const meta of new Set(changes.map((change) => change.meta))) ctx["saveMeta"](meta);
   } catch (error) {
-    report.reportDelivery = previous;
+    for (const { receipt, previous } of changes) receipt.reportDelivery = previous;
     throw error;
   }
   return true;

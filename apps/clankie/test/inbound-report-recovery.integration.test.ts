@@ -326,12 +326,52 @@ it("VUH-2216: a worker's poll validates only its own retained reports", async ()
     expect(store.senderReportEvents("pane", binding)).toHaveLength(1);
     expect(parse).toHaveBeenCalledOnce();
     parse.mockRestore();
-    expect(store.senderReportEvents("busy-pane", binding)).toHaveLength(10);
+    const busy = store.senderReportEvents("busy-pane", binding);
+    // Ten receipts reach a busy pane as one line, not ten (#97).
+    expect(busy).toHaveLength(1);
+    expect(busy[0]?.content).toContain("Stored 10 of your reports");
     expect(store.inboundReports()).toHaveLength(11);
   } finally {
     parse.mockRestore();
     await store.close();
   }
+});
+
+it("#97: acknowledging a pile of old reports tells the worker once", async () => {
+  const root = fixtureRoot();
+  const store = new ConversationStore(join(root, "conversations"), async () => {});
+  const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  const binding = "a".repeat(64);
+  for (let report = 0; report < 44; report++)
+    receipts.accept(
+      "pane",
+      { id: randomUUID(), binding },
+      `old ${report}`,
+      `old ${report}`,
+      "global-default",
+      async () => {},
+    );
+  // The worker's link already told it each report was stored.
+  for (const event of store.senderReportEvents("pane", binding))
+    expect(store.acknowledgeSenderReportEvent("pane", binding, event.id)).toBe(true);
+  expect(store.senderReportEvents("pane", binding)).toEqual([]);
+  const page = store.readInboundReports("global-default");
+  expect(store.acknowledgeInboundReports("global-default", page.ackDeliveryIds)).toBe(true);
+  const events = store.senderReportEvents("pane", binding);
+  expect(events).toHaveLength(1);
+  expect(events[0]?.content.split("\n")).toEqual([
+    expect.stringContaining(`Clankie acknowledged ${page.ackDeliveryIds.length} of your reports`),
+    expect.stringContaining("No reply from Clankie has reached you for them"),
+    "Receipt only; no reply needed.",
+  ]);
+  expect(store.acknowledgeSenderReportEvent("pane", binding, events[0]!.id)).toBe(true);
+  expect(store.senderReportEvents("pane", binding)).toEqual([]);
+  // A report sent after the batch is still told on its own.
+  receipts.accept("pane", { id: randomUUID(), binding }, "new", "new", "global-default", async () => {});
+  expect(store.senderReportEvents("pane", binding)).toEqual([
+    expect.objectContaining({ content: expect.stringContaining("stored") }),
+  ]);
+  await store.close();
 });
 
 it.each(["unadopted", "adoption"] as const)(
@@ -385,10 +425,11 @@ it.each(["unadopted", "adoption"] as const)(
       }),
     ).toBe(true);
     const events = store.senderReportEvents("pane", delivery.binding);
-    expect(events).toHaveLength(2);
-    expect(events[1]?.content).toContain("acknowledged");
-    expect(events[1]?.content).toContain(link);
-    expect(events[1]?.content).toContain("Filed the follow-up.");
+    // The acknowledgment supersedes the untold "taken" stage: one line, not two (#97).
+    expect(events).toHaveLength(1);
+    expect(events[0]?.content).toContain("acknowledged");
+    expect(events[0]?.content).toContain(link);
+    expect(events[0]?.content).toContain("Filed the follow-up.");
     await store.close();
     const reopened = new ConversationStore(directory, async () => {});
     expect(reopened.senderReportEvents("pane", delivery.binding)).toEqual(events);
