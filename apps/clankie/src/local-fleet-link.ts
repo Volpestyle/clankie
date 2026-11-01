@@ -77,9 +77,12 @@ export class LocalFleetLink {
   private readonly connections = new WeakMap<Socket, string>();
   private open = true;
   private published: string | undefined;
+  private publishedCore: string | undefined;
   private readonly options: {
     directory: string;
     binding(): Promise<HerdrBinding | undefined>;
+    /** The Herdr desktop app's core socket, so a worker in one of its terminals finds this link (ADR 0319). */
+    coreSocket?(): string | undefined;
     prove(
       socket: Socket,
       pane: string,
@@ -240,31 +243,46 @@ export class LocalFleetLink {
   async publish(port: number): Promise<void> {
     const binding = await this.options.binding();
     if (!this.open || !binding) return;
-    this.published = JSON.stringify({
-      schemaVersion: 2,
-      authentication: "local-process",
-      fleet: "default",
-      socket: binding.socketPath,
-      url: `http://127.0.0.1:${port}`,
-    });
+    this.published = linkFile(binding.socketPath, port);
     await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
-    const path = join(this.options.directory, "default-local.json");
-    const temp = `${path}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temp, this.published, { flag: "wx", mode: 0o600 });
-      await rename(temp, path);
-    } finally {
-      await rm(temp, { force: true });
-    }
+    await writeLink(join(this.options.directory, "default-local.json"), this.published);
+    // The same listener and the same process proof, found by the desktop app's core socket.
+    const core = this.options.coreSocket?.();
+    if (core === undefined || !this.open) return;
+    this.publishedCore = linkFile(core, port);
+    await writeLink(join(this.options.directory, "herdr-core-local.json"), this.publishedCore);
   }
 
   async close(): Promise<void> {
     this.open = false;
-    const path = join(this.options.directory, "default-local.json");
-    if (
-      this.published !== undefined &&
-      (await readFile(path, "utf8").catch(() => undefined)) === this.published
-    )
-      await rm(path, { force: true });
+    for (const [name, published] of [
+      ["default-local.json", this.published],
+      ["herdr-core-local.json", this.publishedCore],
+    ] as const) {
+      const path = join(this.options.directory, name);
+      // allow-swallowed-rejection -- an unreadable link is not ours to remove; only our own published file is.
+      if (published !== undefined && (await readFile(path, "utf8").catch(() => undefined)) === published)
+        await rm(path, { force: true });
+    }
+  }
+}
+
+function linkFile(socket: string, port: number): string {
+  return JSON.stringify({
+    schemaVersion: 2,
+    authentication: "local-process",
+    fleet: "default",
+    socket,
+    url: `http://127.0.0.1:${port}`,
+  });
+}
+
+async function writeLink(path: string, contents: string): Promise<void> {
+  const temp = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, contents, { flag: "wx", mode: 0o600 });
+    await rename(temp, path);
+  } finally {
+    await rm(temp, { force: true });
   }
 }

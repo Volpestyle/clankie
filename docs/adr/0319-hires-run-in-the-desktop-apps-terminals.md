@@ -34,9 +34,11 @@ detected.
 
 - **A machine's hires go where its owner works.** When the desktop app's core
   answers on a machine, Clankie's hires there start in its terminals; otherwise
-  they start in Herdr panes as today. `clankie fleet seats --host desktop|herdr`
-  pins it per machine for the rare owner who wants the other; there is no
-  Common setting. Hires already running stay where they are.
+  they start in Herdr panes as today. `clankie fleet set --seat-host
+auto|desktop|herdr` pins it per machine for the rare owner who wants the
+  other; there is no Common setting. Hires already running stay where they
+  are. Until the desktop app's hires are proven on the owner's Mac, `auto`
+  keeps them in Herdr panes and `desktop` opts in.
 - **They show in one Clankie space.** Each hire is a `terminal.run` with
   `labels { herdr.space: "clankie", herdr.tab: <hire>, clankie.seat: <hire> }`
   and `keep: true`, started in the hire's checkout with its harness command as
@@ -74,10 +76,19 @@ detected.
 ## Consequences
 
 - A seat host for herdr-core sits beside the Herdr runner under
-  `routeHerdrFleets`. It creates a terminal with the harness command already in
-  it, the way prepared native hosts use `layout.apply` today, so each harness
-  adapter that starts through `herdr agent start` gains a prepared launch first
-  (Claude, then Codex).
+  `routeHerdrFleets`. A prepared launch's command is the terminal's program. A
+  harness that starts through `herdr agent start` (Claude) starts its terminal
+  at a small launcher instead: the core takes no command after a terminal
+  starts, and nothing types into it, so the service writes the harness command
+  to a private file the launcher sources, and the harness execs in the
+  launcher's place. Its seat proof is then the terminal's own process.
+- Anything inside a terminal can relabel it through the core's socket, so a
+  seat's project proof trusts Clankie's private record of what he started (the
+  terminal's pid when the harness took it, and the session he named) rather
+  than its labels. The socket owner's ancestry must hold that pid, and the
+  kernel must show it running the installed harness. Under the worker sandbox,
+  the launcher starts inside the worker's Seatbelt profile, since a terminal
+  runs no shell to apply it.
 - The `w<n>:p<n>` checks scattered through proofs, the mailbox, connector
   routes and the worker bin accept a core address where a seat id is expected.
   Machine-access ceilings

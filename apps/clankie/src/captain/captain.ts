@@ -612,7 +612,31 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (error instanceof NativePaneNotFoundError) paneGone(paneId);
       });
   };
-  const herdrCoreRunner = createHerdrCoreRunner({ seats: createHerdrCoreSeats() });
+  const herdrCoreSeats = createHerdrCoreSeats();
+  const herdrCoreRunner = createHerdrCoreRunner({
+    seats: herdrCoreSeats,
+    launchDirectory: join(options.stateDir, "desktop-launches"),
+    seatDirectory: join(options.stateDir, "desktop-seats"),
+    turn: (session) => {
+      const last = seatHooks.latest(session);
+      return last?.type === "turn_started" ? "working" : last?.type === "turn_completed" ? "idle" : undefined;
+    },
+  });
+  /**
+   * This machine's new Claude hires go to the desktop app's terminals when the owner
+   * pins them there (ADR 0319). Other harnesses, and prepared launches, stay in Herdr
+   * panes until their own desktop launch lands.
+   */
+  const placeLocalHire = async (request: {
+    readonly harness?: string;
+    readonly command?: readonly string[];
+  }) => {
+    if (request.harness !== "claude" || request.command !== undefined) return undefined;
+    if ((await settingsStore.load()).fleet.seatHost !== "desktop") return undefined;
+    if (!(await herdrCoreSeats.available()))
+      throw new Error("Hires are set to start in the Herdr desktop app, and it isn't running on this Mac.");
+    return HERDR_CORE_FLEET;
+  };
   const herdrRunner = routeHerdrFleets(
     options.nativeHerdrRunner ??
       createHerdrWatchRunner(
@@ -689,6 +713,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // The desktop app's terminals Clankie started (ADR 0319); last, so no connection can shadow it.
         [HERDR_CORE_FLEET, herdrCoreRunner] as const,
       ]),
+    placeLocalHire,
   );
   async function refreshFleets() {
     namedLocal = await (deps.runtimes?.namedLocal?.() ?? Promise.resolve([]));

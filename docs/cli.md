@@ -4885,7 +4885,7 @@ channel or Discord.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -5068,6 +5068,14 @@ keychain, the file broker and the checkouts' `.env.local`
 ([worker access](worker-access.md#worker-sandbox)). It defaults to off and
 applies only to hires started after the change. Codex hires are confined only
 in maximum trust mode, because Codex's own sandbox can't nest inside it.
+
+`--seat-host desktop` starts this machine's new Claude hires in the Herdr
+desktop app's own terminals, in its Clankie space, instead of Herdr panes
+([ADR 0319](adr/0319-hires-run-in-the-desktop-apps-terminals.md)). A hire is
+refused while the desktop app isn't running. `herdr` keeps them in panes, and
+`auto`, the default, keeps them in panes until the desktop app's hires are
+proven. Other harnesses stay in Herdr panes for now, and hires already running
+stay where they are.
 
 `--closure` and `--machine-setup` both default to `lead`:
 

@@ -31,6 +31,11 @@ the reason. `trust_required` leaves the lead running: home-directory trust is
 session-only in Claude Code. Follow its owner workdir/trust action; never edit
 trust flags or answer a trust prompt for the owner.
 
+`clankie fleet set --seat-host desktop` starts this machine's new Claude hires
+in the Herdr desktop app's terminals, in its Clankie space (ADR 0319); their
+seat ids read `herdr-core/t7`. `auto` (the default) and `herdr` keep hires in
+Herdr panes.
+
 Hired seats have their own default-on `seatRestarts`
 setting. `clankie fleet set --seat-restarts on|off` (also in `/fleet`) controls
 fresh-session restarts at 450K context tokens in each idle hired seat’s own pane,

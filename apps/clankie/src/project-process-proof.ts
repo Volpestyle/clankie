@@ -27,7 +27,7 @@ interface NativeLauncher {
   script?: string;
 }
 /** Resolve only the service's installed launcher; request headers and pane metadata cannot choose it. */
-async function installedLauncher(harness: string): Promise<NativeLauncher | undefined> {
+export async function installedLauncher(harness: string): Promise<NativeLauncher | undefined> {
   const find = async (name: string) => {
     for (const directory of (process.env.PATH ?? "").split(delimiter)) {
       if (!isAbsolute(directory)) continue;
@@ -189,6 +189,40 @@ class ProjectProcessRefusalError extends Error {
 }
 
 /** Host observation only. Generic shells/wrappers never establish an agent occupant. */
+/**
+ * Whether an observed process runs the installed harness: its executable, or an earlier
+ * or later release beside it that an auto-update left running (a superseded release may
+ * already be pruned from disk; its kernel path is then compared without resolution). An
+ * interpreter launch needs the exact installed script as argv[1].
+ */
+export async function matchesHarnessLauncher(
+  launcher: NativeLauncher,
+  harness: string,
+  observed: { readonly executable: string; readonly argv: readonly string[] },
+  canonical: (path: string) => Promise<string> = realpath,
+): Promise<false | { readonly update?: HarnessUpdate }> {
+  const executableRelease = async (
+    path: string,
+  ): Promise<false | { readonly installed: string; readonly running: string } | undefined> => {
+    // allow-swallowed-rejection -- a pruned release has no path to resolve; its kernel path is compared as is
+    const resolved = await canonical(path).catch(() => undefined);
+    if (resolved === launcher.executable) return undefined;
+    return harnessReleaseSibling(launcher.executable, resolved ?? path) ?? false;
+  };
+  const executable = await executableRelease(observed.executable);
+  if (executable === false) return false;
+  const update = (release: { installed: string; running: string } | undefined) =>
+    release === undefined ? {} : { update: { harness, ...release } };
+  if (!launcher.script) return update(executable);
+  // Interpreter launches need the exact installed script as argv[1], never an arbitrary
+  // command containing its name. Unsupported wrappers/process-title rewrites deny.
+  const [interpreter, script] = observed.argv;
+  if (!interpreter || !script || !isAbsolute(interpreter) || !isAbsolute(script)) return false;
+  const interpreterRelease = await executableRelease(interpreter);
+  if (interpreterRelease === false || (await canonical(script)) !== launcher.script) return false;
+  return update(interpreterRelease ?? executable);
+}
+
 export function createProjectProcessObserver(options: {
   binding(): Promise<HerdrBinding | undefined>;
   herdrBinary: string;
@@ -366,32 +400,8 @@ export function createProjectProcessObserver(options: {
       let initialProcesses = await snapshot("initial");
       if (!initialProcesses) return refuse("native_initial_unavailable");
       let [shell, agent] = initialProcesses.processes;
-      // The installed executable, or an earlier/later release beside it that a
-      // harness auto-update left running. A superseded release may already be
-      // pruned from disk; its kernel path is then compared without resolution.
-      const executableRelease = async (
-        path: string,
-      ): Promise<false | { readonly installed: string; readonly running: string } | undefined> => {
-        const resolved = await canonical(path).catch(() => undefined);
-        if (resolved === launcher.executable) return undefined;
-        return harnessReleaseSibling(launcher.executable, resolved ?? path) ?? false;
-      };
-      const matchesLauncher = async (
-        observed: NonNullable<typeof agent>,
-      ): Promise<false | { readonly update?: HarnessUpdate }> => {
-        const executable = await executableRelease(observed.executable);
-        if (executable === false) return false;
-        const update = (release: { installed: string; running: string } | undefined) =>
-          release === undefined ? {} : { update: { harness: nativeInitial.harness, ...release } };
-        if (!launcher.script) return update(executable);
-        // Interpreter launches need the exact installed script as argv[1], never an arbitrary
-        // command containing its name. Unsupported wrappers/process-title rewrites deny.
-        const [interpreter, script] = observed.argv;
-        if (!interpreter || !script || !isAbsolute(interpreter) || !isAbsolute(script)) return false;
-        const interpreterRelease = await executableRelease(interpreter);
-        if (interpreterRelease === false || (await canonical(script)) !== launcher.script) return false;
-        return update(interpreterRelease ?? executable);
-      };
+      const matchesLauncher = (observed: NonNullable<typeof agent>) =>
+        matchesHarnessLauncher(launcher, nativeInitial.harness, observed, canonical);
       let wrapperMatches: ((process: NonNullable<typeof agent>) => Promise<boolean>) | undefined;
       let initialMatch = shell && agent ? await matchesLauncher(agent) : false;
       if (!initialMatch && shell && agent && nativeInitial.harness === "claude") {

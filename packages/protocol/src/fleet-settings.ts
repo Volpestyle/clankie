@@ -39,6 +39,7 @@ const FleetPolicySchema = z
     peerMessages: z.enum(["on", "off"]).optional(),
     remoteGates: z.enum(["on", "off"]).optional(),
     workerSandbox: z.enum(["on", "off"]).optional(),
+    seatHost: z.enum(["auto", "desktop", "herdr"]).optional(),
     leadRestarts: z.enum(["on", "off"]).optional(),
     seatRestarts: z.enum(["on", "off"]).optional(),
     autoTidy: z.enum(FLEET_AUTO_TIDY).optional(),
