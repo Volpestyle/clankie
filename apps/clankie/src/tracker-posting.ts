@@ -645,6 +645,21 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     return `Posting to ${TRACKER_NAMES[tracker]} is read only${named ? ` for ${named}` : ""}, so nothing was posted. Keep this in the project's issue file (.clankie/work) or your own notes instead.${settingsHint}`;
   };
 
+  /**
+   * The exact text sits in a fenced block after its two-line summary, so the owner's feed
+   * folds it behind "Show details" and a long post can't push its answers out of reach
+   * (#118). A detail that wouldn't fit an ask's 2,000 characters fenced stays as it is.
+   */
+  const foldedDetail = (detail: string): string => {
+    const split = detail.indexOf("\n\n");
+    if (split < 0) return detail;
+    const body = detail.slice(split + 2);
+    const longest = Math.max(0, ...[...body.matchAll(/`+/gu)].map((run) => run[0].length));
+    const fence = "`".repeat(Math.max(3, longest + 1));
+    const folded = `${detail.slice(0, split)}\n\n${fence}\n${body}\n${fence}`;
+    return folded.length <= 2000 ? folded : detail;
+  };
+
   /** Raises the owner's feed check for a waiting post; false when it couldn't be asked. */
   const askOwner = async (post: Stored): Promise<boolean> => {
     const conversationId = await options.leadConversation(post.projectId);
@@ -652,7 +667,7 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     const draft: QuestionDraft = {
       kind: "choice",
       purpose: "verify",
-      prompt: post.detail,
+      prompt: foldedDetail(post.detail),
       check: post.summary,
       ...(post.projectId === undefined ? {} : { projectId: post.projectId }),
       waitingOn: `Your OK to post to ${TRACKER_NAMES[post.tracker]}`,
