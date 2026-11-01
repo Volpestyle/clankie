@@ -21,13 +21,9 @@ import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
-import { requireMachineAccess } from "./machine-access.ts";
 import { assertScratchNetwork, verifyLocalSandbox } from "@clankie/settings";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
-import { JoinedComputer } from "./joined-computer.ts";
-import { ComputerBody } from "./computer-body.ts";
-import { computerRoutes } from "./computer-http.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
 import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
@@ -42,7 +38,6 @@ import {
   DISCORD_USER_SESSION_PROVIDER_ID,
   resolveActivityProducerCredential,
 } from "@clankie/credential-broker";
-import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
 import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.ts";
 import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { execFile } from "node:child_process";
@@ -156,8 +151,9 @@ import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "@clankie/pokemon/world/session";
 import { browserEnabled } from "./browser-host.ts";
 import { browserExtension } from "./browser-extension.ts";
+import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
-import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
+import { mediaExtension } from "./media-extension.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
 import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
@@ -237,7 +233,7 @@ import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
 import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { browserOf, createCoreExtensions, doorwayOf } from "./extension-host.ts";
+import { browserOf, createCoreExtensions, doorwayOf, projected, routesOf } from "./extension-host.ts";
 import { relayExtension } from "./relay-extension.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
@@ -397,6 +393,13 @@ const extensions = createCoreExtensions({
   capabilityStateRoot,
   attachmentRoot,
   settings: settingsStore,
+  stateRoot,
+  get bodyLeaseStore() {
+    return bodyLeaseStore;
+  },
+  get machineJoins() {
+    return machineJoins;
+  },
   whenListening: (run) => void listening.then(run),
   ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
 });
@@ -516,19 +519,10 @@ extensions.add(browserExtension, {
 await extensions.start();
 const browserHost = browserOf(extensions);
 
-// His drawing hand (ADR 0096). The tldraw desktop app is a GUI app on the
-// operator's Mac, so "not open" is the normal absent case and stays a refusal
-// he says out loud; nothing here reaches the app until he draws something.
-let tldrawHost: TldrawHost | undefined;
-if (tldrawEnabled(process.env.CLANKIE_TLDRAW_ENABLED)) {
-  tldrawHost = await createTldrawHost({
-    stateRoot: capabilityStateRoot,
-    attachmentRoot,
-    logger,
-    environment: process.env,
-  });
-  logger.info({ event: "tldraw.capability.enabled" }, "diagram host ready");
-}
+// What he makes (ADR 0328 extension), starting with his drawing hand (ADR 0096).
+extensions.add(mediaExtension, { enabled: true, settings: undefined });
+await extensions.start();
+const tldrawHost = projected(extensions, "diagrams");
 
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
@@ -1095,12 +1089,9 @@ const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-ro
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
-const computer =
-  process.platform === "darwin"
-    ? new ComputerBody(new PeekabooComputerAdapter(), bodyLeaseStore, join(stateRoot, "body"), () =>
-        requireMachineAccess(settingsStore, "local", "screen"),
-      )
-    : undefined;
+// His own computer body (ADR 0328 extension): the Mac's screen and joined machines' screens.
+extensions.add(computerExtension, { enabled: true, settings: undefined });
+await extensions.start();
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 const gameExtensions = new GameExtensionRegistry<GameExtensionProjection>();
@@ -2337,13 +2328,7 @@ const clankie = await createClankieApp({
   minecraft,
   minecraftHost,
   minecraftPrivateDelivery,
-  extensionRoutes: [
-    computerRoutes({
-      ...(computer === undefined ? {} : { body: computer }),
-      joined: new JoinedComputer(machineJoins, settingsStore),
-    }),
-    skinDraftRoutes(skinDrafts),
-  ],
+  extensionRoutes: [...routesOf(extensions), skinDraftRoutes(skinDrafts)],
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,

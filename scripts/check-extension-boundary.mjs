@@ -75,7 +75,7 @@ const EXTENSION_RULES = [
   // Which harnesses can take computer work is part of hiring, so it stays core.
   ["computer", [/^computer-(?!use-harnesses\.ts$)/u, /^joined-computer\.ts$/u]],
   ["browser", [/^browser-/u]],
-  ["media", [/^media-generation\.ts$/u, /^skin-draft/u, /^tldraw-host\.ts$/u]],
+  ["media", [/^media-(generation|extension)\.ts$/u, /^skin-draft/u, /^tldraw-host\.ts$/u]],
 ];
 
 const partOf = (path) => {

@@ -81,6 +81,7 @@ export async function serveDormantBody(options: {
     capabilityStateRoot: join(options.stateRoot, "runner"),
     attachmentRoot: discordAttachmentRoot(env),
     settings: options.settingsStore,
+    stateRoot: options.stateRoot,
     whenListening: (run) => void listening.then(run),
     ...(options.onDoorwayChange === undefined ? {} : { onDoorwayChange: options.onDoorwayChange }),
   });
