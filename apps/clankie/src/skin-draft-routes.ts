@@ -8,9 +8,22 @@ import {
 } from "@clankie/protocol/skin-drafts";
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { SkinDraftPort } from "./ports/media.ts";
+import type { ExtensionRoutes } from "./ports/routes.ts";
 import { SkinDraftError } from "./skin-drafts.ts";
 
-export function createSkinDraftRoutes(options: {
+/** The owner's skin draft routes as an extension's routes (ADR 0328). */
+export function skinDraftRoutes(service: SkinDraftPort | undefined): ExtensionRoutes {
+  return {
+    place: "owner",
+    register: (app, host) =>
+      app.route(
+        "/",
+        createSkinDraftRoutes({ service, authorize: (request) => host.ownerAuthority(request) }),
+      ),
+  };
+}
+
+function createSkinDraftRoutes(options: {
   service?: SkinDraftPort | undefined;
   authorize(request: Request): Promise<QuestionAuthority | undefined>;
 }) {

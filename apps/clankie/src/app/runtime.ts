@@ -72,7 +72,7 @@ import { pumpBodyRequests } from "../body-request-pump.ts";
 import { BodyLeaseRecovery } from "../body-lease-recovery.ts";
 import { CaptainPresenceLeaseConflictError, CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
-import { registerComputerRoutes } from "../computer-http.ts";
+import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
 import { ActivitySharingRequestSchema } from "../activity-sharing.ts";
 import { ActivityAdmissionError } from "../activity-admission.ts";
 import { ActivityShareRequestError } from "@clankie/rendered-surface-client";
@@ -102,7 +102,6 @@ import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createHttpSettingsRoutes } from "../http-settings-routes.ts";
 import { httpCors } from "@clankie/settings";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
-import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
@@ -2311,15 +2310,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  registerComputerRoutes(app, {
-    ...(dependencies.computer === undefined ? {} : { body: dependencies.computer }),
-    ...(dependencies.joinedComputer === undefined ? {} : { joined: dependencies.joinedComputer }),
-    async identity(request, conversationId) {
+  // Extensions' routes (ADR 0328) use the core's authority checks, never their own.
+  const extensionRouteHost: ExtensionRouteHost = {
+    ownerAuthority: (request) => questionOwnerAuthority(request),
+    async bodyIdentity(request, conversationId) {
       const operator = await authenticateOperator(request, dependencies);
       if (!operator || operator === "unavailable") return undefined;
       return operatorBodyIdentity(conversationId, request);
     },
-    async ownerRecovery(request) {
+    async ownerComputerRecovery(request) {
       const original = await authenticateOperator(request, dependencies);
       if (!original || original === "unavailable") return undefined;
       return {
@@ -2336,7 +2335,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         },
       };
     },
-  });
+  };
+  const mountExtensionRoutes = (place: ExtensionRoutes["place"]) => {
+    for (const routes of dependencies.extensionRoutes ?? [])
+      if (routes.place === place) routes.register(app, extensionRouteHost);
+  };
+  mountExtensionRoutes("body");
 
   app.post("/v1/body-leases", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -2887,10 +2891,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     },
   });
 
-  app.route(
-    "/",
-    createSkinDraftRoutes({ service: dependencies.skinDrafts, authorize: questionOwnerAuthority }),
-  );
+  mountExtensionRoutes("owner");
 
   /**
    * Delivery for devices that authorized it. The dispatcher owns coalescing and

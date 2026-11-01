@@ -5,6 +5,7 @@ import { FileCredentialStore, ensureOperatorCredential } from "@clankie/credenti
 import { SettingsStore } from "@clankie/settings";
 import { ConfiguredMediaGenerator } from "../src/media-generation.ts";
 import { SkinDraftService } from "../src/skin-drafts.ts";
+import { skinDraftRoutes } from "../src/skin-draft-routes.ts";
 import { skinDraftGenerator } from "../src/skin-draft-generation.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
 import { createClankieApp } from "../src/app.ts";
@@ -47,7 +48,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const app = await createClankieApp({
     captain: createStubCaptain(),
     settings: new SettingsStore(join(root, "settings.json")),
-    skinDrafts: service,
+    extensionRoutes: [skinDraftRoutes(service)],
     authenticateOperator: createCredentialBackedOperatorAuthenticator({
       env: {},
       store: credentials,

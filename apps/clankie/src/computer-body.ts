@@ -86,12 +86,8 @@ const RecoveryAuditSchema = z.strictObject({
 });
 type Ref = NonNullable<ReturnType<BodyLeaseStore["recoveryReference"]>>;
 
-/** Host-created from the authenticated operator request, never from a command or native tool identity. */
-export interface OwnerComputerRecovery {
-  readonly operatorId: string;
-  readonly authorize: () => Promise<boolean>;
-  readonly holderIdle: (conversationId: string) => boolean;
-}
+export type { OwnerComputerRecovery } from "./ports/routes.ts";
+import type { OwnerComputerRecovery } from "./ports/routes.ts";
 const recoveryRefusal = (reason: string, detail: string, next: string) => ({
   outcome: "rejected" as const,
   reason,

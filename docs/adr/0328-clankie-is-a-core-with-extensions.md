@@ -83,8 +83,10 @@ Each of these becomes an extension:
 
 Which hired harnesses can do computer work (`computer-use-harnesses.ts`) is
 part of hiring and stays in core; the `computer` extension is Clankie's own
-computer body. The core reaches media and diagrams through its own ports
-(`ports/media.ts`).
+computer body. The core reaches media, diagrams and skin drafts through its own
+ports (`ports/media.ts`), and an extension's HTTP routes mount through
+`ports/routes.ts`, which gives them the core's authority checks and keeps each
+route group's place in the app's middleware order.
 
 The first seven are the ones James named. `computer`, `browser` and `media` are
 proposed here because the fleet runs without them; they can move back to core

@@ -126,7 +126,6 @@ export interface TrustedDeviceIdentity {
 export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface ClankieAppDependencies {
-  skinDrafts?: import("../ports/media.ts").SkinDraftPort;
   /** Host-side voice environment validation; omitted uses the service process environment. */
   voiceSettingsEnv?: NodeJS.ProcessEnv;
   fleetResources?: import("../fleet-resource-runtime.ts").FleetResourceRuntime;
@@ -333,8 +332,8 @@ export interface ClankieAppDependencies {
     ReturnType<typeof import("../minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
     "authorize"
   >;
-  computer?: import("../computer-body.ts").ComputerBody;
-  joinedComputer?: import("../joined-computer.ts").JoinedComputer;
+  /** Routes extensions add, such as computer use and skin drafts (ADR 0328). */
+  extensionRoutes?: readonly import("../ports/routes.ts").ExtensionRoutes[];
   /**
    * Device voice calls (VUH-2682). Resolves the same realtime provider
    * composition and credentials a Discord body uses, when a call starts;
