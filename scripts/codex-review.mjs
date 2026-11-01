@@ -40,7 +40,7 @@ function gh(args, input) {
 const api = (path, ...rest) => JSON.parse(gh(["api", path, ...rest]) || "null");
 const pages = (path) =>
   JSON.parse(gh(["api", "--paginate", "--slurp", path]) || "[]").flatMap((page) =>
-    Array.isArray(page) ? page : (page.check_runs ?? page.statuses ?? []),
+    Array.isArray(page) ? page : (page.check_runs ?? page.workflow_runs ?? page.statuses ?? []),
   );
 const git = (args, cwd) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
@@ -256,15 +256,48 @@ function post(repo, pr, flags) {
   );
 }
 
-/** codex-clean on the head plus every other status and check run there. */
-function headChecks(repo, sha) {
-  const statuses = new Map();
-  for (const status of pages(`repos/${repo}/commits/${sha}/statuses?per_page=100`)) {
-    if (!statuses.has(status.context)) statuses.set(status.context, status.state); // newest first
+/** When the pull request last became ready for review: its last ready event, or its opening. */
+function readySince(repo, pr, info) {
+  const ready = pages(`repos/${repo}/issues/${pr}/events?per_page=100`).filter(
+    (event) => event.event === "ready_for_review",
+  );
+  return ready.at(-1)?.created_at ?? info.created_at;
+}
+
+/**
+ * Check suites whose workflow runs again when a draft is marked ready. A job
+ * such a workflow skipped before that moment was skipped for the draft, so it
+ * has not run yet.
+ */
+function rerunOnReady(repo, sha) {
+  const suites = new Set();
+  const listens = new Map();
+  for (const run of pages(`repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`)) {
+    if (!listens.has(run.path)) {
+      let text = "";
+      try {
+        const file = api(`repos/${repo}/contents/${run.path}?ref=${sha}`);
+        text = Buffer.from(file.content ?? "", "base64").toString("utf8");
+      } catch {
+        text = "ready_for_review"; // unreadable workflow: assume it reruns, so nothing is waved through
+      }
+      listens.set(run.path, /\bready_for_review\b/u.test(text));
+    }
+    if (listens.get(run.path)) suites.add(run.check_suite_id);
   }
-  const runs = new Map();
-  for (const run of pages(`repos/${repo}/commits/${sha}/check-runs?per_page=100&filter=latest`)) {
-    runs.set(run.name, run.status === "completed" ? run.conclusion : run.status);
+  return suites;
+}
+
+/**
+ * codex-clean on the head plus every other status and check run there. A
+ * job skipped before `since` in a workflow that reruns when the pull request
+ * is marked ready counts as still to run, so `land` cannot merge in the gap
+ * before the ready checks start.
+ */
+export function judgeChecks({ statuses: statusList, runs: runList, since, rerunSuites }) {
+  const statuses = new Map();
+  for (const status of statusList) {
+    if (!statuses.has(status.context)) statuses.set(status.context, status.state); // newest first
   }
   const codex = statuses.get(CONTEXT) ?? "missing";
   statuses.delete(CONTEXT);
@@ -274,16 +307,29 @@ function headChecks(repo, sha) {
     if (state === "pending") pending.push(name);
     else if (state !== "success") failing.push(`${name} (${state})`);
   }
-  for (const [name, state] of runs) {
-    if (["queued", "in_progress", "waiting", "requested", "pending"].includes(state)) pending.push(name);
-    else if (!OK_CONCLUSIONS.has(state)) failing.push(`${name} (${state})`);
+  for (const run of runList) {
+    const state = run.status === "completed" ? run.conclusion : run.status;
+    const draftSkip =
+      state === "skipped" && since && run.completed_at < since && rerunSuites.has(run.check_suite?.id);
+    if (draftSkip) pending.push(`${run.name} (not run since ready)`);
+    else if (run.status !== "completed") pending.push(run.name);
+    else if (!OK_CONCLUSIONS.has(state)) failing.push(`${run.name} (${state})`);
   }
   return { codex, pending, failing };
 }
 
+function headChecks(repo, sha, since) {
+  return judgeChecks({
+    statuses: pages(`repos/${repo}/commits/${sha}/statuses?per_page=100`),
+    runs: pages(`repos/${repo}/commits/${sha}/check-runs?per_page=100&filter=latest`),
+    since,
+    rerunSuites: since ? rerunOnReady(repo, sha) : new Set(),
+  });
+}
+
 function status(repo, pr) {
   const info = pull(repo, pr);
-  const checks = headChecks(repo, info.head.sha);
+  const checks = headChecks(repo, info.head.sha, info.draft ? undefined : readySince(repo, pr, info));
   console.log(
     JSON.stringify(
       {
@@ -307,7 +353,7 @@ function land(repo, pr, flags) {
   if (info.state !== "open") fail(`#${pr} is ${info.merged_at ? "already merged" : info.state}`);
   if (info.draft) fail(`#${pr} is a draft; mark it ready first`, 3);
   const head = info.head.sha;
-  const { codex, pending, failing } = headChecks(repo, head);
+  const { codex, pending, failing } = headChecks(repo, head, readySince(repo, pr, info));
   if (codex !== "success") {
     fail(`Codex has not passed ${short(head)} (${CONTEXT}: ${codex}); ask the Mac reviewer for a review`, 3);
   }

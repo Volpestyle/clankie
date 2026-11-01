@@ -57,7 +57,8 @@ Questions go to the lead that asked, never to the owner.
   the current head and every other check.
 - `node scripts/codex-review.mjs land OWNER/REPO PR` merges (squash by default)
   only when the pull request is ready, `codex-clean` passed on its current head
-  and every other check there finished green. It merges against that exact
-  head. The private repos have no GitHub auto-merge on their plan, so `land` is
+  and every other check there finished green; a job skipped while the pull
+  request was a draft counts as not run yet until the ready run replaces it. It
+  merges against that exact head. The private repos have no GitHub auto-merge on their plan, so `land` is
   how they merge; on clankie, GitHub auto-merge also waits on `codex-clean`
   when the owner lists it as a required check.
