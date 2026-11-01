@@ -195,10 +195,10 @@ and render original Clankie. This does not change World/chat lead art.
 
 ### 10. Play
 
-| Setting                                                   | API                                     | CLI  | TUI            | App | Dash | Tier     |
-| --------------------------------------------------------- | --------------------------------------- | ---- | -------------- | --- | ---- | -------- |
-| Games (PokeAgent MMO, budgets), installed game extensions | `GET`/`PUT /v1/games/configuration`     | file | file `/games`  | —   | —    | Advanced |
-| Minecraft play, profiles, allowlist                       | `GET`/`PUT /v1/minecraft/configuration` | file | ✓ `/minecraft` | —   | —    | Advanced |
+| Setting                                                   | API                                     | CLI  | TUI            | App | Dash | Tier                                                   |
+| --------------------------------------------------------- | --------------------------------------- | ---- | -------------- | --- | ---- | ------------------------------------------------------ |
+| Games (PokeAgent MMO, budgets), installed game extensions | `GET`/`PUT /v1/games/configuration`     | file | file `/games`  | —   | —    | Advanced                                               |
+| Minecraft play, profiles, allowlist                       | `GET`/`PUT /v1/minecraft/configuration` | file | ✓ `/minecraft` | —   | —    | Advanced; served while the `minecraft` extension is on |
 
 ### 11. Account
 
