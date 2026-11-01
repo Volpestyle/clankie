@@ -5,7 +5,11 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { createHerdrCoreRunner, readDesktopSeat } from "../src/captain/herdr-core-runner.ts";
+import { realpath } from "node:fs/promises";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { createHerdrCoreRunner, liveDesktopSeat, readDesktopSeat } from "../src/captain/herdr-core-runner.ts";
+import { fleetProcessHelper } from "../src/local-fleet-process.ts";
+import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { CLANKIE_SPACE, SEAT_LABEL, createHerdrCoreSeats } from "../src/captain/herdr-core-seats.ts";
 
 // A hire's terminal in the Herdr desktop app (ADR 0319), end to end against a real
@@ -209,6 +213,31 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
     agent: "claude",
     session,
   });
+
+  // The proof a project hire waits on before its brief: the service's own observer, against
+  // this real terminal and record, must name the occupant the hire's session names.
+  const helper = fleetProcessHelper(resolve(import.meta.dirname, "../../.."));
+  if (existsSync(helper)) {
+    const binding = { runtime: "external" as const, session: "herdr-core", socketPath: join(cwd, "unused") };
+    const proof = await createProjectProcessObserver({
+      binding: async () => undefined,
+      herdrBinary: "herdr",
+      processHelper: helper,
+      coreBinding: async () => binding,
+      coreSeat: (_binding, seat) => liveDesktopSeat(seats, join(cwd, "seats"), seat),
+      launcher: async () => ({
+        executable: await realpath(process.execPath),
+        script: await realpath(join(cwd, "bin", "claude")),
+      }),
+    })("default", `herdr-core/${address}`);
+    const hired = await runner.get(address);
+    expect(proof).toMatchObject({
+      fleet: "default",
+      pane: `herdr-core/${address}`,
+      nativeOccupantId: occupantIdForHerdrSession(hired.session!),
+      processes: [{ pid: started.pid }],
+    });
+  }
 
   await expect(runner.startAgent({ name: "ada", kind: "claude", paneId: address })).rejects.toThrow();
   await runner.closePane(address);
