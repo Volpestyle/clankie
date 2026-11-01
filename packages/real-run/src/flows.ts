@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
 import { Effect } from "effect";
@@ -368,12 +368,28 @@ export const flows: readonly Flow[] = [
           "the routine's run finishes",
           () =>
             Effect.runPromise(stack.cliJson("routines", "history", routine!.id, "--json")).then((history) => {
-              const runs = (history.runs ?? history.history ?? []) as Array<{ status: string }>;
+              const runs = (history.runs ?? history.history ?? []) as Array<{ id: string; status: string }>;
               return runs.find((r) => r.status !== "running");
             }),
           { timeoutMs: 120_000, intervalMs: 1_000 },
         );
         yield* check(run.status === "succeeded", "the routine's run succeeded", run);
+        // Its permit came from the service's own fleet registry, which in this scratch
+        // home is the fixture's: the Mac's permit this real run holds covers it, so it
+        // never queues behind other heavy work for a second one (#193).
+        const leasesFile = join(stack.env.CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY!, "leases.jsonl");
+        const held = (existsSync(leasesFile) ? readFileSync(leasesFile, "utf8").trim().split("\n") : [])
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { event: string; holderId?: string; exitCode?: number })
+          .filter((lease) => lease.holderId === `routine:${run.id}`);
+        yield* check(
+          held.length === 2 &&
+            held[0]!.event === "admitted" &&
+            held[1]!.event === "released" &&
+            held[1]!.exitCode === 0,
+          "the routine's run held a heavy permit from the service's fleet for its whole run",
+          held,
+        );
 
         // The owner's routine controls, on a turn routine that never runs here.
         type Routine = { id: string; name: string; enabled: boolean; missed: string; nextRunAt?: string };

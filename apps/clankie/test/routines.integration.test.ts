@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { createResourceGovernor } from "@clankie/fleet-resources";
 import type { OperatorSeatSpawnResult } from "@clankie/protocol";
 import { createRoutineRunner } from "../src/captain/routine-runner.ts";
 import { RoutineStore, type RoutineActor } from "../src/captain/routines.ts";
@@ -10,12 +11,13 @@ import { RoutineStore, type RoutineActor } from "../src/captain/routines.ts";
 // Mac that slept through runs follows the routine's missed-run policy. Real
 // state files, real cron in a real time zone and the real runner. The
 // conversation turn and the hire are the recorded boundary; a check runs a real
-// child process through a stand-in for `clankie heavy`. The CLI and HTTP route
+// child process on a permit from a real fleet governor over a private registry.
+// The CLI and HTTP route
 // are proved by the real-app run's routine flow (ADR 0309).
 
-const cleanup: Array<() => void> = [];
-afterEach(() => {
-  for (const close of cleanup.splice(0).reverse()) close();
+const cleanup: Array<() => void | Promise<void>> = [];
+afterEach(async () => {
+  for (const close of cleanup.splice(0).reverse()) await close();
 });
 
 const MAIN = "global-main";
@@ -28,15 +30,18 @@ function fixture(start: string) {
   const turns: Array<{ conversationId: string; prompt: string; finish: () => void }> = [];
   const hires: Array<{ conversationId: string; title: string; brief: string }> = [];
   const notes: Array<{ conversationId: string; text: string }> = [];
-  // `clankie heavy --seat S --holder H -- CMD...` stand-in: run CMD as given.
-  const heavy = join(root, "heavy.mjs");
-  writeFileSync(
-    heavy,
-    'import { spawnSync } from "node:child_process";\n' +
-      'const argv = process.argv.slice(process.argv.indexOf("--") + 1);\n' +
-      'const result = spawnSync(argv[0], argv.slice(1), { stdio: "inherit" });\n' +
-      "process.exit(result.status ?? 1);\n",
-  );
+  // The service's governor, on its own registry and an idle machine reading.
+  const resources = join(root, "fleet-resources");
+  const governor = createResourceGovernor({
+    directory: resources,
+    probe: async () => ({ loadRatio: 0, availableMemoryMb: 65_536 }),
+  });
+  cleanup.push(() => governor.close());
+  const leases = () =>
+    readFileSync(join(resources, "leases.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { event: string; holderId?: string; exitCode?: number });
   const execute = createRoutineRunner({
     runTurn: (conversationId, prompt) =>
       new Promise<void>((resolve) => turns.push({ conversationId, prompt, finish: resolve })),
@@ -53,7 +58,7 @@ function fixture(start: string) {
       notes.push({ conversationId, text });
       return true;
     },
-    launcher: { command: process.execPath, args: [heavy] },
+    governor: () => governor,
   });
   const open = () => {
     const store = new RoutineStore({
@@ -72,7 +77,7 @@ function fixture(start: string) {
   const at = (iso: string) => {
     clock.now = Date.parse(iso);
   };
-  return { root, clock, at, open, turns, hires, notes };
+  return { root, clock, at, open, turns, hires, notes, leases };
 }
 
 const daily = (store: RoutineStore, missed?: "catch_up" | "skip") =>
@@ -254,6 +259,12 @@ it("hires and checks run as their conversation, and leads only reach their own r
   });
   expect(f.notes.map((note) => note.conversationId)).toEqual(["lead-kh2", MAIN]);
   expect(f.notes[1]!.text).toContain("exited 3");
+  // The check held a heavy permit for exactly its run.
+  const checkRun = runs.find((run) => run.routineId === check.id)!;
+  expect(f.leases().filter((lease) => lease.holderId === `routine:${checkRun.id}`)).toMatchObject([
+    { event: "admitted" },
+    { event: "released", exitCode: 3 },
+  ]);
 
   // A hire that didn't happen reaches the lead relying on it, not only the run log.
   const busy = (

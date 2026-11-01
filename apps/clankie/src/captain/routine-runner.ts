@@ -1,10 +1,9 @@
-import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { Writable } from "node:stream";
+import type { FleetResourceGovernor } from "@clankie/fleet-resources";
 import type { OperatorSeatSpawnResult, Routine, RoutineRun, SpawnOperatorSeat } from "@clankie/protocol";
 import type { RoutineExecution } from "./routines.ts";
 
 const CHECK_TIMEOUT_MS = 30 * 60_000;
-const CHECK_KILL_GRACE_MS = 10_000;
 const OUTPUT_TAIL_BYTES = 6_000;
 
 export interface RoutineRunnerDeps {
@@ -18,8 +17,11 @@ export interface RoutineRunnerDeps {
   ) => Promise<OperatorSeatSpawnResult>;
   /** A note in the target conversation; false when nothing accepted it. */
   readonly notify: (conversationId: string, text: string) => Promise<boolean>;
-  /** The launcher that provides `clankie heavy`. */
-  readonly launcher: { readonly command: string; readonly args: readonly string[] };
+  /**
+   * The service's own fleet governor, as the merge gate uses it: the machine's
+   * shared registry in a real service, the fixture's in a test service (#193).
+   */
+  readonly governor: () => FleetResourceGovernor | undefined;
 }
 
 /** Runs a routine's target with that conversation's authority and nothing more (ADR 0265). */
@@ -57,7 +59,7 @@ export function createRoutineRunner(deps: RoutineRunnerDeps) {
         return { ok: true, detail: `Hired ${target.hire.title} as ${seat}.` };
       }
       case "check": {
-        const result = await runCheck(deps.launcher, routine, run, target);
+        const result = await runCheck(deps.governor(), routine, run, target);
         const report = target.report ?? "failure";
         if (report === "always" || !result.ok)
           await deps
@@ -86,60 +88,45 @@ function routineHeader(routine: Routine, run: RoutineRun): string {
 }
 
 async function runCheck(
-  launcher: RoutineRunnerDeps["launcher"],
+  governor: FleetResourceGovernor | undefined,
   routine: Routine,
   run: RoutineRun,
   target: Extract<Routine["target"], { kind: "check" }>,
 ): Promise<RoutineExecution> {
+  if (!governor)
+    return { ok: false, detail: "This service has no fleet resource governor, so the check did not run." };
   const started = Date.now();
-  const child = spawn(
-    launcher.command,
-    [
-      ...launcher.args,
-      "heavy",
-      "--seat",
-      `routine:${routine.id}`,
-      "--holder",
-      `routine:${run.id}`,
-      "--",
-      ...target.command,
-    ],
-    { cwd: target.workingDirectory, stdio: ["ignore", "pipe", "pipe"], env: process.env },
-  );
   let tail = "";
-  const keep = (chunk: Buffer) => {
-    tail = (tail + chunk.toString("utf8")).slice(-OUTPUT_TAIL_BYTES);
-  };
-  child.stdout.on("data", keep);
-  child.stderr.on("data", keep);
-  let timedOut = false;
-  let kill: ReturnType<typeof setTimeout> | undefined;
-  const timer = setTimeout(
-    () => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      kill = setTimeout(() => child.kill("SIGKILL"), CHECK_KILL_GRACE_MS);
+  const keep = new Writable({
+    write: (chunk: Buffer, _encoding, done) => {
+      tail = (tail + chunk.toString("utf8")).slice(-OUTPUT_TAIL_BYTES);
+      done();
     },
-    (target.timeoutSeconds ?? CHECK_TIMEOUT_MS / 1000) * 1000,
-  );
-  const code = await new Promise<number | string>((resolve) => {
-    child.once("error", (error) => resolve(error.message));
-    child.once("close", (exit, signal) => resolve(exit ?? signal ?? "unknown"));
   });
-  clearTimeout(timer);
-  if (kill !== undefined) clearTimeout(kill);
+  // The limit covers the wait for a permit too, as it did when the check ran under `clankie heavy`.
+  const limit = AbortSignal.timeout((target.timeoutSeconds ?? CHECK_TIMEOUT_MS / 1000) * 1000);
+  // A permit from the service's own governor, never the CLI's: a test service's
+  // check would otherwise queue in the machine registry behind the permit its
+  // own harness already holds, and wait out every other heavy job (#193).
+  const code = await governor
+    .runHeavy(target.command[0]!, target.command.slice(1), {
+      cwd: target.workingDirectory,
+      seatId: `routine:${routine.id}`,
+      holderId: `routine:${run.id}`,
+      // An empty, closed stdin: a check never reads the service's.
+      input: "",
+      stdout: keep,
+      stderr: keep,
+      signal: limit,
+    })
+    .catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const output = tail.trim() ? `\n\n${tail.trim()}` : "";
-  if (code === 0) return { ok: true, detail: `passed in ${seconds}s.${output}` };
-  const why = timedOut
+  if (code === 0 && !limit.aborted) return { ok: true, detail: `passed in ${seconds}s.${output}` };
+  const why = limit.aborted
     ? `timed out after ${seconds}s`
     : typeof code === "number"
       ? `exited ${String(code)} after ${seconds}s`
       : `failed: ${code}`;
   return { ok: false, detail: `${why}.${output}` };
-}
-
-/** The launcher this service ships with, run by the same Node. */
-export function serviceLauncher(repoRoot: string): RoutineRunnerDeps["launcher"] {
-  return { command: process.execPath, args: [join(repoRoot, "apps", "tui", "bin", "clankie.ts")] };
 }
