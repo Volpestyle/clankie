@@ -5,8 +5,9 @@ to captain split"). One question is open: whether the Discord persona is core or
 an extension. Until he answers it is an extension, and the [last section](#if-the-persona-is-core)
 says what moving it would change. Step 1, the contract in
 [`@clankie/extension`](../../packages/extension/README.md), landed 2026-11-01, then the
-boundary check, then the relay as the first extension (`relay-extension.ts`);
-machine joins now seal with the core's `sealed-values.ts`.
+boundary check, then the relay as the first extension (`relay-extension.ts`;
+machine joins now seal with the core's `sealed-values.ts`) and the browser
+(`browser-extension.ts`).
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside

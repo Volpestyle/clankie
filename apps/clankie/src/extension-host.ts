@@ -1,7 +1,8 @@
 import { ExtensionSupervisor } from "@clankie/extension";
 import type { CredentialStore } from "@clankie/credential-broker";
 import type { PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
-import type { ClankieAppDependencies } from "./app/types.ts";
+import type { SettingsStore } from "@clankie/settings";
+import type { BrowserToolPort, ClankieAppDependencies } from "./app/types.ts";
 import type { PushWakeSender } from "./push.ts";
 
 /**
@@ -23,7 +24,14 @@ export interface CorePorts {
   readonly logger: {
     info(fields: Readonly<Record<string, unknown>>, message: string): void;
     warn(fields: Readonly<Record<string, unknown>>, message: string): void;
+    error(fields: Readonly<Record<string, unknown>>, message: string): void;
   };
+  /** Where the service keeps its capabilities' own state. */
+  readonly capabilityStateRoot: string;
+  /** Where files the captain sends or saves are kept. */
+  readonly attachmentRoot: string;
+  /** Live settings, read when a choice is made rather than at startup. */
+  readonly settings: Pick<SettingsStore, "load">;
   /** Runs once the service's HTTP server listens, or at once if it already does. */
   whenListening(run: () => void): void;
   readonly onDoorwayChange?: (change: DoorwayChange) => void;
@@ -39,6 +47,8 @@ export interface DoorwayProjection {
 
 export interface CoreProjection {
   readonly doorway?: DoorwayProjection;
+  /** The browser extension's tools, from its host's catalog and calls. */
+  readonly browser?: BrowserToolPort;
 }
 
 export type CoreExtensions = ExtensionSupervisor<CorePorts, CoreProjection>;
@@ -52,6 +62,11 @@ export function createCoreExtensions(ports: CorePorts): CoreExtensions {
         "an extension stopped working",
       ),
   });
+}
+
+/** The browser tools a running extension adds, if any. */
+export function browserOf(extensions: CoreExtensions): BrowserToolPort | undefined {
+  return extensions.projections().find((projection) => projection.browser !== undefined)?.browser;
 }
 
 /** The first projection that carries a doorway, if any extension added one. */

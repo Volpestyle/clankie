@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { BODY_TRANSFER_ROUTES } from "@clankie/protocol/body-transfer";
-import type { SettingsStore } from "@clankie/settings";
+import { discordAttachmentRoot, type SettingsStore } from "@clankie/settings";
 import { createClankieApp, type ClankieApp } from "./app.ts";
 import type { ClankieAppDependencies } from "./app/types.ts";
 import type { BodyTransfer } from "./body-transfer.ts";
@@ -78,6 +78,9 @@ export async function serveDormantBody(options: {
     env,
     servicePorts: { port: options.port, relayPort: options.relayPort },
     logger,
+    capabilityStateRoot: join(options.stateRoot, "runner"),
+    attachmentRoot: discordAttachmentRoot(env),
+    settings: options.settingsStore,
     whenListening: (run) => void listening.then(run),
     ...(options.onDoorwayChange === undefined ? {} : { onDoorwayChange: options.onDoorwayChange }),
   });

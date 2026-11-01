@@ -75,12 +75,13 @@ interface ActivityObservationReadPort {
   current(signal?: AbortSignal): Promise<ActivityObservationSnapshot | undefined>;
 }
 
-interface BrowserToolPort {
+/** The browser extension's tools as the core calls them (ADR 0328). */
+export interface BrowserToolPort {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
   call(
     request: CallBrowserToolRequest,
     signal?: AbortSignal,
-    authority?: { shell?: boolean; guard?: () => Promise<void>; conversationId?: string },
+    authority?: { shell?: boolean; guard?: () => Promise<void>; conversationId?: string | undefined },
   ): Promise<CallBrowserToolResult>;
 }
 

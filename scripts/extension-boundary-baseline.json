@@ -77,7 +77,6 @@
     "captain/conversations/store.ts -> linear-wake-read.ts (tracker-linear)",
     "captain/conversations/store.ts -> linear-webhook.ts (tracker-linear)",
     "captain/deps.ts -> activity-sharing.ts (world)",
-    "captain/deps.ts -> browser-host.ts (browser)",
     "captain/deps.ts -> computer-use-harnesses.ts (computer)",
     "captain/deps.ts -> discord-captain-actions.ts (persona)",
     "captain/deps.ts -> discord-music.ts (persona)",

@@ -25,7 +25,7 @@ import type {
   GenerateVideoRequest,
   GenerateVideoResult,
 } from "@clankie/protocol";
-import type { BrowserHost } from "../browser-host.ts";
+import type { BrowserToolPort } from "../app/types.ts";
 import type { createDiscordCaptainActionClient } from "../discord-captain-actions.ts";
 import type { createDiscordMusicClient } from "../discord-music.ts";
 import type { createDiscordVoicePresenceClient } from "../discord-voice-presence.ts";
@@ -150,7 +150,7 @@ export interface CaptainDeps {
   readonly mcp: Pick<McpHost, "catalog" | "catalogStatus" | "call">;
   /** The mail tools only; the account catalog owns status and disconnect. */
   readonly email: Pick<EmailPort, "list" | "read" | "search" | "send">;
-  readonly browser: Pick<BrowserHost, "catalog" | "call">;
+  readonly browser: BrowserToolPort;
   readonly media: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
     /** `room` tags the render so the room that asked is told when it lands. */
