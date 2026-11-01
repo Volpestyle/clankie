@@ -26,7 +26,7 @@ const INHERITED_HERDR_IDENTITY = [
   "HERDR_TAB_ID",
 ] as const;
 
-export interface HerdrCoreSeatStart {
+interface HerdrCoreSeatStart {
   /** The hire's command, run as the terminal's own program. */
   readonly argv: readonly string[];
   readonly cwd: string;
@@ -37,7 +37,7 @@ export interface HerdrCoreSeatStart {
   readonly tab?: string;
 }
 
-export interface HerdrCoreTerminal {
+interface HerdrCoreTerminal {
   readonly address: string;
   readonly state: "live" | "finished";
   readonly labels: Readonly<Record<string, string>>;
