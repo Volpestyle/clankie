@@ -157,7 +157,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext, wake = tr
 }
 
 /** Wake routes are mounted only by the wake extension in the service composition. */
-export function registerLinearWakeRoutes(ctx: RegisterLinearRoutesContext) {
+function registerLinearWakeRoutes(ctx: RegisterLinearRoutesContext) {
   const operatorOf = ctx.operator ?? (async () => "unavailable" as const);
   ctx.app.on(["GET", "PUT"], "/v1/linear/routes", async (context) => {
     const operator = await operatorOf(context.req.raw);
