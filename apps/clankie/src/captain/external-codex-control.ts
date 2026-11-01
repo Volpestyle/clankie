@@ -27,13 +27,22 @@ export function codexSocketControl(
   mode: "steer" | "queue" = "steer",
 ): ExternalCodexControl {
   return async (sessionId, text, _codexHome, _endpoint, beforeDispatch) => {
+    // Nothing follows a queue, so its owner learns why nothing was sent instead of a bare "unavailable".
+    const unavailable = (cause: string): FleetSeatDelivery | undefined =>
+      mode === "queue"
+        ? {
+            outcome: "undelivered",
+            deliveryStage: "unavailable",
+            detail: `Codex queue unavailable (${cause}); nothing was sent.`,
+          }
+        : undefined;
     let client: CodexAppServerClient | undefined;
     let attempted = false;
     let messageId: string | undefined;
     let denied = false;
     try {
       const socket = await connect();
-      if (socket === undefined) return undefined;
+      if (socket === undefined) return unavailable("no connection to Codex's app server");
       client = new CodexAppServerClient(socket, () => {}, timeoutMs);
       if (socket.readyState !== WebSocket.OPEN)
         await new Promise<void>((resolve, reject) => {
@@ -64,13 +73,14 @@ export function codexSocketControl(
       const read = (await client.request("thread/read", { threadId: sessionId })) as {
         thread?: { id?: string; status?: { type?: string; activeFlags?: string[] } };
       };
+      if (read.thread?.id !== sessionId)
+        return unavailable("Codex's app server doesn't have this session open");
       if (
-        read.thread?.id !== sessionId ||
         !["active", ...(mode === "queue" ? ["idle", "systemError"] : [])].includes(
           read.thread.status?.type ?? "",
         )
       )
-        return undefined;
+        return unavailable(`Codex reports this session as ${read.thread.status?.type ?? "having no status"}`);
       if (mode === "steer" && read.thread.status?.activeFlags?.some((flag) => /waiting/iu.test(flag)))
         return {
           outcome: "undelivered",
@@ -137,7 +147,7 @@ export function codexSocketControl(
             ...(messageId === undefined ? {} : { messageId }),
             detail: `Codex ${mode} was not confirmed; inspect the exact session before resending: ${String(error)}`,
           }
-        : undefined;
+        : unavailable(error instanceof Error ? error.message : String(error));
     } finally {
       client?.close();
     }
