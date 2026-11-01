@@ -2501,6 +2501,7 @@ const clankie = await createClankieApp({
   prepareLocalClaudeShim: (action, binding) => prepareLocalClaudeShim(action, binding),
   deliveredFiles,
   herdrRuntime: herdr.status,
+  extensions,
   activitySharing,
   ...(activityAdmission === undefined ? {} : { activityAdmission }),
   ...(activityLaunches === undefined ? {} : { activityLaunches }),

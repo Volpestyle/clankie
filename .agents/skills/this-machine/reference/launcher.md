@@ -14,6 +14,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Start at login, restart after a crash       | `clankie autostart status`, `clankie autostart enable`, `clankie recover`                                                                                          |
 | Are processes up                            | `clankie status` (JSON; `clankie health` is an alias)                                                                                                              |
 | Sustained CPU or slow health                | `clankie runtime-health status`; `clankie runtime-health set --cpu-percent 50 --health-ms 1000 --sustained-seconds 300`; `/runtime-health` opens the settings menu |
+| Which extensions run                        | `clankie extensions` (`running`, `degraded` with a reason code, `off`; core serves the fleet regardless)                                                           |
 | Shipped skills                              | `clankie skills`; also `clankie doctor --json` → `skills`                                                                                                          |
 | Service model + local providers             | `clankie model status`                                                                                                                                             |
 | Add a local OpenAI-compatible runtime       | `clankie model add-local --id ds4 --base-url http://127.0.0.1:8000 --set`                                                                                          |

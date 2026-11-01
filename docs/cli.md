@@ -238,6 +238,16 @@ process CPU percentage, `/health` latency, fixed CPU/health reasons, alarm state
 delivery state, and the last incident duration. `/status` and `/doctor` show the
 same observation. Missing observations remain unknown.
 
+### `extensions`
+
+`clankie extensions` reads `GET /v1/extensions` (operator or paired device) and
+prints each extension's state as JSON: `running`, `degraded` with a fixed reason
+code such as `start_failed`, `off`, `starting` or `stopped`. It reads each
+running extension's health first, so an extension that just failed shows as
+degraded. `/health` carries the same list as last known, without the health
+read. The core serves the fleet whatever these say
+([ADR 0328](adr/0328-clankie-is-a-core-with-extensions.md)).
+
 ### `runtime-health`
 
 `clankie runtime-health status` reads the live observation and settings from the

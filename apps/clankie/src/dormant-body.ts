@@ -109,6 +109,7 @@ export async function serveDormantBody(options: {
     }),
     ...(connector === undefined ? {} : { publicGatewayHostBaseUrl: connector.hostBaseUrl }),
     publicGatewayDoorway: () => connector?.doorway ?? { state: "disabled" },
+    extensions,
   });
   const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: options.port });
   if (server.listening) serviceListening?.();

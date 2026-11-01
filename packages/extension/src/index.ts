@@ -135,6 +135,11 @@ export class ExtensionSupervisor<Ports extends object, Projection = never> {
     return [...this.entries.values()].map((entry) => this.reportOf(entry));
   }
 
+  /** The last known state of every extension, without reading health. */
+  public snapshot(): readonly ExtensionReport[] {
+    return [...this.entries.values()].map((entry) => this.reportOf(entry));
+  }
+
   /** What the running extensions add to the core's tools, routes and commands. */
   public projections(): readonly Projection[] {
     return [...this.entries.values()].flatMap((entry) =>

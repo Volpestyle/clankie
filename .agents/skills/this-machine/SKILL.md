@@ -87,6 +87,7 @@ The [full command table](reference/launcher.md#command-table) maps every job to 
 | This install                | `clankie doctor --json` (`ok` means the card was produced)           |
 | Can he take a turn          | `clankie doctor --json` → `captain` (`ready`, `no_model`, …)         |
 | Are processes up            | `clankie status` (`clankie health` is an alias)                      |
+| Which extensions run        | `clankie extensions` (`running`, `degraded` + reason, `off`)         |
 | Service model and effort    | `clankie model status`, `clankie model set provider/model`, `effort` |
 | Account connections         | `clankie accounts list`; `/connect accounts` in the console          |
 | Fleet and working policy    | `clankie fleet status`, `clankie project settings PROJECT`           |
