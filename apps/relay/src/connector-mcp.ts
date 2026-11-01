@@ -204,7 +204,8 @@ function connectorServer(
         "read_reports reads a lead thread's worker reports and acknowledge_reports marks them handled; answer a worker with message_agent. " +
         "list_issues lists the owner's projects and their issues, wherever each project tracks them; read_issue reads one with its comments; " +
         'save_issue creates or changes one and comment_issue comments, under each project\'s "Posting to your tracker" setting. ' +
-        "When you lead work through Clankie, follow the clankie_guide topic lead, the same guidance Clankie leads by. " +
+        "When you lead work through Clankie, follow the clankie_guide topic lead, the same guidance Clankie leads by, and its page lead/reference/connected-leads.md, written for connected leads: " +
+        "hire Clankie workers on the owner's machines for building and checking, desktop app first, one watcher per worker, one worker per task in a fresh worktree ending at a PR, and worker questions to leads, not the owner. " +
         "Its core rule: work never waits on CI; keep pushing and fixing, file each bug at the front of the queue by how badly it blocks the current goals, " +
         "run the full checks once when work is ready to merge, and never let a failure already on main block other work. " +
         "You can't otherwise type into a pane, close or move an agent, or reach Clankie himself here. " +
