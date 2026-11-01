@@ -106,7 +106,11 @@ weighing each harness's `allocation` in `worker_accounts`. Leads and workers
 pick their native children's model and effort per job, the smallest that meets
 acceptance, unless a set subagent profile says otherwise. Usage decisions start
 from a fresh `worker_accounts` / `clankie usage --json` reading in the same turn,
-never from an old warning. Unrelated work goes to a fresh hire, not a finished
+never from an old warning. To pace a push, read `burn` in `fleet_capacity`:
+a window whose recent percent per hour sits below `toUseAllByReset` will reset
+with capacity unused, so give it more independent work; one with `runsOutAt`
+before its reset is spending too fast, so move the next hires to another
+account. Its `lastHour` names which agents are spending it. Unrelated work goes to a fresh hire, not a finished
 seat: old context costs tokens every turn and invites mix-ups.
 
 ## Brief an owned result
