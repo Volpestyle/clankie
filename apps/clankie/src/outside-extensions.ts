@@ -101,7 +101,7 @@ const unavailable = (reason: string): never => {
 };
 
 /** Where `clankie extensions add` puts a pinned git source. */
-export function extensionCheckout(stateRoot: string, id: string, commit: string): string {
+function extensionCheckout(stateRoot: string, id: string, commit: string): string {
   return join(stateRoot, "extensions", id, commit);
 }
 
