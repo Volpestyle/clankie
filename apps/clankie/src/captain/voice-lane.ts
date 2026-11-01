@@ -1,3 +1,5 @@
+import type { VoiceSurface } from "../ports/voice.ts";
+
 /**
  * What the realtime voice is told about who it is and how it talks.
  *
@@ -21,9 +23,6 @@ function identitySection(instructions: string): string {
   const end = rest.findIndex((line) => /^# \S/u.test(line));
   return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n").trim();
 }
-
-/** Where a voice is: a Discord voice channel, or a private call from the owner's own device (VUH-2682). */
-export type VoiceSurface = "discord" | "call";
 
 const VOICE_WHERE: Readonly<Record<VoiceSurface, string>> = {
   discord:

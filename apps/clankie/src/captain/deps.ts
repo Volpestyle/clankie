@@ -38,6 +38,7 @@ import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
+import type { CaptainVoice } from "../ports/voice.ts";
 import type { CreateRoomTurns } from "./room-turns.ts";
 
 /**
@@ -64,6 +65,8 @@ export interface CaptainDeps {
   ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
   /** The persona's room turns: Discord messages, room wakes and owner forks (ADR 0328). */
   readonly roomTurns?: CreateRoomTurns;
+  /** Voice's lane instructions and device-call handoff, which its extension supplies while on (ADR 0328). */
+  readonly voice?: CaptainVoice;
   /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
   readonly activityTools?: (
     turn: import("./tools.ts").TurnContext,
