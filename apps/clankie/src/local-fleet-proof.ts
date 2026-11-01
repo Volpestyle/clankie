@@ -63,6 +63,20 @@ export interface LocalFleetProofOptions extends Pick<
   "launcher" | "canonical" | "harnessBinary"
 > {
   binding(): Promise<HerdrBinding | undefined>;
+  /**
+   * The Herdr desktop app's core, for a seat in one of its terminals (ADR 0319):
+   * its socket as a binding, so a proof stays bound to the core it was made against.
+   */
+  coreBinding?(): Promise<HerdrBinding | undefined>;
+  /**
+   * The live terminal Clankie started at this core address, with its program's pid;
+   * null when the core has no such terminal, or it isn't a live Clankie seat.
+   */
+  coreTerminal?(
+    binding: HerdrBinding,
+    address: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly pid: number } | null>;
   /** Server-owned private app-server registry; never supplied by a caller. */
   privateSeat?(
     ancestors: readonly number[],
@@ -219,7 +233,15 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
           );
     if (!["darwin", "linux"].includes(options.platform ?? process.platform))
       return refuse("unsupported_platform");
-    if (!/^w[\w]+:p[\w]+$/u.test(pane)) return refuse("invalid_pane");
+    // A Herdr pane, or one of Clankie's own terminals in the Herdr desktop app (ADR 0319).
+    const core = /^herdr-core\/(t\d+)$/u.exec(pane)?.[1];
+    if (
+      core === undefined
+        ? !/^w[\w]+:p[\w]+$/u.test(pane)
+        : options.coreTerminal === undefined || options.coreBinding === undefined
+    )
+      return refuse("invalid_pane");
+    const bindingOf = () => (core === undefined ? options.binding() : options.coreBinding!());
     const clientPort = socket.remotePort;
     const serverPort = socket.localPort;
     const alive = () =>
@@ -233,6 +255,12 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
     if (!alive() || !clientPort || !serverPort) return refuse("closed_socket");
     const paneInfo = async (binding: HerdrBinding) => {
       signal?.throwIfAborted();
+      if (core !== undefined) {
+        // The terminal's own program is its shell: a hire's harness execs in its place.
+        const terminal = await options.coreTerminal!(binding, core, signal);
+        signal?.throwIfAborted();
+        return terminal === null ? null : { pane_id: pane, shell_pid: terminal.pid };
+      }
       let result: unknown;
       try {
         result = options.run
@@ -270,7 +298,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       if (held.pane !== pane || observeBirth === undefined || (expected && !sameOwner(expected, held.owner)))
         return false;
       try {
-        const binding = await options.binding();
+        const binding = await bindingOf();
         signal?.throwIfAborted();
         if (binding?.socketPath !== held.binding.socketPath || binding?.session !== held.binding.session)
           return false;
@@ -299,7 +327,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
           )) !== true
         )
           return false;
-        const current = await options.binding();
+        const current = await bindingOf();
         signal?.throwIfAborted();
         return (
           alive() &&
@@ -319,7 +347,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       if (!alive()) return refuse("closed_socket");
     }
     try {
-      const binding = await options.binding();
+      const binding = await bindingOf();
       signal?.throwIfAborted();
       if (!binding) return refuse("missing_binding");
       const initial = await snapshot("initial", options.expectedOwner?.(socket) ?? owners.get(socket));
@@ -355,7 +383,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       if (!alive()) return refuse("closed_socket");
       if (!chain.includes(shell) && (await options.privateSeat?.(chain, pane, binding, signal)) !== true)
         return refuse("private_seat_expired");
-      const current = await options.binding();
+      const current = await bindingOf();
       signal?.throwIfAborted();
       if (!alive()) return refuse("closed_socket");
       if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)

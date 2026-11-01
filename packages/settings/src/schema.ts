@@ -421,6 +421,12 @@ export const FleetSettingsSchema = z
      */
     workerSandbox: z.enum(["on", "off"]).default("off"),
     /**
+     * Where this machine's new hires start (ADR 0319): `desktop` is the Herdr desktop
+     * app's own terminals, `herdr` a Herdr pane. `auto` stays on Herdr panes until the
+     * desktop app's hires are proven on the owner's Mac.
+     */
+    seatHost: z.enum(["auto", "desktop", "herdr"]).default("auto"),
+    /**
      * An idle native lead seat restarts fresh in its own pane, with a handoff
      * brief, once its session grows large or old (VUH-2274, ADR 0271).
      */

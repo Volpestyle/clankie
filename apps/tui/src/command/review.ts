@@ -14,6 +14,7 @@ import {
   readCandidatePatch,
 } from "../../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
 import { commandHost } from "./io.ts";
+import { seatIdentity } from "./seat-identity.ts";
 
 export const REVIEW_USAGE =
   "Usage: clankie review list [--project ID] | show ID [--patch] | status [--directory DIR] [--base REF] | waive --reason TEXT [--directory DIR] [--base REF] | submit --checkout DIR --summary TEXT [--issue KEY] [--evidence URL]... [--base REF]";
@@ -183,8 +184,9 @@ async function submitFromPane(
     else if (values.has(flag)) throw new Error(REVIEW_USAGE);
     else values.set(flag, value);
   }
-  const link = readLink(env.HERDR_SOCKET_PATH, env);
-  const pane = env.HERDR_PANE_ID?.trim();
+  const seat = seatIdentity(env);
+  const link = readLink(seat.socket, env);
+  const pane = seat.pane;
   if (!link || !pane)
     throw new Error(
       "Run clankie review submit in your own fleet pane: its link proves you are the author, as submit_for_review does.",

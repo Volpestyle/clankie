@@ -62,6 +62,8 @@ export interface HerdrCoreSeats {
   kill(address: string): Promise<void>;
   /** The terminal's text: its screen, with `lines` of history above it. */
   read(address: string, lines: number): Promise<string>;
+  /** Sets labels on a terminal Clankie started; an empty value removes one. */
+  label(address: string, labels: Readonly<Record<string, string>>): Promise<void>;
 }
 
 export interface HerdrCoreSeatsOptions {
@@ -122,6 +124,10 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
     async read(address, lines) {
       const read = (await call("terminal.read", { terminal: address, lines })) as { text?: unknown };
       return typeof read.text === "string" ? read.text : "";
+    },
+
+    async label(address, labels) {
+      await call("terminal.label", { terminal: address, labels: { ...labels } });
     },
 
     async kill(address) {

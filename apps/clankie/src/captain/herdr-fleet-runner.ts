@@ -135,10 +135,16 @@ export function createRemoteHerdrRunner(
  * terminal id to that fleet's runner, and everything it answers comes back
  * qualified the same way, so a watch, a seat or a hire records an id that still
  * names its machine after a restart. Bare ids stay on the local default fleet.
+ * `placeLocal` may name a fleet that holds this machine's new hires instead, such as
+ * the desktop app's terminals (ADR 0319); their ids then carry that fleet's prefix.
  */
 export function routeHerdrFleets(
   local: HerdrWatchRunner,
   fleets: ReadonlyMap<string, HerdrWatchRunner> | (() => Promise<ReadonlyMap<string, HerdrWatchRunner>>),
+  placeLocal?: (request: {
+    readonly harness?: string;
+    readonly command?: readonly string[];
+  }) => Promise<string | undefined>,
 ): HerdrWatchRunner {
   const current = async () => (typeof fleets === "function" ? fleets() : fleets);
   // Fleet factories refresh per call. Keep placement serialization at the
@@ -272,15 +278,21 @@ export function routeHerdrFleets(
       if (runner.renamePane === undefined) throw new Error("Herdr pane rename is unavailable");
       await runner.renamePane(id, label);
     },
-    createTab: async (options) => {
-      const runner = options.fleet === undefined ? local : (await current()).get(options.fleet);
-      if (runner?.createTab === undefined) throw new Error(`Unknown Herdr fleet ${String(options.fleet)}`);
-      const key = options.fleet ?? "local";
+    createTab: async (requested) => {
+      const placed = requested.fleet === undefined ? await placeLocal?.(requested) : undefined;
+      const fleet = requested.fleet ?? placed;
+      const { fleet: _requestedFleet, ...options } = requested;
+      const runner = fleet === undefined ? local : (await current()).get(fleet);
+      if (runner?.createTab === undefined) throw new Error(`Unknown Herdr fleet ${String(fleet)}`);
+      const key = fleet ?? "local";
       const next = (allocations.get(key) ?? Promise.resolve())
         .catch(() => undefined)
         .then(async () => {
-          const paneId = await runner.createTab!(options);
-          return options.fleet === undefined ? paneId : fleetQualified(options.fleet, paneId);
+          // A placed fleet holds this machine's own hires, so its runner gets no fleet to reach.
+          const paneId = await runner.createTab!(
+            fleet === undefined || placed !== undefined ? options : { ...options, fleet },
+          );
+          return fleet === undefined ? paneId : fleetQualified(fleet, paneId);
         });
       allocations.set(key, next);
       try {

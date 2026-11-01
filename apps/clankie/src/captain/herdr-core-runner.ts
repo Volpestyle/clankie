@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr-core-seats.ts";
@@ -10,6 +13,33 @@ import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr
 
 /** The prefix a desktop-app terminal's seat id carries; no Herdr fleet may take it. */
 export const HERDR_CORE_FLEET = "herdr-core";
+
+/** Labels a hire's terminal carries once its harness starts, so they outlive Clankie's restarts. */
+const AGENT_LABEL = "clankie.agent";
+const SESSION_LABEL = "clankie.session";
+
+/** The harnesses a desktop-app terminal can start so far, by the binary its owner runs. */
+const HARNESS_BINARIES: Readonly<Record<string, string>> = { claude: "claude" };
+
+/**
+ * A new hire's terminal runs this until Clankie hands it the harness command. The core
+ * starts a terminal with its program and takes no command after that, and Clankie never
+ * types into a terminal (ADR 0207), so the command arrives as a private file the
+ * launcher sources: it removes the file, then execs the harness in its place. A
+ * terminal whose command never comes ends after ten minutes.
+ */
+const LAUNCHER = [
+  'f="$1"',
+  "n=0",
+  'while [ ! -f "$f" ]; do',
+  "  n=$((n + 1))",
+  '  if [ "$n" -gt 3000 ]; then echo "Clankie never started this hire." >&2; exit 1; fi',
+  "  sleep 0.2",
+  "done",
+  '. "$f"',
+].join("\n");
+
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 /** The agent status OSC 7501 reports, in the words Herdr uses for a pane's agent. */
 const STATUSES = new Set(["idle", "working", "blocked", "done"]);
@@ -27,31 +57,47 @@ function agentOf(app: string | undefined): string {
 
 export interface HerdrCoreRunnerOptions {
   readonly seats: HerdrCoreSeats;
-  /** The native session a hire was launched into, which the core itself doesn't know. */
-  readonly session?: (address: string) => HerdrAgentSession | undefined;
+  /**
+   * A hire's turn as its harness's own hooks last reported it, for a terminal whose
+   * program reports no status of its own: the core keeps only OSC 7501 reports.
+   */
+  readonly turn?: (session: string) => "working" | "idle" | undefined;
+  /** A private directory for launch handoffs; only the service writes here. */
+  readonly launchDirectory?: string;
   readonly pollMs?: number;
 }
 
-/** The read and lifecycle half of a seat runner for the desktop app's core; hiring comes later. */
+/** A seat runner for the desktop app's core: it starts, reads, waits on and closes Clankie's hires. */
 export function createHerdrCoreRunner(
   options: HerdrCoreRunnerOptions,
-): HerdrWatchRunner & Required<Pick<HerdrWatchRunner, "readPane" | "closePane">> {
+): HerdrWatchRunner &
+  Required<Pick<HerdrWatchRunner, "readPane" | "closePane" | "createTab" | "startAgent">> {
   const { seats } = options;
   const pollMs = options.pollMs ?? POLL_MS;
+  /** Terminals waiting at the launcher, by address, with the file their command goes in. */
+  const pending = new Map<string, string>();
+  /** The program's own report, else its harness hooks' turn once Clankie started it, else unknown. */
+  const statusOf = (terminal: HerdrCoreTerminal, session: HerdrAgentSession | undefined): string => {
+    if (terminal.state !== "live") return "offline";
+    if (terminal.status !== undefined && STATUSES.has(terminal.status)) return terminal.status;
+    if (terminal.labels[AGENT_LABEL] === undefined) return "unknown";
+    return (session?.kind === "id" ? options.turn?.(session.value) : undefined) ?? "idle";
+  };
   const snapshot = (terminal: HerdrCoreTerminal): HerdrAgentSnapshot => {
-    const session = options.session?.(terminal.address);
+    const labeled = terminal.labels[SESSION_LABEL];
+    // The core knows no agent session: this is the one Clankie named at launch.
+    const session: HerdrAgentSession | undefined =
+      labeled === undefined
+        ? undefined
+        : { source: `herdr:${terminal.labels[AGENT_LABEL] ?? "claude"}`, kind: "id", value: labeled };
     const seat = terminal.labels[SEAT_LABEL];
     const live = terminal.state === "live";
     return {
       paneId: terminal.address,
       terminalId: terminal.address,
       ...(seat === undefined ? {} : { name: seat }),
-      agent: live ? agentOf(terminal.app) : "unknown",
-      status: !live
-        ? "offline"
-        : terminal.status !== undefined && STATUSES.has(terminal.status)
-          ? terminal.status
-          : "unknown",
+      agent: live ? agentOf(terminal.app ?? terminal.labels[AGENT_LABEL]) : "unknown",
+      status: statusOf(terminal, session),
       title: terminal.title ?? "",
       ...(session === undefined ? {} : { session }),
       ...(terminal.cwd === undefined ? {} : { workingDirectory: terminal.cwd }),
@@ -80,15 +126,16 @@ export function createHerdrCoreRunner(
       const agent = await get(address);
       if (done(agent) || agent.status === "offline" || (end !== undefined && Date.now() >= end)) return agent;
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, pollMs);
-        signal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            reject(signal.reason);
-          },
-          { once: true },
-        );
+        const aborted = () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        };
+        // Each delay takes its listener back, so a long wait holds one at a time.
+        const timer = setTimeout(() => {
+          signal.removeEventListener("abort", aborted);
+          resolve();
+        }, pollMs);
+        signal.addEventListener("abort", aborted, { once: true });
       });
     }
   };
@@ -109,8 +156,61 @@ export function createHerdrCoreRunner(
     },
     closePane: async (address, guard) => {
       await guard?.();
+      pending.delete(address);
       if ((await own(address)) === undefined) return;
       await seats.kill(address);
+    },
+    createTab: async (request) => {
+      if (request.fleet !== undefined) throw new Error("The desktop app's terminals belong to this machine");
+      const seat = request.paneLabel ?? request.label;
+      if (request.command !== undefined)
+        return seats.start({
+          argv: request.command,
+          cwd: request.cwd,
+          ...(request.env === undefined ? {} : { env: request.env }),
+          seat,
+          ...(request.pipeline === undefined ? {} : { tab: request.pipeline }),
+        });
+      if (options.launchDirectory === undefined)
+        throw new Error("The desktop app's terminals need a launch directory to start a harness");
+      await mkdir(options.launchDirectory, { recursive: true, mode: 0o700 });
+      const handoff = join(options.launchDirectory, `${randomUUID()}.sh`);
+      const address = await seats.start({
+        argv: ["/bin/sh", "-c", LAUNCHER, "clankie-seat", handoff],
+        cwd: request.cwd,
+        ...(request.env === undefined ? {} : { env: request.env }),
+        seat,
+        ...(request.pipeline === undefined ? {} : { tab: request.pipeline }),
+      });
+      pending.set(address, handoff);
+      return address;
+    },
+    startAgent: async ({ kind, paneId, args = [] }) => {
+      const handoff = pending.get(paneId);
+      if (handoff === undefined)
+        throw new Error(`Desktop-app terminal ${paneId} is not waiting for a harness`);
+      const binary = HARNESS_BINARIES[kind];
+      if (binary === undefined) throw new Error(`The desktop app's terminals can't start ${kind} yet`);
+      const terminal = await own(paneId);
+      if (terminal?.state !== "live") throw new Error(`Desktop-app terminal ${paneId} has ended`);
+      pending.delete(paneId);
+      // The session Clankie named (Claude's --session-id) stays on the terminal, since the core can't detect it.
+      const named = args.indexOf("--session-id");
+      const session = named < 0 ? undefined : args[named + 1];
+      await seats.label(paneId, {
+        [AGENT_LABEL]: kind,
+        ...(session === undefined ? {} : { [SESSION_LABEL]: session }),
+      });
+      const temp = `${handoff}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temp, `rm -f -- "$1"\nexec ${[binary, ...args].map(quote).join(" ")}\n`, {
+          flag: "wx",
+          mode: 0o600,
+        });
+        await rename(temp, handoff);
+      } finally {
+        await rm(temp, { force: true });
+      }
     },
   };
 }

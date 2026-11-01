@@ -336,6 +336,8 @@ export interface HerdrWatchRunner {
     readonly command?: readonly string[];
     /** A registered remote fleet (ADR 0184); absent is the local default. */
     readonly fleet?: string;
+    /** The harness this tab will hold, which decides where a local hire can start (ADR 0319). */
+    readonly harness?: string;
   }): Promise<string>;
   /** Start a harness in a pane already sitting at its shell prompt. */
   startAgent?(options: {
@@ -4744,6 +4746,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),
         cwd: input.workingDirectory,
+        harness: input.harness,
         label: hirePaneLabel(input.title, input.taskTitle, input.role),
         ...(resume === undefined ? {} : { paneLabel: resumePaneLabel(resume) }),
         ...(nativePrepared === undefined

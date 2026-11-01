@@ -13,6 +13,10 @@ import {
 import { WorkMedia } from "./work-media.ts";
 import { readProjectOutcomes } from "./project-outcomes.ts";
 import { AutoRoundRecord } from "./captain/auto-rounds.ts";
+import type { HerdrBinding } from "@clankie/protocol";
+import { herdrCoreSocketPath } from "./captain/herdr-core.ts";
+import { HERDR_CORE_FLEET } from "./captain/herdr-core-runner.ts";
+import { SEAT_LABEL, createHerdrCoreSeats } from "./captain/herdr-core-seats.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
@@ -1904,11 +1908,24 @@ const operatorSeatBindings = new OperatorSeatBindings(
       "Binding refusal observed during the preparation release",
     ),
 );
+// Clankie's hires in the Herdr desktop app's terminals (ADR 0319) reach the same listener.
+const herdrCoreBinding = async (): Promise<HerdrBinding> => ({
+  runtime: "external",
+  session: HERDR_CORE_FLEET,
+  socketPath: herdrCoreSocketPath(process.env),
+});
+const herdrCoreTerminal = async (binding: HerdrBinding, address: string) => {
+  const terminal = await createHerdrCoreSeats({ socketPath: binding.socketPath }).get(address);
+  return terminal?.state === "live" && terminal.labels[SEAT_LABEL] !== undefined && terminal.pid !== undefined
+    ? { pid: terminal.pid }
+    : null;
+};
 const localFleet = new LocalFleetLink({
   fixtureAdmission: (request, proof, socket, current) =>
     nativeFixtureAdmissions.handleOriginal(request, proof, socket, current),
   directory: join(stateRoot, "links"),
   binding: localFleetBinding,
+  coreSocket: () => herdrCoreSocketPath(process.env),
   projectProof: localProjectProof({
     harnessBinary: harnessBinaries.record,
     diagnostics: localProofDiagnostics(logger, "project", fleetHealthMetrics),
@@ -1932,6 +1949,8 @@ const localFleet = new LocalFleetLink({
   prove: localFleetAdmissionProof({
     diagnostics: localProofDiagnostics(logger, "fleet", fleetHealthMetrics),
     binding: localFleetBinding,
+    coreBinding: herdrCoreBinding,
+    coreTerminal: herdrCoreTerminal,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding, signal) => {
       if (await localCodexSeats.allowsAdmission(chain, pane, binding, undefined, signal)) return true;
