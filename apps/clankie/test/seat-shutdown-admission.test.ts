@@ -99,7 +99,6 @@ it.each(["seat attachment", "model images", "session startup"])(
       stateDir: root,
       workingDirectory: root,
       settings: new SettingsStore(join(root, "settings.json")),
-      personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
       deliveredFiles: {
         publish: unused,
         removeConversation: async () => {},

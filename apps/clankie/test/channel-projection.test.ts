@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createChannelProjection } from "../src/captain/channel-projection.ts";
+import { createChannelProjection } from "../src/captain/discord-channel-projection.ts";
 
 const CREDENTIAL = {
   guildId: "guild-1",

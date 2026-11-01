@@ -165,8 +165,16 @@ export async function prepareMacApp(
   }
 }
 
-/** Pairing capability stays in the existing private handoff, never installer output or argv. */
-export async function launchMacApp(root: string, path: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+/**
+ * Pairing capability stays in the existing private handoff, never installer output or argv.
+ * An update reopens the app in the background (`open -g`), so it never takes the owner's screen.
+ */
+export async function launchMacApp(
+  root: string,
+  path: string,
+  env: NodeJS.ProcessEnv,
+  options: { readonly background?: boolean } = {},
+): Promise<boolean> {
   try {
     // Only the app this installer just verified may take the handoff (VUH-2604).
     await exec(join(root, "bin/clankie"), ["companion", "trust", path, "--label", "Clankie"], {
@@ -179,7 +187,7 @@ export async function launchMacApp(root: string, path: string, env: NodeJS.Proce
     });
     const receipt = JSON.parse(stdout);
     if (receipt.ok !== true || receipt.localCompanion !== true) return false;
-    await exec("open", [path], { env, timeout: 30_000 });
+    await exec("open", options.background ? ["-g", path] : [path], { env, timeout: 30_000 });
     return true;
   } catch {
     return false;

@@ -38,7 +38,6 @@ it("puts a real room-turn refusal cause in the current bridge's error text", asy
       stateDir: join(root, "captain"),
       settings,
       discordEnvironment: {},
-      personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
     },
   );
   const room = captain.bodyRoomConversation("discord_presence", "40000:50000");

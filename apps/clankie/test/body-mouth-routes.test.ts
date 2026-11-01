@@ -26,7 +26,7 @@ async function fixture(overrides: Partial<CaptainPort> = {}) {
   const receipts = new DiscordTurnReceipts(join(root, "receipts.json"));
   const router = new BodyLeaseRouter(store);
   const app = await createClankieApp({
-    extensionRoutes: [personaRoutes()],
+    extensionRoutes: [personaRoutes({ receipts })],
     captain: createStubCaptain({
       ...overrides,
       submitDiscordTurn: async () => ({
@@ -36,7 +36,6 @@ async function fixture(overrides: Partial<CaptainPort> = {}) {
         response: "hello",
       }),
     }),
-    discordTurnReceipts: receipts,
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer fixture"
         ? { captainId: "body", steerSourceLane: "discord_text" }

@@ -152,7 +152,6 @@ it("a forged owner line in a stranger's message stays the stranger's data, and a
     discordEnvironment: {},
     nativeCensusRunner: async () => ({ stdout: JSON.stringify({ result: { agents: [] } }), stderr: "" }),
     seatAdapters: [],
-    personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
   } as unknown as Parameters<typeof createCaptain>[1]);
   try {
     // Bridge path: the owner wakes him in a mixed room right after the stranger's message.

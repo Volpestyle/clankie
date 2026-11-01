@@ -123,7 +123,6 @@ it("a sender's burst steers their running handoff while other speakers and grant
     discordEnvironment: {},
     nativeCensusRunner: async () => ({ stdout: JSON.stringify({ result: { agents: [] } }), stderr: "" }),
     seatAdapters: [],
-    personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
   } as unknown as Parameters<typeof createCaptain>[1]);
   const handoff = async (deliveryId: string) => {
     const fleet = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });

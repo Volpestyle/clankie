@@ -174,7 +174,6 @@ async function fixture(granted = false, runNativeRoomHandoff?: NativeRoomHandoff
       workingDirectory: root,
       settings,
       discordEnvironment: {},
-      personaImages: async () => ({ images: [], hash: "fake", files: [] }),
     },
   );
   fixtures.push({ captain, root });

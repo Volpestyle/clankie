@@ -5,12 +5,10 @@ import type { HarnessSeatAdapter } from "@clankie/agent-hosts";
 import { type ModelPurpose } from "@clankie/model-provider";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
-import { type AgentSession } from "@earendil-works/pi-coding-agent";
+import { type AgentSession, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { DeliveredFileStore } from "../delivered-files.ts";
-import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import { type FleetProjectMembership } from "../fleet-project-membership.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
-import { type PersonaImageSource } from "../persona-images.ts";
 import type { RemoteCodexLaunch, RemoteCodexRegistration } from "../remote-codex-seats.ts";
 import type { BodyHeartbeat } from "../scheduled-update.ts";
 import type { FleetResourceRuntime } from "../fleet-resource-runtime.ts";
@@ -133,7 +131,8 @@ export interface CaptainOptions {
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
   readonly localCodexSocket?: () => string | undefined;
   readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;
-  readonly personaImages?: PersonaImageSource;
+  /** The persona's look references, which its extension supplies (ADR 0328). */
+  readonly personaLook?: PersonaLook;
   /** Repo root: instructions.md lives here, skills are discovered here. */
   readonly repoRoot: string;
   /**
@@ -158,18 +157,19 @@ export interface CaptainOptions {
   /** Conversation-scoped file publication; bytes share the conversation retention lifecycle. */
   readonly deliveredFiles?: Pick<DeliveredFileStore, "publish" | "removeConversation"> &
     Partial<Pick<DeliveredFileStore, "beginUpload" | "appendUpload" | "commitUpload" | "attachment">>;
-  /**
-   * Trusted Discord runtime, used to make a channel's room and webhook
-   * (ADR 0146). It is also what answers which guild the managed server is, so an
-   * absent runtime is no Discord projection at all rather than a fallback to
-   * pasting — a deployment with no Discord bot has nothing to paste into.
-   * Only a runtime that is present but lacks `Manage Webhooks` leaves the
-   * manual path, and that webhook still has to be in the managed server.
-   */
-  readonly discordChannels?: Pick<
-    DiscordPresenceRuntimePort,
-    "provisionChannel" | "listRooms" | "swarmGuildId"
-  >;
+}
+
+/**
+ * The owner's references for how Clankie looks and feels, in core shapes. The
+ * persona supplies it from its mood board (ADR 0328); absent, sessions carry none.
+ */
+export interface PersonaLook {
+  /** Whether any references are configured, so a session carries them. */
+  readonly present: () => Promise<boolean>;
+  /** Shows the references before each turn, with the host's current context after them. */
+  readonly extension: (turnContext?: (prompt: string) => Promise<string>) => InlineExtension;
+  /** Their written description for a prompt, empty when there are none. */
+  readonly briefing: () => Promise<string>;
 }
 
 export interface LaneSession {

@@ -166,6 +166,7 @@ export function createHerdrSessionSource(
         ...(request.machine === undefined ? {} : { machine: request.machine }),
         ...(request.workingDirectory === undefined ? {} : { workingDirectory: request.workingDirectory }),
         ...(request.harness === undefined ? {} : { harness: request.harness }),
+        ...(request.account === undefined ? {} : { account: request.account }),
         ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
       });
       if (result.op !== "start_agent") throw new Error("Clankie answered with something else.");
@@ -260,6 +261,50 @@ export function createHerdrSessionSource(
         };
       }
       throw new SessionRefusal("The agent's thread kept changing. Try again.");
+    },
+
+    async close(id, leaveUnlanded) {
+      const result = await port.dispatch({
+        op: "close_seat",
+        schemaVersion: 1,
+        seatId: id,
+        ...(leaveUnlanded === undefined ? {} : { unlandedReason: leaveUnlanded }),
+      });
+      if (result.op !== "close_seat") throw new Error("Clankie answered with something else.");
+      if (result.closed) return { id, status: "closed", detail: "Its pane is closed." };
+      const refusal = result.refusal;
+      if (refusal === undefined)
+        return {
+          id,
+          status: "unavailable",
+          detail:
+            "Clankie couldn't close it or confirm it closed. Read the agent or list the sessions before trying again.",
+        };
+      if (refusal.reason === "not_found")
+        return {
+          id,
+          status: "refused",
+          detail: "No agent Clankie seats has that id now. List the sessions again.",
+        };
+      if (refusal.reason === "not_clankies_hire")
+        return {
+          id,
+          status: "refused",
+          detail:
+            "Clankie or a connected app didn't hire this agent (the owner or another agent started it), so it's the owner's to close.",
+        };
+      if (refusal.reason === "busy")
+        return {
+          id,
+          status: "refused",
+          detail: `It's ${refusal.status}, not finished. Close it once it's idle, or message it to wrap up first.`,
+        };
+      const where = refusal.worktrees.map((worktree) => worktree.path).join(", ");
+      return {
+        id,
+        status: "refused",
+        detail: `Its worktree has work that hasn't landed${where.length === 0 ? "" : ` (${where})`}. Land it first, or close again with leave_unlanded saying why it can stay behind.`,
+      };
     },
 
     async image(id, path) {
