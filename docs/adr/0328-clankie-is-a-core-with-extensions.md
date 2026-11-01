@@ -173,11 +173,19 @@ each step one pull request with no change in what he does:
    renaming them needs every body to read both names first, and buys nothing he
    would see.
 3. A `tracker-linear` extension owns the webhook and settings routes, its
-   client, request budget and mirrors, and projects its work-items backend. The routes, mirror and cutover commands included, landed 2026-11-01: they mount
+   client, request budget and mirrors, and projects its work-items backend.
+   The routes, mirror and cutover commands included, landed 2026-11-01: they mount
    as `tracker` routes where they always did, and the core's route host gives
    them its operator and owner checks, settings, clock and tracker wakes.
 4. The MCP hosts publish through the work-items port, so neither imports a
-   tracker.
+   tracker. Landed 2026-11-01 as ports the composition root fills: the MCP
+   host's `TrackerMcpAdapter` (`ports/tracker-mcp.ts`, filled by `linearMcp`)
+   carries the GraphQL escape hatch, worker publishing, compact write results
+   and budget refusals; catalog entries mark tools that write as a persona
+   (`writesAsPersona`), so worker grants name no tracker; work items take the
+   tracker's projects as `trackerProjects`; and fetched evidence bytes go
+   through the core's evidence store. The core imports no `tracker-linear`
+   file.
 
 GitHub and files trackers already sit behind `@clankie/work-items`; they move
 the same way once step 4 lands.
