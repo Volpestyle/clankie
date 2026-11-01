@@ -899,6 +899,17 @@ export function createOperatorService(
         projectEffort === undefined
           ? { effort: "medium", effortReason: "Started from a connected app; medium is the everyday level" }
           : { effortReason: "Started from a connected app; the project sets this worker effort" };
+      // Each start is new work. Where a settled earlier hire fences this place, it goes
+      // as a fresh intent after that hire, as Clankie's own new work there does (#100).
+      const freshIntent =
+        chosen.fleet === undefined
+          ? undefined
+          : ctx.herdrWatches.nextFreshIntent(chosen.fleet, harness, chosen.place.workingDirectory);
+      if (freshIntent !== undefined && !request.prompt?.trim())
+        return answer("refused", {
+          detail:
+            "An earlier agent here has finished, so a new one there needs its own first message. Try again with a prompt.",
+        });
       const hired = await ctx.hireSeat(
         {
           schemaVersion: 1,
@@ -906,6 +917,7 @@ export function createOperatorService(
           title,
           workingDirectory: chosen.place.workingDirectory,
           ...(chosen.fleet === undefined ? {} : { fleet: chosen.fleet }),
+          ...(freshIntent === undefined ? {} : { freshIntent }),
           projectId: chosen.projectId,
           hireKind: "worker",
           ...effort,

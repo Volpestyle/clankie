@@ -3433,6 +3433,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /** Retire completed receipts only against a complete census on their unchanged configured host. */
+  /**
+   * A new remote hire at a place whose last hire was settled, or that already
+   * holds fresh-intent history, can start only as a fresh intent after that
+   * last receipt (#100). Returns one for a caller that asks for new work on every
+   * call, such as a connected app's start_agent; undefined when an ordinary
+   * hire still fits. The fence still refuses while any hire there is unresolved.
+   */
+  public nextFreshIntent(
+    fleet: string,
+    harness: string,
+    workingDirectory: string,
+  ): { id: string; afterReceiptId: string } | undefined {
+    return this.hireReceipts.nextFreshIntent(JSON.stringify([fleet, harness, workingDirectory, "new"]));
+  }
+
   private async retireCompletedHires(
     fleet: string,
     scope: { baseKey?: string; paneId?: string },

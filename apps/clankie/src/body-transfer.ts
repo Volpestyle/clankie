@@ -148,6 +148,15 @@ class BodyTransferError extends Error {
   }
 }
 
+/**
+ * Only the body this source froze for can release or abort it. Another body's
+ * answer says nothing about whether the recorded destination applied the move,
+ * so trusting it could leave Clankie active on two machines (#101).
+ */
+function recordedDestination(record: BodyTransferRecord, destination: string): void {
+  if (record.peer !== destination) throw new BodyTransferError("answer_not_from_recorded_destination");
+}
+
 /** Runs `commit` only once the body is idle and closed to new turns, then shuts the service down. */
 export type BodyCutover = (commit: () => Promise<void>) => Promise<"ready" | "busy">;
 
@@ -371,7 +380,8 @@ export class BodyTransfer {
       const self = this.current();
       const record = self.transfers[request.transferId];
       if (record?.role === "source" && record.outcome === "released") return this.authority();
-      const { self: frozen } = this.frozenSource(request.transferId);
+      const { self: frozen, record: recorded } = this.frozenSource(request.transferId);
+      recordedDestination(recorded, request.destination);
       const activation = request.activation;
       if (
         activation.state !== "active" ||
@@ -397,6 +407,7 @@ export class BodyTransfer {
     const request = BodyTransferAbortRequestSchema.parse(input);
     return this.serial(async () => {
       const { self, record } = this.frozenSource(request.transferId);
+      recordedDestination(record, request.destination);
       if (request.discarded.transfers?.[request.transferId]?.outcome !== "burned")
         throw new BodyTransferError("destination_has_not_burned_transfer");
       await this.removeOutgoing(request.transferId);

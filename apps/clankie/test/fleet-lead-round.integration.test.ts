@@ -550,13 +550,8 @@ it("keeps an idle reporter parked through its report receipts and delivers them 
   const alert = f.captain.notifyFleetHealthAlert("w1:p4", "Fleet proof alert: child needs its lead.");
   const events = (await woken)!;
   expect(events[0]?.content).toBe("Worker w1:p4 (codex). Fleet proof alert: child needs its lead.");
-  expect(events.slice(1).map((event) => event.id)).toEqual(
-    expect.arrayContaining([
-      `report:${deliveryId}:stored`,
-      `report:${deliveryId}:taken`,
-      `report:${deliveryId}:acknowledged`,
-    ]),
-  );
+  // Its newest stage supersedes the stages it was never told (#97).
+  expect(events.slice(1).map((event) => event.id)).toEqual([`report:${deliveryId}:acknowledged`]);
   expect(events.slice(1).every((event) => event.source === "worker-report-receipt")).toBe(true);
   for (const event of events) expect(await f.captain.acknowledgeFleetSeatEvent("w1:p1", event.id)).toBe(true);
   expect(await alert).toBe(true);
