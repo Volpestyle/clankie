@@ -79,7 +79,6 @@
     "mcp-host.ts -> linear-request-budget.ts (tracker-linear)",
     "mcp-host.ts -> linear-write-receipt.ts (tracker-linear)",
     "work-items.ts -> linear-work-projects.ts (tracker-linear)",
-    "work-media.ts -> linear-import.ts (tracker-linear)",
     "worker-mcp.ts -> @clankie/play (world)",
     "worker-mcp.ts -> linear-publishing.ts (tracker-linear)",
     "worker-mcp.ts -> minecraft.ts (minecraft)"
