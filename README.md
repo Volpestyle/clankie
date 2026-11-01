@@ -33,8 +33,9 @@ clankie
 ```
 
 A Mac release with a published app pin also installs `Clankie.app` in
-`/Applications` and opens it to pair with the local service. The Mac starts with
-the desktop pet; the World window is opt-in. For a terminal-only install:
+`/Applications` and opens it to pair with the local service. On the Mac, Clankie
+is the desktop pet with a small panel for Sessions, the Feed and Settings. For a
+terminal-only install:
 
 ```sh
 curl -fsSL https://clankie.bot/install | sh -s -- --no-app
