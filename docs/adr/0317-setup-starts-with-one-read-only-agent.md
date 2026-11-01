@@ -29,7 +29,12 @@ starts at, refuses every hire.
   arguments, since an open prefix lets an option such as `git log --output`
   write a file. Every other tool, including
   edits, other shell commands, the web and `clankie_call`, is refused without
-  asking. Maximum trust mode never applies to it, and it refuses any
+  asking. Claude adds each settings file's allow rules together, and
+  `dontAsk` runs whatever any of them allows, so the hire starts with
+  `--setting-sources ""`: none of the owner's user, project or local settings
+  load. Its hooks and report tools come from the worker plugin, which its own
+  flag settings enable. Managed policy still loads, and the hire denies edits,
+  writes and the web outright, which holds even against a managed allow. Maximum trust mode never applies to it, and it refuses any
   permission, settings or extra-directory argument. Only a new Claude hire
   through its seat adapter can be read-only; other harnesses, resumed
   transcripts and bare terminal launches refuse it until they have an

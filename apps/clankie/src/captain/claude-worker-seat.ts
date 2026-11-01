@@ -170,6 +170,14 @@ const READ_ONLY_RULES = [
   "Bash(tailscale status --json)",
 ];
 
+/**
+ * Claude adds every settings file's allow rules to these, and `dontAsk` runs
+ * anything an inherited rule allows. A read-only hire therefore loads none of
+ * the owner's user, project or local settings: only these flag settings and any
+ * managed policy apply. The denies also hold against a managed allow.
+ */
+const READ_ONLY_DENY = ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"];
+
 /** Claude flags that would widen or replace a read-only hire's permissions. */
 const READ_ONLY_OVERRIDES =
   /^--(?:dangerously-skip-permissions|allow-dangerously-skip-permissions|permission-mode|allowed-?tools|settings|setting-sources|permission-prompt-tool|add-dir)(?:=|$)/u;
@@ -192,7 +200,9 @@ function claudeWorkerSettings(
     permissions: {
       allow: readOnly ? READ_ONLY_RULES : WORKER_SERVER_RULES,
       defaultMode: readOnly ? "dontAsk" : "auto",
-      ...(trackerDeny.length === 0 ? {} : { deny: [...trackerDeny] }),
+      ...(trackerDeny.length === 0 && !readOnly
+        ? {}
+        : { deny: [...(readOnly ? READ_ONLY_DENY : []), ...trackerDeny] }),
     },
   });
 }
@@ -210,6 +220,8 @@ export function claudeWorkerLaunchArgs(
   )
     throw new Error("A read-only hire cannot take permission or settings arguments");
   return [
+    // No inherited allow rule reaches a read-only hire (ADR 0317).
+    ...(launch.readOnly === true ? ["--setting-sources", ""] : []),
     "--settings",
     settings,
     "--channels",

@@ -1362,8 +1362,13 @@ it("a read-only hire starts Claude in dontAsk with only reading and reporting al
   });
   // The owner's maximum trust mode never lifts a read-only hire's permissions.
   expect(args).not.toContain("--dangerously-skip-permissions");
-  const settings = JSON.parse(args[1]!) as { permissions: { allow: string[]; defaultMode: string } };
+  // None of the owner's settings files load, so no inherited allow rule widens the list.
+  expect(args.slice(0, 2)).toEqual(["--setting-sources", ""]);
+  const settings = JSON.parse(args[args.indexOf("--settings") + 1]!) as {
+    permissions: { allow: string[]; deny: string[]; defaultMode: string };
+  };
   expect(settings.permissions.defaultMode).toBe("dontAsk");
+  expect(settings.permissions.deny).toEqual(expect.arrayContaining(["Edit", "Write", "WebFetch"]));
   expect(settings.permissions.allow).toEqual(
     expect.arrayContaining(["Read", "Glob", "Grep", "mcp__plugin_clankie-worker_worker__message_clankie"]),
   );
@@ -1379,4 +1384,8 @@ it("a read-only hire starts Claude in dontAsk with only reading and reporting al
       harnessArgs: ["--permission-mode", "bypassPermissions"],
     }),
   ).toThrow("read-only");
+  // An everyday hire keeps the owner's settings.
+  expect(claudeWorkerLaunchArgs({ harness: "claude", cwd: "/w", brief: "b" })).not.toContain(
+    "--setting-sources",
+  );
 });
