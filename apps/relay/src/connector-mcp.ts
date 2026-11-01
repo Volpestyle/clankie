@@ -354,6 +354,14 @@ function connectorServer(
               description:
                 "The account to hire on, exactly as fleet_capacity names it for that machine and harness. Leave it out and Clankie picks the account with the most spare capacity, skipping any the owner held; name one, even a held one, and it is used or the start is refused.",
             },
+            mcpServers: {
+              type: "array",
+              minItems: 1,
+              maxItems: 32,
+              items: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" },
+              description:
+                "The owner's own MCP servers, by their name in the harness config, that this job needs; a hire otherwise starts only its worker tools and what its checkout declares. Screen work on the owner's Mac runs in background windows through a Codex computer-use seat: harness codex with [\"node_repl\"].",
+            },
             prompt: {
               type: "string",
               minLength: 1,
@@ -857,11 +865,23 @@ function connectorServer(
           (account !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(account))
         )
           return failure("account is a label from fleet_capacity, such as default or james.");
+        const mcpServers = args.mcpServers;
+        if (
+          mcpServers !== undefined &&
+          (!Array.isArray(mcpServers) ||
+            mcpServers.length < 1 ||
+            mcpServers.length > 32 ||
+            !mcpServers.every((name) => typeof name === "string" && /^[A-Za-z0-9_-]{1,64}$/u.test(name)))
+        )
+          return failure(
+            'mcpServers is a list of MCP server names from the harness config, such as ["node_repl"].',
+          );
         const starting = sessions.start({
           ...(machine === undefined ? {} : { machine }),
           ...(workingDirectory === undefined ? {} : { workingDirectory }),
           ...(harness === undefined ? {} : { harness }),
           ...(account === undefined ? {} : { account }),
+          ...(mcpServers === undefined ? {} : { mcpServers: mcpServers as string[] }),
           ...(prompt === undefined ? {} : { prompt }),
         });
         // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).
