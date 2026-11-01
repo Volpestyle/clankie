@@ -260,6 +260,8 @@ export class HireOwners {
             ? {}
             : { hireConversationId: prior.hireConversationId }),
           ...(prior?.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
+          // Adoption sets the current lead, never who asked for the hire.
+          ...(prior?.startedBy === undefined ? {} : { startedBy: prior.startedBy }),
           ...(prior === undefined
             ? { hired: false }
             : prior.hired === undefined

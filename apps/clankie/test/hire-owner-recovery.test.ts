@@ -283,6 +283,9 @@ it("remembers who asked for a hire across restarts and reattachment, and never i
   expect(restarted.starter("hand-seat", "hand-occupant")).toBeUndefined();
   // A replacement occupant in the same seat is not the agent the app asked for.
   expect(restarted.starter("app-seat", "replacement")).toBeUndefined();
+  // A lead's later message adopts the hire; who asked for it stays.
+  restarted.adopt("app-pane", "app-seat", "app-occupant", owner, "app-session");
+  expect(restarted.starter("app-seat", "app-occupant")).toEqual({ kind: "app", deviceId: "phone" });
   restarted.readopt("app-pane-2", "app-seat-2", "app-occupant-2", owner, "app-session");
   restarted.bind("app-pane-2", owner, "app-seat-2", undefined, "app-occupant-2", "app-session");
   expect(new HireOwners(path).starter("app-seat-2", "app-occupant-2")).toEqual({

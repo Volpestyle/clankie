@@ -5362,11 +5362,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return asked?.kind === "owner" ? { kind: "owner" } : { kind: "clankie" };
       }
       const parentName =
-        seat?.owner === undefined && seat?.parentSeatId !== undefined
+        seat?.parentSeatId !== undefined
           ? result.agents.find((row) => row.seatId === seat.parentSeatId && row.machineId === agent.machineId)
               ?.name
           : undefined;
-      // Not hired and not spawned by another agent: someone started it by hand on the owner's machine.
+      // Adoption sets the current lead, not who started it. Not hired and not spawned by
+      // another agent: someone started it by hand on the owner's machine.
       return parentName ? { kind: "agent", name: parentName } : { kind: "owner" };
     };
     return {
