@@ -134,7 +134,7 @@ const unavailable = (detail: string): FleetSeatDelivery => ({
 });
 
 /** Proves the registered service is the process it names, before anything is sent. */
-export async function serviceAnswers(service: OpenCodeServiceRegistration): Promise<boolean> {
+async function serviceAnswers(service: OpenCodeServiceRegistration): Promise<boolean> {
   try {
     const info = await call(service, "GET", "/api/info");
     return info.status === 200 && (info.json as { pid?: unknown } | undefined)?.pid === service.pid;
