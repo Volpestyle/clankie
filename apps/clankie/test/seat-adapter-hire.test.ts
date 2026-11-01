@@ -324,6 +324,8 @@ it.each([
       transcript: (current) => routed.transcript!(current as HerdrAgentSnapshot),
       mailbox: { bound: () => true, deliver },
       timing: { readyMs: 10, receiptMs: 10, pollMs: 1, firstTurnMs: 10 },
+      // Claude takes the session id it is launched with.
+      newSessionId: () => "10000000-0000-4000-8000-000000000001",
     });
     const store = new HerdrWatchStore(join(root, "routed.json"), {
       runner: { ...routed, read },

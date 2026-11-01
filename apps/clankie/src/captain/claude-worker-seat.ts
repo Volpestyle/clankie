@@ -73,6 +73,8 @@ export interface ClaudeWorkerSeatDeps {
    * `--plugin-dir`. This install's own copy by default.
    */
   readonly workerRoot?: () => Promise<string>;
+  /** The id a fresh Claude session is launched with; a random UUID by default. */
+  readonly newSessionId?: () => string;
   readonly hooks: SeatHookLog;
   /** Current verified workspace policy; absent preserves native permission defaults. */
   readonly fleetGates?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<FleetGates>;
@@ -185,6 +187,8 @@ export function claudeWorkerLaunchArgs(
   startupPrompt?: string,
   /** The worker plugin's directory on the seat's machine. */
   workerRoot = shippedWorkerFile(),
+  /** The id a fresh session takes, so the seat binds to the session Clankie named (ADR 0319). */
+  sessionId?: string,
 ): string[] {
   return [
     "--settings",
@@ -195,6 +199,7 @@ export function claudeWorkerLaunchArgs(
     "--channels",
     `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
     ...(launch.resumeSessionId === undefined ? [] : ["--resume", launch.resumeSessionId]),
+    ...(launch.resumeSessionId === undefined && sessionId !== undefined ? ["--session-id", sessionId] : []),
     ...(launch.model === undefined ? [] : ["--model", launch.model]),
     ...(launch.effort === undefined ? [] : ["--effort", launch.effort]),
     ...(launch.harnessArgs ?? []),
@@ -1088,6 +1093,14 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
       }
       const nativePrompt = launch.resumeSessionId === undefined && launch.brief.length > 0;
+      // A fresh session takes the id Clankie names, unless the owner's own arguments pick one.
+      const namedSessionId =
+        launch.resumeSessionId === undefined &&
+        !(launch.harnessArgs ?? []).some((argument) =>
+          /^--(?:session-id|resume|continue|fork-session|from-pr)(?:=|$)|^-[rc]$/u.test(argument),
+        )
+          ? (deps.newSessionId ?? randomUUID)()
+          : undefined;
       await view.guard?.();
       let startAttempted = false;
       let startError: unknown;
@@ -1135,6 +1148,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
             ? undefined
             : `Execute the assignment in the clankieBrief JSON field of @${briefPath}`,
           workerRoot,
+          namedSessionId,
         );
         const unsafe = args.findIndex((argument) => /\p{Cc}/u.test(argument));
         if (unsafe >= 0)
@@ -1176,6 +1190,12 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           outcome: "failed",
           reason: "not_ready",
           detail: "Claude resumed a different session; no brief was sent",
+        };
+      if (namedSessionId !== undefined && sessionId !== namedSessionId)
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail: `Claude reported session ${sessionId}, not the ${namedSessionId} it was launched with; the brief may have been submitted, never replay it`,
         };
       const ref: SeatRef = { harness: "claude", sessionId, paneId: view.paneId };
       await view.bound?.(ref);

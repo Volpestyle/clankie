@@ -237,6 +237,8 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
     mailbox: { bound: () => bound, deliver },
     timing: { readyMs: 200, receiptMs: 200, pollMs: 10, firstTurnMs: 50 },
     trackerDeny: () => [],
+    // Claude takes the session id it is launched with.
+    newSessionId: () => SESSION,
   };
   const adapter = createClaudeWorkerSeatAdapter(deps);
   const start = vi.fn(async () => {
@@ -258,6 +260,38 @@ async function fixture(options: { approved?: boolean; binds?: boolean; echoes?: 
     unbind: () => (bound = false),
   };
 }
+
+it.each([true, false])(
+  "a fresh hire launches with the session id Clankie named and binds only to it (reported: %s)",
+  async (matching) => {
+    const f = await fixture();
+    const named = "20000000-0000-4000-8000-00000000000a";
+    const adapter = createClaudeWorkerSeatAdapter({ ...f.deps, newSessionId: () => named });
+    if (matching) Object.assign(f.agent, { session: { kind: "id", value: named } });
+    const result = await adapter.start({ harness: "claude", cwd: f.root, brief: "" }, f.view);
+    const args = (f.start.mock.calls[0] as unknown as [string, string[]])[1];
+    expect(args.slice(args.indexOf("--session-id"), args.indexOf("--session-id") + 2)).toEqual([
+      "--session-id",
+      named,
+    ]);
+    expect(result).toMatchObject(
+      matching
+        ? { outcome: "started" }
+        : { outcome: "failed", reason: "not_ready", detail: expect.stringContaining(`not the ${named}`) },
+    );
+    // A resume, or an owner argument that picks the session, leaves the id to Claude.
+    expect(
+      claudeWorkerLaunchArgs(
+        { harness: "claude", cwd: "/w", brief: "", resumeSessionId: SESSION },
+        [],
+        undefined,
+        undefined,
+        "/w",
+        named,
+      ),
+    ).not.toContain("--session-id");
+  },
+);
 
 it("consumes restart consent once for the exact admitted launch across the native start boundary", async () => {
   const f = await fixture();
