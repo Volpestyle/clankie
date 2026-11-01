@@ -42,7 +42,7 @@ import type { CreateRoomTurns } from "./room-turns.ts";
 import type { ChannelProjection } from "./conversations.ts";
 
 /** What the captain lends the persona's channel projection (ADR 0146, ADR 0328). */
-export interface ChannelProjectionHost {
+interface ChannelProjectionHost {
   /** The owner's current Discord settings, read fresh before each projection write. */
   readonly fleetSettings: () => Promise<import("@clankie/protocol").DiscordSettings>;
   readonly discordActions?: Pick<DiscordActionPort, "serverAction">;

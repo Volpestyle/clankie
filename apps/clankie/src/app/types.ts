@@ -410,7 +410,7 @@ export interface ClankieApp {
 }
 
 /** One Discord delivery's room, as the persona's receipt recorded it. */
-export interface RoomDeliveryOrigin {
+interface RoomDeliveryOrigin {
   readonly baseSessionKey?: string | undefined;
   readonly presenceSessionId: string;
   readonly characterId: string;

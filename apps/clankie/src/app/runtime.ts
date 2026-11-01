@@ -139,6 +139,7 @@ import {
   type DeviceAuthDenial,
   type DiscordBodyRouteState,
   type PendingCompletion,
+  type RoomDeliveryReceipts,
   type TrustedDeviceIdentity,
 } from "./types.ts";
 
@@ -241,7 +242,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
   >();
   // The persona's routes hand these over when they register (ADR 0328).
-  let discordTurnReceipts: import("./types.ts").RoomDeliveryReceipts | undefined;
+  let discordTurnReceipts: RoomDeliveryReceipts | undefined;
   let bodyRequestsOpen = true;
   let pumpingBodyRequests = false;
   const conversationBodyRouteAuthorized = (
