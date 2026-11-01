@@ -54,9 +54,9 @@ function retiredPersona(input: unknown): unknown {
 
 const MAX_AVATAR_BYTES = 512 * 1024;
 /** A character unseen and quiet this long has no agent left to hold its project role (#181). */
-export const PERSONA_ROLE_GONE_AFTER_MS = 7 * 86_400_000;
+const PERSONA_ROLE_GONE_AFTER_MS = 7 * 86_400_000;
 /** How often, and how long after start, gone characters' roles are swept. */
-export const PERSONA_ROLE_SWEEP_MS = 3_600_000;
+const PERSONA_ROLE_SWEEP_MS = 3_600_000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const LegacyPersonaFileSchema = z
   .object({

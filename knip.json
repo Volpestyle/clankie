@@ -10,6 +10,8 @@
     ".": {
       "entry": [
         "scripts/evals/run.mjs",
+        ".agents/dev-skills/*/replay-*.{ts,mjs}",
+        ".agents/dev-skills/*/model/*.mjs",
         "docs/testing/evidence-viewer.js",
         "scripts/build-remote-lead.mjs",
         "scripts/build-fixture-read.mjs",
