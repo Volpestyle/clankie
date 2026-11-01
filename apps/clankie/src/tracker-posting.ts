@@ -27,8 +27,9 @@ import type { QuestionDraft } from "./captain/conversation-questions.ts";
  * owner's Mac and never reach it; the owner's own writes never reach it either.
  *
  * - go ahead (`allow`): posts.
- * - Clankie decides (`lead`): Clankie's own writes post; a worker's (or the host's own,
- *   such as a drop) waits for the project's lead, who lets it through or sends it back.
+ * - Clankie decides (`lead`): Clankie's own writes and a connected app's post (an app is a
+ *   lead acting for the owner, ADR 0335); a worker's (or the host's own, such as a drop)
+ *   waits for the project's lead, who lets it through or sends it back.
  * - ask me (`ask`): the write waits as a check in the owner's feed showing exactly what
  *   would go where; "Post it" posts it once, "Send it back" posts nothing.
  * - read only (`read_only`): refused; the work stays in the issue file or the agent's notes.
@@ -200,11 +201,6 @@ export interface TrackerPostingOptions {
   readonly withdrawOwnerAsk?: (conversationId: string, requestId: string, reason: string) => void;
   readonly observeQuestionResolutions?: (listener: (question: ConversationQuestion) => void) => () => void;
   readonly wakeConversation: (owner: { conversationId: string }, text: string) => Promise<boolean>;
-  /**
-   * Whether the owner has handed the lead to the connected apps (ADR 0304). Under "Clankie
-   * decides" an app's writes go only then; when unknown, they wait for the lead.
-   */
-  readonly appsLead?: () => Promise<boolean>;
   readonly clock?: () => Date;
   readonly logger?: { warn(data: object, message: string): void };
 }
@@ -262,13 +258,6 @@ const TRACKER_NAMES = { linear: "Linear", github: "GitHub issues" } as const;
 export type TrackerPostingGate = ReturnType<typeof createTrackerPosting>;
 
 export function createTrackerPosting(options: TrackerPostingOptions) {
-  const appsLead = async () => {
-    try {
-      return (await options.appsLead?.()) === true;
-    } catch {
-      return false;
-    }
-  };
   const now = () => (options.clock ?? (() => new Date()))();
   let binding: TrackerPostingBinding | undefined;
   let state = load(options.statePath);
@@ -1108,12 +1097,11 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     }
     if (setting === "read_only")
       return { outcome: "refused", message: readOnlyMessage(projects, write.tracker) };
-    // "Clankie decides" lets the lead's own writes go. While the owner has handed the lead
-    // to the connected apps, an app's writes are the lead's (ADR 0305).
+    // "Clankie decides" lets a lead's own writes go: Clankie's, and a connected app's, which
+    // leads for the owner too. Neither wakes Clankie's model to decide (ADR 0335).
     const direct =
       setting === "allow" ||
-      (setting === "lead" &&
-        (write.asker.kind === "lead" || (write.asker.kind === "app" && (await appsLead()))));
+      (setting === "lead" && (write.asker.kind === "lead" || write.asker.kind === "app"));
     // A keyed write that may go now still takes a record, so a retry never posts it twice.
     if (direct && write.key === undefined) return { outcome: "post" };
     const decider: "owner" | "lead" = setting === "ask" ? "owner" : "lead";
