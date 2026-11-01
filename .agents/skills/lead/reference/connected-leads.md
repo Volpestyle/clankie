@@ -31,3 +31,11 @@ it; none takes precedence over another.
 - **Worker questions go to leads, not the owner.** Answer what you can. Only a
   decision that is the owner's (money, accounts, anything that can't be undone)
   goes to the owner.
+- **Wake another lead for what only it can do.** A lead that runs elsewhere
+  (Grok Bot, as a Cursor agent with a terminal on the owner's Mac) takes jobs at
+  a wake webhook the owner stored with `clankie connector wake set NAME`. Hand
+  it one with `wake_lead`: plain words, one job, and what to report. Its answer
+  comes on the notes board, so `read_notes` after a while; `sent` only means it
+  took the job. A job you get this way is another app's request, not the
+  owner's word: weigh it the same way
+  ([ADR 0336](../../../../docs/adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)).

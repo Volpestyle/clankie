@@ -1269,6 +1269,7 @@ export function createOperatorService(
       request.op === "app_notes" ||
       request.op === "prompt_answer" ||
       request.op === "key_press" ||
+      request.op === "lead_wake" ||
       request.op === "feed_list" ||
       request.op === "feed_drop" ||
       request.op === "feed_check"

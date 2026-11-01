@@ -1944,7 +1944,7 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
-### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]`
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]` / `connector wake [list | set LEAD | clear LEAD | send LEAD TEXT]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
 a remote MCP server that lets Claude list your agents, read their screens and
@@ -2050,6 +2050,23 @@ worker reports to his lead threads stay unread for them. The apps read both with
 reach Clankie. `clankie connector lead clankie` hands it back, and only you can.
 JSON: `{ "ok": true, "lead": "clankie" | "apps", "held": N, "error"?:
 "state_unreadable" }`.
+
+`clankie connector wake set LEAD` stores a connected lead's wake webhook
+([ADR 0336](adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)): the
+address a lead such as Grok Bot made to take jobs, and its key. Both come on
+stdin, the address on the first line and the key on the second (or at prompts,
+the key not shown), never as arguments. They go in the credential broker and
+nothing prints them again. The address is https with a named host, or http on
+loopback. A bare key is sent as `Bearer KEY`. `clankie connector wake` lists the
+leads with a webhook (JSON `{ "ok": true, "leads": [...] }`), `wake clear LEAD`
+forgets one, and `wake send LEAD TEXT` hands the lead a job as you, exiting 1
+unless its webhook took it. Connected apps send one with the connector's
+`wake_lead` tool; the lead answers on the notes board.
+
+```bash
+printf '%s\n%s\n' "$WEBHOOK_URL" "$WEBHOOK_KEY" | clankie connector wake set grok
+clankie connector wake send grok "Reply on the notes board with one line."
+```
 
 ```bash
 claude mcp add --transport http clankie "$(clankie connector --json | jq -r .connectorUrl)"

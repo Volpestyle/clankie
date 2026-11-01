@@ -297,6 +297,8 @@ const HEADLESS_COMMAND_HELP = [
       "  connector detect [on|off herdr] [--json]   Whether Herdr sessions are discovered, including ones just cleared",
       "  connector serve [on|off APP] [--json]   Which connected apps the connector serves",
       "  connector lead [clankie|apps] [--json]   Who leads Clankie's lead threads: Clankie, or the connected apps",
+      "  connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json]",
+      "                           A connected lead's wake webhook (address and key on stdin), and a job for it",
     ],
   },
   {

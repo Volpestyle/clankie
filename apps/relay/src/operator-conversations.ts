@@ -732,6 +732,17 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     }
     // And the app writing an issue; the service names it and passes the write through
     // the project's posting setting (ADR 0305).
+    // And the app waking a connected lead; the service names it from its device (ADR 0336).
+    if (serviceRequest.op === "lead_wake") {
+      if (serviceRequest.appDeviceId !== undefined) {
+        writeJson(response, 400, { error: "lead_wake_app_is_stamped" });
+        return true;
+      }
+      if (authorization.device.scope !== "connector") {
+        writeJson(response, 403, { error: "connector_device_required" });
+        return true;
+      }
+    }
     if (serviceRequest.op === "issue_write") {
       if (serviceRequest.appDeviceId !== undefined) {
         writeJson(response, 400, { error: "issue_write_app_is_stamped" });
@@ -831,6 +842,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "start_agent" ||
               // An app's issue write is lead work: what the lead files and moves.
               serviceRequest.op === "issue_write" ||
+              // Handing a connected lead a job is lead work too (ADR 0336).
+              serviceRequest.op === "lead_wake" ||
               serviceRequest.op === "move_seat" ||
               serviceRequest.op === "channel" ||
               serviceRequest.op === "update_persona" ||
@@ -858,6 +871,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (serviceRequest.op === "key_press")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (serviceRequest.op === "issue_write")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (serviceRequest.op === "lead_wake")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
@@ -1748,6 +1763,7 @@ const CONNECTOR_OPS = new Set([
   "work_items",
   "work_item_activity",
   "issue_write",
+  "lead_wake",
   "herdr_core_list",
   "herdr_core_read",
   "get",

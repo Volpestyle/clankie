@@ -223,6 +223,53 @@ export const KeyPressResultSchema = z
 export type KeyPressResult = z.infer<typeof KeyPressResultSchema>;
 
 /**
+ * Waking a connected lead (ADR 0336): a lead such as Grok Bot runs somewhere else and
+ * takes jobs at a webhook it made. The owner stores that webhook's address and key in
+ * Clankie's credential broker under a short name; an app or the owner hands the lead a
+ * job by that name, and only the text goes. The address and key never leave the Mac.
+ */
+export const LEAD_WAKE_TEXT_MAX = 4_000;
+export const LeadWakeNameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9-]{0,31}$/u, "A lead's name is 1 to 32 letters, digits or dashes, such as grok");
+export const LeadWakeResultSchema = z
+  .object({
+    outcome: z.enum(["sent", "not_set", "refused", "uncertain", "unavailable"]),
+    lead: LeadWakeNameSchema.optional(),
+    /** The webhook's HTTP status, when it answered. Never its body. */
+    status: z.number().int().min(100).max(599).optional(),
+    /** Every lead with a stored webhook, when the one named has none. */
+    leads: z.array(LeadWakeNameSchema).max(64).optional(),
+    message: z.string().min(1).max(1_000),
+  })
+  .strict();
+export type LeadWakeResult = z.infer<typeof LeadWakeResultSchema>;
+
+/**
+ * Where a lead's wake may be sent: an https address with a named host, or a loopback
+ * address over http for a lead on this Mac. No user info, no fragment.
+ */
+export function leadWakeUrl(raw: string): URL | undefined {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return undefined;
+  }
+  if (url.username !== "" || url.password !== "" || url.hash !== "") return undefined;
+  const host = url.hostname.replace(/^\[|\]$/gu, "");
+  const loopback = host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(host);
+  if (url.protocol === "http:") return loopback ? url : undefined;
+  if (url.protocol !== "https:") return undefined;
+  if (loopback) return url;
+  // A named host only: an address typed as numbers is no service anyone signed up for.
+  if (/^[\d.]+$/u.test(host) || host.includes(":") || !host.includes(".")) return undefined;
+  return url;
+}
+
+/**
  * Images a connected app passes to and from agents (ADR 0315). Images sent to
  * an agent ride the owner-attachment upload (ADR 0209); this many per message.
  */
@@ -419,6 +466,9 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
       return true;
     // An app's own issue writes, stamped by the relay and passed through posting (ADR 0305).
     case "issue_write":
+      return true;
+    // A job handed to a connected lead's stored webhook, stamped with the app (ADR 0336).
+    case "lead_wake":
       return true;
     default:
       return false;
