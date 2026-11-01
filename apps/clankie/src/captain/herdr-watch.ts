@@ -952,6 +952,8 @@ export interface ProjectHirePolicy {
     authority?: ConversationAuthority,
   ): Promise<string | undefined>;
   proof?(fleet: string, pane: string): Promise<ProjectHireProcessProof | undefined>;
+  /** Why the last proof for this pane was refused, in fixed words, when the observer kept it. */
+  proofRefusal?(pane: string): string | undefined;
   tools?(projectId: string): Promise<readonly string[]>;
 }
 
@@ -4411,10 +4413,19 @@ export class HerdrWatchStore implements HerdrWatchPort {
           proof.nativeOccupantId !== occupantId ||
           proof.pane !== agent.paneId ||
           proof.fleet !== (input.fleet ?? "default"))
-      )
+      ) {
+        const refused =
+          proof === undefined
+            ? this.projectPolicy?.proofRefusal?.(agent.paneId)
+            : proof.nativeOccupantId !== occupantId
+              ? "occupant_mismatch"
+              : proof.pane !== agent.paneId
+                ? "pane_mismatch"
+                : "fleet_mismatch";
         throw new Error(
-          "Native hire binding has no matching current process proof; delivery remains unconfirmed",
+          `Native hire binding has no matching current process proof${refused === undefined ? "" : ` (${refused})`}; delivery remains unconfirmed`,
         );
+      }
       this.projectHires.observe(allocation, agent.terminalId, occupantId, proof);
     }
   }

@@ -9,6 +9,7 @@ import {
   type MachineAccessLevel,
 } from "@clankie/protocol";
 import { localSandboxAccess, type ClankieSettings, type SettingsStore } from "@clankie/settings";
+import { HERDR_CORE_FLEET } from "./captain/herdr-core-runner.ts";
 
 interface JoinedMachineRegistry {
   has(id: string): boolean;
@@ -59,7 +60,8 @@ export async function requireRuntimeMachineAccess(
   required: MachineAccessLevel,
   joined?: JoinedMachineRegistry,
 ): Promise<MachineAccessFence> {
-  if (fleet === undefined || fleet === "default")
+  // The desktop app's terminals (ADR 0319) are this machine's, under its own ceiling.
+  if (fleet === undefined || fleet === "default" || fleet === HERDR_CORE_FLEET)
     return requireMachineAccess(settings, "local", required, joined);
   const policy = await settings.loadFenced();
   const connection = policy.settings.execution.connections.find((entry) => entry.id === fleet);

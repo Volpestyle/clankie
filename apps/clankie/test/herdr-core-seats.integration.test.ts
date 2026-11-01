@@ -201,6 +201,7 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   expect(address).toMatch(/^t\d+$/u);
   // Waiting at the launcher, the terminal is Clankie's but holds no harness yet.
   expect(await runner.get(address)).toMatchObject({ name: "ada · fix the login", status: "unknown" });
+  expect(await runner.paneShell!(address)).toEqual({ foreground: [] });
 
   const session = "0b9f3c5e-1d2a-4c8b-9e7f-6a5b4c3d2e1f";
   await runner.startAgent({
@@ -219,6 +220,11 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
     agent: "claude",
     status: "idle",
     session: { kind: "id", value: session },
+  });
+  // An agent read finds the harness as the terminal's own process, with no shell under it.
+  expect(await runner.paneShell!(address)).toEqual({
+    shellPid: started.pid,
+    foreground: [{ pid: started.pid, name: "claude" }],
   });
   // The handoff is gone once the harness started, and the directory is the service's alone.
   await until(async () => (await readdir(join(cwd, "launches"))).length === 0);

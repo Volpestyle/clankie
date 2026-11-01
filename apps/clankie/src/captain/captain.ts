@@ -917,6 +917,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       settings: async () => (await settings()).projects,
       ...(options.projectHireTools === undefined ? {} : { tools: options.projectHireTools }),
       ...(options.projectHireIdentity === undefined ? {} : { proof: options.projectHireIdentity }),
+      ...(options.projectHireRefusal === undefined ? {} : { proofRefusal: options.projectHireRefusal }),
       project: resolveHireProject,
     },
     ...(options.nativeSummariesPath === undefined ? {} : { summariesPath: options.nativeSummariesPath }),
