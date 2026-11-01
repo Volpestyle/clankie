@@ -20,7 +20,7 @@ import { ActivityPlaySource } from "../src/activity-play-source.ts";
 import { ActivitySharing } from "../src/activity-sharing.ts";
 import { createClankieApp } from "../src/app.ts";
 import { activityRoutes } from "../src/activity-routes.ts";
-import { activityTools } from "../src/captain/activity-tools.ts";
+import { activityTools } from "../src/activity-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { activityRoomLauncher } from "../src/captain/tools.ts";

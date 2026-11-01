@@ -64,7 +64,7 @@ import { SeatQuestionAnswerSchema } from "./codex-user-input.ts";
 import { joinWorld, stopPlay } from "./play.ts";
 import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
-import { activityTools, type ActivityRoomLauncher } from "./activity-tools.ts";
+import type { ActivityRoomLauncher } from "../ports/activity.ts";
 import { DISCORD_BODY_UNREACHABLE_MESSAGE } from "../discord-captain-actions.ts";
 import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
 import { routineTool } from "./routine-tools.ts";
@@ -245,8 +245,8 @@ export function captainTools(
           }),
         ]
       : []),
-    ...(deps.activitySharing && (lane === "operator" || lane.startsWith("discord_"))
-      ? activityTools(deps.activitySharing, turn, activityRoomLauncher(deps, turn, lane))
+    ...(deps.activityTools && (lane === "operator" || lane.startsWith("discord_"))
+      ? deps.activityTools(turn, activityRoomLauncher(deps, turn, lane))
       : []),
     ...(lane === "operator" && deps.linearWake ? linearWakeTools(deps.linearWake, turn) : []),
     ...(deps.bodyLeases === undefined

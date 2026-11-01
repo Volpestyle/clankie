@@ -45,7 +45,11 @@ export interface CaptainDeps {
   readonly harnessProcesses?: import("../fleet-harness-processes.ts").FleetHarnessProcesses;
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
-  readonly activitySharing?: import("../activity-sharing.ts").ActivitySharing;
+  /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
+  readonly activityTools?: (
+    turn: import("./tools.ts").TurnContext,
+    launcher: import("../ports/activity.ts").ActivityRoomLauncher | undefined,
+  ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
   /** The app note board's read (ADR 0301): notes connector apps left, information never orders. */
   readonly appNotes?: {
     read(
