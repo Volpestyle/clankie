@@ -5,7 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { createHerdrCoreRunner } from "../src/captain/herdr-core-runner.ts";
+import { createHerdrCoreRunner, readDesktopSeat } from "../src/captain/herdr-core-runner.ts";
 import { CLANKIE_SPACE, SEAT_LABEL, createHerdrCoreSeats } from "../src/captain/herdr-core-seats.ts";
 
 // A hire's terminal in the Herdr desktop app (ADR 0319), end to end against a real
@@ -171,6 +171,7 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   const runner = createHerdrCoreRunner({
     seats,
     launchDirectory: join(cwd, "launches"),
+    seatDirectory: join(cwd, "seats"),
     turn: () => undefined,
     pollMs: 50,
   });
@@ -202,8 +203,16 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   await until(async () => (await readdir(join(cwd, "launches"))).length === 0);
   expect((await stat(join(cwd, "launches"))).mode & 0o777).toBe(0o700);
 
+  // Clankie's own record of the seat, which its proof trusts over the terminal's labels.
+  expect(await readDesktopSeat(join(cwd, "seats"), address)).toEqual({
+    pid: started.pid,
+    agent: "claude",
+    session,
+  });
+
   await expect(runner.startAgent({ name: "ada", kind: "claude", paneId: address })).rejects.toThrow();
   await runner.closePane(address);
+  expect(await readDesktopSeat(join(cwd, "seats"), address)).toBeUndefined();
 
   // A resumed hire keeps the session it resumes.
   const resumed = await runner.createTab({ cwd: work, label: "ada · fix the login", harness: "claude" });

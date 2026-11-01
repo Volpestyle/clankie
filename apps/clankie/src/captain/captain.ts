@@ -616,6 +616,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const herdrCoreRunner = createHerdrCoreRunner({
     seats: herdrCoreSeats,
     launchDirectory: join(options.stateDir, "desktop-launches"),
+    seatDirectory: join(options.stateDir, "desktop-seats"),
     turn: (session) => {
       const last = seatHooks.latest(session);
       return last?.type === "turn_started" ? "working" : last?.type === "turn_completed" ? "idle" : undefined;

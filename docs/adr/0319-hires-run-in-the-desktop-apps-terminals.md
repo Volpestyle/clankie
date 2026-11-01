@@ -82,6 +82,13 @@ auto|desktop|herdr` pins it per machine for the rare owner who wants the
   starts, and nothing types into it, so the service writes the harness command
   to a private file the launcher sources, and the harness execs in the
   launcher's place. Its seat proof is then the terminal's own process.
+- Anything inside a terminal can relabel it through the core's socket, so a
+  seat's project proof trusts Clankie's private record of what he started (the
+  terminal's pid when the harness took it, and the session he named) rather
+  than its labels. The socket owner's ancestry must hold that pid, and the
+  kernel must show it running the installed harness. Under the worker sandbox,
+  the launcher starts inside the worker's Seatbelt profile, since a terminal
+  runs no shell to apply it.
 - The `w<n>:p<n>` checks scattered through proofs, the mailbox, connector
   routes and the worker bin accept a core address where a seat id is expected.
   Machine-access ceilings

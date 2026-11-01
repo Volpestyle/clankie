@@ -2,13 +2,16 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Socket } from "node:net";
 import { pinHerdrEnvironment } from "./herdr-session.ts";
-import type { HerdrBinding } from "@clankie/protocol";
+import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
+import { OPERATOR_SEAT_HARNESSES, type HerdrBinding } from "@clankie/protocol";
 import type { FleetProofRefusalReason } from "@clankie/protocol";
 import { nativeRequest, NativePaneNotFoundError } from "./herdr-native-request.ts";
 import type { NativeTransportReason } from "./native-process-transport.ts";
 import { FleetAdmissionUnavailableError } from "./local-fleet-admission.ts";
 import {
   createProjectProcessObserver,
+  installedLauncher,
+  matchesHarnessLauncher,
   type ProjectProcessProof,
   type ProjectProcessRefusal,
 } from "./project-process-proof.ts";
@@ -16,6 +19,7 @@ import type { LocalFleetProofRequestContext } from "./local-fleet-link.ts";
 import {
   fleetProcessHelper,
   observeSocketProcess,
+  observeNativeProcesses,
   type NativeSocketOwner,
   type NativeSocketProcess,
   type NativeProcessDiagnostic,
@@ -77,6 +81,16 @@ export interface LocalFleetProofOptions extends Pick<
     address: string,
     signal?: AbortSignal,
   ): Promise<{ readonly pid: number } | null>;
+  /**
+   * The harness Clankie started in that terminal, from his own private record of it (the
+   * terminal's labels can be rewritten by anything inside it); null unless the terminal is
+   * a live Clankie seat whose pid is still the one the harness took.
+   */
+  coreSeat?(
+    binding: HerdrBinding,
+    address: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly pid: number; readonly agent: string; readonly session: string } | null>;
   /** Server-owned private app-server registry; never supplied by a caller. */
   privateSeat?(
     ancestors: readonly number[],
@@ -438,6 +452,135 @@ export function localProjectProof(options: LocalFleetProofOptions) {
           signal,
         );
   const owners = new WeakMap<Socket, NativeSocketOwner>();
+  /**
+   * A desktop-app seat (ADR 0319): the launcher execs the harness in the terminal's own
+   * process, so there is no separate shell and foreground group to read. The harness is
+   * the terminal's pid in Clankie's private record, the socket owner's ancestry must hold
+   * it, and the kernel's view of it must be the installed harness, the same before and
+   * after the socket's second observation. Its parent (the core) stands in as the shell.
+   */
+  const coreProjectProof = async (
+    socket: Socket,
+    pane: string,
+    address: string,
+    signal: AbortSignal | undefined,
+    context: LocalFleetProofRequestContext | undefined,
+    report: (event: NativeProcessDiagnostic) => void,
+    nativeReason: () => FleetProofRefusalReason | undefined,
+    emit: (event: LocalFleetProofDiagnostic) => void,
+    refuse: (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => undefined,
+  ): Promise<ProjectProcessProof | undefined> => {
+    const clientPort = socket.remotePort;
+    const serverPort = socket.localPort;
+    const alive = () =>
+      !socket.destroyed &&
+      socket.readable &&
+      socket.writable &&
+      socket.remoteAddress === "127.0.0.1" &&
+      socket.localAddress === "127.0.0.1" &&
+      socket.remotePort === clientPort &&
+      socket.localPort === serverPort;
+    if (!alive() || !clientPort || !serverPort) return refuse("closed_socket");
+    try {
+      const binding = await options.coreBinding!();
+      signal?.throwIfAborted();
+      if (!binding) return refuse("missing_binding");
+      const seat = await options.coreSeat!(binding, address, signal);
+      signal?.throwIfAborted();
+      if (!seat || !OPERATOR_SEAT_HARNESSES.some((harness) => harness === seat.agent))
+        return refuse("pane_unavailable");
+      const launcher = await (options.launcher ?? installedLauncher)(seat.agent);
+      signal?.throwIfAborted();
+      if (!launcher) return refuse("observation_failed");
+      const initial = await observeSocket(
+        socket,
+        "initial",
+        pane,
+        options.expectedOwner?.(socket) ?? owners.get(socket),
+        signal,
+        context,
+        report,
+      );
+      signal?.throwIfAborted();
+      if (!initial) return refuse(nativeReason() ?? "native_initial_unavailable");
+      emit({ source: "socket_owner", owner: initial.owner });
+      if (!alive()) return refuse("closed_socket");
+      const harness = initial.ancestors.find((ancestor) => ancestor.pid === seat.pid);
+      if (!harness || harness.ppid <= 1) return refuse("not_member");
+      const processes = () =>
+        observeNativeProcesses(
+          harness.ppid,
+          seat.pid,
+          options.processHelper ?? fleetProcessHelper(),
+          options.run,
+          signal,
+          (event) => diagnostic(options, { source: "native", checkpoint: "initial", event }, pane, context),
+          (reason) => diagnostic(options, { source: "transport", reason }, pane, context),
+        );
+      const observed = await processes();
+      signal?.throwIfAborted();
+      if (!observed) return refuse("native_initial_unavailable");
+      const [shell, agent] = observed.processes;
+      const born = (process: {
+        pid: number;
+        birth: readonly [string, string];
+        kernelIdentity?: string | undefined;
+      }) =>
+        initial.ancestors.some(
+          (ancestor) =>
+            ancestor.pid === process.pid &&
+            JSON.stringify(ancestor.birth) === JSON.stringify(process.birth) &&
+            ancestor.kernelIdentity === process.kernelIdentity,
+        );
+      if (!shell || !agent || agent.ppid !== shell.pid || !born(shell) || !born(agent))
+        return refuse("snapshot_changed");
+      const match = await matchesHarnessLauncher(launcher, seat.agent, agent, options.canonical);
+      signal?.throwIfAborted();
+      if (!match) return refuse("not_member");
+      const final = await observeSocket(socket, "final", pane, initial.owner, signal, context, report);
+      signal?.throwIfAborted();
+      if (!final) return refuse(nativeReason() ?? "native_final_unavailable");
+      const again = await processes();
+      const seatAgain = await options.coreSeat!(binding, address, signal);
+      const current = await options.coreBinding!();
+      signal?.throwIfAborted();
+      if (!alive()) return refuse("closed_socket");
+      if (
+        JSON.stringify(final) !== JSON.stringify(initial) ||
+        JSON.stringify(again) !== JSON.stringify(observed) ||
+        JSON.stringify(seatAgain) !== JSON.stringify(seat)
+      )
+        return refuse("snapshot_changed");
+      if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
+        return refuse("binding_changed");
+      const nativeOccupantId = occupantIdForHerdrSession({
+        source: `herdr:${seat.agent}`,
+        kind: "id",
+        value: seat.session,
+      });
+      try {
+        options.harnessBinary?.(pane, nativeOccupantId, match.update);
+      } catch {
+        // A diagnostic observer never changes the proof.
+      }
+      owners.set(socket, initial.owner);
+      emit({ source: "proof_success" });
+      return {
+        fleet: "default",
+        pane,
+        nativeOccupantId,
+        binding: {
+          socketPath: binding.socketPath,
+          ...(binding.session === undefined ? {} : { session: binding.session }),
+        },
+        shell: { pid: shell.pid, startTime: nativeProcessStart(shell.birth, shell.kernelIdentity) },
+        processes: [{ pid: agent.pid, startTime: nativeProcessStart(agent.birth, agent.kernelIdentity) }],
+      };
+    } catch {
+      signal?.throwIfAborted();
+      return refuse("observation_failed");
+    }
+  };
   return async (
     socket: Socket,
     pane: string,
@@ -482,6 +625,11 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     };
     if (!["darwin", "linux"].includes(options.platform ?? process.platform))
       return refuse("unsupported_platform");
+    const core = /^herdr-core\/(t\d+)$/u.exec(pane)?.[1];
+    if (core !== undefined)
+      return options.coreBinding === undefined || options.coreSeat === undefined
+        ? refuse("invalid_pane")
+        : coreProjectProof(socket, pane, core, signal, context, report, () => nativeReason, emit, refuse);
     if (!/^w[\w]+:p[\w]+$/u.test(pane)) return refuse("invalid_pane");
     const clientPort = socket.remotePort;
     const serverPort = socket.localPort;

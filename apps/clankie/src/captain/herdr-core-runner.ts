@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
@@ -55,6 +55,54 @@ function agentOf(app: string | undefined): string {
   return app;
 }
 
+/**
+ * What Clankie started in one of his terminals, kept where only the service writes. A
+ * terminal's labels name its seat and session for anyone looking, but any process in
+ * the terminal can relabel it through the core's socket, so a seat's proof (ADR 0319)
+ * trusts this record: the terminal's pid when the harness took it, and its session.
+ */
+export interface DesktopSeatRecord {
+  readonly pid: number;
+  readonly agent: string;
+  readonly session: string;
+}
+
+const recordPath = (directory: string, address: string) => {
+  if (!/^t\d+$/u.test(address)) throw new Error(`Not a desktop-app terminal: ${address}`);
+  return join(directory, `${address}.json`);
+};
+
+/** The record Clankie kept for this terminal, or undefined when it kept none. */
+export async function readDesktopSeat(
+  directory: string,
+  address: string,
+): Promise<DesktopSeatRecord | undefined> {
+  try {
+    const value = JSON.parse(
+      await readFile(recordPath(directory, address), "utf8"),
+    ) as Partial<DesktopSeatRecord>;
+    return Number.isSafeInteger(value.pid) &&
+      value.pid! > 1 &&
+      typeof value.agent === "string" &&
+      typeof value.session === "string" &&
+      value.session.length > 0
+      ? { pid: value.pid!, agent: value.agent, session: value.session }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writePrivately(path: string, text: string): Promise<void> {
+  const temp = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, text, { flag: "wx", mode: 0o600 });
+    await rename(temp, path);
+  } finally {
+    await rm(temp, { force: true });
+  }
+}
+
 export interface HerdrCoreRunnerOptions {
   readonly seats: HerdrCoreSeats;
   /**
@@ -64,6 +112,8 @@ export interface HerdrCoreRunnerOptions {
   readonly turn?: (session: string) => "working" | "idle" | undefined;
   /** A private directory for launch handoffs; only the service writes here. */
   readonly launchDirectory?: string;
+  /** A private directory for the records a seat's proof trusts (readDesktopSeat). */
+  readonly seatDirectory?: string;
   readonly pollMs?: number;
 }
 
@@ -159,6 +209,8 @@ export function createHerdrCoreRunner(
       pending.delete(address);
       if ((await own(address)) === undefined) return;
       await seats.kill(address);
+      if (options.seatDirectory !== undefined)
+        await rm(recordPath(options.seatDirectory, address), { force: true });
     },
     createTab: async (request) => {
       if (request.fleet !== undefined) throw new Error("The desktop app's terminals belong to this machine");
@@ -212,16 +264,15 @@ export function createHerdrCoreRunner(
         [AGENT_LABEL]: kind,
         ...(session === undefined ? {} : { [SESSION_LABEL]: session }),
       });
-      const temp = `${handoff}.${randomUUID()}.tmp`;
-      try {
-        await writeFile(temp, `rm -f -- "$1"\nexec ${[binary, ...args].map(quote).join(" ")}\n`, {
-          flag: "wx",
-          mode: 0o600,
-        });
-        await rename(temp, handoff);
-      } finally {
-        await rm(temp, { force: true });
+      // The launcher execs the harness in its own place, so the terminal's pid becomes the harness's.
+      if (options.seatDirectory !== undefined && session !== undefined && terminal.pid !== undefined) {
+        await mkdir(options.seatDirectory, { recursive: true, mode: 0o700 });
+        await writePrivately(
+          recordPath(options.seatDirectory, paneId),
+          JSON.stringify({ pid: terminal.pid, agent: kind, session } satisfies DesktopSeatRecord),
+        );
       }
+      await writePrivately(handoff, `rm -f -- "$1"\nexec ${[binary, ...args].map(quote).join(" ")}\n`);
     },
   };
 }

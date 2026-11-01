@@ -15,7 +15,7 @@ import { readProjectOutcomes } from "./project-outcomes.ts";
 import { AutoRoundRecord } from "./captain/auto-rounds.ts";
 import type { HerdrBinding } from "@clankie/protocol";
 import { herdrCoreSocketPath } from "./captain/herdr-core.ts";
-import { HERDR_CORE_FLEET } from "./captain/herdr-core-runner.ts";
+import { HERDR_CORE_FLEET, readDesktopSeat } from "./captain/herdr-core-runner.ts";
 import { SEAT_LABEL, createHerdrCoreSeats } from "./captain/herdr-core-seats.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
@@ -1920,6 +1920,12 @@ const herdrCoreTerminal = async (binding: HerdrBinding, address: string) => {
     ? { pid: terminal.pid }
     : null;
 };
+const desktopSeats = join(stateRoot, "captain", "desktop-seats");
+const herdrCoreSeat = async (binding: HerdrBinding, address: string) => {
+  const terminal = await herdrCoreTerminal(binding, address);
+  const record = terminal === null ? undefined : await readDesktopSeat(desktopSeats, address);
+  return record !== undefined && record.pid === terminal?.pid ? record : null;
+};
 const localFleet = new LocalFleetLink({
   fixtureAdmission: (request, proof, socket, current) =>
     nativeFixtureAdmissions.handleOriginal(request, proof, socket, current),
@@ -1930,6 +1936,8 @@ const localFleet = new LocalFleetLink({
     harnessBinary: harnessBinaries.record,
     diagnostics: localProofDiagnostics(logger, "project", fleetHealthMetrics),
     binding: localFleetBinding,
+    coreBinding: herdrCoreBinding,
+    coreSeat: herdrCoreSeat,
     herdrBinary: "herdr",
     privateSeat: async (chain, pane, binding, signal) => {
       if (await localCodexSeats.allows(chain, pane, binding, undefined, signal)) return true;
