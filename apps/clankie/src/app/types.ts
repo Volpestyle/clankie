@@ -324,10 +324,8 @@ export interface ClankieAppDependencies {
     identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
   ) => Promise<unknown>;
   gameExtensions?: Pick<InstalledGameExtensions, "catalog" | "projections">;
-  minecraftPrivateDelivery?: Pick<
-    ReturnType<typeof import("../minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
-    "authorize"
-  >;
+  /** Checks a Discord body's private Minecraft login-code delivery; Minecraft's extension supplies it. */
+  minecraftPrivateDelivery?: { authorize(capability: string, payload: unknown): Promise<boolean> };
   /** Routes extensions add, such as computer use and skin drafts (ADR 0328). */
   extensionRoutes?: readonly import("../ports/routes.ts").ExtensionRoutes[];
   /**

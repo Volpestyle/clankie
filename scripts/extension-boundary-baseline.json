@@ -27,7 +27,6 @@
     "app/types.ts -> discord-room-observations.ts (persona)",
     "app/types.ts -> discord-room-routes.ts (persona)",
     "app/types.ts -> discord-room-voice.ts (voice)",
-    "app/types.ts -> minecraft-host-invite.ts (minecraft)",
     "app/types.ts -> persona-images.ts (persona)",
     "app/types.ts -> voice-receipt-activity.ts (voice)",
     "captain/activity-tools.ts -> activity-sharing.ts (world)",
@@ -65,7 +64,6 @@
     "captain/tools.ts -> discord-captain-actions.ts (persona)",
     "captain/tools.ts -> world/operations.ts (world)",
     "event-log.ts -> discord-presence-session.ts (persona)",
-    "game-extension-modules.ts -> discord-active-body.ts (persona)",
-    "worker-mcp.ts -> minecraft.ts (minecraft)"
+    "game-extension-modules.ts -> discord-active-body.ts (persona)"
   ]
 }
