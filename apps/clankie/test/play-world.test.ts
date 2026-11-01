@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { EmbodimentPlayNote, EmbodimentSession, WorldJoinRefusalReason } from "@clankie/protocol";
 import type { ActivityFrameSink } from "@clankie/rendered-surface-client";
 import { describe, expect, it, vi } from "vitest";
-import { joinWorld as askJoinWorld } from "../src/captain/play.ts";
+import { joinWorld as askJoinWorld } from "../src/world/play.ts";
 import { createWorldPlayExecution } from "../src/play-execution-world.ts";
 import { PlayHost, type EmbodimentAssignment, type EmbodimentLifecycleUpdate } from "../src/play-host.ts";
 import { parseFreePlayJournal } from "@clankie/play";
