@@ -1,3 +1,5 @@
+import type { ExtensionDescriptor, ExtensionHealth } from "@clankie/extension";
+
 /** Host-owned authority. None of these callbacks are model arguments or credentials. */
 export { GameExtensionRegistry } from "./registry.ts";
 export {
@@ -23,7 +25,7 @@ export type GameExtensionStatus =
   | { state: "idle" }
   | { state: "starting" | "running" | "stopping" | "uncertain"; sessionId: string };
 
-export type GameExtensionHealth = { state: "ready" } | { state: "degraded"; reason: string };
+export type GameExtensionHealth = ExtensionHealth;
 
 export interface GameExtensionRuntime<Request extends { sessionId: string }, Result> {
   /** Resolves only after the executor and cleanup settle. The host retains its durable lease. */
@@ -41,16 +43,21 @@ export interface GameExtensionRuntime<Request extends { sessionId: string }, Res
   deactivate?(): Promise<void>;
 }
 
-/** Different transports and motors share composition, not a synthetic universal action. */
-export interface GameExtension<Request extends { sessionId: string }, Result, Settings, Host> {
-  readonly contractVersion: 1;
-  readonly id: string;
+/**
+ * Different transports and motors share composition, not a synthetic universal action.
+ * A game is an ADR 0328 extension with its connector, skill and Activity surface on top.
+ */
+export interface GameExtension<
+  Request extends { sessionId: string },
+  Result,
+  Settings,
+  Host,
+> extends ExtensionDescriptor<Settings> {
   readonly connector:
     | { readonly kind: "native"; readonly package: string }
     | { readonly kind: "mcp"; readonly connection: string }
     | { readonly kind: "skill"; readonly sessionServer: string };
   readonly skill: { readonly name: string; readonly path: string };
-  readonly settings: { readonly key: string; readonly schema: { parse(input: unknown): Settings } };
   readonly activity: { readonly surface: string } | null;
   create(host: Host): GameExtensionRuntime<Request, Result>;
 }
