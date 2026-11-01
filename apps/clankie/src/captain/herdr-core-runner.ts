@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { hostname } from "node:os";
 import type { HerdrForegroundProcess } from "./codex-seat.ts";
 import type { HerdrCensusFleet } from "./herdr-census.ts";
-import type { HerdrAgentSession } from "./herdr-transcript.ts";
+import { readHerdrSeatTranscript, type HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import { SESSION_LABEL } from "./herdr-core.ts";
 import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr-core-seats.ts";
@@ -142,6 +142,12 @@ export interface HerdrCoreRunnerOptions {
   readonly launchDirectory?: string;
   /** A private directory for the records a seat's proof trusts (readDesktopSeat). */
   readonly seatDirectory?: string;
+  /**
+   * The installed harness as an absolute command (its executable, or interpreter and
+   * script), the same one a seat's process proof checks for. Unset or unresolved, the
+   * launcher looks the harness up on the terminal's own PATH.
+   */
+  readonly harnessCommand?: (harness: string) => Promise<readonly string[] | undefined>;
   readonly pollMs?: number;
 }
 
@@ -241,6 +247,8 @@ export function createHerdrCoreRunner(
     waitForChange: (address, current, signal) => until(address, (agent) => agent.status !== current, signal),
     waitUntilIdle: (address, signal) =>
       until(address, (agent) => ["idle", "working", "done"].includes(agent.status), signal, IDLE_WAIT_MS),
+    // The harness's own session file, as a Herdr pane's is read: Clankie named the session.
+    transcript: async (agent) => readHerdrSeatTranscript(agent.agent, agent.session),
     readPane: async (address, source) => {
       if ((await own(address)) === undefined)
         throw new Error(`The desktop app has no Clankie terminal ${address}`);
@@ -327,7 +335,11 @@ export function createHerdrCoreRunner(
           JSON.stringify({ pid: terminal.pid, agent: kind, session } satisfies DesktopSeatRecord),
         );
       }
-      await writePrivately(handoff, `rm -f -- "$1"\nexec ${[binary, ...args].map(quote).join(" ")}\n`);
+      // The desktop app's own PATH may find another install than the service's, which the
+      // seat's process proof would then refuse; exec the exact harness the proof expects.
+      // allow-swallowed-rejection -- an unresolved install falls back to the terminal's own PATH, as before
+      const command = (await options.harnessCommand?.(kind).catch(() => undefined)) ?? [binary];
+      await writePrivately(handoff, `rm -f -- "$1"\nexec ${[...command, ...args].map(quote).join(" ")}\n`);
     },
   };
 }

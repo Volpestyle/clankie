@@ -395,6 +395,103 @@ it.each([false, true])(
   },
 );
 
+it("a new hire settles an earlier stuck hire whose agent is gone, and leaves a running one fenced", async () => {
+  const { DeliveryFence, deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const f = await fixture();
+  const watchPath = join(f.root, "gone-watch.json");
+  const owner = { conversationId: "hiring-lead" };
+  const pane = "herdr-core/t21";
+  const key = JSON.stringify(["local", "claude", f.root, "new"]);
+  const original = new DeliveryFence(`${watchPath}.hire-receipts.json`).begin(key, {
+    fingerprint: deliveryFingerprint("old brief"),
+    paneId: pane,
+    beforeIds: [],
+  });
+  const { session: _session, ...bare } = f.agent;
+  const stuck: HerdrAgentSnapshot = { ...bare, paneId: pane, terminalId: pane };
+  let inventory: HerdrAgentSnapshot[] = [stuck];
+  const asked: (string | undefined)[] = [];
+  let tabs = 0;
+  const runner: HerdrWatchRunner = {
+    createTab: async () => {
+      tabs++;
+      throw new Error("No new tab in this test");
+    },
+    startAgent: async () => {
+      throw new Error("No launch in this test");
+    },
+    runInPane: async () => {
+      throw new Error("No fallback");
+    },
+    get: async (target) => {
+      const found = inventory.find((agent) => agent.paneId === target);
+      if (!found) throw new Error("pane absent");
+      return found;
+    },
+    resolveTerminal: async (target) => inventory.find((agent) => agent.terminalId === target),
+    list: async (fleet) => {
+      asked.push(fleet);
+      return inventory;
+    },
+    paneShell: async () => ({ shellPid: 4242, foreground: [{ pid: 4242, name: "claude" }] }),
+    wait: () => new Promise(() => {}),
+  };
+  const store = new HerdrWatchStore(watchPath, {
+    runner,
+    seatAdapters: [f.adapter],
+    validateOwner: async () => true,
+    workerAccountsReport: async () => ({
+      machine: "local",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "claude",
+          label: "fixture",
+          home: f.root,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "claude-usage",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
+  });
+  stores.push(store);
+  const request = {
+    schemaVersion: 1 as const,
+    harness: "claude" as const,
+    title: "Worker",
+    workingDirectory: f.root,
+    effort: "medium" as const,
+    effortReason: "Verify a stuck hire whose agent is gone frees its place.",
+  };
+  const hire = () =>
+    store.spawnSeat(request, undefined, "new brief", undefined, {
+      owner,
+      current: () => true,
+      authorize: async () => true,
+    });
+  // Its harness still runs in the recorded terminal: the place stays fenced, nothing starts.
+  expect(await hire()).toMatchObject({ outcome: "failed", receiptId: original.messageId });
+  expect(tabs).toBe(0);
+  // The agent is gone from the desktop app's list: Clankie settles it and starts the new hire.
+  inventory = [];
+  await hire();
+  expect(tabs).toBe(1);
+  expect(new Set(asked)).toEqual(new Set(["herdr-core"]));
+  expect(new DeliveryFence(`${watchPath}.hire-receipts.json`).settlement(original.messageId)).toMatchObject({
+    disposition: "abandoned",
+    journal: "local-host-inventory",
+    pane: { paneId: pane, present: false },
+  });
+});
+
 it("does not count a startup file reference, a truncated file or changed contents as brief acceptance", async () => {
   for (const kind of ["reference-only", "truncated", "changed"] as const) {
     const f = await fixture();
@@ -500,4 +597,62 @@ it("settles a legacy pane-absent failed start by allocation ID and releases it w
     gone: true,
     operatorRelease: expect.any(Object),
   });
+});
+
+it("settles a desktop-app hire whose terminal is gone, and its place takes a new hire", async () => {
+  const { DeliveryFence, deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const f = await fixture();
+  const path = join(f.root, "desktop-watch.json");
+  const pane = "herdr-core/t21";
+  const key = JSON.stringify(["herdr-core", "claude", f.root, "new"]);
+  const original = new DeliveryFence(`${path}.hire-receipts.json`).begin(key, {
+    fingerprint: deliveryFingerprint("old brief"),
+    paneId: pane,
+    beforeIds: [],
+  });
+  const live: HerdrAgentSnapshot = {
+    paneId: pane,
+    terminalId: pane,
+    agent: "claude",
+    status: "idle",
+    title: "",
+    workingDirectory: f.root,
+  };
+  let inventory: HerdrAgentSnapshot[] = [live];
+  const asked: (string | undefined)[] = [];
+  const store = new HerdrWatchStore(path, {
+    runner: {
+      get: async () => {
+        throw new Error("pane absent");
+      },
+      resolveTerminal: async () => undefined,
+      wait: async () => {
+        throw new Error("pane absent");
+      },
+      list: async (fleet) => {
+        asked.push(fleet);
+        return inventory;
+      },
+      paneShell: async () => ({ shellPid: 4242, foreground: [{ pid: 4242, name: "claude" }] }),
+    },
+  });
+  stores.push(store);
+  // A live harness in the original terminal is never settled away.
+  expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+    state: "refused",
+  });
+  inventory = [];
+  expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+    state: "abandoned",
+    receiptId: original.messageId,
+    evidence: { journal: "local-host-inventory", pane: { paneId: pane, present: false } },
+  });
+  expect(new Set(asked)).toEqual(new Set(["herdr-core"]));
+  store.close();
+  // The place is free again: a new hire there begins its own receipt.
+  const fence = new DeliveryFence(`${path}.hire-receipts.json`);
+  expect(fence.nextFreshIntent(key)).toBeUndefined();
+  expect(
+    fence.begin(key, { fingerprint: deliveryFingerprint("new brief"), beforeIds: [] }).messageId,
+  ).not.toBe(original.messageId);
 });

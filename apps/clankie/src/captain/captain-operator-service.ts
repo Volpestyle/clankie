@@ -45,6 +45,7 @@ import {
 } from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import { createHerdrCore, type HerdrCore } from "./herdr-core.ts";
+import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
 import { PersonaStore } from "./personas.ts";
@@ -822,7 +823,12 @@ export function createOperatorService(
           scope.forget(request.terminalId);
           return unavailable("The agent in that pane changed while it was read; read it again.");
         }
-        const { text, detail } = scope.bound(request.terminalId, occupant, history, screen);
+        // A desktop-app hire's terminal has run nothing but the harness Clankie started in it
+        // (ADR 0319): all of its history is that agent's own, so none of it is held back.
+        const { text, detail } =
+          splitFleetQualified(pane.paneId)?.fleet === HERDR_CORE_FLEET
+            ? { text: history, detail: undefined }
+            : scope.bound(request.terminalId, occupant, history, screen);
         return {
           op: "terminal_read",
           schemaVersion: 1,
