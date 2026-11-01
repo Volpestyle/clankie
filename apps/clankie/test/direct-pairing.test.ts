@@ -260,6 +260,46 @@ describe("same-Mac pairing", () => {
     expect(refreshed.relayUrl).toBe(LOOPBACK.relayUrl);
   });
 
+  it("lets the owner's Mac app show a phone pairing QR, and nobody else (ADR 0314)", async () => {
+    const { send, pair } = await sameMacService();
+    const session = await pair();
+    const offer = (headers: Record<string, string>, body: unknown = {}) =>
+      send("/v1/pairing/offer", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${session.deviceToken}`,
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      });
+
+    const minted = await offer({});
+    expect(minted.status).toBe(200);
+    const wire = PairingOfferWireSchema.parse(await minted.json());
+    expect(wire.direct).toBe(DIRECT.controlPlaneUrl);
+    expect(wire.qr?.modules).toHaveLength((wire.qr?.size ?? 0) ** 2);
+    // The QR carries the link a phone can scan, not the same-Mac short code.
+    const decoded = await import("qrcode").then(({ default: QRCode }) =>
+      QRCode.create(wire.deepLink, { errorCorrectionLevel: "M" }),
+    );
+    expect(wire.qr?.size).toBe(decoded.modules.size);
+
+    // A phone can redeem the offer the Mac app made.
+    const offerSecret = new URL(wire.deepLink).searchParams.get("offer");
+    const redeemed = await send("/v1/pairing/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-clankie-gateway": "1" },
+      body: JSON.stringify({ offerSecret, device: IOS }),
+    });
+    expect(redeemed.status).toBe(200);
+
+    // The device may not mint review or run offers, nor mint from off this Mac.
+    expect((await offer({}, { review: { days: 1 } })).status).toBe(403);
+    expect((await offer({ "x-clankie-gateway": "1" })).status).toBe(401);
+    expect((await offer({ authorization: "Bearer not-a-device" })).status).toBe(401);
+  });
+
   it("keeps the advertised route for requests the gateway forwards over loopback", async () => {
     const { pair } = await sameMacService();
     const session = await pair({ "x-clankie-gateway": "1" });

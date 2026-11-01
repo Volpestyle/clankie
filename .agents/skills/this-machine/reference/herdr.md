@@ -6,8 +6,10 @@ Machines and devices, worker defaults, which Herdr session Clankie uses and how 
 
 Machines run agents; devices are paired portals. Use `clankie machines --json`
 for configured machines and discovered candidates. `machines discover --json`
-refreshes bounded, non-prompting SSH discovery. An unreachable candidate remains
-listed; no probe starts Herdr or installs software.
+refreshes bounded, non-prompting SSH discovery: the owner's SSH aliases and the
+online computers on their tailnet, named by MagicDNS. Adding a Tailscale SSH
+machine trusts the host keys Tailscale reports for it. An unreachable candidate
+remains listed; no probe starts Herdr or installs software.
 
 `machines add NAME --ssh HOST [--shell posix|powershell]` immediately registers
 transcript reading and offers existing Herdr sessions. `machines sessions NAME`

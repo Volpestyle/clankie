@@ -155,9 +155,3 @@ keeps client and gateway implementation in their respective repositories.
 revision-fenced edits and exact-artifact approval. The [draft API and CLI](../../docs/skin-drafts.md)
 require host-proven owner authority; no schema field grants generation, spending
 or publication.
-
-`@clankie/protocol/hosted-browser-session` defines account-owned browser cleanup:
-`HostedOwnerDeviceSchema` is the signed body's device-membership declaration;
-`HostedBrowserRevocationSchema` and its exact-ID receipt describe account-owned
-revocation. The fleet keeps the idempotent tombstone even while a body sleeps.
-These payloads carry identifiers, never device tokens or encryption keys.

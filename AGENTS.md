@@ -67,8 +67,11 @@ This repository is public. Both neighbors are private and consume
   finding not yet fixed) goes in the issues of the private `clankie-app` or
   `clankie-ops` repo, never here. Create no new issues in the
   [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview);
-  issues already there keep being worked and updated there, and milestone
-  updates still go to that project.
+  issues already there keep being worked and updated there. Milestone updates
+  for this repo go to the status updates of the public
+  [Clankie GitHub Project](https://github.com/users/Volpestyle/projects/3), which
+  names only work in this repo; private milestones go to the owner's private
+  project.
 - Match the surrounding code and iterate with focused checks. On a shared
   machine, run builds, typechecks, test suites, installs and formatting/linting
   through `clankie heavy --` (the `fleet-resources` skill); CI runs them directly.

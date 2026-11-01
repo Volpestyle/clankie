@@ -1949,7 +1949,12 @@ the fleet can afford before a hire
 each metered account's plan, usage, remaining limit and reset, heavy-work
 permits, tracker request budgets, and each live pane's context against its
 budget. A number Clankie does not have is `"unknown"`. It does not include
-homes, emails or credentials, and it hires nothing. `list_issues` and `read_issue`
+homes, emails or credentials, and it hires nothing. `message_agent` can carry
+up to four images (by public https address or as base64), which the agent finds
+in its workspace under `.clankie/inbox/`, and `read_image` returns an image an
+agent saved in its working directory, such as a screenshot
+([ADR 0315](adr/0315-connected-apps-pass-images-to-and-from-agents.md)). Both
+work for agents on this Mac. `list_issues` and `read_issue`
 read your projects' issues, wherever each project tracks them. `save_issue`
 and `comment_issue` write them as that app, never as you: issue files are
 written right away, and Linear or GitHub follow the project's "Posting to your
@@ -3081,10 +3086,16 @@ Under owner closure, work stays In Review for the owner's ordinary verification.
   same report as `trackerRequestBudget`.
 - `clankie work init` records what discovery found; `work init --backend
 default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
-[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL]
+[--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--previous linear|none]
 [--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]` records the owner's
   choice. The answer is written to `.clankie/tracking.json` in the repo; nothing
   else is added to a repo that tracks work elsewhere.
+  `--previous linear` with `--backend github` is for a repo moving off Linear
+  (#81). It keeps the Linear scope recorded before (or the one `--linear-team`
+  names) readable: lists show GitHub's issues, then Linear's, and an existing
+  Linear issue is read, updated and commented on where it lives. Every new issue
+  goes to GitHub, never to Linear. `--previous none` drops Linear once its open
+  issues are done or no longer relevant.
   `--linear-label` saves an existing Linear label as `linear.label`, scoping
   this repo's board within its team/project and adding the label to new items.
   It requires a Linear convention with a team; blank, multiline or over-64-character
@@ -5728,7 +5739,14 @@ A machine is where agents run; a device is a paired phone or desktop portal.
 `machines` prints one row per machine: access level, Herdr sessions, state and worker count
 (`?` when unavailable). `--json` returns `{ observedAt, machines }` from
 `GET /v1/machines`. Discovery reads local Herdr sessions and literal aliases in
-the owner's SSH config (including bounded `Include` expansion). Probes use BatchMode and strict known-host checking,
+the owner's SSH config (including bounded `Include` expansion), and the online
+computers on the owner's tailnet from `tailscale status --json`
+([ADR 0314](adr/0314-setup-adds-the-phone-and-the-tailnet.md)). A tailnet
+machine is listed by its MagicDNS name with Tailscale's own name and platform.
+A Tailscale SSH machine is probed with the host keys Tailscale reports for it;
+`machines add` writes those keys to the service user's `known_hosts` only then,
+and leaves an entry already there for that name alone. A machine running its own
+sshd still needs its key in `known_hosts`. Probes use BatchMode and strict known-host checking,
 never prompt, start a server or install remote software. Four probes run at
 most concurrently, with a three-second probe deadline and a 6.5-second listing
 budget. Unreachable and still-discovering candidates remain visible. Results

@@ -1,6 +1,6 @@
 import { createAgentSessions } from "../src/agent-sessions.ts";
 import { createAgentSessionRoutes } from "../src/agent-session-routes.ts";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
@@ -349,6 +349,79 @@ test("named execution refuses a replacement socket installed after its caller's 
       ["agent", "list"],
       expect.objectContaining({ HERDR_SOCKET_PATH: "/tmp/replacement.sock" }),
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("discovery finds Herdr machines on the tailnet and trusts Tailscale's keys only on add (ADR 0314)", async () => {
+  const dir = await mkdtemp("/tmp/clankie-machine-tailnet-");
+  try {
+    const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBi0Zp4fQZ0Zp4fQZ0Zp4fQZ0Zp4fQZ0Zp4fQZ0Zp4f";
+    const status = JSON.stringify({
+      Self: { HostName: "Jamess-MacBook-Pro", DNSName: "mac.tail1234.ts.net.", OS: "macOS", Online: true },
+      Peer: {
+        a: { HostName: "Desktop", DNSName: "desktop.tail1234.ts.net.", OS: "windows", Online: true },
+        b: {
+          HostName: "box",
+          DNSName: "box.tail1234.ts.net.",
+          OS: "linux",
+          Online: true,
+          sshHostKeys: [key, "junk"],
+        },
+        c: { HostName: "phone", DNSName: "phone.tail1234.ts.net.", OS: "iOS", Online: true },
+        d: { HostName: "asleep", DNSName: "asleep.tail1234.ts.net.", OS: "linux", Online: false },
+        e: { HostName: "pc", DNSName: "pc.tail1234.ts.net.", OS: "windows", Online: true },
+      },
+    });
+    const knownHostsPath = join(dir, "ssh", "known_hosts");
+    const probes: string[][] = [];
+    const machines = new Machines({
+      settings: new SettingsStore(join(dir, "settings.json")),
+      primary: () => undefined,
+      changed: () => {},
+      sshConfig: async () => "Host pc",
+      tailnet: async () => status,
+      knownHostsPath,
+      run: async (cmd, args) => {
+        if (cmd !== "ssh") return { stdout: JSON.stringify({ sessions: [] }) };
+        probes.push([...args]);
+        const host = args[args.indexOf("--") + 1];
+        if (host === "desktop") throw new Error("Host key verification failed");
+        if (args.includes("agent")) return { stdout: "" };
+        return { stdout: JSON.stringify({ sessions: [{ name: "main" }] }) };
+      },
+    });
+    const result = MachineInventorySchema.parse(await machines.list(true));
+    // The ssh-config `pc` already reaches the tailnet's `pc`; phones and offline peers stay out.
+    expect(result.machines.map((machine) => machine.id)).toEqual(["local", "pc", "desktop", "box"]);
+    expect(result.machines.find((machine) => machine.id === "box")).toMatchObject({
+      name: "box",
+      platform: "linux",
+      ssh: "box",
+      shell: "posix",
+      configured: false,
+      state: "available",
+    });
+    expect(result.machines.find((machine) => machine.id === "desktop")).toMatchObject({
+      platform: "win32",
+      shell: "powershell",
+      state: "unreachable",
+    });
+    // Only the Tailscale SSH peer is probed with Tailscale's keys, still refusing any other key.
+    const boxProbe = probes.find((args) => args[args.indexOf("--") + 1] === "box")!;
+    expect(boxProbe).toContain("StrictHostKeyChecking=yes");
+    expect(boxProbe.find((arg) => arg.startsWith("UserKnownHostsFile="))).toMatch(
+      new RegExp(`^UserKnownHostsFile=${knownHostsPath} \\S+known_hosts$`, "u"),
+    );
+    const desktopProbe = probes.find((args) => args[args.indexOf("--") + 1] === "desktop")!;
+    expect(desktopProbe.some((arg) => arg.startsWith("UserKnownHostsFile="))).toBe(false);
+    // Nothing is trusted until the owner adds the machine.
+    await expect(readFile(knownHostsPath, "utf8")).rejects.toThrow();
+    await machines.add({ id: "box", ssh: "box", shell: "posix" });
+    expect(await readFile(knownHostsPath, "utf8")).toBe(`box ${key}\n`);
+    await machines.add({ id: "box", ssh: "box", shell: "posix" });
+    expect(await readFile(knownHostsPath, "utf8")).toBe(`box ${key}\n`);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
