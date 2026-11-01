@@ -652,6 +652,8 @@ export interface CaptainPort {
     requestIds: readonly string[],
     authority: import("./conversation-questions.ts").QuestionAuthority,
   ): Promise<import("./conversations/inbox-fence.ts").InboxQuestionReadFence>;
+  /** Take back a host-raised owner ask that is still open; an answer to it then counts for nothing. */
+  withdrawOwnerAsk(conversationId: string, requestId: string, reason: string): void;
   /** Raise an owner ask from the host in an existing chat (ADR 0245 surface ask). */
   requestOwnerAsk(
     conversationId: string,
@@ -803,6 +805,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     observeDurableMessages: () => () => {},
     observeQuestionResolutions: () => () => {},
     readOwnerAsk: () => undefined,
+    withdrawOwnerAsk: () => {},
     requestOwnerAsk: async (conversationId) => ({
       status: "refused",
       conversationId,

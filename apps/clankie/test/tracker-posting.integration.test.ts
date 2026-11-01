@@ -247,6 +247,8 @@ async function fixture(
         ...options,
       }),
     observeQuestionResolutions: (listener) => store.observeQuestionResolutions(listener),
+    withdrawOwnerAsk: (conversationId, requestId, reason) =>
+      store.cancelPendingQuestion(conversationId, reason, undefined, requestId),
     wakeConversation: wake,
   };
   const posting = createTrackerPosting(postingOptions);
@@ -288,6 +290,7 @@ async function fixture(
   posting.bind({
     execute: trackerPostingExecutor({ mcpHost: host, workItems }),
     repoTarget: (ref) => workItems.postingTarget(ref),
+    place: (ref) => workItems.postingPlace(ref),
     afterPosted: async (drop, posted) => {
       if (failDropMarks > 0) {
         failDropMarks -= 1;
@@ -798,6 +801,128 @@ it("a full record of decided posts drops its oldest, so a waiting post survives 
   expect(f.mutations("commentCreate")).toBe(0);
 });
 
+describe("a held write when its project moves from Linear to GitHub (#159)", () => {
+  const app = {
+    type: "agent-worker" as const,
+    id: "app:device-1",
+    name: "Claude Duet",
+    onBehalfOf: [TRACKER_OWNER],
+  };
+  const held = async (f: Awaited<ReturnType<typeof fixture>>, args: Record<string, unknown>) => {
+    await f.workItems.callTracker("list_issues", {}, { repo: f.garden, local: true });
+    const { repos } = (await f.workItems.handle({ action: "repos" }, true)) as {
+      repos: { id: string; root: string }[];
+    };
+    const repo = repos.find((entry) => entry.root === f.garden)!.id;
+    const error = await f.workItems.callTracker("save_issue", args, { repo, local: false, actor: app }).then(
+      () => undefined,
+      (caught: unknown) => caught as Error,
+    );
+    const id = /post ([0-9a-f-]{36})/u.exec(error?.message ?? "")?.[1];
+    if (id === undefined) throw new Error(`expected a hold, got ${String(error?.message)}`);
+    return id;
+  };
+  const toGitHub = (f: Awaited<ReturnType<typeof fixture>>) =>
+    writeConvention(f.garden, { ...decided, backend: "github", github: { repo: "fixture/garden" } });
+  const created = (f: Awaited<ReturnType<typeof fixture>>) =>
+    f.github.filter((entry) => entry.method === "POST" && entry.path.endsWith("/issues"));
+  const pending = async (f: Awaited<ReturnType<typeof fixture>>) => {
+    const listed = await f.dispatch({ op: "input_list", schemaVersion: 1 });
+    if (listed.op !== "input_list") throw new Error("unexpected list");
+    return listed.result.questions.filter((entry) => entry.question?.status === "pending");
+  };
+
+  it("a new issue moves to GitHub, waits for the owner's OK there, and posts once", async () => {
+    const f = await fixture();
+    await f.setPosting("garden", "ask");
+    const id = await held(f, {
+      title: "Wishlist: a pause button",
+      description: "From the lead's wishlist.",
+      priority: 2,
+      labels: ["Feature"],
+      state: "Todo",
+      assignee: "me",
+    });
+    const before = await pending(f);
+    expect(before).toHaveLength(1);
+    await toGitHub(f);
+    await f.posting.followMoves();
+    expect(f.posting.read(id)).toMatchObject({
+      tracker: "github",
+      state: "waiting",
+      decider: "owner",
+      summary: "Post a new issue: Wishlist: a pause button to GitHub issues",
+      note: expect.stringContaining("Moved from Linear"),
+    });
+    expect(f.posting.read(id)!.note).toContain("assignee");
+    // The Linear check is taken back and one for GitHub stands in its place.
+    const after = await pending(f);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.question!.requestId).not.toBe(before[0]!.question!.requestId);
+    expect(after[0]!.question!.prompt).toContain("Moved from Linear");
+    await f.settle(() => f.wakes().some((text) => text.includes(id) && text.includes("Moved from Linear")));
+    // A second look finds nothing more to move.
+    await f.posting.followMoves();
+    expect((await pending(f)).map((entry) => entry.question!.requestId)).toEqual([
+      after[0]!.question!.requestId,
+    ]);
+    await f.answer("Post it");
+    await f.settle(() => f.posting.read(id)?.state === "posted");
+    expect(created(f)).toMatchObject([
+      {
+        path: "/repos/fixture/garden/issues",
+        body: { title: "Wishlist: a pause button", labels: expect.arrayContaining(["Feature"]) },
+      },
+    ]);
+    expect(f.mutations("issueCreate")).toBe(0);
+  });
+
+  it("an owner's OK given to the old Linear check moves it instead of failing it", async () => {
+    const f = await fixture();
+    await f.setPosting("garden", "ask");
+    const id = await held(f, { title: "Held before the move" });
+    const old = await f.pendingAsk();
+    await toGitHub(f);
+    await f.answer("Post it", old);
+    await f.settle(() => f.posting.read(id)?.tracker === "github");
+    expect(f.posting.read(id)).toMatchObject({ state: "waiting" });
+    expect(created(f)).toEqual([]);
+    expect(f.mutations("issueCreate")).toBe(0);
+    await f.answer("Post it");
+    await f.settle(() => f.posting.read(id)?.state === "posted");
+    expect(created(f)).toHaveLength(1);
+  });
+
+  it("a change to a Linear issue can't follow, so it ends with why and leaves nothing in the feed", async () => {
+    const f = await fixture();
+    await f.setPosting("garden", "ask");
+    const id = await held(f, { id: ISSUE_ID, title: "Renamed" });
+    await toGitHub(f);
+    await f.posting.followMoves();
+    expect(f.posting.read(id)).toMatchObject({
+      state: "refused",
+      note: expect.stringContaining("It changes something on Linear"),
+    });
+    expect(await pending(f)).toEqual([]);
+    await f.settle(() => f.wakes().some((text) => text.includes(id) && text.includes("was not posted")));
+    expect(created(f)).toEqual([]);
+    expect(f.mutations("issueUpdate")).toBe(0);
+  });
+
+  it("a project now kept in private issue files ends its held posts", async () => {
+    const f = await fixture();
+    await f.setPosting("garden", "ask");
+    const id = await held(f, { title: "Going local" });
+    await writeConvention(f.garden, { ...decided, backend: "markdown", directory: ".clankie/work" });
+    await f.posting.followMoves();
+    expect(f.posting.read(id)).toMatchObject({
+      state: "refused",
+      note: expect.stringContaining("stays on this Mac"),
+    });
+    expect(await pending(f)).toEqual([]);
+  });
+});
+
 describe("a drop on a GitHub project", () => {
   const drop = async (f: Awaited<ReturnType<typeof fixture>>, key: string, body: string) => {
     const result = await f.dispatch({
@@ -826,24 +951,34 @@ describe("a drop on a GitHub project", () => {
     ]);
   });
 
-  it("is not posted when the project's GitHub repo changes while it waits for the owner", async () => {
+  it("is not posted where it wasn't asked when the project's GitHub repo changes; it asks the owner again there", async () => {
     const f = await fixture();
     await f.setPosting("pond", "ask");
     expect(await drop(f, "drop-pond-ask-me-0001", "Net the leaves")).toMatchObject({ posting: "waiting" });
+    const first = await f.pendingAsk();
     // The repo is moved to another GitHub repository before the owner answers.
     await writeConvention(f.pond, { ...f.pondConvention, github: { repo: "fixture/other" } });
-    await f.answer("Post it");
-    let posts: TrackerPost[] = [];
-    // The answer posts in the background; under a loaded machine that can take a while.
-    for (const deadline = Date.now() + 15_000; Date.now() < deadline;) {
-      const listed = await f.posts({ action: "list", state: "all" });
-      posts = (listed.body as { posts: TrackerPost[] }).posts;
-      // "posting" is on its way to an outcome; wait for the outcome itself.
-      if (posts.some((post) => post.state !== "waiting" && post.state !== "posting")) break;
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    expect(posts).toMatchObject([{ state: "failed", note: expect.stringContaining("tracker changed") }]);
+    const [post] = (await f.posts({ action: "list", state: "all" })).body.posts as TrackerPost[];
+    await f.answer("Post it", first);
+    // His OK was for the old repo: nothing goes, and a new check names where it would go now.
+    await f.settle(() => f.posting.read(post!.id)?.note?.includes("another GitHub issues home") === true);
+    expect(f.posting.read(post!.id)).toMatchObject({ state: "waiting" });
     expect(created(f)).toEqual([]);
+    const again = await f.pendingAsk();
+    expect(again.question.requestId).not.toBe(first.question.requestId);
+    await f.answer("Post it", again);
+    await f.settle(() => f.posting.read(post!.id)?.state === "posted");
+    expect(created(f)).toMatchObject([
+      { path: "/repos/fixture/other/issues", body: { title: "Net the leaves" } },
+    ]);
+    // The drop's file says where it went once it is marked.
+    const leaves = async () => (await readDrops(f.pond)).find((entry) => entry.title === "Net the leaves");
+    for (
+      const deadline = Date.now() + 15_000;
+      Date.now() < deadline && (await leaves())?.posted === undefined;
+    )
+      await new Promise((r) => setTimeout(r, 10));
+    expect((await leaves())?.posted).toMatchObject({ tracker: "github" });
   });
 });
 

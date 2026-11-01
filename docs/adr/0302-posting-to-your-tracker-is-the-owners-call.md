@@ -95,3 +95,19 @@ start on `allow` (Go ahead). The four values, the strictest-wins rule, the
 always-writable files on the Mac and the owner's own writes are unchanged.
 Anyone who wants each post shown first picks Ask me for that project, and a
 saved value of any kind keeps applying.
+
+## Amendment: Held writes follow their project (2026-11-01)
+
+A held write named the tracker its project used when it was asked. When the
+clankie project moved from Linear to GitHub issues, its waiting writes still
+showed as approvable checks, and each approval was refused (#159).
+
+A held write now follows its project. Clankie compares each waiting write's
+destination with its project's saved tracker at start, every minute, and again
+on approval. A new issue moves to the new tracker with what that tracker takes
+(title, description and priority, plus labels and a plain state on GitHub),
+names anything left out, and waits for the owner's OK there whatever the
+setting, because his OK named another place. A change or comment on an issue in
+the old tracker, or a project now kept on the Mac, ends `refused` with why. The
+old feed check is taken back, and the asker hears what happened. The host-only
+destination check before sending stays as the last guard.

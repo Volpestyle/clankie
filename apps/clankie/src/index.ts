@@ -710,6 +710,8 @@ const trackerPosting = createTrackerPosting({
   requestOwnerAsk: (conversationId, draft, publicationId, options) =>
     captain.requestOwnerAsk(conversationId, draft, publicationId, options),
   readOwnerAsk: (requestId) => captain.readOwnerAsk(requestId),
+  withdrawOwnerAsk: (conversationId, requestId, reason) =>
+    captain.withdrawOwnerAsk(conversationId, requestId, reason),
   observeQuestionResolutions: (listener) => captain.observeQuestionResolutions(listener),
   wakeConversation: (owner, text) => captain.wakeConversation(owner, text),
   // A damaged lead setting reads as the apps leading for Clankie's turns; here it holds writes.
@@ -990,6 +992,7 @@ const workItems = createWorkItemsService({
 trackerPosting.bind({
   execute: trackerPostingExecutor({ mcpHost, workItems }),
   repoTarget: (repo) => workItems.postingTarget(repo),
+  place: (repo) => workItems.postingPlace(repo),
   afterPosted: (drop, posted) => recordDropPosted(drop.root, drop.key, posted),
 });
 // Read-only capability discovery on this host and registered Windows fleets.

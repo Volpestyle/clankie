@@ -3422,6 +3422,15 @@ it names none Clankie can match, the default applies.
   raised) and says which. Do not retry it: the same write while it waits is the
   same post, never a second one. Clankie's lead chat hears how each held write
   ended and passes it on to the worker who asked.
+- **When the project moves.** A held write follows its project when it starts
+  tracking its work somewhere else, such as from Linear to GitHub issues or to
+  another GitHub repo (#159). Clankie checks every minute, at start and on
+  approval. A new issue moves there with its title, description and priority,
+  plus labels and a plain state on GitHub; anything else is left out and named.
+  It then waits for the owner's OK there, whatever the setting, and his check
+  for the old place is taken back. A change or comment on an issue in the old
+  tracker, or a project now kept on this Mac, can't follow: it ends `refused`
+  with why. Either way the asker hears it, so it isn't sent twice.
 - **Never twice.** A post is marked as sending before it goes. If the service
   stops in between, it reads `uncertain` and is never sent again; check the
   tracker by hand.
