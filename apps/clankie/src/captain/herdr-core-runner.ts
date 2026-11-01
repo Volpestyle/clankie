@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { hostname } from "node:os";
 import type { HerdrForegroundProcess } from "./codex-seat.ts";
@@ -48,6 +48,8 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const STATUSES = new Set(["idle", "working", "blocked", "done"]);
 const SETTLED = new Set(["idle", "done", "blocked"]);
 const POLL_MS = 500;
+/** How long a start waits for the launcher to take its handoff; it polls every 0.2 s. */
+const LAUNCH_HANDOFF_MS = 3_000;
 const IDLE_WAIT_MS = 30_000;
 const HISTORY_LINES = 2_000;
 
@@ -320,6 +322,23 @@ export function createHerdrCoreRunner(
       const terminal = await own(paneId);
       if (terminal?.state !== "live") throw new Error(`Desktop-app terminal ${paneId} has ended`);
       pending.delete(paneId);
+      // The desktop app's own PATH may find another install than the service's, which the
+      // seat's process proof would then refuse; exec the exact harness the proof expects.
+      // allow-swallowed-rejection -- an unresolved install falls back to the terminal's own PATH, as before
+      const command = (await options.harnessCommand?.(kind).catch(() => undefined)) ?? [binary];
+      await writePrivately(handoff, `rm -f -- "$1"\nexec ${[...command, ...args].map(quote).join(" ")}\n`);
+      // The launcher removes its handoff just before it execs the harness. Until then the
+      // terminal's process is still the launcher, so its session and seat record wait for
+      // that: a session seen any earlier starts the hire's process proof against the launcher.
+      const deadline = Date.now() + LAUNCH_HANDOFF_MS;
+      while (
+        Date.now() < deadline &&
+        (await access(handoff).then(
+          () => true,
+          () => false,
+        ))
+      )
+        await new Promise((resolve) => setTimeout(resolve, 25));
       // The session Clankie named or resumes stays on the terminal, since the core can't detect it.
       const named = args.findIndex((arg) => arg === "--session-id" || arg === "--resume");
       const session = named < 0 ? undefined : args[named + 1];
@@ -335,11 +354,6 @@ export function createHerdrCoreRunner(
           JSON.stringify({ pid: terminal.pid, agent: kind, session } satisfies DesktopSeatRecord),
         );
       }
-      // The desktop app's own PATH may find another install than the service's, which the
-      // seat's process proof would then refuse; exec the exact harness the proof expects.
-      // allow-swallowed-rejection -- an unresolved install falls back to the terminal's own PATH, as before
-      const command = (await options.harnessCommand?.(kind).catch(() => undefined)) ?? [binary];
-      await writePrivately(handoff, `rm -f -- "$1"\nexec ${[...command, ...args].map(quote).join(" ")}\n`);
     },
   };
 }

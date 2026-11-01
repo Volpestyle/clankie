@@ -147,3 +147,52 @@ processIt("proves a desktop-app hire when Clankie confirms it, the way a pane hi
     await rm(records, { recursive: true, force: true });
   }
 });
+
+processIt(
+  "a hire proven in the instant its launcher is still exec'ing the harness waits for the exec",
+  async () => {
+    // The desktop terminal's launcher is a shell that execs the harness in place once Clankie
+    // hands it the command. A proof that lands before the exec sees the shell in the harness's
+    // process; it looks again briefly instead of refusing a hire that is about to run.
+    const records = await mkdtemp(join(tmpdir(), "desktop-exec-"));
+    const handoff = join(records, "launch.sh");
+    const launcher = `while [ ! -f "$1" ]; do sleep 0.05; done; exec "${process.execPath}" "${script}" 9`;
+    const seat = spawn("/bin/sh", ["-c", launcher, "clankie-seat", handoff], {
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    const never = spawn("/bin/sh", ["-c", "sleep 30; :"], { stdio: "ignore" });
+    await Promise.all([once(seat, "spawn"), once(never, "spawn")]);
+    try {
+      const binding = { runtime: "external" as const, session: "herdr-core", socketPath: "/tmp/core.sock" };
+      const session = "6c1f1e7a-2b90-4c2b-9d0e-0b3c4e9a6f61";
+      await writeFile(
+        join(records, "t2k.json"),
+        JSON.stringify({ pid: seat.pid!, agent: "claude", session }),
+      );
+      await writeFile(
+        join(records, "t2l.json"),
+        JSON.stringify({ pid: never.pid!, agent: "claude", session }),
+      );
+      const observe = createProjectProcessObserver({
+        binding: async () => undefined,
+        herdrBinary: "herdr",
+        processHelper: helper,
+        coreBinding: async () => binding,
+        coreSeat: async (_binding, address) => (await readDesktopSeat(records, address)) ?? null,
+        launcher: async () => ({ executable: await realpath(process.execPath), script }),
+      });
+
+      const proving = observe("default", "herdr-core/t2k");
+      setTimeout(() => void writeFile(handoff, ""), 400);
+      expect(await proving).toMatchObject({ pane: "herdr-core/t2k", processes: [{ pid: seat.pid }] });
+
+      // A shell that never execs the installed harness is still refused once the brief wait ends.
+      expect(await observe("default", "herdr-core/t2l")).toBeUndefined();
+    } finally {
+      seat.stdin?.end();
+      seat.kill();
+      never.kill();
+      await rm(records, { recursive: true, force: true });
+    }
+  },
+);

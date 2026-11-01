@@ -210,6 +210,9 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
     paneId: address,
     args: ["--session-id", session, "--append-system-prompt-file", "it's here.md"],
   });
+  // The start returns only once the launcher took its handoff, so the session it names is
+  // never seen while the terminal's process is still the launcher (a proof would refuse it).
+  expect(await readdir(join(cwd, "launches"))).toEqual([]);
   const report = join(cwd, "claude.json");
   await until(async () => existsSync(report));
   const started = JSON.parse(await readFile(report, "utf8")) as { pid: number; argv: string[]; cwd: string };
