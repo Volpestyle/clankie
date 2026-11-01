@@ -22,13 +22,20 @@ import type { HerdrAgentSnapshot } from "./captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "./captain/herdr-census.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import type { ProjectHireProcessProof } from "./captain/project-hires.ts";
-import { fleetQualified, splitFleetQualified } from "./herdr-fleet.ts";
+import {
+  DESKTOP_SEAT_FLEET,
+  fleetQualified,
+  nativeProofLocation,
+  splitFleetQualified,
+} from "./herdr-fleet.ts";
 import type { FleetProgressObservation } from "./fleet-progress.ts";
 import { notifyResourceHolderOnce } from "./resource-holder-notices.ts";
 
 /** A simulator request's first proof: three observations about two seconds apart (VUH-2055). */
 const PROOF_ATTEMPTS = 3;
 const PROOF_RETRY_MS = 2_000;
+/** A Herdr desktop-app terminal's bare address, as its own HC_TERMINAL_ID gives it. */
+const DESKTOP_TERMINAL = /^t[0-9a-z]+$/u;
 
 const RESOURCE_BRIEF = [
   "Machine resource safety:",
@@ -193,7 +200,8 @@ export async function createFleetResourceRuntime(input: {
   const local = async (fleet?: string) => {
     if (!resolver)
       throw new ResourceAdmissionError("Local hire refused: native host authority is not ready.");
-    return resolver.isLocalFleet(fleet);
+    // The desktop app's terminals run on this machine (ADR 0319).
+    return fleet === DESKTOP_SEAT_FLEET || resolver.isLocalFleet(fleet);
   };
   const owner = (message: string) => new SimulatorRequestError("owner_unavailable", message);
   const observe = async (request: { seatId: string; fleet?: string; holderId?: string }) => {
@@ -234,20 +242,28 @@ export async function createFleetResourceRuntime(input: {
     const fleet = request.fleet ?? qualified?.fleet;
     if (!(await local(fleet)))
       throw new SimulatorRequestError("seat_not_local", "Simulator leases require a local native seat.");
-    const seatId =
+    let seatId =
       fleet && fleet !== "default" && !qualified ? fleetQualified(fleet, request.seatId) : request.seatId;
-    const before = await resolver.resolve(seatId);
+    let before = await resolver.resolve(seatId);
+    // A desktop-app hire reads its bare terminal address from HC_TERMINAL_ID; no Herdr
+    // pane on this machine answers to it, so it names that terminal (ADR 0319).
+    if (!before && fleet === undefined && DESKTOP_TERMINAL.test(seatId)) {
+      seatId = fleetQualified(DESKTOP_SEAT_FLEET, seatId);
+      before = await resolver.resolve(seatId);
+    }
     if (!before?.session || before.status === "offline" || before.status === "unknown")
       throw owner("Simulator seat has no proven live native occupant.");
-    const pane = splitFleetQualified(before.paneId);
-    if ((pane?.fleet ?? "default") !== (fleet ?? "default")) throw owner("Simulator seat changed host.");
+    const seatFleet = splitFleetQualified(seatId)?.fleet ?? fleet ?? "default";
+    if ((splitFleetQualified(before.paneId)?.fleet ?? "default") !== seatFleet)
+      throw owner("Simulator seat changed host.");
     const occupantId = occupantIdForHerdrSession(before.session);
-    const proof = await resolver.proof(fleet ?? "default", pane?.id ?? before.paneId);
+    const location = nativeProofLocation(before.paneId);
+    const proof = await resolver.proof(location.fleet, location.pane);
     if (
       !proof ||
       proof.nativeOccupantId !== occupantId ||
-      proof.fleet !== (fleet ?? "default") ||
-      proof.pane !== (pane?.id ?? before.paneId) ||
+      proof.fleet !== location.fleet ||
+      proof.pane !== location.pane ||
       proof.processes.length === 0
     )
       throw owner("Simulator native process ownership is unavailable.");
@@ -267,7 +283,8 @@ export async function createFleetResourceRuntime(input: {
       seatId: after.terminalId,
       occupantId,
       ...(request.holderId === undefined ? {} : { holderId: request.holderId }),
-      ...(fleet === undefined || fleet === "default" ? {} : { fleet }),
+      // The owner carries the proof's own location, so every later check against a proof holds.
+      ...(location.fleet === "default" ? {} : { fleet: location.fleet }),
       pane: proof.pane,
       binding: { ...proof.binding },
       processes: proof.processes.map((process) => ({ ...process })),
@@ -329,10 +346,10 @@ export async function createFleetResourceRuntime(input: {
     await Promise.all(
       seen.map(async (seat) => {
         if (!resolver || !seat.paneId) return;
-        const pane = splitFleetQualified(seat.paneId);
-        const fleet = pane?.fleet ?? "default";
-        if (!(await resolver.isLocalFleet(fleet).catch(() => false))) return;
-        const proof = await resolver.proof(fleet, pane?.id ?? seat.paneId).catch(() => undefined);
+        const location = nativeProofLocation(seat.paneId);
+        if (!(await resolver.isLocalFleet(location.fleet).catch(() => false))) return;
+        // allow-swallowed-rejection -- an unprovable seat attributes no simulator process; attribution is advisory.
+        const proof = await resolver.proof(location.fleet, location.pane).catch(() => undefined);
         if (!proof) return;
         for (const process of [proof.shell, ...proof.processes])
           byPid.set(process.pid, { seatId: seat.seatId, pane: seat.paneId });
@@ -436,7 +453,7 @@ export async function createFleetResourceRuntime(input: {
         if (
           !agent.session ||
           observed.identity.occupantId !== occupantIdForHerdrSession(agent.session) ||
-          observed.identity.pane !== (qualified?.id ?? agent.paneId) ||
+          observed.identity.pane !== nativeProofLocation(agent.paneId).pane ||
           observed.status !== "idle"
         )
           return { clear: false, reason: "restart_resource_native_changed" };

@@ -6,6 +6,7 @@ import type { HerdrForegroundProcess } from "./codex-seat.ts";
 import type { HerdrCensusFleet } from "./herdr-census.ts";
 import { readHerdrSeatTranscript, type HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
+import { DESKTOP_SEAT_FLEET } from "../herdr-fleet.ts";
 import { SESSION_LABEL } from "./herdr-core.ts";
 import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr-core-seats.ts";
 
@@ -16,7 +17,7 @@ import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr
 // read through the connector's session source, never driven here.
 
 /** The prefix a desktop-app terminal's seat id carries; no Herdr fleet may take it. */
-export const HERDR_CORE_FLEET = "herdr-core";
+export const HERDR_CORE_FLEET = DESKTOP_SEAT_FLEET;
 
 /** Labels a hire's terminal carries once its harness starts, so they outlive Clankie's restarts. */
 const AGENT_LABEL = "clankie.agent";

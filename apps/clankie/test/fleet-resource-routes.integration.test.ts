@@ -68,6 +68,8 @@ async function fixture(
     seatEnv?: NodeJS.ProcessEnv;
     bind?: boolean;
     replyLease?: Record<string, string>;
+    /** The seat is a Herdr desktop-app terminal (ADR 0319), proven as the captain proves one. */
+    desktop?: boolean;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "fleet-resource-http-"));
@@ -90,9 +92,11 @@ async function fixture(
   if (!native) throw new Error("Actual fixture native process unavailable");
   const session = { source: "herdr:opencode", kind: "id" as const, value: "ses_httpResourceFixture123" };
   const occupantId = occupantIdForHerdrSession(session);
+  const seatId = extra.desktop ? "herdr-core/t2k" : "resource-seat";
+  const paneId = extra.desktop ? "herdr-core/t2k" : "w1:p1";
   const agent = () => ({
-    paneId: "w1:p1",
-    terminalId: "resource-seat",
+    paneId,
+    terminalId: seatId,
     agent: "opencode",
     status: "working",
     title: "HTTP fixture",
@@ -136,15 +140,17 @@ async function fixture(
         notices.push({ pane, text });
         return true;
       },
-      resolve: async (seatId) => (seatId === "resource-seat" ? agent() : undefined),
+      resolve: async (requested) => (requested === seatId ? agent() : undefined),
       isLocalFleet: async (fleet) => fleet === undefined || fleet === "default",
-      proof: async () => {
+      proof: async (fleet, pane) => {
+        // The captain's observer files a desktop terminal on the default fleet, full pane.
+        if (fleet !== "default" || pane !== paneId) return undefined;
         const current = await processIdentity(child.pid!);
         if (!current || current.startTime !== native.startTime) return undefined;
         await proofAction();
         return {
           fleet: "default",
-          pane: "w1:p1",
+          pane: paneId,
           nativeOccupantId: occupantId,
           binding: { socketPath: join(root, "fixture-secret-socket") },
           processes: [{ pid: current.pid, startTime: current.startTime }],
@@ -248,7 +254,7 @@ async function fixture(
     commands,
     acquire: {
       action: "acquire",
-      seatId: "resource-seat",
+      seatId,
       holderId: "root-task",
       deviceType,
       runtime: simulatorRuntime,
@@ -357,6 +363,39 @@ it("serves validated metadata and crosses actual TCP/governor/process-based simu
       .map((command) => command[0]),
   ).toEqual(["create", "bootstatus", "shutdown"]);
 });
+
+it.each(["t2k", "herdr-core/t2k"])(
+  "leases a simulator to a desktop-app terminal named %s and restarts it only while idle",
+  async (named) => {
+    const f = await fixture(false, { desktop: true });
+    const acquired = await f.send("POST", FLEET_SIMULATORS_PATH, { ...f.acquire, seatId: named });
+    expect(acquired.status).toBe(200);
+    const result = FleetSimulatorResultSchema.parse(acquired.json);
+    if (result.outcome !== "acquired") throw new Error(`Desktop seat lease refused: ${acquired.text}`);
+    expect(result.lease).toMatchObject({ seatId: "herdr-core/t2k" });
+    for (const action of ["touch", "release"])
+      expect(
+        (
+          await f.send("POST", FLEET_SIMULATORS_PATH, {
+            action,
+            holderId: f.acquire.holderId,
+            seatId: named,
+            id: result.lease.id,
+          })
+        ).status,
+      ).toBe(200);
+    expect(
+      await f.resources.restartGuard({
+        paneId: "herdr-core/t2k",
+        terminalId: "herdr-core/t2k",
+        agent: "opencode",
+        status: "working",
+        title: "HTTP fixture",
+        session: { source: "herdr:opencode", kind: "id", value: "ses_httpResourceFixture123" },
+      }),
+    ).toMatchObject({ clear: false, reason: "restart_resource_native_changed" });
+  },
+);
 
 it.each([
   { occupantId: "caller-claimed-native" },

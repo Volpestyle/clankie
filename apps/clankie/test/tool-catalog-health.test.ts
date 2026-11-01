@@ -20,6 +20,13 @@ import {
   FLEET_TOOL_CATALOG_HEALTH_PATH,
 } from "@clankie/protocol/tool-catalog";
 import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "../src/captain/tool-catalog-health.ts";
+import {
+  createToolCatalogHealth,
+  type ToolCatalogHealthContext,
+} from "../src/captain/captain-tool-catalog.ts";
+import { FleetChangeClock } from "../src/captain/herdr-fleet-changes.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 
 // The real worker bridge names. A rejected server gives Claude none of these;
 // the tools/list incident in VUH-1651 dropped the whole Clankie server.
@@ -323,4 +330,46 @@ it("admits catalog reports through real local and remote listeners while keeping
     await captain.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// A desktop-app terminal (ADR 0319) is proven on this machine's default fleet under
+// its full `herdr-core/<address>` pane, as its worker plugin names itself; the
+// catalog check compares against that location, never a split of the seat id.
+it("records a desktop-app hire's catalog under its own proof and refuses a proof filed elsewhere", async () => {
+  const session = { source: "herdr:claude", kind: "id" as const, value: "native-session" };
+  const desktop = {
+    paneId: "herdr-core/t2k",
+    terminalId: "herdr-core/t2k",
+    agent: "claude",
+    status: "idle",
+    title: "desktop hire",
+    session,
+  };
+  const health = createToolCatalogHealth({
+    options: { projectHireTools: async () => [] },
+    deps: { herdrAvailable: () => false },
+    herdrRunner: { get: async (pane: string) => (pane === desktop.paneId ? desktop : undefined) },
+    settings: async () => ({ fleet: { peerMessages: "on" } }),
+    toolCatalogHealth: new ToolCatalogHealthStore(),
+    fleetChanges: new FleetChangeClock(),
+  } as unknown as ToolCatalogHealthContext);
+  const proof = (fleet: string, pane: string): ProjectProcessProof => ({
+    fleet,
+    pane,
+    nativeOccupantId: occupantIdForHerdrSession(session),
+    binding: { socketPath: "/desktop-core.sock" },
+    processes: [{ pid: 4242, startTime: "start" }],
+    shell: { pid: 4242, startTime: "start" },
+  });
+  const bridged = report(["message_clankie", "message_clankie_status", "list_fleet_seats", "message_peer"]);
+  const recorded = await health.recordNativeToolCatalog(
+    desktop.paneId,
+    bridged,
+    [],
+    proof("default", "herdr-core/t2k"),
+  );
+  expect(recorded).toMatchObject({ status: "matched" });
+  expect(
+    await health.recordNativeToolCatalog(desktop.paneId, bridged, [], proof("herdr-core", "t2k")),
+  ).toBeUndefined();
 });
