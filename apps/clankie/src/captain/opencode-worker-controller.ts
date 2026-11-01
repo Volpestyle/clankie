@@ -86,7 +86,7 @@ export async function createOpenCodeController(input: {
   let acceptedOnce = false;
   let candidate = false;
   let lastAcknowledgment: string | undefined;
-  let activeSend: { messageId: string; text: string } | undefined;
+  let activeSend: { messageId: string; text: string; delivery?: "steer" | "queue" | undefined } | undefined;
   let activeExit: { beforeDispatch?: () => Promise<boolean> } | undefined;
   let activeRefresh: { beforeDispatch?: () => Promise<boolean> } | undefined;
   const pending = new Map<
@@ -320,6 +320,8 @@ export async function createOpenCodeController(input: {
               .string()
               .min(1)
               .max(128 * 1024),
+            // OpenCode 2 admits into the session inbox with an explicit lane.
+            delivery: z.enum(["steer", "queue"]).optional(),
           })
           .parse(value);
       }

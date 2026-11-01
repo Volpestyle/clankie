@@ -128,7 +128,7 @@ flowchart TD
 | Claude Code | Native worker-plugin channel and turn hooks           | Implemented; requires the owner's channel consent                          |
 | Codex       | App-server shared with the native TUI's bound thread  | Implemented; starts or steers a turn                                       |
 | Pi          | Process-bound native extension follow-up messages     | Opt-in on macOS/Linux; installed Pi ≥ 0.87.1 that passes the hire probe    |
-| OpenCode    | Injected SDK in the process-bound native worker TUI   | Local and linked Mac POSIX fleets; installed 1.18.18+ passing its probe    |
+| OpenCode    | Injected SDK in the process-bound native worker TUI   | Local and linked Mac POSIX fleets on 1.18.18+; local only on 2.2.5+        |
 | Grok Build  | Leader IPC/ACP on the exact interactive TUI session   | Local on macOS; installed 1.0.46+ passing its probe                        |
 | Prime Agent | Daemon session created by Clankie, TUI attached to it | Implemented locally on macOS/Linux (0.10.x); operator seat `clankie prime` |
 
@@ -139,16 +139,18 @@ no probe can observe, and each floor's code comment says which. The Linux image
 may still pin a version in their image build; that is a build choice, not an
 adapter refusal. Several of these surfaces are harness internals:
 
-| Harness  | Surface Clankie relies on                                         | Status                                                                                                                             |
-| -------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| OpenCode | SDKv2 client injected into TUI plugins (`api.client`)             | Published `@opencode-ai/sdk` v2 types; usage docs cover v1                                                                         |
-| OpenCode | TUI plugin entry: default `{ id, tui }`, loaded by `readV1Plugin` | `TuiPluginModule` type is published; TUI plugins undocumented, loader internal                                                     |
-| OpenCode | Stored history: `opencode.db` tables, indexes and migrations      | Internal; the reader probes the columns and migrations it uses                                                                     |
-| Grok     | Leader IPC socket (`--leader`, `--leader-socket`, control)        | Internal, undocumented; [ADR 0224](../../docs/adr/0224-grok-build-shares-the-visible-native-session.md) pins the observed protocol |
-| Grok     | ACP over that socket                                              | ACP is public; the `_x.ai/*` methods and `_meta` keys are internal                                                                 |
+| Harness  | Surface Clankie relies on                                         | Status                                                                                                                                                                                         |
+| -------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenCode | SDKv2 client injected into TUI plugins (`api.client`)             | Published `@opencode-ai/sdk` v2 types; usage docs cover v1                                                                                                                                     |
+| OpenCode | TUI plugin entry: default `{ id, tui }`, loaded by `readV1Plugin` | `TuiPluginModule` type is published; TUI plugins undocumented, loader internal                                                                                                                 |
+| OpenCode | Stored history: `opencode.db` tables, indexes and migrations      | Internal; the reader probes the columns and migrations it uses                                                                                                                                 |
+| OpenCode | V2: TUI plugin `{ id, setup }` with `context.client`, `ui.router` | Published `@opencode/plugin/tui` (2.x); session inbox `prompt` with `delivery` and client `id` is the public V2 API ([ADR 0333](../../docs/adr/0333-opencode-2-hires-run-a-private-server.md)) |
+| Grok     | Leader IPC socket (`--leader`, `--leader-socket`, control)        | Internal, undocumented; [ADR 0224](../../docs/adr/0224-grok-build-shares-the-visible-native-session.md) pins the observed protocol                                                             |
+| Grok     | ACP over that socket                                              | ACP is public; the `_x.ai/*` methods and `_meta` keys are internal                                                                                                                             |
 
 No documented public extension point drives either harness's visible TUI
-session, so these stay. Floors: OpenCode 1.18.18, Grok 1.0.46; verified on
+session, so these stay. Floors: OpenCode 1.18.18 (V1 plugin) and 2.2.5 (V2 plugin), Grok 1.0.46; verified on
+OpenCode 2.2.5 by `apps/clankie/test/opencode2-worker.integration.test.ts`,
 OpenCode 1.19.3 and Grok 1.0.50 in the
 [latest-release evidence](../../docs/testing/2026-10-17-opencode-grok-latest/README.md).
 

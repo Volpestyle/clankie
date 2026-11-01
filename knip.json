@@ -93,6 +93,8 @@
         "integrations/claude-plugin/worker/bin/skill-bundle.d.mts",
         "integrations/opencode-plugin/worker-tui.mjs",
         "integrations/opencode-plugin/worker-server.mjs",
+        "integrations/opencode-plugin/v2/worker-tui/tui.mjs",
+        "integrations/opencode-plugin/v2/worker-server/index.mjs",
         "scripts/manual/computer-use/run.mjs",
         "scripts/manual/windows-computer/check.ts",
         "scripts/manual/computer-use/fixture-server.d.mts",
@@ -195,6 +197,7 @@
     "scripts/evals/lead-controller.mjs": ["unlisted"],
     "scripts/evals/lead-model-runtime.mjs": ["unlisted"],
     "integrations/opencode-plugin/worker-tui.mjs": ["unlisted"],
+    "integrations/opencode-plugin/v2/worker-tui/tui.mjs": ["unlisted"],
     "scripts/manual/tracker-peak-day.ts": ["unlisted"],
     "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/browser.ts": ["unlisted"]
   }
