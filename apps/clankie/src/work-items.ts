@@ -3,6 +3,7 @@ import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { readFileSync, statSync } from "node:fs";
@@ -55,6 +56,7 @@ import {
   WorkInitInvalid,
   type CommandRunner,
   githubRestApi,
+  ghCliApi,
   type GhRunner,
   type LinearToolCall,
   type TrackerDeps,
@@ -326,7 +328,8 @@ export interface WorkItemsServiceOptions {
   readonly mcpHost?: Pick<McpHost, "call"> & Partial<Pick<McpHost, "account" | "binding" | "trackerStatus">>;
   /**
    * The body's GitHub account connection token (ADR 0196). When present it is
-   * used instead of `gh`; a hosted body has no `gh` login to fall back on.
+   * used instead of `gh`. Without it, writes from devices and connected apps use the
+   * owner's `gh` login on this machine (ADR 0191, #98); a hosted body has none.
    */
   readonly githubToken?: () => Promise<string | undefined>;
   readonly hosted?: boolean;
@@ -772,7 +775,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
     return {
       run,
-      ...(options.hosted === true || !local ? {} : { gh: options.gh ?? defaultGh(path) }),
+      // A delegated call uses the connected account when there is one, else the owner's gh login.
+      ...(options.hosted === true || (!local && token !== undefined)
+        ? {}
+        : { gh: options.gh ?? defaultGh(path) }),
       ...(token === undefined
         ? {}
         : {
@@ -975,6 +981,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     outcome: WorkItemWriteReceipt["outcome"],
     message: string,
   ): WorkItemWriteReceipt => ({ requestId, outcome, message });
+  /** The GitHub login gh is signed in as on this machine, or undefined when it isn't. */
+  const ghLogin = async (): Promise<string | undefined> => {
+    try {
+      const login = (await (options.gh ?? defaultGh(homedir()))(["api", "user", "--jq", ".login"])).trim();
+      return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u.test(login) ? login : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const accountBinding = async (kind: WorkConvention["backend"]) => {
     if (kind === "linear") {
       if (options.mcpHost?.binding) return (await options.mcpHost.binding("linear", "operator")).binding;
@@ -983,9 +998,14 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     }
     if (kind === "github") {
       const token = await options.githubToken?.();
-      // Owner writes use the connected account. An ambient gh login is not a bound account.
-      if (!token) throw new Error("Connect GitHub to write work from a device.");
-      return deliveryFingerprint(token);
+      // Owner writes use the connected account, else the owner's gh login on this machine.
+      if (token) return deliveryFingerprint(token);
+      const login = options.hosted === true ? undefined : await ghLogin();
+      if (login === undefined)
+        throw new Error(
+          "Sign in to GitHub on this machine with `gh auth login`, or connect GitHub to Clankie, to write work from a device.",
+        );
+      return deliveryFingerprint(`gh:${login}`);
     }
     return "files";
   };
@@ -1124,7 +1144,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           confirmed = true;
         };
         const dependencies = await deps(target.path);
-        // No inferred backend or gh fallback on the owner-authorized path.
+        // No inferred backend on the owner-authorized path. GitHub goes through the connected
+        // account, else through the gh login that accountBinding bound above.
         const writeDeps: { -readonly [K in keyof TrackerDeps]: TrackerDeps[K] } = {
           ...dependencies,
           scopedWrites: true,
@@ -1188,7 +1209,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           };
         }
         if (target.convention.backend === "github") {
-          const api = dependencies.github;
+          const api =
+            dependencies.github ?? (dependencies.gh === undefined ? undefined : ghCliApi(dependencies.gh));
           if (!api) throw new Error("GitHub is unavailable.");
           writeDeps.github = {
             ...api,
@@ -2303,8 +2325,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             projectIds: await projectIdsAt(path),
           }),
         );
-      // Delegated tools use a connected account; the owner's ambient gh login
-      // is available only to native local calls.
+      // Delegated tools use the connected account, else the owner's gh login on this
+      // machine, bound for the whole call so a switched account stops the write.
       const account = !local && convention.backend === "github" ? await accountBinding("github") : undefined;
       const assertAccountCurrent = async () => {
         if (account !== undefined && (await accountBinding("github")) !== account)

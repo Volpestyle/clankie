@@ -411,6 +411,101 @@ it("writes issues: issue files right away, Linear and GitHub under the project's
   expect(created).toHaveLength(2);
 });
 
+// #98: with no GitHub connection, an app's write goes through the owner's gh login on the Mac.
+it("writes a GitHub issue through the Mac's gh login when GitHub isn't connected to Clankie", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "connector-issue-gh-")));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const pond = await projectRepo(root, "pond", {
+    ...decided,
+    backend: "github",
+    github: { repo: "fixture/pond" },
+  });
+  const created: { title: string; body?: string }[] = [];
+  const issueAt = (number: number) => ({
+    id: 9000 + number,
+    number,
+    title: created[number - 1]!.title,
+    body: created[number - 1]!.body ?? "",
+    state: "open",
+    labels: [],
+    html_url: `https://github.com/fixture/pond/issues/${String(number)}`,
+  });
+  // GitHub's REST API, reached the way `gh api` reaches it.
+  const github = createServer(async (request, response) => {
+    const path = new URL(request.url ?? "/", "http://fixture").pathname;
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/user") return void response.end(JSON.stringify(signedIn));
+    if (request.method === "GET" && path === "/repos/fixture/pond/issues") return void response.end("[]");
+    const one = /^\/repos\/fixture\/pond\/issues\/(\d+)$/u.exec(path);
+    if (request.method === "GET" && one !== null && created[Number(one[1]) - 1] !== undefined)
+      return void response.end(JSON.stringify(issueAt(Number(one[1]))));
+    if (request.method === "POST" && path === "/repos/fixture/pond/issues") {
+      created.push(JSON.parse(Buffer.concat(chunks).toString()) as { title: string; body?: string });
+      return void response.writeHead(201).end(JSON.stringify(issueAt(created.length)));
+    }
+    response.writeHead(404).end(JSON.stringify({ message: "Not Found" }));
+  });
+  github.listen(0, "127.0.0.1");
+  await once(github, "listening");
+  cleanups.push(() => new Promise<void>((done) => github.close(() => done())));
+  const origin = `http://127.0.0.1:${String((github.address() as AddressInfo).port)}`;
+  let signedIn: { login: string } | undefined = { login: "pond-owner" };
+  const ghCalls: string[][] = [];
+  // The gh CLI: `api [-X METHOD] PATH [--jq EXPR] [--input -]` against the stand-in, or not signed in.
+  const gh = async (args: readonly string[], stdin?: string) => {
+    ghCalls.push([...args]);
+    if (signedIn === undefined)
+      throw new Error("gh: To get started with GitHub CLI, please run: gh auth login");
+    const rest = args.slice(1).filter((arg) => arg !== "--paginate" && arg !== "--slurp");
+    const method = rest[0] === "-X" ? rest[1]! : "GET";
+    const path = rest[0] === "-X" ? rest[2]! : rest[0]!;
+    const response = await fetch(`${origin}/${path.replace(/^\//u, "")}`, {
+      method,
+      ...(stdin === undefined ? {} : { body: stdin }),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`gh: Not Found (HTTP ${String(response.status)})`);
+    if (args.includes("--jq")) return `${String((JSON.parse(text) as { login: string }).login)}\n`;
+    return args.includes("--slurp") ? `[${text}]` : text;
+  };
+  const settings = await projectSettings(root, [{ id: "pond", name: "Pond", path: pond }]);
+  await settings.update((current) => ({
+    ...current,
+    projects: {
+      ...current.projects,
+      projects: current.projects.projects.map((project) => ({
+        ...project,
+        trackerPosting: "allow" as const,
+      })),
+    },
+  }));
+  const workItems = createWorkItemsService({
+    stateDirectory: join(root, "work-state"),
+    projects: async () => (await settings.load()).projects,
+    localMachineId: "local",
+    run: defaultRun,
+    githubToken: async () => undefined,
+    gh,
+  });
+  const pondId = await repoIdOf(workItems, "pond");
+  const { call } = await connectedApp(workItems);
+
+  const filed = await call("save_issue", { project: pondId, title: "Net the leaves" });
+  expect(filed.error).toBe(false);
+  expect(JSON.parse(filed.text)).toMatchObject({ outcome: "written", issue: "#1" });
+  expect(created.map((issue) => issue.title)).toEqual(["Net the leaves"]);
+  // The write was bound to the signed-in account before it went.
+  expect(ghCalls).toContainEqual(["api", "user", "--jq", ".login"]);
+
+  // Signed out of gh, the refusal names the one step that turns writing on.
+  signedIn = undefined;
+  const refused = await call("save_issue", { project: pondId, title: "Skim the pond" });
+  expect(refused.text).toContain("gh auth login");
+  expect(created).toHaveLength(1);
+});
+
 /** Claude registers, the owner approves the code at the Mac, and Claude trades it for a token. */
 async function signIn(baseUrl: string, operatorToken: string): Promise<string> {
   const { client_id: clientId } = (await (
