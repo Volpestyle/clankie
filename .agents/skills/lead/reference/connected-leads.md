@@ -6,7 +6,12 @@ it; none takes precedence over another.
 
 - **Hire on the owner's machines for building and checking.** Code changes,
   builds, test runs and anything that needs a real checkout, the owner's tools or
-  their machines go to a Clankie worker with `start_agent`. Do the work yourself
+  their machines go to a Clankie worker with `start_agent`. Read
+  `fleet_capacity` first and pick the harness, and when it matters the account
+  (`account`, a label from `fleet_capacity`), the owner wants spent: an account
+  the owner held is never chosen for you, but you may name it as overflow
+  ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
+  Do the work yourself
   when that fits better: planning, research, reading, writing that needs no
   checkout.
 - **Herdr desktop app seats only.** Local workers run in the Herdr desktop
