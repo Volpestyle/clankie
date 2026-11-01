@@ -147,6 +147,8 @@ export interface CaptainOptions {
   readonly settings?: SettingsStore;
   /** Joined machines, for Clankie's own shell there beside his local coding tools. */
   readonly joinedMachines?: import("./machine-coding-tools.ts").JoinedShellMachines;
+  /** Startup extension switch; omitted preserves standalone captain behavior. */
+  readonly linearWakeEnabled?: boolean;
   /** Live webhook readiness, rechecked before a queued Linear wake starts. */
   readonly linearFollowing?: () => Promise<boolean>;
   readonly linearWakeReceived?: (

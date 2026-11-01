@@ -56,8 +56,11 @@ watching screen shares now leave his tools too, with `media` off so do
 `/v1/media/*` and the skin draft routes no longer mounted, and with `minecraft` off
 (`minecraft-extension.ts`, a switch beside Minecraft's `GameExtension`) its game,
 routes, tools, host and MCP motor are never built. Still reached with every switch
-off: the persona's music and room tools, and `linear_wake` (built inside the
-captain's tracker wakes).
+off: the persona's music and room tools. Linear wakes now have their own
+`linear-wake` switch (`linear-wake-extension.ts`): off, the composition root
+leaves out its receipt reader and wake callbacks, the captain has no
+`linear_wake` tool, and its webhook and wake routes are not mounted. The
+tracker-neutral wake queue and saved cursors stay in the core.
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside
@@ -124,7 +127,8 @@ Each of these becomes an extension:
 | `world`            | PokeAgents play, the Activity watch surface, World and desktop-pet surfaces' routes                 |
 | `minecraft`, games | Already `GameExtension`s; they keep that contract as a specialization of this one                   |
 | `watch`            | Nothing in this service yet: the Watch app is in `clankie-app` and reads the feed the phone reads   |
-| `tracker-linear`   | Linear import, mirror, cutover, webhooks and publishing                                             |
+| `tracker-linear`   | Linear import, mirror, cutover, request budget and publishing                                       |
+| `linear-wake`      | Linear webhook, wake rules, routing and notification-read receipts                                  |
 | `tracker-github`   | The GitHub issues backend                                                                           |
 | `relay`            | The clankie.bot gateway connector and phone doorway                                                 |
 | `computer`         | Computer use on the Mac and the PCs                                                                 |
@@ -241,6 +245,12 @@ each step one pull request with no change in what he does:
    tracker's projects as `trackerProjects`; and fetched evidence bytes go
    through the core's evidence store. The core imports no `tracker-linear`
    file.
+
+5. Give Linear wakes their own startup switch, `linear-wake`, after the
+   tracker-neutral store and MCP ports land. The webhook and wake routes move
+   under this switch, independently of `tracker-linear`'s request budget,
+   mirror and cutover routes. Off, queued Linear wakes do not run and the
+   `linear_wake` tool is absent; saved rules and metadata remain intact.
 
 GitHub and files trackers already sit behind `@clankie/work-items`; they move
 the same way once step 4 lands.
