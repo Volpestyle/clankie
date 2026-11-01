@@ -38,7 +38,7 @@ background. Two routes do that on their Mac:
   for flows in their apps or their signed-in Chrome, like a web form under
   their account ([delegation](reference/delegation.md)).
 - **agent-desktop** (`agent-desktop status`, then `agent-desktop skills get
-  desktop`): reads an app's accessibility tree and acts on its elements. Use its
+desktop`): reads an app's accessibility tree and acts on its elements. Use its
   accessibility actions only. `focus`, `focus-window`, `hover` and the mouse
   commands take the screen; when an element can only be reached that way, stop.
 
