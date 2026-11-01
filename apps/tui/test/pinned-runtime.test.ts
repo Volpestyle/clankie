@@ -66,6 +66,25 @@ it("rejects dirty tracked and untracked pins before install or worktree mutation
     ).toBe(true);
   }
 });
+it("lets Claude Code's plugin scaffolding through but still stops on anything beside it", () => {
+  const scaffolding = [
+    "?? integrations/claude-plugin/worker/tsconfig.json",
+    "?? integrations/claude-plugin/worker/.claude-plugin/types/mods.d.ts",
+    "?? integrations/claude-plugin/tsconfig.json",
+  ].join("\n");
+  const clean = fixture();
+  clean.dirty(scaffolding);
+  expect(assertPinnedRuntime(clean.checkout, clean.runtime, clean.run)).toBe("a".repeat(40));
+  for (const other of [
+    "?? integrations/claude-plugin/worker/other.json",
+    " M integrations/claude-plugin/worker/tsconfig.json",
+    "?? apps/tsconfig.json",
+  ]) {
+    const f = fixture();
+    f.dirty(`${scaffolding}\n${other}`);
+    expect(() => assertPinnedRuntime(f.checkout, f.runtime, f.run)).toThrow("local changes");
+  }
+});
 it("resolves refs as argv with option termination and rejects option injection", () => {
   const f = fixture();
   expect(pinnedCommit(f.checkout, "main", f.run)).toBe("a".repeat(40));
