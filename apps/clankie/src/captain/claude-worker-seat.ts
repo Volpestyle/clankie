@@ -156,9 +156,44 @@ const WORKER_SERVER_RULES = [
   `mcp__plugin_${CLAUDE_WORKER_PLUGIN.plugin}_clankie`,
 ];
 
+/**
+ * A read-only hire's whole allow list (ADR 0320). Claude's `dontAsk` mode
+ * refuses every tool not listed here without asking: it reads files, runs four
+ * exact commands that only look, and reports to Clankie. No edit, write, web or
+ * connected-tool call is on the list, and neither is `clankie_call`.
+ */
+const READ_ONLY_RULES = [
+  "Read",
+  "Glob",
+  "Grep",
+  ...WORKER_SERVER_RULES.flatMap((server) => [
+    `${server}__message_clankie`,
+    `${server}__message_clankie_status`,
+  ]),
+  // Exact commands only: an open prefix lets options such as `git log --output`
+  // write a file.
+  "Bash(git remote -v)",
+  "Bash(git status --short)",
+  "Bash(git log --oneline -20)",
+  "Bash(tailscale status --json)",
+];
+
+/**
+ * Claude adds every settings file's allow rules to these, and `dontAsk` runs
+ * anything an inherited rule allows. A read-only hire therefore loads none of
+ * the owner's user, project or local settings: only these flag settings and any
+ * managed policy apply. The denies also hold against a managed allow.
+ */
+const READ_ONLY_DENY = ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"];
+
+/** Claude flags that would widen or replace a read-only hire's permissions. */
+const READ_ONLY_OVERRIDES =
+  /^--(?:dangerously-skip-permissions|allow-dangerously-skip-permissions|permission-mode|allowed-?tools|settings|setting-sources|permission-prompt-tool|add-dir)(?:=|$)/u;
+
 function claudeWorkerSettings(
   trackerDeny: readonly string[] = [],
   allowedMcpServers?: readonly ClaudeMcpPolicyEntry[],
+  readOnly = false,
 ): string {
   // Hired workers use Claude's auto classifier for routine work (James,
   // 2026-10-09). Blanket ask rules override auto mode and stall every command.
@@ -172,9 +207,11 @@ function claudeWorkerSettings(
     // A local hire's MCP profile (VUH-2388): Claude starts no other server.
     ...(allowedMcpServers === undefined ? {} : { allowedMcpServers }),
     permissions: {
-      allow: WORKER_SERVER_RULES,
-      defaultMode: "auto",
-      ...(trackerDeny.length === 0 ? {} : { deny: [...trackerDeny] }),
+      allow: readOnly ? READ_ONLY_RULES : WORKER_SERVER_RULES,
+      defaultMode: readOnly ? "dontAsk" : "auto",
+      ...(trackerDeny.length === 0 && !readOnly
+        ? {}
+        : { deny: [...(readOnly ? READ_ONLY_DENY : []), ...trackerDeny] }),
     },
   });
 }
@@ -183,14 +220,21 @@ export function claudeWorkerLaunchArgs(
   launch: SeatLaunch,
   trackerDeny: readonly string[] = [],
   /** The settings JSON itself, or a path to a file holding it. */
-  settings = claudeWorkerSettings(trackerDeny),
+  settings = claudeWorkerSettings(trackerDeny, undefined, launch.readOnly === true),
   startupPrompt?: string,
   /** The worker plugin's directory on the seat's machine. */
   workerRoot = shippedWorkerFile(),
   /** The id a fresh session takes, so the seat binds to the session Clankie named (ADR 0319). */
   sessionId?: string,
 ): string[] {
+  if (
+    launch.readOnly === true &&
+    (launch.harnessArgs ?? []).some((argument) => READ_ONLY_OVERRIDES.test(argument))
+  )
+    throw new Error("A read-only hire cannot take permission or settings arguments");
   return [
+    // No inherited allow rule reaches a read-only hire (ADR 0320).
+    ...(launch.readOnly === true ? ["--setting-sources", ""] : []),
     "--settings",
     settings,
     // The worker plugin rides this session only (ADR 0317): nothing installed in a profile.
@@ -204,7 +248,8 @@ export function claudeWorkerLaunchArgs(
     ...(launch.effort === undefined ? [] : ["--effort", launch.effort]),
     ...(launch.harnessArgs ?? []),
     // Overrides the settings' auto default mode; Claude still enforces deny rules in every mode.
-    ...(launch.maximumTrust === true ? MAXIMUM_TRUST_HARNESS_ARGS.claude : []),
+    // A read-only hire never skips its permissions, whatever the owner's trust mode.
+    ...(launch.maximumTrust === true && launch.readOnly !== true ? MAXIMUM_TRUST_HARNESS_ARGS.claude : []),
     // A fresh session takes its first prompt through Claude's native startup,
     // after its hooks and channel handlers are installed. An MCP stdout write
     // during discovery is not proof the native channel receiver exists yet.
@@ -1112,6 +1157,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           launch.mcpServers === undefined
             ? undefined
             : claudeWorkerMcpAllowlist(launch.cwd, launch.env ?? {}, launch.mcpServers, workerRoot),
+          launch.readOnly === true,
         );
         // A one-line JSON file also keeps control characters and arbitrarily
         // many brief lines out of Claude's text-file/binary and line limits.

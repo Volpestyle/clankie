@@ -453,6 +453,13 @@ export async function runHeadlessCaptainCommand(
       );
       return 0;
     }
+    if (command === "setup-agent") {
+      outputJson(
+        stdout,
+        await (await import("../src/command/setup-agent.ts")).runSetupAgentCommand(rest, options),
+      );
+      return 0;
+    }
     if (command === "maximum-trust-mode") {
       outputJson(
         stdout,

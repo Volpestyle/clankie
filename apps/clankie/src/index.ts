@@ -2365,6 +2365,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
+  setupSurveyPath: join(stateRoot, "setup-survey.json"),
   connectorDetection,
   evidenceStore,
   builtInTracker,
