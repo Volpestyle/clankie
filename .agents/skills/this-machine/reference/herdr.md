@@ -125,6 +125,18 @@ until the turn ends, potentially the entire goal. Do not interpret it as seen.
 An unconfirmed steer must be reconciled before retrying; never type a fallback
 into the pane. Owner approval/input remains pending.
 
+## Agents with no channel
+
+An agent with no harness channel, Codex queue or hook receiver (Claude started
+without the worker plugin, for one) gets an owner's or lead's message typed
+through `herdr agent prompt`, but only while Herdr shows it idle, its input line
+reads empty and its session can be read (ADR 0334). The receipt then says
+`consumed` once the session shows the message, or `unconfirmed`: read the agent
+before sending it again. A refusal names what blocked it (busy, a question open,
+someone's draft, an input line Clankie can't read yet); nothing was typed, so
+send again once it clears. Peer messages and chosen steer or queue modes never
+type, and neither do the Herdr desktop app's terminals.
+
 A shared daemon still may lack a valid Herdr pane/session report. Do not guess a
 thread from recent history, globally enable the daemon, or forge membership to
 repair it. Outbound owner-authorized control does not authorize inbound fleet

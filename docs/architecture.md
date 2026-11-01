@@ -434,7 +434,10 @@ outside Clankie's service process group so a service restart does not disconnect
 or stop the native worker. The adapter reports
 the thread ID explicitly, so the fleet census does not depend on shared-daemon
 hooks. Existing unmanaged Codex seats can use their native `codex queue` when
-available. Automated messages never fall back to typing in the terminal. Missing
+available. Automated messages fall back to typing only for an agent with no
+channel at all, through `herdr agent prompt` while it is idle with an empty input
+line, confirmed by its session
+([ADR 0334](adr/0334-herdr-direct-prompting-is-the-fallback.md)). Missing
 control, waiting consent, and uncertain delivery remain explicit outcomes. A
 `turn/steer` receipt reports guidance to the active turn, not an after-turn queue
 ([ADR 0207](adr/0207-work-records-and-native-agent-delivery.md)).
