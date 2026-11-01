@@ -9,11 +9,12 @@ it; none takes precedence over another.
   their machines go to a Clankie worker with `start_agent`. Do the work yourself
   when that fits better: planning, research, reading, writing that needs no
   checkout.
-- **Desktop app first, Herdr panes as the fallback.** `start_agent` hires into
-  the Herdr desktop app's terminals where its core runs on that machine, and into
-  Herdr panes otherwise ([ADR 0319](../../../../docs/adr/0319-hires-run-in-the-desktop-apps-terminals.md)).
-  If a desktop hire doesn't come up or can't be messaged, say so to the owner;
-  they pin a machine with `clankie fleet set --seat-host herdr`.
+- **Herdr desktop app seats only.** Local workers run in the Herdr desktop
+  app's terminals (herdr-core seats), never in Herdr TUI panes. `start_agent`
+  hires there where the app's core runs
+  ([ADR 0319](../../../../docs/adr/0319-hires-run-in-the-desktop-apps-terminals.md)).
+  If a desktop hire doesn't come up or can't be messaged, tell the owner rather
+  than hiring into a TUI pane.
 - **One watcher per worker.** Each local worker you start has exactly one lead
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and
