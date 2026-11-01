@@ -1,4 +1,10 @@
-import { fleetQualified, splitFleetQualified, type HerdrFleet, type HerdrFleetRun } from "../herdr-fleet.ts";
+import {
+  fleetQualified,
+  HerdrFleetError,
+  splitFleetQualified,
+  type HerdrFleet,
+  type HerdrFleetRun,
+} from "../herdr-fleet.ts";
 import { createSshAgentHost } from "@clankie/agent-hosts";
 import type { AgentTranscriptHost } from "@clankie/agent-transcript";
 import { remoteHerdrTranscriptReader } from "./remote-herdr-transcript.ts";
@@ -249,6 +255,12 @@ export function routeHerdrFleets(
       const { runner, id } = await route(paneId);
       if (!runner.sendText) throw new Error("Herdr text input is unavailable");
       await runner.sendText(id, text);
+    },
+    promptAgent: async (paneId, text) => {
+      const { runner, id } = await route(paneId);
+      if (!runner.promptAgent)
+        throw new HerdrFleetError("unavailable", "Herdr agent prompts are unavailable here", "not_sent");
+      await runner.promptAgent(id, text);
     },
     paneProcesses: async (paneId) => {
       const { runner, id } = await route(paneId);

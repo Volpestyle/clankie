@@ -86,9 +86,12 @@ real interactive harness, and controls it through the harness's own extension
 points: a `SeatControl` with `send` acknowledged by the harness, `settled`
 completion, `interrupt`, and `close`. `attach` looks up control using the harness's
 session ID; recovery after a service restart depends on the adapter. Failures are typed outcomes; `blocked`
-names an owner decision (such as approving a channel). Automated delivery never
-falls back to typing into the owner's terminal. Missing control and uncertain
-delivery remain explicit outcomes; neither authorizes a second launch or resend.
+names an owner decision (such as approving a channel). A seat with control never
+falls back to typing into the owner's terminal; only an agent with no channel at
+all is typed into, through `herdr agent prompt` while idle with an empty input
+line ([ADR 0334](../../docs/adr/0334-herdr-direct-prompting-is-the-fallback.md)).
+Missing control and uncertain delivery remain explicit outcomes; neither
+authorizes a second launch or resend.
 The Claude adapter lives in the
 service (`apps/clankie/src/captain/claude-worker-seat.ts`), as does Codex's.
 

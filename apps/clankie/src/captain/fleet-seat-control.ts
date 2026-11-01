@@ -17,6 +17,10 @@ import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { nativeSessionId } from "./native-session-resume.ts";
+import { promptWhenClear } from "./direct-prompt.ts";
+import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
+import { randomUUID } from "node:crypto";
+import { paneInputLine } from "./pane-draft.ts";
 import { currentOf, withCurrent, type CurrentCheck, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 
 /** Native control is shared by messages and watches; the adapters own its lifetime. */
@@ -53,6 +57,8 @@ export function createFleetSeatControl(
     readonly now?: () => number;
     /** How long a message waits its turn behind another delivery to the same recipient (VUH-2779). */
     readonly inFlightWaitMs?: number;
+    /** How long a typed message may take to appear in its agent's session (ADR 0334). */
+    readonly directPromptConfirmMs?: number;
   } = {},
 ) {
   const now = settlement.now ?? Date.now;
@@ -66,6 +72,7 @@ export function createFleetSeatControl(
   /** Each recipient's queue of deliveries: the tail settles when the last one finishes. */
   const turns = new Map<string, Promise<void>>();
   const inFlightWaitMs = settlement.inFlightWaitMs ?? IN_FLIGHT_WAIT_MS;
+  const directPromptConfirmMs = settlement.directPromptConfirmMs ?? DIRECT_PROMPT_CONFIRM_MS;
   /**
    * A lead's and a peer's message to one seat can arrive together. Rather than
    * contend for its receipt fence, a later one waits its turn behind the
@@ -312,6 +319,126 @@ export function createFleetSeatControl(
     }
   };
 
+  /**
+   * Herdr direct prompting (ADR 0334): an owner's or lead's message to an agent with no
+   * native channel and no hook receiver is typed into its own terminal through Herdr's
+   * paste-aware prompt, only while it waits for input with an empty input line. Only a
+   * caller that cleared the message for it (`directPrompt`) and named the session it saw
+   * gets it: peers, rooms, chosen delivery modes and the desktop app never type.
+   * Undefined leaves delivery to the mailbox as before.
+   */
+  const promptWithoutChannel = async (
+    current: HerdrAgentSnapshot | undefined,
+    text: string,
+    begin: () => void,
+    clear: () => void,
+    authorized: ((() => Promise<boolean>) & CurrentCheck) | undefined,
+    options?: PeerDeliveryOptions,
+  ): Promise<FleetSeatDelivery | undefined> => {
+    const cleared = options?.directPrompt;
+    if (
+      cleared === undefined ||
+      !isMessageableSeat(current) ||
+      current.session?.value !== cleared.session ||
+      current.paneId.startsWith(`${HERDR_CORE_FLEET}/`) ||
+      options?.fence !== undefined ||
+      options?.reconcileOnly ||
+      options?.stableReceiptKey !== undefined ||
+      runner.promptAgent === undefined ||
+      runner.readPane === undefined ||
+      runner.transcript === undefined
+    )
+      return undefined;
+    // A Claude session with Clankie's hooks reads its mailbox; typing would be a second lane.
+    const receiverState = receiver?.(current).state;
+    if (receiverState === "live" || receiverState === "next-turn-only") return undefined;
+    const paneId = current.paneId;
+    const baseline = await runner.transcript(current).catch(() => undefined);
+    if (baseline === undefined)
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail:
+          "This agent has no native channel, and its session can't be read to confirm a typed message, so nothing was typed.",
+      };
+    const before = new Set(baseline.entries.map((entry) => entry.id));
+    const sameOccupant = async () => {
+      const live = await runner.resolveTerminal(current.terminalId).catch(() => undefined);
+      return live !== undefined &&
+        live.paneId === paneId &&
+        live.session?.value === cleared.session &&
+        live.agent === current.agent
+        ? live
+        : undefined;
+    };
+    let dispatched = false;
+    let typingError: unknown;
+    try {
+      const outcome = await promptWhenClear(
+        {
+          harness: current.agent,
+          status: async () => (await sameOccupant())?.status,
+          input: async () => paneInputLine(current.agent, await runner.readPane!(paneId, "visible", "ansi")),
+          prompt: async (message) => {
+            begin();
+            dispatched = true;
+            await runner.promptAgent!(paneId, message);
+          },
+        },
+        text,
+        async () => (authorized ? await authorized() : true) && (await sameOccupant()) !== undefined,
+      );
+      if (!outcome.sent)
+        return { outcome: "undelivered", deliveryStage: "unavailable", detail: outcome.detail };
+    } catch (error) {
+      if (!dispatched) return { outcome: "undelivered", deliveryStage: "unavailable", detail: String(error) };
+      if (error instanceof HerdrFleetError && error.definitive === "not_sent") {
+        clear();
+        return {
+          outcome: "undelivered",
+          deliveryStage: "unavailable",
+          detail: `Herdr refused to type the message, so nothing was sent: ${error.message}`,
+        };
+      }
+      // It may have been typed: the session still decides.
+      typingError = error;
+    }
+    // The paste is confirmed only by the agent's own session: a new operator turn with this
+    // exact text, matched as every other receipt here matches it.
+    const fingerprint = deliveryFingerprint(text);
+    const deadline = now() + directPromptConfirmMs;
+    for (;;) {
+      const transcript = await runner.transcript(current).catch(() => undefined);
+      const matched = transcript?.entries.find(
+        (entry) =>
+          entry.type === "message" &&
+          entry.role === "operator" &&
+          !before.has(entry.id) &&
+          deliveryFingerprint(channelBody(entry.text) ?? entry.text) === fingerprint,
+      );
+      if (matched)
+        return {
+          outcome: "delivered",
+          deliveryStage: "consumed",
+          messageId: matched.id,
+          state: "started",
+          detail:
+            "This agent has no native channel, so the message was typed into its terminal while it was idle with an empty input line, and its session shows it arrived.",
+        };
+      if (now() >= deadline) break;
+      await delay(DIRECT_PROMPT_POLL_MS);
+    }
+    return {
+      outcome: "unconfirmed",
+      // Marks a typed message, so this send never rediscovers and types it again (ADR 0334).
+      messageId: `${DIRECT_PROMPT_ID}${randomUUID()}`,
+      detail:
+        typingError === undefined
+          ? "The message was typed into the agent's terminal (it has no native channel), but its session doesn't show it yet. Read the agent before sending it again."
+          : `Typing into the agent's terminal didn't return cleanly (${String(typingError)}), and its session doesn't show the message yet. Read the agent before sending it again.`,
+    };
+  };
+
   const dispatch = async (
     current: HerdrAgentSnapshot | undefined,
     text: string,
@@ -396,6 +523,8 @@ export function createFleetSeatControl(
       clear();
     }
     if (options?.delivery) return modeUnavailable(options.delivery);
+    const typed = await promptWithoutChannel(current, text, begin, clear, authorized, options);
+    if (typed !== undefined) return typed;
     if (uncontrolled !== undefined) {
       if (authorized && !(await authorized())) return refused();
       if (options?.stableReceiptKey !== undefined) begin();
@@ -1087,7 +1216,8 @@ export function createFleetSeatControl(
         else if (
           stamped.outcome === "unconfirmed" &&
           options?.rediscover === true &&
-          options.stableReceiptKey === undefined
+          options.stableReceiptKey === undefined &&
+          !stamped.messageId?.startsWith(DIRECT_PROMPT_ID)
         ) {
           rediscoverAfter = true;
           outcome = stamped;
@@ -1155,6 +1285,12 @@ export function createFleetSeatControl(
     },
   };
 }
+
+/** How long a typed message may take to show in the agent's session before it reads unconfirmed. */
+const DIRECT_PROMPT_CONFIRM_MS = 20_000;
+const DIRECT_PROMPT_POLL_MS = 1_000;
+/** The id prefix of a typed message's uncertain receipt: it is never rediscovered and typed again. */
+const DIRECT_PROMPT_ID = "direct-prompt:";
 
 /** An original absent from its idle recipient's session stops blocking a different message after this. */
 const UNARRIVED_SETTLE_MS = 5 * 60_000;

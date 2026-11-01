@@ -117,7 +117,7 @@ import {
   type FleetSeatDelivery,
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
 import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
 import {
   chooseWorkerAccount,
@@ -305,6 +305,11 @@ export interface HerdrWatchRunner {
    * never a channel for automated messages (ADR 0207).
    */
   sendText?(paneId: string, text: string): Promise<void>;
+  /**
+   * `herdr agent prompt`: pastes a whole message and presses Enter, refused while the agent is
+   * blocked. Only the direct-prompt fallback for an agent with no native channel (ADR 0334).
+   */
+  promptAgent?(paneId: string, text: string): Promise<void>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `herdr pane process-info --pane` → the pane's own shell and its foreground processes. */
@@ -611,6 +616,41 @@ function execHerdr(
   });
 }
 
+/** Herdr's error codes for refusing `agent prompt` before it types anything. */
+const HERDR_PROMPT_REFUSALS = new Set([
+  "agent_blocked",
+  "agent_not_ready",
+  "agent_not_found",
+  "blocked",
+  "pane_not_found",
+  "terminal_not_found",
+]);
+
+/**
+ * Herdr's refusal of `agent prompt`, as a definite not-sent (ADR 0334). Only Herdr's own
+ * error code counts, read from its JSON error or a remote fleet's parsed one: a timeout, or
+ * a failure whose text is the command line (which carries the message), proves nothing
+ * about whether the paste landed.
+ */
+function herdrPromptRefusal(error: unknown): HerdrFleetError | undefined {
+  let code: string | undefined;
+  if (error instanceof HerdrFleetError) code = error.code;
+  else {
+    const message = error instanceof Error ? error.message : String(error);
+    // Node's own failure text is the command line, which holds the message's text.
+    if (!message.startsWith("Command failed"))
+      try {
+        const value = JSON.parse(message.slice(message.indexOf("{"))) as { error?: { code?: unknown } };
+        if (typeof value.error?.code === "string") code = value.error.code;
+      } catch {
+        // Not Herdr's JSON error: the outcome is unknown.
+      }
+  }
+  return code !== undefined && HERDR_PROMPT_REFUSALS.has(code)
+    ? new HerdrFleetError(code, "Herdr refused to type the message", "not_sent")
+    : undefined;
+}
+
 function runExecFile(
   command: string,
   args: readonly string[],
@@ -785,6 +825,13 @@ export function createHerdrWatchRunner(
         );
     },
     sendText: (paneId, text) => runHerdr(["pane", "send-text", paneId, text]).then(() => undefined),
+    promptAgent: (paneId, text) =>
+      runHerdr(["agent", "prompt", paneId, text]).then(
+        () => undefined,
+        (error: unknown) => {
+          throw herdrPromptRefusal(error) ?? error;
+        },
+      ),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     paneShell: async (paneId) => {

@@ -101,6 +101,12 @@ export interface PeerDeliveryOptions {
    * that one redelivery; it is never followed by another.
    */
   readonly rediscover?: boolean | "final";
+  /**
+   * The owner's or a lead's message, cleared by its sender for Herdr direct prompting
+   * (ADR 0334) if the agent has no channel: the native session the sender saw, which the
+   * agent must still hold, and no uncertain worker-channel original is waiting on it.
+   */
+  readonly directPrompt?: { readonly session: string };
 }
 const ReceiptRecordSchema = z
   .object({
