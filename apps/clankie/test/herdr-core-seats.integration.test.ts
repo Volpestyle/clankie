@@ -137,7 +137,9 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   const seen = await runner.get(address);
   expect(seen).toMatchObject({ paneId: address, terminalId: address, name: "grace" });
   expect(seen.status).not.toBe("offline");
-  await until(async () => (await runner.readPane(address, "visible")).includes("hello from the desktop app"));
+  await until(async () =>
+    (await runner.readPane(address, "visible", "text")).includes("hello from the desktop app"),
+  );
 
   // A terminal the owner started is never his to drive.
   expect(await runner.resolveTerminal(warm)).toBeUndefined();

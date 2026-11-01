@@ -33,7 +33,9 @@ export interface HerdrCoreRunnerOptions {
 }
 
 /** The read and lifecycle half of a seat runner for the desktop app's core; hiring comes later. */
-export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWatchRunner {
+export function createHerdrCoreRunner(
+  options: HerdrCoreRunnerOptions,
+): HerdrWatchRunner & Required<Pick<HerdrWatchRunner, "readPane" | "closePane">> {
   const { seats } = options;
   const pollMs = options.pollMs ?? POLL_MS;
   const snapshot = (terminal: HerdrCoreTerminal): HerdrAgentSnapshot => {
