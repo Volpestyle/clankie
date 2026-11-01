@@ -211,6 +211,11 @@ interface McpToolDescriptor {
   readonly inputSchema: Record<string, unknown>;
   /** Whether this one is active from the first turn rather than found by search. */
   readonly initial: boolean;
+  /**
+   * Writes as a worker persona: a grant must bind the exact personaId, and a
+   * project's standing access leaves it out.
+   */
+  readonly writesAsPersona?: boolean;
 }
 
 type McpRefusalReason =
@@ -1027,9 +1032,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       !projected.some((tool) => tool.name === LINEAR_GRAPHQL_TOOL.name)
     )
       projected.push(graphqlDescriptor());
-    state.tools = projected;
+    // A server's own tool of the same name is still published as the persona.
+    const tools = projected.map((tool) =>
+      server.id === "linear" && isLinearWorkerTool(tool.name) ? { ...tool, writesAsPersona: true } : tool,
+    );
+    state.tools = tools;
     delete state.failure;
-    return projected;
+    return tools;
   }
 
   async function account(server: McpServerSettings, expectedCredential?: string) {

@@ -31,7 +31,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
-import { isLinearWorkerTool } from "./linear-publishing.ts";
 import { trackerCatalogForRole } from "@clankie/work-items";
 import {
   MinecraftActionSchema,
@@ -833,18 +832,16 @@ export class WorkerMcp {
       // A project's standing access: the server's tools, minus worker publishing,
       // which must name the persona it writes as.
       request.tools = catalog
-        .filter(
-          (tool) =>
-            tool.server === request.server && !(request.server === "linear" && isLinearWorkerTool(tool.name)),
-        )
+        .filter((tool) => tool.server === request.server && !tool.writesAsPersona)
         .map((tool) => ({ name: tool.name, arguments: {}, forbiddenArguments: [] }));
     if (request.tools.length === 0) throw new Error(`No tools are available on ${request.server}`);
     if (new Set(request.tools.map((tool) => tool.name)).size !== request.tools.length)
       throw new Error("Tool names must be unique");
     for (const rule of request.tools) {
       if (
-        request.server === "linear" &&
-        isLinearWorkerTool(rule.name) &&
+        catalog.some(
+          (tool) => tool.server === request.server && tool.name === rule.name && tool.writesAsPersona,
+        ) &&
         typeof rule.arguments.personaId !== "string"
       )
         throw new Error("Worker publishing grants must bind an exact personaId");
@@ -1495,9 +1492,7 @@ export class WorkerMcp {
         try {
           const { account, binding, backend } = await this.binding(server, "operator");
           const tools = catalog
-            .filter(
-              (tool) => tool.server === server && !(server === "linear" && isLinearWorkerTool(tool.name)),
-            )
+            .filter((tool) => tool.server === server && !tool.writesAsPersona)
             .map((tool) => ({ name: tool.name, arguments: {}, forbiddenArguments: [] }));
           if (!tools.length) continue;
           records.push({
