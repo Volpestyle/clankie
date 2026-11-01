@@ -248,6 +248,13 @@ degraded. `/health` carries the same list as last known, without the health
 read. The core serves the fleet whatever these say
 ([ADR 0328](adr/0328-clankie-is-a-core-with-extensions.md)).
 
+`clankie extensions off ID` keeps one extension off, and `clankie extensions on
+ID` lets it run again whenever its own requirement is met (the relay once you
+sign in to remote access, the browser unless `CLANKIE_BROWSER_ENABLED` turns it
+off). Both are owner-only `POST /v1/extensions` calls, take effect at the next
+`clankie restart clankie`, and answer with `restartRequired`. The switches are
+the `extensions` map in settings; an id with no entry is on.
+
 ### `runtime-health`
 
 `clankie runtime-health status` reads the live observation and settings from the

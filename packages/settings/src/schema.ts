@@ -32,6 +32,7 @@ export const SETTINGS_SCHEMA_VERSION = 1 as const;
 
 import { DiscordSettingsSchema, withoutRetiredDiscordSettings } from "@clankie/protocol/discord-settings";
 import { RuntimeHealthSettingsSchema } from "@clankie/protocol/runtime-health";
+import { ExtensionSwitchesSchema } from "@clankie/protocol/extensions";
 export { DiscordSettingsSchema, type DiscordSettings } from "@clankie/protocol/discord-settings";
 
 export {
@@ -685,6 +686,8 @@ export const ClankieSettingsSchema = z
     http: HttpSettingsSchema.default(() => HttpSettingsSchema.parse({})),
     host: HostSettingsSchema.default(() => HostSettingsSchema.parse({})),
     runtimeHealth: RuntimeHealthSettingsSchema.default(() => RuntimeHealthSettingsSchema.parse({})),
+    /** The owner's on/off switch per extension (ADR 0328); a missing id is on. */
+    extensions: ExtensionSwitchesSchema.default(() => ({})),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
     evidence: EvidenceSettingsSchema.default(() => ({ backend: "local" as const })),
     /**

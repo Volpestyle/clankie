@@ -216,7 +216,10 @@ const HEADLESS_COMMAND_HELP = [
   },
   {
     nouns: ["extensions"],
-    lines: ["  extensions [status]      Each extension's state: running, degraded with a reason, off (JSON)"],
+    lines: [
+      "  extensions [status]      Each extension's state: running, degraded with a reason, off (JSON)",
+      "  extensions on|off ID     Switch one extension on or off; applies at the next restart",
+    ],
   },
   {
     nouns: ["runtime-health"],

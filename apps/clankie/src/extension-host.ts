@@ -78,6 +78,18 @@ export function createCoreExtensions(ports: CorePorts): CoreExtensions {
   });
 }
 
+/**
+ * The owner's switch (ADR 0328) on top of the extension's own requirement:
+ * `off` keeps it off, `on` or no entry leaves the requirement to decide.
+ */
+export function switchedOn(
+  settings: { readonly extensions: Readonly<Record<string, "on" | "off">> },
+  id: string,
+  requirementMet = true,
+): boolean {
+  return settings.extensions[id] !== "off" && requirementMet;
+}
+
 /** The first running extension's addition under one projection key, if any. */
 export function projected<Key extends keyof CoreProjection>(
   extensions: CoreExtensions,

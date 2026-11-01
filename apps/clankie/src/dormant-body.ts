@@ -7,7 +7,7 @@ import { createClankieApp, type ClankieApp } from "./app.ts";
 import type { ClankieAppDependencies } from "./app/types.ts";
 import type { BodyTransfer } from "./body-transfer.ts";
 import { createStubCaptain } from "./captain/port.ts";
-import { createCoreExtensions, doorwayOf, type CorePorts } from "./extension-host.ts";
+import { createCoreExtensions, doorwayOf, switchedOn, type CorePorts } from "./extension-host.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
 import { relayExtension } from "./relay-extension.ts";
@@ -85,8 +85,12 @@ export async function serveDormantBody(options: {
     whenListening: (run) => void listening.then(run),
     ...(options.onDoorwayChange === undefined ? {} : { onDoorwayChange: options.onDoorwayChange }),
   });
-  const publicGateway = (await options.settingsStore.load()).publicGateway;
-  extensions.add(relayExtension, { enabled: publicGateway.url !== undefined, settings: publicGateway });
+  const startupSettings = await options.settingsStore.load();
+  const publicGateway = startupSettings.publicGateway;
+  extensions.add(relayExtension, {
+    enabled: switchedOn(startupSettings, "relay", publicGateway.url !== undefined),
+    settings: publicGateway,
+  });
   await extensions.start();
   const connector = doorwayOf(extensions)?.connector;
   const deviceSessionKeyPath = env.CLANKIE_DEVICE_SESSION_KEY_PATH

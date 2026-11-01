@@ -10,7 +10,8 @@ machine joins now seal with the core's `sealed-values.ts`), the browser
 (`browser-extension.ts`), the computer body (`computer-extension.ts`) and
 media, which starts with the drawing hand (`media-extension.ts`). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
-`clankie status` and `clankie doctor --json`; the on/off settings are still to come.
+`clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
+sets the owner's switch for the next start; the app's Common controls are still to come.
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside
