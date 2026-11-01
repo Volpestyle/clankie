@@ -56,3 +56,10 @@ docs/testing/**/*.gif
 docs/testing/**/*.mp4
 docs/testing/**/*.mov
 docs/testing/**/*.webm
+
+# Claude Code writes type scaffolding beside a loaded plugin's mods. It is never
+# authored here, and in the pinned runtime it would read as local changes.
+/integrations/claude-plugin/tsconfig.json
+/integrations/claude-plugin/.claude-plugin/types/
+/integrations/claude-plugin/worker/tsconfig.json
+/integrations/claude-plugin/worker/.claude-plugin/types/
