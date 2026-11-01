@@ -92,8 +92,6 @@ import {
   type OperatorSeatEventKind,
   type WorkerReportRouting,
 } from "@clankie/protocol";
-import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
-import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
 import {
   codexAccounts,
   readDiscordServerSettings,
@@ -126,7 +124,6 @@ import { readSeatImage } from "../seat-images.ts";
 import { deliverToFleetSeat, readFleetSeatImage } from "../fleet-seat-files.ts";
 import type { SeatImageResult } from "@clankie/protocol/connector";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
-import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
@@ -174,6 +171,7 @@ import { createPeers } from "./captain-peers.ts";
 import { createCaptainAutoTidy } from "./captain-auto-tidy.ts";
 import { createNativeSources } from "./captain-native-sources.ts";
 import { createFleetRounds } from "./captain-fleet-rounds.ts";
+import { createToolCatalogHealth } from "./captain-tool-catalog.ts";
 import { createLeadSeats, LEAD_RESTART_AGE_MS, LEAD_RESTART_CONTEXT_TOKENS } from "./captain-lead-seats.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import {
@@ -328,7 +326,7 @@ import { withSeatSubagents } from "./seat-subagents.ts";
 import { CaptainResourceLoader, skillSearchExtension } from "./skill-catalog.ts";
 import { createStanceStore } from "./stances.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
-import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "./tool-catalog-health.ts";
+import { ToolCatalogHealthStore } from "./tool-catalog-health.ts";
 import { createWorkerSandbox } from "../worker-sandbox.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 import {
@@ -1038,7 +1036,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ...(deps.herdrAvailable?.() === false || fleetFeedSocket === undefined
           ? {}
           : { paneGone: watchPaneGone }),
-        catalogObserved: observeCodexToolCatalog,
+        catalogObserved: (ref, report) => observeCodexToolCatalog(ref, report),
         ...(options.localCodexProcess === undefined
           ? {}
           : {
@@ -1193,7 +1191,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             if (local !== undefined)
               return [
                 createCodexSeatAdapter({
-                  catalogObserved: observeCodexToolCatalog,
+                  catalogObserved: (ref, report) => observeCodexToolCatalog(ref, report),
                   herdr: async (args) => {
                     await guard();
                     return deps.runtimes!.runNamed!(
@@ -1228,7 +1226,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   return deps.fleets!.run(fleet)(...args);
                 },
                 options.remoteCodexProcess,
-                observeCodexToolCatalog,
+                (ref, report) => observeCodexToolCatalog(ref, report),
               ),
               createRemoteClaudeWorkerSeatAdapter(fleet, shell, claudeWorkerDeps),
               ...(options.remoteOpenCode === undefined
@@ -4091,134 +4089,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       : { ...bank, tools: [...bank.tools, ...ownerTools] };
   }
 
-  async function recordNativeToolCatalog(
-    paneId: string,
-    report: FleetSeatToolCatalog,
-    workerTools: readonly string[],
-    proof?: ProjectProcessProof,
-    operatorTools?: readonly string[],
-  ) {
-    if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
-    const agent = await herdrRunner.get(paneId).catch(() => undefined);
-    if (!agent?.session) return undefined;
-    const identity = catalogIdentity(
-      {
-        paneId,
-        occupantId: occupantIdForHerdrSession(agent.session),
-        harness: agent.agent,
-        session: agent.session,
+  const { recordNativeToolCatalog, observeCodexToolCatalog, catalogIdentity, currentCatalogHealth } =
+    createToolCatalogHealth({
+      options,
+      deps,
+      herdrRunner,
+      settings,
+      conversations,
+      validateConversationOwner,
+      toolCatalogHealth,
+      fleetChanges,
+      laneToolBankFor,
+      get inboundBinding() {
+        return inboundBinding;
       },
-      report.bridge,
-    );
-    if (!identity || identity.sessionId !== report.sessionId || identity.harness !== report.harness)
-      return undefined;
-    const qualified = splitFleetQualified(paneId);
-    if (
-      proof &&
-      (proof.nativeSessionPending ||
-        proof.nativeOccupantId !== identity.occupantId ||
-        proof.pane !== (qualified?.id ?? paneId) ||
-        proof.fleet !== (qualified?.fleet ?? "default"))
-    )
-      return undefined;
-    const currentSettings = await settings();
-    const expected =
-      report.bridge === "worker"
-        ? [
-            "message_clankie",
-            "message_clankie_status",
-            ...workerTools,
-            ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
-          ]
-        : operatorTools;
-    if (expected === undefined) return undefined;
-    if (report.bridge === "operator" && proof && report.conversationId) {
-      // This caller has kernel/native-session proof and explicitly reports its
-      // operator conversation. Preserve that qualified binding while the
-      // transcript attachment and current occupant still agree. A later bare
-      // discovery must not depend on unrelated offline fleet inventories.
-      const current = await herdrRunner.get(paneId).catch(() => undefined);
-      if (
-        !current ||
-        inboundBinding(current) !== inboundBinding(agent) ||
-        conversations.attachedConversationForNative(current) !== report.conversationId ||
-        !(await validateConversationOwner({ conversationId: report.conversationId }))
-      )
-        return undefined;
-      await rememberOperatorSource(report.conversationId, current);
-    }
-    const health = toolCatalogHealth.record(identity, report, expected);
-    fleetChanges.touch();
-    return health;
-  }
-
-  async function observeCodexToolCatalog(ref: { paneId: string }, report: FleetSeatToolCatalog) {
-    const workerTools = (await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? [];
-    return recordNativeToolCatalog(ref.paneId, report, workerTools);
-  }
-
-  function catalogIdentity(
-    observed: {
-      paneId: string;
-      occupantId: string;
-      harness: string;
-      session?: { kind: "id" | "path"; value: string };
-    },
-    bridge: "worker" | "operator",
-  ): ToolCatalogIdentity | undefined {
-    if (observed.harness !== "claude" && observed.harness !== "codex") return undefined;
-    const sessionId =
-      observed.session === undefined
-        ? undefined
-        : observed.session.kind === "id"
-          ? observed.session.value
-          : basename(observed.session.value, ".jsonl");
-    return {
-      paneId: observed.paneId,
-      occupantId: observed.occupantId,
-      harness: observed.harness,
-      ...(sessionId === undefined ? {} : { sessionId }),
-      bridge,
-    };
-  }
-
-  async function currentCatalogHealth(identity: ToolCatalogIdentity) {
-    const operatorIdentity = { ...identity, bridge: "operator" as const };
-    const workerIdentity = { ...identity, bridge: "worker" as const };
-    if (!toolCatalogHealth.hasReport(operatorIdentity) && !toolCatalogHealth.hasReport(workerIdentity))
-      return toolCatalogHealth.readPane(identity);
-    try {
-      const currentSettings = await settings();
-      const worker = [
-        "message_clankie",
-        "message_clankie_status",
-        ...((await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? []),
-        ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
-      ];
-      const operator = toolCatalogHealth.hasReport(operatorIdentity)
-        ? [
-            ...(
-              await laneToolBankFor("operator", toolCatalogHealth.conversationId(operatorIdentity))
-            ).tools.map((tool) => tool.name),
-            "reconcile_seat_call",
-            "reply",
-          ]
-        : undefined;
-      return toolCatalogHealth.readPane(identity, { worker, ...(operator ? { operator } : {}) });
-    } catch (error) {
-      const health = toolCatalogHealth.readPane(identity);
-      return {
-        ...health,
-        status: "unverified" as const,
-        missing: [],
-        detail:
-          `The current bridge catalog could not be read: ${error instanceof Error ? error.message : String(error)}`.slice(
-            0,
-            4096,
-          ),
-      };
-    }
-  }
+      get rememberOperatorSource() {
+        return rememberOperatorSource;
+      },
+    });
 
   const FLEET_FRESH_MS = 1000;
   const FLEET_READ_TIMEOUT_MS = 5_000;
