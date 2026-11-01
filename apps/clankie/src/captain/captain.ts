@@ -7006,8 +7006,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const lane = request.trigger.kind === "voice_event" ? "discord_voice" : "discord_presence";
       const targetId = `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`;
       const parentId = conversations.roomConversation(lane, targetId);
+      // Routing must not yield before the coordinator admits concurrent turns.
+      // Authority is still refreshed when each admitted turn actually runs.
       const initialDiscord = resolveDiscordSettings(
-        (await settings()).discord,
+        settingsStore.readSync().discord,
         options.discordEnvironment,
       ).settings;
       const initialGuild =
