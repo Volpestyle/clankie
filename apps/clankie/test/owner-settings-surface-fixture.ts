@@ -8,6 +8,7 @@ import { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 
 /** Real HTTP, owner credentials and atomic settings; the unrelated captain never runs. */
 export async function ownerSettingsFixture(env: NodeJS.ProcessEnv = {}, suppliedSettings?: SettingsStore) {
@@ -25,6 +26,7 @@ export async function ownerSettingsFixture(env: NodeJS.ProcessEnv = {}, supplied
       identity: { operatorId: "fixture-owner" },
     }),
     voiceSettingsEnv: env,
+    extensionRoutes: [personaRoutes()],
   });
   const server = await startFixtureServer(service.app.fetch);
   return {
