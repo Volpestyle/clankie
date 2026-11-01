@@ -292,7 +292,7 @@ import {
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import { FleetCensusBreaker } from "./fleet-census-breaker.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
-import { HERDR_CORE_FLEET, createHerdrCoreRunner } from "./herdr-core-runner.ts";
+import { HERDR_CORE_FLEET, createHerdrCoreRunner, herdrCoreCensusFleet } from "./herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./herdr-core-seats.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
@@ -580,6 +580,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       host: "local",
       run: (args: readonly string[]) => deps.runtimes!.runNamed!(entry.id, args, undefined, undefined, entry),
     })),
+    // Hires in the desktop app's terminals are seats too (ADR 0319).
+    herdrCoreCensusFleet(herdrCoreRunner, () => herdrCoreSeats.available()),
   ];
   // A local Codex seat hears its pane close from the fleet event feed instead
   // of polling `herdr pane get` every few seconds (VUH-2391). A restarted feed
