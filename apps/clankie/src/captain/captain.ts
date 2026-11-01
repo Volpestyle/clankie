@@ -1,4 +1,3 @@
-import { stageWindowsMessage, stagedMessagePointer } from "./remote-seat-message.ts";
 import { discordGuildSettings } from "@clankie/protocol";
 import { listedOnLane } from "./mcp-tool-surface.ts";
 import { RoomLoops } from "./room-loops.ts";
@@ -14,10 +13,6 @@ import { UsageHistory } from "../app/usage-burn.ts";
 import { remoteRetirementWork } from "./remote-retirement-work.ts";
 import { workerWorktreeHold } from "./worktree-decisions.ts";
 import { renderLeadChats, type LeadChat } from "./lead-roster.ts";
-import {
-  prepareWorkHandoffIntent as prepareWorkIntent,
-  prepareFreeAgentIntent as prepareFreeIntent,
-} from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
 import { WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
 import { routeLaneRun } from "./lane-route.ts";
@@ -52,7 +47,7 @@ import { fleetInstructions } from "./captain-prompts.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
 import { prepareSeatTelemetry, readSeatCommitBaseline, type SeatCommitBaseline } from "./seat-telemetry.ts";
 import { fleetReviewContext } from "./fleet-review.ts";
-import { readCodexGoal, readClaudeSubagents, readCodexSubagents } from "@clankie/agent-transcript";
+import { readCodexGoal } from "@clankie/agent-transcript";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
@@ -89,7 +84,7 @@ import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
-import { HerdrFleetError, splitFleetQualified, type FleetShellRun, type HerdrFleet } from "../herdr-fleet.ts";
+import { splitFleetQualified, type FleetShellRun, type HerdrFleet } from "../herdr-fleet.ts";
 import { NativePaneNotFoundError, nativeRequest } from "../herdr-native-request.ts";
 import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
@@ -148,6 +143,7 @@ import { createToolCatalogHealth } from "./captain-tool-catalog.ts";
 import { createFleetProjection } from "./captain-fleet-projection.ts";
 import { createFleetRoster } from "./captain-fleet-roster.ts";
 import { createHiring } from "./captain-hiring.ts";
+import { createSeatDelivery } from "./captain-seat-delivery.ts";
 import { createLeadSeats, LEAD_RESTART_AGE_MS, LEAD_RESTART_CONTEXT_TOKENS } from "./captain-lead-seats.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import {
@@ -185,12 +181,7 @@ import {
   type FleetRoomRecord,
 } from "./fleet-room.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.ts";
-import {
-  deliverFleetSeatMessage,
-  fleetSeatMailbox,
-  type FleetSeatDelivery,
-  type FleetSeatMessageContext,
-} from "./fleet-seat.ts";
+import { fleetSeatMailbox } from "./fleet-seat.ts";
 import { createGrokSeatAdapter } from "./grok-seat-adapter.ts";
 import { createPrimeSeatAdapter } from "./prime-seat-adapter.ts";
 import {
@@ -233,7 +224,7 @@ import { FleetRoster } from "./fleet-roster.ts";
 import { fleetRosterAction } from "./fleet-roster-actions.ts";
 import { PaneTidy } from "./pane-tidy.ts";
 import { SeatIssueKeeper } from "./seat-issue-status.ts";
-import { currentOf, withCurrent, type CurrentCheck, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
+import { currentOf, withCurrent, type CurrentCheck } from "./peer-seat-messages.ts";
 import { PersonaStore } from "./personas.ts";
 import type { CaptainPort, MessageSeat } from "./port.ts";
 import {
@@ -2806,320 +2797,35 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   herdrWatches.issueStatus = issueStatus;
 
-  /**
-   * The one lane into a seat — an operator DM, a room turn, and the captain's
-   * own messages all take it: harness control, native queue or the seat's bound
-   * mailbox. A missing or uncertain channel never permits terminal typing.
-   */
-  function prepareFreeAgentIntent(intent: import("@clankie/protocol").FreeAgentIntent) {
-    return prepareFreeIntent(
-      {
-        settingsStore,
-        options,
-        refreshFleet: async () => {
-          await refreshFleet({ force: true });
-          const helper = liveSeats.find(
-            (seat) => seat.seatId === intent.seatId && seat.occupantId === intent.occupantId,
-          );
-          if (!helper) return liveSeats;
-          const addressed =
-            conversations.conversationIdForPersona(helper.personaId) !== undefined ||
-            conversations.conversationIdForSeat(helper.seatId) !== undefined;
-          const native =
-            addressed && helper.fleet === undefined
-              ? await herdrRunner.resolveTerminal(helper.seatId).catch(() => undefined)
-              : undefined;
-          let subagents: import("@clankie/protocol").OperatorSeatSubagents | undefined;
-          if (native?.session && occupantIdForHerdrSession(native.session) === intent.occupantId) {
-            try {
-              subagents =
-                helper.harness === "codex"
-                  ? await readCodexSubagents(native.session, { freshDiscovery: true })
-                  : helper.harness === "claude"
-                    ? readClaudeSubagents(native.session, { requireComplete: true })
-                    : undefined;
-            } catch {
-              /* Unknown census never proves zero children. */
-            }
-          }
-          liveSeats = liveSeats.map((seat) => (seat === helper ? { ...seat, subagents } : seat));
-          return liveSeats;
-        },
-        seats: () => liveSeats,
-        personaForOccupant: (id) => personas.personaForOccupant(id),
-      },
-      intent,
-    );
-  }
-
-  function prepareWorkHandoffIntent(intent: import("@clankie/protocol").WorkHandoffIntent) {
-    return prepareWorkIntent(
-      {
-        settingsStore,
-        options,
-        refreshFleet: async () => {
-          await refreshFleet({ force: true });
-          return liveSeats;
-        },
-        seats: () => liveSeats,
-        personaForOccupant: (id) => personas.personaForOccupant(id),
-      },
-      intent,
-    );
-  }
-
-  async function deliverToSeat(
-    seatId: string,
-    message: string,
-    context: FleetSeatMessageContext,
-    deliveryOptions?: PeerDeliveryOptions,
-  ): Promise<FleetSeatDelivery> {
-    if (context.workHandoff) {
-      const intent = context.workHandoff;
-      if (
-        context.freeAgent ||
-        intent.seatId !== seatId ||
-        context.source !== "operator" ||
-        context.delivery === "queue"
-      )
-        return {
-          outcome: "undelivered",
-          deliveryStage: "rejected",
-          detail: "This work handoff changed its original recipient.",
-        };
-      const recipient = await prepareWorkHandoffIntent(intent);
-      const previous = deliveryOptions;
-      deliveryOptions = {
-        ...previous,
-        source: "operator",
-        guard: async () => {
-          await previous?.guard?.();
-          await recipient.guard();
-        },
-        fence: async (agent) => {
-          if (previous?.fence && !(await previous.fence(agent))) return false;
-          await recipient.guard();
-          recipient.assertCurrent();
-          return (
-            !!agent?.session &&
-            agent.terminalId === intent.seatId &&
-            occupantIdForHerdrSession(agent.session) === intent.occupantId
-          );
-        },
-      };
-      await deliveryOptions.guard!();
-    }
-    if (context.freeAgent) {
-      const intent = context.freeAgent;
-      if (intent.seatId !== seatId || context.source !== "operator" || context.delivery === "queue")
-        return {
-          outcome: "undelivered",
-          deliveryStage: "rejected",
-          detail: "This drop changed its original recipient.",
-        };
-      const free = await prepareFreeAgentIntent(intent);
-      const previous = deliveryOptions;
-      deliveryOptions = {
-        ...previous,
-        source: "operator",
-        guard: async () => {
-          await previous?.guard?.();
-          await free.guard();
-        },
-        fence: async (agent) => {
-          const teammate = intent.helpTarget
-            ? await herdrRunner.resolveTerminal(intent.helpTarget.seatId).catch(() => undefined)
-            : undefined;
-          if (previous?.fence && !(await previous.fence(agent))) return false;
-          await free.guard();
-          free.assertCurrent();
-          return (
-            !!agent?.session &&
-            agent.terminalId === intent.seatId &&
-            occupantIdForHerdrSession(agent.session) === intent.occupantId &&
-            /^(idle|resting)$/u.test(agent.status) &&
-            (!intent.helpTarget ||
-              (!!teammate?.session &&
-                teammate.paneId === intent.helpTarget.paneId &&
-                occupantIdForHerdrSession(teammate.session) === intent.helpTarget.occupantId))
-          );
-        },
-      };
-      await deliveryOptions.guard!();
-    }
-    const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
-    if (
-      context.source === "operator" &&
-      options.connectorSessionDetection?.() === true &&
-      deliveryOptions?.reconcileOnly !== true &&
-      deliveryOptions?.rediscover === undefined
-    )
-      deliveryOptions = { ...deliveryOptions, rediscover: true };
-    deliveryOptions = {
-      ...deliveryOptions,
-      conversationId: context.conversationId,
-      ...(inboundBinding(current) === undefined ? {} : { recipientBinding: inboundBinding(current)! }),
-    };
-    if (
-      context.delivery &&
-      current?.agent === "claude" &&
-      !(await herdrWatches.inputCapabilities(current)).deliveryModes.includes(context.delivery)
-    )
-      return {
-        outcome: "undelivered",
-        deliveryStage: "rejected",
-        detail: `This Claude session cannot ${context.delivery} through its current receiver. Nothing was sent.`,
-      };
-    const prior = nextTurnMailboxes.receipt(seatId, inboundBinding(current), message);
-    if (prior && deliveryOptions?.stableReceiptKey === undefined) return prior;
-    const mailbox = fleetSeatMailbox(
-      fleetMailboxes,
-      seatId,
-      join(options.stateDir, "delivery-receipts", "fleet"),
-      deps.onSeatDeliveryEvent,
-    );
-    if (deliveryOptions?.reconcileOnly) {
-      const receipt = mailbox.receipt(message);
-      if (receipt?.outcome === "delivered") return { outcome: "delivered", deliveryStage: "delivered" };
-    }
-    // An adapter-driven seat takes its message through the adapter, which
-    // waits for the harness's own receipt; any other seat needs a structured lane.
-    // `attempt` is the delivery attempt that fell back here: the rediscovery's
-    // final resend passes its own options, not the first attempt's.
-    const fallback = async (attempt?: {
-      readonly rediscover?: boolean | "final";
-    }): Promise<FleetSeatDelivery> => {
-      const live = fleetMailboxes.get(seatId);
-      const rediscover = attempt?.rediscover ?? deliveryOptions?.rediscover;
-      // A cleared session leaves the mailbox certain of an occupant that is gone.
-      // Release that one receipt so the rediscovery can send once. A poll still
-      // bound to the current session keeps its receipt until the transcript
-      // proves the message absent, which is the final attempt.
-      if (
-        live &&
-        (rediscover === "final" || (rediscover === true && !live.boundTo(inboundBinding(current) ?? "")))
-      )
-        live.releaseAbsent(message);
-      if (live?.boundTo(inboundBinding(current) ?? "") || live?.uncertain()) {
-        let staged: Awaited<ReturnType<typeof stageWindowsMessage>> | undefined;
-        let dispatched = false;
-        try {
-          const fleetId = current && splitFleetQualified(current.paneId)?.fleet;
-          const fleet = fleetId && (await refreshFleets()).find((entry) => entry.id === fleetId);
-          if (
-            current?.agent === "claude" &&
-            message.length > OPERATOR_CONVERSATION_TEXT_MAX &&
-            fleet &&
-            fleet.ssh.shell === "powershell"
-          ) {
-            const revision = fleetRevisions.get(fleet.id) ?? 0;
-            try {
-              staged = await stageWindowsMessage(async (...args) => {
-                await refreshFleets();
-                if ((fleetRevisions.get(fleet.id) ?? 0) !== revision || !deps.fleets?.shell)
-                  throw new Error("Machine connection changed");
-                return deps.fleets.shell(fleet)(...args);
-              }, message);
-            } catch (error) {
-              throw new HerdrFleetError("staging_failed", `Nothing was sent: ${String(error)}`, "not_sent");
-            }
-          }
-          if (staged) {
-            // allow-swallowed-rejection -- A failed recipient read refuses dispatch and removes this preparation.
-            const observed = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
-            if (
-              !observed ||
-              observed.paneId !== current?.paneId ||
-              inboundBinding(observed) !== inboundBinding(current)
-            )
-              return {
-                outcome: "undelivered",
-                deliveryStage: "unavailable",
-                detail: "The native recipient changed while staging; nothing was sent.",
-              };
-          }
-          await deliveryOptions?.guard?.();
-          if (deliveryOptions?.fence && !(await deliveryOptions.fence(current)))
-            return {
-              outcome: "undelivered",
-              deliveryStage: "rejected",
-              detail: "Peer authority changed before mailbox delivery; nothing was sent.",
-            };
-          if (context.delivery && current?.session?.kind === "id" && current.status === "working")
-            live.observeTurn(current.session.value, "responding", { onlyIfUnknown: true });
-          dispatched = true;
-          const result = await deliverFleetSeatMessage(fleetMailboxes, seatId, message, {
-            ...context,
-            ...(staged === undefined ? {} : { channelContent: stagedMessagePointer(staged, message) }),
-            ...(deliveryOptions?.recipientBinding !== undefined
-              ? { recipientBinding: deliveryOptions.recipientBinding }
-              : context.delivery && inboundBinding(current)
-                ? { recipientBinding: inboundBinding(current)! }
-                : {}),
-          });
-          if (result.outcome === "undelivered" || result.outcome === "offline") dispatched = false;
-          return result;
-        } finally {
-          // allow-swallowed-rejection -- Cleanup cannot change the send verdict; stale files remain eligible for the seven-day prune.
-          if (staged && !dispatched) await staged.remove().catch(() => undefined);
-        }
-      }
-      if (context.delivery === "steer")
-        return {
-          outcome: "undelivered",
-          deliveryStage: "rejected",
-          detail: "This agent's channel is unavailable. Nothing was sent.",
-        };
-      const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
-      await deliveryOptions?.guard?.();
-      if (deliveryOptions?.fence && !(await deliveryOptions.fence(agent)))
-        return {
-          outcome: "undelivered",
-          deliveryStage: "rejected",
-          detail: "Peer authority changed before mailbox storage; nothing was sent.",
-        };
-      let receipt = nextTurnMailboxes.store(seatId, inboundBinding(agent), message);
-      if (receipt.deliveryStage === "stored" && agent?.agent === "claude")
-        receipt = {
-          ...receipt,
-          detail: `${receipt.detail ?? ""} ${
-            nextTurnMailboxes.messageReceiver(
-              seatId,
-              inboundBinding(agent),
-              false,
-              agent.session?.kind === "id" ? agent.session.value : undefined,
-            ).detail
-          }`.trim(),
-        };
-      fleetChanges.touch();
-      if (agent)
-        await publishWaitingNotice(seatId, inboundBinding(agent), agent.paneId).catch(() => undefined);
-      return receipt;
-    };
-    const deliver = () =>
-      deliveryOptions || context.delivery
-        ? herdrWatches.deliverToSeat(seatId, message, fallback, {
-            ...deliveryOptions,
-            ...(context.delivery === undefined ? {} : { delivery: context.delivery }),
-          })
-        : herdrWatches.deliverToSeat(seatId, message, fallback);
-    let delivery: FleetSeatDelivery | undefined;
-    if (context.source === "room") {
-      await herdrWatches.sendAndWatchReply(seatId, message, async () => {
-        delivery = await deliver();
-        return delivery.outcome === "delivered";
-      });
-    } else delivery = await deliver();
-    // What a seat has been asked to do today is a fact about the seat, so the
-    // roster's cursor moves for it the way it moves for a stance (ADR 0150).
-    if (delivery?.outcome === "delivered") {
-      if (context.source === "captain" && delivery.deliveryStage !== "stored")
-        recordLeadVisit(seatId, "message", message);
-      seatLedger.promptSent(seatId);
-      fleetChanges.touch();
-    }
-    return delivery!;
-  }
+  const { prepareFreeAgentIntent, prepareWorkHandoffIntent, deliverToSeat } = createSeatDelivery({
+    options,
+    deps,
+    settingsStore,
+    conversations,
+    herdrRunner,
+    personas,
+    herdrWatches,
+    nextTurnMailboxes,
+    fleetMailboxes,
+    refreshFleets,
+    fleetRevisions,
+    fleetChanges,
+    publishWaitingNotice,
+    recordLeadVisit,
+    seatLedger,
+    get liveSeats() {
+      return liveSeats;
+    },
+    set liveSeats(seats) {
+      liveSeats = seats;
+    },
+    get refreshFleet() {
+      return refreshFleet;
+    },
+    get inboundBinding() {
+      return inboundBinding;
+    },
+  });
 
   // The captain briefs a hired seat through the native channel the
   // operator would, by whichever id the hire handed back (VUH-1373).
