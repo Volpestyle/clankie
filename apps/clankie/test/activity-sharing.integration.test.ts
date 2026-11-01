@@ -24,6 +24,7 @@ import { ActivitySharing, type ActivitySharingOptions } from "../src/activity-sh
 import { createActivityArtifactSources } from "../src/activity-artifact-source.ts";
 import { ActivityPlaySource } from "../src/activity-play-source.ts";
 import { createClankieApp } from "../src/app.ts";
+import { activityRoutes } from "../src/activity-routes.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
 
@@ -98,7 +99,7 @@ async function ownerPlane(
   const token = mintOperatorToken();
   const service = await createClankieApp({
     captain: createStubCaptain(),
-    activitySharing: sharing,
+    extensionRoutes: [activityRoutes({ activitySharing: sharing })],
     eventLogPath: join(root, "events.jsonl"),
     authenticateOperator: async (req) =>
       req.headers.get("authorization") === `Bearer ${token}` ? { operatorId: "owner" } : undefined,
@@ -163,7 +164,7 @@ it("projects an exact delivered artifact through owner CLI, real Clankie HTTP an
   const service = await createClankieApp({
     captain: createStubCaptain(),
     eventLogPath: join(root, "events.jsonl"),
-    activitySharing: sharing,
+    extensionRoutes: [activityRoutes({ activitySharing: sharing })],
     authenticateOperator: async (req) =>
       authorized && req.headers.get("authorization") === `Bearer ${operatorToken}`
         ? { operatorId: "owner" }
