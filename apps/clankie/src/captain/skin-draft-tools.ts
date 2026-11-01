@@ -1,11 +1,11 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { SkinDraftCommandSchema } from "@clankie/protocol/skin-drafts";
-import type { SkinDraftService } from "../skin-drafts.ts";
+import type { SkinDraftPort } from "../ports/media.ts";
 import { toolJson, type TurnContext } from "./tools.ts";
 
 /** Agents may prepare a draft; only a direct authenticated owner operation can approve it. */
-export function skinDraftTool(service: SkinDraftService | undefined, turn: TurnContext) {
+export function skinDraftTool(service: SkinDraftPort | undefined, turn: TurnContext) {
   return defineTool({
     name: "skin_draft",
     label: "Prepare a lead-skin draft",

@@ -7,10 +7,11 @@ import {
   isSkinDraftRoute,
 } from "@clankie/protocol/skin-drafts";
 import type { QuestionAuthority } from "./captain/conversation-questions.ts";
-import { SkinDraftError, type SkinDraftService } from "./skin-drafts.ts";
+import type { SkinDraftPort } from "./ports/media.ts";
+import { SkinDraftError } from "./skin-drafts.ts";
 
 export function createSkinDraftRoutes(options: {
-  service?: SkinDraftService | undefined;
+  service?: SkinDraftPort | undefined;
   authorize(request: Request): Promise<QuestionAuthority | undefined>;
 }) {
   const app = new Hono<{ Variables: { owner: QuestionAuthority } }>();

@@ -126,7 +126,7 @@ export interface TrustedDeviceIdentity {
 export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface ClankieAppDependencies {
-  skinDrafts?: import("../skin-drafts.ts").SkinDraftService;
+  skinDrafts?: import("../ports/media.ts").SkinDraftPort;
   /** Host-side voice environment validation; omitted uses the service process environment. */
   voiceSettingsEnv?: NodeJS.ProcessEnv;
   fleetResources?: import("../fleet-resource-runtime.ts").FleetResourceRuntime;
