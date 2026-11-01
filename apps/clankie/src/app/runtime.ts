@@ -41,10 +41,6 @@ import {
   CallBrowserToolRequestSchema,
   CaptainPresenceReportSchema,
   ConversationHeadRequestSchema,
-  DISCORD_ROOM_VOICE_PATH,
-  DISCORD_VOICE_OUTPUT_GUARD_PATH,
-  DiscordRoomVoiceCommandSchema,
-  DiscordVoiceOutputControlSchema,
   EmbodimentIntentSchema,
   GenerateImageRequestSchema,
   GenerateVideoRequestSchema,
@@ -596,93 +592,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         settings: settingsSource,
       }),
     );
-
-  app.get(DISCORD_ROOM_VOICE_PATH, async (context) => {
-    const authority = await authorizeRoom(context.req.raw, "observe");
-    if (!authority) return context.json({ error: "room_observe_required" }, 403);
-    if (!dependencies.roomVoice) return context.json({ error: "voice_unavailable" }, 503);
-    try {
-      const status = await dependencies.roomVoice.status();
-      await authority.guard();
-      if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
-      context.header("cache-control", "no-store");
-      return context.json(status);
-    } catch {
-      return context.json({ error: "voice_unavailable" }, 503);
-    }
-  });
-  app.post(DISCORD_ROOM_VOICE_PATH, async (context) => {
-    const authority = await authorizeRoom(context.req.raw, "settings");
-    if (!authority) return context.json({ error: "operator_required" }, 403);
-    const parsed = DiscordRoomVoiceCommandSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_voice_control" }, 400);
-    if (!dependencies.roomVoice) return context.json({ error: "voice_unavailable" }, 503);
-    const command = parsed.data;
-    if (command.action === "join") {
-      const room = await dependencies.captain.serveOperatorConversation({
-        op: "get",
-        schemaVersion: 1,
-        conversationId: command.conversationId,
-      });
-      const settings = await settingsSource.load();
-      if (
-        room.op !== "get" ||
-        room.conversation?.scope.kind !== "room" ||
-        room.conversation.scope.lane !== "discord_voice" ||
-        !settings.discord.ownerUserId
-      )
-        return context.json({ error: "exact_voice_room_required" }, 409);
-      try {
-        return context.json(
-          await dependencies.roomVoice.join(
-            command.conversationId,
-            room.conversation.scope.targetId,
-            settings.discord.ownerUserId,
-            authority,
-          ),
-        );
-      } catch {
-        return context.json({ error: "voice_control_refused" }, 409);
-      }
-    }
-    if (
-      (command.action !== "mute_output" &&
-        command.action !== "unmute_output" &&
-        command.action !== "leave") ||
-      command.stayId === undefined
-    )
-      return context.json({ error: "voice_control_unsupported" }, 409);
-    try {
-      return context.json(
-        await dependencies.roomVoice.control(
-          command.conversationId,
-          command.stayId,
-          command.action,
-          authority,
-        ),
-      );
-    } catch {
-      return context.json({ error: "voice_control_refused" }, 409);
-    }
-  });
-  app.post(DISCORD_VOICE_OUTPUT_GUARD_PATH, async (context) => {
-    const parsed = DiscordVoiceOutputControlSchema.safeParse(await readJson(context.req.raw));
-    const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (
-      !captain ||
-      captain === "unavailable" ||
-      (captain.steerSourceLane !== "discord_voice" && captain.steerSourceLane !== "discord_text")
-    )
-      return context.json({ error: "discord_body_required" }, 403);
-    if (!parsed.success || !dependencies.roomVoice)
-      return context.json({ error: "voice_control_unknown" }, 403);
-    try {
-      await dependencies.roomVoice.authorize(parsed.data);
-      return context.json({ authorized: true });
-    } catch {
-      return context.json({ error: "voice_control_unknown" }, 403);
-    }
-  });
 
   app.route(
     "/",
@@ -2222,6 +2131,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     settings: settingsSource,
     clock,
     trackerWakes: dependencies.captain,
+    room: (request, access) => authorizeRoom(request, access),
+    captainCaller: (request) => authenticateCaptain(request, dependencies),
+    conversations: dependencies.captain,
     async chatDevice(request) {
       const identity = await authenticateDevice(request);
       if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
