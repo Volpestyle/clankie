@@ -152,7 +152,13 @@ authenticated conversation, refuses unauthenticated requests, and runs
 `play.recover` inside its incarnation-fenced recovery before `reconcileStopped`;
 only that operation releases the ledger claim. Bundled games are unchanged.
 
-[Integration evidence](../../apps/clankie/test/game-extension-modules.integration.test.ts)
+[Integration evidence](../../apps/clankie/test/outside-extensions.integration.test.ts)
 installs a fixture module through the CLI writer, loads it beside a missing one,
 and checks owner-authenticated discovery, routes and tools, scoped credentials,
 and play recovery across a real ledger restart.
+
+Since 2026-11-01 these modules are one form of outside extension
+([ADR 0338](0338-outside-extensions-plug-into-the-same-contract.md)): the types
+moved to `@clankie/extension` (`src/game.ts`), `outside-extensions.ts` loads them
+with the owner's per-permission grants and switch, and `gameplay.extensions`
+entries move to `installedExtensions` at the next start.
