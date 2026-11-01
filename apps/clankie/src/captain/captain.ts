@@ -291,6 +291,8 @@ import {
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import { FleetCensusBreaker } from "./fleet-census-breaker.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
+import { HERDR_CORE_FLEET, createHerdrCoreRunner } from "./herdr-core-runner.ts";
+import { createHerdrCoreSeats } from "./herdr-core-seats.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
   createHerdrWatchRunner,
@@ -610,6 +612,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (error instanceof NativePaneNotFoundError) paneGone(paneId);
       });
   };
+  const herdrCoreRunner = createHerdrCoreRunner({ seats: createHerdrCoreSeats() });
   const herdrRunner = routeHerdrFleets(
     options.nativeHerdrRunner ??
       createHerdrWatchRunner(
@@ -683,6 +686,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ),
           ] as const;
         }),
+        // The desktop app's terminals Clankie started (ADR 0319); last, so no connection can shadow it.
+        [HERDR_CORE_FLEET, herdrCoreRunner] as const,
       ]),
   );
   async function refreshFleets() {

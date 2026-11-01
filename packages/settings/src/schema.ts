@@ -204,7 +204,8 @@ export const ExecutionConnectionSchema = z
     id: z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)
-      .refine((id) => id !== "default"),
+      // `herdr-core` names the Herdr desktop app's own terminals (ADR 0319).
+      .refine((id) => id !== "default" && id !== "herdr-core"),
     machine: z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,63}$/u)

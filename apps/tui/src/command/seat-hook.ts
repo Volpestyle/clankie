@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { seatIdentity } from "./seat-identity.ts";
 import { isAbsolute } from "node:path";
 import { readHerdrSeatTranscript } from "@clankie/agent-transcript";
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
@@ -40,7 +41,7 @@ export async function runSeatHookCommand(
 ): Promise<number> {
   if (args.length) throw new Error("Usage: clankie seat-hook (Claude hook JSON on stdin)");
   const env = options.env ?? process.env;
-  const paneId = env.HERDR_PANE_ID?.trim();
+  const paneId = seatIdentity(env).pane;
   if (!paneId) return 0;
   let input = "";
   for await (const chunk of options.stdin ?? process.stdin) {

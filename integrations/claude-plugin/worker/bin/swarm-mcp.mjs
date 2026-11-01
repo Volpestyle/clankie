@@ -5,7 +5,7 @@
 // On a machine linked to his fleet (VUH-1527) the same channel, and a
 // message_clankie tool, run here over that machine's link.
 import { execFileSync, spawn } from "node:child_process";
-import { hasLinks, parentCommandLine } from "./link.mjs";
+import { hasLinks, parentCommandLine, seatIdentity } from "./link.mjs";
 import { runSeatChannel } from "./seat-channel.mjs";
 
 const fail = (message) => {
@@ -35,10 +35,9 @@ if (process.env.CLANKIE_JOINED_SEAT_TOKEN && process.env.CLANKIE_JOINED_WORKER_S
 } else if (hasLinks()) {
   // A machine in one of his ssh fleets (VUH-1527) reaches him through its link,
   // with no `clankie` CLI or operator credential here.
-  runSeatChannel({ paneId: process.env.HERDR_PANE_ID?.trim(), parentArgv: parentCommandLine() });
+  runSeatChannel({ paneId: seatIdentity().pane, parentArgv: parentCommandLine() });
 } else {
-  if (!process.env.HERDR_PANE_ID)
-    fail("only a Clankie hire in a herdr pane or a linked fleet runs this server");
+  if (!seatIdentity().pane) fail("only a Clankie hire in a herdr pane or a linked fleet runs this server");
   // The bridge checks its parent's argv for the channel; its parent is this
   // wrapper, so hand it Claude's.
   let parent = "";

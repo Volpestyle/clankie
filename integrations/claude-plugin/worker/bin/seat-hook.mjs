@@ -15,15 +15,16 @@ import {
   TEXT_MAX,
   claudeParentCommandLine,
   approvesWorkerChannel,
+  seatIdentity,
 } from "./link.mjs";
 import { codexToolCatalogReport } from "./codex-tool-catalog.mjs";
 import { panePresence } from "./pane-presence.mjs";
 
-const paneId = process.env.HERDR_PANE_ID?.trim();
+const { pane: paneId, socket } = seatIdentity();
 if (!paneId) process.exit(0);
 // Claude's prewarmed background processes may inherit a pane that has gone.
 // They remain unclaimed; an unavailable native observation is not nonmembership.
-if ((await panePresence(process.env.HERDR_SOCKET_PATH, paneId)) === false) process.exit(0);
+if ((await panePresence(socket, paneId)) === false) process.exit(0);
 if (hasLinks()) {
   // On a linked machine; a pane outside his fleets has nothing to report.
   const link = readLink();
