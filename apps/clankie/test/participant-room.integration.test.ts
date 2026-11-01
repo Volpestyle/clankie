@@ -225,7 +225,6 @@ it.each([false, true, "absent"] as const)(
           nativeCensusRunner: census,
           nativeHerdrRunner: runner,
           seatAdapters: [],
-          personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
         },
       );
     const request = (n: number, actorId = "22222"): DiscordPresenceChannelTurnRequest => ({

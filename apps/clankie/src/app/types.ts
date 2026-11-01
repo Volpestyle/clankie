@@ -41,7 +41,6 @@ import type { AgentSessions } from "../agent-sessions.ts";
 import type { BodyLeaseRouter } from "../body-lease-router.ts";
 import type { BodyLeaseStore } from "../body-leases.ts";
 import { CaptainPresenceManager } from "../captain-presence.ts";
-import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
@@ -54,7 +53,6 @@ import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
-import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
 import type { BodyVoiceStaysPort } from "../ports/voice.ts";
 import { type WorkItemsService } from "../work-items.ts";
@@ -156,7 +154,10 @@ export interface ClankieAppDependencies {
   refreshHarnesses?: (authority: HarnessRefreshAuthority) => Promise<unknown>;
   pluginVersionInstalled?: (version: string) => void;
   refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
-  /** Durable exact Discord turn receipts; production supplies its state directory. */
+  /**
+   * Where the persona keeps its exact Discord turn receipts when it is handed
+   * none of its own; production supplies its state directory.
+   */
   discordTurnReceiptPath?: string;
   /** Durable operator MCP hire/delivery receipts, retained across service restarts. */
   seatCallReceiptPath?: string;
@@ -173,7 +174,6 @@ export interface ClankieAppDependencies {
    * one Herdr detection switch (ADR 0312). Absent: an in-memory store, on.
    */
   connectorDetection?: import("./connector-detection.ts").ConnectorDetection;
-  discordTurnReceipts?: DiscordTurnReceipts;
   modelKeys?: ModelKeysPort;
   /** Worker harness sign-in with each harness's own login (Claude, Codex). */
   captainSeats?: import("../captain-seat.ts").CaptainSeats;
@@ -286,7 +286,8 @@ export interface ClankieAppDependencies {
     stopped(guildId: string, channelId: string): Promise<void>;
   };
   memory?: MemoryStores;
-  personaImages?: PersonaImageSource;
+  /** The persona's written look description for voice briefings, while the persona is on (ADR 0328). */
+  personaBriefing?: () => Promise<string>;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
   discordEnvironment?: NodeJS.ProcessEnv;
   discordDirectory?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["directory"];
@@ -406,6 +407,27 @@ export interface ClankieApp {
   close(): Promise<void>;
 }
 
+/** One Discord delivery's room, as the persona's receipt recorded it. */
+interface RoomDeliveryOrigin {
+  readonly baseSessionKey?: string | undefined;
+  readonly presenceSessionId: string;
+  readonly characterId: string;
+  readonly credentialRef: string;
+  readonly transportKind: "bot" | "user_session";
+  readonly guildId?: string | undefined;
+  readonly channelId: string;
+  readonly messageId: string;
+  readonly actorId: string;
+}
+
+/** What the core reads of the persona's exact Discord delivery receipts (ADR 0328). */
+export interface RoomDeliveryReceipts {
+  /** A delivery's receipt, by its key; throws while the receipts are unreadable. */
+  get(id: string): { readonly origin?: RoomDeliveryOrigin | undefined } | undefined;
+  /** Whether every body write a conversation began has settled or been proven absent. */
+  writesSettled(conversationId: string): boolean;
+}
+
 /**
  * The Discord body's live state. The core keeps it for its own admission
  * checks (body routes, voice leases) and hands it to the persona extension's
@@ -457,7 +479,11 @@ export interface DiscordBodyRouteState {
     string,
     { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
   >;
-  readonly discordTurnReceipts: DiscordTurnReceipts;
+  /**
+   * The persona hands the core a read of its Discord delivery receipts when its
+   * routes register (ADR 0328); until then the core has none.
+   */
+  readonly useRoomDeliveryReceipts: (receipts: RoomDeliveryReceipts) => void;
   readonly captainTurnResults: Map<
     string,
     {

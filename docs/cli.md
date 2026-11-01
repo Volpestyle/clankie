@@ -1975,7 +1975,16 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
-`start_agent` existed sign in again to use it. `fleet_capacity` reads what
+`start_agent` existed sign in again to use it. `start_agent` takes an optional
+`account`, a label exactly as `fleet_capacity` names it for that machine and
+harness ([ADR 0340](adr/0340-connected-apps-name-the-hire-account.md)). Left out,
+Clankie picks the account with the most spare capacity and skips any the owner
+held with `clankie accounts hold`; named, it is used exactly, even when held, or
+the start is refused and nothing else is tried. It also takes optional
+`mcpServers`, the owner's own MCP servers by harness config name that the job
+needs, as the captain's hire tool takes them; screen work on the owner's Mac
+goes to a Codex computer-use seat, `harness: "codex"` with
+`mcpServers: ["node_repl"]`, which works in background windows. `fleet_capacity` reads what
 the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
 each metered account's plan, usage, remaining limit and reset, heavy-work
@@ -2026,6 +2035,14 @@ can approve a prompt too. It works for Herdr panes on every machine and for
 hires in the Herdr desktop app, never types text, and never touches a screen
 whose question Clankie sent to you. Each press leaves a note in that app's name
 on the board.
+
+`close_agent` closes a finished agent's pane
+([ADR 0339](adr/0339-connected-apps-close-finished-hires.md)). It closes only an
+agent Clankie or a connected app hired, only while it is idle or done, and only
+when its worktree has no unlanded work, unless the app gives `leave_unlanded`
+with a reason, which is recorded as left behind. An agent you started, or one
+you asked Clankie to hire, stays yours to close. Each close the app asks is
+logged as `connector.close_agent` with its device.
 
 `clankie connector detect` says whether Herdr sessions are discovered
 ([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you

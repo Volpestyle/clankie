@@ -19,7 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { SettingsStore, emptySettings } from "@clankie/settings";
 import { PERSONA_IMAGE_FRAMING } from "@clankie/persona-images";
-import { personaImagesExtension } from "../src/persona-images.ts";
+import { personaImagesExtension, personaLook } from "../src/persona-images.ts";
 import { assembleLanePrompt } from "../src/captain/captain.ts";
 import { createClankieApp } from "../src/app.ts";
 import { personaRoutes } from "../src/persona-extension.ts";
@@ -194,7 +194,7 @@ it("sends only the bounded description into Discord realtime voice", async () =>
     extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     settings: { load: async () => emptySettings() },
-    personaImages: async () => board,
+    personaBriefing: personaLook(async () => board).briefing,
     authenticateCaptain: async () => ({ captainId: "test", steerSourceLane: "discord_voice" }),
   });
   try {

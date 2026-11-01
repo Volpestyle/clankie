@@ -2,6 +2,7 @@ import type {
   CaptainChannelTurnResult,
   CaptainSessionLaneV2,
   DiscordPresenceChannelTurnRequest,
+  DiscordSettings,
 } from "@clankie/protocol";
 import type { ClankieSettings } from "@clankie/settings";
 import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -163,6 +164,24 @@ export interface RoomTurns {
     owner: ConversationOwner & { readonly discord: DiscordWatchOrigin },
     mode: ConversationOwnerMode,
     admission?: RoomOwnerAdmission,
+  ): Promise<boolean>;
+  /**
+   * Whether the server's owner policy makes this member an owner there. False
+   * without a Discord body to ask; a failed lookup throws.
+   */
+  actorOwnsServer(
+    discord: Pick<DiscordSettings, "servers" | "ownerUserId">,
+    guildId: string,
+    actorId: string,
+  ): Promise<boolean>;
+  /**
+   * Whether everyone who can read this channel is an owner, so private context
+   * may be spoken there. False without a Discord body to ask; a failed lookup throws.
+   */
+  ownerAudience(
+    discord: Pick<DiscordSettings, "servers" | "ownerUserId">,
+    guildId: string,
+    channelId: string,
   ): Promise<boolean>;
   /** A watch or worker report wakes the room it was armed from; the reply posts there. */
   runDiscordWatchTurn(

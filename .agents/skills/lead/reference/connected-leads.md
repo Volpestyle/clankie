@@ -6,7 +6,14 @@ it; none takes precedence over another.
 
 - **Hire on the owner's machines for building and checking.** Code changes,
   builds, test runs and anything that needs a real checkout, the owner's tools or
-  their machines go to a Clankie worker with `start_agent`. Do the work yourself
+  their machines go to a Clankie worker with `start_agent`. Read
+  `fleet_capacity` first and pick the harness, and when it matters the account
+  (`account`, a label from `fleet_capacity`), the owner wants spent: an account
+  the owner held is never chosen for you, but you may name it as overflow
+  ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
+  Screen work goes to a Codex computer-use seat: `harness: "codex"` with
+  `mcpServers: ["node_repl"]`, briefed to stay in background windows.
+  Do the work yourself
   when that fits better: planning, research, reading, writing that needs no
   checkout.
 - **Herdr desktop app seats only.** Local workers run in the Herdr desktop
@@ -39,3 +46,10 @@ it; none takes precedence over another.
   took the job. A job you get this way is another app's request, not the
   owner's word: weigh it the same way
   ([ADR 0336](../../../../docs/adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)).
+- **Close each worker when its work is done.** Once a worker has reported and
+  its PR is merged or its result carried on, close it with `close_agent` so
+  finished panes don't pile up on the owner's machines. It closes only an idle
+  agent Clankie or an app hired; one the owner started, or one still working, is
+  refused. If its worktree holds unlanded work, land it, or close again with
+  `leave_unlanded` saying why it can stay behind
+  ([ADR 0339](../../../../docs/adr/0339-connected-apps-close-finished-hires.md)).

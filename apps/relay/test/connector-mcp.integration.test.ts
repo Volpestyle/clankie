@@ -41,7 +41,11 @@ const connectorDevice = {
 };
 // A second app signed in to the same connector.
 const GROK_TOKEN = "grok-connector-device-session-token";
-const grokDevice = { ...connectorDevice, deviceId: "device-connector-2", name: "Grok" };
+const grokDevice = {
+  ...connectorDevice,
+  deviceId: "device-connector-2",
+  name: "Grok",
+};
 // The service names a note's author from its own record of the stamped device.
 const DEVICE_NAMES = new Map([
   [connectorDevice.deviceId, connectorDevice.name],
@@ -117,7 +121,10 @@ afterEach(async () => {
 });
 
 async function startConnectorRelay(
-  device: RelayDeviceAuthorization = { authorized: true, device: connectorDevice },
+  device: RelayDeviceAuthorization = {
+    authorized: true,
+    device: connectorDevice,
+  },
   linked: {
     // What the service's probe of each ssh machine found.
     readonly machines?: readonly OperatorTerminalMachine[];
@@ -225,7 +232,11 @@ async function startConnectorRelay(
           ],
         };
       case "create":
-        return { op: "create", schemaVersion: 1, conversation: thread("conv-bram", request.scope) };
+        return {
+          op: "create",
+          schemaVersion: 1,
+          conversation: thread("conv-bram", request.scope),
+        };
       case "get":
         return {
           op: "get",
@@ -247,15 +258,26 @@ async function startConnectorRelay(
             revision: request.turn.expectedRevision + 1,
             safeCursor: "c2",
             ...(request.turn.message === "after your goal"
-              ? { seatDelivery: { state: "queued" as const, detail: "Bram is mid-goal; the message waits." } }
+              ? {
+                  seatDelivery: {
+                    state: "queued" as const,
+                    detail: "Bram is mid-goal; the message waits.",
+                  },
+                }
               : {}),
             // A Claude hire whose own session already shows the message.
             ...(request.turn.message === "ping"
-              ? { deliveryStage: "consumed" as const, seatDelivery: { state: "queued" as const } }
+              ? {
+                  deliveryStage: "consumed" as const,
+                  seatDelivery: { state: "queued" as const },
+                }
               : {}),
             // A Codex queue that acknowledged it but hasn't run it.
             ...(request.turn.message === "when you're done"
-              ? { deliveryStage: "delivered" as const, seatDelivery: { state: "queued" as const } }
+              ? {
+                  deliveryStage: "delivered" as const,
+                  seatDelivery: { state: "queued" as const },
+                }
               : {}),
           },
         } as OperatorConversationServiceResult;
@@ -301,18 +323,41 @@ async function startConnectorRelay(
           },
         };
       case "start_agent": {
-        const places = [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }];
+        const places = [
+          {
+            machine: "volpe@pc1",
+            project: "kh2",
+            workingDirectory: "C:\\code\\kh2",
+          },
+        ];
         if (request.machine === undefined || request.workingDirectory === undefined)
-          return { op: "start_agent", schemaVersion: 1, status: "places", places };
+          return {
+            op: "start_agent",
+            schemaVersion: 1,
+            status: "places",
+            places,
+          };
         // The hire outlives a lost answer, as when Clankie's own deadline passes mid-start.
         if (request.workingDirectory === "C:\\code\\slow") throw new Error("upstream deadline passed");
         // The sign-in ends while the agent starts: the relay's recheck refuses a hire that happened.
         if (request.workingDirectory === "C:\\code\\revoked") {
           authorization = { authorized: false, denial: "revoked" };
-          return { op: "start_agent", schemaVersion: 1, status: "started", places, seatId: "pc1/term_late" };
+          return {
+            op: "start_agent",
+            schemaVersion: 1,
+            status: "started",
+            places,
+            seatId: "pc1/term_late",
+          };
         }
         return request.machine === "volpe@pc1" && request.workingDirectory === "C:\\code\\kh2"
-          ? { op: "start_agent", schemaVersion: 1, status: "started", places, seatId: "pc1/term_new" }
+          ? {
+              op: "start_agent",
+              schemaVersion: 1,
+              status: "started",
+              places,
+              seatId: "pc1/term_new",
+            }
           : {
               op: "start_agent",
               schemaVersion: 1,
@@ -321,12 +366,51 @@ async function startConnectorRelay(
               detail: "That isn't one of the places an agent can start.",
             };
       }
+      case "close_seat": {
+        // Like the service: an app's close needs the device the relay stamped, and each seat
+        // answers as the captain's refusals would for it.
+        if (request.appDeviceId === undefined)
+          throw new Error("A close needs the device the relay authenticated");
+        const closeOf = (
+          refusal?: NonNullable<Extract<OperatorConversationServiceResult, { op: "close_seat" }>["refusal"]>,
+        ) =>
+          ({
+            op: "close_seat",
+            schemaVersion: 1,
+            seatId: request.seatId,
+            closed: refusal === undefined,
+            ...(refusal ? { refusal } : {}),
+          }) as const;
+        if (request.seatId === "pc1/kh2") return closeOf({ reason: "busy", status: "working" });
+        if (request.seatId === "pc1/mine") return closeOf({ reason: "not_clankies_hire" });
+        if (request.seatId === "pc1/unlanded" && request.unlandedReason === undefined)
+          return closeOf({
+            reason: "unlanded_work",
+            worktrees: [
+              {
+                path: "C:\\code\\kh2-wt",
+                state: "unreconciled",
+                unlandedCommits: 2,
+              },
+            ],
+          });
+        if (request.seatId === "pc1/done" || request.seatId === "pc1/unlanded") return closeOf();
+        return closeOf({ reason: "not_found" });
+      }
       case "app_notes": {
         if (request.action === "read")
-          return { op: "app_notes", schemaVersion: 1, result: board.readAppNotes(request) };
+          return {
+            op: "app_notes",
+            schemaVersion: 1,
+            result: board.readAppNotes(request),
+          };
         const author = DEVICE_NAMES.get(request.appDeviceId ?? "");
         if (author === undefined) throw new Error("A note needs the device the relay authenticated");
-        return { op: "app_notes", schemaVersion: 1, result: board.postAppNote(author, request.text) };
+        return {
+          op: "app_notes",
+          schemaVersion: 1,
+          result: board.postAppNote(author, request.text),
+        };
       }
       case "terminal_read": {
         if (linked.terminalRead === false) throw new Error(`unexpected ${request.op}`);
@@ -375,7 +459,13 @@ async function startConnectorRelay(
           return {
             op: "terminal_tail",
             schemaVersion: 1,
-            result: { schemaVersion: 1, status: "reset", terminalId, surfaceClientId, reason: "stream_lost" },
+            result: {
+              schemaVersion: 1,
+              status: "reset",
+              terminalId,
+              surfaceClientId,
+              reason: "stream_lost",
+            },
           };
         }
         return {
@@ -413,9 +503,17 @@ async function startConnectorRelay(
       }
       // The Herdr desktop app's own terminal server on this Mac.
       case "upload_begin":
-        return { op: "upload_begin", schemaVersion: 1, result: await files.beginUpload(request.upload) };
+        return {
+          op: "upload_begin",
+          schemaVersion: 1,
+          result: await files.beginUpload(request.upload),
+        };
       case "upload_chunk":
-        return { op: "upload_chunk", schemaVersion: 1, result: await files.appendUpload(request.chunk) };
+        return {
+          op: "upload_chunk",
+          schemaVersion: 1,
+          result: await files.appendUpload(request.chunk),
+        };
       case "upload_commit":
         return {
           op: "upload_commit",
@@ -429,7 +527,10 @@ async function startConnectorRelay(
           result:
             request.seatId === "pc1/kh2"
               ? await readSeatImage({ workspace, path: request.path })
-              : { outcome: "unavailable", message: "That agent isn't one Clankie seats now." },
+              : {
+                  outcome: "unavailable",
+                  message: "That agent isn't one Clankie seats now.",
+                },
         };
       case "herdr_core_list":
         return {
@@ -459,7 +560,11 @@ async function startConnectorRelay(
         throw new Error(`unexpected ${request.op}`);
     }
   };
-  const operator = createOperatorConversationRelayHandler({ authorizeDevice, dispatch, tailPollMs: 50 });
+  const operator = createOperatorConversationRelayHandler({
+    authorizeDevice,
+    dispatch,
+    tailPollMs: 50,
+  });
   const connector = createConnectorMcpHandler({
     authorizeDevice,
     operator: createLoopbackConnectorOperator("http://placeholder.invalid", (input, init) =>
@@ -526,6 +631,7 @@ describe("Claude connector MCP endpoint", () => {
       "list_places",
       "start_agent",
       "press_keys",
+      "close_agent",
       "answer_prompt",
       "post_note",
       "read_notes",
@@ -584,21 +690,37 @@ describe("Claude connector MCP endpoint", () => {
     });
 
     const read = JSON.parse(
-      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } })),
+      textOf(
+        await client.callTool({
+          name: "read_agent",
+          arguments: { agent: "herdr:pc1/kh2" },
+        }),
+      ),
     );
     // PC1 is an ssh machine: Herdr there reads its own pane, so no stream is needed.
-    expect(read).toEqual({ agent: "herdr:pc1/kh2", text: "Building kh2\n> cargo build\nCompiling...done" });
+    expect(read).toEqual({
+      agent: "herdr:pc1/kh2",
+      text: "Building kh2\n> cargo build\nCompiling...done",
+    });
     expect(relay.seen.some((request) => request.op === "terminal_tail")).toBe(false);
     // History that scrolled off the screen is still read.
     const loose = JSON.parse(
       textOf(
-        await client.callTool({ name: "read_agent", arguments: { agent: "herdr:term-loose", lines: 5 } }),
+        await client.callTool({
+          name: "read_agent",
+          arguments: { agent: "herdr:term-loose", lines: 5 },
+        }),
       ),
     );
     expect(loose.text).toBe("line 9\nline 10\nBuilding kh2\n> cargo build\nCompiling...done");
     // Empty rows between a hire's reply and its input box don't push the reply out of the read.
     const hire = JSON.parse(
-      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr:herdr-core/t2h" } })),
+      textOf(
+        await client.callTool({
+          name: "read_agent",
+          arguments: { agent: "herdr:herdr-core/t2h" },
+        }),
+      ),
     );
     expect(hire.text).toBe(
       [
@@ -640,7 +762,10 @@ describe("Claude connector MCP endpoint", () => {
     const tell = async (message: string) =>
       JSON.parse(
         textOf(
-          await client.callTool({ name: "message_agent", arguments: { agent: "herdr:pc1/kh2", message } }),
+          await client.callTool({
+            name: "message_agent",
+            arguments: { agent: "herdr:pc1/kh2", message },
+          }),
         ),
       );
     // In the agent's own session is delivered, never "busy".
@@ -665,7 +790,12 @@ describe("Claude connector MCP endpoint", () => {
 
     // The desktop app's agent reads through the connector's allowlist, like a Herdr pane.
     const desktop = JSON.parse(
-      textOf(await client.callTool({ name: "read_agent", arguments: { agent: "herdr-core:t3", lines: 1 } })),
+      textOf(
+        await client.callTool({
+          name: "read_agent",
+          arguments: { agent: "herdr-core:t3", lines: 1 },
+        }),
+      ),
     );
     // The service bounds the read to the agent's own output (ADR 0307); its note comes through.
     expect(desktop).toEqual({
@@ -673,7 +803,11 @@ describe("Claude connector MCP endpoint", () => {
       text: "All 12 checks passed.",
       note: "Earlier screen hidden until this agent prints something new.",
     });
-    expect(relay.seen).toContainEqual({ op: "herdr_core_read", schemaVersion: 1, terminal: "t3" });
+    expect(relay.seen).toContainEqual({
+      op: "herdr_core_read",
+      schemaVersion: 1,
+      terminal: "t3",
+    });
     // It can't be messaged: herdr-core would type into its terminal (ADR 0207).
     const refused = await client.callTool({
       name: "message_agent",
@@ -697,7 +831,10 @@ describe("Claude connector MCP endpoint", () => {
     ).not.toHaveProperty("startedBy");
     const reads = await Promise.all(
       [first, second].map((client) =>
-        client.callTool({ name: "read_agent", arguments: { agent: "herdr:term-loose" } }),
+        client.callTool({
+          name: "read_agent",
+          arguments: { agent: "herdr:term-loose" },
+        }),
       ),
     );
     for (const read of reads) expect(JSON.parse(textOf(read)).text).toContain("Compiling...done");
@@ -711,11 +848,23 @@ describe("Claude connector MCP endpoint", () => {
     const places = JSON.parse(textOf(await client.callTool({ name: "start_agent", arguments: {} })));
     expect(places).toEqual({
       status: "places",
-      places: [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }],
+      places: [
+        {
+          machine: "volpe@pc1",
+          project: "kh2",
+          workingDirectory: "C:\\code\\kh2",
+        },
+      ],
     });
     const startsBefore = relay.seen.filter((request) => request.op === "start_agent").length;
     expect(JSON.parse(textOf(await client.callTool({ name: "list_places", arguments: {} })))).toEqual({
-      places: [{ machine: "volpe@pc1", project: "kh2", workingDirectory: "C:\\code\\kh2" }],
+      places: [
+        {
+          machine: "volpe@pc1",
+          project: "kh2",
+          workingDirectory: "C:\\code\\kh2",
+        },
+      ],
     });
     // Listing asks the service for places only: no machine, no directory, nothing to start.
     expect(relay.seen.filter((request) => request.op === "start_agent").slice(startsBefore)).toEqual([
@@ -734,7 +883,10 @@ describe("Claude connector MCP endpoint", () => {
         }),
       ),
     );
-    expect(started).toMatchObject({ agent: "herdr:pc1/term_new", status: "started" });
+    expect(started).toMatchObject({
+      agent: "herdr:pc1/term_new",
+      status: "started",
+    });
     expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
       op: "start_agent",
       schemaVersion: 1,
@@ -743,6 +895,62 @@ describe("Claude connector MCP endpoint", () => {
       harness: "codex",
       prompt: "fix the netcode desync",
     });
+    // The app may name the account to hire on, as fleet_capacity names it; Clankie uses it exactly.
+    await client.callTool({
+      name: "start_agent",
+      arguments: {
+        machine: "volpe@pc1",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "claude",
+        account: "mimo",
+      },
+    });
+    expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+      op: "start_agent",
+      schemaVersion: 1,
+      machine: "volpe@pc1",
+      workingDirectory: "C:\\code\\kh2",
+      harness: "claude",
+      account: "mimo",
+    });
+    const startsBeforeBadAccount = relay.seen.filter((request) => request.op === "start_agent").length;
+    for (const account of ["james@example.com", "../.claude", ""]) {
+      const refused = await client.callTool({
+        name: "start_agent",
+        arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", account },
+      });
+      expect(refused.isError, account).toBe(true);
+    }
+    expect(relay.seen.filter((request) => request.op === "start_agent")).toHaveLength(startsBeforeBadAccount);
+    // Screen work runs through a Codex computer-use seat, which needs the owner's node_repl server.
+    await client.callTool({
+      name: "start_agent",
+      arguments: {
+        machine: "volpe@pc1",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "codex",
+        mcpServers: ["node_repl"],
+        prompt: "fill the form in a background window",
+      },
+    });
+    expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+      op: "start_agent",
+      schemaVersion: 1,
+      machine: "volpe@pc1",
+      workingDirectory: "C:\\code\\kh2",
+      harness: "codex",
+      mcpServers: ["node_repl"],
+      prompt: "fill the form in a background window",
+    });
+    const startsBeforeBadServers = relay.seen.filter((request) => request.op === "start_agent").length;
+    for (const mcpServers of [[], ["../node_repl"], "node_repl", [7]]) {
+      const refused = await client.callTool({
+        name: "start_agent",
+        arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", mcpServers },
+      });
+      expect(refused.isError, JSON.stringify(mcpServers)).toBe(true);
+    }
+    expect(relay.seen.filter((request) => request.op === "start_agent")).toHaveLength(startsBeforeBadServers);
     const elsewhere = await client.callTool({
       name: "start_agent",
       arguments: { machine: "volpe@pc1", workingDirectory: "C:\\Windows" },
@@ -751,7 +959,11 @@ describe("Claude connector MCP endpoint", () => {
     expect(textOf(elsewhere)).toContain("isn't one of the places");
     const other = await client.callTool({
       name: "start_agent",
-      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", harness: "pi" },
+      arguments: {
+        machine: "volpe@pc1",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "pi",
+      },
     });
     expect(other.isError).toBe(true);
     const lost = await client.callTool({
@@ -764,11 +976,63 @@ describe("Claude connector MCP endpoint", () => {
     );
     const revoked = await client.callTool({
       name: "start_agent",
-      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\revoked" },
+      arguments: {
+        machine: "volpe@pc1",
+        workingDirectory: "C:\\code\\revoked",
+      },
     });
     expect(revoked.isError).toBe(true);
     expect(textOf(revoked)).toContain("sign-in has ended");
     expect(textOf(revoked)).toContain("Call list_agents");
+    await client.close();
+  });
+
+  it("closes a finished agent Clankie or an app hired, in the app's name, and refuses the rest", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    const close = (agent: string, extra: Record<string, unknown> = {}) =>
+      client.callTool({ name: "close_agent", arguments: { agent, ...extra } });
+
+    const done = await close("herdr:pc1/done");
+    expect(done.isError).not.toBe(true);
+    expect(textOf(done)).toContain("pane is closed");
+    expect(relay.seen.findLast((request) => request.op === "close_seat")).toEqual({
+      op: "close_seat",
+      schemaVersion: 1,
+      seatId: "pc1/done",
+      appDeviceId: "device-connector-1",
+    });
+
+    const busy = await close("herdr:pc1/kh2");
+    expect(busy.isError).toBe(true);
+    expect(textOf(busy)).toContain("working");
+    const mine = await close("herdr:pc1/mine");
+    expect(mine.isError).toBe(true);
+    expect(textOf(mine)).toContain("owner");
+    const gone = await close("herdr:pc1/nobody");
+    expect(gone.isError).toBe(true);
+
+    const held = await close("herdr:pc1/unlanded");
+    expect(held.isError).toBe(true);
+    expect(textOf(held)).toContain("kh2-wt");
+    expect(textOf(held)).toContain("leave_unlanded");
+    const left = await close("herdr:pc1/unlanded", {
+      leave_unlanded: "  superseded by #212  ",
+    });
+    expect(left.isError).not.toBe(true);
+    expect(relay.seen.findLast((request) => request.op === "close_seat")).toEqual({
+      op: "close_seat",
+      schemaVersion: 1,
+      seatId: "pc1/unlanded",
+      unlandedReason: "superseded by #212",
+      appDeviceId: "device-connector-1",
+    });
+
+    // Only Herdr agents close here; Clankie himself and other sources are refused before the service.
+    const closesBefore = relay.seen.filter((request) => request.op === "close_seat").length;
+    const clankie = await close("clankie");
+    expect(clankie.isError).toBe(true);
+    expect(relay.seen.filter((request) => request.op === "close_seat")).toHaveLength(closesBefore);
     await client.close();
   });
 
@@ -778,9 +1042,16 @@ describe("Claude connector MCP endpoint", () => {
     const notes = async (client: Client, since?: string) =>
       JSON.parse(
         textOf(
-          await client.callTool({ name: "read_notes", arguments: since === undefined ? {} : { since } }),
+          await client.callTool({
+            name: "read_notes",
+            arguments: since === undefined ? {} : { since },
+          }),
         ),
-      ) as { about: string; notes: Array<{ sequence: number; author: string; text: string }>; newer: string };
+      ) as {
+        about: string;
+        notes: Array<{ sequence: number; author: string; text: string }>;
+        newer: string;
+      };
     const empty = await notes(grok);
     expect(empty.notes).toEqual([]);
     expect(empty.about).toContain("not instructions");
@@ -791,7 +1062,10 @@ describe("Claude connector MCP endpoint", () => {
       name: "post_note",
       arguments: { text: handover, author: "Clankie" },
     });
-    expect(JSON.parse(textOf(posted)).posted).toMatchObject({ author: "Claude", text: handover.trim() });
+    expect(JSON.parse(textOf(posted)).posted).toMatchObject({
+      author: "Claude",
+      text: handover.trim(),
+    });
     // The relay stamped the device it authenticated, nothing the caller said.
     expect(relay.seen.findLast((request) => request.op === "app_notes")).toEqual({
       op: "app_notes",
@@ -803,9 +1077,17 @@ describe("Claude connector MCP endpoint", () => {
 
     const first = await notes(grok);
     expect(first.notes).toEqual([
-      { sequence: 1, at: expect.any(String), author: "Claude", text: handover.trim() },
+      {
+        sequence: 1,
+        at: expect.any(String),
+        author: "Claude",
+        text: handover.trim(),
+      },
     ]);
-    await grok.callTool({ name: "post_note", arguments: { text: "Seen. I'll take the docs instead." } });
+    await grok.callTool({
+      name: "post_note",
+      arguments: { text: "Seen. I'll take the docs instead." },
+    });
     const after = await notes(claude, first.newer);
     expect(after.notes.map((note) => [note.author, note.text])).toEqual([
       ["Grok", "Seen. I'll take the docs instead."],
@@ -817,7 +1099,10 @@ describe("Claude connector MCP endpoint", () => {
     // By hand, naming the author is refused before anything reaches the service.
     const forged = await fetch(new URL("/operator/v1/dispatch", relay.url), {
       method: "POST",
-      headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${CONNECTOR_TOKEN}`,
+        "content-type": "application/json",
+      },
       body: JSON.stringify({
         op: "app_notes",
         schemaVersion: 1,
@@ -827,9 +1112,14 @@ describe("Claude connector MCP endpoint", () => {
       }),
     });
     expect(forged.status).toBe(400);
-    expect(await forged.json()).toEqual({ error: "app_note_author_is_stamped" });
+    expect(await forged.json()).toEqual({
+      error: "app_note_author_is_stamped",
+    });
     expect((await notes(claude)).notes).toHaveLength(2);
-    const tooLong = await claude.callTool({ name: "post_note", arguments: { text: "x".repeat(2001) } });
+    const tooLong = await claude.callTool({
+      name: "post_note",
+      arguments: { text: "x".repeat(2001) },
+    });
     expect(tooLong.isError).toBe(true);
     await Promise.all([claude.close(), grok.close()]);
   });
@@ -843,15 +1133,30 @@ describe("Claude connector MCP endpoint", () => {
     });
     const post = await fetch(new URL("/operator/v1/dispatch", relay.url), {
       method: "POST",
-      headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
-      body: JSON.stringify({ op: "app_notes", schemaVersion: 1, action: "post", text: "hello" }),
+      headers: {
+        authorization: `Bearer ${CONNECTOR_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        op: "app_notes",
+        schemaVersion: 1,
+        action: "post",
+        text: "hello",
+      }),
     });
     expect(post.status).toBe(403);
     expect(await post.json()).toEqual({ error: "connector_device_required" });
     const read = await fetch(new URL("/operator/v1/dispatch", relay.url), {
       method: "POST",
-      headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
-      body: JSON.stringify({ op: "app_notes", schemaVersion: 1, action: "read" }),
+      headers: {
+        authorization: `Bearer ${CONNECTOR_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        op: "app_notes",
+        schemaVersion: 1,
+        action: "read",
+      }),
     });
     // Any other device reads the board only as the owner, like the fleet room, never on
     // the relay's own bearer: without Take Control nothing is read.
@@ -869,14 +1174,20 @@ describe("Claude connector MCP endpoint", () => {
     const client = await connect(relay.url);
     const listed = JSON.parse(textOf(await client.callTool({ name: "list_agents", arguments: {} })));
     // Bram's last known status would read as idle work; the machine is what's wrong.
-    expect(listed.agents[0]).toMatchObject({ agent: "herdr:pc1/kh2", status: "unreachable" });
+    expect(listed.agents[0]).toMatchObject({
+      agent: "herdr:pc1/kh2",
+      status: "unreachable",
+    });
     // PC2 runs no agents yet and is still named, so a caller knows it's linked.
     expect(listed.machines).toEqual(["PC1", "this Mac", "pc2"]);
     expect(listed.notices).toEqual([
       "Herdr on PC1 isn't answering, so its agents show what Clankie last saw and can't be read.",
       "Herdr on pc2 is version 0.9.1 and needs at least 0.9.3.",
     ]);
-    const read = await client.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } });
+    const read = await client.callTool({
+      name: "read_agent",
+      arguments: { agent: "herdr:pc1/kh2" },
+    });
     expect(read.isError).toBe(true);
     expect(textOf(read)).toContain("Operation timed out");
     await client.close();
@@ -891,9 +1202,15 @@ describe("Claude connector MCP endpoint", () => {
       about: expect.stringMatching(/\bcontrol Herdr\b/i),
     });
 
-    const herdr = await client.callTool({ name: "clankie_guide", arguments: { topic: "herdr" } });
+    const herdr = await client.callTool({
+      name: "clankie_guide",
+      arguments: { topic: "herdr" },
+    });
     expect(textOf(herdr)).toContain("# Herdr");
-    const lead = await client.callTool({ name: "clankie_guide", arguments: { topic: "lead" } });
+    const lead = await client.callTool({
+      name: "clankie_guide",
+      arguments: { topic: "lead" },
+    });
     const [, more] = lead.content as Array<{ text: string }>;
     expect(more!.text).toContain("lead/reference/delivery.md");
     const page = await client.callTool({
@@ -911,7 +1228,10 @@ describe("Claude connector MCP endpoint", () => {
     expect(textOf(connected)).toContain("One watcher per worker");
 
     for (const topic of ["herdr/../../../package.json", "shared-checkout/scripts", "nobody"]) {
-      const refused = await client.callTool({ name: "clankie_guide", arguments: { topic } });
+      const refused = await client.callTool({
+        name: "clankie_guide",
+        arguments: { topic },
+      });
       expect(refused.isError).toBe(true);
     }
     await client.close();
@@ -922,26 +1242,51 @@ describe("Claude connector MCP endpoint", () => {
     const post = (path: string, body: unknown) =>
       fetch(new URL(path, relay.url), {
         method: "POST",
-        headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
+        headers: {
+          authorization: `Bearer ${CONNECTOR_TOKEN}`,
+          "content-type": "application/json",
+        },
         body: JSON.stringify(body),
       });
     for (const body of [
       {
         op: "terminal_input",
         schemaVersion: 1,
-        input: { schemaVersion: 1, terminalId: "pc1/kh2", leaseToken: "x", data: "aGk=" },
+        input: {
+          schemaVersion: 1,
+          terminalId: "pc1/kh2",
+          leaseToken: "x",
+          data: "aGk=",
+        },
       },
-      { op: "spawn_seat", schemaVersion: 1, seat: { harness: "claude", workingDirectory: "/tmp" } },
-      { op: "close_seat", schemaVersion: 1, seatId: "pc1/kh2" },
+      {
+        op: "spawn_seat",
+        schemaVersion: 1,
+        seat: { harness: "claude", workingDirectory: "/tmp" },
+      },
+      // An app may not name the device it closes for: the relay stamps the one it signed in.
+      {
+        op: "close_seat",
+        schemaVersion: 1,
+        seatId: "pc1/kh2",
+        appDeviceId: "device-grok",
+      },
       { op: "autonomy", schemaVersion: 1, command: { action: "status" } },
       { op: "work_item_write", schemaVersion: 1 },
       { op: "list", schemaVersion: 1 },
-      { op: "create", schemaVersion: 1, scope: { kind: "global" }, title: "Clankie" },
+      {
+        op: "create",
+        schemaVersion: 1,
+        scope: { kind: "global" },
+        title: "Clankie",
+      },
     ]) {
       const response = await post("/operator/v1/dispatch", body);
       expect([400, 403], JSON.stringify(body)).toContain(response.status);
       if (response.status === 403)
-        expect(await response.json()).toEqual({ error: "connector_operation_not_allowed" });
+        expect(await response.json()).toEqual({
+          error: "connector_operation_not_allowed",
+        });
     }
     const lead = await post("/operator/v1/dispatch", {
       op: "send",
@@ -960,7 +1305,10 @@ describe("Claude connector MCP endpoint", () => {
     for (const path of ["/operator/v1/tail", "/v1/body-leases", "/v1/operator/http-settings"]) {
       const response = await fetch(new URL(path, relay.url), {
         method: path === "/v1/body-leases" || path === "/v1/operator/http-settings" ? "GET" : "POST",
-        headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
+        headers: {
+          authorization: `Bearer ${CONNECTOR_TOKEN}`,
+          "content-type": "application/json",
+        },
         ...(path === "/operator/v1/tail" ? { body: "{}" } : {}),
       });
       expect(response.status, path).toBe(403);
@@ -969,7 +1317,10 @@ describe("Claude connector MCP endpoint", () => {
 
   it("answers without a bearer with the 401 that starts Claude's sign-in, and serves the resource metadata", async () => {
     const relay = await startConnectorRelay();
-    const response = await fetch(new URL("/mcp", relay.url), { method: "POST", body: "{}" });
+    const response = await fetch(new URL("/mcp", relay.url), {
+      method: "POST",
+      body: "{}",
+    });
     expect(response.status).toBe(401);
     const host = new URL(relay.url).host;
     expect(response.headers.get("www-authenticate")).toBe(
@@ -981,7 +1332,9 @@ describe("Claude connector MCP endpoint", () => {
       authorization_servers: ["http://127.0.0.1:4310"],
     });
     const forwarded = await fetch(new URL("/.well-known/oauth-protected-resource/mcp", relay.url), {
-      headers: { "x-clankie-public-base": "https://api.clankie.bot/h/host-example-123456" },
+      headers: {
+        "x-clankie-public-base": "https://api.clankie.bot/h/host-example-123456",
+      },
     });
     expect(await forwarded.json()).toMatchObject({
       resource: "https://api.clankie.bot/h/host-example-123456/mcp",
@@ -990,10 +1343,16 @@ describe("Claude connector MCP endpoint", () => {
   });
 
   it("asks for a fresh sign-in once the device is revoked, and refuses a device that isn't a connector", async () => {
-    const revoked = await startConnectorRelay({ authorized: false, denial: "revoked" });
+    const revoked = await startConnectorRelay({
+      authorized: false,
+      denial: "revoked",
+    });
     const response = await fetch(new URL("/mcp", revoked.url), {
       method: "POST",
-      headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${CONNECTOR_TOKEN}`,
+        "content-type": "application/json",
+      },
       body: "{}",
     });
     expect(response.status).toBe(401);
@@ -1008,7 +1367,10 @@ describe("Claude connector MCP endpoint", () => {
     });
     const refused = await fetch(new URL("/mcp", phone.url), {
       method: "POST",
-      headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${CONNECTOR_TOKEN}`,
+        "content-type": "application/json",
+      },
       body: "{}",
     });
     expect(refused.status).toBe(403);
@@ -1022,10 +1384,16 @@ describe("Claude connector MCP endpoint", () => {
       },
     );
     const client = await connect(off.url);
-    const refused = await client.callTool({ name: "list_agents", arguments: {} });
+    const refused = await client.callTool({
+      name: "list_agents",
+      arguments: {},
+    });
     expect(refused.isError).toBe(true);
     expect(textOf(refused)).toContain('clankie connector serve on "Claude"');
-    const refusedCapacity = await client.callTool({ name: "fleet_capacity", arguments: {} });
+    const refusedCapacity = await client.callTool({
+      name: "fleet_capacity",
+      arguments: {},
+    });
     expect(refusedCapacity.isError).toBe(true);
     expect(textOf(refusedCapacity)).toContain('clankie connector serve on "Claude"');
 
@@ -1039,7 +1407,10 @@ describe("Claude connector MCP endpoint", () => {
     const listed = JSON.parse(textOf(await reader.callTool({ name: "list_agents", arguments: {} })));
     expect(listed.agents).toEqual([]);
     expect(listed.notices[0]).toContain("clankie connector detect on herdr");
-    const unread = await reader.callTool({ name: "read_agent", arguments: { agent: "herdr:pc1/kh2" } });
+    const unread = await reader.callTool({
+      name: "read_agent",
+      arguments: { agent: "herdr:pc1/kh2" },
+    });
     expect(unread.isError).toBe(true);
     expect(textOf(unread)).toContain("isn't reachable");
     const unsent = await reader.callTool({
@@ -1057,7 +1428,10 @@ describe("Claude connector MCP endpoint", () => {
   });
 
   it("returns fleet capacity with unknown where the service has no number", async () => {
-    const relay = await startConnectorRelay({ authorized: true, device: connectorDevice });
+    const relay = await startConnectorRelay({
+      authorized: true,
+      device: connectorDevice,
+    });
     const client = await connect(relay.url);
     const capacity = JSON.parse(textOf(await client.callTool({ name: "fleet_capacity", arguments: {} })));
     expect(capacity.accounts[0]).toMatchObject({
@@ -1071,7 +1445,10 @@ describe("Claude connector MCP endpoint", () => {
     expect(capacity.panes[0].agent).toBe("herdr:pc1/kh2");
     const listed = JSON.parse(textOf(await client.callTool({ name: "list_agents", arguments: {} })));
     expect(listed.agents.map((agent: { agent: string }) => agent.agent)).toContain(capacity.panes[0].agent);
-    const read = await client.callTool({ name: "read_agent", arguments: { agent: capacity.panes[0].agent } });
+    const read = await client.callTool({
+      name: "read_agent",
+      arguments: { agent: capacity.panes[0].agent },
+    });
     expect(read.isError).not.toBe(true);
     expect(capacity.heavy).toBe("unknown");
     expect(capacity.tracker).toBe("unknown");
@@ -1085,7 +1462,9 @@ describe("Claude connector MCP endpoint", () => {
         lookup: async (host) => (host === "cdn.example.com" ? ["93.184.216.34"] : ["127.0.0.1"]),
         fetch: async (url) => {
           fetched.push(url.href);
-          return new Response(JPEG, { headers: { "content-type": "image/jpeg" } });
+          return new Response(JPEG, {
+            headers: { "content-type": "image/jpeg" },
+          });
         },
       },
     });
@@ -1152,7 +1531,9 @@ describe("Claude connector MCP endpoint", () => {
 
   it("returns an image an agent saved in its workspace, and only an image inside it", async () => {
     const relay = await startConnectorRelay();
-    await mkdir(join(relay.workspace, ".clankie", "inbox"), { recursive: true });
+    await mkdir(join(relay.workspace, ".clankie", "inbox"), {
+      recursive: true,
+    });
     await writeFile(join(relay.workspace, ".clankie", "inbox", "boss.png"), PNG);
     await writeFile(join(relay.workspace, "notes.png"), "not really a picture");
     const outside = join(relay.workspace, "..", "secret.png");
@@ -1165,12 +1546,23 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { agent: "herdr:pc1/kh2", path: ".clankie/inbox/boss.png" },
     });
     expect(image.isError).not.toBe(true);
-    const [, picture] = image.content as Array<{ type: string; data?: string; mimeType?: string }>;
-    expect(picture).toEqual({ type: "image", data: PNG.toString("base64"), mimeType: "image/png" });
+    const [, picture] = image.content as Array<{
+      type: string;
+      data?: string;
+      mimeType?: string;
+    }>;
+    expect(picture).toEqual({
+      type: "image",
+      data: PNG.toString("base64"),
+      mimeType: "image/png",
+    });
     // The same file by its absolute path.
     const absolute = await client.callTool({
       name: "read_image",
-      arguments: { agent: "herdr:pc1/kh2", path: join(relay.workspace, ".clankie", "inbox", "boss.png") },
+      arguments: {
+        agent: "herdr:pc1/kh2",
+        path: join(relay.workspace, ".clankie", "inbox", "boss.png"),
+      },
     });
     expect(absolute.isError).not.toBe(true);
 

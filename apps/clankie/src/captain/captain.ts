@@ -22,7 +22,6 @@ import {
   machineCodingTools,
   offersJoinedMachineShell,
 } from "./machine-coding-tools.ts";
-import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
 import {
   discordAllowedToolNames,
   discordSessionTools,
@@ -50,7 +49,6 @@ import { fleetReviewContext } from "./fleet-review.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
 import { installedLauncher } from "../project-process-proof.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
-import { personaImageBriefing } from "@clankie/persona-images";
 import {
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_HEAD_AGENT_NAME,
@@ -97,7 +95,6 @@ import { materializeOwnerAttachments } from "../owner-attachments.ts";
 import { readSeatImage } from "../seat-images.ts";
 import { deliverToFleetSeat, readFleetSeatImage } from "../fleet-seat-files.ts";
 import type { SeatImageResult } from "@clankie/protocol/connector";
-import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
 import { createAgentWorkStore } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
@@ -151,7 +148,6 @@ import { createFleetRoster } from "./captain-fleet-roster.ts";
 import { createHiring } from "./captain-hiring.ts";
 import { createSeatDelivery } from "./captain-seat-delivery.ts";
 import { createLeadSeats, LEAD_RESTART_AGE_MS, LEAD_RESTART_CONTEXT_TOKENS } from "./captain-lead-seats.ts";
-import { createChannelProjection } from "./channel-projection.ts";
 import {
   claudeWorkerChannelConsent,
   createClaudeWorkerSeatAdapter,
@@ -1277,7 +1273,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     discordSettings: () => readDiscordServerSettings(options.discordEnvironment, settingsStore),
   };
-  const personaImages = options.personaImages ?? createPersonaImageSource(settingsStore, options.repoRoot);
+  const personaLook = options.personaLook;
   const personas = new PersonaStore(options.stateDir);
   let liveSeats: readonly OperatorFleetSeat[] = [];
   const seatByPersona = new Map<string, string>();
@@ -1853,7 +1849,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const selection = route.current.selection;
     const hasPersonaImages =
       options.evalSessionBoundary === undefined &&
-      (await prepare("persona images", personaImages)).images.length > 0;
+      personaLook !== undefined &&
+      (await prepare("persona images", personaLook.present));
     const piSettings = options.evalSessionBoundary?.settings() ?? SettingsManager.inMemory();
     const quietSkills = new Set<string>();
     const credentialRecovery: OwnerCredentialRecovery = {};
@@ -1897,7 +1894,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ? []
             : hasPersonaImages
               ? [
-                  personaImagesExtension(personaImages, async (prompt) => {
+                  personaLook!.extension(async (prompt) => {
                     const card = await deps.memory.recallMemoryCard(lane, prompt).catch(() => undefined);
                     const selection = await resolveRoute(purpose)
                       .then((route) => route.selection)
@@ -2237,38 +2234,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       });
       await created;
     },
-    createChannelProjection({
+    deps.channelProjection?.({
       fleetSettings: () => readDiscordServerSettings(options.discordEnvironment, settingsStore),
-      ownerAudience: async (guildId, channelId) => {
-        if (!deps.discordActions) return false;
-        const discord = await readDiscordServerSettings(options.discordEnvironment, settingsStore);
-        return discordOwnerAudience(discord, guildId, channelId, async (action) => {
-          const result = await deps.discordActions!.serverAction(action);
-          if (!result.ok) throw new Error("Discord audience unavailable");
-          return result.data;
-        });
-      },
-      ...(deps.discordActions?.serverAction === undefined
-        ? {}
-        : {
-            participantPost: async (channelId: string, content: string) => {
-              const result = await deps.discordActions!.serverAction({
-                method: "POST",
-                path: `/channels/${channelId}/messages`,
-                body: { content, allowed_mentions: { parse: [] } },
-              });
-              if (!result.ok) throw new Error(result.message);
-            },
-          }),
-      ...(options.discordChannels?.provisionChannel === undefined
-        ? {}
-        : { provision: (input) => options.discordChannels!.provisionChannel!(input) }),
-      ...(options.discordChannels?.listRooms === undefined
-        ? {}
-        : { rooms: () => options.discordChannels!.listRooms!() }),
-      ...(options.discordChannels?.swarmGuildId === undefined
-        ? {}
-        : { swarmGuildId: () => options.discordChannels!.swarmGuildId!() }),
+      ...(deps.discordActions === undefined ? {} : { discordActions: deps.discordActions }),
     }),
     (personaId) => seatByPersona.get(personaId),
     async (personaId) => personas.presentation(personaId, (await settings()).discord.activityTunnelHostname),
@@ -4054,17 +4022,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (authority?.sourceCurrent?.() === false) throw new Error("room_handoff_source_expired");
         const roleOwner =
           request.trigger.guildId !== undefined &&
-          deps.discordActions !== undefined &&
-          (await discordActorOwnsServer(
-            discord,
-            request.trigger.guildId,
-            request.trigger.actorId,
-            async (action) => {
-              const result = await deps.discordActions!.serverAction(action);
-              if (!result.ok) throw new Error("Discord membership unavailable");
-              return result.data;
-            },
-          ));
+          (await roomTurns.actorOwnsServer(discord, request.trigger.guildId, request.trigger.actorId));
         return authority?.verifiedOwner === true || roleOwner
           ? { ...discord, systemActorUserIds: [...discord.systemActorUserIds, request.trigger.actorId] }
           : discord;
@@ -4169,17 +4127,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ? false
             : request.trigger.guildId === undefined
               ? request.identity.transportKind === "bot" && owner
-              : deps.discordActions !== undefined &&
-                (await discordOwnerAudience(
-                  discord,
-                  request.trigger.guildId,
-                  request.trigger.channelId,
-                  async (action) => {
-                    const result = await deps.discordActions!.serverAction(action);
-                    if (!result.ok) throw new Error("Discord audience unavailable");
-                    return result.data;
-                  },
-                ));
+              : await roomTurns.ownerAudience(discord, request.trigger.guildId, request.trigger.channelId);
         const currentSkillGrant = discord.roomSkills.find(
           (entry) =>
             entry.serverId === request.trigger.guildId && entry.channelId === request.trigger.channelId,
@@ -4685,17 +4633,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     if (
                       access.privateContext &&
                       request.trigger.guildId !== undefined &&
-                      (!deps.discordActions ||
-                        !(await discordOwnerAudience(
-                          await readAuthoritySettings(),
-                          request.trigger.guildId,
-                          request.trigger.channelId,
-                          async (action) => {
-                            const result = await deps.discordActions!.serverAction(action);
-                            if (!result.ok) throw new Error("Discord audience unavailable");
-                            return result.data;
-                          },
-                        )))
+                      !(await roomTurns.ownerAudience(
+                        await readAuthoritySettings(),
+                        request.trigger.guildId,
+                        request.trigger.channelId,
+                      ))
                     )
                       throw new Error("discord_owner_audience_required");
                     if (authority?.sourceCurrent?.() === false)
@@ -5406,7 +5348,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
         laneHoldsSystemTools(lane) && sections.includes("reach") ? await harnessesForPrompt() : [],
       );
-      if (sections.includes("persona")) prompt += "\n\n" + personaImageBriefing(await personaImages());
+      if (sections.includes("persona")) prompt += "\n\n" + ((await personaLook?.briefing()) ?? "");
       if (conversationId === undefined) return prompt;
       if (binding === undefined) throw new Error("Unknown captain conversation");
       const files =

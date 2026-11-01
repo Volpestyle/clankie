@@ -134,7 +134,6 @@ async function fixture(holds: { readonly headBoundGraceMs?: number; readonly hea
       settings,
       discordEnvironment: {},
       seatAdapters: [],
-      personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
       ...holds,
     },
   );

@@ -1,22 +1,12 @@
 {
   "edges": [
     "app/runtime.ts -> @clankie/discord-presence-core (persona)",
-    "app/runtime.ts -> captain/discord-turn-receipts.ts (persona)",
     "app/runtime.ts -> discord-presence-session.ts (persona)",
     "app/runtime.ts -> discord-user-session-opt-in.ts (persona)",
     "app/runtime.ts -> stream-watch-observation.ts (world)",
     "app/types.ts -> @clankie/discord-presence-core (persona)",
-    "app/types.ts -> captain/discord-turn-receipts.ts (persona)",
     "app/types.ts -> discord-presence-runtime.ts (persona)",
     "app/types.ts -> discord-room-observations.ts (persona)",
-    "app/types.ts -> discord-room-routes.ts (persona)",
-    "app/types.ts -> persona-images.ts (persona)",
-    "captain/captain-types.ts -> discord-presence-runtime.ts (persona)",
-    "captain/captain-types.ts -> persona-images.ts (persona)",
-    "captain/captain.ts -> @clankie/discord-presence-core (persona)",
-    "captain/captain.ts -> @clankie/persona-images (persona)",
-    "captain/captain.ts -> persona-images.ts (persona)",
-    "captain/channel-projection.ts -> @clankie/discord-presence-core (persona)",
-    "captain/conversations/channel-projection.ts -> @clankie/discord-presence-core (persona)"
+    "app/types.ts -> discord-room-routes.ts (persona)"
   ]
 }

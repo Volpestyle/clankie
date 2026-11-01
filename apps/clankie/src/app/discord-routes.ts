@@ -46,6 +46,7 @@ import { authenticateCaptain, authenticateOperator, captainTransportKind, readJs
 import { logger } from "./log.ts";
 import { DELIVERY_RETENTION_MS, pruneExpired, withSerializedLock } from "./request-state.ts";
 import { PROFILE_HASH, discordPresenceBindingKey } from "./body-presence.ts";
+import type { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import { type ClankieAppDependencies, type DiscordBodyRouteState } from "./types.ts";
 import type { ExtensionRouteHost } from "../ports/routes.ts";
 import { registerVoiceBriefingRoute } from "./voice-briefing.ts";
@@ -53,6 +54,7 @@ const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
 export interface RegisterDiscordRoutesContext extends Omit<DiscordBodyRouteState, "machineName"> {
   readonly app: Hono;
+  readonly discordTurnReceipts: DiscordTurnReceipts;
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
   readonly authorizeRoom: ExtensionRouteHost["room"];

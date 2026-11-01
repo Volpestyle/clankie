@@ -109,6 +109,17 @@ export interface SessionKeysResult {
   readonly detail: string;
 }
 
+/**
+ * `closed`: the agent's pane is gone. `refused`: it stays open, and `detail` says why
+ * (the owner started it, it is mid-turn, or its worktree holds unlanded work).
+ * `unavailable`: it stays open because closing couldn't be done or confirmed.
+ */
+export interface SessionCloseResult {
+  readonly id: string;
+  readonly status: "closed" | "refused" | "unavailable";
+  readonly detail: string;
+}
+
 /** Where a new session may start: a known project's checkout on one machine. */
 export interface SessionPlace {
   readonly machine: string;
@@ -120,6 +131,10 @@ export interface SessionStartRequest {
   readonly machine?: string;
   readonly workingDirectory?: string;
   readonly harness?: "claude" | "codex";
+  /** The account to hire on, as fleet capacity names it; absent, Clankie picks. */
+  readonly account?: string;
+  /** The owner's own MCP servers this hire needs, by harness config name (node_repl for Codex computer use). */
+  readonly mcpServers?: readonly string[];
   /** The first thing the new agent is asked. */
   readonly prompt?: string;
 }
@@ -151,6 +166,11 @@ export interface SessionSource {
   answer?(id: string, answer: SessionPromptAnswer): Promise<SessionAnswerResult>;
   /** Press named keys in a session's terminal (`up`, `esc`, `ctrl+c`); a source that can't leaves this out. */
   press?(id: string, keys: readonly string[]): Promise<SessionKeysResult>;
+  /**
+   * Close a finished agent that Clankie or an app hired; `leaveUnlanded` is why work its
+   * worktree hasn't landed may stay behind. A source that can't close any leaves this out.
+   */
+  close?(id: string, leaveUnlanded?: string): Promise<SessionCloseResult>;
 }
 
 /** A refusal worded for the person or model that asked. */
@@ -231,6 +251,13 @@ export class SessionSources {
     if (source.press === undefined)
       throw new SessionRefusal("That session's app can't take key presses from here.");
     return { ...(await source.press(native, keys)), id };
+  }
+
+  public async close(id: string, leaveUnlanded?: string): Promise<SessionCloseResult> {
+    const [source, native] = this.resolve(id);
+    if (source.close === undefined)
+      throw new SessionRefusal("That session's app can't close agents from here.");
+    return { ...(await source.close(native, leaveUnlanded)), id };
   }
 
   public async open(id: string): Promise<SessionOpenResult> {

@@ -146,10 +146,12 @@ export interface CreateOperatorServiceContext {
         timeUsedSeconds?: number | undefined;
       }
     | undefined;
-  readonly conversationAssignment: (
-    conversationId: string,
-  ) =>
-    | { objective: string; updatedAt: string; issue?: { repoId: string; itemId: string } | undefined }
+  readonly conversationAssignment: (conversationId: string) =>
+    | {
+        objective: string;
+        updatedAt: string;
+        issue?: { repoId: string; itemId: string } | undefined;
+      }
     | undefined;
   readonly validateConversationOwner: (owner: ConversationOwner) => Promise<boolean>;
   readonly reportSummaries: (
@@ -256,7 +258,11 @@ export function createOperatorService(
         return { op: "lead", schemaVersion: 1, result: { status } };
       }
       if (command.action === "status")
-        return { op: "lead", schemaVersion: 1, result: { status: ctx.lead.status() } };
+        return {
+          op: "lead",
+          schemaVersion: 1,
+          result: { status: ctx.lead.status() },
+        };
       const page = ctx.lead.inbox(command.after, command.limit);
       const counts = new Map<string, number>();
       for (const report of ctx.conversations.inboundReports())
@@ -325,7 +331,9 @@ export function createOperatorService(
       request.op === "acknowledge_worker_report_history"
     ) {
       if (authority) await authorizeQuestion(authority);
-      const owner: ConversationOwner = { conversationId: request.conversationId };
+      const owner: ConversationOwner = {
+        conversationId: request.conversationId,
+      };
       const admitted = captureConversationAuthority({
         owner,
         current: () =>
@@ -340,7 +348,12 @@ export function createOperatorService(
       if (request.op === "readopt_seat") {
         await ctx.herdrWatches.readoptSeat(request.seatId, admitted);
         ctx.fleetChanges.touch();
-        return { op: request.op, schemaVersion: 1, seatId: request.seatId, adopted: true };
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          seatId: request.seatId,
+          adopted: true,
+        };
       }
       if (request.op === "worker_reports") {
         return {
@@ -443,7 +456,10 @@ export function createOperatorService(
                 age < 10_000 &&
                 (recentReport === undefined || acceptedAt > Date.parse(recentReport.acceptedAt))
               )
-                recentReport = { deliveryId: item.deliveryId, acceptedAt: item.acceptedAt };
+                recentReport = {
+                  deliveryId: item.deliveryId,
+                  acceptedAt: item.acceptedAt,
+                };
             }
             reportCursor = currentReportCursor;
           }
@@ -505,7 +521,9 @@ export function createOperatorService(
     }
     if (request.op === "fleet") {
       await ctx.fleetChanges.wait(request.cursor, request.waitMs ?? 0);
-      const snapshot = await ctx.fleetSnapshot({ includeCheckouts: request.includeCheckouts === true });
+      const snapshot = await ctx.fleetSnapshot({
+        includeCheckouts: request.includeCheckouts === true,
+      });
       const { closedPanes: _closed, ...withoutHistory } = snapshot.snapshot;
       const full = request.includeClosedPanes ? snapshot : { ...snapshot, snapshot: withoutHistory };
       const { goals: _goals, assignments: _assignments, ...legacy } = full.snapshot;
@@ -537,7 +555,11 @@ export function createOperatorService(
     }
     if (request.op === "fleet_capacity") {
       if (ctx.fleetCapacity === undefined) throw new Error("Fleet capacity isn't available on this Clankie.");
-      return { op: "fleet_capacity", schemaVersion: 1, result: await ctx.fleetCapacity() };
+      return {
+        op: "fleet_capacity",
+        schemaVersion: 1,
+        result: await ctx.fleetCapacity(),
+      };
     }
     if (request.op === "seat_image") {
       const result =
@@ -564,7 +586,10 @@ export function createOperatorService(
         return {
           op: "state_work",
           schemaVersion: 1,
-          result: { outcome: "unseated", herdrPaneId: request.work.herdrPaneId },
+          result: {
+            outcome: "unseated",
+            herdrPaneId: request.work.herdrPaneId,
+          },
         };
       const assignment = ctx.agentWork.state(occupantId, request.work.assignment);
       ctx.fleetChanges.touch();
@@ -597,7 +622,10 @@ export function createOperatorService(
         return {
           op: "state_stance",
           schemaVersion: 1,
-          result: { outcome: "unseated", herdrPaneId: request.stance.herdrPaneId },
+          result: {
+            outcome: "unseated",
+            herdrPaneId: request.stance.herdrPaneId,
+          },
         };
       }
       const standing = ctx.stances.read(seat.seatId, seat.occupantId);
@@ -654,7 +682,11 @@ export function createOperatorService(
       };
     }
     if (request.op === "roles") {
-      return { op: "roles", schemaVersion: 1, roles: [...ctx.personas.roles()] };
+      return {
+        op: "roles",
+        schemaVersion: 1,
+        roles: [...ctx.personas.roles()],
+      };
     }
     if (request.op === "set_persona_role") {
       if (!ctx.personas.all([], () => undefined).some((persona) => persona.personaId === request.personaId))
@@ -903,8 +935,13 @@ export function createOperatorService(
         ?.hiring?.worker?.effort;
       const effort =
         projectEffort === undefined
-          ? { effort: "medium", effortReason: "Started from a connected app; medium is the everyday level" }
-          : { effortReason: "Started from a connected app; the project sets this worker effort" };
+          ? {
+              effort: "medium",
+              effortReason: "Started from a connected app; medium is the everyday level",
+            }
+          : {
+              effortReason: "Started from a connected app; the project sets this worker effort",
+            };
       // Each start is new work. Where a settled earlier hire fences this place, it goes
       // as a fresh intent after that hire, as Clankie's own new work there does (#100).
       const freshIntent =
@@ -921,6 +958,8 @@ export function createOperatorService(
         {
           schemaVersion: 1,
           harness,
+          ...(request.account === undefined ? {} : { account: request.account }),
+          ...(request.mcpServers === undefined ? {} : { mcpServers: request.mcpServers }),
           title,
           // The tab the owner sees names the work, not just the project (every hire here
           // would otherwise read "clankie · Work").
@@ -974,7 +1013,12 @@ export function createOperatorService(
     if (request.op === "herdr_core_list") {
       const listed = await herdrCore().list();
       return listed.status === "listed"
-        ? { op: "herdr_core_list", schemaVersion: 1, status: "listed", agents: [...listed.agents] }
+        ? {
+            op: "herdr_core_list",
+            schemaVersion: 1,
+            status: "listed",
+            agents: [...listed.agents],
+          }
         : {
             op: "herdr_core_list",
             schemaVersion: 1,
@@ -985,11 +1029,21 @@ export function createOperatorService(
     }
     if (request.op === "herdr_core_read") {
       const read = await herdrCore().read(request.terminal);
-      return { op: "herdr_core_read", schemaVersion: 1, terminal: request.terminal, ...read };
+      return {
+        op: "herdr_core_read",
+        schemaVersion: 1,
+        terminal: request.terminal,
+        ...read,
+      };
     }
     if (request.op === "herdr_core_focus") {
       const focused = await herdrCore().focus(request.terminal);
-      return { op: "herdr_core_focus", schemaVersion: 1, terminal: request.terminal, ...focused };
+      return {
+        op: "herdr_core_focus",
+        schemaVersion: 1,
+        terminal: request.terminal,
+        ...focused,
+      };
     }
     if (request.op === "seat_bridges") {
       return {
@@ -998,7 +1052,10 @@ export function createOperatorService(
         bridges: ctx.headSeatConversations().map((id) => {
           const title = ctx.conversations.conversation(id)?.title;
           const bridge = ctx.seatOutbox(id).bridgeStatus(id);
-          return { ...bridge, detail: title === undefined ? bridge.detail : `${title}: ${bridge.detail}` };
+          return {
+            ...bridge,
+            detail: title === undefined ? bridge.detail : `${title}: ${bridge.detail}`,
+          };
         }),
       };
     }
@@ -1108,10 +1165,53 @@ export function createOperatorService(
         if ((await ctx.settings()).autonomy?.watch === true) throw new WatchingError();
       };
       await refuseWhileWatching();
+      // A connected app closes only an idle hire that Clankie or an app started: never a pane
+      // the owner started or asked for, and never one mid-turn. Each close it asks is logged.
+      const app = request.appDeviceId;
+      const logAppClose = (closed: boolean, refusal?: string) =>
+        logger.info(
+          {
+            event: "connector.close_agent",
+            appDeviceId: app,
+            seatId: request.seatId,
+            closed,
+            ...(refusal === undefined ? {} : { refusal }),
+          },
+          closed ? "A connected app closed an agent" : "A connected app's close was refused",
+        );
+      const busy = (status: string | undefined) =>
+        status !== undefined && status !== "idle" && status !== "done";
+      if (app !== undefined) {
+        const { snapshot } = await ctx.fleetSnapshot();
+        const seat = snapshot.seats.find((candidate) => candidate.seatId === request.seatId);
+        const starter =
+          seat === undefined
+            ? undefined
+            : ctx.seatStarters?.(snapshot)(seat.seatId, seat.occupantId, seat.fleet ?? "local");
+        const refusal =
+          seat === undefined
+            ? ({ reason: "not_found" } as const)
+            : seat.owner?.hired !== true || (starter?.kind !== "clankie" && starter?.kind !== "app")
+              ? ({ reason: "not_clankies_hire" } as const)
+              : busy(seat.status)
+                ? ({ reason: "busy", status: seat.status } as const)
+                : undefined;
+        if (refusal !== undefined) {
+          logAppClose(false, refusal.reason);
+          return {
+            op: "close_seat",
+            schemaVersion: 1,
+            seatId: request.seatId,
+            closed: false,
+            refusal,
+          };
+        }
+      }
       // The same hold as close_worker_pane: unlanded work stays unless a reason is recorded.
       const tidy = ctx.herdrWatches.tidy;
       const held = (await tidy?.seatWorktreeHold(request.seatId)) ?? [];
-      if (held.length && request.unlandedReason === undefined)
+      if (held.length && request.unlandedReason === undefined) {
+        if (app !== undefined) logAppClose(false, "unlanded_work");
         return {
           op: "close_seat",
           schemaVersion: 1,
@@ -1119,11 +1219,19 @@ export function createOperatorService(
           closed: false,
           refusal: { reason: "unlanded_work", worktrees: held.slice(0, 8) },
         };
+      }
       const closed = await ctx.herdrWatches.closeSeat(request.seatId, async () => {
         await refuseWhileWatching();
         if (request.unlandedReason === undefined && (await tidy?.seatWorktreeHold(request.seatId))?.length)
           throw new Error("unlanded_work");
+        // Read again just before the exit: a turn that started meanwhile keeps its pane.
+        if (
+          app !== undefined &&
+          busy((await ctx.herdrRunner.resolveTerminal(request.seatId).catch(() => undefined))?.status)
+        )
+          throw new Error("busy");
       });
+      if (app !== undefined) logAppClose(closed);
       if (closed && held.length && request.unlandedReason !== undefined)
         try {
           tidy?.recordLeftBehind(
@@ -1140,7 +1248,9 @@ export function createOperatorService(
         ctx.fleetChanges.touch();
         const issue = await ctx.herdrWatches.issueStatus?.closed({
           seatId: request.seatId,
-          reason: request.unlandedReason ?? "closed by the owner",
+          reason:
+            request.unlandedReason ??
+            (app === undefined ? "closed by the owner" : "closed by a connected app"),
           unlanded: held.length > 0,
         });
         if (issue?.outcome === "failed") warnSeatIssueUnavailable(issue);
@@ -1167,7 +1277,10 @@ export function createOperatorService(
       const { ownerWork, ...seat } = request.seat;
       if (ownerWork) await authorizeQuestion(authority);
       const hired = await ctx.hireSeat(
-        { ...seat, ...(ownerWork ? { effortReason: `owner-chosen via app (${ownerWork.surface})` } : {}) },
+        {
+          ...seat,
+          ...(ownerWork ? { effortReason: `owner-chosen via app (${ownerWork.surface})` } : {}),
+        },
         request.brief,
         {
           owner: { conversationId },
@@ -1205,7 +1318,11 @@ export function createOperatorService(
         return {
           op: "move_seat",
           schemaVersion: 1,
-          result: { outcome: "failed", reason: "unknown_seat", detail: request.move.seatId },
+          result: {
+            outcome: "failed",
+            reason: "unknown_seat",
+            detail: request.move.seatId,
+          },
         };
       }
       // What the seat is saying about itself outlives the chair: the move is
@@ -1219,7 +1336,11 @@ export function createOperatorService(
         return {
           op: "move_seat",
           schemaVersion: 1,
-          result: { outcome: "failed", reason: "harness_unavailable", detail: seat.harness },
+          result: {
+            outcome: "failed",
+            reason: "harness_unavailable",
+            detail: seat.harness,
+          },
         };
       }
       const standing = ctx.stances.read(seat.seatId, seat.occupantId);
@@ -1264,7 +1385,11 @@ export function createOperatorService(
         );
       }
       ctx.fleetChanges.touch();
-      return { op: "move_seat", schemaVersion: 1, result: { outcome: "moved", seat: rehired } };
+      return {
+        op: "move_seat",
+        schemaVersion: 1,
+        result: { outcome: "moved", seat: rehired },
+      };
     }
     if (
       request.op === "connections" ||
@@ -1410,7 +1535,10 @@ export function createOperatorService(
             const cwd =
               ctx.liveSeats.find((seat) => seat.seatId === seatId)?.workingDirectory ??
               previous?.workingDirectory;
-            const source = { ...snapshot.agent, ...(cwd === undefined ? {} : { workingDirectory: cwd }) };
+            const source = {
+              ...snapshot.agent,
+              ...(cwd === undefined ? {} : { workingDirectory: cwd }),
+            };
             ctx.conversations.rememberNativeSource(input.conversationId, source);
             const paging = nativeConversationPage(
               conversation,
@@ -1453,7 +1581,9 @@ export function createOperatorService(
               Date.now() >= deadline
             )
               return { op: request.op, schemaVersion: 1, result: page };
-            await delay(Math.min(1_000, deadline - Date.now()), undefined, { signal: tailSignal });
+            await delay(Math.min(1_000, deadline - Date.now()), undefined, {
+              signal: tailSignal,
+            });
           }
         }
       }
@@ -1544,8 +1674,11 @@ async function linkedMachines(ctx: CreateOperatorServiceContext): Promise<
     fleets.map(async (fleet) => {
       try {
         const stdout = await ctx.deps.fleets!.run(fleet)(["api", "snapshot"], undefined, MACHINE_PROBE_MS);
-        const version = (JSON.parse(stdout) as { result?: { snapshot?: { version?: unknown } } }).result
-          ?.snapshot?.version;
+        const version = (
+          JSON.parse(stdout) as {
+            result?: { snapshot?: { version?: unknown } };
+          }
+        ).result?.snapshot?.version;
         return {
           fleet,
           machine: {
@@ -1557,7 +1690,11 @@ async function linkedMachines(ctx: CreateOperatorServiceContext): Promise<
         };
       } catch {
         // allow-swallowed-rejection -- a machine that doesn't answer is reported unreachable.
-        return { fleet, machine: { id: fleet.id, reachable: false }, sessions: [] };
+        return {
+          fleet,
+          machine: { id: fleet.id, reachable: false },
+          sessions: [],
+        };
       }
     }),
   );
@@ -1583,7 +1720,11 @@ function startAgentPlaces(settings: ClankieSettings): {
       if (workspace.machineId === "local" && workspace.platform === "posix")
         return [
           {
-            place: { machine: local, project: project.name, workingDirectory: workspace.path },
+            place: {
+              machine: local,
+              project: project.name,
+              workingDirectory: workspace.path,
+            },
             names: new Set(["local", "this mac", local.toLowerCase()]),
             projectId: project.id,
             machineKey: "local",
@@ -1602,7 +1743,11 @@ function startAgentPlaces(settings: ClankieSettings): {
         .map((reached) => {
           const host = reached.connection.ssh!.host.slice(0, 200);
           return {
-            place: { machine: host, project: project.name, workingDirectory: workspace.path },
+            place: {
+              machine: host,
+              project: project.name,
+              workingDirectory: workspace.path,
+            },
             names: new Set([
               host.toLowerCase(),
               reached.connection.id,

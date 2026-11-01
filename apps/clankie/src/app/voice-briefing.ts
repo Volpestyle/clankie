@@ -6,7 +6,6 @@ import {
   VOICE_AWARENESS_MAX_CHARACTERS,
 } from "../voice-awareness.ts";
 import { type DiscordPresenceSessionRecord, type PlayStoryRead } from "@clankie/interactive-environment";
-import { personaImageBriefing } from "@clankie/persona-images";
 import type { DiscordStreamWatchObservation } from "@clankie/protocol";
 import {
   type DiscordPersonMemoryFact,
@@ -232,7 +231,7 @@ export async function composeVoiceCallBriefing(
   const instructions = boundVoiceBriefingText(
     [
       personaInstructions(persona, "social"),
-      ctx.dependencies.personaImages ? personaImageBriefing(await ctx.dependencies.personaImages()) : "",
+      (await ctx.dependencies.personaBriefing?.()) ?? "",
       voiceLane,
       VOICE_CALL_REALTIME_SURFACE_RULES,
       awareness,
@@ -339,7 +338,7 @@ export function registerVoiceBriefingRoute(ctx: VoiceBriefingRouteContext) {
     const instructions = boundVoiceBriefingText(
       [
         personaInstructions(persona, "social"),
-        ctx.dependencies.personaImages ? personaImageBriefing(await ctx.dependencies.personaImages()) : "",
+        (await ctx.dependencies.personaBriefing?.()) ?? "",
         voiceLane,
         DISCORD_VOICE_REALTIME_SURFACE_RULES,
         awareness,

@@ -263,6 +263,9 @@ the apps, which read them with `read_inbox` and `read_reports` and answer
 workers with `message_agent` or, for a prompt open in a pane, `answer_prompt`;
 `press_keys` drives a worker's interface with named keys (arrows, esc, ctrl+c,
 shift+tab, enter) whatever it is doing, under the same per-app switch.
+`close_agent` closes a finished worker's pane once it is idle and its work has
+landed, but only a worker you or an app hired; the owner's own agents stay
+theirs (ADR 0339).
 An app can send a worker images with `message_agent` (they land under
 `.clankie/inbox/` in its workspace) and look at one the worker saved there with
 `read_image`, so a worker that wants an app to see a screenshot saves it inside
