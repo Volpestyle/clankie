@@ -162,6 +162,8 @@ export interface ClankieAppDependencies {
   feedCheckReceiptPath?: string;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   connectorPromptAnswersPath?: string;
+  /** Setup's one read-only agent and its proposal (ADR 0320). */
+  setupSurveyPath?: string;
   /**
    * Shared with the captain so operator delivery and the connector routes see
    * one Herdr detection switch (ADR 0312). Absent: an in-memory store, on.

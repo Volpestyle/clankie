@@ -3026,7 +3026,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
     }
-    if (resume === undefined) {
+    // A read-only hire only looks around (ADR 0320): its folder is never fetched,
+    // fast-forwarded or moved to a worktree, so the owner's home stays as it is.
+    if (resume === undefined && request.readOnly !== true) {
       const remote = remoteFleets.find((fleet) => fleet.id === request.fleet);
       const shell = remote && deps.fleets?.shell?.(remote);
       const paneDirectories = async () => {
@@ -7954,6 +7956,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     readWorkerAccounts,
     resolveWorkerAccountLabel: (machine, harness, label) =>
       harnessAccountIdentities(harnessAccountIdentityPath(options.stateDir)).resolve(machine, harness, label),
+    seatReports: async ({ conversationId, seatId, paneId: kept, since }) => {
+      const pane = () => kept ?? liveEdgeSeats.find((seat) => seat.seatId === seatId)?.paneId;
+      // A just-hired agent's pane can be newer than the last census; look once more.
+      if (pane() === undefined) await refreshFleet({ force: true }).catch(() => undefined);
+      const paneId = pane();
+      if (paneId === undefined) return { reports: [] };
+      if (!conversations.conversation(conversationId)) return { paneId, reports: [] };
+      return {
+        paneId,
+        reports: conversations
+          .inboundReports(conversationId, { includeRead: true, acceptedAfterMs: Date.parse(since) - 1 })
+          .filter((report) => report.paneId === paneId)
+          .map(({ text, acceptedAt }) => ({ text, acceptedAt })),
+      };
+    },
     serveOperatorConversation: createOperatorService({
       prepareFreeAgentIntent,
       get personas() {

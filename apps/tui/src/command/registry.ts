@@ -490,6 +490,13 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["setup-agent"],
+    lines: [
+      "  setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]",
+      "                           Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)",
+    ],
+  },
+  {
     nouns: ["maximum-trust-mode"],
     lines: [
       "  maximum-trust-mode [status|on|off]",

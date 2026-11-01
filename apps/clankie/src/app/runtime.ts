@@ -76,7 +76,8 @@ import { registerComputerRoutes } from "../computer-http.ts";
 import { ActivitySharingRequestSchema } from "../activity-sharing.ts";
 import { ActivityAdmissionError } from "../activity-admission.ts";
 import { ActivityShareRequestError } from "@clankie/rendered-surface-client";
-import { changeRuntime } from "../connections.ts";
+import { changeRuntime, manageConnections } from "../connections.ts";
+import { createSetupSurveyRoutes, createSetupSurveyService } from "../setup-survey.ts";
 import { DeviceSessionError, DeviceSessionSigner } from "../device-session.ts";
 import {
   applyDeviceEvent,
@@ -1021,6 +1022,59 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
           }
         : {}),
     }),
+  );
+  app.route(
+    "/",
+    createSetupSurveyRoutes(
+      authorizeOwnerSecrets,
+      dependencies.setupSurveyPath === undefined || !settingsSource.update
+        ? undefined
+        : createSetupSurveyService({
+            path: dependencies.setupSurveyPath,
+            settings: {
+              load: () => settingsSource.load(),
+              update: (mutate) => settingsSource.update!(mutate),
+            },
+            serve: (request) => dependencies.captain.serveOperatorConversation(request),
+            reports: async (input) => (await dependencies.captain.seatReports?.(input)) ?? { reports: [] },
+            connections: (command) => manageConnections(dependencies, command),
+            facts: async () => {
+              const settings = await settingsSource.load();
+              const [machines, accounts] = await Promise.all([
+                dependencies.runtimes?.machines.list(true).catch(() => undefined),
+                dependencies.workerAccounts?.().catch(() => undefined),
+              ]);
+              return {
+                autonomy: settings.autonomy.watch === true ? "watch" : "set",
+                machines: machines?.machines.map(
+                  ({ id, name, platform, ssh, configured, state, sessions }) => ({
+                    id,
+                    name,
+                    platform,
+                    ssh,
+                    configured,
+                    state,
+                    sessions: sessions.map(({ name: session, state: sessionState }) => ({
+                      session,
+                      state: sessionState,
+                    })),
+                  }),
+                ),
+                projects: settings.projects.projects.map((project) => ({
+                  id: project.id,
+                  name: project.name,
+                  folders: project.workspaces.map(({ machineId, path }) => ({ machine: machineId, path })),
+                })),
+                accounts: accounts?.accounts.map(({ harness, label, signedIn, plan }) => ({
+                  harness,
+                  label,
+                  signedIn,
+                  ...(plan === undefined ? {} : { plan }),
+                })),
+              };
+            },
+          }),
+    ),
   );
   app.route(
     "/",

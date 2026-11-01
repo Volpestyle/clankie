@@ -1392,3 +1392,41 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
     expect(typed.sendKeys).not.toHaveBeenCalled();
   });
 });
+
+it("a read-only hire starts Claude in dontAsk with only reading and reporting allowed (ADR 0320)", () => {
+  const args = claudeWorkerLaunchArgs({
+    harness: "claude",
+    cwd: "/w",
+    brief: "b",
+    readOnly: true,
+    maximumTrust: true,
+  });
+  // The owner's maximum trust mode never lifts a read-only hire's permissions.
+  expect(args).not.toContain("--dangerously-skip-permissions");
+  // None of the owner's settings files load, so no inherited allow rule widens the list.
+  expect(args.slice(0, 2)).toEqual(["--setting-sources", ""]);
+  const settings = JSON.parse(args[args.indexOf("--settings") + 1]!) as {
+    permissions: { allow: string[]; deny: string[]; defaultMode: string };
+  };
+  expect(settings.permissions.defaultMode).toBe("dontAsk");
+  expect(settings.permissions.deny).toEqual(expect.arrayContaining(["Edit", "Write", "WebFetch"]));
+  expect(settings.permissions.allow).toEqual(
+    expect.arrayContaining(["Read", "Glob", "Grep", "mcp__plugin_clankie-worker_worker__message_clankie"]),
+  );
+  for (const widening of ["Edit", "Write", "Bash", "WebFetch", "mcp__plugin_clankie-worker_worker"])
+    expect(settings.permissions.allow).not.toContain(widening);
+  expect(settings.permissions.allow.some((rule) => rule.endsWith("clankie_call"))).toBe(false);
+  expect(() =>
+    claudeWorkerLaunchArgs({
+      harness: "claude",
+      cwd: "/w",
+      brief: "b",
+      readOnly: true,
+      harnessArgs: ["--permission-mode", "bypassPermissions"],
+    }),
+  ).toThrow("read-only");
+  // An everyday hire keeps the owner's settings.
+  expect(claudeWorkerLaunchArgs({ harness: "claude", cwd: "/w", brief: "b" })).not.toContain(
+    "--setting-sources",
+  );
+});
