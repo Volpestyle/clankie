@@ -7607,7 +7607,13 @@ owner's fix. It does not launch a second worker or type the brief into the pane.
 Nothing accepts the development-channel warning on the owner's behalf.
 
 Local OpenCode workers use `hire_agent` with `harness: "opencode"` on macOS
-and the installed direct native executable, 1.18.18 or newer. A release whose
+and the installed direct native executable, 1.18.18 or newer. OpenCode 2
+(2.2.5 or newer) takes the V2 worker plugin instead: the TUI runs
+`--standalone` with its own private server, and follow-ups take `delivery:
+"steer"` or `"queue"` through the session inbox, with OpenCode's admission as the
+receipt ([ADR 0333](adr/0333-opencode-2-hires-run-a-private-server.md)). Its
+history is not in the registered SQLite profiles, and linked Macs on OpenCode 2
+refuse by name. A release whose
 worker probe fails is refused with its version and the missing surface, before
 any brief. Optional models use `provider/model`;
 `effort` requires an explicit model and a variant it supports. Account, skill,
