@@ -101,6 +101,34 @@ it("binds an explicit fresh admission to a retained native settlement, rejecting
   expect(await readFile(f.path, "utf8")).toBe(before);
 });
 
+it("#100: new work after a settled original gets a fresh intent the fence admits", async () => {
+  const f = await fixture();
+  const elsewhere = JSON.stringify(["pc", "codex", "C:\\other", "new"]);
+  // A place with no settled history takes an ordinary hire.
+  expect(f.fence.nextFreshIntent(elsewhere)).toBeUndefined();
+  const intent = f.fence.nextFreshIntent(proof.receiptKey)!;
+  expect(intent.afterReceiptId).toBe(proof.receiptId);
+  const admitted = f.fence.freshHireAdmission(
+    proof.receiptKey,
+    { ...f.input, freshIntent: intent },
+    f.owner,
+    f.fingerprint,
+  );
+  // Every call is its own intent, never a retry of an earlier one.
+  expect(f.fence.nextFreshIntent(proof.receiptKey)!.id).not.toBe(intent.id);
+  f.fence.begin(admitted.key, { fingerprint: f.fingerprint, freshHire: admitted.metadata, beforeIds: [] });
+  // While that fresh hire is unresolved, the next one names it and is refused.
+  const next = f.fence.nextFreshIntent(proof.receiptKey)!;
+  expect(() =>
+    f.fence.freshHireAdmission(
+      proof.receiptKey,
+      { ...f.input, freshIntent: next },
+      f.owner,
+      deliveryFingerprint("Another new brief"),
+    ),
+  ).toThrow("unresolved");
+});
+
 it("a restarted journal permits only exact same-ID inspection while any sibling remains uncertain", async () => {
   const f = await fixture();
   const a = f.fence.freshHireAdmission(proof.receiptKey, f.input, f.owner, f.fingerprint);

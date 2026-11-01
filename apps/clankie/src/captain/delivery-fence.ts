@@ -144,6 +144,20 @@ export class DeliveryFence {
     return [...this.records.entries()];
   }
 
+  /**
+   * The fresh intent new work at this location needs: after its latest retained
+   * receipt, once that location was settled or holds fresh history (#100).
+   * Undefined when an ordinary hire still fits. Admission still decides.
+   */
+  public nextFreshIntent(baseKey: string): { id: string; afterReceiptId: string } | undefined {
+    const siblings = this.all().filter(
+      ([key, receipt]) => (receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key) === baseKey,
+    );
+    if (!this.settled(baseKey) && !siblings.some(([, receipt]) => receipt.freshHire)) return undefined;
+    const latest = siblings.at(-1)?.[1];
+    return latest === undefined ? undefined : { id: randomUUID(), afterReceiptId: latest.messageId };
+  }
+
   /** Read-only validation; repeat synchronously immediately before begin, after any awaits. */
   public freshHireAdmission(
     baseKey: string,
