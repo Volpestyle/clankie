@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-// The worker loads for each launch from Clankie's own files (ADR 0314); an older
+// The worker loads for each launch from Clankie's own files (ADR 0317); an older
 // installed copy is switched off for that session so the worker loads once.
 const plugin = "clankie-worker@inline";
 const installed = "clankie-worker@clankie";

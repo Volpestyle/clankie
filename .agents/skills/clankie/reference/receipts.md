@@ -135,7 +135,7 @@ Claude sessions with an observed, process/session-bound worker prompt hook can
 receive held replies once at the next `UserPromptSubmit` without `--channels`.
 A live channel can deliver immediately only when Claude was launched with
 Clankie's worker loaded for that session (`--plugin-dir` with
-`--channels plugin:clankie-worker@inline`, ADR 0314) and the policy allows it;
+`--channels plugin:clankie-worker@inline`, ADR 0317) and the policy allows it;
 reconnecting the plugin alone does not enable a channel in an original process. The roster's `messageReceiver` names `live` (an exact-session native
 poll, not model awareness), `next-turn-only` (an observed prompt hook without
 a live poll), or `unverified`. Next-turn-only is an idle-wake limitation even

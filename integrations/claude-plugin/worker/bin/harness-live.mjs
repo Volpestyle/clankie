@@ -30,7 +30,7 @@ const daemonFix =
   "After saving affected sessions, stop the shared daemon with codex app-server daemon stop. Resume each session in its own pane with codex --no-daemon resume <SESSION>; keep daemon_auto_start=false in the source-owned config.";
 const fix = (harness) =>
   harness === "claude"
-    ? `Restart this pane's Claude with Clankie's worker loaded for that session (ADR 0314): claude --resume <SESSION> --plugin-dir "${WORKER_ROOT}" --channels plugin:clankie-worker@inline (a prepared Mac pane adds both to claude --resume <SESSION>). Then verify its native tool catalog.`
+    ? `Restart this pane's Claude with Clankie's worker loaded for that session (ADR 0317): claude --resume <SESSION> --plugin-dir "${WORKER_ROOT}" --channels plugin:clankie-worker@inline (a prepared Mac pane adds both to claude --resume <SESSION>). Then verify its native tool catalog.`
     : "Check this pane's source-owned Codex bridge registration/plugin. Resume in this pane with codex --no-daemon resume <SESSION>, then verify its native tool catalog.";
 
 function table(stdout) {

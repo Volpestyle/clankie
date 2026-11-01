@@ -245,7 +245,7 @@ describe.skipIf(!harnessesInstalled)("several accounts per harness, signed in fr
   it("moves a re-signed profile's label to the account now signed in there, for hires too", async () => {
     const f = await fixture(true);
     const work = join(f.home, ".claude-work");
-    // A ready profile: first-run setup done. Hires load the worker themselves (ADR 0314).
+    // A ready profile: first-run setup done. Hires load the worker themselves (ADR 0317).
     await writeFile(join(work, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
     await writeFile(join(work, "fixture-identity.json"), JSON.stringify({ email: "alice@example.com" }));
     const hire = async () => {

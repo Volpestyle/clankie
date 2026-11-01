@@ -380,7 +380,7 @@ and readable exact transcript.
 A hand-started Claude in a linked Herdr pane shows an exact-session restart
 command when Clankie's worker was not loaded for that session; the owner uses the
 shown `claude --resume UUID --plugin-dir <worker folder> --channels
-plugin:clankie-worker@inline` (ADR 0314). Do not restart
+plugin:clankie-worker@inline` (ADR 0317). Do not restart
 existing panes or substitute terminal input for messages.
 
 The roster's `inputCapabilities` lists observed `deliveryModes`, exact-task

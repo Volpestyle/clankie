@@ -66,7 +66,7 @@ export function approveWorkerChannel(existing: string): {
     value = parsed as Record<string, unknown>;
   }
   const listed = Array.isArray(value.allowedChannelPlugins) ? [...value.allowedChannelPlugins] : [];
-  // The installed copy's pair approves nothing once setup has removed that copy (ADR 0314).
+  // The installed copy's pair approves nothing once setup has removed that copy (ADR 0317).
   const allowed = listed.filter(
     (entry) =>
       !(

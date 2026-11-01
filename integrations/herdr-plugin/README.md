@@ -12,7 +12,7 @@ board, console, and status report one keystroke from any herdr workspace.
 ## Hand-started Claude on Mac
 
 In prepared Mac zsh panes, typing `claude` or `claude --resume ID` selects
-Clankie's PATH shim, which loads Clankie's worker for that session (ADR 0314):
+Clankie's PATH shim, which loads Clankie's worker for that session (ADR 0317):
 `--plugin-dir` with this install's `integrations/claude-plugin/worker` and
 `--channels plugin:clankie-worker@inline`, and switches off an older installed
 copy for that launch. A settings layer that sets `clankie-worker@inline` (or the

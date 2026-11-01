@@ -87,7 +87,7 @@ export class NextTurnMailbox {
         detail:
           "Idle wake is unavailable: only this session's next UserPromptSubmit receiver is observed. Messages stay in the next-turn mailbox. Check the channel launch flag and bridge connection; plugin installation alone cannot enable a channel in a running Claude session. Coordinate any reconnect or relaunch with the owner; do not type into the pane or replay mail." +
           (z.string().uuid().safeParse(sessionId).success
-            ? ` When authorized, resume in the original cwd and account/config home with Clankie's worker loaded for that session (ADR 0314): claude --resume ${sessionId} --plugin-dir <that machine's Clankie worker plugin folder> --channels plugin:clankie-worker@inline. In a prepared Mac pane, claude --resume ${sessionId} adds both.`
+            ? ` When authorized, resume in the original cwd and account/config home with Clankie's worker loaded for that session (ADR 0317): claude --resume ${sessionId} --plugin-dir <that machine's Clankie worker plugin folder> --channels plugin:clankie-worker@inline. In a prepared Mac pane, claude --resume ${sessionId} adds both.`
             : ""),
       };
     return {

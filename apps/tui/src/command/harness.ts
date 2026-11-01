@@ -111,7 +111,7 @@ export async function runHarnessCommand(
         context?.profile === codexProfile &&
         (approved || (await automaticCodexConsent(detail, context, marketplace)))
       );
-    // Claude needs no install (ADR 0314); setup only removes an older worker copy from the selected profile.
+    // Claude needs no install (ADR 0317); setup only removes an older worker copy from the selected profile.
     return (
       claudeExists &&
       context?.profile === claudeProfile &&

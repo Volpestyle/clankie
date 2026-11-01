@@ -87,7 +87,7 @@ export interface WorkerAccountStatus {
   /** The windows behind `headroom`, with their source and observation time. */
   readonly usage?: AccountUsage;
   /**
-   * Retired: Claude hires load the worker for each session (ADR 0314), so a
+   * Retired: Claude hires load the worker for each session (ADR 0317), so a
    * profile's install state no longer decides whether it can hire. Kept so a
    * machine running older code still parses.
    */

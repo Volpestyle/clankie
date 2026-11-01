@@ -1,5 +1,5 @@
 /**
- * ADR 0314: Claude hires load the worker from Clankie's own files, so setup and
+ * ADR 0317: Claude hires load the worker from Clankie's own files, so setup and
  * the update refresh only remove what an older setup installed in a profile.
  */
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";

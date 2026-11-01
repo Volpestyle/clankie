@@ -20,7 +20,7 @@ import { installPaneShell, preparePaneShell, inspectPaneShim } from "../../herdr
 const exec = promisify(execFile);
 const roots: string[] = [];
 const worker = "clankie-worker@inline";
-// This checkout's worker plugin, which the installed launcher hands to every launch (ADR 0314).
+// This checkout's worker plugin, which the installed launcher hands to every launch (ADR 0317).
 const workerRoot = new URL("../worker", import.meta.url).pathname.replace(/\/$/u, "");
 const loaded = [
   "--plugin-dir",

@@ -315,7 +315,7 @@ export async function inspectHarnessBridges(
             "Register clankie mcp --fleet through the source that owns Codex configSource; preserve generated configuration symlinks.",
           ]
         : []),
-      // Claude hires load the worker from Clankie's own files (ADR 0314); an older
+      // Claude hires load the worker from Clankie's own files (ADR 0317); an older
       // installed copy still loads in hand-started sessions, so doctor names it.
       ...profiles.claude
         .filter((profile) => profile.installed)

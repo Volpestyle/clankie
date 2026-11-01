@@ -13,7 +13,7 @@ export interface HarnessInstallResult {
     | "installed"
     | "updated"
     | "source-setup-completed"
-    /** An older installed Claude worker copy was removed (ADR 0314). */
+    /** An older installed Claude worker copy was removed (ADR 0317). */
     | "removed"
     | "declined"
     | "absent"

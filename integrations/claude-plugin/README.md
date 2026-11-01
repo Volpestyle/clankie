@@ -365,7 +365,7 @@ restart the seat. A missing native mod/API remains an explicit failure in
 [doctor](../../docs/cli.md#doctor).
 
 `clankie-worker` serves native hired seats and linked fleet agents. Claude loads it
-for one session as `clankie-worker@inline` (ADR 0314); Codex installs it as
+for one session as `clankie-worker@inline` (ADR 0317); Codex installs it as
 `clankie-worker@clankie-fleet`.
 Its MCP server key is `clankie`; older `swarm` registrations require updating.
 it runs the native seat mailbox or fleet link, with no coordinator runtime.
@@ -618,7 +618,7 @@ physical appearance; the caption preserves that distinction. A restart of Clanki
 
 `clankie harness install` installs the native Codex worker plugin and, with consent
 for each discovered local Claude profile, removes an older installed Claude copy
-(Claude hires load the worker for each session, ADR 0314). `clankie herdr prepare
+(Claude hires load the worker for each session, ADR 0317). `clankie herdr prepare
 NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` stages the worker at
 `~/.clankie/claude-plugin/worker`, approves its channel in the machine's managed
 policy, and does the same per-profile cleanup across remote Claude profiles,

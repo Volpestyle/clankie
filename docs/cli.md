@@ -391,7 +391,7 @@ already lists; doctor also observes the named head's operator bridge.
 - `missing`: a live native harness has no observed descendant or dedicated
   socket-matched bridge. For Claude, resume it with Clankie's worker loaded for
   that session (`--plugin-dir` with `--channels plugin:clankie-worker@inline`,
-  ADR 0314; a prepared Mac pane's `claude` adds both). For Codex, check its
+  ADR 0317; a prepared Mac pane's `claude` adds both). For Codex, check its
   source-owned bridge registration and resume with
   `codex --no-daemon resume <SESSION>`.
 - `pane-mismatch`: the observed bridge claims another pane/socket. Check its
@@ -6470,7 +6470,7 @@ Named machine connections reach the captain immediately; only default workspace 
 machine's Claude and Codex workers; running it is the owner's approval. It ships
 this Clankie's own worker bundle to `~/.clankie/claude-plugin`, removes an older
 installed Claude copy from each discovered profile (hires load the staged worker
-for each session, ADR 0314), and approves its worker channel in managed
+for each session, ADR 0317), and approves its worker channel in managed
 policy (`C:\Program Files\ClaudeCode\managed-settings.json` on Windows), keeping
 existing entries. Codex uses its native `clankie-worker@clankie-fleet` plugin.
 A source-managed Codex config requires its source manager, selected with the
@@ -8049,7 +8049,7 @@ that agent (a DM from the app, or a group-chat turn) arrives as
 instead of being typed into the pane. Identity is `HERDR_PANE_ID`. On a local
 machine the `clankie-worker` Claude plugin's `worker` server runs this command,
 handing it Claude's argv, and it polls only when that session approved
-`plugin:clankie-worker@inline` (ADR 0314) or, from an older installed copy,
+`plugin:clankie-worker@inline` (ADR 0317) or, from an older installed copy,
 `plugin:clankie-worker@clankie` through `--channels`. Hires and prepared Mac panes
 load the worker for each session.
 
@@ -8067,7 +8067,7 @@ user-scoped registration never consumes mail beside the selected worker plugin.
 
 Register `clankie mcp --fleet` in Codex with `env_vars = ["HERDR_PANE_ID",
 "HERDR_SOCKET_PATH"]`; Claude loads the `clankie-worker` plugin for each session
-(ADR 0314).
+(ADR 0317).
 Preserve generated/symlinked harness configuration: inspect
 `doctor.harnessBridges.codex.configSource` and edit its owning source.
 Codex seats Clankie hires into a dedicated app-server run the bridge this command
@@ -9522,7 +9522,7 @@ message bodies. Restarting the service preserves these warnings; acknowledgment,
 expiry or replacement of the native recipient clears the current roster warning.
 A channel can wake an idle Claude session only when Claude was started with
 Clankie's worker loaded for that session (`--plugin-dir` with
-`--channels plugin:clankie-worker@inline`, ADR 0314) and policy permits it.
+`--channels plugin:clankie-worker@inline`, ADR 0317) and policy permits it.
 Enabling policy alone does not enable channels in an existing process.
 The service never repairs an unavailable channel by typing a draft into a pane.
 
@@ -10033,7 +10033,7 @@ retains the named target revision across terminal confirmation and sends it to
 the service; changing its SSH target or session refuses dispatch until reviewed.
 An existing canonical workspace with no project uses global policy. Missing, ambiguous,
 mismatched or unverified worktree context refuses.
-Claude profiles get nothing installed (ADR 0314): it removes an older
+Claude profiles get nothing installed (ADR 0317): it removes an older
 `clankie-worker@clankie` copy from each discovered profile with Claude's own
 `plugin uninstall --scope user`, and the clankie marketplace when no other Clankie
 plugin uses it. A Claude profile whose settings come from a source the owner

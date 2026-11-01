@@ -89,7 +89,7 @@ it("reports harness registration, generated config source, and live membership s
   }
 });
 
-it("names an older installed Claude worker copy for removal (ADR 0314)", async () => {
+it("names an older installed Claude worker copy for removal (ADR 0317)", async () => {
   const home = await mkdtemp(join(tmpdir(), "clankie-harness-doctor-stale-"));
   try {
     const bundle = join(home, "bundle");

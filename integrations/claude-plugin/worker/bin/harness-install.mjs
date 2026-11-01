@@ -87,7 +87,7 @@ const WORKER = "clankie-worker@clankie";
 /**
  * What an older setup left in a Claude profile: Clankie's installed worker and,
  * when no other Clankie plugin is installed from it, the `clankie` marketplace.
- * Claude hires load the worker from Clankie's own files (ADR 0314).
+ * Claude hires load the worker from Clankie's own files (ADR 0317).
  */
 async function legacyClaudeWorker(profile) {
   const known = await json(join(profile, "plugins", "known_marketplaces.json")).catch(() => ({}));
@@ -128,10 +128,10 @@ async function removeClaudeWorker({ profile, execute, consent }) {
     if (entries.length > 0)
       return {
         status: "source-manager-required",
-        detail: `source-managed: ${profile} still declares the old worker copy in ${source}. Remove ${entries.join(" and ")} there through its owner, then run setup again to clear this profile's cached copy; preserve the configuration link. Claude hires load the worker from Clankie's own files (ADR 0314).`,
+        detail: `source-managed: ${profile} still declares the old worker copy in ${source}. Remove ${entries.join(" and ")} there through its owner, then run setup again to clear this profile's cached copy; preserve the configuration link. Claude hires load the worker from Clankie's own files (ADR 0317).`,
       };
   }
-  const detail = `Remove the old ${WORKER} copy${legacy.marketplace ? " and its clankie marketplace" : ""} from profile ${profile}: Claude hires load the worker from Clankie's own files now (ADR 0314).`;
+  const detail = `Remove the old ${WORKER} copy${legacy.marketplace ? " and its clankie marketplace" : ""} from profile ${profile}: Claude hires load the worker from Clankie's own files now (ADR 0317).`;
   if (!(await consent("claude", detail, { profile, source, managed }))) return { status: "declined", detail };
   const unchanged = async () => {
     if (

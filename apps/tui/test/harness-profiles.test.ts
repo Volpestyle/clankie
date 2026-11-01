@@ -71,7 +71,7 @@ it("reports installed, enabled, version, bridge, hook and skill gaps independent
         if (command === "claude" && args[1] === "uninstall") environments.push(env!.CLAUDE_CONFIG_DIR!);
       },
     });
-    // Only the profile an older setup installed into is cleared, through its own configuration (ADR 0314).
+    // Only the profile an older setup installed into is cleared, through its own configuration (ADR 0317).
     expect(environments).toEqual([named]);
   } finally {
     await rm(home, { recursive: true, force: true });
