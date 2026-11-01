@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess, type ExecFileException } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -258,11 +258,32 @@ function controlConnectionKey(fleet: HerdrFleet, controlDirectory: string): stri
   return JSON.stringify([controlDirectory, fleet.id, fleet.ssh.host]);
 }
 
+/**
+ * A Unix socket path must fit macOS's sockaddr_un: 104 bytes with its NUL. OpenSSH
+ * expands %C to 40 hex bytes and adds a 17-byte temporary suffix while a master starts,
+ * so a long state directory (one under macOS's TMPDIR, say) makes every call fail with
+ * "ControlPath too long". Such a directory's sockets go to a short directory under /tmp
+ * that only this user owns, and that nothing else may take: a symlink, another owner or
+ * wider permissions refuse rather than share it.
+ */
+const SOCKET_PATH_BYTES = 104;
+function controlSocketDirectory(directory: string): string {
+  const longest = Buffer.byteLength(join(directory, `${"0".repeat(6)}-${"0".repeat(40)}`)) + 17 + 1;
+  if (longest <= SOCKET_PATH_BYTES || process.platform === "win32") return directory;
+  const uid = process.getuid?.();
+  const short = join("/tmp", `clankie-ssh-${uid ?? "user"}`);
+  mkdirSync(short, { recursive: true, mode: 0o700 });
+  const info = lstatSync(short);
+  if (!info.isDirectory() || (uid !== undefined && info.uid !== uid) || (info.mode & 0o077) !== 0)
+    throw new Error(`${short} isn't a private directory of this user's; Clankie won't put ssh sockets there`);
+  return short;
+}
+
 function controlPath(fleet: HerdrFleet, directory: string, maxAgeMs: number): string {
   const key = controlConnectionKey(fleet, directory);
   const current = controlConnections.get(key);
   if (current && Date.now() - current.since < maxAgeMs) return current.path;
-  const path = join(directory, `${randomBytes(3).toString("hex")}-%C`);
+  const path = join(controlSocketDirectory(directory), `${randomBytes(3).toString("hex")}-%C`);
   controlConnections.set(key, { path, since: Date.now() });
   return path;
 }

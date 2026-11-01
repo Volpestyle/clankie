@@ -184,6 +184,14 @@ describe("remote Herdr transport", () => {
       .slice("ControlPath=".length)
       .replace("%C", "a".repeat(40));
     expect(Buffer.byteLength(longerHome) + 17 + 1).toBeLessThanOrEqual(104);
+    // A state directory under macOS's long TMPDIR still gets a socket path ssh accepts.
+    const long = "/var/folders/7x/2v9q3k1j5d8f0g2h4m6n8p0r0000gn/T/clankie-state-a1b2c3/ssh";
+    const tmp = sshArgs(pc, long, "cmd")
+      .find((arg) => arg.startsWith("ControlPath="))!
+      .slice("ControlPath=".length)
+      .replace("%C", "a".repeat(40));
+    expect(tmp.startsWith(long)).toBe(false);
+    expect(Buffer.byteLength(tmp) + 17 + 1).toBeLessThanOrEqual(104);
   });
 
   it("reports Herdr's own JSON error and a dead link as distinct failures", async () => {
