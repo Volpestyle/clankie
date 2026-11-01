@@ -63,12 +63,20 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
   const commands: OperatorConnectionCommand[] = [];
   let watchedAtHire: boolean | undefined;
   const closed: string[] = [];
+  const open = new Set(["w1:p7", "w1:p9"]);
   const captain = createStubCaptain({
-    // The lead may already have read them; the survey still sees its own agent's reports.
-    seatReports: async ({ conversationId, seatId }) =>
-      conversationId === "global-default"
-        ? reports.filter((report) => report.seatId === seatId).map(({ text }) => ({ text, acceptedAt: "" }))
-        : [],
+    // The lead may already have read them; the survey still sees its own agent's
+    // reports. A seat's pane is known only while it is open, unless the caller kept it.
+    seatReports: async ({ conversationId, seatId, paneId }) => {
+      const pane = paneId ?? (open.has(seatId) ? `pane-${seatId}` : undefined);
+      if (pane === undefined || conversationId !== "global-default") return { reports: [] };
+      return {
+        paneId: pane,
+        reports: reports
+          .filter((report) => `pane-${report.seatId}` === pane)
+          .map(({ text }) => ({ text, acceptedAt: "" })),
+      };
+    },
     serveOperatorConversation: async (request) => {
       requests.push(request);
       if (request.op === "spawn_seat") {
@@ -166,6 +174,8 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
     call,
     watchedAtHire: () => watchedAtHire,
     closed: () => closed,
+    /** The owner closes the agent's pane in Herdr. */
+    closePane: (seatId: string) => open.delete(seatId),
   };
 }
 
@@ -299,4 +309,13 @@ it("closes the agent before an approved Watch level turns Watch on", async () =>
   // The close went through, which it can't once Watch is on.
   expect(f.closed()).toEqual(["w1:p7"]);
   expect((await f.settings.load()).autonomy.watch).toBe(true);
+});
+
+it("finds the proposal after the agent's pane has closed", async () => {
+  const f = await fixture();
+  const started = await f.call("POST", "/v1/setup/survey", { schemaVersion: 1 });
+  expect(started.body.survey).not.toHaveProperty("paneId");
+  f.reports.push({ seatId: "w1:p7", text: `\`\`\`json\n${JSON.stringify(PROPOSAL)}\n\`\`\`` });
+  f.closePane("w1:p7");
+  expect((await f.call("GET", "/v1/setup/survey")).body.survey?.status).toBe("proposed");
 });

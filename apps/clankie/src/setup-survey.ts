@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { Hono } from "hono";
+import { z } from "zod";
 import { bodyLimit } from "hono/body-limit";
 import {
   ApplySetupSurveySchema,
@@ -30,6 +31,13 @@ import type { ClankieSettings } from "@clankie/settings";
 const LEAD = "global-default";
 const ACTIVE = new Set<SetupSurvey["status"]>(["surveying", "proposed"]);
 
+/**
+ * The survey as Clankie keeps it: the agent's pane stays with it from the hire
+ * on, so its report is still found after the pane closes. Readers never see it.
+ */
+const KeptSurveySchema = SetupSurveySchema.extend({ paneId: z.string().min(1).max(256).optional() });
+type KeptSurvey = z.infer<typeof KeptSurveySchema>;
+
 export interface SetupSurveyDependencies {
   /** Where the one survey is kept, so a restart or a closed app does not lose it. */
   readonly path: string;
@@ -45,8 +53,9 @@ export interface SetupSurveyDependencies {
   readonly reports: (input: {
     readonly conversationId: string;
     readonly seatId: string;
+    readonly paneId?: string;
     readonly since: string;
-  }) => Promise<readonly { readonly text: string }[]>;
+  }) => Promise<{ readonly paneId?: string; readonly reports: readonly { readonly text: string }[] }>;
   /** The connection API setup and Settings use; it returns the inventory after the change. */
   readonly connections: (command: OperatorConnectionCommand) => Promise<unknown>;
   /** What the agent starts from: the machines, sessions and projects Clankie already knows. */
@@ -157,25 +166,26 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
     queue = result.catch(() => undefined);
     return result;
   };
-  async function read(): Promise<SetupSurvey | undefined> {
+  async function read(): Promise<KeptSurvey | undefined> {
     try {
-      const parsed = SetupSurveySchema.safeParse(JSON.parse(await readFile(deps.path, "utf8")));
+      const parsed = KeptSurveySchema.safeParse(JSON.parse(await readFile(deps.path, "utf8")));
       return parsed.success ? parsed.data : undefined;
     } catch {
       return undefined;
     }
   }
-  async function write(survey: SetupSurvey): Promise<SetupSurvey> {
+  async function write(survey: KeptSurvey): Promise<KeptSurvey> {
     await mkdir(dirname(deps.path), { recursive: true, mode: 0o700 });
     const temporary = `${deps.path}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(survey, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, deps.path);
     return survey;
   }
-  const snapshot = (survey: SetupSurvey | undefined): SetupSurveySnapshot => ({
-    schemaVersion: 1,
-    ...(survey === undefined ? {} : { survey }),
-  });
+  const snapshot = (kept: KeptSurvey | undefined): SetupSurveySnapshot => {
+    if (kept === undefined) return { schemaVersion: 1 };
+    const { paneId: _paneId, ...survey } = kept;
+    return { schemaVersion: 1, survey };
+  };
   /** Watch goes off only for the survey, and comes back when it ends (ADR 0317). */
   async function setWatch(watch: boolean): Promise<void> {
     await deps.settings.update((current) => {
@@ -192,10 +202,10 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
     }
   }
   async function end(
-    survey: SetupSurvey,
+    survey: KeptSurvey,
     status: "applied" | "cancelled" | "failed",
     extra: Partial<SetupSurvey> = {},
-  ): Promise<SetupSurvey> {
+  ): Promise<KeptSurvey> {
     await closeAgent(survey);
     const ended = await write({ ...survey, ...extra, status, endedAt: now() });
     // Watch comes back only after the agent closes: closing refuses while Watch is on.
@@ -203,18 +213,21 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
     return ended;
   }
   /** Reads the agent's reports for a proposal; the survey moves to proposed once one parses. */
-  async function refresh(survey: SetupSurvey): Promise<SetupSurvey> {
+  async function refresh(survey: KeptSurvey): Promise<KeptSurvey> {
     if (survey.status !== "surveying" || survey.seatId === undefined) return survey;
-    const reports = await deps.reports({
+    const answer = await deps.reports({
       conversationId: LEAD,
       seatId: survey.seatId,
+      ...(survey.paneId === undefined ? {} : { paneId: survey.paneId }),
       since: survey.startedAt,
     });
-    for (const report of [...reports].reverse()) {
+    const kept = survey.paneId ?? answer.paneId;
+    const withPane = kept === undefined ? survey : { ...survey, paneId: kept };
+    for (const report of [...answer.reports].reverse()) {
       const proposal = proposalFromReport(report.text);
-      if (proposal) return write({ ...survey, status: "proposed", proposal });
+      if (proposal) return write({ ...withPane, status: "proposed", proposal });
     }
-    return survey;
+    return withPane === survey ? survey : write(withPane);
   }
   async function applyLine(line: SetupSurveyLine, survey: SetupSurvey): Promise<SetupSurveyLineResult> {
     switch (line.kind) {
@@ -314,7 +327,8 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
               }),
             );
           survey = await write({ ...survey, seatId: answer.result.seat.seatId });
-          return snapshot(survey);
+          // Keep the agent's pane now, while it is surely open.
+          return snapshot(await refresh(survey));
         } catch (error) {
           return snapshot(await end(survey, "failed", { detail: words(error) }));
         }

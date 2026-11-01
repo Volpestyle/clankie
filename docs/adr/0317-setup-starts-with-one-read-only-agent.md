@@ -51,6 +51,8 @@ starts at, refuses every hire.
   service reads every report that agent sent since the survey started, read
   or not, and takes the last block that parses. The report lands in the
   shared lead thread, and its lead reading it first must not hide it.
+  Clankie keeps the agent's pane with the survey from the hire on, so the
+  report is still found after that pane closes.
 - **Line by line.** The owner approves lines by id. Only approved lines run,
   through the same APIs setup and Settings use: `add_machine`,
   `connect_session`, `machine_access` and `autonomy`. `pair_phone`,

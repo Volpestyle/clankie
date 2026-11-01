@@ -382,13 +382,19 @@ export interface CaptainPort {
   /**
    * Every retained report one seat sent a conversation since a time, read or
    * not, without offering it to anyone. Setup's agent reports to the shared
-   * lead thread, whose lead may read it first (ADR 0317).
+   * lead thread, whose lead may read it first (ADR 0317). The seat's pane comes
+   * from the live census unless the caller kept it from an earlier answer, so a
+   * closed pane's reports stay readable.
    */
   seatReports?(input: {
     readonly conversationId: string;
     readonly seatId: string;
+    readonly paneId?: string;
     readonly since: string;
-  }): Promise<readonly { readonly text: string; readonly acceptedAt: string }[]>;
+  }): Promise<{
+    readonly paneId?: string;
+    readonly reports: readonly { readonly text: string; readonly acceptedAt: string }[];
+  }>;
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,

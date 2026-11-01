@@ -1573,24 +1573,37 @@ it("offers retained results through authenticated operator dispatch and only ack
   const bySeat = await Promise.all(
     (await roster(f.service)).map(async (seat) => ({
       seatId: seat.seatId,
-      reports: await f.service.captain.seatReports!({
+      ...(await f.service.captain.seatReports!({
         conversationId: "global-default",
         seatId: seat.seatId,
         since,
-      }),
+      })),
     })),
   );
+  const sender = bySeat.filter(({ reports }) =>
+    reports.some((entry) => entry.text === "Retained finished result for the lead"),
+  );
+  expect(sender).toHaveLength(1);
+  expect(sender[0]!.paneId).toBe(WORKER);
+  // A kept pane still finds it once its seat is gone from the census, and a later start finds nothing.
   expect(
-    bySeat.filter(({ reports }) =>
-      reports.some((entry) => entry.text === "Retained finished result for the lead"),
-    ),
+    (
+      await f.service.captain.seatReports!({
+        conversationId: "global-default",
+        seatId: "gone",
+        paneId: WORKER,
+        since,
+      })
+    ).reports,
   ).toHaveLength(1);
   expect(
-    await f.service.captain.seatReports!({
-      conversationId: "global-default",
-      seatId: bySeat.find(({ reports }) => reports.length > 0)!.seatId,
-      since: new Date(Date.now() + 60_000).toISOString(),
-    }),
+    (
+      await f.service.captain.seatReports!({
+        conversationId: "global-default",
+        seatId: sender[0]!.seatId,
+        since: new Date(Date.now() + 60_000).toISOString(),
+      })
+    ).reports,
   ).toEqual([]);
   const unauthenticated = await f.service.app.app.request("/operator/v1/dispatch", {
     method: "POST",
