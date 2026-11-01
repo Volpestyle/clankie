@@ -61,7 +61,11 @@ starts at, refuses every hire.
   through the same APIs setup and Settings use: `add_machine`,
   `connect_session`, `machine_access` and `autonomy`. `pair_phone`,
   `connect_lead` and `owner_step` are the owner's own steps: approving one
-  shows him how, and nothing runs. Then Clankie closes the agent.
+  shows him how, and nothing runs. Clankie closes the agent before it applies
+  anything. The close says the files in its folder are the owner's own, so a
+  home tracked in Git with uncommitted files doesn't hold it open; a close the
+  service still refuses leaves the survey running, and nothing is applied
+  until a later try closes it.
 - **One API, every surface.** `GET`/`POST /v1/setup/survey`,
   `POST /v1/setup/survey/apply` and `POST /v1/setup/survey/cancel`, owner or a
   device with Take Control. `clankie setup-agent` covers it in the CLI. One

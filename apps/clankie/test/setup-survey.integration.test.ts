@@ -63,6 +63,7 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
   const commands: OperatorConnectionCommand[] = [];
   let watchedAtHire: boolean | undefined;
   const closed: string[] = [];
+  let refuseCloses = false;
   const open = new Set(["w1:p7", "w1:p9"]);
   const captain = createStubCaptain({
     // The lead may already have read them; the survey still sees its own agent's
@@ -103,6 +104,16 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
       if (request.op === "close_seat" && (await settings.load()).autonomy.watch === true)
         throw new Error("Watch is on");
       if (request.op === "close_seat") {
+        // As the real service does for a home tracked in Git with uncommitted files,
+        // closing holds on them unless the close says why they stay.
+        if (refuseCloses || request.unlandedReason === undefined)
+          return {
+            op: "close_seat",
+            schemaVersion: 1,
+            seatId: request.seatId,
+            closed: false,
+            refusal: { reason: "unlanded_work", worktrees: [] },
+          } as OperatorConversationServiceResult;
         closed.push(request.seatId);
         return {
           op: "close_seat",
@@ -176,6 +187,10 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
     closed: () => closed,
     /** The owner closes the agent's pane in Herdr. */
     closePane: (seatId: string) => open.delete(seatId),
+    /** The service refuses every close, whatever reason it is given. */
+    refuseCloses: (refuse = true) => {
+      refuseCloses = refuse;
+    },
   };
 }
 
@@ -240,7 +255,13 @@ it("hires one read-only Claude agent, applies only the approved lines, and goes 
   // The declined machine was never added.
   expect(f.commands).toEqual([{ action: "set_machine_access", id: "local", accessLevel: "workers" }]);
   expect(f.requests.filter((request) => request.op === "close_seat")).toEqual([
-    { op: "close_seat", schemaVersion: 1, seatId: "w1:p7" },
+    {
+      op: "close_seat",
+      schemaVersion: 1,
+      seatId: "w1:p7",
+      unlandedReason:
+        "Setup's read-only agent only looked around; the files in its folder are the owner's own.",
+    },
   ]);
   expect((await f.settings.load()).autonomy.watch).toBe(true);
 });
@@ -325,6 +346,30 @@ it("closes the agent before an approved Watch level turns Watch on", async () =>
     lineIds: ["level"],
   });
   // The close went through, which it can't once Watch is on.
+  expect(f.closed()).toEqual(["w1:p7"]);
+  expect((await f.settings.load()).autonomy.watch).toBe(true);
+});
+
+it("keeps the survey running when the agent cannot be closed, so stopping it again retries", async () => {
+  const f = await fixture();
+  const started = await f.call("POST", "/v1/setup/survey", { schemaVersion: 1 });
+  const surveyId = started.body.survey!.id;
+  f.reports.push({ seatId: "w1:p7", text: `\`\`\`json\n${JSON.stringify(PROPOSAL)}\n\`\`\`` });
+  f.refuseCloses();
+  const applying = await f.call("POST", "/v1/setup/survey/apply", {
+    schemaVersion: 1,
+    surveyId,
+    lineIds: ["local-workers"],
+  });
+  expect(applying.status).toBe(409);
+  // Nothing ran, the proposal still waits, and Watch stays off for the agent still open.
+  expect(f.commands).toEqual([]);
+  expect((await f.call("GET", "/v1/setup/survey")).body.survey?.status).toBe("proposed");
+  expect((await f.call("POST", "/v1/setup/survey/cancel", { schemaVersion: 1, surveyId })).status).toBe(409);
+  expect((await f.settings.load()).autonomy.watch).toBeUndefined();
+  f.refuseCloses(false);
+  const cancelled = await f.call("POST", "/v1/setup/survey/cancel", { schemaVersion: 1, surveyId });
+  expect(cancelled.body.survey?.status).toBe("cancelled");
   expect(f.closed()).toEqual(["w1:p7"]);
   expect((await f.settings.load()).autonomy.watch).toBe(true);
 });

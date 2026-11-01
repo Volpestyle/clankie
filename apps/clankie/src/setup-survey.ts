@@ -174,6 +174,9 @@ function proposalFromReport(text: string): SetupSurveyProposal | undefined {
   return undefined;
 }
 
+const UNLANDED_REASON =
+  "Setup's read-only agent only looked around; the files in its folder are the owner's own.";
+
 const words = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 600);
 
 export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSurveyService {
@@ -213,20 +216,38 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
       return { ...current, autonomy: { ...autonomy, ...(watch ? { watch: true as const } : {}) } };
     });
   }
-  async function closeAgent(survey: SetupSurvey): Promise<void> {
+  /**
+   * Closes the agent. Its folder may be the owner's home tracked in Git, whose
+   * uncommitted files are his own, not the agent's work, so the close says so
+   * instead of holding on them. A close the service still refuses leaves the
+   * survey running, so stopping it again retries (ADR 0317).
+   */
+  async function closeAgent(survey: SetupSurvey, mustClose: boolean): Promise<void> {
     if (survey.seatId === undefined) return;
+    let answer: OperatorConversationServiceResult;
     try {
-      await deps.serve({ op: "close_seat", schemaVersion: 1, seatId: survey.seatId });
+      answer = await deps.serve({
+        op: "close_seat",
+        schemaVersion: 1,
+        seatId: survey.seatId,
+        unlandedReason: UNLANDED_REASON,
+      });
     } catch {
-      /* The owner can still close its pane in Herdr; the survey ends either way. */
+      /* Watch chosen meanwhile refuses every close; the owner can still close its pane in Herdr. */
+      return;
     }
+    if (mustClose && answer.op === "close_seat" && !answer.closed && answer.refusal !== undefined)
+      throw new SetupSurveyConflict(
+        "Clankie couldn’t close the setup agent. Close its pane in Herdr, then try again.",
+      );
   }
   async function end(
     survey: KeptSurvey,
     status: "applied" | "cancelled" | "failed",
     extra: Partial<KeptSurvey> = {},
+    closed = false,
   ): Promise<KeptSurvey> {
-    await closeAgent(survey);
+    if (!closed) await closeAgent(survey, status !== "failed");
     const ended = await write({ ...survey, ...extra, status, endedAt: now() });
     // Watch comes back only after the agent closes: closing refuses while Watch is on.
     if (ended.restoresWatch) await setWatch(true, ended.held);
@@ -366,6 +387,8 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
         const known = new Set(survey.proposal.lines.map((line) => line.id));
         if ([...approved].some((id) => !known.has(id)))
           throw new SetupSurveyConflict("Approve only lines from this proposal");
+        // The proposal is in hand: close the agent first, so a refused close changes nothing.
+        await closeAgent(survey, true);
         const results: SetupSurveyLineResult[] = [];
         const working = { ...survey };
         for (const line of survey.proposal.lines) {
@@ -377,11 +400,16 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
           }
         }
         return snapshot(
-          await end(survey, "applied", {
-            results,
-            restoresWatch: working.restoresWatch,
-            ...(working.held === undefined ? {} : { held: working.held }),
-          }),
+          await end(
+            survey,
+            "applied",
+            {
+              results,
+              restoresWatch: working.restoresWatch,
+              ...(working.held === undefined ? {} : { held: working.held }),
+            },
+            true,
+          ),
         );
       }),
     cancel: (surveyId) =>
