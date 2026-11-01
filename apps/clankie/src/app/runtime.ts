@@ -109,7 +109,6 @@ import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-rep
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
 import type { MediaGeneratorPort } from "../ports/media.ts";
-import { createMinecraftRoutes } from "../minecraft-routes.ts";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
 import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
@@ -1671,16 +1670,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     },
   };
-  if (dependencies.gameExtensions === undefined) {
-    app.route(
-      "/",
-      createMinecraftRoutes({
-        ...gameRouteOptions,
-        ...(dependencies.minecraft === undefined ? {} : { service: dependencies.minecraft }),
-        ...(dependencies.minecraftHost === undefined ? {} : { host: dependencies.minecraftHost }),
-      }),
-    );
-  } else {
+  // Games serve their routes through their extensions (ADR 0328).
+  if (dependencies.gameExtensions !== undefined) {
     app.use("*", async (context, next) => {
       for (const projection of dependencies.gameExtensions!.projections()) {
         if (projection.paths.includes(context.req.path))

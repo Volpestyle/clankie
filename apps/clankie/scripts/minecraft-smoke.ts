@@ -82,10 +82,20 @@ const app = routesOnly
   : await (async () => {
       const { createClankieApp } = await import("../src/app.ts");
       const { createStubCaptain } = await import("../src/captain/port.ts");
+      // The whole app serves Minecraft's routes as the service does: through a game projection.
       return createClankieApp({
         captain: createStubCaptain(),
         settings,
-        minecraft,
+        gameExtensions: {
+          catalog: async () => ({ schemaVersion: 1, extensions: [] }),
+          projections: () => [
+            {
+              paths: ["/v1/minecraft", "/v1/minecraft/host", "/v1/minecraft/configuration"],
+              tools: () => [],
+              routes: (options) => createMinecraftRoutes({ ...options, service: minecraft }),
+            },
+          ],
+        },
         authenticateOperator: async (request) =>
           authenticated(request) ? { operatorId: "local-smoke" } : undefined,
       });
