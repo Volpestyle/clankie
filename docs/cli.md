@@ -10139,6 +10139,31 @@ owner provide a script and run `clankie harness install --codex-source-setup
 
 An explicitly disabled Codex plugin reports `declined`: its native installer
 would enable it, so refreshing that profile requires a reviewed install.
+
+### OpenCode 2 sessions you open yourself
+
+`clankie harness opencode [status|install]` (JSON). `status` reports the
+OpenCode settings folder (`OPENCODE_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/opencode`), whether Herdr's OpenCode plugin is in place for
+OpenCode 2 (`herdrPlugin`: `./herdr-opencode` listed in `cli.json` with its
+`tui.js`), whether OpenCode 2's shared service is registered and running
+(`sharedService`), `messageable` when both hold, and `next` when something is
+missing. `install` creates the settings folder if needed and runs
+`herdr integration install opencode` through the selected Herdr runtime, then
+reports the same fields with Herdr's last output line as `installed`. Nothing
+else in the OpenCode settings changes. While V1 settings still wait to migrate,
+Herdr defers the OpenCode 2 entry, and `next` says to open `opencode` once and
+install again. `clankie doctor --json` carries the same state under
+`harnessBridges.opencode` when OpenCode 2 is installed, with a remediation line
+while the plugin is missing.
+
+With the plugin in place, a message to an OpenCode 2 pane Clankie didn't start
+goes into that session's inbox on the shared service, as Steer (OpenCode's
+default) or Queue. It is sent only when the pane's process runs without
+`--standalone` or `--server` and holds a connection to the registered service.
+The inbox item is the receipt. A refusal sends nothing, and a lost answer is
+unconfirmed and never sent again
+([ADR 0337](adr/0337-hand-opened-opencode-2-sessions-take-messages-through-the-shared-service.md)).
 Checkout and release installers maintain existing links as part of the
 owner-authorized update, then offer new linking interactively.
 

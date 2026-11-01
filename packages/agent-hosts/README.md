@@ -90,6 +90,10 @@ names an owner decision (such as approving a channel). A seat with control never
 falls back to typing into the owner's terminal; only an agent with no channel at
 all is typed into, through `herdr agent prompt` while idle with an empty input
 line ([ADR 0334](../../docs/adr/0334-herdr-direct-prompting-is-the-fallback.md)).
+An OpenCode 2 session the owner opened by hand is not typed into: Herdr's
+OpenCode plugin reports its session, and the message is admitted into that
+session's inbox on OpenCode's shared service
+([ADR 0337](../../docs/adr/0337-hand-opened-opencode-2-sessions-take-messages-through-the-shared-service.md)).
 Missing control and uncertain delivery remain explicit outcomes; neither
 authorizes a second launch or resend.
 The Claude adapter lives in the

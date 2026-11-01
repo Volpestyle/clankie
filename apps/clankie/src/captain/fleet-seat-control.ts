@@ -21,6 +21,15 @@ import { promptWhenClear } from "./direct-prompt.ts";
 import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
 import { randomUUID } from "node:crypto";
 import { paneInputLine } from "./pane-draft.ts";
+import {
+  connectedToService,
+  isOpenCodeSession,
+  OPENCODE_SERVICE_ID,
+  openCodeServicePath,
+  promptOpenCodeSession,
+  readOpenCodeService,
+  sharedOpenCodeProcess,
+} from "./opencode-shared-service.ts";
 import { currentOf, withCurrent, type CurrentCheck, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 
 /** Native control is shared by messages and watches; the adapters own its lifetime. */
@@ -59,6 +68,8 @@ export function createFleetSeatControl(
     readonly inFlightWaitMs?: number;
     /** How long a typed message may take to appear in its agent's session (ADR 0334). */
     readonly directPromptConfirmMs?: number;
+    /** Where OpenCode 2 registers its shared service (ADR 0337); OpenCode's own default otherwise. */
+    readonly openCodeServicePath?: string;
   } = {},
 ) {
   const now = settlement.now ?? Date.now;
@@ -73,6 +84,7 @@ export function createFleetSeatControl(
   const turns = new Map<string, Promise<void>>();
   const inFlightWaitMs = settlement.inFlightWaitMs ?? IN_FLIGHT_WAIT_MS;
   const directPromptConfirmMs = settlement.directPromptConfirmMs ?? DIRECT_PROMPT_CONFIRM_MS;
+  const openCodeService = () => readOpenCodeService(settlement.openCodeServicePath ?? openCodeServicePath());
   /**
    * A lead's and a peer's message to one seat can arrive together. Rather than
    * contend for its receipt fence, a later one waits its turn behind the
@@ -207,8 +219,49 @@ export function createFleetSeatControl(
             result.deliveryModes.push("steer");
         }
       }
+    } else if (agent.agent === "opencode" && control === undefined) {
+      if ((await sharedOpenCodeSession(agent)) !== undefined) result.deliveryModes = ["steer", "queue"];
     }
     return result;
+  };
+
+  /**
+   * A hand-opened OpenCode 2 TUI on this machine (ADR 0337): Herdr's OpenCode
+   * integration reports its exact session, its process runs on the shared
+   * service rather than `--standalone` or `--server`, and it holds a connection
+   * to the registered service's port. Undefined when any of that isn't shown.
+   */
+  const sharedOpenCodeSession = async (agent: HerdrAgentSnapshot) => {
+    if (splitFleetQualified(agent.paneId) !== undefined || agent.paneId.startsWith(`${HERDR_CORE_FLEET}/`))
+      return undefined;
+    const sessionId = agent.session?.kind === "id" ? agent.session.value : undefined;
+    if (!isOpenCodeSession(sessionId) || !runner.paneProcesses || !runner.openFiles) return undefined;
+    const service = await openCodeService();
+    if (service === undefined) return undefined;
+    try {
+      const tui = sharedOpenCodeProcess(await runner.paneProcesses(agent.paneId));
+      if (tui === undefined || !connectedToService(await runner.openFiles(tui.pid), service))
+        return undefined;
+    } catch {
+      return undefined;
+    }
+    return { sessionId, service };
+  };
+
+  /** Admits a message into a hand-opened OpenCode 2 session's inbox; undefined when it isn't one. */
+  const deliverOpenCodeService = async (
+    agent: HerdrAgentSnapshot,
+    text: string,
+    begin: () => void,
+    authorized?: (() => Promise<boolean>) & CurrentCheck,
+    delivery?: "steer" | "queue",
+  ): Promise<FleetSeatDelivery | undefined> => {
+    if (agent.agent !== "opencode") return undefined;
+    const shared = await sharedOpenCodeSession(agent);
+    if (shared === undefined) return undefined;
+    if (authorized && !(await authorized())) return refused();
+    begin();
+    return promptOpenCodeSession(shared.service, shared.sessionId, text, delivery, authorized);
   };
 
   /** Existing unowned Codex sessions may take their native queue instead of PTY input. */
@@ -529,6 +582,19 @@ export function createFleetSeatControl(
         return delivery;
       unreachableQueue = delivery;
       clear();
+    }
+    // A hand-opened OpenCode 2 session takes the message in its own inbox (ADR 0337).
+    if (isMessageableSeat(current) && current.agent === "opencode") {
+      const delivery = await deliverOpenCodeService(current, text, begin, authorized, options?.delivery);
+      if (
+        delivery !== undefined &&
+        !(delivery.outcome === "undelivered" && delivery.deliveryStage === "unavailable")
+      )
+        return delivery;
+      if (delivery !== undefined) {
+        unreachableQueue = delivery;
+        clear();
+      }
     }
     if (options?.delivery) return unreachableQueue ?? modeUnavailable(options.delivery);
     const typed = await promptWithoutChannel(current, text, begin, clear, authorized, options);
@@ -1230,7 +1296,8 @@ export function createFleetSeatControl(
           stamped.outcome === "unconfirmed" &&
           options?.rediscover === true &&
           options.stableReceiptKey === undefined &&
-          !stamped.messageId?.startsWith(DIRECT_PROMPT_ID)
+          !stamped.messageId?.startsWith(DIRECT_PROMPT_ID) &&
+          !stamped.messageId?.startsWith(OPENCODE_SERVICE_ID)
         ) {
           rediscoverAfter = true;
           outcome = stamped;
