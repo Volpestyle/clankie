@@ -29,6 +29,7 @@ import {
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import { FakeVox } from "../../discord-bridge/test/fake-vox.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
+import { registerVoiceCallRoute } from "../../clankie/src/app/voice-call-route.ts";
 import { BodyLeaseRouter } from "../../clankie/src/body-lease-router.ts";
 import { BodyLeaseStore } from "../../clankie/src/body-leases.ts";
 import { ConversationStore } from "../../clankie/src/captain/conversations.ts";
@@ -357,6 +358,8 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
       store: leases,
       confirmStopped: async () => true,
     },
+    // The voice extension mounts the device call route while voice is on (ADR 0328).
+    extensionRoutes: [{ place: "body", register: registerVoiceCallRoute }],
     voiceCall: {
       realtime: async () => ({
         ports: createVoiceRealtimePorts({
