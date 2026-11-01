@@ -1,10 +1,11 @@
 name: CI
 # Every push gets the quick `check` job. A draft pull request stops there. A
-# ready pull request adds the landing gate (typecheck and the test files it
-# changed) and the real-app run on the Mac, a few minutes in all. The tests a
-# change reaches through its imports run on main after the merge (`checkpoint`
-# and `mac`), and the whole suite runs nightly: checkpoints, not waits
-# (ADR 0310). A draft cannot merge, so the skipped jobs pass nothing.
+# ready pull request adds the real-app run; `check` and `real-run` are all a
+# merge waits on (ADR 0332). The landing gate (typecheck and the test files a
+# change edits) and the tests it reaches through its imports run on main after
+# the merge (`landing`, `checkpoint` and `mac`), and the whole suite runs
+# nightly: checkpoints, not waits (ADR 0310). Red on main is a bug to file at
+# the front of the queue. A draft cannot merge, so the skipped jobs pass nothing.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -80,14 +81,15 @@ jobs:
             .data/qa/
             .local/typechecks/
           retention-days: 7
-  # The landing gate's checks on GitHub's free Linux runner for every pull
-  # request (ADR 0240): skills, format, lint with Vox's cargo checks, deadcode,
+  # The landing gate's checks on GitHub's free Linux runner for every push to
+  # main, after the merge (ADR 0240, ADR 0332): skills, format, lint with Vox's cargo checks, deadcode,
   # doc links, swallowed rejections, evidence, the scoped typecheck and the
   # changed-test selection. Tests Linux skips (macOS-only) stay on the owner's
   # Mac. Exit 3 is green checks waiting for the standing reviewer (ADR 0287),
-  # which needs the owner's operator credential and never answers here.
+  # which needs the owner's operator credential and never answers here. A red run
+  # is a bug to file at the front of the queue, not a gate; nothing waits on it.
   landing:
-    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -108,8 +110,7 @@ jobs:
       # tests decode real MP4 and GIF media with ffmpeg; the seat-command tests resolve
       # numbered Claude commands through a real zsh login shell.
       - run: sudo apt-get install -y --no-install-recommends nasm ffmpeg zsh
-      # A pull request's own cache is visible only to that pull request, so the
-      # landing job restores the one the vox-cache job saves on main.
+      # The cargo cache the vox-cache job saves on main.
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -119,27 +120,27 @@ jobs:
           key: landing-cargo-${{ runner.os }}-${{ hashFiles('apps/vox/Cargo.lock') }}
           restore-keys: landing-cargo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      # Compiler state from this pull request's last run, else from main, so the
-      # typecheck rechecks only what changed since (ADR 0310).
+      # Compiler state the typecheck-cache job saved on main, so the typecheck
+      # rechecks only what changed since (ADR 0310).
       - uses: actions/cache/restore@v4
         with:
           path: .local/tsbuildinfo
-          key: tsbuildinfo-${{ runner.os }}-pr${{ github.event.pull_request.number }}-${{ github.sha }}
-          restore-keys: |
-            tsbuildinfo-${{ runner.os }}-pr${{ github.event.pull_request.number }}-
-            tsbuildinfo-${{ runner.os }}-main-
+          key: tsbuildinfo-${{ runner.os }}-main-${{ github.sha }}
+          restore-keys: tsbuildinfo-${{ runner.os }}-main-
       # The gate's skills phase installs the pinned Herdr here; tests spawn it by name.
       - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
-      - name: Landing gate checks against the pull request's base
+      - name: Landing gate checks against main before the push
         env:
+          BEFORE: ${{ github.event.before }}
           # Four vCPUs and 16 GB fit three 2.5 GiB compiler heaps at once.
           CLANKIE_TYPECHECK_JOBS: 3
           # A complete run report: unhandled errors and unfinished files count against it.
           CLANKIE_RELEASE_TEST_REPORT: ${{ github.workspace }}/.local/landing-run.json
         run: |
           status=0
-          # The checked-out merge commit's first parent is the base it merges into.
-          base=$(git rev-parse HEAD^1)
+          # main before this push, else the pushed commit's first parent.
+          base="$BEFORE"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=$(git rev-parse HEAD^1); fi
           # Only the test files this change edits; the rest checkpoint on main.
           node scripts/check-landing.mjs --base "$base" --keep-going --own-tests -- \
             --reporter=default --reporter=./scripts/testing/release-test-reporter.mjs || status=$?
@@ -152,12 +153,6 @@ jobs:
             exit $?
           fi
           test "$checks" = 0
-      # Saved even when the gate fails: the next push rechecks only what changed.
-      - uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: .local/tsbuildinfo
-          key: tsbuildinfo-${{ runner.os }}-pr${{ github.event.pull_request.number }}-${{ github.sha }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

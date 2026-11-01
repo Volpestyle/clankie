@@ -12,7 +12,7 @@ review posts under the Mac's `gh` login as one GitHub review headed
 **Codex review**, and sets the `codex-clean` commit status on the exact commit
 it read. The review is advisory: a pull request merges once its checks are
 green, with or without it, and findings become follow-up issues
-([ADR 0331](../../../docs/adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)).
+([ADR 0332](../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
 
 `scripts/codex-review.mjs` does the GitHub side. Run it from a clean clone of
 clankie's `main` at `~/dev/.clankie-checks/codex-review/tools`

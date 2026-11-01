@@ -105,6 +105,8 @@ export const ReceiptSchema = z
   .strict();
 export type UncertainReceipt = z.infer<typeof ReceiptSchema>;
 const COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** Receipt fleets this machine's own inventory settles: Herdr's local panes and the desktop app's ("herdr-core"). */
+const LOCAL_SETTLEMENT_FLEETS: ReadonlySet<unknown> = new Set(["local", "herdr-core"]);
 
 /** Delivery receipts, never a queue. Ordinary callers expose only unresolved claims. */
 export class DeliveryFence {
@@ -471,7 +473,7 @@ export class DeliveryFence {
     if (
       this.unreadable ||
       previous?.messageId !== messageId ||
-      JSON.parse(key)[0] !== "local" ||
+      !LOCAL_SETTLEMENT_FLEETS.has(JSON.parse(key)[0]) ||
       previous.freshHire ||
       previous.remoteAdmission ||
       previous.recoveryRequested ||

@@ -4,17 +4,18 @@
 root landing gate in ADR 0240. The full gate includes the
 HTTP journey, unit, integration, Rust, IPC, type, lint and documentation checks.
 Pushes and pull requests run fast formatting, lint and native MCP contracts on Linux.
-Pull requests also run the landing gate's checks on Linux against their base;
-exit 3, green checks waiting for the standing reviewer, passes there, and
+Ready pull requests add the real-app run; `check` and `real-run` are all a
+merge waits on ([ADR 0332](../adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+Each push to `main` runs the landing gate's checks on Linux against `main`
+before the push, after the merge; a red run is a bug to file, not a gate, and
+exit 3, green checks waiting for the standing reviewer, passes there.
 macOS-only tests run in the `mac` job on the owner's Mac runner: install, the
 pinned Herdr and `node scripts/check-changed-tests.mjs --base <commit>` (the landing gate's test
 selection, declared filesystem-input consumers included), for pushes and same-repository pull requests
 only, never forks. It stays off until the `CLANKIE_MAC_RUNNER` repository
 variable is `true`. The `codex-clean` commit status, posted by the Codex
 reviewer on the owner's Mac ([ADR 0329](../adr/0329-codex-reviews-on-the-owners-mac.md)),
-is advisory: a pull request merges on green checks without it
-([ADR 0331](../adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)),
-and its findings become follow-up issues. The landing job restores the Vox cargo cache a
+is advisory: a pull request merges on green checks without it, and its findings become follow-up issues. The landing job restores the Vox cargo cache a
 push to main saves, and checks three TypeScript programs at once. Run the
 complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,

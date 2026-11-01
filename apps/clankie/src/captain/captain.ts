@@ -48,6 +48,7 @@ import { SeatEfficiencyStore } from "./seat-efficiency.ts";
 import { prepareSeatTelemetry, readSeatCommitBaseline, type SeatCommitBaseline } from "./seat-telemetry.ts";
 import { fleetReviewContext } from "./fleet-review.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
+import { installedLauncher } from "../project-process-proof.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
@@ -489,6 +490,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seats: herdrCoreSeats,
     launchDirectory: join(options.stateDir, "desktop-launches"),
     seatDirectory: join(options.stateDir, "desktop-seats"),
+    // The same installed harness the seat's process proof resolves (installedLauncher).
+    harnessCommand: async (harness) => {
+      const launcher = await installedLauncher(harness);
+      return launcher === undefined
+        ? undefined
+        : [launcher.executable, ...(launcher.script === undefined ? [] : [launcher.script])];
+    },
     turn: (session) => {
       const last = seatHooks.latest(session);
       return last?.type === "turn_started" ? "working" : last?.type === "turn_completed" ? "idle" : undefined;

@@ -1,7 +1,7 @@
 # ADR 0329: Codex reviews on the owner's Mac, and builds run in local workers
 
 Status: Accepted, 2026-11-01; its review gate and merge rule are superseded
-by [ADR 0331](0331-clankies-own-pull-requests-merge-on-green-checks.md) (the
+by [ADR 0332](0332-clankies-own-pull-requests-merge-on-green-checks.md) (the
 review is advisory and merges wait on green checks only). Accepted on James's
 "Yes, add it" to this plan, and his word that he turned the cloud Codex review off ("turned it off"). Amends
 [ADR 0310](0310-ci-is-a-checkpoint-not-a-wait.md) and the `codex-clean` check

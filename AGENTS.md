@@ -100,9 +100,10 @@ This repository is public. Both neighbors are private and consume
   the side; nobody sits idle on a run. File each bug as an issue at the front of
   the queue, ordered by how badly it blocks the current goals. Open pull
   requests as drafts: a draft gets the quick checks on every push, and marking
-  it ready runs the landing gate and the real-app run, a few minutes. The tests
-  a change reaches through its imports and the Mac's tests run on `main` after
-  the merge, and the whole suite nightly: red there is a bug to file. A test that
+  it ready runs the real-app run; those two are all a merge waits on. The
+  landing gate, the tests a change reaches through its imports and the Mac's
+  tests run on `main` after the merge, and the whole suite nightly: red there is
+  a bug to file. A test that
   already fails on `main` warns and does not block a pull request; file it. A
   change gets its full checks in one place, never twice: CI for a pull request,
   `pnpm check:landing` for a direct landing. While iterating, run only the tests
@@ -110,7 +111,7 @@ This repository is public. Both neighbors are private and consume
 - On a pull request, keep its branch current with `main` and resolve conflicts
   yourself. A ready pull request in this repo, `clankie-app` or `clankie-ops`
   merges once its checks are green, with a plain merge; nothing else gates it
-  ([ADR 0331](docs/adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)).
+  ([ADR 0332](docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
   A local review (Codex on the owner's Mac through the `codex-review` skill,
   OpenCode 2 or any other model) is advisory: run one when it helps, before or
   after the merge, and file its findings as follow-up issues. The cloud Codex

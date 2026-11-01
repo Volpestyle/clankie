@@ -27,15 +27,14 @@ checkpoints the rest on the side.
   Marking it ready for review runs the pull request's gate, and every push after
   that runs it again. A draft cannot merge, so the jobs it skips pass nothing. A
   newer push still cancels the older run.
-- **A pull request's gate takes minutes.** It is the landing gate's checks with
-  the warm typecheck and only the test files the change itself adds or edits
-  (`check-landing.mjs --own-tests`), beside the real-app run on the Mac
-  (ADR 0309). `landing` and `mac` stay required; `mac` is skipped on a pull
-  request, which passes. `codex-clean`, the Mac's Codex review, is advisory
-  since ADR 0331.
-- **The rest checkpoints on `main`.** After a merge, the `checkpoint` job runs
-  the tests the merge reaches through its imports on Linux, and the `mac` job
-  runs them on the Mac. A red run there is a bug to file at the front of the
+- **A pull request's gate takes minutes.** It is the quick `check` job and the
+  real-app run on the Mac (ADR 0309); nothing else gates a merge since
+  ADR 0332. The landing gate's checks (the warm typecheck and only the test
+  files the change itself adds or edits, `check-landing.mjs --own-tests`) run
+  on `main` after the merge. `codex-clean`, the Mac's Codex review, is advisory.
+- **The rest checkpoints on `main`.** After a merge, the `landing` job runs the
+  landing gate's checks, the `checkpoint` job runs the tests the merge reaches
+  through its imports on Linux, and the `mac` job runs them on the Mac. A red run there is a bug to file at the front of the
   queue, not a gate. A newer push to `main` cancels an older run; the nightly
   run covers whatever that skipped.
 - **Main's failures are main's.** The landing gate runs every selected test

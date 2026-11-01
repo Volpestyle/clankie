@@ -27,7 +27,7 @@ it; none takes precedence over another.
   your own. In Clankie's own repos a ready pull request merges once its checks
   are green, and a local review by any model is advisory, with its findings
   filed as follow-up issues
-  ([ADR 0331](../../../../docs/adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)).
+  ([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
 - **Worker questions go to leads, not the owner.** Answer what you can. Only a
   decision that is the owner's (money, accounts, anything that can't be undone)
   goes to the owner.
