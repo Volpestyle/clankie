@@ -167,6 +167,7 @@ export function createHerdrSessionSource(
         ...(request.workingDirectory === undefined ? {} : { workingDirectory: request.workingDirectory }),
         ...(request.harness === undefined ? {} : { harness: request.harness }),
         ...(request.account === undefined ? {} : { account: request.account }),
+        ...(request.mcpServers === undefined ? {} : { mcpServers: [...request.mcpServers] }),
         ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
       });
       if (result.op !== "start_agent") throw new Error("Clankie answered with something else.");
