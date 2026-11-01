@@ -499,6 +499,7 @@ describe("Claude connector MCP endpoint", () => {
       "fleet_capacity",
       "list_places",
       "start_agent",
+      "press_keys",
       "answer_prompt",
       "post_note",
       "read_notes",

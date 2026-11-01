@@ -1981,6 +1981,15 @@ waits on input and the prompt it read is still on screen, once per prompt, and
 never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
 
+`press_keys` presses named keys in an agent's terminal whatever it is doing
+([ADR 0323](adr/0323-connected-apps-press-keys-in-agents-terminals.md)): `up`,
+`down`, `esc`, `ctrl+c`, `shift+tab`, `enter`, a letter or a digit, up to 24 at
+a time. The same `clankie connector prompts` switch turns it on, because a key
+can approve a prompt too. It works for Herdr panes on every machine and for
+hires in the Herdr desktop app, never types text, and never touches a screen
+whose question Clankie sent to you. Each press leaves a note in that app's name
+on the board.
+
 `clankie connector detect` says whether Herdr sessions are discovered
 ([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you
 turn it off: `Herdr: on`, and `clankie connector detect off herdr` stops

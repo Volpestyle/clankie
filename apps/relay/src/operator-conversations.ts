@@ -720,9 +720,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     }
     // So is the app answering a prompt in an agent's pane; the service checks the
     // owner turned answering on for that app (ADR 0303).
-    if (serviceRequest.op === "prompt_answer") {
+    if (serviceRequest.op === "prompt_answer" || serviceRequest.op === "key_press") {
       if (serviceRequest.appDeviceId !== undefined) {
-        writeJson(response, 400, { error: "prompt_answer_app_is_stamped" });
+        writeJson(response, 400, { error: `${serviceRequest.op}_app_is_stamped` });
         return true;
       }
       if (authorization.device.scope !== "connector") {
@@ -801,6 +801,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "seat_image" ||
       // The owner's per-app switch, checked by the service, is what lets keys through.
       serviceRequest.op === "prompt_answer" ||
+      serviceRequest.op === "key_press" ||
       // Reading who leads and what is held for the apps (ADR 0304).
       (serviceRequest.op === "lead" && serviceRequest.command.action !== "set") ||
       serviceRequest.op === "herdr_core_list" ||
@@ -853,6 +854,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (serviceRequest.op === "app_notes" && serviceRequest.action === "post")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (serviceRequest.op === "prompt_answer")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (serviceRequest.op === "key_press")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (serviceRequest.op === "issue_write")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
@@ -1735,6 +1738,7 @@ const CONNECTOR_OPS = new Set([
   "start_agent",
   "app_notes",
   "prompt_answer",
+  "key_press",
   "lead",
   "worker_reports",
   "acknowledge_worker_reports",

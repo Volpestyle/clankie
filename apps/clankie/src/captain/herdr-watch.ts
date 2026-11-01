@@ -270,7 +270,8 @@ export interface HerdrBoundPane {
   resolve(): Promise<HerdrAgentSnapshot | undefined>;
   readScreen(): Promise<string>;
   sendKeys(keys: readonly string[]): Promise<void>;
-  sendText(text: string): Promise<void>;
+  /** Absent where the terminal takes only named keys, as a desktop-app seat does. */
+  sendText?(text: string): Promise<void>;
 }
 
 export interface HerdrWatchRunner {
