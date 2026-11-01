@@ -20,6 +20,7 @@ import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-
 import type { PeerDeliveryOptions } from "../src/captain/peer-seat-messages.ts";
 import { HerdrFleetError } from "../src/herdr-fleet.ts";
 import { DIRECT_PROMPT_MAX } from "../src/captain/direct-prompt.ts";
+import { codexProxyControl } from "../src/captain/external-codex-control.ts";
 
 const SESSION = "0b3c4e9a-6f61-4c2b-9d0e-6c1f1e7a2b90";
 const roots: string[] = [];
@@ -176,4 +177,93 @@ test("only a message its sender cleared, for the session it saw, is typed", asyn
   );
   expect((await f.send("status?", { delivery: "steer" })).outcome).not.toBe("delivered");
   expect(f.typed).toEqual([]);
+});
+
+test("a Codex TUI with no reachable queue receives the owner's message typed, confirmed by its rollout", async () => {
+  const root = mkdtempSync(join(tmpdir(), "direct-prompt-codex-"));
+  roots.push(root);
+  const rollout = join(root, `rollout-2026-11-01T18-00-00-${SESSION}.jsonl`);
+  writeFileSync(rollout, "");
+  const agent: HerdrAgentSnapshot = {
+    paneId: "w1:p2",
+    terminalId: "owner-codex",
+    agent: "codex",
+    status: "idle",
+    title: "codex",
+    session: { source: "herdr:codex", kind: "id", value: SESSION },
+    workingDirectory: root,
+  };
+  const typed: string[] = [];
+  const runner: HerdrWatchRunner = {
+    get: async () => agent,
+    resolveTerminal: async () => agent,
+    wait: async () => agent,
+    readPane: async () => screen("codex-empty"),
+    // A plain TUI: no --remote endpoint, and no shared app server for the proxy to reach.
+    paneProcesses: async () => [{ pid: 4242, name: "codex", argv: ["codex"] }],
+    openFiles: async () => `n${rollout}\n`,
+    codexQueue: async (sessionId, text, home, endpoint, beforeDispatch) =>
+      (await codexProxyControl("/nonexistent/codex", [], 100, "queue")(
+        sessionId,
+        text,
+        home,
+        endpoint,
+        beforeDispatch,
+      )) ?? false,
+    transcript: async () => ({
+      sessionKey: rollout,
+      entries: parseHerdrSeatTranscript("codex", readFileSync(rollout, "utf8")),
+    }),
+    promptAgent: async (_pane, text) => {
+      typed.push(text);
+      // Codex records a pasted prompt as a user message with its exact text.
+      appendFileSync(
+        rollout,
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          type: "response_item",
+          payload: {
+            type: "message",
+            id: randomUUID(),
+            role: "user",
+            content: [{ type: "input_text", text }],
+            internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] },
+          },
+        })}\n`,
+      );
+    },
+  };
+  const control = createFleetSeatControl(
+    runner,
+    new Map(),
+    undefined,
+    undefined,
+    undefined,
+    join(root, "receipts.json"),
+    undefined,
+    undefined,
+    { directPromptConfirmMs: 1_500 },
+  );
+  const send = (text: string, extra: PeerDeliveryOptions = {}) =>
+    control.deliverToSeat("owner-codex", text, undefined, {
+      directPrompt: { session: SESSION },
+      rediscover: true,
+      ...extra,
+    });
+
+  // An uncleared send keeps the queue's own reason and types nothing.
+  const peer = await control.deliverToSeat("owner-codex", "status?");
+  expect(peer).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+  expect(peer.detail).toMatch(/Codex queue unavailable/u);
+  // A chosen Queue never falls back to typing either.
+  expect((await send("status?", { delivery: "queue" })).outcome).toBe("undelivered");
+  expect(typed).toEqual([]);
+
+  const typedDelivery = await send("Pull main and rerun the tests.");
+  expect(typedDelivery).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "consumed",
+    state: "started",
+  });
+  expect(typed).toEqual(["Pull main and rerun the tests."]);
 });

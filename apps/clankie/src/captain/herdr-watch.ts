@@ -860,7 +860,11 @@ export function createHerdrWatchRunner(
         codexHome,
         endpoint,
         beforeDispatch,
-      )) ?? { outcome: "undelivered", detail: "Original Codex queue unavailable; nothing was sent." },
+      )) ?? {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: "Original Codex queue unavailable; nothing was sent.",
+      },
     codexSettled: codexProxySettled,
     closePane: async (target, guard) => {
       await guard?.();
