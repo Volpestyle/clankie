@@ -916,11 +916,15 @@ export function createOperatorService(
           detail:
             "An earlier agent here has finished, so a new one there needs its own first message. Try again with a prompt.",
         });
+      const caption = taskCaption(request.prompt);
       const hired = await ctx.hireSeat(
         {
           schemaVersion: 1,
           harness,
           title,
+          // The tab the owner sees names the work, not just the project (every hire here
+          // would otherwise read "clankie · Work").
+          ...(caption === undefined ? {} : { taskTitle: caption }),
           workingDirectory: chosen.place.workingDirectory,
           ...(chosen.fleet === undefined ? {} : { fleet: chosen.fleet }),
           ...(freshIntent === undefined ? {} : { freshIntent }),
@@ -1649,4 +1653,17 @@ function startAgentRefusalWords(reason: string): string {
     default:
       return `Clankie couldn't start it (${reason}).`;
   }
+}
+
+/** A short caption for a hire's tab from its first message: its first line, cut at a word. */
+function taskCaption(prompt: string | undefined): string | undefined {
+  const line = (prompt ?? "")
+    .split(/\r?\n/u)
+    .map((part) => part.replaceAll(/[\p{Cc}\s]+/gu, " ").trim())
+    .find((part) => part.length > 0);
+  if (line === undefined) return undefined;
+  if (line.length <= 48) return line;
+  const cut = line.slice(0, 48);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:–—-]+$/u, "")}…`;
 }

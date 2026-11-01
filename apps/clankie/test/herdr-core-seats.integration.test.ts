@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { realpath } from "node:fs/promises";
@@ -16,6 +16,7 @@ import {
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
 import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { CLANKIE_SPACE, SEAT_LABEL, createHerdrCoreSeats } from "../src/captain/herdr-core-seats.ts";
+import { PANES_PER_TAB, nameClankieTabs, type HerdrWindow } from "../src/captain/herdr-window.ts";
 
 // A hire's terminal in the Herdr desktop app (ADR 0319), end to end against a real
 // herdr-core: started in Clankie's space, read back, and ended. The test runs its own
@@ -187,6 +188,74 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   await runner.closePane(address);
   const ended = await runner.wait(address, AbortSignal.timeout(10_000));
   expect(ended.status).toBe("offline");
+});
+
+coreIt("each desktop hire gets its own named tab in its project's space, never one shared tab", async () => {
+  const seats = createHerdrCoreSeats({ env });
+  // The open window as `herdr-app ls` shows it: it places terminals by their labels, and a
+  // space or tab it makes for them is unnamed (a folder, a number) until renamed.
+  const renamed = new Map<string, string>();
+  const window: HerdrWindow = {
+    ls: async () => {
+      const spaces = new Map<string, { id: string; name: string; tabs: { id: string; name: string }[] }>();
+      for (const terminal of await seats.list()) {
+        const space = terminal.labels["herdr.space"];
+        const tab = terminal.labels["herdr.tab"];
+        if (terminal.state !== "live" || space === undefined || tab === undefined) continue;
+        const shown = spaces.get(space) ?? {
+          id: space,
+          name: renamed.get(space) ?? basename(terminal.cwd ?? "~"),
+          tabs: [],
+        };
+        if (!shown.tabs.some((t) => t.id === tab))
+          shown.tabs.push({ id: tab, name: renamed.get(tab) ?? String(shown.tabs.length + 1) });
+        spaces.set(space, shown);
+      }
+      return [...spaces.values()];
+    },
+    rename: async (_kind, id, name) => {
+      renamed.set(id, name);
+      return true;
+    },
+  };
+  const runner = createHerdrCoreRunner({ seats, window, launchDirectory: join(cwd, "placed"), pollMs: 50 });
+  const work = await mkdtemp(join(cwd, "wt-clankie-"));
+  const hires = [
+    await runner.createTab({ cwd: work, label: "Ari · fix login", project: "clankie", harness: "claude" }),
+    await runner.createTab({ cwd: work, label: "Mei · fix login", project: "clankie", harness: "claude" }),
+  ];
+  const piped = [];
+  for (let i = 0; i < 4; i += 1)
+    piped.push(
+      await runner.createTab({
+        cwd: work,
+        label: `p${i}`,
+        project: "clankie",
+        pipeline: "review",
+        harness: "claude",
+      }),
+    );
+  const labels = async (address: string) => (await seats.get(address))!.labels;
+  const [ari, mei] = await Promise.all(hires.map(labels));
+  // One space per project, one tab per hire, even when two hires share a task name.
+  expect(ari!["herdr.space"]).toBe("clankie-clankie");
+  expect(mei!["herdr.space"]).toBe("clankie-clankie");
+  expect(ari!["herdr.tab"]).not.toBe(mei!["herdr.tab"]);
+  // A pipeline's hires share a tab a few at a time, then open its next one.
+  const tabs = await Promise.all(piped.map(async (address) => (await labels(address))["herdr.tab"]));
+  expect(new Set(tabs.slice(0, PANES_PER_TAB)).size).toBe(1);
+  expect(tabs[PANES_PER_TAB]).not.toBe(tabs[0]);
+  // The window names the space for the project and each tab for its hire.
+  await until(async () => renamed.get(ari!["herdr.tab"]!) === "Ari · fix login");
+  await until(async () => renamed.get(tabs[PANES_PER_TAB]!) === "review · 2");
+  expect(renamed.get("clankie-clankie")).toBe("clankie workers");
+  expect(renamed.get(mei!["herdr.tab"]!)).toBe("Mei · fix login");
+  expect(renamed.get(tabs[0]!)).toBe("review");
+  // A name the owner gave is never overwritten.
+  renamed.set(ari!["herdr.tab"]!, "my tab");
+  expect(await nameClankieTabs(seats, window)).toBe(0);
+  expect(renamed.get(ari!["herdr.tab"]!)).toBe("my tab");
+  for (const address of [...hires, ...piped]) await runner.closePane(address);
 });
 
 coreIt("Clankie hires Claude into a desktop-app terminal without typing into it", async () => {
