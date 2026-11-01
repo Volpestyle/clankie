@@ -15,6 +15,7 @@ import {
   type LinearWriteReceipts,
 } from "../linear-webhook.ts";
 import { linearMirrorEvent } from "../linear-mirror.ts";
+import { CutoverRequestSchema } from "../linear-cutover.ts";
 import { readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
@@ -43,6 +44,10 @@ export interface LinearRouteParts {
     mirror?(event: import("@clankie/work-items").LinearMirrorEvent): void;
   };
   readonly linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
+  /** Owner command for a scratch store's webhook mirror (VUH-1965). */
+  readonly linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;
+  /** Mirror 3 (VUH-1987): owner-run cutover from Linear and its switch-back. */
+  readonly linearCutover?: Pick<import("../linear-cutover.ts").LinearCutover, "run">;
 }
 
 /** Linear's webhook, wake and settings routes, mounted by the core where they always were. */
@@ -73,6 +78,53 @@ export interface RegisterLinearRoutesContext {
 
 export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
   const operatorOf = ctx.operator ?? (async () => "unavailable" as const);
+  // Mirror 2 (VUH-1965): the owner turns a scratch import's webhook mirror on or off.
+  ctx.app.post("/v1/tracker/mirror/linear", async (context) => {
+    const identity = await operatorOf(context.req.raw);
+    if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);
+    const parsed = z
+      .object({
+        projectId: z.string().uuid(),
+        scratch: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u),
+        action: z.enum(["enable", "disable", "status"]),
+      })
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.linearMirrors) return context.json({ error: "mirror_unavailable" }, 503);
+    try {
+      return context.json(
+        await ctx.dependencies.linearMirrors.configure(
+          parsed.data.scratch,
+          parsed.data.projectId,
+          parsed.data.action,
+        ),
+      );
+    } catch (error) {
+      return context.json(
+        { error: "linear_mirror_refused", detail: error instanceof Error ? error.message : String(error) },
+        409,
+      );
+    }
+  });
+  // Mirror 3 (VUH-1987): the owner cuts a World project over to the built-in tracker,
+  // or switches it back. A dry run reads only (Linear included) and prints every change.
+  ctx.app.post("/v1/tracker/cutover/linear", async (context) => {
+    const identity = await operatorOf(context.req.raw);
+    if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);
+    const parsed = CutoverRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.linearCutover) return context.json({ error: "cutover_unavailable" }, 503);
+    try {
+      const result = (await ctx.dependencies.linearCutover.run(parsed.data)) as { ready: boolean };
+      return context.json(result, result.ready || parsed.data.dryRun ? 200 : 409);
+    } catch (error) {
+      return context.json(
+        { error: "linear_cutover_failed", detail: error instanceof Error ? error.message : String(error) },
+        422,
+      );
+    }
+  });
   ctx.app.on(["GET", "PUT"], "/v1/linear/routes", async (context) => {
     const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")

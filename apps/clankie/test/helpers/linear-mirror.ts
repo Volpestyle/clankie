@@ -123,9 +123,9 @@ export async function linearMirrorFixture(options: { withhold?: string } = {}) {
     clock: () => NOW,
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === `Bearer ${OPERATOR}` ? { operatorId: "owner" } : undefined,
-    linearMirrors: mirrors,
     extensionRoutes: [
       linearRoutes({
+        linearMirrors: mirrors,
         linearWebhook: { secret: async () => SECRET, mirror: (event) => mirrors.receive(event) },
       }),
     ],

@@ -2239,7 +2239,22 @@ const linearWebhook: NonNullable<LinearRouteParts["linearWebhook"]> = {
   // allow-swallowed-rejection -- An unreadable own account leaves the wake rules to decide.
   ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
 };
-extensions.add(linearTrackerExtension({ linearWebhook, linearRequestBudget }), {
+const linearCutover = new LinearCutover({
+  trackerDirectory: join(stateRoot, "tracker"),
+  importsRoot: join(stateRoot, "tracker-imports"),
+  mirrors: linearMirrors,
+  settings: settingsStore,
+  localMachineId: "local",
+  // The import's own read-only capture: queries only, the shared background budget.
+  linearSnapshot: async (projectId) => {
+    const session = await mirrorSession();
+    const snapshot = await collectLinearImport({ projectId, query: session.query });
+    if (snapshot.workspaceId !== session.binding.workspaceId)
+      throw new Error("Linear workspace did not match connected account");
+    return { snapshot, requests: session.requests() };
+  },
+});
+extensions.add(linearTrackerExtension({ linearWebhook, linearRequestBudget, linearMirrors, linearCutover }), {
   enabled: switchedOn(startupSettings, "tracker-linear"),
   settings: undefined,
 });
@@ -2407,22 +2422,6 @@ const clankie = await createClankieApp({
   builtInTracker,
   discordForum: { receive: (event) => discordForum.accept(event, discordForumOwner) },
   linearProjectExists: (id) => linearProjectExists(mcpHost, id),
-  linearMirrors,
-  linearCutover: new LinearCutover({
-    trackerDirectory: join(stateRoot, "tracker"),
-    importsRoot: join(stateRoot, "tracker-imports"),
-    mirrors: linearMirrors,
-    settings: settingsStore,
-    localMachineId: "local",
-    // The import's own read-only capture: queries only, the shared background budget.
-    linearSnapshot: async (projectId) => {
-      const session = await mirrorSession();
-      const snapshot = await collectLinearImport({ projectId, query: session.query });
-      if (snapshot.workspaceId !== session.binding.workspaceId)
-        throw new Error("Linear workspace did not match connected account");
-      return { snapshot, requests: session.requests() };
-    },
-  }),
   importLinear: async (projectId, scratch, assertCurrent) => {
     const settings = await settingsStore.load();
     return importConnectedLinear(projectId, {

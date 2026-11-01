@@ -1,6 +1,5 @@
 {
   "edges": [
-    "app/conversation-routes.ts -> linear-cutover.ts (tracker-linear)",
     "app/runtime.ts -> @clankie/discord-presence-core (persona)",
     "app/runtime.ts -> @clankie/rendered-surface-client (world)",
     "app/runtime.ts -> activity-admission.ts (world)",
@@ -29,8 +28,6 @@
     "app/types.ts -> discord-room-observations.ts (persona)",
     "app/types.ts -> discord-room-routes.ts (persona)",
     "app/types.ts -> discord-room-voice.ts (voice)",
-    "app/types.ts -> linear-cutover.ts (tracker-linear)",
-    "app/types.ts -> linear-mirror.ts (tracker-linear)",
     "app/types.ts -> minecraft-host-invite.ts (minecraft)",
     "app/types.ts -> minecraft-host.ts (minecraft)",
     "app/types.ts -> minecraft.ts (minecraft)",

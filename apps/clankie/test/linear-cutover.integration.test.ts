@@ -35,6 +35,7 @@ import { createWorkItemsService } from "../src/work-items.ts";
 import { runWorkCommand } from "../../tui/src/command/work.ts";
 import { captured, OWNER_ID } from "./helpers/linear-mirror.ts";
 import { trackerEvidence } from "./helpers/tracker-evidence.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 /**
  * VUH-1987 through the real service surfaces: the owner's cutover route over HTTP, a
@@ -275,8 +276,7 @@ async function cutoverFixture(
     workerMcp: worker,
     workItems,
     builtInTracker: live,
-    linearMirrors: mirrors,
-    linearCutover: cutover,
+    extensionRoutes: [linearRoutes({ linearMirrors: mirrors, linearCutover: cutover })],
     fleetLinks: {
       identity: () => undefined,
       authenticate: (token) => (token === "local-fleet-test" ? "test-fleet" : undefined),

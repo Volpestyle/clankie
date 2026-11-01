@@ -26,6 +26,7 @@ import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 /**
  * Manual scratch rehearsal (VUH-1987), never the live service. A disposable host and
@@ -180,8 +181,7 @@ const app = await createClankieApp({
   workerMcp: worker,
   workItems,
   builtInTracker: live,
-  linearMirrors: mirrors,
-  linearCutover: cutover,
+  extensionRoutes: [linearRoutes({ linearMirrors: mirrors, linearCutover: cutover })],
   deviceSessionKey: randomBytes(32),
   eventLogPath: join(root, "events.jsonl"),
   fleetLinks: {

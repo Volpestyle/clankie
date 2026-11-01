@@ -199,10 +199,6 @@ export interface ClankieAppDependencies {
   /** Owner project-binding validation through the connected Linear app, never a fallback. */
   linearProjectExists?: (id: string) => Promise<boolean>;
   importLinear?: (projectId: string, scratch: string, assertCurrent: () => Promise<void>) => Promise<unknown>;
-  /** Owner command for a scratch store's webhook mirror (VUH-1965). */
-  linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;
-  /** Mirror 3 (VUH-1987): owner-run cutover from Linear and its switch-back. */
-  linearCutover?: Pick<import("../linear-cutover.ts").LinearCutover, "run">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */
