@@ -1950,8 +1950,15 @@ the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
 each metered account's plan, usage, remaining limit and reset, heavy-work
 permits, tracker request budgets, and each live pane's context against its
-budget. A number Clankie does not have is `"unknown"`. It does not include
-homes, emails or credentials, and it hires nothing. `message_agent` can carry
+budget. Its `burn` list says how fast each Claude and Codex account is being
+spent ([ADR 0324](adr/0324-a-lead-reads-how-fast-the-fleet-spends.md)): each
+usage window's percent per hour, recent (from Clankie's own readings at least
+half an hour apart) and the window's average, beside the even pace that spends
+what is left by reset, the percent projected at reset and when it runs out if
+sooner, and the tokens each Claude session on this Mac spent in the last hour,
+named by agent id when it is a known agent. A number Clankie does not have is
+`"unknown"`. It does not include homes, emails, session ids or credentials, and
+it hires nothing. `message_agent` can carry
 up to four images (by public https address or as base64), which the agent finds
 in its workspace under `.clankie/inbox/`, and `read_image` returns an image an
 agent saved in its working directory, such as a screenshot
@@ -1982,7 +1989,7 @@ never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
 
 `press_keys` presses named keys in an agent's terminal whatever it is doing
-([ADR 0323](adr/0323-connected-apps-press-keys-in-agents-terminals.md)): `up`,
+([ADR 0324](adr/0323-connected-apps-press-keys-in-agents-terminals.md)): `up`,
 `down`, `esc`, `ctrl+c`, `shift+tab`, `enter`, a letter or a digit, up to 24 at
 a time. The same `clankie connector prompts` switch turns it on, because a key
 can approve a prompt too. It works for Herdr panes on every machine and for

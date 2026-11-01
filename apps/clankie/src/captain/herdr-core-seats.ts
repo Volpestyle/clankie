@@ -5,7 +5,7 @@ import { HerdrCoreError, herdrCoreCall, herdrCoreSocketPath } from "./herdr-core
 // window shows it. The core starts, inspects and ends these terminals. A hire's
 // messages reach it through its worker channel, never through the terminal's
 // input (ADR 0207); the only input is named keys, pressed for the owner or a
-// connected app he turned keys on for (ADR 0323), never text.
+// connected app he turned keys on for (ADR 0324), never text.
 
 /** The desktop app shows a terminal labeled with a space; this one is Clankie's. */
 export const CLANKIE_SPACE = "clankie";

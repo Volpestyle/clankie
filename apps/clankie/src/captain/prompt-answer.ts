@@ -190,7 +190,7 @@ export interface KeyPressInput {
 }
 
 /**
- * A connected app presses keys in an agent's terminal, whatever it is doing (ADR 0323):
+ * A connected app presses keys in an agent's terminal, whatever it is doing (ADR 0324):
  * arrows, esc, ctrl+c, tab, enter, to drive its interface the way the owner would. The
  * pane and its machine connection are bound once. Before every key the agent must still
  * be in that same pane, no owner ask may hold its question, Clankie must not be only

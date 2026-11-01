@@ -23,6 +23,7 @@ import {
 } from "./fleet-projection-diagnostics.ts";
 import { harnessAccountIdentities, harnessAccountIdentityPath } from "./harness-account-identities.ts";
 import { createFleetCapacityReader } from "../app/fleet-capacity.ts";
+import { UsageHistory } from "../app/usage-burn.ts";
 import { remoteRetirementWork } from "./remote-retirement-work.ts";
 import { workerWorktreeHold } from "./worktree-decisions.ts";
 import { renderLeadChats, type LeadChat } from "./lead-roster.ts";
@@ -436,6 +437,8 @@ export const REPORT_ROUND_MS = 10 * 60_000;
 const LEAD_RESTART_CHECK_MS = 5 * 60_000;
 /** The longest a prune or cache reclaim waits for its light permit (VUH-2933). */
 const BULK_PERMIT_WAIT_MS = 5 * 60_000;
+/** How often this Mac's account usage is read for the burn rate (ADR 0324). */
+const USAGE_SAMPLE_MS = 10 * 60_000;
 /** ADR 0293's accepted work budget, independent of Claude's model window. */
 const LEAD_RESTART_CONTEXT_TOKENS = 250_000;
 const LEAD_RESTART_AGE_MS = 12 * 60 * 60_000;
@@ -536,7 +539,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   let namedLocal: Array<{ id: string; session: string; socketPath?: string | undefined }> = [];
   let fleetIdentities = new Map(remoteFleets.map((fleet) => [fleet.id, JSON.stringify(fleet)]));
   const fleetRevisions = new Map<string, number>();
-  const readWorkerAccounts = createWorkerAccountsReader({
+  // Every account read is a usage sample for the burn rate a lead reads (ADR 0324).
+  const usageHistory = new UsageHistory(join(options.stateDir, "usage-history.json"));
+  const readWorkerAccountsUnrecorded = createWorkerAccountsReader({
     identityPath: harnessAccountIdentityPath(options.stateDir),
     notifyIdentityChange: (text) =>
       conversations.recordServiceNotice(conversations.defaultGlobalConversationId(), text),
@@ -554,6 +559,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return shutdown.signal;
     },
   });
+  const readWorkerAccounts: typeof readWorkerAccountsUnrecorded = async (...args) => {
+    const report = await readWorkerAccountsUnrecorded(...args);
+    void usageHistory.record(report.accounts).catch(() => undefined);
+    return report;
+  };
+  // Usage readings stay current between reads so a lead sees a recent pace.
+  // `claude -p /usage` and Codex's rate-limit read spend no model tokens.
+  const usageSampler = setInterval(() => {
+    if (!shutdown.signal.aborted)
+      void readWorkerAccounts(undefined, ["claude", "codex"]).catch(() => undefined);
+  }, USAGE_SAMPLE_MS);
+  usageSampler.unref?.();
   // A linked fleet that just failed its census is skipped (reported unknown)
   // until a background probe answers, rather than costing every census its
   // transport deadline again.
@@ -8149,6 +8166,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         leadSeatId: () => headSeat?.seatId,
         heavy: () => options.fleetResources?.status(),
         tracker: () => options.trackerRequestBudget?.(),
+        history: usageHistory,
       }),
       get observeFleet() {
         return observeFleet;
@@ -9563,6 +9581,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       conversations.receiveLinearActivity(activity, following, conversationId),
 
     async close(): Promise<void> {
+      clearInterval(usageSampler);
       shutdown.abort(new SeatLinkInterruptedError());
       seatEfficiency.close();
       fleetRoster.close();

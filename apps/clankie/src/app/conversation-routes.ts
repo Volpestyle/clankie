@@ -713,7 +713,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       }
     }
     if (parsed.success && parsed.data.op === "key_press") {
-      // Keys pressed in an agent's terminal (ADR 0323), under the same per-app switch and
+      // Keys pressed in an agent's terminal (ADR 0324), under the same per-app switch and
       // the same relay stamp as answering prompts: a key can approve a prompt too.
       const request = parsed.data;
       const relay = () =>
