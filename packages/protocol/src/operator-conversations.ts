@@ -883,7 +883,6 @@ export const OperatorAgentStarterSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("app"), name: z.string().min(1).max(256) }).strict(),
   z.object({ kind: z.literal("agent"), name: z.string().min(1).max(256) }).strict(),
 ]);
-export type OperatorAgentStarter = z.infer<typeof OperatorAgentStarterSchema>;
 
 export const OperatorFleetSeatSchema = z
   .object({
