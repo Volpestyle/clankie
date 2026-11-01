@@ -28,6 +28,18 @@ person's apps usually goes better as a hired seat:
 harness, the brief, human checks and the report. The rest of this skill is for
 driving the desktop yourself.
 
+## Stay off the owner's screen
+
+The screen belongs to the person using it. Work in the background by default:
+browse in Clankie's own headless browser (`clankie browser call`, which keeps its
+own logins) or another headless browser, drive native apps with background
+input, and leave every window where it is. Never bring an app or window to the
+front, move the pointer, type into a window they are using, or open a window
+of your own over theirs. Driving their own Chrome or the foreground needs the
+owner's yes for that task, asked right then; otherwise stop and say what only
+their screen can do. A page that needs their login gets one sign-in in Clankie's
+own browser (`headed: true`), not a session in their Chrome.
+
 The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
 does not drive apps. Peekaboo is his own hands, guided by this session's current
 observation. A hired Codex computer-use seat is another visible driver; coordinate
