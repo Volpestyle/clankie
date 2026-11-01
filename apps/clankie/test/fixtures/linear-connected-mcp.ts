@@ -22,6 +22,7 @@ import { SeatOutbox } from "../../src/captain/seat-outbox.ts";
 import type { CaptainDeps } from "../../src/captain/deps.ts";
 import type { LaneUpstreamTransportEvent } from "../../../tui/src/command/mcp.ts";
 import type { LinearRequestBudget } from "../../src/linear-request-budget.ts";
+import { linearRoutes } from "../../src/app/linear-routes.ts";
 
 function gate() {
   let release!: () => void;
@@ -294,11 +295,15 @@ export async function createConnectedLinearFixture(
   const service = await createClankieApp({
     operatorSeatBindings: seatBinding.registry,
     settings,
-    linearWebhook: {
-      secret: async () => webhookSecret,
-      writes: linearWrites,
-      recordActivity: () => host.invalidateTrackerReads!(),
-    },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: {
+          secret: async () => webhookSecret,
+          writes: linearWrites,
+          recordActivity: () => host.invalidateTrackerReads!(),
+        },
+      }),
+    ],
     captain: createStubCaptain({
       seatContext: () => ({ conversationId, cwd: root }),
       pollSeatEvents: (waitMs, signal) => {

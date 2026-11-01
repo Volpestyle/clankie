@@ -8,7 +8,9 @@ says what moving it would change. Step 1, the contract in
 boundary check, then the relay as the first extension (`relay-extension.ts`;
 machine joins now seal with the core's `sealed-values.ts`), the browser
 (`browser-extension.ts`), the computer body (`computer-extension.ts`) and
-media, which starts with the drawing hand (`media-extension.ts`). Each
+media, which starts with the drawing hand (`media-extension.ts`), and Linear,
+which starts with its webhook, wake, settings, mirror and cutover routes
+(`linear-extension.ts`). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app's Common controls are still to come.
@@ -165,9 +167,15 @@ each step one pull request with no change in what he does:
    2026-11-01: `captain/tracker-activity.ts`, adapted by `linearTrackerActivity`.
 2. The store's wake queue, receipts and cursors become tracker-neutral. Saved
    metadata keeps loading under the old `linear*` names until every body has
-   rewritten it.
+   rewritten it. Landed 2026-11-01 as code: `captain/conversations/tracker-wakes.ts`,
+   the `trackerWake*` store and captain methods, and the core's
+   `TrackerWakeReference`. The saved fields keep their `linear*` names for now;
+   renaming them needs every body to read both names first, and buys nothing he
+   would see.
 3. A `tracker-linear` extension owns the webhook and settings routes, its
-   client, request budget and mirrors, and projects its work-items backend.
+   client, request budget and mirrors, and projects its work-items backend. The routes, mirror and cutover commands included, landed 2026-11-01: they mount
+   as `tracker` routes where they always did, and the core's route host gives
+   them its operator and owner checks, settings, clock and tracker wakes.
 4. The MCP hosts publish through the work-items port, so neither imports a
    tracker.
 

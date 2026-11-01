@@ -17,7 +17,7 @@ import { createClankieApp } from "../src/app.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { createConversationRunner } from "../src/captain/captain-conversation-runner.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
-import { sameLinearWakeRecipient } from "../src/captain/conversations/linear-wakes.ts";
+import { sameTrackerWakeRecipient } from "../src/captain/conversations/tracker-wakes.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { LaneLog } from "../src/captain/lane-log.ts";
@@ -31,6 +31,7 @@ import { LinearWakeReadReceipts } from "../src/linear-wake-read.ts";
 import { LinearRequestBudget } from "../src/linear-request-budget.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { runLinearCommand } from "../../tui/src/command/linear.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -273,11 +274,11 @@ async function fixture(
     if (options.noBinding && !options.noSession) store.syncNativeSeatTranscript(id, `owned-native-${id}`, []);
   }
   const received = (id: string, wakeId: string) =>
-    store.receiveLinearWake(
+    store.receiveTrackerWake(
       id,
       wakeId,
       async (original) =>
-        sameLinearWakeRecipient(original, {
+        sameTrackerWakeRecipient(original, {
           binding: recipients.get(id),
           sessionKey: store.nativeSeatSessionKey(id),
         }) && outbox(id).confirmReceived(original),
@@ -289,8 +290,8 @@ async function fixture(
     captain: createStubCaptain({
       receiveTrackerActivity: (event, following, target) =>
         store.receiveTrackerActivity(event, following, target),
-      linearWakeTargetAllowed: (id) => store.linearWakeTargetAllowed(id),
-      linearWakeDeliveries: () => store.linearWakeDeliveries(),
+      trackerWakeTargetAllowed: (id) => store.trackerWakeTargetAllowed(id),
+      trackerWakeDeliveries: () => store.trackerWakeDeliveries(),
       pollSeatEvents: (wait, signal, id = "global-default") =>
         store.pollConversationDriver(
           id,
@@ -312,7 +313,7 @@ async function fixture(
         return {
           lane,
           tools: linearWakeTools(
-            { settings, targetAllowed: (target) => store.linearWakeTargetAllowed(target), received },
+            { settings, targetAllowed: (target) => store.trackerWakeTargetAllowed(target), received },
             {
               conversationAuthority: {
                 owner: { conversationId: id },
@@ -332,13 +333,17 @@ async function fixture(
     }),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === `Bearer ${token}` ? { operatorId: "owned-seat" } : undefined,
-    linearWebhook: {
-      secret: async () => secret,
-      ownAccount: own,
-      recordActivity: (activity) => attribution.record(activity),
-      issueContext: (activity) => attribution.issueContext(activity, host),
-      projectContext: (activity) => attribution.projectContext(activity, host),
-    },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: {
+          secret: async () => secret,
+          ownAccount: own,
+          recordActivity: (activity) => attribution.record(activity),
+          issueContext: (activity) => attribution.issueContext(activity, host),
+          projectContext: (activity) => attribution.projectContext(activity, host),
+        },
+      }),
+    ],
   });
   for (const id of [leadId, "global-default"])
     await seatBinding.register(service.app, id, { authorization: `Bearer ${token}` });

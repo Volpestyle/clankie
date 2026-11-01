@@ -154,6 +154,8 @@ import { browserExtension } from "./browser-extension.ts";
 import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { mediaExtension } from "./media-extension.ts";
+import { linearTrackerExtension } from "./linear-extension.ts";
+import type { LinearRouteParts } from "./app/linear-routes.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
 import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
@@ -2217,6 +2219,46 @@ const captainSeats = new CaptainSeats({
     binding: localFleetBinding,
   }),
 });
+// Read per delivery rather than cached at boot: the owner pastes this secret
+// after the URL exists, and rotating it in Linear should not need a restart.
+const linearWebhook: NonNullable<LinearRouteParts["linearWebhook"]> = {
+  secret: async () => {
+    const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
+    return credential?.type === "api" ? credential.key : undefined;
+  },
+  writes: linearWrites,
+  recordActivity: (activity) => {
+    mcpHost.invalidateTrackerReads?.();
+    linearAttribution.record(activity);
+    discordTracking.record(activity);
+  },
+  issueContext: (activity) => linearAttribution.issueContext(activity, mcpHost),
+  projectContext: (activity) => linearAttribution.projectContext(activity, mcpHost),
+  mirror: (event) => linearMirrors.receive(event),
+  // Verified own-account identity suppresses its activity independently of rules.
+  // allow-swallowed-rejection -- An unreadable own account leaves the wake rules to decide.
+  ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
+};
+const linearCutover = new LinearCutover({
+  trackerDirectory: join(stateRoot, "tracker"),
+  importsRoot: join(stateRoot, "tracker-imports"),
+  mirrors: linearMirrors,
+  settings: settingsStore,
+  localMachineId: "local",
+  // The import's own read-only capture: queries only, the shared background budget.
+  linearSnapshot: async (projectId) => {
+    const session = await mirrorSession();
+    const snapshot = await collectLinearImport({ projectId, query: session.query });
+    if (snapshot.workspaceId !== session.binding.workspaceId)
+      throw new Error("Linear workspace did not match connected account");
+    return { snapshot, requests: session.requests() };
+  },
+});
+extensions.add(linearTrackerExtension({ linearWebhook, linearRequestBudget, linearMirrors, linearCutover }), {
+  enabled: switchedOn(startupSettings, "tracker-linear"),
+  settings: undefined,
+});
+await extensions.start();
 const clankie = await createClankieApp({
   voiceCall: {
     // Read when a call starts, never at boot: the broker is touched only when someone calls.
@@ -2257,7 +2299,6 @@ const clankie = await createClankieApp({
   credentialStoreHealth: () => operatorCredentialStore.health?.() ?? { state: "ready" },
   runtimeHealth: () => runtimeHealth.snapshot(),
   fleetHealthMetrics,
-  linearRequestBudget,
   trackerRequestBudget,
   // The captain writes this record under its stateDir; the route only reads it.
   autoRounds: new AutoRoundRecord(join(stateRoot, "captain", "auto-rounds")),
@@ -2381,22 +2422,6 @@ const clankie = await createClankieApp({
   builtInTracker,
   discordForum: { receive: (event) => discordForum.accept(event, discordForumOwner) },
   linearProjectExists: (id) => linearProjectExists(mcpHost, id),
-  linearMirrors,
-  linearCutover: new LinearCutover({
-    trackerDirectory: join(stateRoot, "tracker"),
-    importsRoot: join(stateRoot, "tracker-imports"),
-    mirrors: linearMirrors,
-    settings: settingsStore,
-    localMachineId: "local",
-    // The import's own read-only capture: queries only, the shared background budget.
-    linearSnapshot: async (projectId) => {
-      const session = await mirrorSession();
-      const snapshot = await collectLinearImport({ projectId, query: session.query });
-      if (snapshot.workspaceId !== session.binding.workspaceId)
-        throw new Error("Linear workspace did not match connected account");
-      return { snapshot, requests: session.requests() };
-    },
-  }),
   importLinear: async (projectId, scratch, assertCurrent) => {
     const settings = await settingsStore.load();
     return importConnectedLinear(projectId, {
@@ -2570,25 +2595,6 @@ const clankie = await createClankieApp({
     },
   }),
   eventLogPath,
-  // Read per delivery rather than cached at boot: the owner pastes this secret
-  // after the URL exists, and rotating it in Linear should not need a restart.
-  linearWebhook: {
-    secret: async () => {
-      const credential = await operatorCredentialStore.get(LINEAR_WEBHOOK_PROVIDER_ID);
-      return credential?.type === "api" ? credential.key : undefined;
-    },
-    writes: linearWrites,
-    recordActivity: (activity) => {
-      mcpHost.invalidateTrackerReads?.();
-      linearAttribution.record(activity);
-      discordTracking.record(activity);
-    },
-    issueContext: (activity) => linearAttribution.issueContext(activity, mcpHost),
-    projectContext: (activity) => linearAttribution.projectContext(activity, mcpHost),
-    mirror: (event) => linearMirrors.receive(event),
-    // Verified own-account identity suppresses its activity independently of rules.
-    ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
-  },
 });
 clankieRef = clankie;
 minecraftRuntime.activate();

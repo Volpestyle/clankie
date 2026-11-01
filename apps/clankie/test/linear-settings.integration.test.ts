@@ -13,6 +13,7 @@ import { captainTools } from "../src/captain/tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
 import { runLinearCommand } from "../../tui/src/command/linear.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 it("shares durable wake settings between Clankie's tool, CLI and HTTP with ordinary chat validation", async () => {
   const root = await mkdtemp(join(tmpdir(), "linear-settings-integration-"));
@@ -29,8 +30,9 @@ it("shares durable wake settings between Clankie's tool, CLI and HTTP with ordin
   const env = { CLANKIE_OPERATOR_TOKEN: "integration-operator" };
   const service = await createClankieApp({
     settings,
+    extensionRoutes: [linearRoutes()],
     captain: createStubCaptain({
-      linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+      trackerWakeTargetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     }),
     authenticateOperator: createCredentialBackedOperatorAuthenticator({
       env,
@@ -57,7 +59,7 @@ it("shares durable wake settings between Clankie's tool, CLI and HTTP with ordin
   const deps: CaptainDeps = {
     linearWake: {
       settings,
-      targetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+      targetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     },
     mcp: { catalog: async () => [], call: unused },
     email: { list: unused, read: unused, search: unused, send: unused },

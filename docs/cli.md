@@ -253,7 +253,10 @@ ID` lets it run again whenever its own requirement is met (the relay once you
 sign in to remote access, the browser unless `CLANKIE_BROWSER_ENABLED` turns it
 off). Both are owner-only `POST /v1/extensions` calls, take effect at the next
 `clankie restart clankie`, and answer with `restartRequired`. The switches are
-the `extensions` map in settings; an id with no entry is on.
+the `extensions` map in settings; an id with no entry is on. With
+`tracker-linear` off, Linear's webhook, its wake, follow, target and route
+settings, and its mirror and cutover commands are not served until it is on
+again.
 
 ### `runtime-health`
 

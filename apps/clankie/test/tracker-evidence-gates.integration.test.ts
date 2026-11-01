@@ -88,7 +88,7 @@ it("requires independently checked real evidence, blocks a run on an owner gate 
       }),
     readOwnerAsk: (requestId) => conversations.readOwnerAsk(requestId),
     observeQuestionResolutions: (listener) => conversations.observeQuestionResolutions(listener),
-    linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+    trackerWakeTargetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     wakeConversation: async (owner, text) => {
       wakes.push({ conversationId: (owner as { conversationId: string }).conversationId, text });
       return true;

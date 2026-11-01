@@ -14,6 +14,7 @@ import { ConversationStore } from "../src/captain/conversations.ts";
 import { FleetRoomJournal, inboundFleetRoomRecord } from "../src/captain/fleet-room.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearWriteReceipts } from "../src/linear-webhook.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const SECRET = "temporary-fixture-webhook-secret";
 const cleanups: (() => Promise<void>)[] = [];
@@ -48,7 +49,7 @@ async function fixture() {
     captain: createStubCaptain({
       receiveTrackerActivity: (activity, wake, target) =>
         store.receiveTrackerActivity(activity, wake, target),
-      linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
+      trackerWakeTargetAllowed: (target) => store.trackerWakeTargetAllowed(target),
       submitDiscordTurn: async () => ({
         state: "settled",
         captainSessionId: "captain-session",
@@ -60,12 +61,16 @@ async function fixture() {
       fleetRoom: (request, signal) => room.read(request, signal),
     }),
     settings,
-    linearWebhook: {
-      secret: async () => SECRET,
-      writes: new LinearWriteReceipts(join(root, "writes.json")),
-      ownAccount: async () => account,
-      recordActivity: () => undefined,
-    },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: {
+          secret: async () => SECRET,
+          writes: new LinearWriteReceipts(join(root, "writes.json")),
+          ownAccount: async () => account,
+          recordActivity: () => undefined,
+        },
+      }),
+    ],
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
     authenticateCaptain: async (request) =>

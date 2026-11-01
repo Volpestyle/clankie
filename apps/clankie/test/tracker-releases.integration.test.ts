@@ -126,7 +126,7 @@ it("derives each release's items from the commits since the previous tag, delive
       }),
     readOwnerAsk: (requestId) => conversations.readOwnerAsk(requestId),
     observeQuestionResolutions: (listener) => conversations.observeQuestionResolutions(listener),
-    linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+    trackerWakeTargetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     wakeConversation: async (_owner, text) => {
       wakes.push(text);
       return true;

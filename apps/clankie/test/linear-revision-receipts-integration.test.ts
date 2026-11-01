@@ -14,6 +14,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearWriteReceipts, type LinearActivityEvent } from "../src/linear-webhook.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import type { TrackerActivity } from "../src/captain/tracker-activity.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const NOW = new Date("2026-10-04T12:00:00.000Z");
 const SECRET = "fixture-only-linear-webhook-signing-secret";
@@ -163,13 +164,17 @@ async function fixture() {
               return store.receiveTrackerActivity(activity, following);
             },
           }),
-          linearWebhook: {
-            secret: async () => SECRET,
-            writes: reloaded,
-            recordActivity: (activity) => {
-              recorded.push(activity);
-            },
-          },
+          extensionRoutes: [
+            linearRoutes({
+              linearWebhook: {
+                secret: async () => SECRET,
+                writes: reloaded,
+                recordActivity: (activity) => {
+                  recorded.push(activity);
+                },
+              },
+            }),
+          ],
           clock: () => NOW,
         }),
       );

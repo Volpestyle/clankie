@@ -12,43 +12,121 @@ import {
   linearActivityProject,
   linearTrackerActivity,
   type LinearActivityEvent,
+  type LinearWriteReceipts,
 } from "../linear-webhook.ts";
 import { linearMirrorEvent } from "../linear-mirror.ts";
-import { authenticateOperator, readJson } from "./http-auth.ts";
+import { CutoverRequestSchema } from "../linear-cutover.ts";
+import { readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
-import type { ClankieAppDependencies } from "./types.ts";
+import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
 import {
   LINEAR_REQUEST_BUDGET_PATH,
   LinearRequestBudgetReportSchema,
 } from "@clankie/protocol/linear-request-budget";
 
+/** What Linear's routes are handed by the composition root (ADR 0328). */
+export interface LinearRouteParts {
+  /**
+   * The broker-held Linear webhook signing secret (ADR 0165). Absent means no
+   * webhook is configured and the route reports itself unavailable; the wake it
+   * leads to belongs to the captain.
+   */
+  readonly linearWebhook?: {
+    secret(): Promise<string | undefined>;
+    writes?: LinearWriteReceipts;
+    recordActivity?(activity: LinearActivityEvent): void;
+    /** His own verified Linear identity; activity it authors is kept without a wake. */
+    ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
+    /** Bounded read of missing issue context through the verified connected account. */
+    issueContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["issueContext"]>;
+    projectContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["projectContext"]>;
+    /** Owner-enabled Linear mirrors (VUH-1965): applied after the response, never gating a wake. */
+    mirror?(event: import("@clankie/work-items").LinearMirrorEvent): void;
+  };
+  readonly linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
+  /** Owner command for a scratch store's webhook mirror (VUH-1965). */
+  readonly linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;
+  /** Mirror 3 (VUH-1987): owner-run cutover from Linear and its switch-back. */
+  readonly linearCutover?: Pick<import("../linear-cutover.ts").LinearCutover, "run">;
+}
+
+/** Linear's webhook, wake and settings routes, mounted by the core where they always were. */
+export function linearRoutes(parts: LinearRouteParts = {}): ExtensionRoutes {
+  return {
+    place: "tracker",
+    register: (app, host) =>
+      registerLinearRoutes({
+        app,
+        dependencies: { ...parts, captain: host.trackerWakes },
+        operator: (request) => host.operator(request),
+        settingsSource: host.settings,
+        clock: host.clock,
+        authorizeOwnerSettings: (request) => host.ownerSettings(request),
+      }),
+  };
+}
+
 export interface RegisterLinearRoutesContext {
   readonly app: Hono;
-  readonly dependencies: Pick<
-    ClankieAppDependencies,
-    "linearWebhook" | "authenticateOperator" | "linearRequestBudget"
-  > & {
-    readonly captain: Pick<
-      ClankieAppDependencies["captain"],
-      "receiveTrackerActivity" | "linearWakeTargetAllowed"
-    > &
-      Partial<
-        Pick<
-          ClankieAppDependencies["captain"],
-          "linearWakeDeliveries" | "linearWakeRecoveries" | "recordInbound"
-        >
-      >;
-  };
-  readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
+  readonly dependencies: LinearRouteParts & { readonly captain: ExtensionRouteHost["trackerWakes"] };
+  /** Absent means operator authentication is unavailable. */
+  readonly operator?: ExtensionRouteHost["operator"];
+  readonly settingsSource: ExtensionRouteHost["settings"];
   readonly clock: () => Date;
-  readonly authorizeOwnerSettings?: (
-    request: Request,
-  ) => Promise<true | "authentication_required" | "forbidden">;
+  readonly authorizeOwnerSettings?: ExtensionRouteHost["ownerSettings"];
 }
 
 export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
+  const operatorOf = ctx.operator ?? (async () => "unavailable" as const);
+  // Mirror 2 (VUH-1965): the owner turns a scratch import's webhook mirror on or off.
+  ctx.app.post("/v1/tracker/mirror/linear", async (context) => {
+    const identity = await operatorOf(context.req.raw);
+    if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);
+    const parsed = z
+      .object({
+        projectId: z.string().uuid(),
+        scratch: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u),
+        action: z.enum(["enable", "disable", "status"]),
+      })
+      .strict()
+      .safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.linearMirrors) return context.json({ error: "mirror_unavailable" }, 503);
+    try {
+      return context.json(
+        await ctx.dependencies.linearMirrors.configure(
+          parsed.data.scratch,
+          parsed.data.projectId,
+          parsed.data.action,
+        ),
+      );
+    } catch (error) {
+      return context.json(
+        { error: "linear_mirror_refused", detail: error instanceof Error ? error.message : String(error) },
+        409,
+      );
+    }
+  });
+  // Mirror 3 (VUH-1987): the owner cuts a World project over to the built-in tracker,
+  // or switches it back. A dry run reads only (Linear included) and prints every change.
+  ctx.app.post("/v1/tracker/cutover/linear", async (context) => {
+    const identity = await operatorOf(context.req.raw);
+    if (!identity || identity === "unavailable") return context.json({ error: "operator_required" }, 401);
+    const parsed = CutoverRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+    if (!ctx.dependencies.linearCutover) return context.json({ error: "cutover_unavailable" }, 503);
+    try {
+      const result = (await ctx.dependencies.linearCutover.run(parsed.data)) as { ready: boolean };
+      return context.json(result, result.ready || parsed.data.dryRun ? 200 : 409);
+    } catch (error) {
+      return context.json(
+        { error: "linear_cutover_failed", detail: error instanceof Error ? error.message : String(error) },
+        422,
+      );
+    }
+  });
   ctx.app.on(["GET", "PUT"], "/v1/linear/routes", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
@@ -61,7 +139,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       if (!input.success) return context.json({ error: "malformed" }, 400);
       if (
         input.data.projectChats.some(
-          (route) => !ctx.dependencies.captain.linearWakeTargetAllowed(route.conversationId),
+          (route) => !ctx.dependencies.captain.trackerWakeTargetAllowed(route.conversationId),
         )
       )
         return context.json({ error: "linear_wake_target_unavailable" }, 409);
@@ -74,18 +152,18 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     return context.json({ schemaVersion: 1, projectChats: current.linearWebhook.projectChats });
   });
   ctx.app.get("/v1/linear/deliveries", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     return context.json({
       schemaVersion: 1,
-      deliveries: ctx.dependencies.captain.linearWakeDeliveries?.() ?? [],
-      recoveries: ctx.dependencies.captain.linearWakeRecoveries?.() ?? [],
+      deliveries: ctx.dependencies.captain.trackerWakeDeliveries?.() ?? [],
+      recoveries: ctx.dependencies.captain.trackerWakeRecoveries?.() ?? [],
     });
   });
   ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
@@ -139,7 +217,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
   });
 
   ctx.app.on(["GET", "PUT"], "/v1/linear/target", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
@@ -156,7 +234,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
         .safeParse(await readJson(context.req.raw));
       if (!input.success) return context.json({ error: "malformed" }, 400);
       // Use the same ordinary-chat guard as the captain's settings tool.
-      if (!ctx.dependencies.captain.linearWakeTargetAllowed(input.data.conversationId))
+      if (!ctx.dependencies.captain.trackerWakeTargetAllowed(input.data.conversationId))
         return context.json({ error: "linear_wake_target_unavailable" }, 409);
       if (!ctx.settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
       current = await ctx.settingsSource.update((value) => ({
@@ -341,7 +419,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     const route =
       project &&
       current.linearWebhook.projectChats.find((route) => route.projectId.toLowerCase() === project.id);
-    const leadAvailable = route && ctx.dependencies.captain.linearWakeTargetAllowed(route.conversationId);
+    const leadAvailable = route && ctx.dependencies.captain.trackerWakeTargetAllowed(route.conversationId);
     const target = leadAvailable
       ? route.conversationId
       : project
@@ -370,7 +448,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
           }
         : {}),
     };
-    const targetAllowed = ctx.dependencies.captain.linearWakeTargetAllowed(target);
+    const targetAllowed = ctx.dependencies.captain.trackerWakeTargetAllowed(target);
     const following =
       current.linearWebhook.following &&
       !identityUnavailable &&

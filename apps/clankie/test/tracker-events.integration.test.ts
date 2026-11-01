@@ -88,7 +88,7 @@ it("moves an item through every stage, asks the owner to check it, verifies on a
       }),
     readOwnerAsk: (requestId) => conversations.readOwnerAsk(requestId),
     observeQuestionResolutions: (listener) => conversations.observeQuestionResolutions(listener),
-    linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+    trackerWakeTargetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     wakeConversation: async (owner, text) => {
       wakes.push({ conversationId: (owner as { conversationId: string }).conversationId, text });
       return true;

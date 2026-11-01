@@ -43,6 +43,7 @@ import { WorkerMcp } from "../src/worker-mcp.ts";
 import { runLinearCommand } from "../../tui/src/command/linear.ts";
 import { doctorCommand } from "../../tui/src/command/doctor.ts";
 import { formatDoctorReport } from "../../tui/src/doctor-report.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -1008,7 +1009,7 @@ it("projects the warning through authenticated HTTP, CLI, and doctor without spe
   expect(alerts).toHaveLength(1);
   const service = await createClankieApp({
     captain: createStubCaptain(),
-    linearRequestBudget: budget,
+    extensionRoutes: [linearRoutes({ linearRequestBudget: budget })],
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer budget-owner"
         ? { operatorId: "budget-owner" }

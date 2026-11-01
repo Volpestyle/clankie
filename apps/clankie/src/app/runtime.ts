@@ -105,7 +105,6 @@ import { createHttpSettingsRoutes } from "../http-settings-routes.ts";
 import { httpCors } from "@clankie/settings";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
-import { registerLinearRoutes } from "./linear-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
@@ -2335,6 +2334,11 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Extensions' routes (ADR 0328) use the core's authority checks, never their own.
   const extensionRouteHost: ExtensionRouteHost = {
     ownerAuthority: (request) => questionOwnerAuthority(request),
+    operator: (request) => authenticateOperator(request, dependencies),
+    ownerSettings: authorizeOwnerSecrets,
+    settings: settingsSource,
+    clock,
+    trackerWakes: dependencies.captain,
     async bodyIdentity(request, conversationId) {
       const operator = await authenticateOperator(request, dependencies);
       if (!operator || operator === "unavailable") return undefined;
@@ -2713,13 +2717,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  registerLinearRoutes({
-    app,
-    dependencies,
-    settingsSource,
-    clock,
-    authorizeOwnerSettings: authorizeOwnerSecrets,
-  });
+  mountExtensionRoutes("tracker");
   app.get(AUTO_ROUNDS_PATH, async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
