@@ -20,7 +20,13 @@ core keeps through the route host's `discordBody`), then the persona's Discord
 body tools: voice membership, social actions, the server's REST and project
 mirrors, and music (`captain/discord-tools.ts`, reaching the captain as
 `CaptainDeps.personaTools` only while the persona is on at start, over the
-core's client shapes in `ports/discord.ts`). Each
+core's client shapes in `ports/discord.ts`), then the captain's room turns:
+framing and running a Discord message in its room, waking a room from a watch
+or worker report, and the owner's `room_turn` fork (`captain/captain-discord-turns.ts`,
+reaching the captain as `CaptainDeps.roomTurns` only while the persona is on at
+start, over the core's shapes in `captain/room-turns.ts`; the owner check and
+operator and remote-lead wakes stay core in `captain/conversation-wakes.ts`, and
+a Discord-origin owner holds nothing while the persona is off). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app shows and flips the same switches in Settings → Extensions.

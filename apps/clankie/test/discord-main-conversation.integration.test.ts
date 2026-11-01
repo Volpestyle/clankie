@@ -7,6 +7,7 @@ import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 it("a linked channel uses the conversation's existing service runner and keeps concurrent replies separate", async () => {
   const root = await mkdtemp(join(tmpdir(), "discord-main-runner-"));
@@ -65,6 +66,7 @@ async function fixture() {
   let privateAudience = true;
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       herdrAvailable: () => false,
       embodiment: {},
       conversationRouteAuthorized: () => true,

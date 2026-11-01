@@ -61,6 +61,8 @@ export interface CaptainDeps {
     turn: import("./tools.ts").TurnContext,
     lane: CaptainSessionLaneV2,
   ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
+  /** The persona's room turns: Discord messages, room wakes and owner forks (ADR 0328). */
+  readonly roomTurns?: import("./room-turns.ts").CreateRoomTurns;
   /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
   readonly activityTools?: (
     turn: import("./tools.ts").TurnContext,

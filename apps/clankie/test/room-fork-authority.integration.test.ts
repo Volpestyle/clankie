@@ -25,6 +25,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { DiscordTurnReceipts } from "../src/captain/discord-turn-receipts.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // The live failure (room_fork_room_authority_unavailable) came from the app's
 // real route authority, which the first fork test never wired. Here the real
@@ -213,7 +214,7 @@ async function fixture() {
   const workspace = join(root, "workspace");
   await mkdir(workspace, { recursive: true });
   const attachments = join(root, "attachments");
-  const captain = createCaptain(deps, {
+  const captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), {
     repoRoot: root,
     stateDir: root,
     workingDirectory: workspace,

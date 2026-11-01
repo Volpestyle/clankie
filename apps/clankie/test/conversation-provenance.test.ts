@@ -14,6 +14,7 @@ import { HireOwners } from "../src/captain/hire-owners.ts";
 import { captainTools, type TurnContext } from "../src/captain/tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 const roots: string[] = [];
 const root = () => {
@@ -301,6 +302,7 @@ it("validates a persisted exact room against current grants and never falls back
   let routePresent = true;
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       conversationRouteAuthorized: () => routePresent,
       discordActions: {
         serverAction: async (action: { path: string }) => ({

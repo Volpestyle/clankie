@@ -28,6 +28,7 @@ import {
 } from "../src/captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 const fixtures: Array<{ root: string; captain: ReturnType<typeof createCaptain> }> = [];
 afterEach(async () => {
@@ -237,7 +238,7 @@ async function fixture(
       : {}),
   } as unknown as CaptainDeps;
   const open = () => {
-    const captain = createCaptain(deps, {
+    const captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), {
       repoRoot: root,
       stateDir: root,
       workingDirectory: root,

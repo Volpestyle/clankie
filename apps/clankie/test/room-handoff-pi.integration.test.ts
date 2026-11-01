@@ -18,6 +18,7 @@ import type { ConversationOwner } from "../src/captain/conversation-owner.ts";
 import { readHerdrSeatTranscript } from "@clankie/agent-transcript";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { ConversationStore, OPERATOR_CONVERSATION_RETAINED_MAX } from "../src/captain/conversations.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // Select the loopback provider; Pi, its tools/extensions, sessions and journals remain real.
 const selection = vi.hoisted(() => ({ value: undefined as unknown }));
@@ -229,7 +230,7 @@ it("real Pi room children bound admission fairly, keep grants under a bound Code
     seatAdapters: [],
     personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
   };
-  let captain = createCaptain(deps, options);
+  let captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), options);
   let work: Promise<unknown>[] = [];
   const pollAbort = new AbortController();
   let nativePoll: ReturnType<typeof captain.pollSeatEvents> | undefined;
@@ -447,7 +448,7 @@ it("real Pi room children bound admission fairly, keep grants under a bound Code
     if (all.op !== "fleet") throw new Error("Expected fleet");
     const allChildren = all.snapshot.roomHandoffs!;
     await captain.close();
-    captain = createCaptain(deps, options);
+    captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), options);
     const restored = await captain.serveOperatorConversation({ schemaVersion: 1, op: "fleet" });
     if (restored.op !== "fleet") throw new Error("Expected fleet");
     expect(restored.snapshot.roomHandoffs?.map((child) => child.conversationId).sort()).toEqual(

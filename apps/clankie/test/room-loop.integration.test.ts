@@ -10,6 +10,7 @@ import { expect, it, vi } from "vitest";
 import { planDiscordTurnSession } from "../src/captain/system-authority.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // ADR 0291 with its rollout switch on. Select the loopback provider; Pi, its
 // steering queue, sessions and journals remain real.
@@ -126,7 +127,7 @@ async function fixture(setup?: (settings: SettingsStore) => Promise<unknown>, au
     browser: { catalog: async () => ({ available: false, tools: [] }) },
   } as unknown as CaptainDeps;
   let nativeCalls = 0;
-  const captain = createCaptain(deps, {
+  const captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), {
     runNativeRoomHandoff: async () => {
       nativeCalls += 1;
       return undefined;

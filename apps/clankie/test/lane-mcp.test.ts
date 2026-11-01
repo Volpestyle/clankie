@@ -43,6 +43,7 @@ import type { LaneLog } from "../src/captain/lane-log.ts";
 import { createStubCaptain, type LaneTool, type LaneToolBank } from "../src/captain/port.ts";
 import { fleetEfficiencyTools, type FleetEfficiencyReview } from "../src/captain/fleet-efficiency-tools.ts";
 import { permissiveSeatBindings } from "./fixtures/permissive-seat-bindings.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 /**
  * His tools over MCP (VUH-1085). What this guards is the lane boundary: the
@@ -557,7 +558,7 @@ it("binds native tools, project doctrine and channel delivery to selected servic
     fleet: { ...settings.fleet, notes: "Owner fleet marker" },
   }));
   const captain = createCaptain(
-    { ...bankDeps(), herdrAvailable: () => false },
+    { roomTurns: createDiscordTurns, ...bankDeps(), herdrAvailable: () => false },
     {
       repoRoot: root,
       stateDir: root,
@@ -626,6 +627,7 @@ it("initializes an operator MCP session with native and connected tools", async 
   });
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       ...bankDeps(),
       mcp,
       agentSessions: {
@@ -745,7 +747,7 @@ it("initializes an operator MCP session with native and connected tools", async 
 it("serves every real Captain schema with MCP's object root without losing union validation", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-mcp-schema-"));
   const captain = createCaptain(
-    { ...bankDeps(), herdrAvailable: () => false },
+    { roomTurns: createDiscordTurns, ...bankDeps(), herdrAvailable: () => false },
     {
       repoRoot: root,
       stateDir: root,
@@ -1112,6 +1114,7 @@ it("serves realtime voice its own recall_episodes, get_self_state and remember_e
   }
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       ...bankDeps(),
       herdrAvailable: () => false,
       embodiment: { getLiveSession: () => Promise.resolve(undefined) },
@@ -1303,7 +1306,12 @@ it("serves an operator API and its first tool bank while a real remote MCP catal
     logger: { info() {}, warn() {} },
   });
   const deps = { ...bankDeps(), mcp };
-  const captain = createCaptain(deps, { repoRoot: root, stateDir: root, workingDirectory: root, settings });
+  const captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), {
+    repoRoot: root,
+    stateDir: root,
+    workingDirectory: root,
+    settings,
+  });
   let piSession: AgentSession | undefined;
   const warm = mcp.warm();
   const app = await createClankieApp({

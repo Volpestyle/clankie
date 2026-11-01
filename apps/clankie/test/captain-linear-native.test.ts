@@ -10,6 +10,7 @@ import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import * as fleetRunner from "../src/captain/herdr-fleet-runner.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 vi.mock("../src/captain/model.ts", () => ({
   createCaptainModelRuntime: async () => ({ runtime: {} }),
@@ -39,6 +40,7 @@ function fixture(local = false) {
   const create = () =>
     createCaptain(
       {
+        roomTurns: createDiscordTurns,
         memory: {},
         discordActions: {
           serverAction: async (action: { path: string }) => ({

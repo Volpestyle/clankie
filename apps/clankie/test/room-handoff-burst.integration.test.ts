@@ -9,6 +9,7 @@ import type { DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
 import { expect, it, vi } from "vitest";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // Select the loopback provider; Pi, its steering queue, sessions and journals remain real.
 const selection = vi.hoisted(() => ({ value: undefined as unknown }));
@@ -114,7 +115,7 @@ it("a sender's burst steers their running handoff while other speakers and grant
     mcp: { catalog: async () => [] },
     browser: { catalog: async () => ({ available: false, tools: [] }) },
   } as unknown as CaptainDeps;
-  const captain = createCaptain(deps, {
+  const captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), {
     repoRoot: root,
     stateDir: root,
     workingDirectory: root,
