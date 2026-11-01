@@ -743,6 +743,12 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         return true;
       }
     }
+    // A connected app closing an agent is named too; the service then closes only an idle
+    // hire that Clankie or an app started. Other devices close as the owner, unstamped.
+    if (serviceRequest.op === "close_seat" && serviceRequest.appDeviceId !== undefined) {
+      writeJson(response, 400, { error: "close_seat_app_is_stamped" });
+      return true;
+    }
     if (serviceRequest.op === "issue_write") {
       if (serviceRequest.appDeviceId !== undefined) {
         writeJson(response, 400, { error: "issue_write_app_is_stamped" });
@@ -873,6 +879,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (serviceRequest.op === "issue_write")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (serviceRequest.op === "lead_wake")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (serviceRequest.op === "close_seat" && currentAuthorization.device.scope === "connector")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
@@ -1764,6 +1772,7 @@ const CONNECTOR_OPS = new Set([
   "work_item_activity",
   "issue_write",
   "lead_wake",
+  "close_seat",
   "herdr_core_list",
   "herdr_core_read",
   "get",

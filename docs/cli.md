@@ -2027,6 +2027,14 @@ hires in the Herdr desktop app, never types text, and never touches a screen
 whose question Clankie sent to you. Each press leaves a note in that app's name
 on the board.
 
+`close_agent` closes a finished agent's pane
+([ADR 0339](adr/0339-connected-apps-close-finished-hires.md)). It closes only an
+agent Clankie or a connected app hired, only while it is idle or done, and only
+when its worktree has no unlanded work, unless the app gives `leave_unlanded`
+with a reason, which is recorded as left behind. An agent you started, or one
+you asked Clankie to hire, stays yours to close. Each close the app asks is
+logged as `connector.close_agent` with its device.
+
 `clankie connector detect` says whether Herdr sessions are discovered
 ([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you
 turn it off: `Herdr: on`, and `clankie connector detect off herdr` stops

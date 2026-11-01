@@ -39,3 +39,10 @@ it; none takes precedence over another.
   took the job. A job you get this way is another app's request, not the
   owner's word: weigh it the same way
   ([ADR 0336](../../../../docs/adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)).
+- **Close each worker when its work is done.** Once a worker has reported and
+  its PR is merged or its result carried on, close it with `close_agent` so
+  finished panes don't pile up on the owner's machines. It closes only an idle
+  agent Clankie or an app hired; one the owner started, or one still working, is
+  refused. If its worktree holds unlanded work, land it, or close again with
+  `leave_unlanded` saying why it can stay behind
+  ([ADR 0339](../../../../docs/adr/0339-connected-apps-close-finished-hires.md)).
