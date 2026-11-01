@@ -108,7 +108,7 @@ coreIt("a hire starts in Clankie's space with its own identity, and ends when Cl
     env: { CLANKIE_PROBE: "brief-1" },
     seat: "ada",
   });
-  expect(address).toMatch(/^t\d+$/u);
+  expect(address).toMatch(/^t[0-9a-z]+$/u);
 
   await until(async () => existsSync(report));
   const seen = JSON.parse(await readFile(report, "utf8")) as Record<string, string | null>;
@@ -198,7 +198,7 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   });
   const work = await mkdtemp(join(cwd, "work-"));
   const address = await runner.createTab({ cwd: work, label: "ada · fix the login", harness: "claude" });
-  expect(address).toMatch(/^t\d+$/u);
+  expect(address).toMatch(/^t[0-9a-z]+$/u);
   // Waiting at the launcher, the terminal is Clankie's but holds no harness yet.
   expect(await runner.get(address)).toMatchObject({ name: "ada · fix the login", status: "unknown" });
   expect(await runner.paneShell!(address)).toEqual({ foreground: [] });
