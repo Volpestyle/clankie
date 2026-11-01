@@ -30,12 +30,12 @@ export interface RegisterLinearRoutesContext {
   > & {
     readonly captain: Pick<
       ClankieAppDependencies["captain"],
-      "receiveTrackerActivity" | "linearWakeTargetAllowed"
+      "receiveTrackerActivity" | "trackerWakeTargetAllowed"
     > &
       Partial<
         Pick<
           ClankieAppDependencies["captain"],
-          "linearWakeDeliveries" | "linearWakeRecoveries" | "recordInbound"
+          "trackerWakeDeliveries" | "trackerWakeRecoveries" | "recordInbound"
         >
       >;
   };
@@ -61,7 +61,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       if (!input.success) return context.json({ error: "malformed" }, 400);
       if (
         input.data.projectChats.some(
-          (route) => !ctx.dependencies.captain.linearWakeTargetAllowed(route.conversationId),
+          (route) => !ctx.dependencies.captain.trackerWakeTargetAllowed(route.conversationId),
         )
       )
         return context.json({ error: "linear_wake_target_unavailable" }, 409);
@@ -80,8 +80,8 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     return context.json({
       schemaVersion: 1,
-      deliveries: ctx.dependencies.captain.linearWakeDeliveries?.() ?? [],
-      recoveries: ctx.dependencies.captain.linearWakeRecoveries?.() ?? [],
+      deliveries: ctx.dependencies.captain.trackerWakeDeliveries?.() ?? [],
+      recoveries: ctx.dependencies.captain.trackerWakeRecoveries?.() ?? [],
     });
   });
   ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {
@@ -156,7 +156,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
         .safeParse(await readJson(context.req.raw));
       if (!input.success) return context.json({ error: "malformed" }, 400);
       // Use the same ordinary-chat guard as the captain's settings tool.
-      if (!ctx.dependencies.captain.linearWakeTargetAllowed(input.data.conversationId))
+      if (!ctx.dependencies.captain.trackerWakeTargetAllowed(input.data.conversationId))
         return context.json({ error: "linear_wake_target_unavailable" }, 409);
       if (!ctx.settingsSource.update) return context.json({ error: "settings_unavailable" }, 503);
       current = await ctx.settingsSource.update((value) => ({
@@ -341,7 +341,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     const route =
       project &&
       current.linearWebhook.projectChats.find((route) => route.projectId.toLowerCase() === project.id);
-    const leadAvailable = route && ctx.dependencies.captain.linearWakeTargetAllowed(route.conversationId);
+    const leadAvailable = route && ctx.dependencies.captain.trackerWakeTargetAllowed(route.conversationId);
     const target = leadAvailable
       ? route.conversationId
       : project
@@ -370,7 +370,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
           }
         : {}),
     };
-    const targetAllowed = ctx.dependencies.captain.linearWakeTargetAllowed(target);
+    const targetAllowed = ctx.dependencies.captain.trackerWakeTargetAllowed(target);
     const following =
       current.linearWebhook.following &&
       !identityUnavailable &&

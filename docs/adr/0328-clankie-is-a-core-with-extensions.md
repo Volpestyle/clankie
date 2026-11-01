@@ -165,7 +165,11 @@ each step one pull request with no change in what he does:
    2026-11-01: `captain/tracker-activity.ts`, adapted by `linearTrackerActivity`.
 2. The store's wake queue, receipts and cursors become tracker-neutral. Saved
    metadata keeps loading under the old `linear*` names until every body has
-   rewritten it.
+   rewritten it. Landed 2026-11-01 as code: `captain/conversations/tracker-wakes.ts`,
+   the `trackerWake*` store and captain methods, and the core's
+   `TrackerWakeReference`. The saved fields keep their `linear*` names for now;
+   renaming them needs every body to read both names first, and buys nothing he
+   would see.
 3. A `tracker-linear` extension owns the webhook and settings routes, its
    client, request budget and mirrors, and projects its work-items backend.
 4. The MCP hosts publish through the work-items port, so neither imports a

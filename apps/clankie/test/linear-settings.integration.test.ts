@@ -30,7 +30,7 @@ it("shares durable wake settings between Clankie's tool, CLI and HTTP with ordin
   const service = await createClankieApp({
     settings,
     captain: createStubCaptain({
-      linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+      trackerWakeTargetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     }),
     authenticateOperator: createCredentialBackedOperatorAuthenticator({
       env,
@@ -57,7 +57,7 @@ it("shares durable wake settings between Clankie's tool, CLI and HTTP with ordin
   const deps: CaptainDeps = {
     linearWake: {
       settings,
-      targetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+      targetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     },
     mcp: { catalog: async () => [], call: unused },
     email: { list: unused, read: unused, search: unused, send: unused },

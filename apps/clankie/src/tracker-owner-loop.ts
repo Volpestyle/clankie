@@ -31,7 +31,7 @@ export interface TrackerOwnerLoopOptions {
     | "readOwnerAsk"
     | "observeQuestionResolutions"
     | "wakeConversation"
-    | "linearWakeTargetAllowed"
+    | "trackerWakeTargetAllowed"
     | "trackerClosurePolicy"
   >;
   readonly settings: Pick<SettingsStore, "load">;
@@ -114,7 +114,7 @@ export async function startTrackerOwnerLoop(options: TrackerOwnerLoopOptions): P
           )?.conversationId;
     const preferred = issue.projectId === null ? linearWebhook.wakeConversationId : lead;
     const conversationId =
-      preferred !== undefined && options.captain.linearWakeTargetAllowed(preferred)
+      preferred !== undefined && options.captain.trackerWakeTargetAllowed(preferred)
         ? preferred
         : "global-default";
     return { conversationId, issue };

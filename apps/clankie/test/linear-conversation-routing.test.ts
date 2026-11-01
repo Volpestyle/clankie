@@ -40,7 +40,7 @@ function notice(title: string, overrides: Partial<LinearActivityEvent> = {}): Li
 function fixture(root = temporaryRoot()) {
   const wakes: { id: string; prompt: string | undefined }[] = [];
   const store = new ConversationStore(root, async (id, _message, publish, context) => {
-    const prompt = store.linearWakePrompt(id, context.runId);
+    const prompt = store.trackerWakePrompt(id, context.runId);
     wakes.push({ id, prompt });
     publish({ type: "message", role: "captain", text: "Reviewed Linear activity", streaming: false });
   });
@@ -111,7 +111,7 @@ it("uses the selected ordinary chat and ignores old per-issue or native reply re
   expect(f.wakes.map((wake) => wake.id)).toEqual([target]);
   expect(await events(f.store, "global-default")).toEqual([]);
   expect(f.store.conversation(target)).toMatchObject({ title: "Linear", scope: { kind: "global" } });
-  expect(f.store.linearWakeTargetAllowed("missing")).toBe(false);
+  expect(f.store.trackerWakeTargetAllowed("missing")).toBe(false);
   expect(() =>
     f.store.receiveTrackerActivity(linearTrackerActivity(notice("Missing target")), true, "missing"),
   ).toThrow("existing ordinary global or workspace chat");
@@ -140,7 +140,7 @@ it("coalesces new deliveries during an active wake into one queued follow-up", a
   });
   const prompts: string[] = [];
   const store = new ConversationStore(root, async (id, _message, _publish, context) => {
-    prompts.push(store.linearWakePrompt(id, context.runId)!);
+    prompts.push(store.trackerWakePrompt(id, context.runId)!);
     if (prompts.length === 1) await held;
   });
   store.receiveTrackerActivity(linearTrackerActivity(notice("First active wake")), true);
@@ -252,7 +252,7 @@ it("keeps an interrupted offered wake consumed when no definite delivery refusal
   });
   const prompts: string[] = [];
   const original = new ConversationStore(root, async (id, _message, _publish, context) => {
-    prompts.push(original.linearWakePrompt(id, context.runId)!);
+    prompts.push(original.trackerWakePrompt(id, context.runId)!);
     await held;
   });
   const activity = notice("Crash recovery");

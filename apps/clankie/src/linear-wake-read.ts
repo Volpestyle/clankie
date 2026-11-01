@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import type { TrackerWakeReference } from "./captain/tracker-activity.ts";
 import type { LinearAttributionJournal } from "./linear-attribution.ts";
 import type { McpHost } from "./mcp-host.ts";
 
@@ -12,11 +13,7 @@ const ReferenceSchema = z.object({
   receivedAt: z.number(),
   retryUntil: z.number(),
 });
-export interface LinearWakeNotificationReference {
-  readonly eventId: string;
-  readonly receiver: z.infer<typeof ReceiverSchema>;
-  readonly notificationTypes: readonly string[];
-}
+export type LinearWakeNotificationReference = TrackerWakeReference;
 const ClaimSchema = z.object({
   eventId: z.string(),
   receiver: ReceiverSchema,

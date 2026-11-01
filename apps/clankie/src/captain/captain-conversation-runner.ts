@@ -153,13 +153,13 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
           (ctx.options.linearFollowing !== undefined &&
             !(await preparation.wait("Linear following authorization", ctx.options.linearFollowing()))))
       ) {
-        ctx.conversations.discardLinearWake(conversationId);
+        ctx.conversations.discardTrackerWake(conversationId);
         return;
       }
       // A hook wake is worded when it starts, from whatever arrived until now.
       preparedMessage =
         context.origin === "hook"
-          ? ctx.conversations.linearWakePrompt(conversationId, context.runId)
+          ? ctx.conversations.trackerWakePrompt(conversationId, context.runId)
           : incoming;
     } finally {
       preparation.close();
@@ -205,7 +205,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             let queuedAtSeat = false;
             const linearOriginal =
               context.origin === "hook"
-                ? ctx.conversations.linearWakeReceipt(conversationId, context.runId)
+                ? ctx.conversations.trackerWakeReceipt(conversationId, context.runId)
                 : undefined;
             const original =
               context.nativeOriginal === undefined
@@ -311,7 +311,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             ctx.conversations.runsOnRemoteSeat(conversationId))
         ) {
           context.deliveryReceipt?.("unavailable");
-          ctx.conversations.deferLinearWake(conversationId);
+          ctx.conversations.deferTrackerWake(conversationId);
           return;
         }
         // ADR 0218: no live seat means the service runs the conversation. The

@@ -253,7 +253,7 @@ import { RoomHandoffBursts } from "./room-handoff-bursts.ts";
 import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
 import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
-import { sameLinearWakeRecipient } from "./conversations/linear-wakes.ts";
+import { sameTrackerWakeRecipient } from "./conversations/tracker-wakes.ts";
 import { captainRoutingExtension } from "./routing.ts";
 import { captainTurnModelExtension, TurnModelRecorder } from "./turn-model.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
@@ -1222,9 +1222,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     appNotes: { read: async (input: AppNotesReadInput) => fleetRoom.readAppNotes(input) },
     linearWake: {
       settings: settingsStore,
-      targetAllowed: (id: string) => conversations.linearWakeTargetAllowed(id),
+      targetAllowed: (id: string) => conversations.trackerWakeTargetAllowed(id),
       received: (id: string, wakeId: string) =>
-        conversations.receiveLinearWake(id, wakeId, async (original) => {
+        conversations.receiveTrackerWake(id, wakeId, async (original) => {
           const source = await operatorNativeSource(id);
           const binding = inboundBinding(source);
           const nativeId = source === undefined ? undefined : nativeSessionId(source);
@@ -1237,7 +1237,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 ? undefined
                 : `${source.agent}:${nativeId}`;
           if (
-            !sameLinearWakeRecipient(original, {
+            !sameTrackerWakeRecipient(original, {
               ...(binding === undefined ? {} : { binding }),
               ...(sessionKey === undefined ? {} : { sessionKey }),
             })
@@ -3604,7 +3604,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     stateDir: options.stateDir,
     defaultConversationId: () => conversations.defaultGlobalConversationId(),
     validateTarget: (target) => {
-      if (!conversations.linearWakeTargetAllowed(target.conversationId))
+      if (!conversations.trackerWakeTargetAllowed(target.conversationId))
         throw new RoutineError("invalid", "A routine targets an existing ordinary global or workspace chat");
     },
     execute: createRoutineRunner({
@@ -6435,7 +6435,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       };
     },
     fleetWriteAuthority,
-    linearWakeTargetAllowed: (id) => conversations.linearWakeTargetAllowed(id),
+    trackerWakeTargetAllowed: (id) => conversations.trackerWakeTargetAllowed(id),
     prepareTrackerLeadClosure: async (original, trackerProjectId) => {
       const source = captureConversationAuthority(original);
       await assertConversationAuthority(source);
@@ -6459,8 +6459,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return "owner";
       }
     },
-    linearWakeDeliveries: () => conversations.linearWakeDeliveries(),
-    linearWakeRecoveries: () => conversations.linearWakeRecoveries(),
+    trackerWakeDeliveries: () => conversations.trackerWakeDeliveries(),
+    trackerWakeRecoveries: () => conversations.trackerWakeRecoveries(),
     receiveTrackerActivity: (activity, following, conversationId) =>
       conversations.receiveTrackerActivity(activity, following, conversationId),
 

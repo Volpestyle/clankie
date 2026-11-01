@@ -14,3 +14,10 @@ export interface TrackerActivity {
   readonly receiver?: { readonly userId: string; readonly workspaceId: string };
   readonly notificationTypes?: readonly string[];
 }
+
+/** A woken activity's notification, which the tracker may mark read once the chat confirms it. */
+export interface TrackerWakeReference {
+  readonly eventId: string;
+  readonly receiver: { readonly userId: string; readonly workspaceId: string };
+  readonly notificationTypes: readonly string[];
+}

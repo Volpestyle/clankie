@@ -48,7 +48,7 @@ async function fixture() {
     captain: createStubCaptain({
       receiveTrackerActivity: (activity, wake, target) =>
         store.receiveTrackerActivity(activity, wake, target),
-      linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
+      trackerWakeTargetAllowed: (target) => store.trackerWakeTargetAllowed(target),
       submitDiscordTurn: async () => ({
         state: "settled",
         captainSessionId: "captain-session",

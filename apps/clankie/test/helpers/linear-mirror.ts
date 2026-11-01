@@ -116,7 +116,7 @@ export async function linearMirrorFixture(options: { withhold?: string } = {}) {
         wakes.push(activity.eventId ?? "");
         return true;
       },
-      linearWakeTargetAllowed: () => true,
+      trackerWakeTargetAllowed: () => true,
     }),
     settings,
     clock: () => NOW,

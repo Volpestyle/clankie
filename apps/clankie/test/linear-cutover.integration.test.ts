@@ -263,7 +263,7 @@ async function cutoverFixture(
       }),
     readOwnerAsk: (requestId) => conversations.readOwnerAsk(requestId),
     observeQuestionResolutions: (listener) => conversations.observeQuestionResolutions(listener),
-    linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+    trackerWakeTargetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     wakeConversation: async (_owner, text) => {
       wakes.push(text);
       return true;
