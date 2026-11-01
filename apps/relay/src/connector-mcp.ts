@@ -346,6 +346,14 @@ function connectorServer(
               enum: ["claude", "codex"],
               description: "Which agent app (default claude).",
             },
+            account: {
+              type: "string",
+              minLength: 1,
+              maxLength: 128,
+              pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              description:
+                "The account to hire on, exactly as fleet_capacity names it for that machine and harness. Leave it out and Clankie picks the account with the most spare capacity, skipping any the owner held; name one, even a held one, and it is used or the start is refused.",
+            },
             prompt: {
               type: "string",
               minLength: 1,
@@ -843,10 +851,17 @@ function connectorServer(
         const prompt = optionalString(args.prompt);
         if (prompt !== undefined && prompt.length > START_PROMPT_MAX)
           return failure(`prompt is longer than ${START_PROMPT_MAX} characters.`);
+        const account = optionalString(args.account);
+        if (
+          (args.account !== undefined && account === undefined) ||
+          (account !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(account))
+        )
+          return failure("account is a label from fleet_capacity, such as default or james.");
         const starting = sessions.start({
           ...(machine === undefined ? {} : { machine }),
           ...(workingDirectory === undefined ? {} : { workingDirectory }),
           ...(harness === undefined ? {} : { harness }),
+          ...(account === undefined ? {} : { account }),
           ...(prompt === undefined ? {} : { prompt }),
         });
         // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).

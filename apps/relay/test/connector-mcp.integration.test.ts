@@ -895,6 +895,33 @@ describe("Claude connector MCP endpoint", () => {
       harness: "codex",
       prompt: "fix the netcode desync",
     });
+    // The app may name the account to hire on, as fleet_capacity names it; Clankie uses it exactly.
+    await client.callTool({
+      name: "start_agent",
+      arguments: {
+        machine: "volpe@pc1",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "claude",
+        account: "mimo",
+      },
+    });
+    expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+      op: "start_agent",
+      schemaVersion: 1,
+      machine: "volpe@pc1",
+      workingDirectory: "C:\\code\\kh2",
+      harness: "claude",
+      account: "mimo",
+    });
+    const startsBeforeBadAccount = relay.seen.filter((request) => request.op === "start_agent").length;
+    for (const account of ["james@example.com", "../.claude", ""]) {
+      const refused = await client.callTool({
+        name: "start_agent",
+        arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", account },
+      });
+      expect(refused.isError, account).toBe(true);
+    }
+    expect(relay.seen.filter((request) => request.op === "start_agent")).toHaveLength(startsBeforeBadAccount);
     const elsewhere = await client.callTool({
       name: "start_agent",
       arguments: { machine: "volpe@pc1", workingDirectory: "C:\\Windows" },

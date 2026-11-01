@@ -1975,7 +1975,12 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
-`start_agent` existed sign in again to use it. `fleet_capacity` reads what
+`start_agent` existed sign in again to use it. `start_agent` takes an optional
+`account`, a label exactly as `fleet_capacity` names it for that machine and
+harness ([ADR 0340](adr/0340-connected-apps-name-the-hire-account.md)). Left out,
+Clankie picks the account with the most spare capacity and skips any the owner
+held with `clankie accounts hold`; named, it is used exactly, even when held, or
+the start is refused and nothing else is tried. `fleet_capacity` reads what
 the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
 each metered account's plan, usage, remaining limit and reset, heavy-work

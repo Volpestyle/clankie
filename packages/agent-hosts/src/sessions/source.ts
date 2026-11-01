@@ -131,6 +131,8 @@ export interface SessionStartRequest {
   readonly machine?: string;
   readonly workingDirectory?: string;
   readonly harness?: "claude" | "codex";
+  /** The account to hire on, as fleet capacity names it; absent, Clankie picks. */
+  readonly account?: string;
   /** The first thing the new agent is asked. */
   readonly prompt?: string;
 }

@@ -836,6 +836,18 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       machine: z.string().trim().min(1).max(200).optional(),
       workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX).optional(),
       harness: z.enum(START_AGENT_HARNESSES).optional(),
+      /**
+       * The account to hire on, as `fleet_capacity` names it (a profile label, never an email
+       * or home). Absent, Clankie picks by spare capacity and skips held accounts; named, it is
+       * used exactly or the start is refused, even when the owner held it (ADR 0340).
+       */
+      account: z
+        .string()
+        .trim()
+        .min(1)
+        .max(128)
+        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u)
+        .optional(),
       /** The first thing the agent is asked; information from the caller, delivered as its brief. */
       prompt: z.string().trim().min(1).max(8_000).optional(),
     })
