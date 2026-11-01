@@ -70,7 +70,7 @@ Each of these becomes an extension:
 | `voice`            | Discord voice, Vox, voice calls and the realtime briefing                                           |
 | `world`            | PokeAgents play, the Activity watch surface, World and desktop-pet surfaces' routes                 |
 | `minecraft`, games | Already `GameExtension`s; they keep that contract as a specialization of this one                   |
-| `watch`            | The Apple Watch feed and its push                                                                   |
+| `watch`            | Nothing in this service yet: the Watch app is in `clankie-app` and reads the feed the phone reads   |
 | `tracker-linear`   | Linear import, mirror, cutover, webhooks and publishing                                             |
 | `tracker-github`   | The GitHub issues backend                                                                           |
 | `relay`            | The clankie.bot gateway connector and phone doorway                                                 |
@@ -156,8 +156,13 @@ Each step is one green pull request with no behaviour change unless it says so.
 
 1. Add `@clankie/extension`, and make `GameExtension` and its registry a
    specialization of it. Minecraft keeps passing its tests unchanged.
-2. Add the core-only composition and its end-to-end test. This is where hidden
-   core-to-extension imports show up; each one gets a host port.
+2. Add `scripts/check-extension-boundary.mjs` to the landing gate. It sorts
+   `apps/clankie/src` into the core and the extensions above by path, and fails
+   when the core gains an import of an extension. The composition root
+   (`index.ts`) is the one file allowed to. On 2026-11-01 the rest of the core
+   had 123 such imports from 39 files, listed in a baseline that only shrinks.
+   Then add the core-only composition and its end-to-end test; each import left
+   gets a host port.
 3. Move the small extensions first: `relay`, `watch`, `tracker-github`,
    `tracker-linear`, `media`, `browser`, `computer`.
 4. Move `world` and `voice`.
@@ -175,8 +180,8 @@ the composition and the moves that cloud checks can prove run in the cloud.
 
 - A free install can leave out what it doesn't use, and a broken Discord token,
   Linear outage or game server no longer threatens the fleet.
-- The line between core and extension is checked by a test, not kept by
-  convention.
+- The line between core and extension is checked on every landing, not kept
+  by convention.
 - Each extension's settings, tools and routes live in one place, which makes
   the captain smaller in the same stroke as ADR 0325.
 - There is one more layer between the captain and Discord, and moving the
