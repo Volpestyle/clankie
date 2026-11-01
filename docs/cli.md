@@ -256,7 +256,11 @@ off). Both are owner-only `POST /v1/extensions` calls, take effect at the next
 the `extensions` map in settings; an id with no entry is on. With
 `tracker-linear` off, Linear's webhook, its wake, follow, target and route
 settings, and its mirror and cutover commands are not served until it is on
-again.
+again. With `world` off, the Activity's admission and sharing routes are not
+served and he has no Activity sharing or PokeAgent play tools. With `voice`
+off, the phone composer's transcription routes and the room voice routes
+(`/v1/discord/room-voice`, the Discord body's output guard) are not served;
+his Discord voice lanes still run until voice moves with the persona.
 
 ### `runtime-health`
 
