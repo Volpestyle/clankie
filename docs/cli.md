@@ -254,10 +254,14 @@ sign in to remote access, the browser unless `CLANKIE_BROWSER_ENABLED` turns it
 off). Both are owner-only `POST /v1/extensions` calls, take effect at the next
 `clankie restart clankie`, and answer with `restartRequired`. The switches are
 the `extensions` map in settings; an id with no entry is on. With
-`tracker-linear` off, Linear's webhook, its wake, follow, target and route
-settings, and its mirror and cutover commands are not served until it is on
-again. With `world` off, the Activity's admission and sharing routes are not
-served and he has no Activity sharing or PokeAgent play tools. With `voice`
+`tracker-linear` off, Linear's request budget, mirror and cutover commands
+are not served. `clankie extensions off linear-wake` independently disables
+the signed webhook, wake, follow, target, route and delivery routes and removes
+`linear_wake` from his tools at the next start. Queued Linear wakes stay quiet
+while it is off; saved rules and cursors are kept. `clankie extensions on
+linear-wake` restores the wake on the next start. Both switches appear in
+`clankie status` and `clankie doctor --json`. With `world` off, the Activity's
+admission and sharing routes are not served and he has no Activity sharing or PokeAgent play tools. With `voice`
 off, the phone composer's transcription routes and the room voice routes
 (`/v1/discord/room-voice`, the Discord body's output guard) are not served;
 his Discord voice lanes still run until voice moves with the persona. With
@@ -267,6 +271,11 @@ transcripts), the room routes (`/v1/discord/rooms`, room guidance, Discord
 settings, directory and setup test post), `/v1/operator/persona`,
 `/v1/operator/voice` and `/v1/operator/appearance` answer `404`; the Discord
 body's live state and his captain's Discord turns stay in the core for now.
+With `minecraft` off, Minecraft is not in the games catalog, its routes
+(`/v1/minecraft`, `/v1/minecraft/host`, `/v1/minecraft/configuration` and the
+Discord body's login-code check) answer `404`, his and his workers' Minecraft
+tools are gone, and its MCP motor, host service and play polling never start;
+a world he was in stays put until he comes back.
 
 #### Outside extensions
 

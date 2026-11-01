@@ -110,9 +110,18 @@ for (;;) {
 
 /** Every extension the owner can switch, off (ADR 0328 "Choosing extensions"). */
 const ALL_OFF = Object.fromEntries(
-  ["persona", "world", "voice", "relay", "browser", "media", "computer", "minecraft", "tracker-linear"].map(
-    (id) => [id, "off"],
-  ),
+  [
+    "persona",
+    "world",
+    "voice",
+    "relay",
+    "browser",
+    "media",
+    "computer",
+    "minecraft",
+    "tracker-linear",
+    "linear-wake",
+  ].map((id) => [id, "off"]),
 );
 
 /** One HTTP route each switched extension mounts; off, none of them is served. */
@@ -123,21 +132,43 @@ const EXTENSION_ROUTES = [
   ["world", "POST", "/v1/activity/shares"],
   ["tracker-linear", "POST", "/v1/tracker/mirror/linear"],
   ["tracker-linear", "POST", "/v1/tracker/cutover/linear"],
-  ["tracker-linear", "GET", "/v1/linear/deliveries"],
+  ["linear-wake", "GET", "/v1/linear/deliveries"],
+  ["linear-wake", "GET", "/v1/linear/wake"],
+  ["linear-wake", "GET", "/v1/linear/follow"],
+  ["linear-wake", "GET", "/v1/linear/target"],
+  ["linear-wake", "GET", "/v1/linear/routes"],
+  ["linear-wake", "POST", "/v1/hooks/linear"],
   ["voice", "GET", "/v1/discord/room-voice"],
   ["voice", "POST", "/v1/discord/voice-output-guard"],
   ["persona", "GET", "/v1/discord/rooms"],
   ["persona", "GET", "/v1/discord/settings"],
   ["persona", "GET", "/v1/discord/readiness"],
   ["persona", "GET", "/v1/operator/appearance"],
+  ["media", "POST", "/v1/media/images"],
+  ["media", "POST", "/v1/media/videos"],
+  ["media", "GET", "/v1/operator/skin-drafts"],
+  ["minecraft", "GET", "/v1/minecraft"],
+  ["minecraft", "POST", "/v1/minecraft/host"],
+  ["minecraft", "GET", "/v1/minecraft/configuration"],
+  ["minecraft", "POST", "/v1/internal/minecraft-login-code/authorize"],
 ] as const;
 
 /**
  * Operator tools a switched-on extension adds: voice's join, leave and screen
- * shares are listed; media's diagrams wait in the deferred catalog.
+ * shares are listed; media's generation, skin drafts and diagrams and Minecraft's
+ * play and setup wait in the deferred catalog.
  */
 const LISTED_EXTENSION_TOOLS = ["voice_join", "voice_leave", "observe_share"];
-const DEFERRED_EXTENSION_TOOLS = ["draw_er_diagram", "draw_sequence_diagram"];
+const DEFERRED_EXTENSION_TOOLS = [
+  "generate_image",
+  "generate_video",
+  "skin_draft",
+  "draw_er_diagram",
+  "draw_sequence_diagram",
+  "linear_wake",
+  "minecraft_join",
+  "minecraft_configure",
+];
 
 async function freePort(): Promise<number> {
   for (;;) {
@@ -258,7 +289,9 @@ it.skipIf(!native)(
       expect(health.extensions.map((entry) => entry.id).sort()).toEqual([
         "browser",
         "computer",
+        "linear-wake",
         "media",
+        "minecraft",
         "persona",
         "relay",
         "tracker-linear",
@@ -279,6 +312,12 @@ it.skipIf(!native)(
         });
         expect({ path, status: response.status }).toEqual({ path, status: 404 });
       }
+
+      // Minecraft off: the games catalog, where its play lease and tools live, has no Minecraft.
+      const games = await fetch(`${url}/v1/games/extensions`, { headers: operator });
+      expect(games.status).toBe(200);
+      const catalog = (await games.json()) as { extensions: { id: string }[] };
+      expect(catalog.extensions.map((entry) => entry.id)).not.toContain("minecraft");
 
       // Issues on a local-files tracker, through the CLI and the service.
       expect((await clankie(["work", "init"])).repo.backend).toBe("default");

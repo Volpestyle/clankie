@@ -50,6 +50,7 @@ const BUILT_IN_IDS = new Set([
   "computer",
   "media",
   "tracker-linear",
+  "linear-wake",
   "world",
   "voice",
   "persona",

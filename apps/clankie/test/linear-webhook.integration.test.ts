@@ -15,7 +15,7 @@ import { LinearAttributionJournal } from "../src/linear-attribution.ts";
 import { LinearWriteReceipts } from "../src/linear-webhook.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
-import { linearRoutes } from "../src/app/linear-routes.ts";
+import { linearWakeRoutes } from "../src/app/linear-routes.ts";
 
 const NOW = new Date("2026-10-05T00:00:00.000Z");
 const SECRET = "temporary-fixture-webhook-secret";
@@ -129,7 +129,7 @@ async function fixture() {
     settings,
     clock: () => NOW,
     extensionRoutes: [
-      linearRoutes({
+      linearWakeRoutes({
         linearWebhook: {
           secret: async () => SECRET,
           writes,

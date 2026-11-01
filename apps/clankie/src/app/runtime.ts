@@ -41,11 +41,7 @@ import {
   CaptainPresenceReportSchema,
   ConversationHeadRequestSchema,
   EmbodimentIntentSchema,
-  GenerateImageRequestSchema,
-  GenerateVideoRequestSchema,
   HERDR_BINDING_PATH,
-  MEDIA_IMAGE_GENERATION_PATH,
-  MEDIA_VIDEO_GENERATION_PATH,
   ProcessHealthSnapshotSchema,
   eventStreamKindForId,
   type CaptainChannelTurnResult,
@@ -97,7 +93,6 @@ import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
-import type { MediaGeneratorPort } from "../ports/media.ts";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
 import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
@@ -107,7 +102,6 @@ import { createReviewRoutes } from "../review-routes.ts";
 import { createPushDispatcher, type PushDispatcher } from "../push.ts";
 import { createRuntimeUpdateRoutes } from "../runtime-update-routes.ts";
 import { DiscordStreamWatchProjection } from "../stream-watch-observation.ts";
-import { defaultDiscordLiveReceiptPath, readVoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import {
   WORK_EXPORT_PATH,
   WorkExportRequestSchema,
@@ -117,7 +111,6 @@ import {
 import { WorkerGrantRequestSchema } from "../worker-mcp.ts";
 import { registerConversationRoutes } from "./conversation-routes.ts";
 import { PROFILE_HASH, discordPresenceBindingKey } from "./body-presence.ts";
-import { registerVoiceCallRoute } from "./voice-call-route.ts";
 import { authenticateCaptain, authenticateOperator, captainTransportKind, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
@@ -1409,20 +1402,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.post("/v1/internal/minecraft-login-code/authorize", async (context) => {
-    const body = await authenticateCaptain(context.req.raw, dependencies);
-    if (!body || body === "unavailable" || body.steerSourceLane !== "discord_text")
-      return context.body(null, 403);
-    const input = await context.req.json().catch(() => undefined);
-    if (!input || typeof input !== "object" || typeof input.capability !== "string")
-      return context.body(null, 403);
-    const { capability, ...payload } = input;
-    const allowed = await dependencies.minecraftPrivateDelivery
-      ?.authorize(capability, payload)
-      .catch(() => false);
-    context.header("Cache-Control", "no-store");
-    return context.body(null, allowed ? 204 : 403);
-  });
+  // Mounted only while Minecraft's switch is on (ADR 0328); its extension supplies the check.
+  const minecraftPrivateDelivery = dependencies.minecraftPrivateDelivery;
+  if (minecraftPrivateDelivery !== undefined)
+    app.post("/v1/internal/minecraft-login-code/authorize", async (context) => {
+      const body = await authenticateCaptain(context.req.raw, dependencies);
+      if (!body || body === "unavailable" || body.steerSourceLane !== "discord_text")
+        return context.body(null, 403);
+      // allow-swallowed-rejection -- invalid JSON is refused with 403 just below.
+      const input = await context.req.json().catch(() => undefined);
+      if (!input || typeof input !== "object" || typeof input.capability !== "string")
+        return context.body(null, 403);
+      const { capability, ...payload } = input;
+      const allowed = await minecraftPrivateDelivery.authorize(capability, payload).catch(() => false);
+      context.header("Cache-Control", "no-store");
+      return context.body(null, allowed ? 204 : 403);
+    });
 
   const gameRouteOptions = {
     settings: settingsSource,
@@ -1533,38 +1528,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     },
     get authenticateLane() {
       return authenticateLane;
-    },
-  });
-  registerVoiceCallRoute({
-    get app() {
-      return app;
-    },
-    get dependencies() {
-      return dependencies;
-    },
-    get settingsSource() {
-      return settingsSource;
-    },
-    get clock() {
-      return clock;
-    },
-    get captainPresence() {
-      return captainPresence;
-    },
-    get discordPresenceSessions() {
-      return discordPresenceSessions;
-    },
-    get discordStreamWatch() {
-      return discordStreamWatch;
-    },
-    get embodiment() {
-      return embodiment;
-    },
-    get recordEvent() {
-      return recordEvent;
-    },
-    get idFactory() {
-      return idFactory;
     },
   });
   const discordBody: DiscordBodyRouteState = {
@@ -2383,41 +2346,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  /**
-   * Making a picture or a clip (ADR 0085). A refusal comes back 200 with a
-   * reason he can say out loud; only an unconfigured plane or a malformed body
-   * is an error status.
-   */
-  const mediaRoute = <Request>(
-    path: string,
-    schema: { safeParse(value: unknown): { success: true; data: Request } | { success: false } },
-    run: (generator: MediaGeneratorPort, request: Request, signal: AbortSignal) => Promise<unknown>,
-  ): void => {
-    app.post(path, async (context) => {
-      const authorization = await authenticateCaptainOrOperator(context);
-      if ("denial" in authorization) return authorization.denial;
-      if (dependencies.mediaGenerator === undefined) {
-        return context.json({ error: "media_unavailable" }, 503);
-      }
-      const body = await readJson(context.req.raw);
-      const parsed = schema.safeParse(body);
-      if (!parsed.success) return context.json({ error: "invalid_media_request" }, 400);
-      try {
-        const result = await run(dependencies.mediaGenerator, parsed.data, context.req.raw.signal);
-        return context.json({ result }, 200, { "cache-control": "no-store" });
-      } catch {
-        return context.json({ error: "media_upstream_failure" }, 502);
-      }
-    });
-  };
-
-  mediaRoute(MEDIA_IMAGE_GENERATION_PATH, GenerateImageRequestSchema, (generator, request) =>
-    generator.generateImage(request),
-  );
-  mediaRoute(MEDIA_VIDEO_GENERATION_PATH, GenerateVideoRequestSchema, (generator, request, signal) =>
-    generator.generateVideo(request, { signal }),
-  );
-
   app.get("/v1/embodiment/sessions/:id", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);
     if (captain === "unavailable") {
@@ -2759,17 +2687,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     presenceSessions: () => discordPresenceSessions.list(),
     streamWatch: () => discordStreamWatch.current(),
     voiceHistory: (limit: number) => discordVoiceHistory.list(limit),
-    recentVoiceSpeech: (limit: number) => {
-      const room = discordPresenceSessions
-        .list()
-        .flatMap((session) => session.voiceRooms ?? [])
-        .find((candidate) => candidate.channelId !== undefined);
-      return readVoiceSpeechSnapshot(
-        defaultDiscordLiveReceiptPath(),
-        limit,
-        room?.channelId === undefined ? undefined : { guildId: room.guildId, channelId: room.channelId },
-      );
-    },
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: async (): Promise<void> => {

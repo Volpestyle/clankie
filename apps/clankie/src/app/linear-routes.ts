@@ -51,11 +51,29 @@ export interface LinearRouteParts {
 }
 
 /** Linear's webhook, wake and settings routes, mounted by the core where they always were. */
-export function linearRoutes(parts: LinearRouteParts = {}): ExtensionRoutes {
+export function linearRoutes(parts: LinearRouteParts = {}, wake = true): ExtensionRoutes {
   return {
     place: "tracker",
     register: (app, host) =>
-      registerLinearRoutes({
+      registerLinearRoutes(
+        {
+          app,
+          dependencies: { ...parts, captain: host.trackerWakes },
+          operator: (request) => host.operator(request),
+          settingsSource: host.settings,
+          clock: host.clock,
+          authorizeOwnerSettings: (request) => host.ownerSettings(request),
+        },
+        wake,
+      ),
+  };
+}
+
+export function linearWakeRoutes(parts: LinearRouteParts): ExtensionRoutes {
+  return {
+    place: "tracker",
+    register: (app, host) =>
+      registerLinearWakeRoutes({
         app,
         dependencies: { ...parts, captain: host.trackerWakes },
         operator: (request) => host.operator(request),
@@ -76,7 +94,7 @@ export interface RegisterLinearRoutesContext {
   readonly authorizeOwnerSettings?: ExtensionRouteHost["ownerSettings"];
 }
 
-export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
+export function registerLinearRoutes(ctx: RegisterLinearRoutesContext, wake = true) {
   const operatorOf = ctx.operator ?? (async () => "unavailable" as const);
   // Mirror 2 (VUH-1965): the owner turns a scratch import's webhook mirror on or off.
   ctx.app.post("/v1/tracker/mirror/linear", async (context) => {
@@ -125,6 +143,22 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       );
     }
   });
+  ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {
+    const operator = await operatorOf(context.req.raw);
+    if (operator === "unavailable")
+      return context.json({ error: "operator_authentication_unavailable" }, 503);
+    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
+    if (!ctx.dependencies.linearRequestBudget)
+      return context.json({ error: "linear_request_budget_unavailable" }, 503);
+    return context.json(LinearRequestBudgetReportSchema.parse(ctx.dependencies.linearRequestBudget.report()));
+  });
+
+  if (wake) registerLinearWakeRoutes(ctx);
+}
+
+/** Wake routes are mounted only by the wake extension in the service composition. */
+export function registerLinearWakeRoutes(ctx: RegisterLinearRoutesContext) {
+  const operatorOf = ctx.operator ?? (async () => "unavailable" as const);
   ctx.app.on(["GET", "PUT"], "/v1/linear/routes", async (context) => {
     const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
@@ -161,15 +195,6 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       deliveries: ctx.dependencies.captain.trackerWakeDeliveries?.() ?? [],
       recoveries: ctx.dependencies.captain.trackerWakeRecoveries?.() ?? [],
     });
-  });
-  ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {
-    const operator = await operatorOf(context.req.raw);
-    if (operator === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
-    if (!ctx.dependencies.linearRequestBudget)
-      return context.json({ error: "linear_request_budget_unavailable" }, 503);
-    return context.json(LinearRequestBudgetReportSchema.parse(ctx.dependencies.linearRequestBudget.report()));
   });
 
   const revision = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");

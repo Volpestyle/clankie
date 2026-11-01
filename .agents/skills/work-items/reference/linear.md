@@ -112,3 +112,14 @@ the recorded convention with `backend_unavailable`; report them to your lead.
 Do not create another queue to compensate for an uncertain write. Explicit
 export/import identity mapping is designed in ADR 0226; migration is not yet
 implemented.
+
+## Wake extension
+
+`clankie extensions off linear-wake` disables Linear webhook ingestion, its
+wake settings and delivery routes, and the `linear_wake` tool at the next
+service start. Saved rules and queued wake cursors are retained.
+`clankie extensions on linear-wake` restores them at the next start. Read the
+switch in `clankie extensions`, `clankie status` or `clankie doctor --json`.
+The independent `tracker-linear` switch controls request budget, mirror and
+cutover routes; it does not control the wake. Connected tracker tools keep
+their existing account and posting authority checks.

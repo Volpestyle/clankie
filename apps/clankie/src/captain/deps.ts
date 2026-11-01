@@ -38,6 +38,7 @@ import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
+import type { CaptainVoice } from "../ports/voice.ts";
 import type { CreateRoomTurns } from "./room-turns.ts";
 import type { ChannelProjection } from "./conversations.ts";
 
@@ -74,6 +75,8 @@ export interface CaptainDeps {
   ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
   /** The persona's room turns: Discord messages, room wakes and owner forks (ADR 0328). */
   readonly roomTurns?: CreateRoomTurns;
+  /** Voice's lane instructions and device-call handoff, which its extension supplies while on (ADR 0328). */
+  readonly voice?: CaptainVoice;
   /** The persona's projection of channels onto Discord rooms (ADR 0146, ADR 0328). */
   readonly channelProjection?: CreateChannelProjection;
   /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
@@ -183,7 +186,8 @@ export interface CaptainDeps {
   /** The mail tools only; the account catalog owns status and disconnect. */
   readonly email: Pick<EmailPort, "list" | "read" | "search" | "send">;
   readonly browser: BrowserToolPort;
-  readonly media: {
+  /** Image and video generation; absent while the media extension is off (ADR 0328). */
+  readonly media?: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
     /** `room` tags the render so the room that asked is told when it lands. */
     generateVideo(request: GenerateVideoRequest, room?: string): Promise<GenerateVideoResult>;

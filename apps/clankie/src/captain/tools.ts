@@ -212,7 +212,7 @@ export function captainTools(
   );
   return [
     ...desktopTools(deps.desktop),
-    ...(lane === "operator" ? [skinDraftTool(deps.skinDrafts, turn)] : []),
+    ...(lane === "operator" && deps.skinDrafts ? [skinDraftTool(deps.skinDrafts, turn)] : []),
     ...(lane === "operator" && deps.refreshWorkerCatalogs
       ? [
           defineTool({
@@ -345,82 +345,7 @@ export function captainTools(
           }),
         ]
       : []),
-    defineTool({
-      name: "generate_image",
-      label: "Draw a picture",
-      description:
-        "Draw a picture. Describe what you want in the prompt as fully as you like — subject, style, mood, colours. " +
-        "You can also change a picture you made earlier by passing its sourceRef along with what to change. " +
-        "In a Discord channel the picture is attached to your reply automatically, so make it and then talk about " +
-        "it normally; never paste the reference into your message. 'refused' names a reason you can say out loud: " +
-        "'no_model_configured' means nobody has picked an image model yet (/image-model), 'credential_unavailable' " +
-        "means there is no API key stored for it. A refusal is something to mention, not retry.",
-      parameters: Type.Object({
-        personaReference: Type.Optional(
-          Type.Boolean({
-            description:
-              "Use only the owner appearance/ references when depicting yourself. Vibe references never define your look. Do not combine with sourceRef.",
-          }),
-        ),
-        prompt: Type.String({ minLength: 1, maxLength: 4000 }),
-        aspectRatio: Type.Optional(
-          Type.String({ description: "Shape like 16:9 or 1:1. Omit to let the model choose." }),
-        ),
-        sourceRef: Type.Optional(
-          Type.String({
-            description: "artifactRef from an earlier generate_image result, to edit that picture.",
-          }),
-        ),
-      }),
-      executionMode: "sequential",
-      execute: async (_id, params) => {
-        const result = await deps.media.generateImage({ schemaVersion: 1, ...params });
-        if (result.outcome === "ok")
-          turn.media = { artifactRef: result.artifactRef, filename: result.filename };
-        return json(result);
-      },
-    }),
-    defineTool({
-      name: "generate_video",
-      label: "Make a video",
-      description:
-        "Make a short video from a prompt. A result of 'pending' is normal — it is still rendering; say so, and " +
-        "know that it keeps rendering after you answer. You will be told in this room when it lands, and calling " +
-        "again with the same requestId then hands you the finished video. Never start a second render of the " +
-        "same idea. In a Discord channel a finished video attaches itself to your reply, like a picture does. " +
-        "To animate a picture you made, pass its artifactRef as firstFrame; pass the same one as lastFrame too " +
-        "for a seamless loop. Frames and reference images need a model that takes them (Veo); a refusal says so.",
-      parameters: Type.Object({
-        prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 4000 })),
-        requestId: Type.Optional(
-          Type.String({ description: "Resume a render that came back pending, instead of a prompt." }),
-        ),
-        firstFrame: Type.Optional(
-          Type.String({ description: "artifactRef of a picture the video opens on and animates from." }),
-        ),
-        lastFrame: Type.Optional(
-          Type.String({ description: "artifactRef of the picture it ends on. Needs firstFrame." }),
-        ),
-        referenceImages: Type.Optional(
-          Type.Array(Type.String(), {
-            minItems: 1,
-            maxItems: 3,
-            description: "artifactRefs of a subject or style to take after, without opening on them.",
-          }),
-        ),
-        aspectRatio: Type.Optional(
-          Type.String({ description: "16:9 or 9:16. Omit to let the model choose." }),
-        ),
-        durationSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 15 })),
-      }),
-      executionMode: "sequential",
-      execute: async (_id, params) => {
-        const result = await deps.media.generateVideo({ schemaVersion: 1, ...params }, turn.room);
-        if (result.outcome === "ok")
-          turn.media = { artifactRef: result.artifactRef, filename: result.filename };
-        return json(result);
-      },
-    }),
+    ...(deps.media === undefined ? [] : generationTools(deps.media, turn)),
     ...diagramTools(deps, turn),
     // The persona's Discord body tools come from its extension (ADR 0328).
     ...(deps.personaTools?.(deps, turn, lane) ?? []),
@@ -551,7 +476,7 @@ export function captainTools(
           deps.presence.listRecentVoiceSpeech(12),
           // Only this room's renders: what he was asked to make elsewhere is
           // not this room's business, same rule as `observe_room`.
-          turn.room === undefined ? [] : deps.media.finishedRenders(turn.room),
+          turn.room === undefined || deps.media === undefined ? [] : deps.media.finishedRenders(turn.room),
           deps.streamWatch?.current(),
         ]);
         return json({
@@ -1935,4 +1860,86 @@ export async function callConversationBrowser(
     },
   );
   return result.outcome === "completed" ? result.value : result;
+}
+
+/** Making a picture or a clip (ADR 0085), while the media extension runs (ADR 0328). */
+function generationTools(media: NonNullable<CaptainDeps["media"]>, turn: TurnContext): ToolDefinition[] {
+  return [
+    defineTool({
+      name: "generate_image",
+      label: "Draw a picture",
+      description:
+        "Draw a picture. Describe what you want in the prompt as fully as you like — subject, style, mood, colours. " +
+        "You can also change a picture you made earlier by passing its sourceRef along with what to change. " +
+        "In a Discord channel the picture is attached to your reply automatically, so make it and then talk about " +
+        "it normally; never paste the reference into your message. 'refused' names a reason you can say out loud: " +
+        "'no_model_configured' means nobody has picked an image model yet (/image-model), 'credential_unavailable' " +
+        "means there is no API key stored for it. A refusal is something to mention, not retry.",
+      parameters: Type.Object({
+        personaReference: Type.Optional(
+          Type.Boolean({
+            description:
+              "Use only the owner appearance/ references when depicting yourself. Vibe references never define your look. Do not combine with sourceRef.",
+          }),
+        ),
+        prompt: Type.String({ minLength: 1, maxLength: 4000 }),
+        aspectRatio: Type.Optional(
+          Type.String({ description: "Shape like 16:9 or 1:1. Omit to let the model choose." }),
+        ),
+        sourceRef: Type.Optional(
+          Type.String({
+            description: "artifactRef from an earlier generate_image result, to edit that picture.",
+          }),
+        ),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) => {
+        const result = await media.generateImage({ schemaVersion: 1, ...params });
+        if (result.outcome === "ok")
+          turn.media = { artifactRef: result.artifactRef, filename: result.filename };
+        return json(result);
+      },
+    }),
+    defineTool({
+      name: "generate_video",
+      label: "Make a video",
+      description:
+        "Make a short video from a prompt. A result of 'pending' is normal — it is still rendering; say so, and " +
+        "know that it keeps rendering after you answer. You will be told in this room when it lands, and calling " +
+        "again with the same requestId then hands you the finished video. Never start a second render of the " +
+        "same idea. In a Discord channel a finished video attaches itself to your reply, like a picture does. " +
+        "To animate a picture you made, pass its artifactRef as firstFrame; pass the same one as lastFrame too " +
+        "for a seamless loop. Frames and reference images need a model that takes them (Veo); a refusal says so.",
+      parameters: Type.Object({
+        prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 4000 })),
+        requestId: Type.Optional(
+          Type.String({ description: "Resume a render that came back pending, instead of a prompt." }),
+        ),
+        firstFrame: Type.Optional(
+          Type.String({ description: "artifactRef of a picture the video opens on and animates from." }),
+        ),
+        lastFrame: Type.Optional(
+          Type.String({ description: "artifactRef of the picture it ends on. Needs firstFrame." }),
+        ),
+        referenceImages: Type.Optional(
+          Type.Array(Type.String(), {
+            minItems: 1,
+            maxItems: 3,
+            description: "artifactRefs of a subject or style to take after, without opening on them.",
+          }),
+        ),
+        aspectRatio: Type.Optional(
+          Type.String({ description: "16:9 or 9:16. Omit to let the model choose." }),
+        ),
+        durationSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 15 })),
+      }),
+      executionMode: "sequential",
+      execute: async (_id, params) => {
+        const result = await media.generateVideo({ schemaVersion: 1, ...params }, turn.room);
+        if (result.outcome === "ok")
+          turn.media = { artifactRef: result.artifactRef, filename: result.filename };
+        return json(result);
+      },
+    }),
+  ];
 }
