@@ -23,11 +23,11 @@ const ID_PREFIX = "clankie-";
 const APP_MS = 5_000;
 const GIT_MS = 2_000;
 
-export interface HerdrWindowTab {
+interface HerdrWindowTab {
   readonly id: string;
   readonly name: string;
 }
-export interface HerdrWindowSpace {
+interface HerdrWindowSpace {
   readonly id: string;
   readonly name: string;
   readonly folder?: string;
