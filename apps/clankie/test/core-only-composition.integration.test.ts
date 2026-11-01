@@ -130,6 +130,10 @@ const EXTENSION_ROUTES = [
   ["persona", "GET", "/v1/discord/settings"],
   ["persona", "GET", "/v1/discord/readiness"],
   ["persona", "GET", "/v1/operator/appearance"],
+  ["minecraft", "GET", "/v1/minecraft"],
+  ["minecraft", "POST", "/v1/minecraft/host"],
+  ["minecraft", "GET", "/v1/minecraft/configuration"],
+  ["minecraft", "POST", "/v1/internal/minecraft-login-code/authorize"],
 ] as const;
 
 /**
@@ -259,6 +263,7 @@ it.skipIf(!native)(
         "browser",
         "computer",
         "media",
+        "minecraft",
         "persona",
         "relay",
         "tracker-linear",
@@ -279,6 +284,12 @@ it.skipIf(!native)(
         });
         expect({ path, status: response.status }).toEqual({ path, status: 404 });
       }
+
+      // Minecraft off: the games catalog, where its play lease and tools live, has no Minecraft.
+      const games = await fetch(`${url}/v1/games/extensions`, { headers: operator });
+      expect(games.status).toBe(200);
+      const catalog = (await games.json()) as { extensions: { id: string }[] };
+      expect(catalog.extensions.map((entry) => entry.id)).not.toContain("minecraft");
 
       // Issues on a local-files tracker, through the CLI and the service.
       expect((await clankie(["work", "init"])).repo.backend).toBe("default");

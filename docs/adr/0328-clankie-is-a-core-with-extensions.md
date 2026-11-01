@@ -33,10 +33,12 @@ sets the owner's switch for the next start; the app shows and flips the same swi
 The core-only end-to-end test (`apps/clankie/test/core-only-composition.integration.test.ts`)
 starts the real service with every switch off and hires, messages, reads and
 hears from an agent in a scratch Herdr; with `voice` off, joining voice and
-watching screen shares now leave his tools too. Still reached with every switch
+watching screen shares now leave his tools too, and with `minecraft` off
+(`minecraft-extension.ts`, a switch beside Minecraft's `GameExtension`) its game,
+routes, tools, host and MCP motor are never built. Still reached with every switch
 off: image and video generation and skin drafts (the appearance question below),
-Minecraft (no switch yet), the persona's music and room tools, and `linear_wake`
-(built inside the captain's tracker wakes).
+the persona's music and room tools, and `linear_wake` (built inside the
+captain's tracker wakes).
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside

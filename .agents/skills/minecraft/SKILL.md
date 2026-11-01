@@ -21,6 +21,10 @@ configuration are owner-approved. The CLI equivalent is `clankie minecraft`, and
 `/minecraft` exposes it in the console. Backend setup, playit and plugin details:
 [hosting](reference/hosting.md). `clankie games extensions` (TUI
 `/games extensions`) reports game lifecycle and health without joining a world.
+Minecraft is also an owner switch: `clankie extensions off minecraft` leaves it
+out from the next restart (no tools, routes, host or motor), and `clankie
+extensions on minecraft` brings it back. If his Minecraft tools are missing,
+check `clankie extensions` before anything else.
 
 ## Set up a world with its owner
 

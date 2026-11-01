@@ -1409,20 +1409,21 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  app.post("/v1/internal/minecraft-login-code/authorize", async (context) => {
-    const body = await authenticateCaptain(context.req.raw, dependencies);
-    if (!body || body === "unavailable" || body.steerSourceLane !== "discord_text")
-      return context.body(null, 403);
-    const input = await context.req.json().catch(() => undefined);
-    if (!input || typeof input !== "object" || typeof input.capability !== "string")
-      return context.body(null, 403);
-    const { capability, ...payload } = input;
-    const allowed = await dependencies.minecraftPrivateDelivery
-      ?.authorize(capability, payload)
-      .catch(() => false);
-    context.header("Cache-Control", "no-store");
-    return context.body(null, allowed ? 204 : 403);
-  });
+  // Mounted only while Minecraft's switch is on (ADR 0328); its extension supplies the check.
+  const minecraftPrivateDelivery = dependencies.minecraftPrivateDelivery;
+  if (minecraftPrivateDelivery !== undefined)
+    app.post("/v1/internal/minecraft-login-code/authorize", async (context) => {
+      const body = await authenticateCaptain(context.req.raw, dependencies);
+      if (!body || body === "unavailable" || body.steerSourceLane !== "discord_text")
+        return context.body(null, 403);
+      const input = await context.req.json().catch(() => undefined);
+      if (!input || typeof input !== "object" || typeof input.capability !== "string")
+        return context.body(null, 403);
+      const { capability, ...payload } = input;
+      const allowed = await minecraftPrivateDelivery.authorize(capability, payload).catch(() => false);
+      context.header("Cache-Control", "no-store");
+      return context.body(null, allowed ? 204 : 403);
+    });
 
   const gameRouteOptions = {
     settings: settingsSource,
