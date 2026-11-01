@@ -151,7 +151,6 @@ async function fixture() {
     settings,
     discordEnvironment: {},
     deliveredFiles: new DeliveredFileStore(attachments),
-    personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
   });
   cleanups.push(() => captain.close());
   return { root, workspace, attachments, captain, prompts, posts };

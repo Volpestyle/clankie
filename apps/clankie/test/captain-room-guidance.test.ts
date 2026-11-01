@@ -114,7 +114,6 @@ it("parallel room children consume guidance once and keep separate tool captures
       repoRoot: root,
       stateDir: root,
       settings: new SettingsStore(join(root, "settings.json")),
-      personaImages: async () => ({ images: [], hash: "fake", files: [] }),
     },
   );
   // Different speakers: one sender's follow-up would steer their running child instead.

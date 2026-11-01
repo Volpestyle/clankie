@@ -7,14 +7,60 @@
 // seat, which ADR 0048 treats as an accepted ToS risk for one account and would
 // be a fleet's worth of violations for a fleet.
 
-import { planDiscordWebhookPost } from "@clankie/discord-presence-core";
+import {
+  discordOwnerAudience,
+  parseDiscordWebhookUrl,
+  planDiscordWebhookPost,
+} from "@clankie/discord-presence-core";
 import { discordFleetGuild, discordGuildSettings, type DiscordSettings } from "@clankie/protocol";
+import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { ChannelProjection } from "./conversations.ts";
+import type { CreateChannelProjection } from "./deps.ts";
 
 const DISCORD_API = "https://discord.com/api/v10";
 /** Discord's own limits. Exceeding either is a rejected post, not a truncated one. */
 const CONTENT_MAX = 2_000;
 const USERNAME_MAX = 80;
+
+/**
+ * The persona's channel projection, as the captain builds it (ADR 0328). The
+ * trusted runtime that holds the bot token makes a room's webhook; without one,
+ * only a pasted webhook projects.
+ */
+export function discordChannelProjection(
+  runtime: Pick<DiscordPresenceRuntimePort, "provisionChannel" | "listRooms" | "swarmGuildId"> | undefined,
+): CreateChannelProjection {
+  return (host) =>
+    createChannelProjection({
+      fleetSettings: host.fleetSettings,
+      ownerAudience: async (guildId, channelId) => {
+        if (!host.discordActions) return false;
+        const discord = await host.fleetSettings();
+        return discordOwnerAudience(discord, guildId, channelId, async (action) => {
+          const result = await host.discordActions!.serverAction(action);
+          if (!result.ok) throw new Error("Discord audience unavailable");
+          return result.data;
+        });
+      },
+      ...(host.discordActions?.serverAction === undefined
+        ? {}
+        : {
+            participantPost: async (channelId: string, content: string) => {
+              const result = await host.discordActions!.serverAction({
+                method: "POST",
+                path: `/channels/${channelId}/messages`,
+                body: { content, allowed_mentions: { parse: [] } },
+              });
+              if (!result.ok) throw new Error(result.message);
+            },
+          }),
+      ...(runtime?.provisionChannel === undefined
+        ? {}
+        : { provision: (input) => runtime.provisionChannel!(input) }),
+      ...(runtime?.listRooms === undefined ? {} : { rooms: () => runtime.listRooms!() }),
+      ...(runtime?.swarmGuildId === undefined ? {} : { swarmGuildId: () => runtime.swarmGuildId!() }),
+    });
+}
 
 export function createChannelProjection(
   options: {
@@ -55,6 +101,7 @@ export function createChannelProjection(
       throw new Error("Discord fleet display requires Admin in the connected server and fleet enabled.");
   };
   return {
+    parseWebhookUrl: parseDiscordWebhookUrl,
     post: async (input) => {
       await requireAdmin(input.guildId);
       if (options.fleetSettings !== undefined) {

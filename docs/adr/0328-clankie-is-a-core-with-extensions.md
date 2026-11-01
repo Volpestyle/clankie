@@ -26,7 +26,18 @@ or worker report, and the owner's `room_turn` fork (`captain/captain-discord-tur
 reaching the captain as `CaptainDeps.roomTurns` only while the persona is on at
 start, over the core's shapes in `captain/room-turns.ts`; the owner check and
 operator and remote-lead wakes stay core in `captain/conversation-wakes.ts`, and
-a Discord-origin owner holds nothing while the persona is off). Each
+a Discord-origin owner holds nothing while the persona is off; the server owner
+and owner-audience checks inside a room turn are `RoomTurns` methods too), then
+the persona's channel projection onto Discord rooms
+(`captain/discord-channel-projection.ts`, reaching the captain as
+`CaptainDeps.channelProjection` only while the persona is on at start; without
+it no room goes to Discord), his look references (`persona-images.ts`, reaching
+the captain as `personaLook` and voice briefings as `personaBriefing`, over the
+core's `PersonaLook` shape, only while the persona is on), and the persona's
+exact Discord delivery receipts (`captain/discord-turn-receipts.ts`, owned by
+`personaRoutes`, which hand the core a read of them through
+`discordBody.useRoomDeliveryReceipts` in the core's `RoomDeliveryReceipts`
+shape). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app shows and flips the same switches in Settings → Extensions.

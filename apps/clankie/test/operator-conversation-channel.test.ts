@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { foldOperatorConversationReactions, type UpsertOperatorChannel } from "@clankie/protocol";
+import { parseDiscordWebhookUrl } from "@clankie/discord-presence-core";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import type { FleetSeatDelivery } from "../src/captain/fleet-seat.ts";
 
@@ -54,6 +55,7 @@ describe("channel conversations", () => {
         post: async (post) => {
           posted.push(post);
         },
+        parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: async () => ({ guildId: "guild-1", channelId: "channel-1" }),
         swarmGuildId: () => "guild-1",
       });
@@ -199,6 +201,7 @@ describe("channel conversations", () => {
           posted.push({ ...post });
           return Promise.resolve();
         },
+        parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
         swarmGuildId: () => "guild-1",
       },
@@ -266,6 +269,7 @@ describe("channel conversations", () => {
         posted.push({ ...post });
         return Promise.resolve();
       },
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
       swarmGuildId: () => "guild-1",
     });
@@ -338,6 +342,7 @@ describe("channel conversations", () => {
         },
         // Discord answers which room the webhook points at, so the operator
         // never types a guild or channel id.
+        parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
         swarmGuildId: () => "guild-1",
       },
@@ -427,6 +432,7 @@ describe("channel conversations", () => {
     );
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
       swarmGuildId: () => "guild-1",
@@ -467,6 +473,7 @@ describe("channel conversations", () => {
     );
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
       rooms,
@@ -507,7 +514,13 @@ describe("channel conversations", () => {
           webhookToken: "provisioned-secret",
         }),
     );
-    const store = channelStore(root, { post, resolve: vi.fn(), provision, swarmGuildId: () => "oathkeeper" });
+    const store = channelStore(root, {
+      post,
+      parseWebhookUrl: parseDiscordWebhookUrl,
+      resolve: vi.fn(),
+      provision,
+      swarmGuildId: () => "oathkeeper",
+    });
 
     const created = await upsertChannel(store, {
       title: "Field notes",
@@ -560,6 +573,7 @@ describe("channel conversations", () => {
     const root = await makeRoot("clankie-channel-norooms-");
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       swarmGuildId: () => "guild-1",
     });
@@ -572,6 +586,7 @@ describe("channel conversations", () => {
     const root = await makeRoot("clankie-channel-noprovision-");
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       swarmGuildId: () => "guild-1",
     });
@@ -596,6 +611,7 @@ describe("channel conversations", () => {
           posted.push({ username: post.username, content: post.content });
           return Promise.resolve();
         },
+        parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: (credential) =>
           Promise.resolve({ guildId: "guild-1", channelId: `discord-${credential.webhookId}` }),
         swarmGuildId: () => "guild-1",
@@ -645,6 +661,7 @@ describe("channel conversations", () => {
     const provision = vi.fn(() => Promise.reject(new Error("Missing Permissions")));
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
       swarmGuildId: () => "guild-1",
@@ -669,6 +686,7 @@ describe("channel conversations", () => {
     const provision = vi.fn(() => Promise.reject(new Error("Missing Permissions")));
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
       swarmGuildId: () => "guild-1",
@@ -698,6 +716,7 @@ describe("channel conversations", () => {
     const remove = vi.fn(() => Promise.resolve());
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "pasted-channel" }),
       provision: () =>
         Promise.resolve({
@@ -747,6 +766,7 @@ describe("channel conversations", () => {
     const remove = vi.fn(() => Promise.resolve());
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision: () =>
         Promise.resolve({
@@ -788,6 +808,7 @@ describe("channel conversations", () => {
     );
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
       swarmGuildId: () => "guild-1",
@@ -835,6 +856,7 @@ describe("channel conversations", () => {
     const resolve = vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" }));
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve,
       provision: vi.fn(),
       swarmGuildId: () => "oathkeeper",
@@ -858,6 +880,7 @@ describe("channel conversations", () => {
     const root = await makeRoot("clankie-channel-forum-webhook-");
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "forum-1" })),
       rooms: vi.fn(() =>
         Promise.resolve([{ kind: "forum" as const, channelId: "forum-1", name: "field-notes" }]),
@@ -879,6 +902,7 @@ describe("channel conversations", () => {
     const provision = vi.fn();
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve,
       provision,
       swarmGuildId: () => undefined,
@@ -903,6 +927,7 @@ describe("channel conversations", () => {
     // Projected while blinker city was admitted; the managed server is oathkeeper now.
     const projection = {
       post,
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" })),
       swarmGuildId: (): string | undefined => "blinker-city",
     };
@@ -930,6 +955,7 @@ describe("channel conversations", () => {
     const root = await makeRoot("clankie-channel-swarmwebhook-");
     const store = channelStore(root, {
       post: vi.fn(() => Promise.resolve()),
+      parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "77" })),
       swarmGuildId: () => "oathkeeper",
     });

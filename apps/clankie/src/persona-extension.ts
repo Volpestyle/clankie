@@ -1,5 +1,6 @@
 import type { ClankieExtension } from "@clankie/extension";
 import { registerDiscordRoutes } from "./app/discord-routes.ts";
+import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import { createAppearanceRoutes } from "./appearance-routes.ts";
 import { createDiscordRoomRoutes } from "./discord-room-routes.ts";
 import type { CorePorts, CoreProjection } from "./extension-host.ts";
@@ -11,14 +12,17 @@ import type { ExtensionRoutes } from "./ports/routes.ts";
  * voice settings, appearance, and the Discord body's own routes (presence,
  * channel turns, the user-session opt-in). The body's live state stays in the
  * core, which reads it for its own admission checks, and reaches these routes
- * through the route host.
+ * through the route host. Its exact delivery receipts are its own: the ones it is
+ * handed, or a store at the app's receipt path, which the core then reads.
  */
-export function personaRoutes(): ExtensionRoutes {
+export function personaRoutes(options: { readonly receipts?: DiscordTurnReceipts } = {}): ExtensionRoutes {
   return {
     place: "body",
     register(app, host) {
       const body = host.discordBody;
       const { dependencies } = body;
+      const receipts = options.receipts ?? new DiscordTurnReceipts(dependencies.discordTurnReceiptPath);
+      body.useRoomDeliveryReceipts(receipts);
       // First: its /v1/discord/* body limit and no-store reach the body routes below.
       if (dependencies.roomObservations !== undefined)
         app.route(
@@ -62,6 +66,7 @@ export function personaRoutes(): ExtensionRoutes {
       app.route("/", createAppearanceRoutes(host.ownerSettings, host.settings));
       registerDiscordRoutes({
         ...body,
+        discordTurnReceipts: receipts,
         app,
         settingsSource: host.settings,
         clock: host.clock,
@@ -72,14 +77,16 @@ export function personaRoutes(): ExtensionRoutes {
 }
 
 /** The persona as an ADR 0328 extension; its routes are all it serves so far. */
-export function personaExtension(): ClankieExtension<undefined, CorePorts, never, CoreProjection> {
+export function personaExtension(
+  options: { readonly receipts?: DiscordTurnReceipts } = {},
+): ClankieExtension<undefined, CorePorts, never, CoreProjection> {
   return {
     contractVersion: 1,
     id: "persona",
     settings: { key: "persona", schema: { parse: () => undefined } },
     needs: [],
     create() {
-      const routes = personaRoutes();
+      const routes = personaRoutes(options);
       return {
         async start() {},
         async stop() {},

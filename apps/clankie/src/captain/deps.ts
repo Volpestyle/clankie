@@ -39,6 +39,16 @@ import type { McpHost } from "../mcp-host.ts";
 import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
 import type { CreateRoomTurns } from "./room-turns.ts";
+import type { ChannelProjection } from "./conversations.ts";
+
+/** What the captain lends the persona's channel projection (ADR 0146, ADR 0328). */
+export interface ChannelProjectionHost {
+  /** The owner's current Discord settings, read fresh before each projection write. */
+  readonly fleetSettings: () => Promise<import("@clankie/protocol").DiscordSettings>;
+  readonly discordActions?: Pick<DiscordActionPort, "serverAction">;
+}
+
+export type CreateChannelProjection = (host: ChannelProjectionHost) => ChannelProjection;
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
@@ -64,6 +74,8 @@ export interface CaptainDeps {
   ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
   /** The persona's room turns: Discord messages, room wakes and owner forks (ADR 0328). */
   readonly roomTurns?: CreateRoomTurns;
+  /** The persona's projection of channels onto Discord rooms (ADR 0146, ADR 0328). */
+  readonly channelProjection?: CreateChannelProjection;
   /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
   readonly activityTools?: (
     turn: import("./tools.ts").TurnContext,

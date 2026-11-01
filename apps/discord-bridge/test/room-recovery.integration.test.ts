@@ -212,7 +212,6 @@ it("recovers an outage once, delivers saved answers to their original room and a
       stateDir: join(root, "captain"),
       settings,
       discordEnvironment: {},
-      personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
     },
   );
   const roomId = captain.bodyRoomConversation("discord_presence", "40000:50000");
@@ -223,7 +222,7 @@ it("recovers an outage once, delivers saved answers to their original room and a
   const leases = new BodyLeaseStore(join(root, "body"));
   const router = new BodyLeaseRouter(leases);
   const service = await createClankieApp({
-    extensionRoutes: [personaRoutes()],
+    extensionRoutes: [personaRoutes({ receipts })],
     captain,
     settings,
     roomObservations: observations,
@@ -232,7 +231,6 @@ it("recovers an outage once, delivers saved answers to their original room and a
         ? { operatorId: "fixture-owner" }
         : undefined,
     discordEnvironment: {},
-    discordTurnReceipts: receipts,
     eventLogPath: join(root, "events.jsonl"),
     authenticateCaptain: createBearerAuthenticator("fixture-captain", {
       captainId: "fixture-body",

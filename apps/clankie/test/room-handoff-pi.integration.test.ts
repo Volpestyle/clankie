@@ -228,7 +228,6 @@ it("real Pi room children bound admission fairly, keep grants under a bound Code
     nativeCensusRunner: census,
     nativeHerdrRunner: nativeRunner,
     seatAdapters: [],
-    personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
   };
   let captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), options);
   let work: Promise<unknown>[] = [];
