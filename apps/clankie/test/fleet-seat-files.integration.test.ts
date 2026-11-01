@@ -154,6 +154,9 @@ describe("an image from a seat on a linked machine", () => {
     await writeFile(join(pc.root, "secret.png"), PNG);
     await symlink(join(pc.root, "secret.png"), join(pc.workspace, "linked.png"));
     await symlink(pc.root, join(pc.workspace, "up"));
+    await mkdir(join(pc.root, "private", "sub"), { recursive: true });
+    await writeFile(join(pc.root, "private", "secret.png"), PNG);
+    await symlink(join(pc.root, "private", "sub"), join(pc.workspace, "link"));
     const read = (path: string) =>
       readFleetSeatImage({ fleet, shell: pc.shell, workspace: pc.workspace, path });
 
@@ -173,7 +176,13 @@ describe("an image from a seat on a linked machine", () => {
       outcome: "unavailable",
       message: expect.stringContaining("3.8 MB"),
     });
-    for (const path of ["linked.png", "up/secret.png", "../../secret.png", join(pc.root, "secret.png")])
+    for (const path of [
+      "linked.png",
+      "up/secret.png",
+      "../../secret.png",
+      "link/../secret.png",
+      join(pc.root, "secret.png"),
+    ])
       expect(await read(path)).toMatchObject({
         outcome: "unavailable",
         message: expect.stringContaining("Only files inside the agent's working directory"),
