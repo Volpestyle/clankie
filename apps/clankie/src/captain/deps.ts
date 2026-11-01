@@ -186,7 +186,8 @@ export interface CaptainDeps {
   /** The mail tools only; the account catalog owns status and disconnect. */
   readonly email: Pick<EmailPort, "list" | "read" | "search" | "send">;
   readonly browser: BrowserToolPort;
-  readonly media: {
+  /** Image and video generation; absent while the media extension is off (ADR 0328). */
+  readonly media?: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
     /** `room` tags the render so the room that asked is told when it lands. */
     generateVideo(request: GenerateVideoRequest, room?: string): Promise<GenerateVideoResult>;

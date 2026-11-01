@@ -24,7 +24,7 @@ import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { assertScratchNetwork, verifyLocalSandbox } from "@clankie/settings";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
 import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
 import { ActivityPlaySource } from "./activity-play-source.ts";
@@ -141,9 +141,6 @@ import {
 } from "@clankie/settings";
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
-import { SkinDraftService } from "./skin-drafts.ts";
-import { skinDraftRoutes } from "./skin-draft-routes.ts";
-import { skinDraftGenerator } from "./skin-draft-generation.ts";
 import { RemoteProjectLeads } from "./remote-project-leads.ts";
 import { createLeadWakes } from "./lead-wakes.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
@@ -243,7 +240,6 @@ import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import type { DiscordPresenceRuntimePort } from "./discord-presence-runtime.ts";
 import { readDiscordBodyDirectory } from "./discord-directory.ts";
 import { readDiscordBodyPermissions, postDiscordBodyTest } from "./discord-setup-body.ts";
-import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { createFileMemory, defaultMemoryDir } from "./memory.ts";
 import { createCaptainMemory } from "./captain-memory.ts";
 import { createWorldPlayExecution } from "./play-execution-world.ts";
@@ -427,6 +423,12 @@ const extensions = createCoreExtensions({
   get machineJoins() {
     return machineJoins;
   },
+  repoRoot,
+  get deliveredFiles() {
+    return deliveredFiles;
+  },
+  // His look, filled by the persona extension while it runs; empty without it.
+  appearance: async () => projected(extensions, "appearance")?.(),
   whenListening: (run) => void listening.then(run),
   ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
 });
@@ -497,29 +499,6 @@ if (deviceSessionKey === undefined) {
 const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
-const skinDraftOwner = process.env.CLANKIE_OPERATOR_ID ?? "local-operator";
-const skinMediaRoot = join(
-  stateRoot,
-  "skin-drafts-media",
-  createHash("sha256").update(skinDraftOwner).digest("hex"),
-);
-const skinMediaGenerator = new ConfiguredMediaGenerator({
-  credentials: operatorCredentialStore,
-  attachmentRoot: skinMediaRoot,
-  configCwd: repoRoot,
-});
-const skinDrafts = new SkinDraftService({
-  root: join(stateRoot, "skin-drafts"),
-  ownerId: skinDraftOwner,
-  files: deliveredFiles,
-  generator: skinDraftGenerator({
-    media: skinMediaGenerator,
-    attachmentRoot: skinMediaRoot,
-    // VUH-2041: hosted credit admission is still an owner decision. Neither
-    // a model command nor a pose approval can open this paid route.
-    admit: async () => false,
-  }),
-});
 const personaImages = createPersonaImageSource(settingsStore, repoRoot);
 // Snapshot on startup without holding service readiness behind a caption call.
 void personaImages()
@@ -531,12 +510,6 @@ void personaImages()
       );
   })
   .catch((error: unknown) => logger.warn({ error }, "Persona image settings unavailable"));
-const mediaGenerator = new ConfiguredMediaGenerator({
-  personaImages,
-  credentials: operatorCredentialStore,
-  attachmentRoot,
-  configCwd: repoRoot,
-});
 
 // Clankie's private Browser Use Pi session (ADR 0328 extension). Chrome launches on the first call.
 extensions.add(browserExtension, {
@@ -546,10 +519,11 @@ extensions.add(browserExtension, {
 await extensions.start();
 const browserHost = browserOf(extensions);
 
-// What he makes (ADR 0328 extension), starting with his drawing hand (ADR 0096).
+// What he makes (ADR 0328 extension): pictures, clips, skin drafts and his drawing hand (ADR 0096).
 extensions.add(mediaExtension, { enabled: switchedOn(startupSettings, "media"), settings: undefined });
 await extensions.start();
 const tldrawHost = projected(extensions, "diagrams");
+const media = projected(extensions, "media");
 
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
@@ -1579,7 +1553,7 @@ const captain = createCaptain(
       shell: (fleet) => runtimes.fleetShell(fleet),
       remoteWorkspace: (fleet, directory) => runtimes.remoteWorkspace(fleet, directory),
     },
-    skinDrafts,
+    ...(media === undefined ? {} : { skinDrafts: media.skinDrafts }),
     mcp: mcpHost,
     email,
     serviceReadiness: async () => {
@@ -1616,11 +1590,15 @@ const captain = createCaptain(
           reason: "browser_unavailable" as const,
         }),
     },
-    media: {
-      generateImage: (request) => mediaGenerator.generateImage(request),
-      generateVideo: (request, room) => mediaGenerator.generateVideo(request, { room }),
-      finishedRenders: (room) => mediaGenerator.finishedRenders(room),
-    },
+    ...(media === undefined
+      ? {}
+      : {
+          media: {
+            generateImage: (request) => media.generator.generateImage(request),
+            generateVideo: (request, room) => media.generator.generateVideo(request, { room }),
+            finishedRenders: (room) => media.generator.finishedRenders(room),
+          },
+        }),
     ...(tldrawHost === undefined ? {} : { diagrams: tldrawHost }),
     embodiment: {
       submitIntent: (intent, identity) => bodyPlaySessions.submit(intent, identity, boundApp().embodiment),
@@ -2123,7 +2101,7 @@ const workerMcp = new WorkerMcp({
   credentials: operatorCredentialStore,
   host: mcpHost,
   ...(minecraft === undefined ? {} : { minecraft }),
-  video: mediaGenerator,
+  ...(media === undefined ? {} : { video: media.generator }),
   appNotes: {
     read: async (input) =>
       captain.appNotes?.({ action: "read", ...input }) ??
@@ -2348,7 +2326,7 @@ extensions.add(
   ),
   { enabled: voiceOn, settings: undefined },
 );
-extensions.add(personaExtension({ receipts: discordTurnReceipts }), {
+extensions.add(personaExtension({ receipts: discordTurnReceipts, appearance: personaImages }), {
   enabled: personaOn,
   settings: undefined,
 });
@@ -2464,7 +2442,7 @@ const clankie = await createClankieApp({
   bodyPlaySessions,
   guidePokemonPlay: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
   ...(minecraftPrivateDelivery === undefined ? {} : { minecraftPrivateDelivery }),
-  extensionRoutes: [...routesOf(extensions), skinDraftRoutes(skinDrafts)],
+  extensionRoutes: routesOf(extensions),
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
@@ -2632,7 +2610,6 @@ const clankie = await createClankieApp({
   memory,
   settings: settingsStore,
   ...(personaOn ? { personaBriefing: personaLook(personaImages).briefing } : {}),
-  mediaGenerator,
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(browserHost === undefined ? {} : { browserTools: browserHost }),
