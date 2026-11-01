@@ -1631,14 +1631,19 @@ const captain = createCaptain(
     // rather than offering calls that can only ever refuse.
     ...(discordBodyInLoadout
       ? {
-          streamWatch: {
-            current: () => Promise.resolve(boundApp().streamWatch()),
-          },
           discordMusic: createDiscordMusicClient(),
-          discordVoicePresence: createDiscordVoicePresenceClient(process.env, fetch, {
-            voice: bodyVoiceStays,
-            router: bodyLeases,
-          }),
+          // Joining voice and watching shares are the voice extension's (ADR 0328).
+          ...(switchedOn(startupSettings, "voice")
+            ? {
+                streamWatch: {
+                  current: () => Promise.resolve(boundApp().streamWatch()),
+                },
+                discordVoicePresence: createDiscordVoicePresenceClient(process.env, fetch, {
+                  voice: bodyVoiceStays,
+                  router: bodyLeases,
+                }),
+              }
+            : {}),
         }
       : {}),
     discordActions: createDiscordCaptainActionClient(process.env, fetch, discordTurnReceipts),
