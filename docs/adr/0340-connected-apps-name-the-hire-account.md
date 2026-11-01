@@ -41,3 +41,14 @@ Claude hires then go to the accounts left, by pace; apps start Codex hires with
 An app can spend an account the owner held, but only by naming it on a hire,
 and the hire's `accountChoice` and the fleet's usage show it. Older services
 refuse the unknown field, so an app's named account fails closed there.
+
+## Amendment: MCP servers on a start
+
+`start_agent` also takes optional `mcpServers`, the owner's own MCP servers by
+harness config name, which add up with the fleet's and role's opt-ins exactly as
+the captain's `hire_agent` field does (`effectiveHireProfile`). It narrows the
+harness and grants nothing: it can only switch on servers the owner already
+configured. It exists so a connected lead can start the Codex computer-use seat
+(`harness: codex`, `mcpServers: ["node_repl"]`) that keeps screen work in
+background windows (#228). The relay and the service both check the names, and
+older services refuse the unknown field.

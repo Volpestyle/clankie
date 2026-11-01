@@ -848,6 +848,16 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
         .max(128)
         .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u)
         .optional(),
+      /**
+       * The owner's own MCP servers, by harness config name, that this hire needs on top of
+       * its fleet's and role's opt-ins, as the captain's hire tool takes them: a Codex
+       * computer-use seat needs `node_repl`. Narrows the harness; grants nothing.
+       */
+      mcpServers: z
+        .array(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u))
+        .min(1)
+        .max(32)
+        .optional(),
       /** The first thing the agent is asked; information from the caller, delivered as its brief. */
       prompt: z.string().trim().min(1).max(8_000).optional(),
     })

@@ -807,6 +807,8 @@ describe("fleet routing", () => {
         machine: "volpe@supedupsilly",
         workingDirectory: "C:\\code\\kh2",
         harness: "codex",
+        // A connected app can name the owner's MCP servers the job needs, as the captain can.
+        mcpServers: ["node_repl"],
         prompt: "fix the netcode desync",
       }),
     ).toMatchObject({ status: "started", seatId: "pc/term_new" });
@@ -814,6 +816,7 @@ describe("fleet routing", () => {
       {
         seat: expect.objectContaining({
           harness: "codex",
+          mcpServers: ["node_repl"],
           workingDirectory: "C:\\code\\kh2",
           fleet: "pc",
           projectId: "kh2",

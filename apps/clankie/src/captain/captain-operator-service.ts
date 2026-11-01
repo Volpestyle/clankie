@@ -959,6 +959,7 @@ export function createOperatorService(
           schemaVersion: 1,
           harness,
           ...(request.account === undefined ? {} : { account: request.account }),
+          ...(request.mcpServers === undefined ? {} : { mcpServers: request.mcpServers }),
           title,
           // The tab the owner sees names the work, not just the project (every hire here
           // would otherwise read "clankie · Work").

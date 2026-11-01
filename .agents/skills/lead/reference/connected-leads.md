@@ -11,6 +11,8 @@ it; none takes precedence over another.
   (`account`, a label from `fleet_capacity`), the owner wants spent: an account
   the owner held is never chosen for you, but you may name it as overflow
   ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
+  Screen work goes to a Codex computer-use seat: `harness: "codex"` with
+  `mcpServers: ["node_repl"]`, briefed to stay in background windows.
   Do the work yourself
   when that fits better: planning, research, reading, writing that needs no
   checkout.
