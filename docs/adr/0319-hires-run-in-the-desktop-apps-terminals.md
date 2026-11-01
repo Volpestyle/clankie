@@ -35,7 +35,7 @@ detected.
 - **A machine's hires go where its owner works.** When the desktop app's core
   answers on a machine, Clankie's hires there start in its terminals; otherwise
   they start in Herdr panes as today. `clankie fleet set --seat-host
-  auto|desktop|herdr` pins it per machine for the rare owner who wants the
+auto|desktop|herdr` pins it per machine for the rare owner who wants the
   other; there is no Common setting. Hires already running stay where they
   are. Until the desktop app's hires are proven on the owner's Mac, `auto`
   keeps them in Herdr panes and `desktop` opts in.
