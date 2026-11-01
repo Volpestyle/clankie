@@ -464,7 +464,7 @@ const SPAWN_CHANNEL_DIALOG_WAIT_MS = 30_000;
 const CHANNEL_DIALOG_MARKER = "Loading development channels";
 const CLAUDE_CHANNEL_CONSENT_REQUIRED =
   "consent_required: Claude stopped at its development-channel warning, which only the owner may accept. " +
-  "Fix: install clankie-worker@clankie and approve its channel in /Library/Application Support/ClaudeCode/managed-settings.json (channelsEnabled, allowedChannelPlugins).";
+  "Fix: approve the clankie-worker@inline channel in /Library/Application Support/ClaudeCode/managed-settings.json (channelsEnabled, allowedChannelPlugins).";
 const PI_ZONE_START = "\u001B]133;A\u0007";
 const PI_ZONE_END = "\u001B]133;B\u0007\u001B]133;C\u0007";
 
@@ -2373,7 +2373,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         reason: "not_ready",
         detail: "Owner app provenance must be verified by the owner service route.",
       };
-    // Only Claude has a read-only mode Clankie can start it in (ADR 0317). A
+    // Only Claude has a read-only mode Clankie can start it in (ADR 0320). A
     // resumed transcript keeps the mode it was saved under, so it never resumes.
     if (inputRequest.readOnly === true && (inputRequest.harness !== "claude" || resume !== undefined))
       return {

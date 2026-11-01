@@ -8,7 +8,7 @@ import {
 import type { HerdrFleet } from "../src/herdr-fleet.ts";
 
 const pc: HerdrFleet = { id: "pc", session: "default", ssh: { host: "volpe@pc", shell: "powershell" } };
-const worker = { marketplace: "clankie", plugin: "clankie-worker" };
+const worker = { marketplace: "inline", plugin: "clankie-worker" };
 
 describe("preparing a machine for Claude workers (VUH-1527)", () => {
   it("approves the worker channel and keeps every other policy entry", () => {
@@ -29,6 +29,22 @@ describe("preparing a machine for Claude workers (VUH-1527)", () => {
       allowedChannelPlugins: [worker],
     });
     expect(() => approveWorkerChannel("[1]")).toThrow(/untouched/u);
+    // The installed copy's old pair goes once setup removes that copy; every other entry stays.
+    const legacy = approveWorkerChannel(
+      JSON.stringify({
+        channelsEnabled: true,
+        allowedChannelPlugins: [
+          { marketplace: "clankie", plugin: "clankie-worker" },
+          worker,
+          { marketplace: "m", plugin: "p" },
+        ],
+      }),
+    );
+    expect(legacy.changed).toBe(true);
+    expect(JSON.parse(legacy.content).allowedChannelPlugins).toEqual([
+      worker,
+      { marketplace: "m", plugin: "p" },
+    ]);
   });
 
   it("ships a marketplace with only the worker plugin", () => {
@@ -38,31 +54,45 @@ describe("preparing a machine for Claude workers (VUH-1527)", () => {
     });
   });
 
-  it("reads consent from the machine's plugins and policy, and names the one fix", async () => {
-    const output = (plugins: string, policies: string[]) =>
+  it("reads consent from the staged worker plugin and the machine's policy, and names the one fix", async () => {
+    const root = "C:\\Users\\volpe\\.clankie\\claude-plugin\\worker";
+    const output = (staged: boolean, policies: string[]) =>
       [
         "noise",
-        "---CLANKIE-PLUGINS---",
-        plugins,
+        ...(staged ? ["---CLANKIE-WORKER-ROOT---", root] : []),
         ...policies.flatMap((p) => ["---CLANKIE-POLICY---", p]),
       ].join("\r\n");
-    expect(parseConsentOutput(output("[]", ["{}", '{"a":1}']))).toEqual({
-      plugins: "[]",
+    expect(parseConsentOutput(output(true, ["{}", '{"a":1}']))).toEqual({
+      root,
       policies: ["{}", '{"a":1}'],
     });
-    const installed = '[{"id":"clankie-worker@clankie"}]';
     const policy = JSON.stringify({ channelsEnabled: true, allowedChannelPlugins: [worker] });
-    expect(await remoteClaudeConsent(pc, async () => output(installed, [policy]))()).toEqual({
-      approved: true,
-    });
-    expect(await remoteClaudeConsent(pc, async () => output(installed, []))()).toMatchObject({
+    const ready = remoteClaudeConsent(pc, async () => output(true, [policy]));
+    expect(await ready.consent()).toEqual({ approved: true });
+    // Each launch loads the staged copy from where that machine reported it.
+    expect(await ready.workerRoot()).toBe(root);
+    expect(await remoteClaudeConsent(pc, async () => output(true, [])).consent()).toMatchObject({
       approved: false,
       fix: expect.stringContaining("clankie herdr prepare pc"),
     });
-    expect(await remoteClaudeConsent(pc, async () => output("[]", [policy]))()).toMatchObject({
-      approved: false,
-      detail: expect.stringContaining("not installed on pc"),
+    // Approving only an older installed copy's identity is not this launch's channel.
+    const legacy = JSON.stringify({
+      channelsEnabled: true,
+      allowedChannelPlugins: [{ marketplace: "clankie", plugin: "clankie-worker" }],
     });
+    expect(await remoteClaudeConsent(pc, async () => output(true, [legacy])).consent()).toMatchObject({
+      approved: false,
+    });
+    const sideloadOff = JSON.stringify({ disableSideloadFlags: true });
+    expect(
+      await remoteClaudeConsent(pc, async () => output(true, [policy, sideloadOff])).consent(),
+    ).toMatchObject({ approved: false });
+    const unstaged = remoteClaudeConsent(pc, async () => output(false, [policy]));
+    expect(await unstaged.consent()).toMatchObject({
+      approved: false,
+      detail: expect.stringContaining("no worker plugin staged"),
+    });
+    await expect(unstaged.workerRoot()).rejects.toThrow(/no approved worker plugin/u);
   });
 
   it("denies tracker connectors from the machine's own Claude configuration, by Windows path rules", async () => {
@@ -134,11 +164,8 @@ it.each([true, false])(
         copied.push(destination);
       },
     });
-    if (current) await expect(result).rejects.toThrow("Codex preparation incomplete on pc");
-    else
-      await expect(result).rejects.toThrow(
-        ".claude-james: source-manager-required (Use the owning source setup)",
-      );
+    // A Claude profile's install state no longer gates preparation: hires load the staged copy.
+    await expect(result).rejects.toThrow("Codex preparation incomplete on pc");
     expect(copied).toContain(".clankie/claude-plugin.new/.agents");
     expect(commands.join("\n")).not.toMatch(/AppendAllText|mcp_servers\.clankie|plugin disable/u);
   },

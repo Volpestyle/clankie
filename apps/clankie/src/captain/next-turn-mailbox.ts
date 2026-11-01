@@ -87,7 +87,7 @@ export class NextTurnMailbox {
         detail:
           "Idle wake is unavailable: only this session's next UserPromptSubmit receiver is observed. Messages stay in the next-turn mailbox. Check the channel launch flag and bridge connection; plugin installation alone cannot enable a channel in a running Claude session. Coordinate any reconnect or relaunch with the owner; do not type into the pane or replay mail." +
           (z.string().uuid().safeParse(sessionId).success
-            ? ` When authorized, resume in the original cwd and account/config home: claude --resume ${sessionId} --channels plugin:clankie-worker@clankie`
+            ? ` When authorized, resume in the original cwd and account/config home with Clankie's worker loaded for that session (ADR 0317): claude --resume ${sessionId} --plugin-dir <that machine's Clankie worker plugin folder> --channels plugin:clankie-worker@inline. In a prepared Mac pane, claude --resume ${sessionId} adds both.`
             : ""),
       };
     return {
@@ -139,7 +139,7 @@ export class NextTurnMailbox {
       draft: {
         seatId: seat,
         title: `Message waiting in ${pane}`.slice(0, 200),
-        body: `A message was stored for ${pane} because live native delivery was unavailable. It waits for that original session's next user prompt and expires within 24 hours. No terminal input was sent. Check the fleet roster for the current queue and handoff state. Enabling Claude's worker channel requires starting Claude with --channels plugin:clankie-worker@clankie; do not restart an existing lane without authority.`,
+        body: `A message was stored for ${pane} because live native delivery was unavailable. It waits for that original session's next user prompt and expires within 24 hours. No terminal input was sent. Check the fleet roster for the current queue and handoff state. Enabling Claude's worker channel requires starting Claude with Clankie's worker loaded for that session (--plugin-dir with --channels plugin:clankie-worker@inline, which a prepared Mac pane adds itself); do not restart an existing lane without authority.`,
       },
     };
   }

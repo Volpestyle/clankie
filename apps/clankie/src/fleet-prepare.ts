@@ -16,8 +16,9 @@ import {
 /**
  * The owner's one step for Claude workers on another machine (VUH-1527):
  * `clankie herdr prepare NAME`. Running it is the owner's approval. It ships
- * this Clankie's own worker plugin to that machine as a local `clankie`
- * marketplace (so its version always matches this service), enables it for every discovered Claude profile (including CLAUDE_CONFIG_DIR), and approves its
+ * this Clankie's own worker plugin to that machine (so its version always
+ * matches this service), where each Claude hire loads it with `--plugin-dir`
+ * and nothing is installed in a Claude profile (ADR 0317), and approves its
  * channel in that machine's managed policy, keeping any entries already there.
  * Policy is machine-wide, so the ssh account must be that machine's
  * administrator; otherwise the step fails and says so.
@@ -41,7 +42,8 @@ const STAGING_DIR = ".clankie/claude-plugin.new";
 export function workerMarketplace(): string {
   return JSON.stringify(
     {
-      name: CLAUDE_WORKER_PLUGIN.marketplace,
+      // The directory's own marketplace name; a Claude hire loads the plugin from it per launch.
+      name: "clankie",
       description: "Clankie's worker channel, shipped by `clankie herdr prepare`.",
       owner: { name: "Clankie" },
       plugins: [{ name: CLAUDE_WORKER_PLUGIN.plugin, source: "./worker" }],
@@ -63,13 +65,22 @@ export function approveWorkerChannel(existing: string): {
       throw new Error("The managed policy is not a JSON object; leaving it untouched");
     value = parsed as Record<string, unknown>;
   }
-  const allowed = Array.isArray(value.allowedChannelPlugins) ? [...value.allowedChannelPlugins] : [];
+  const listed = Array.isArray(value.allowedChannelPlugins) ? [...value.allowedChannelPlugins] : [];
+  // The installed copy's pair approves nothing once setup has removed that copy (ADR 0317).
+  const allowed = listed.filter(
+    (entry) =>
+      !(
+        (entry as { marketplace?: unknown })?.marketplace === "clankie" &&
+        (entry as { plugin?: unknown })?.plugin === CLAUDE_WORKER_PLUGIN.plugin
+      ),
+  );
   const present = allowed.some(
     (entry) =>
       (entry as { marketplace?: unknown })?.marketplace === CLAUDE_WORKER_PLUGIN.marketplace &&
       (entry as { plugin?: unknown })?.plugin === CLAUDE_WORKER_PLUGIN.plugin,
   );
-  if (value.channelsEnabled === true && present) return { content: existing, changed: false };
+  if (value.channelsEnabled === true && present && allowed.length === listed.length)
+    return { content: existing, changed: false };
   const next = {
     ...value,
     channelsEnabled: true,
@@ -258,7 +269,6 @@ export async function prepareFleet(
     await options.shell(installCommand(fleet, options.codexSourceSetup, options.linkedOnly), 180_000),
   );
   const harnesses = (await inspectFleetHarnesses(fleet, options)) as {
-    claude: Array<{ executable: boolean; enabled: boolean; versionMatches: boolean }>;
     codex: {
       executable: boolean;
       skill: boolean;
@@ -286,19 +296,6 @@ export async function prepareFleet(
       },
     };
   }
-  if (harnesses.claude.some((profile) => profile.executable && (!profile.enabled || !profile.versionMatches)))
-    throw new Error(
-      `A Claude profile on ${fleet.id} has a disabled or stale worker plugin; inspect clankie doctor and native plugin sources. ` +
-        (Array.isArray(installations)
-          ? installations
-              .filter((entry: { harness?: string }) => entry.harness === "claude")
-              .map(
-                (entry: { profile?: string; status?: string; detail?: string }) =>
-                  `${entry.profile ?? "profile"}: ${entry.status ?? "unknown"} (${(entry.detail ?? "").slice(0, 400)})`,
-              )
-              .join("; ")
-          : "Native installer returned no profile results"),
-    );
   const codexReady =
     harnesses.codex.executable === true &&
     harnesses.codex.pluginInstalled &&

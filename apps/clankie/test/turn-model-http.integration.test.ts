@@ -1,6 +1,6 @@
 import { spawn, execFile } from "node:child_process";
 import { once } from "node:events";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +30,6 @@ type Reply = { tool?: string; args?: Record<string, unknown>; actual?: string | 
 // endpoint speaking its real streaming protocol; this is not a model-quality eval.
 it("routes real HTTP turns without replay and retains authenticated serving identity and usage", async () => {
   const dir = await mkdtemp(join(tmpdir(), "turn-model-http-"));
-  await expect(access(join(root, ".env.local"))).rejects.toThrow();
   let replies: Reply[] = [];
   const requests: ProviderRequest[] = [];
   const provider = createServer(async (request, response) => {
@@ -74,6 +73,7 @@ it("routes real HTTP turns without replay and retains authenticated serving iden
   if (!address || typeof address === "string") throw new Error("provider not listening");
   await promisify(execFile)(process.execPath, [join(root, "scripts/scratch-stack.mjs"), dir]);
   const env = parseEnv(await readFile(join(dir, "stack.env"), "utf8"));
+  expect(env.CLANKIE_SCRATCH).toBe("1");
   Object.assign(env, {
     NODE_ENV: "test",
     VITEST: "true",

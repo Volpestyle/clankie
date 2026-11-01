@@ -103,7 +103,10 @@
         "integrations/pi-plugin/worker-connection.d.mts",
         "integrations/claude-plugin/hooks/mods/tool-catalog.mjs",
         "integrations/claude-plugin/worker/hooks/mods/tool-catalog.mjs",
-        "integrations/claude-plugin/worker/bin/mcp-result.mjs"
+        "integrations/claude-plugin/worker/bin/mcp-result.mjs",
+        "docs/testing/2026-10-31-participant-sessions/participant-view.mjs",
+        "docs/testing/2026-10-31-participant-sessions/view.mjs",
+        "docs/testing/2026-10-31-participant-sessions/render.mjs"
       ],
       "paths": {
         "/clankie/*": ["./*"]

@@ -13,7 +13,7 @@ import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import type { ExecutionConnections } from "../src/herdr-session.ts";
 
-// ADR 0317: setup's one read-only agent looks around, proposes, and only the
+// ADR 0320: setup's one read-only agent looks around, proposes, and only the
 // lines the owner approves run. Watch steps aside for it and comes back.
 
 const roots: string[] = [];

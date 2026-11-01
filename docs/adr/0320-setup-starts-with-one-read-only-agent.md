@@ -1,4 +1,4 @@
-# ADR 0317: Setup starts with one read-only agent
+# ADR 0320: Setup starts with one read-only agent
 
 Status: Accepted, 2026-11-01, on James's word approving it ("Build it into
 setup"), after "its almost like, onbaording needs an agent from the beginning
@@ -32,8 +32,9 @@ starts at, refuses every hire.
   asking. Claude adds each settings file's allow rules together, and
   `dontAsk` runs whatever any of them allows, so the hire starts with
   `--setting-sources ""`: none of the owner's user, project or local settings
-  load. Its hooks and report tools come from the worker plugin, which its own
-  flag settings enable. Managed policy still loads, and the hire denies edits,
+  load. Its hooks and report tools come from the worker plugin, which
+  `--plugin-dir` loads for that session ([ADR 0317](0317-a-claude-hire-loads-its-worker-plugin-for-that-session.md)) and its own flag
+  settings enable. Managed policy still loads, and the hire denies edits,
   writes and the web outright, which holds even against a managed allow. Maximum trust mode never applies to it, and it refuses any
   permission, settings or extra-directory argument. Only a new Claude hire
   through its seat adapter can be read-only; other harnesses, resumed

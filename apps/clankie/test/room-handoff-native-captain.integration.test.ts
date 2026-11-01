@@ -90,9 +90,7 @@ it.each(["claude", "codex"] as const)(
       discord: {
         ...current.discord,
         ownerUserId: "11111",
-        servers: [
-          { serverId: "12345", role: "participant", owners: harness === "claude" ? "everyone" : "me" },
-        ],
+        servers: [{ serverId: "12345", role: "admin", owners: harness === "claude" ? "everyone" : "me" }],
         systemActorUserIds: ["11111"],
       },
     }));

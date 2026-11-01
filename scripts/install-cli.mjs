@@ -67,7 +67,8 @@ const sourceManaged = (entry) => entry.status === "source-manager-required";
 const settled = (entries) =>
   entries.every(
     (entry) =>
-      sourceManaged(entry) || ["installed", "updated", "source-setup-completed"].includes(entry.status),
+      sourceManaged(entry) ||
+      ["installed", "updated", "removed", "source-setup-completed"].includes(entry.status),
   );
 const skipped = [
   ...refreshed.local.filter(sourceManaged).map((entry) => ({ machine: "local", ...entry })),

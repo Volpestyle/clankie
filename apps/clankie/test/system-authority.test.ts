@@ -68,10 +68,10 @@ describe("Discord turn authority", () => {
     });
   });
 
-  it("Everyone ownership grants a durable lane shared by admitted members", () => {
+  it("Admin Everyone ownership grants a durable lane shared by admitted members", () => {
     const trusted = {
       ...settings(),
-      servers: [{ serverId: GUILD, role: "participant" as const, owners: "everyone" as const }],
+      servers: [{ serverId: GUILD, role: "admin" as const, owners: "everyone" as const }],
     };
     const first = plan({ settings: trusted });
     expect(first).toMatchObject({ kind: "system_lane", systemTools: true, grant: "guild" });

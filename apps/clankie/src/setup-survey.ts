@@ -207,10 +207,10 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
     const { paneId: _paneId, held: _held, ...survey } = kept;
     return { schemaVersion: 1, survey };
   };
-  /** Watch goes off only for the survey, and comes back when it ends (ADR 0317). */
+  /** Watch goes off only for the survey, and comes back when it ends (ADR 0320). */
   async function setWatch(watch: boolean, held?: string): Promise<ClankieSettings> {
     return deps.settings.update((current) => {
-      // A level the owner chose while the agent looked around stands (ADR 0317).
+      // A level the owner chose while the agent looked around stands (ADR 0320).
       if (watch && held !== undefined && heldAutonomy(current) !== held) return current;
       const { watch: _watch, ...autonomy } = current.autonomy;
       return { ...current, autonomy: { ...autonomy, ...(watch ? { watch: true as const } : {}) } };
@@ -220,7 +220,7 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
    * Closes the agent. Its folder may be the owner's home tracked in Git, whose
    * uncommitted files are his own, not the agent's work, so the close says so
    * instead of holding on them. A close the service still refuses leaves the
-   * survey running, so stopping it again retries (ADR 0317).
+   * survey running, so stopping it again retries (ADR 0320).
    */
   /** Whether the agent's seat still has a live pane, after a fresh look if the last one missed it. */
   async function stillOpen(seatId: string): Promise<boolean> {

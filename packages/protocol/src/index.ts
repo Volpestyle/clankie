@@ -441,6 +441,7 @@ export {
   FLEET_SEAT_MCP_SERVER,
   CLAUDE_WORKER_PLUGIN,
   CLAUDE_WORKER_PLUGIN_ID,
+  CLAUDE_WORKER_INSTALLED_PLUGIN_ID,
   FleetSeatHookSchema,
   ClaudeChannelPermissionRequestSchema,
   type ClaudeChannelPermissionRequest,

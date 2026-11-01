@@ -976,7 +976,7 @@ it("the real captain leaves a read-only hire's folder exactly as it is, even an 
   const home = join(root, "home");
   let captain: ReturnType<typeof createCaptain> | undefined;
   try {
-    // A home tracked as Git with no origin/main and work in progress (ADR 0317).
+    // A home tracked as Git with no origin/main and work in progress (ADR 0320).
     await exec("git", ["init", "--initial-branch=main", home]);
     await writeFile(join(home, ".zshrc"), "export EDITOR=vi\n");
     captain = createCaptain({ herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps, {

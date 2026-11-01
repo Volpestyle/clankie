@@ -382,7 +382,7 @@ export interface CaptainPort {
   /**
    * Every retained report one seat sent a conversation since a time, read or
    * not, without offering it to anyone. Setup's agent reports to the shared
-   * lead thread, whose lead may read it first (ADR 0317). The seat's pane comes
+   * lead thread, whose lead may read it first (ADR 0320). The seat's pane comes
    * from the live census unless the caller kept it from an earlier answer, so a
    * closed pane's reports stay readable.
    */
@@ -463,7 +463,7 @@ export interface CaptainPort {
   syncSeatTranscript(conversationId: string, transcript: SeatTranscriptUpload): boolean;
   seatContext(
     conversationId?: string,
-  ): { conversationId: string; cwd: string; machineId?: string } | undefined;
+  ): { conversationId: string; cwd: string; machineId?: string; participantRoom?: true } | undefined;
   /** Exact transcript/profile recovery; never substitutes the last seat.json or another session. */
   operatorSeatRecovery?(
     conversationId: string,

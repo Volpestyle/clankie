@@ -3,7 +3,7 @@ import { AutonomyLevelSchema } from "./autonomy.ts";
 import { MachineAccessLevelSchema } from "./machine-access.ts";
 
 /**
- * Setup's one read-only agent (ADR 0317). After the owner picks his Herdr
+ * Setup's one read-only agent (ADR 0320). After the owner picks his Herdr
  * session, Clankie may hire one agent on an account the owner already uses. It
  * starts in its harness's read-only mode, looks around, and reports one
  * proposal. The owner approves it line by line, and only approved lines run.

@@ -61,7 +61,7 @@ export interface SeatLaunch {
    */
   readonly maximumTrust?: boolean;
   /**
-   * The harness's own read-only mode (ADR 0317): it reads and reports, and
+   * The harness's own read-only mode (ADR 0320): it reads and reports, and
    * refuses every other tool without asking. Never set with `maximumTrust`.
    */
   readonly readOnly?: boolean;

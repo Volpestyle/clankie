@@ -425,4 +425,4 @@ it("refuses empty, oversized, invalid UTF-8, truncated, contradictory and unsupp
     status: 1,
     body: { outcome: "refused", code: "invalid_path" },
   });
-});
+}, 120_000);

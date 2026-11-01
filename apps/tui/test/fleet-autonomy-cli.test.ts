@@ -286,8 +286,8 @@ it("lead setup runs the exact native plugin-manager operation headlessly and ski
   expect(results.find((entry) => entry.harness === "codex")).toMatchObject({
     status: "installed",
   });
-  expect(results.find((entry) => entry.profile === f.selected)).toMatchObject({ status: "installed" });
-  expect(results.find((entry) => entry.profile === f.sibling)).toMatchObject({ status: "declined" });
+  // Claude needs no install (ADR 0317): untouched profiles get no receipt and no native call.
+  expect(results.filter((entry) => entry.harness === "claude")).toEqual([]);
   expect(
     f.calls.filter((call) => call.profile === f.sibling).every((call) => call.args[0] === "--version"),
   ).toBe(true);
@@ -479,7 +479,7 @@ it("rejects remembered source argv changed after native capture and before autom
   });
 });
 
-it("retains linked Claude profiles and registered custom Codex accounts during automatic refresh", async () => {
+it("clears a linked Claude profile's older copy and keeps registered custom Codex accounts during automatic refresh", async () => {
   const f = await nativeFixture();
   const custom = join(f.root, "custom-codex");
   const marketplace = join(f.root, "integrations", "claude-plugin");
@@ -540,12 +540,13 @@ it("retains linked Claude profiles and registered custom Codex accounts during a
   });
   if (Array.isArray(result)) throw new Error("Expected refresh receipts");
   expect(result.local.find((entry) => entry.profile === custom)).toMatchObject({ status: "updated" });
-  expect(result.local.find((entry) => entry.profile === f.sibling)?.status).not.toBe("declined");
+  // A linked Claude profile's older setup is cleared on refresh (ADR 0317), never re-installed.
   expect(f.calls).toContainEqual({
     command: "claude",
-    args: ["plugin", "update", "clankie-worker@clankie", "--scope", "user"],
+    args: ["plugin", "marketplace", "remove", "clankie"],
     profile: f.sibling,
   });
+  expect(f.calls.some((call) => call.command === "claude" && call.args[1] === "update")).toBe(false);
 });
 
 it("rechecks machine setup policy at each linked-profile consent before native mutation", async () => {

@@ -1,5 +1,5 @@
 import { migrateDiscordOwnership, discordServerSettings } from "@clankie/protocol/discord-settings";
-import { statSync, type BigIntStats } from "node:fs";
+import { readFileSync, statSync, type BigIntStats } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -88,6 +88,24 @@ export class SettingsStore {
     }
     if (this.shared?.version === version) return this.shared.settings;
     const settings = deepFreeze(await this.load());
+    this.shared = { version, settings };
+    return settings;
+  }
+
+  /** Synchronous native launcher context; effect authorization still uses loadFenced(). */
+  public readSync(): Readonly<ClankieSettings> {
+    let version: string;
+    try {
+      const info = statSync(this.filePath, { bigint: true });
+      version = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      version = "absent";
+    }
+    if (this.shared?.version === version) return this.shared.settings;
+    const settings = deepFreeze(
+      version === "absent" ? emptySettings() : this.parse(readFileSync(this.filePath, "utf8")),
+    );
     this.shared = { version, settings };
     return settings;
   }
