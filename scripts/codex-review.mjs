@@ -190,6 +190,13 @@ function prepare(repo, pr) {
   const mergeBase = git(["merge-base", `refs/codex-review/base-${info.base.ref}`, head], mirror);
   const worktree = join(home, `${name}-pr${pr}-${short(head)}`);
   if (!existsSync(worktree)) git(["worktree", "add", "--quiet", "--detach", worktree, head], mirror);
+  // Each round reviews a new head in a new worktree; drop this pull request's
+  // older ones so the Mac's disk does not fill with stale checkouts.
+  const older = join(home, `${name}-pr${pr}-`);
+  for (const line of git(["worktree", "list", "--porcelain"], mirror).split("\n")) {
+    const path = line.startsWith("worktree ") ? line.slice("worktree ".length) : "";
+    if (path.startsWith(older) && path !== worktree) git(["worktree", "remove", "--force", path], mirror);
+  }
   const findings = `${worktree}.findings.json`;
   if (!existsSync(findings))
     writeFileSync(findings, `${JSON.stringify({ summary: "", findings: [] }, null, 2)}\n`);
@@ -307,7 +314,14 @@ export function judgeChecks({ statuses: statusList, runs: runList, since, rerunS
     if (state === "pending") pending.push(name);
     else if (state !== "success") failing.push(`${name} (${state})`);
   }
+  // Each workflow run makes its own check suite, so a job the draft run
+  // skipped and the ready run's copy of it both stay on the head. Judge only
+  // the newest run of each job.
+  const newest = new Map();
   for (const run of runList) {
+    if (!newest.has(run.name) || newest.get(run.name).id < run.id) newest.set(run.name, run);
+  }
+  for (const run of newest.values()) {
     const state = run.status === "completed" ? run.conclusion : run.status;
     const draftSkip =
       state === "skipped" && since && run.completed_at < since && rerunSuites.has(run.check_suite?.id);
