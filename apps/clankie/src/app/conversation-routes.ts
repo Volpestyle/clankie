@@ -46,7 +46,7 @@ import {
   UndoFleetAgentSchema,
 } from "@clankie/protocol/fleet-roster";
 import { Hono } from "hono";
-import { withLinearRequestInvocation } from "../linear-request-budget.ts";
+import { withLinearRequestInvocation } from "../tracker-request-priority.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { QuestionAuthority } from "../captain/conversation-questions.ts";
 import { ConversationRefusedError, ConversationResetError } from "../captain/conversations.ts";

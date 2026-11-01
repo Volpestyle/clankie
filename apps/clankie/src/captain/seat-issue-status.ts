@@ -8,7 +8,7 @@ import type { ProjectsSettings } from "@clankie/protocol/projects";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import type { HerdrWatchStore } from "./herdr-watch.ts";
 import type { WorkItemsService } from "../work-items.ts";
-import type { LinearRequestPriority } from "../linear-request-budget.ts";
+import type { LinearRequestPriority } from "../tracker-request-priority.ts";
 import { RepeatedWarnings } from "@clankie/observability";
 
 /**

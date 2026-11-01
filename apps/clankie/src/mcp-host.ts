@@ -96,14 +96,13 @@ import {
 } from "@clankie/work-items";
 import type { WorkerReadReceiptHost, WorkerReadSnapshot } from "./worker-mcp.ts";
 import { createPrioritySortedLinearIssueReader, callCachedLinearCollection } from "./tracker-tool-router.ts";
+import { LinearRequestBudgetRefused, type LinearRequestBudget } from "./linear-request-budget.ts";
 import {
   currentLinearRequestPriority,
-  LinearRequestBudgetRefused,
   withLinearRequestPriority,
   withinLinearRequestInvocation,
-  type LinearRequestBudget,
   type LinearRequestPriority,
-} from "./linear-request-budget.ts";
+} from "./tracker-request-priority.ts";
 import { TrackerRequestBudgetRefused, type TrackerRequestBudget } from "./tracker-request-budget.ts";
 import { isTrackerWriteTool, TRACKER_POSTING_ADMITTED, type TrackerPostingGate } from "./tracker-posting.ts";
 
