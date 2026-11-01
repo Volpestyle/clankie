@@ -182,8 +182,9 @@ upload's thread is a persona thread, as for a send. An `https` image address is
 fetched by the relay only when every address its host resolves to is public
 (no loopback, private, link-local or tailnet range), with at most three
 redirects, each rechecked, and 20 MiB. `read_image` is the `seat_image` op under
-`terminalObserve`: the service returns one regular file inside a seated local
-agent's real working directory whose leading bytes are a PNG, JPEG, GIF or WebP,
+`terminalObserve`: the service returns one regular file inside a seated agent's
+real working directory (on a linked machine, read by a contained command there,
+ADR 0316) whose leading bytes are a PNG, JPEG, GIF or WebP,
 up to 3.75 MB. Its base64 is passed through unredacted, like evidence bytes.
 `read_inbox` reads the `lead` op's status and inbox (ADR 0304): what Clankie
 held for the apps while they lead, and the lead threads with unread reports. A

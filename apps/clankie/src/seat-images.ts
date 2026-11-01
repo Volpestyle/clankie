@@ -41,24 +41,34 @@ export async function readSeatImage(input: {
   try {
     const info = await handle.stat();
     if (!info.isFile()) return unavailable(`${input.path} isn't a file.`);
-    if (info.size > CONNECTOR_IMAGE_READ_BYTES_MAX)
-      return unavailable(
-        `${input.path} is ${megabytes(info.size)} MB; images up to ${megabytes(CONNECTOR_IMAGE_READ_BYTES_MAX)} MB can be read. Ask the agent to save a smaller copy (a JPEG, or scaled to about 1600 pixels on its long side).`,
-      );
-    const data = await handle.readFile();
-    const mediaType = connectorImageMediaType(data);
-    if (mediaType === undefined || data.byteLength === 0)
-      return unavailable(`${input.path} isn't a PNG, JPEG, GIF or WebP image.`);
-    return {
-      outcome: "ready",
-      filename: basename(source).slice(0, 256),
-      mediaType,
-      byteCount: data.byteLength,
-      dataBase64: data.toString("base64"),
-    };
+    if (info.size > CONNECTOR_IMAGE_READ_BYTES_MAX) return seatImageTooLarge(input.path, info.size);
+    return seatImageFromBytes(input.path, basename(source), await handle.readFile());
   } finally {
     await handle.close();
   }
+}
+
+/** The refusal for an image over the read limit, wherever it was found. */
+export function seatImageTooLarge(path: string, size: number): SeatImageResult {
+  return {
+    outcome: "unavailable",
+    message: `${path} is ${megabytes(size)} MB; images up to ${megabytes(CONNECTOR_IMAGE_READ_BYTES_MAX)} MB can be read. Ask the agent to save a smaller copy (a JPEG, or scaled to about 1600 pixels on its long side).`,
+  };
+}
+
+/** Bytes read from a seat's workspace, returned only when they are an image. */
+export function seatImageFromBytes(path: string, name: string, data: Buffer): SeatImageResult {
+  if (data.byteLength > CONNECTOR_IMAGE_READ_BYTES_MAX) return seatImageTooLarge(path, data.byteLength);
+  const mediaType = connectorImageMediaType(data);
+  if (mediaType === undefined || data.byteLength === 0)
+    return { outcome: "unavailable", message: `${path} isn't a PNG, JPEG, GIF or WebP image.` };
+  return {
+    outcome: "ready",
+    filename: name.slice(0, 256),
+    mediaType,
+    byteCount: data.byteLength,
+    dataBase64: data.toString("base64"),
+  };
 }
 
 function megabytes(bytes: number): string {

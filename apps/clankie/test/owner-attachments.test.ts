@@ -275,6 +275,15 @@ describe("seat delivery", () => {
     ).rejects.toThrow("attachment_inbox_not_a_directory");
     expect((await lstat(join(root, "elsewhere"))).isDirectory()).toBe(true);
     expect(await readdir(join(root, "elsewhere"))).toEqual([]);
+
+    const pointed = join(root, "pointed");
+    await mkdir(join(pointed, ".clankie", "inbox"), { recursive: true });
+    await writeFile(join(root, "victim"), "keep");
+    await symlink(join(root, "victim"), join(pointed, ".clankie", "inbox", ".gitignore"));
+    await expect(
+      materializeOwnerAttachments({ workspace: pointed, messageId: "msg-4", attachments: [video] }),
+    ).rejects.toThrow("attachment_inbox_not_a_directory");
+    expect(await readFile(join(root, "victim"), "utf8")).toBe("keep");
   });
 });
 

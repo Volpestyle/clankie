@@ -54,7 +54,9 @@ carried.
   by a note listing every absolute path. The seat's own channel delivers it,
   as with any message (ADR 0207). Clankie's seat in his own head receives the
   files the same way.
-- A Swarm peer, a seat on another fleet machine, and a seat whose working
+- A seat on a linked machine receives the same folder by `scp`
+  ([ADR 0316](0316-files-reach-agents-on-linked-machines.md)).
+- A Swarm peer and a seat whose working
   directory is unknown share no filesystem with the host. The send is refused
   as `seat_undelivered`, with the reason, and nothing is sent: the owner keeps
   the draft instead of a message that silently lost what it was about. Channels
@@ -86,7 +88,9 @@ sequenceDiagram
     else local seat
         S->>W: .clankie/inbox/<message>/ files, HEIC JPEG, keyframes
         S->>W: channel message with the paths
-    else Swarm or remote seat
+    else linked machine seat (ADR 0316)
+        S->>W: scp the same folder, checked move into the inbox
+    else Swarm seat
         S-->>A: seat_undelivered, nothing sent
     end
 ```

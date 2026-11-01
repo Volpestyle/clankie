@@ -51,7 +51,8 @@ It can send a small one as base64, or the address of one already on the web.
   Clankie seats on this Mac. A seat on a linked machine refuses images and
   says so, as ADR 0209 already does for attachments, and nothing is sent.
   Herdr desktop app agents still can't be messaged. Carrying files to and from
-  linked machines is a follow-up issue.
+  linked machines is a follow-up issue, decided in
+  [ADR 0316](0316-files-reach-agents-on-linked-machines.md).
 
 ADR 0174 kept publishing local because a remote device should not have the
 Mac publish arbitrary paths. `seat_image` publishes nothing and keeps nothing:

@@ -180,6 +180,9 @@ export async function materializeOwnerAttachments(input: {
       throw new Error("attachment_inbox_not_a_directory");
   }
   if ((await realpath(inbox)) !== inbox) throw new Error("attachment_inbox_outside_workspace");
+  const ignore = await lstat(join(inbox, ".gitignore")).catch(() => undefined);
+  // A symlinked .gitignore would have this write land outside the workspace.
+  if (ignore !== undefined && !ignore.isFile()) throw new Error("attachment_inbox_not_a_directory");
   await writeFile(
     join(inbox, ".gitignore"),
     "# Owner attachments delivered by Clankie; never commit them.\n*\n",
