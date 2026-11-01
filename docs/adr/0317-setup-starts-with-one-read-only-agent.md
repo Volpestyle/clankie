@@ -38,12 +38,16 @@ starts at, refuses every hire.
   permission, settings or extra-directory argument. Only a new Claude hire
   through its seat adapter can be read-only; other harnesses, resumed
   transcripts and bare terminal launches refuse it until they have an
-  equivalent mode.
+  equivalent mode. Its folder skips the coding hire's checkout preparation: it
+  is never fetched, fast-forwarded or moved to a worktree, so a home tracked
+  as a dotfiles repository stays exactly as it is.
 - **Watch steps aside for that one agent.** If Watch is on when the survey
   starts, Clankie turns it off (keeping Off's leaves) for the hire, and turns
   it back on when the survey ends: applied, declined, cancelled or failed.
   Approving an `autonomy` line replaces that restore with the owner's level.
-  While the agent looks around, Clankie is at Off.
+  While the agent looks around, Clankie is at Off. Clankie keeps the autonomy
+  it left, and turns Watch back on only if it is still that: a level the owner
+  picks in Settings meanwhile stands.
 - **One proposal, in one report.** The brief carries what Clankie already
   knows (machines and sessions from discovery, projects, worker accounts). The
   agent sends one `message_clankie` with a fenced JSON block shaped as

@@ -285,6 +285,24 @@ it("lets an approved level replace Watch instead of restoring it", async () => {
   expect(autonomy.confirmedAt).toBeDefined();
 });
 
+it("keeps a level the owner picks in Settings while the agent looks around", async () => {
+  const f = await fixture();
+  const started = await f.call("POST", "/v1/setup/survey", { schemaVersion: 1 });
+  expect(started.body.survey).not.toHaveProperty("held");
+  const fleet = (await f.call("GET", "/v1/operator/fleet-settings")).body as unknown as { revision: string };
+  const picked = await f.call("POST", "/v1/operator/fleet-settings", {
+    schemaVersion: 1,
+    expectedRevision: fleet.revision,
+    changes: { autonomyLevel: "high" },
+  });
+  expect(picked.status).toBe(200);
+  const chosen = (await f.settings.load()).autonomy;
+  await f.call("POST", "/v1/setup/survey/cancel", { schemaVersion: 1, surveyId: started.body.survey!.id });
+  // Stopping the agent does not put Watch back over the owner's newer choice.
+  expect(f.closed()).toEqual(["w1:p7"]);
+  expect((await f.settings.load()).autonomy).toEqual(chosen);
+});
+
 it("closes the agent before an approved Watch level turns Watch on", async () => {
   const f = await fixture();
   await f.settings.update((current) => {

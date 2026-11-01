@@ -35,8 +35,26 @@ const ACTIVE = new Set<SetupSurvey["status"]>(["surveying", "proposed"]);
  * The survey as Clankie keeps it: the agent's pane stays with it from the hire
  * on, so its report is still found after the pane closes. Readers never see it.
  */
-const KeptSurveySchema = SetupSurveySchema.extend({ paneId: z.string().min(1).max(256).optional() });
+/**
+ * What only the service keeps: the agent's pane, so its report outlives the pane,
+ * and the owner's autonomy as the survey left it, so Watch comes back only if the
+ * owner has not chosen another level meanwhile.
+ */
+const KeptSurveySchema = SetupSurveySchema.extend({
+  paneId: z.string().min(1).max(256).optional(),
+  held: z.string().max(16_384).optional(),
+});
 type KeptSurvey = z.infer<typeof KeptSurveySchema>;
+
+/** The owner's autonomy apart from Watch, with keys in one order so two reads compare. */
+const heldAutonomy = (settings: ClankieSettings): string => {
+  const { watch: _watch, ...autonomy } = settings.autonomy;
+  return JSON.stringify(autonomy, (_key, value: unknown) =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : value,
+  );
+};
 
 export interface SetupSurveyDependencies {
   /** Where the one survey is kept, so a restart or a closed app does not lose it. */
@@ -183,12 +201,14 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
   }
   const snapshot = (kept: KeptSurvey | undefined): SetupSurveySnapshot => {
     if (kept === undefined) return { schemaVersion: 1 };
-    const { paneId: _paneId, ...survey } = kept;
+    const { paneId: _paneId, held: _held, ...survey } = kept;
     return { schemaVersion: 1, survey };
   };
   /** Watch goes off only for the survey, and comes back when it ends (ADR 0317). */
-  async function setWatch(watch: boolean): Promise<void> {
-    await deps.settings.update((current) => {
+  async function setWatch(watch: boolean, held?: string): Promise<ClankieSettings> {
+    return deps.settings.update((current) => {
+      // A level the owner chose while the agent looked around stands (ADR 0317).
+      if (watch && held !== undefined && heldAutonomy(current) !== held) return current;
       const { watch: _watch, ...autonomy } = current.autonomy;
       return { ...current, autonomy: { ...autonomy, ...(watch ? { watch: true as const } : {}) } };
     });
@@ -204,12 +224,12 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
   async function end(
     survey: KeptSurvey,
     status: "applied" | "cancelled" | "failed",
-    extra: Partial<SetupSurvey> = {},
+    extra: Partial<KeptSurvey> = {},
   ): Promise<KeptSurvey> {
     await closeAgent(survey);
     const ended = await write({ ...survey, ...extra, status, endedAt: now() });
     // Watch comes back only after the agent closes: closing refuses while Watch is on.
-    if (extra.restoresWatch ?? survey.restoresWatch) await setWatch(true);
+    if (ended.restoresWatch) await setWatch(true, ended.held);
     return ended;
   }
   /** Reads the agent's reports for a proposal; the survey moves to proposed once one parses. */
@@ -229,7 +249,7 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
     }
     return withPane === survey ? survey : write(withPane);
   }
-  async function applyLine(line: SetupSurveyLine, survey: SetupSurvey): Promise<SetupSurveyLineResult> {
+  async function applyLine(line: SetupSurveyLine, survey: KeptSurvey): Promise<SetupSurveyLineResult> {
     switch (line.kind) {
       case "add_machine":
         await deps.connections({ action: "add_machine", id: line.machine, ssh: line.ssh, shell: line.shell });
@@ -253,7 +273,7 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
         // The owner's own level wins over Watch coming back. Choosing Watch itself
         // applies Off's leaves now and turns Watch on once the agent has closed.
         survey.restoresWatch = line.level === "watch";
-        await deps.settings.update((current) => {
+        const chosen = await deps.settings.update((current) => {
           const { watch: _watch, ...autonomy } = current.autonomy;
           const level = line.level === "watch" ? "off" : line.level;
           return {
@@ -265,6 +285,7 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
             },
           };
         });
+        survey.held = heldAutonomy(chosen);
         return { lineId: line.id, outcome: "applied" };
       case "pair_phone":
       case "connect_lead":
@@ -299,7 +320,7 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
         });
         try {
           // Watch refuses every hire (ADR 0308); it steps aside only for this one.
-          if (restoresWatch) await setWatch(false);
+          if (restoresWatch) survey = await write({ ...survey, held: heldAutonomy(await setWatch(false)) });
           const brief = setupSurveyBrief(await deps.facts());
           const answer = await deps.serve({
             op: "spawn_seat",
@@ -355,7 +376,13 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
             results.push({ lineId: line.id, outcome: "failed", detail: words(error) });
           }
         }
-        return snapshot(await end(survey, "applied", { results, restoresWatch: working.restoresWatch }));
+        return snapshot(
+          await end(survey, "applied", {
+            results,
+            restoresWatch: working.restoresWatch,
+            ...(working.held === undefined ? {} : { held: working.held }),
+          }),
+        );
       }),
     cancel: (surveyId) =>
       serial(async () => {

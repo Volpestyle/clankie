@@ -2981,7 +2981,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
       }
     }
-    if (resume === undefined) {
+    // A read-only hire only looks around (ADR 0317): its folder is never fetched,
+    // fast-forwarded or moved to a worktree, so the owner's home stays as it is.
+    if (resume === undefined && request.readOnly !== true) {
       const remote = remoteFleets.find((fleet) => fleet.id === request.fleet);
       const shell = remote && deps.fleets?.shell?.(remote);
       const paneDirectories = async () => {

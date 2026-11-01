@@ -967,3 +967,51 @@ it("an overlapping hire while a clean in-place hire is still being admitted is n
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("the real captain leaves a read-only hire's folder exactly as it is, even an owner's dotfiles repository", async () => {
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-read-only-home-")));
+  const home = join(root, "home");
+  let captain: ReturnType<typeof createCaptain> | undefined;
+  try {
+    // A home tracked as Git with no origin/main and work in progress (ADR 0317).
+    await exec("git", ["init", "--initial-branch=main", home]);
+    await writeFile(join(home, ".zshrc"), "export EDITOR=vi\n");
+    captain = createCaptain({ herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps, {
+      repoRoot: join(root, "runtime"),
+      stateDir: join(root, "state"),
+      settings: new SettingsStore(join(root, "settings.json")),
+      nativeHerdrRunner: createHerdrWatchRunner(() => false),
+    });
+    const hire = (readOnly: boolean) =>
+      captain!.serveOperatorConversation({
+        schemaVersion: 1,
+        op: "spawn_seat",
+        conversationId: "global-default",
+        seat: {
+          schemaVersion: 1,
+          harness: "claude",
+          title: "setup",
+          workingDirectory: home,
+          hireKind: "worker",
+          ...(readOnly ? { readOnly: true as const } : {}),
+          effort: "medium",
+          effortReason: "A fixture hire only needs to reach the native launch.",
+        },
+        brief: "look around",
+      });
+    // An everyday hire checks the folder against origin/main first.
+    expect(await hire(false)).toMatchObject({ result: { outcome: "failed", reason: "not_ready" } });
+    // The read-only hire skips that preparation and reaches the harness itself.
+    expect(await hire(true)).toMatchObject({ result: { reason: "harness_unavailable" } });
+    expect(await checkoutGit(home, ["status", "--porcelain=v1"])).toBe("?? .zshrc\n");
+    expect(
+      (await checkoutGit(home, ["worktree", "list", "--porcelain"])).match(/^worktree /gmu),
+    ).toHaveLength(1);
+  } finally {
+    await captain?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
