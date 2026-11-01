@@ -2973,7 +2973,10 @@ export class ConversationStore {
       if (!handedOff) throw error;
       console.error(`seat send in ${meta.conversationId} failed after its hand-off`, error);
       // What stopped it, so a lead can tell a lost answer from a broken channel.
-      const cause = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.trim().slice(0, 200);
+      const cause = (error instanceof Error ? error.message : String(error))
+        .split("\n")[0]!
+        .trim()
+        .slice(0, 200);
       return {
         schemaVersion: 1,
         status: "seat_delivery_unconfirmed",

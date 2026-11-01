@@ -1708,7 +1708,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const before = options?.fence
       ? undefined
       : await this.runner.resolveTerminal(seatId).catch(() => undefined);
-    const owner = before?.session ? this.nativeOwner(before) : undefined;
+    // The lead only arms a follow-up's completion harvest below. A stale claim on this pane or
+    // terminal (an earlier occupant's) names no lead for the current one, and must not stop the
+    // message: the seat control proves the occupant it delivers to on its own.
+    let owner: ConversationOwner | undefined;
+    try {
+      owner = before?.session ? this.nativeOwner(before) : undefined;
+    } catch {
+      owner = undefined;
+    }
     const delivered = await (options === undefined
       ? this.seatControl.deliverToSeat(seatId, text, uncontrolled)
       : this.seatControl.deliverToSeat(seatId, text, uncontrolled, options));
