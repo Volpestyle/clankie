@@ -626,8 +626,10 @@ which fences restarts and overlapping deploys against a second run. A 30-second
 tick resolves due slots with `croner` in the routine's time zone and applies
 `catch_up` or `skip` to slots missed while the Mac slept.
 `captain/routine-runner.ts` runs a target as its conversation: a `turn` takes
-the self-wake path, a `hire` goes through `HireSeat`, and a `check` runs through
-`clankie heavy`. Routines are explicit owner or lead schedules, so `/autonomy
+the self-wake path, a `hire` goes through `HireSeat`, and a `check` runs on a
+heavy permit from the service's own fleet governor, as the merge gate does: the
+machine's shared registry, or a test service's fixture registry, so a real run's
+check is covered by the permit that run already holds. Routines are explicit owner or lead schedules, so `/autonomy
 off` does not pause them; each has its own pause. `POST /v1/captain/routines`,
 `clankie routines`, `/routines` and the lead `routine` tool share one store
 ([ADR 0265](adr/0265-routines-are-recurring-jobs-with-a-run-fence.md)).
