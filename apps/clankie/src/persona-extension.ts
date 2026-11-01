@@ -1,3 +1,10 @@
+import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
+import {
+  DiscordPresenceSessionProjection,
+  DiscordVoiceHistoryProjection,
+  retiredDiscordPresenceEventIds,
+} from "./discord-presence-session.ts";
+import { DiscordUserSessionOptInProjection } from "./discord-user-session-opt-in.ts";
 import type { ClankieExtension } from "@clankie/extension";
 import { registerDiscordRoutes } from "./app/discord-routes.ts";
 import { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
@@ -18,6 +25,15 @@ import type { ExtensionRoutes } from "./ports/routes.ts";
  */
 export function personaRoutes(options: { readonly receipts?: DiscordTurnReceipts } = {}): ExtensionRoutes {
   return {
+    presenceState: {
+      retiredEventIds: retiredDiscordPresenceEventIds,
+      replay: (events) => ({
+        sessions: new DiscordPresenceSessionProjection(events),
+        optIns: new DiscordUserSessionOptInProjection(events),
+        voiceHistory: new DiscordVoiceHistoryProjection(events),
+        transcripts: new DiscordVoiceTranscriptStore(),
+      }),
+    },
     place: "body",
     register(app, host) {
       const body = host.discordBody;

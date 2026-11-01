@@ -22,7 +22,8 @@ import { WORKER_ACCOUNTS_PATH } from "@clankie/protocol/worker-accounts";
 import { SupportGrantStore } from "../support-access.ts";
 import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
 import { createIntegrationRoutes } from "../integrate-routes.ts";
-import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
+import { absentPresenceState } from "../ports/presence.ts";
+import { absentStreamWatch } from "../ports/world.ts";
 import {
   ActivityObservationReadSchema,
   PLAY_STILL_PATH,
@@ -74,12 +75,6 @@ import {
   isDeviceRunExpired,
   type DeviceRegistry,
 } from "../devices.ts";
-import {
-  DiscordPresenceSessionProjection,
-  DiscordVoiceHistoryProjection,
-  retiredDiscordPresenceEventIds,
-} from "../discord-presence-session.ts";
-import { DiscordUserSessionOptInProjection } from "../discord-user-session-opt-in.ts";
 import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "../embodiment.ts";
 import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../event-log.ts";
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
@@ -101,7 +96,6 @@ import { createProjectRoutes } from "../project-routes.ts";
 import { createReviewRoutes } from "../review-routes.ts";
 import { createPushDispatcher, type PushDispatcher } from "../push.ts";
 import { createRuntimeUpdateRoutes } from "../runtime-update-routes.ts";
-import { DiscordStreamWatchProjection } from "../stream-watch-observation.ts";
 import {
   WORK_EXPORT_PATH,
   WorkExportRequestSchema,
@@ -142,19 +136,25 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Read per briefing rather than cached: the owner edits persona and a
   // refreshed voice session must pick it up without a restart.
   const settingsSource = dependencies.settings ?? new SettingsStore();
-  const voiceTranscriptStore = dependencies.voiceTranscriptStore ?? new DiscordVoiceTranscriptStore();
+  const presenceFactory = dependencies.extensionRoutes?.find(
+    (routes) => routes.presenceState !== undefined,
+  )?.presenceState;
   const instanceId = randomUUID();
   const hostDisplayName = dependencies.hostDisplayName ?? hostname();
 
   // Replayed once below, then dropped: after boot the projections hold state
   // and `recentEvents` holds only what redelivery checks need.
   const storedEvents: DomainEvent[] = dependencies.eventLogPath
-    ? loadEventLog(dependencies.eventLogPath, retiredDiscordPresenceEventIds, (message) =>
-        logger.warn({ event: "event_log.compaction" }, message),
+    ? loadEventLog(
+        dependencies.eventLogPath,
+        (events) => presenceFactory?.retiredEventIds(events) ?? new Set(),
+        (message) => logger.warn({ event: "event_log.compaction" }, message),
       )
     : [];
   const recentEvents = new RecentEvents(storedEvents);
-  const discordVoiceHistory = new DiscordVoiceHistoryProjection(storedEvents);
+  const presence = presenceFactory?.replay(storedEvents) ?? absentPresenceState();
+  const discordVoiceHistory = presence.voiceHistory;
+  const voiceTranscriptStore = dependencies.voiceTranscriptStore ?? presence.transcripts;
   const appendEvent = (event: DomainEvent): void => {
     // Heartbeats neither reach the disk nor stay in memory: the presence
     // manager keeps the current lease, and nothing replays liveness noise.
@@ -205,11 +205,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   }, 1000);
   supportTimer.unref();
   for (const event of storedEvents) applyDeviceEvent(devices, event);
-  const discordPresenceSessions = new DiscordPresenceSessionProjection(storedEvents);
-  const discordUserSessionOptIns = new DiscordUserSessionOptInProjection(storedEvents);
-  const discordStreamWatch = new DiscordStreamWatchProjection(
-    process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || undefined,
-  );
+  const discordPresenceSessions = presence.sessions;
+  const discordUserSessionOptIns = presence.optIns;
+  const discordStreamWatch = dependencies.streamWatch ?? absentStreamWatch();
   // Durable replay restores status, but it cannot prove the bridge is still
   // connected: act gating starts unvalidated after every boot and stays
   // fail-closed until an authenticated lifecycle delivery re-opens it.

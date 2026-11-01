@@ -44,7 +44,16 @@ core's `PersonaLook` shape, only while the persona is on), and the persona's
 exact Discord delivery receipts (`captain/discord-turn-receipts.ts`, owned by
 `personaRoutes`, which hand the core a read of them through
 `discordBody.useRoomDeliveryReceipts` in the core's `RoomDeliveryReceipts`
-shape). Each
+shape), then the last eight core imports: presence sessions, opt-ins, voice
+history, transcript reads, room observations and admitted Discord writes use
+core-owned shapes in `ports/presence.ts`. The persona routes supply their
+replay and event-retirement factory before the core loads its log. With the
+persona absent the core retains durable events, reads empty observations and
+refuses presence writes; it never replays a durable session into live authority.
+World supplies stream-watch through `ports/world.ts` only while on at start;
+without it there are no stream observations or accepted reports. Device call
+provider configuration belongs to the voice extension's route options. The
+boundary baseline is now empty: only composition roots import extensions. Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app shows and flips the same switches in Settings → Extensions.

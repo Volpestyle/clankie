@@ -359,18 +359,23 @@ async function fixture(options: { silentPeerMs?: number } = {}) {
       confirmStopped: async () => true,
     },
     // The voice extension mounts the device call route while voice is on (ADR 0328).
-    extensionRoutes: [{ place: "body", register: registerVoiceCallRoute }],
-    voiceCall: {
-      realtime: async () => ({
-        ports: createVoiceRealtimePorts({
-          apiKey: "fixture-realtime",
-          config: parseVoiceRealtimeEnv({}),
-          socketFactory: provider.factory,
-        }),
-        decayWindowMs: 60_000,
-      }),
-      ...(options.silentPeerMs === undefined ? {} : { silentPeerMs: options.silentPeerMs }),
-    },
+    extensionRoutes: [
+      {
+        place: "body",
+        register: (app, host) =>
+          registerVoiceCallRoute(app, host, {
+            realtime: async () => ({
+              ports: createVoiceRealtimePorts({
+                apiKey: "fixture-realtime",
+                config: parseVoiceRealtimeEnv({}),
+                socketFactory: provider.factory,
+              }),
+              decayWindowMs: 60_000,
+            }),
+            ...(options.silentPeerMs === undefined ? {} : { silentPeerMs: options.silentPeerMs }),
+          }),
+      },
+    ],
   });
   cleanups.push(async () => service.close());
   const server = serve({

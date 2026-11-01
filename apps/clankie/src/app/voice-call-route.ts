@@ -1,3 +1,4 @@
+import type { DiscordVoiceRealtimePorts } from "@clankie/discord-presence-core";
 import { upgradeWebSocket } from "@hono/node-server";
 import { OPERATOR_VOICE_CALL_PATH, VOICE_CALL_AUDIO_FRAME_MAX_BYTES } from "@clankie/protocol";
 import { characterNames } from "@clankie/settings";
@@ -53,7 +54,14 @@ function voiceCallLease(
  * authorized device with the captain bearer; the call itself is
  * `VoiceCall`, his Discord rooms' own session with the device as its media.
  */
-export function registerVoiceCallRoute(app: Hono, host: ExtensionRouteHost) {
+export interface VoiceCallOptions {
+  realtime(): Promise<
+    { readonly ports: DiscordVoiceRealtimePorts; readonly decayWindowMs: number } | undefined
+  >;
+  readonly silentPeerMs?: number;
+}
+
+export function registerVoiceCallRoute(app: Hono, host: ExtensionRouteHost, voice?: VoiceCallOptions) {
   // The Discord body's state is read when a call is served, as the core's own routes read it.
   const body = host.discordBody;
   const ctx: VoiceBriefingRouteContext = {
@@ -88,7 +96,6 @@ export function registerVoiceCallRoute(app: Hono, host: ExtensionRouteHost) {
     if (!captain) return context.json({ error: "captain_authentication_required" }, 401);
     if (captain.steerSourceLane !== "api")
       return context.json({ error: "operator_voice_authority_required" }, 403);
-    const voice = ctx.dependencies.voiceCall;
     const leases = ctx.dependencies.bodyLeases?.store;
     if (voice === undefined || leases === undefined)
       return context.json({ error: "voice_call_unavailable" }, 503);

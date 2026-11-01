@@ -4,7 +4,12 @@ import type { HerdrFleet } from "../herdr-fleet.ts";
 import type { FleetHealthMetrics } from "../fleet-health-metrics.ts";
 import type { IntegrationQueue } from "../integrate.ts";
 import type { DeployHolds } from "../deploy-holds.ts";
-import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
+import type {
+  DiscordPresenceRuntimePort,
+  RoomObservationsPort,
+  RoomSetupPort,
+  VoiceTranscriptReadPort,
+} from "../ports/presence.ts";
 import {
   type ActivityObservationSnapshot,
   type DiscordPresencePhaseEvent,
@@ -44,8 +49,6 @@ import { CaptainPresenceManager } from "../captain-presence.ts";
 import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
-import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
-import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import type { RecentEvents } from "../event-log.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
@@ -289,10 +292,10 @@ export interface ClankieAppDependencies {
   personaBriefing?: () => Promise<string>;
   /** Owner-authored persona source for the realtime voice briefing (ADR 0057). */
   discordEnvironment?: NodeJS.ProcessEnv;
-  discordDirectory?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["directory"];
-  discordPermissions?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["permissions"];
-  discordTestPost?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["testPost"];
-  roomObservations?: DiscordRoomObservations;
+  discordDirectory?: RoomSetupPort["directory"];
+  discordPermissions?: RoomSetupPort["permissions"];
+  discordTestPost?: RoomSetupPort["testPost"];
+  roomObservations?: RoomObservationsPort;
   settings?: {
     load(): Promise<ClankieSettings>;
     update?(
@@ -308,6 +311,7 @@ export interface ClankieAppDependencies {
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  streamWatch?: import("../ports/world.ts").StreamWatchPort;
   resolveBodyVoiceTarget?: (input: {
     guildId: string;
     actorId: string;
@@ -331,22 +335,6 @@ export interface ClankieAppDependencies {
   minecraftPrivateDelivery?: { authorize(capability: string, payload: unknown): Promise<boolean> };
   /** Routes extensions add, such as computer use and skin drafts (ADR 0328). */
   extensionRoutes?: readonly import("../ports/routes.ts").ExtensionRoutes[];
-  /**
-   * Device voice calls (VUH-2682). Resolves the same realtime provider
-   * composition and credentials a Discord body uses, when a call starts;
-   * undefined means voice is not set up on this host.
-   */
-  voiceCall?: {
-    realtime(): Promise<
-      | {
-          readonly ports: import("@clankie/discord-presence-core").DiscordVoiceRealtimePorts;
-          readonly decayWindowMs: number;
-        }
-      | undefined
-    >;
-    /** Ends a call whose device stopped sending anything; tests shorten it. */
-    readonly silentPeerMs?: number;
-  };
   bodyLeases?: {
     router: BodyLeaseRouter;
     store: BodyLeaseStore;
@@ -361,7 +349,7 @@ export interface ClankieAppDependencies {
    */
   computerUseHarnesses?: { refresh(): Promise<readonly ComputerUseHarness[]> };
   /** Private exact Discord transcript log, injected by tests when needed. */
-  voiceTranscriptStore?: DiscordVoiceTranscriptStore;
+  voiceTranscriptStore?: VoiceTranscriptReadPort;
   authenticateCaptain?: CaptainAuthenticator;
   authenticateOperator?: OperatorAuthenticator;
   /** HMAC key (≥32 bytes) signing device session tokens; absent fails pairing closed (503). */
@@ -468,7 +456,7 @@ export interface DiscordBodyRouteState {
   readonly recentEvents: RecentEvents;
   readonly appendEvent: (event: DomainEvent) => void;
   readonly discordVoiceHistory: { list(limit: number): DiscordVoiceStay[] };
-  readonly voiceTranscriptStore: DiscordVoiceTranscriptStore;
+  readonly voiceTranscriptStore: VoiceTranscriptReadPort;
   readonly authenticateCaptainOrOperator: (
     context: Context,
   ) => Promise<{ principal: { kind: "captain" | "operator"; id: string } } | { denial: Response }>;
