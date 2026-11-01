@@ -111,6 +111,10 @@ export function createProjectRoutes(
     status?: (
       projects: readonly Project[],
     ) => Promise<{ projects: Record<string, ProjectStatus>; needsYou: number }>;
+    /** Opt-in warnings for the project view; a failed read omits them, never the settings. */
+    health?: (
+      projects: readonly Project[],
+    ) => Promise<{ needsYouOutsideProjects: number; reviewSeatLive: Record<string, boolean> }>;
   } = {},
 ): Hono {
   const app = new Hono();
@@ -140,6 +144,11 @@ export function createProjectRoutes(
       includeAutonomy && options.status
         ? await options.status(current.projects.projects).catch(() => undefined)
         : undefined;
+    // Opt-in only, so a strict client that never asks keeps its response shape.
+    const health =
+      context.req.query("includeHealth") === "true" && options.health
+        ? await options.health(current.projects.projects).catch(() => undefined)
+        : undefined;
     return context.json({
       ...projectSnapshot(
         current,
@@ -150,6 +159,7 @@ export function createProjectRoutes(
         context.req.query("includeTrackerPosting") === "true",
       ),
       ...(status === undefined ? {} : { projectStatus: status.projects, needsYou: status.needsYou }),
+      ...(health === undefined ? {} : health),
     });
   });
   app.post(PROJECT_CREATE_SETTINGS_PATH, async (context) => {

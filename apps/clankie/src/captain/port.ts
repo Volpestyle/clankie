@@ -272,6 +272,14 @@ export interface CaptainPort {
     projects: Record<string, import("@clankie/protocol/projects").ProjectStatus>;
     needsYou: number;
   }>;
+  /**
+   * What the project view should warn about: questions no project counts, and for each
+   * project naming a reviewer seat, whether a live seat answers to it (ADR 0287).
+   */
+  projectHealth?(projects: readonly import("@clankie/protocol/projects").Project[]): Promise<{
+    needsYouOutsideProjects: number;
+    reviewSeatLive: Record<string, boolean>;
+  }>;
   /** Current host-bound persona for the exact native seat and occupant. */
   personaForFleetOccupant(seatId: string, occupantId: string): string | undefined;
   /** That persona's display name, such as Lark, for attributing the seat's writes (LOCAL-VUH-59). */
