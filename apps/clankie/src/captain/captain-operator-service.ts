@@ -82,8 +82,6 @@ export interface CreateOperatorServiceContext {
   readonly workingDirectory: string;
   readonly options: CaptainOptions;
   readonly refreshFleet: (options?: { force?: boolean }) => Promise<readonly OperatorFleetSeat[]>;
-  /** The last census's pane-to-seat join, so worker reports name their seat. */
-  readonly observedSeats?: () => readonly { readonly paneId: string; readonly seatId: string }[];
   liveSeats: readonly OperatorFleetSeat[];
   readonly fleetChanges: FleetChangeClock;
   readonly sessions: Map<string, Promise<LaneSession>>;
@@ -167,10 +165,6 @@ export function createOperatorService(
   let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
   let defaultHerdrCore: HerdrCore | undefined;
   const herdrCore = () => ctx.herdrCore ?? (defaultHerdrCore ??= createHerdrCore());
-  const seatIdForPane = () => {
-    const seats = new Map((ctx.observedSeats?.() ?? []).map((seat) => [seat.paneId, seat.seatId]));
-    return (paneId: string) => seats.get(paneId);
-  };
   async function serve(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
@@ -340,22 +334,14 @@ export function createOperatorService(
         return { op: request.op, schemaVersion: 1, seatId: request.seatId, adopted: true };
       }
       if (request.op === "worker_reports") {
-        const read = () =>
-          ctx.conversations.readInboundReports(request.conversationId, {
+        return {
+          op: request.op,
+          schemaVersion: 1,
+          page: ctx.conversations.readInboundReports(request.conversationId, {
             ...(request.limit === undefined ? {} : { limit: request.limit }),
             ...(request.deliveryIds === undefined ? {} : { deliveryIds: request.deliveryIds }),
-            seatIdFor: seatIdForPane(),
-          });
-        let page = read();
-        // A just-hired agent's pane can be newer than the last census; look once more.
-        if (ctx.observedSeats && page.items.some((item) => item.seatId === undefined)) {
-          const census = await ctx.refreshFleet().then(
-            () => true,
-            () => false,
-          );
-          if (census) page = read();
-        }
-        return { op: request.op, schemaVersion: 1, page };
+          }),
+        };
       }
       if (request.op === "acknowledge_worker_report_history") {
         if (!authority || authority.principal.kind !== "operator")

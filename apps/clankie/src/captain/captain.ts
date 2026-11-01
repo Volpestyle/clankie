@@ -7794,6 +7794,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     readWorkerAccounts,
     resolveWorkerAccountLabel: (machine, harness, label) =>
       harnessAccountIdentities(harnessAccountIdentityPath(options.stateDir)).resolve(machine, harness, label),
+    seatReports: async ({ conversationId, seatId, since }) => {
+      const pane = () => liveEdgeSeats.find((seat) => seat.seatId === seatId)?.paneId;
+      // A just-hired agent's pane can be newer than the last census; look once more.
+      if (pane() === undefined) await refreshFleet({ force: true }).catch(() => undefined);
+      const paneId = pane();
+      if (paneId === undefined || !conversations.conversation(conversationId)) return [];
+      return conversations
+        .inboundReports(conversationId, { includeRead: true, acceptedAfterMs: Date.parse(since) - 1 })
+        .filter((report) => report.paneId === paneId)
+        .map(({ text, acceptedAt }) => ({ text, acceptedAt }));
+    },
     serveOperatorConversation: createOperatorService({
       prepareFreeAgentIntent,
       get personas() {
@@ -7876,7 +7887,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get headSeat() {
         return headSeat;
       },
-      observedSeats: () => liveEdgeSeats,
       seatImage,
       fleetCapacity: createFleetCapacityReader({
         settings,

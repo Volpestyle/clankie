@@ -43,7 +43,9 @@ starts at, refuses every hire.
   knows (machines and sessions from discovery, projects, worker accounts). The
   agent sends one `message_clankie` with a fenced JSON block shaped as
   `SetupSurveyProposalSchema`: a summary, findings, and up to 24 lines. The
-  service reads the agent's reports and takes the last block that parses.
+  service reads every report that agent sent since the survey started, read
+  or not, and takes the last block that parses. The report lands in the
+  shared lead thread, and its lead reading it first must not hide it.
 - **Line by line.** The owner approves lines by id. Only approved lines run,
   through the same APIs setup and Settings use: `add_machine`,
   `connect_session`, `machine_access` and `autonomy`. `pair_phone`,

@@ -1036,6 +1036,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
               update: (mutate) => settingsSource.update!(mutate),
             },
             serve: (request) => dependencies.captain.serveOperatorConversation(request),
+            reports: async (input) => (await dependencies.captain.seatReports?.(input)) ?? [],
             connections: (command) => manageConnections(dependencies, command),
             facts: async () => {
               const settings = await settingsSource.load();

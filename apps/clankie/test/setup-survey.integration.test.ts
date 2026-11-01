@@ -64,6 +64,11 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
   let watchedAtHire: boolean | undefined;
   const closed: string[] = [];
   const captain = createStubCaptain({
+    // The lead may already have read them; the survey still sees its own agent's reports.
+    seatReports: async ({ conversationId, seatId }) =>
+      conversationId === "global-default"
+        ? reports.filter((report) => report.seatId === seatId).map(({ text }) => ({ text, acceptedAt: "" }))
+        : [],
     serveOperatorConversation: async (request) => {
       requests.push(request);
       if (request.op === "spawn_seat") {
@@ -86,25 +91,6 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
               }
         ) as OperatorConversationServiceResult;
       }
-      if (request.op === "worker_reports")
-        return {
-          op: "worker_reports",
-          schemaVersion: 1,
-          page: {
-            conversationId: "global-default",
-            unreadCount: reports.length,
-            ackDeliveryIds: [],
-            items: reports.map((report, index) => ({
-              deliveryId: `00000000-0000-4000-8000-00000000000${index}`,
-              conversationId: "global-default",
-              paneId: report.seatId,
-              seatId: report.seatId,
-              acceptedAt: new Date().toISOString(),
-              state: "delivered",
-              text: report.text,
-            })),
-          },
-        } as OperatorConversationServiceResult;
       // As the real service does, closing refuses while Watch is on.
       if (request.op === "close_seat" && (await settings.load()).autonomy.watch === true)
         throw new Error("Watch is on");

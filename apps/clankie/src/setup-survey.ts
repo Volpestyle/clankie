@@ -38,6 +38,15 @@ export interface SetupSurveyDependencies {
     update(mutate: (current: ClankieSettings) => ClankieSettings): Promise<ClankieSettings>;
   };
   readonly serve: (request: OperatorConversationServiceRequest) => Promise<OperatorConversationServiceResult>;
+  /**
+   * The agent's reports to the lead thread since it started, read or not: the
+   * thread's lead may read one before the owner looks.
+   */
+  readonly reports: (input: {
+    readonly conversationId: string;
+    readonly seatId: string;
+    readonly since: string;
+  }) => Promise<readonly { readonly text: string }[]>;
   /** The connection API setup and Settings use; it returns the inventory after the change. */
   readonly connections: (command: OperatorConnectionCommand) => Promise<unknown>;
   /** What the agent starts from: the machines, sessions and projects Clankie already knows. */
@@ -196,15 +205,12 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
   /** Reads the agent's reports for a proposal; the survey moves to proposed once one parses. */
   async function refresh(survey: SetupSurvey): Promise<SetupSurvey> {
     if (survey.status !== "surveying" || survey.seatId === undefined) return survey;
-    const answer = await deps.serve({
-      op: "worker_reports",
-      schemaVersion: 1,
+    const reports = await deps.reports({
       conversationId: LEAD,
-      limit: 100,
+      seatId: survey.seatId,
+      since: survey.startedAt,
     });
-    if (answer.op !== "worker_reports") return survey;
-    const reports = answer.page.items.filter((item) => item.seatId === survey.seatId);
-    for (const report of reports.reverse()) {
+    for (const report of [...reports].reverse()) {
       const proposal = proposalFromReport(report.text);
       if (proposal) return write({ ...survey, status: "proposed", proposal });
     }

@@ -379,6 +379,16 @@ export interface CaptainPort {
   }): Promise<import("@clankie/protocol/connector").PromptAnswerResult>;
   /** Records a verified outside delivery in the fleet room (VUH-2403); never blocks or alters its handling. */
   recordInbound?(arrival: import("./fleet-room.ts").InboundArrival): void;
+  /**
+   * Every retained report one seat sent a conversation since a time, read or
+   * not, without offering it to anyone. Setup's agent reports to the shared
+   * lead thread, whose lead may read it first (ADR 0317).
+   */
+  seatReports?(input: {
+    readonly conversationId: string;
+    readonly seatId: string;
+    readonly since: string;
+  }): Promise<readonly { readonly text: string; readonly acceptedAt: string }[]>;
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,

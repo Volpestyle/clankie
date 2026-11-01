@@ -1560,20 +1560,38 @@ it("offers retained results through authenticated operator dispatch and only ack
   expect(read.status).toBe(200);
   const result = OperatorConversationServiceResultSchema.parse(await read.json());
   if (result.op !== "worker_reports") throw new Error("Wrong result");
-  // Each report names the seat that sent it, so a reader can match its own hire (ADR 0317).
   expect(result.page.items).toContainEqual(
-    expect.objectContaining({
-      deliveryId: receipt.id,
-      paneId: WORKER,
-      seatId: expect.any(String),
-      text: "Retained finished result for the lead",
-    }),
+    expect.objectContaining({ deliveryId: receipt.id, text: "Retained finished result for the lead" }),
   );
   expect(accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.state).not.toBe(
     "read",
   );
   expect((await f.service.operatorRequest("/operator/v1/dispatch", ack)).status).toBe(200);
   expect(accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.state).toBe("read");
+  // Read by the lead, the report still reaches whoever asks for its seat's reports (ADR 0317).
+  const since = new Date(Date.now() - 60_000).toISOString();
+  const bySeat = await Promise.all(
+    (await roster(f.service)).map(async (seat) => ({
+      seatId: seat.seatId,
+      reports: await f.service.captain.seatReports!({
+        conversationId: "global-default",
+        seatId: seat.seatId,
+        since,
+      }),
+    })),
+  );
+  expect(
+    bySeat.filter(({ reports }) =>
+      reports.some((entry) => entry.text === "Retained finished result for the lead"),
+    ),
+  ).toHaveLength(1);
+  expect(
+    await f.service.captain.seatReports!({
+      conversationId: "global-default",
+      seatId: bySeat.find(({ reports }) => reports.length > 0)!.seatId,
+      since: new Date(Date.now() + 60_000).toISOString(),
+    }),
+  ).toEqual([]);
   const unauthenticated = await f.service.app.app.request("/operator/v1/dispatch", {
     method: "POST",
     headers: { "content-type": "application/json" },
