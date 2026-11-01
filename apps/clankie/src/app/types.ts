@@ -38,7 +38,6 @@ import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DiscordRoomObservations } from "../discord-room-observations.ts";
-import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { MediaGeneratorPort } from "../ports/media.ts";
@@ -282,7 +281,6 @@ export interface ClankieAppDependencies {
   discordPermissions?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["permissions"];
   discordTestPost?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["testPost"];
   roomObservations?: DiscordRoomObservations;
-  roomVoice?: DiscordRoomVoice;
   settings?: {
     load(): Promise<ClankieSettings>;
     update?(

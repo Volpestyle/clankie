@@ -36,6 +36,20 @@ export interface ExtensionRouteHost {
   ownerSettings(request: Request): Promise<true | "authentication_required" | "forbidden">;
   /** A paired device with chat access behind a request; undefined refuses. */
   chatDevice(request: Request): Promise<ChatDeviceAuthority | undefined>;
+  /**
+   * The local operator, or a paired device holding the grant one access level
+   * needs, behind a room request; undefined refuses.
+   */
+  room(
+    request: Request,
+    access: "observe" | "guidance" | "settings",
+  ): Promise<{ current(): boolean; guard(): Promise<void> } | undefined>;
+  /** The Discord body or other captain caller behind a request. */
+  captainCaller(
+    request: Request,
+  ): Promise<import("../app/types.ts").TrustedCaptainIdentity | "unavailable" | undefined>;
+  /** Reads his conversations as the operator does. */
+  readonly conversations: Pick<CaptainPort, "serveOperatorConversation">;
   /** The owner's settings, read when a request is served. */
   readonly settings: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;

@@ -5,6 +5,7 @@ import { BODY_TRANSFER_ROUTES } from "@clankie/protocol/body-transfer";
 import { discordAttachmentRoot, type SettingsStore } from "@clankie/settings";
 import { createClankieApp, type ClankieApp } from "./app.ts";
 import { composerTranscriptionRoutes } from "./composer-transcription.ts";
+import { voiceRoomRoutes } from "./voice-room-routes.ts";
 import type { ClankieAppDependencies } from "./app/types.ts";
 import type { BodyTransfer } from "./body-transfer.ts";
 import { createStubCaptain } from "./captain/port.ts";
@@ -42,8 +43,12 @@ export function createDormantApp(
   const { transfer, restart, ...dependencies } = options;
   return createClankieApp({
     ...dependencies,
-    // The phone still reads the composer's transcription status from a dormant body.
-    extensionRoutes: [...(dependencies.extensionRoutes ?? []), composerTranscriptionRoutes()],
+    // The phone still reads composer transcription and room voice status from a dormant body.
+    extensionRoutes: [
+      ...(dependencies.extensionRoutes ?? []),
+      composerTranscriptionRoutes(),
+      voiceRoomRoutes(),
+    ],
     captain: createStubCaptain(),
     admit: dormantAdmits,
     bodyTransfer: { transfer, restart },

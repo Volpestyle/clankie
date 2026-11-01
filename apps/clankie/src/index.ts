@@ -158,6 +158,7 @@ import { linearTrackerExtension } from "./linear-extension.ts";
 import { activityRoutes } from "./activity-routes.ts";
 import { activityTools } from "./activity-tools.ts";
 import { composerTranscriptionRoutes } from "./composer-transcription.ts";
+import { voiceRoomRoutes } from "./voice-room-routes.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import type { LinearRouteParts } from "./app/linear-routes.ts";
@@ -2371,13 +2372,6 @@ const clankie = await createClankieApp({
   },
   refreshWorkerCatalogs: workerToolRefresh.refresh,
   roomObservations,
-  roomVoice: new DiscordRoomVoice(
-    bodyVoiceStays,
-    bodyLeaseStore,
-    undefined,
-    undefined,
-    voiceProviderReadiness,
-  ),
   discordTurnReceipts,
   bodyVoiceStays,
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
@@ -2389,6 +2383,9 @@ const clankie = await createClankieApp({
     skinDraftRoutes(skinDrafts),
     activityRoutes({ activitySharing, ...(activityAdmission === undefined ? {} : { activityAdmission }) }),
     composerTranscriptionRoutes(),
+    voiceRoomRoutes(
+      new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore, undefined, undefined, voiceProviderReadiness),
+    ),
   ],
   bodyLeases: {
     router: bodyLeases,

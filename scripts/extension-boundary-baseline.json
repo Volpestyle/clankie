@@ -18,7 +18,6 @@
     "app/types.ts -> discord-presence-runtime.ts (persona)",
     "app/types.ts -> discord-room-observations.ts (persona)",
     "app/types.ts -> discord-room-routes.ts (persona)",
-    "app/types.ts -> discord-room-voice.ts (voice)",
     "app/types.ts -> persona-images.ts (persona)",
     "captain/captain-auto-rounds.ts -> captain/captain-discord-turns.ts (persona)",
     "captain/captain-context.ts -> captain/captain-discord-turns.ts (persona)",
