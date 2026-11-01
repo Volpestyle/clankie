@@ -234,7 +234,8 @@ import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
 import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { connectBodyToGateway } from "./body-doorway.ts";
+import { createCoreExtensions, doorwayOf } from "./extension-host.ts";
+import { relayExtension } from "./relay-extension.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
@@ -374,17 +375,28 @@ const hostPower = createHostPowerMonitor({
   keepAwakeRequested: async () => keepAwakeEnabled(await settingsStore.load()),
   onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
 });
-const bodyConnection = await connectBodyToGateway({
-  publicGateway: startupSettings.publicGateway,
-  store: operatorCredentialStore,
+// ADR 0328: the parts the fleet can run without. The relay attaches here,
+// before the app, so restored pairing routes reach it; it connects once the
+// server listens.
+let serviceListening: (() => void) | undefined;
+const listening = new Promise<void>((resolve) => {
+  serviceListening = resolve;
+});
+const extensions = createCoreExtensions({
+  credentials: operatorCredentialStore,
   env: process.env,
-  port,
-  relayPort,
+  servicePorts: { port, relayPort },
   logger,
+  whenListening: (run) => void listening.then(run),
   ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
 });
-const publicGatewayConnector = bodyConnection.connector;
-const publicGatewaySignInRequiredSince = bodyConnection.signInRequiredSince;
+extensions.add(relayExtension, {
+  enabled: startupSettings.publicGateway.url !== undefined,
+  settings: startupSettings.publicGateway,
+});
+await extensions.start();
+const publicGatewayConnector = doorwayOf(extensions)?.connector;
+const publicGatewaySignInRequiredSince = doorwayOf(extensions)?.signInRequiredSince;
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -2676,10 +2688,8 @@ const deviceDoorway = deviceDoorwayHost
 if (deviceDoorway !== undefined) {
   logger.info({ hostname: deviceDoorwayHost, port: deviceDoorwayPort }, "device doorway listening");
 }
-if (publicGatewayConnector !== undefined) {
-  if (server.listening) publicGatewayConnector.start();
-  else server.once("listening", () => publicGatewayConnector?.start());
-}
+if (server.listening) serviceListening?.();
+else server.once("listening", () => serviceListening?.());
 const localFleetServer =
   ["darwin", "linux"].includes(process.platform) && herdr.available()
     ? serve({
@@ -2745,7 +2755,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     );
   runtimeHealth.stop();
   fleetProgress.stop();
-  publicGatewayConnector?.close();
+  void extensions.stop();
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   const closeDoorwayConnections = deviceDoorway === undefined ? undefined : drainHttpServer(deviceDoorway);

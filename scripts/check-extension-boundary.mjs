@@ -4,7 +4,8 @@
 // names it as part of an extension. The core may not import an extension: an
 // extension reaches the core through the ports it names, and the core reaches
 // an extension only through what its projection adds; only the composition
-// root, apps/clankie/src/index.ts, imports extensions. The imports the core
+// roots, apps/clankie/src/index.ts and the dormant body's dormant-body.ts,
+// import extensions. The imports the core
 // still has are listed in scripts/extension-boundary-baseline.json, which only
 // shrinks as extensions move behind the contract.
 //
@@ -13,6 +14,7 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
+const compositionRoots = new Set(["index.ts", "dormant-body.ts"]);
 const source = join(root, "apps/clankie/src");
 const baselinePath = join(root, "scripts/extension-boundary-baseline.json");
 
@@ -63,7 +65,12 @@ const EXTENSION_RULES = [
   ["tracker-linear", [/^linear-/u, /^app\/linear-routes\.ts$/u, /^captain\/conversations\/linear-/u]],
   [
     "relay",
-    [/^public-gateway-connector\.ts$/u, /^gateway-encryption\.ts$/u, /^body-doorway\.ts$/u, /^push\.ts$/u],
+    [
+      /^relay-extension\.ts$/u,
+      /^public-gateway-connector\.ts$/u,
+      /^gateway-encryption\.ts$/u,
+      /^body-doorway\.ts$/u,
+    ],
   ],
   ["computer", [/^computer-/u, /^joined-computer\.ts$/u]],
   ["browser", [/^browser-/u]],
@@ -91,8 +98,8 @@ for (const file of files) {
   const text = readFileSync(file, "utf8");
   const part = partOf(from);
   lines[part] = (lines[part] ?? 0) + text.split("\n").length;
-  // The composition root is the one core file that wires extensions in.
-  if (part !== "core" || from === "index.ts") continue;
+  // The composition roots are the core files that wire extensions in.
+  if (part !== "core" || compositionRoots.has(from)) continue;
   for (const match of text.matchAll(/(?:\bfrom|\bimport\()\s*"([^"]+)"/gu)) {
     const specifier = match[1];
     const target = specifier.startsWith(".")
