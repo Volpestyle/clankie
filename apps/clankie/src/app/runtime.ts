@@ -1416,6 +1416,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       const body = await authenticateCaptain(context.req.raw, dependencies);
       if (!body || body === "unavailable" || body.steerSourceLane !== "discord_text")
         return context.body(null, 403);
+      // allow-swallowed-rejection -- invalid JSON is refused with 403 just below.
       const input = await context.req.json().catch(() => undefined);
       if (!input || typeof input !== "object" || typeof input.capability !== "string")
         return context.body(null, 403);
