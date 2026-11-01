@@ -233,7 +233,14 @@ import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
 import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { browserOf, createCoreExtensions, doorwayOf, projected, routesOf } from "./extension-host.ts";
+import {
+  browserOf,
+  createCoreExtensions,
+  doorwayOf,
+  projected,
+  routesOf,
+  switchedOn,
+} from "./extension-host.ts";
 import { relayExtension } from "./relay-extension.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
@@ -404,7 +411,7 @@ const extensions = createCoreExtensions({
   ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
 });
 extensions.add(relayExtension, {
-  enabled: startupSettings.publicGateway.url !== undefined,
+  enabled: switchedOn(startupSettings, "relay", startupSettings.publicGateway.url !== undefined),
   settings: startupSettings.publicGateway,
 });
 await extensions.start();
@@ -513,14 +520,14 @@ const mediaGenerator = new ConfiguredMediaGenerator({
 
 // Clankie's private Browser Use Pi session (ADR 0328 extension). Chrome launches on the first call.
 extensions.add(browserExtension, {
-  enabled: browserEnabled(process.env.CLANKIE_BROWSER_ENABLED),
+  enabled: switchedOn(startupSettings, "browser", browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)),
   settings: startupSettings.browser,
 });
 await extensions.start();
 const browserHost = browserOf(extensions);
 
 // What he makes (ADR 0328 extension), starting with his drawing hand (ADR 0096).
-extensions.add(mediaExtension, { enabled: true, settings: undefined });
+extensions.add(mediaExtension, { enabled: switchedOn(startupSettings, "media"), settings: undefined });
 await extensions.start();
 const tldrawHost = projected(extensions, "diagrams");
 
@@ -1090,7 +1097,10 @@ const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-tur
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
 // His own computer body (ADR 0328 extension): the Mac's screen and joined machines' screens.
-extensions.add(computerExtension, { enabled: true, settings: undefined });
+extensions.add(computerExtension, {
+  enabled: switchedOn(startupSettings, "computer"),
+  settings: undefined,
+});
 await extensions.start();
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
@@ -2501,6 +2511,7 @@ const clankie = await createClankieApp({
   prepareLocalClaudeShim: (action, binding) => prepareLocalClaudeShim(action, binding),
   deliveredFiles,
   herdrRuntime: herdr.status,
+  extensions,
   activitySharing,
   ...(activityAdmission === undefined ? {} : { activityAdmission }),
   ...(activityLaunches === undefined ? {} : { activityLaunches }),

@@ -215,6 +215,13 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  health | status          Probe every launcher-owned service (JSON)"],
   },
   {
+    nouns: ["extensions"],
+    lines: [
+      "  extensions [status]      Each extension's state: running, degraded with a reason, off (JSON)",
+      "  extensions on|off ID     Switch one extension on or off; applies at the next restart",
+    ],
+  },
+  {
     nouns: ["runtime-health"],
     lines: [
       "  runtime-health [status|on|off]    Runtime CPU and slow-health alarm settings (JSON)",

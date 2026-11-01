@@ -24,6 +24,7 @@ import {
 import { z } from "zod";
 import { DeviceDirectRouteSchema, type DeviceDirectRoute } from "@clankie/protocol";
 import { RuntimeHealthObservationSchema, type RuntimeHealthObservation } from "@clankie/protocol";
+import { ExtensionStatesSchema, type ExtensionStateReport } from "@clankie/protocol/extensions";
 import { commandHost } from "./io.ts";
 
 const DOORWAY_PROBE_TIMEOUT_MS = 5_000;
@@ -127,6 +128,8 @@ export async function probeHealth(options: GatewayCommandOptions = {}): Promise<
   readonly doorway: GatewayDoorwayReport;
   readonly lastSleep?: HostPowerReport["lastSleep"];
   readonly runtimeHealth?: RuntimeHealthObservation;
+  /** Each extension's last known state (ADR 0328). */
+  readonly extensions?: readonly ExtensionStateReport[];
   /** Which body holds Clankie (ADR 0286); a dormant body says where he went. */
   readonly self?: BodyAuthority;
 }> {
@@ -141,11 +144,16 @@ export async function probeHealth(options: GatewayCommandOptions = {}): Promise<
     const power = HostPowerReportSchema.safeParse(body.data.power);
     const runtimeHealth = RuntimeHealthObservationSchema.safeParse(body.data.runtimeHealth);
     const self = BodyAuthoritySchema.safeParse(body.data.self);
+    const extensions = ExtensionStatesSchema.safeParse({
+      schemaVersion: 1,
+      extensions: body.data.extensions,
+    });
     return {
       ...(self.success ? { self: self.data } : {}),
       doorway: body.data.doorway ?? { state: "unreachable" },
       ...(power.success && power.data.lastSleep !== undefined ? { lastSleep: power.data.lastSleep } : {}),
       ...(runtimeHealth.success ? { runtimeHealth: runtimeHealth.data } : {}),
+      ...(extensions.success ? { extensions: extensions.data.extensions } : {}),
     };
   } catch {
     return { doorway: { state: "unreachable" } };

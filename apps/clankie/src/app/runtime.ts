@@ -15,6 +15,8 @@ import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 import { createViewRoutes } from "../view-routes.ts";
 import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
 import { RuntimeHealthObservationSchema } from "@clankie/protocol";
+import { ExtensionStatesSchema } from "@clankie/protocol";
+import { createExtensionStateRoutes } from "../extension-state-routes.ts";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { WORKER_ACCOUNTS_PATH } from "@clankie/protocol/worker-accounts";
@@ -1123,6 +1125,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "unavailable" }, 503);
     }
   });
+  app.route(
+    "/",
+    createExtensionStateRoutes({
+      read: authorizeOwnerDevice,
+      change: authorizeOwnerSecrets,
+      settings: settingsSource,
+      ...(dependencies.extensions === undefined ? {} : { extensions: dependencies.extensions }),
+    }),
+  );
   app.get("/v1/captain/readiness", async (context) => {
     const authorized = await authorizeOwnerDevice(context.req.raw);
     if (authorized !== true)
@@ -1718,6 +1729,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         })(),
       ),
       ...(herdr === undefined ? {} : { herdr }),
+      ...(() => {
+        try {
+          const states = ExtensionStatesSchema.safeParse({
+            schemaVersion: 1,
+            extensions: dependencies.extensions?.snapshot(),
+          });
+          return states.success ? { extensions: states.data.extensions } : {};
+        } catch {
+          return {};
+        }
+      })(),
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
       ...(runtime === undefined ? {} : { runtime }),

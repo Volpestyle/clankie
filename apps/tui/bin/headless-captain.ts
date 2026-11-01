@@ -212,6 +212,13 @@ export async function runHeadlessCaptainCommand(
       else stdout.write(`${formatHuddleBoard(result)}\n`);
       return 0;
     }
+    if (command === "extensions") {
+      outputJson(
+        stdout,
+        await (await import("../src/command/extensions.ts")).runExtensionsCommand(rest, options),
+      );
+      return 0;
+    }
     if (command === "runtime-health") {
       outputJson(
         stdout,

@@ -21,6 +21,7 @@
     "./composer-transcription": "./src/composer-transcription.ts",
     "./accounts": "./src/accounts.ts",
     "./host-power": "./src/host-power.ts",
+    "./extensions": "./src/extensions.ts",
     "./work-items": "./src/work-items.ts",
     "./tracker-posting": "./src/tracker-posting.ts",
     "./views": "./src/views.ts",

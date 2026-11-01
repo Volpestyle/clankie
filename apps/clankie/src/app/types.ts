@@ -222,6 +222,11 @@ export interface ClankieAppDependencies {
   machineJoins?: import("../machine-joins.ts").MachineJoins;
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
+  /** Extension states (ADR 0328): last known on `/health`, health read first on `GET /v1/extensions`. */
+  extensions?: {
+    snapshot(): readonly import("@clankie/protocol").ExtensionStateReport[];
+    report(): Promise<readonly import("@clankie/protocol").ExtensionStateReport[]>;
+  };
   /** Only a currently available connection has an active binding. */
   herdrBinding?: () => HerdrBinding | undefined;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */

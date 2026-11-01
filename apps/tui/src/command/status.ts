@@ -40,6 +40,8 @@ export interface StatusCommandResult {
   readonly presence?: OperatorPresenceSnapshot;
   readonly presenceState?: "unreachable";
   readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
+  /** Each extension's last known state (ADR 0328). */
+  readonly extensions?: readonly import("@clankie/protocol").ExtensionStateReport[];
   /** Which body holds Clankie (ADR 0286). */
   readonly self?: import("@clankie/protocol/body-transfer").BodyAuthority;
   /** Launcher-owned services that crashed in the last day, or that recovery left stopped. */
@@ -156,7 +158,9 @@ async function phoneAccess(
   options: StatusCommandOptions,
   env: NodeJS.ProcessEnv,
   serviceHealthy: boolean,
-): Promise<Pick<StatusCommandResult, "connection" | "doorway" | "nextStep" | "runtimeHealth" | "self">> {
+): Promise<
+  Pick<StatusCommandResult, "connection" | "doorway" | "extensions" | "nextStep" | "runtimeHealth" | "self">
+> {
   try {
     const settings = await new SettingsStore(defaultSettingsPath(env)).load();
     const connection = THIS_MAC_CONNECTION;
@@ -185,6 +189,7 @@ async function phoneAccess(
       doorway,
       ...(self === undefined ? {} : { self }),
       ...(health.runtimeHealth === undefined ? {} : { runtimeHealth: health.runtimeHealth }),
+      ...("extensions" in health && health.extensions !== undefined ? { extensions: health.extensions } : {}),
       nextStep: nextStepLine({
         doorway,
         remoteAccessConfigured: settings.publicGateway.url !== undefined,
