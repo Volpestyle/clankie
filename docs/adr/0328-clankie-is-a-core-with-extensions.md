@@ -150,6 +150,29 @@ of two answers: an appearance port the core offers and the persona extension
 fills, or ports one extension offers another. Until then generation stays in
 the composition root.
 
+### Open: tracker wakes live inside the conversation store
+
+Linear is not yet one piece that can move. Its webhook routes need the
+captain's wake methods; the conversation store queues, defers and records
+Linear wakes in its own turn loop and keeps `linear*` cursors in each
+conversation's saved metadata; the MCP hosts publish to Linear and share its
+request budget; and work items import Linear projects. Moving the routes alone
+would only hand the extension objects the core still builds. The planned order,
+each step one pull request with no change in what he does:
+
+1. A tracker-neutral activity type and one captain port to receive it
+   (`receiveTrackerActivity`), with Linear's webhook adapting into it.
+2. The store's wake queue, receipts and cursors become tracker-neutral. Saved
+   metadata keeps loading under the old `linear*` names until every body has
+   rewritten it.
+3. A `tracker-linear` extension owns the webhook and settings routes, its
+   client, request budget and mirrors, and projects its work-items backend.
+4. The MCP hosts publish through the work-items port, so neither imports a
+   tracker.
+
+GitHub and files trackers already sit behind `@clankie/work-items`; they move
+the same way once step 4 lands.
+
 ### Choosing extensions
 
 Settings gain one `extensions` map from id to on or off, with defaults that
