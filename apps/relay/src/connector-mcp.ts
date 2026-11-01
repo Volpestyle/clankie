@@ -16,6 +16,8 @@ import {
   PromptAnswerStepSchema,
   KEY_PRESS_MAX,
   KeyPressSchema,
+  LEAD_WAKE_TEXT_MAX,
+  LeadWakeNameSchema,
 } from "../../../packages/protocol/src/connector.ts";
 import { FLEET_ROOM_TEXT_MAX, type AppNotesResult } from "../../../packages/protocol/src/fleet-room.ts";
 import { FleetCapacitySchema } from "../../../packages/protocol/src/fleet-capacity.ts";
@@ -206,6 +208,7 @@ function connectorServer(
         "press_keys presses keys in an agent's terminal whatever it is doing (arrows, esc, ctrl+c, tab, enter), to drive its interface, under the same switch. " +
         "When the owner hands the lead to the connected apps, read_inbox shows what Clankie would have handled himself (his workers' messages and reports, his wakes), " +
         "read_reports reads a lead thread's worker reports and acknowledge_reports marks them handled; answer a worker with message_agent. " +
+        "wake_lead hands a job to a connected lead that runs elsewhere, such as Grok Bot, at the wake webhook the owner stored for it; only your text goes, and its answer comes on the notes board. " +
         "list_issues lists the owner's projects and their issues, wherever each project tracks them; read_issue reads one with its comments; " +
         'save_issue creates or changes one and comment_issue comments, under each project\'s "Posting to your tracker" setting. ' +
         "When you lead work through Clankie, follow the clankie_guide topic lead, the same guidance Clankie leads by, and its page lead/reference/connected-leads.md, written for connected leads: " +
@@ -463,6 +466,36 @@ function connectorServer(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      {
+        name: "wake_lead",
+        title: "Wake a connected lead",
+        description:
+          "Hand a job to a connected lead that runs somewhere else, such as Grok Bot, at the wake webhook the owner stored for it at the Mac. lead is its short name (such as grok); text is the job, in plain words, signed with this app's name as the owner approved it. Only the text goes: the webhook's address and key stay on the Mac and never come back. The lead answers on the notes board, so read_notes after a while. sent means its webhook took the job, not that the work is done. A lead with no webhook answers with the names that have one.",
+        inputSchema: {
+          type: "object" as const,
+          properties: {
+            lead: {
+              type: "string",
+              pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,31}$",
+              description: "The lead's short name, such as grok.",
+            },
+            text: {
+              type: "string",
+              minLength: 1,
+              maxLength: LEAD_WAKE_TEXT_MAX,
+              description: "The job for the lead.",
+            },
+          },
+          required: ["lead", "text"],
+          additionalProperties: false,
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
       },
       {
         name: "read_inbox",
@@ -854,6 +887,23 @@ function connectorServer(
         });
         if (result.outcome !== "ready") return failure(unavailableNotes(result));
         return text({ about: NOTES_ABOUT, notes: result.notes, newer: result.newer });
+      }
+      if (call.params.name === "wake_lead") {
+        const lead = LeadWakeNameSchema.safeParse(args.lead);
+        if (!lead.success) return failure("lead is a short name of letters, digits or dashes, such as grok.");
+        // Only the name and the text go up: the relay stamps this app's device.
+        const result = await options.operator.dispatch(
+          {
+            op: "lead_wake",
+            schemaVersion: 1,
+            lead: lead.data,
+            text: requiredString(args.text, "text", LEAD_WAKE_TEXT_MAX),
+          },
+          bearer,
+        );
+        if (result.op !== "lead_wake") throw new Error(`Unexpected ${result.op} result for lead_wake`);
+        const { outcome, message, ...rest } = result.result;
+        return outcome === "sent" ? text({ outcome, ...rest, message }) : failure(message);
       }
       if (call.params.name === "read_inbox") {
         const after = args.after;

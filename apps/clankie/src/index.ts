@@ -144,6 +144,7 @@ import { SkinDraftService } from "./skin-drafts.ts";
 import { skinDraftRoutes } from "./skin-draft-routes.ts";
 import { skinDraftGenerator } from "./skin-draft-generation.ts";
 import { RemoteProjectLeads } from "./remote-project-leads.ts";
+import { createLeadWakes } from "./lead-wakes.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
@@ -2446,6 +2447,10 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
+  leadWakes: createLeadWakes({
+    store: operatorCredentialStore,
+    log: (fields, message) => logger.info({ event: "lead.wake", ...fields }, message),
+  }),
   setupSurveyPath: join(stateRoot, "setup-survey.json"),
   connectorDetection,
   evidenceStore,

@@ -222,3 +222,13 @@ export {
   decodeEvidenceLease,
   type EvidenceCredential,
 } from "./evidence-credential.ts";
+export {
+  LEAD_WAKE_PROVIDER_PREFIX,
+  clearLeadWake,
+  leadWakeAuthorization,
+  leadWakeProviderId,
+  listLeadWakes,
+  readLeadWake,
+  setLeadWake,
+  type LeadWake,
+} from "./lead-wake.ts";

@@ -8,6 +8,9 @@ import {
   KEY_PRESS_MAX,
   KeyPressResultSchema,
   KeyPressSchema,
+  LEAD_WAKE_TEXT_MAX,
+  LeadWakeNameSchema,
+  LeadWakeResultSchema,
   SeatImageResultSchema,
 } from "./connector.ts";
 import { FleetCapacitySchema } from "./fleet-capacity.ts";
@@ -606,6 +609,21 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({
       /**
+       * Hand a job to a connected lead at the webhook the owner stored for it (ADR 0336).
+       * Only the text goes; the address and key stay in the credential broker. An app
+       * reaches it through the relay, which stamps its device; the owner directly.
+       */
+      op: z.literal("lead_wake"),
+      schemaVersion: z.literal(1),
+      lead: LeadWakeNameSchema,
+      text: z.string().trim().min(1).max(LEAD_WAKE_TEXT_MAX),
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /**
        * A connected app writes an issue in one of the owner's projects (ADR 0305), only
        * through the relay, which stamps the app's device. Linear and GitHub writes pass
        * the project's "Posting to your tracker" setting.
@@ -1086,6 +1104,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({ op: z.literal("key_press"), schemaVersion: z.literal(1), result: KeyPressResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("lead_wake"), schemaVersion: z.literal(1), result: LeadWakeResultSchema })
     .strict(),
   z
     .object({ op: z.literal("issue_write"), schemaVersion: z.literal(1), result: IssueWriteResultSchema })

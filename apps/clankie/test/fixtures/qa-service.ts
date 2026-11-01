@@ -20,6 +20,8 @@ export async function createQaService(
     readonly captainToken?: string;
     /** The real work service, when a test reads or writes the owner's issues. */
     readonly workItems?: ClankieAppDependencies["workItems"];
+    /** Waking connected leads at their stored webhooks (ADR 0336). */
+    readonly leadWakes?: ClankieAppDependencies["leadWakes"];
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-qa-"));
@@ -31,6 +33,7 @@ export async function createQaService(
     createClankieApp({
       captain: createStubCaptain(options.captain),
       ...(options.workItems === undefined ? {} : { workItems: options.workItems }),
+      ...(options.leadWakes === undefined ? {} : { leadWakes: options.leadWakes }),
       ...(options.captainToken === undefined
         ? {}
         : {

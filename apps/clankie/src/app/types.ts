@@ -154,6 +154,8 @@ export interface ClankieAppDependencies {
   feedCheckReceiptPath?: string;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   connectorPromptAnswersPath?: string;
+  /** Sends a job to a connected lead's stored wake webhook (ADR 0336). */
+  leadWakes?: import("../lead-wakes.ts").LeadWakes;
   /** Setup's one read-only agent and its proposal (ADR 0320). */
   setupSurveyPath?: string;
   /**
