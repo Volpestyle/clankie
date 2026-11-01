@@ -163,7 +163,10 @@ export class PublicGatewayConnector {
   private readonly pairingRoutes = new Map<string, PublicGatewayPairingRouteFrame>();
   private readonly inFlight = new Map<string, AbortController>();
   private readonly streams = new Map<string, LocalStream>();
-  /** A credential refresh that waits for open calls to end; the gateway's own expiry still binds. */
+  /**
+   * A credential refresh that waits for open calls and requests to end, since closing the tunnel
+   * fails every exchange on it; the gateway's own expiry still binds.
+   */
   private refreshWhenIdle: WebSocket | undefined;
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly pairingRouteWaiters = new Map<string, PairingRouteWaiter>();
@@ -420,9 +423,9 @@ export class PublicGatewayConnector {
         this.tokenRefreshTimer = setTimeout(() => {
           this.tokenRefreshTimer = undefined;
           if (this.socket !== socket) return;
-          // Reconnecting would drop a call on this socket; refresh once the calls end.
-          if (this.streams.size > 0) this.refreshWhenIdle = socket;
-          else socket.close(4000, "refreshing host credential");
+          // Reconnecting would drop a call or request on this socket; refresh once they end.
+          this.refreshWhenIdle = socket;
+          this.refreshIfIdle(socket);
         }, refreshInMs);
         this.tokenRefreshTimer.unref();
       }
@@ -540,7 +543,16 @@ export class PublicGatewayConnector {
     this.inFlight.set(frame.requestId, abort);
     void this.forwardRequest(socket, frame, abort).finally(() => {
       if (this.inFlight.get(frame.requestId) === abort) this.inFlight.delete(frame.requestId);
+      this.refreshIfIdle(socket);
     });
+  }
+
+  /** Closes a socket whose credential refresh is due once nothing is open on it. */
+  private refreshIfIdle(socket: WebSocket): void {
+    if (this.refreshWhenIdle !== socket || this.socket !== socket) return;
+    if (this.streams.size > 0 || this.inFlight.size > 0) return;
+    this.refreshWhenIdle = undefined;
+    socket.close(4000, "refreshing host credential");
   }
 
   private async forwardRequest(
@@ -768,10 +780,7 @@ export class PublicGatewayConnector {
     if (tellGateway && socket !== undefined)
       // allow-swallowed-rejection -- a send fails only on a closed socket, whose close ends every stream
       void sendStreamClose(socket, id, sendableStreamCloseCode(code)).catch(() => undefined);
-    if (this.streams.size === 0 && this.refreshWhenIdle !== undefined && this.refreshWhenIdle === socket) {
-      this.refreshWhenIdle = undefined;
-      socket.close(4000, "refreshing host credential");
-    }
+    if (socket !== undefined) this.refreshIfIdle(socket);
   }
 
   private closeAllStreams(): void {
