@@ -314,7 +314,14 @@ export function judgeChecks({ statuses: statusList, runs: runList, since, rerunS
     if (state === "pending") pending.push(name);
     else if (state !== "success") failing.push(`${name} (${state})`);
   }
+  // Each workflow run makes its own check suite, so a job the draft run
+  // skipped and the ready run's copy of it both stay on the head. Judge only
+  // the newest run of each job.
+  const newest = new Map();
   for (const run of runList) {
+    if (!newest.has(run.name) || newest.get(run.name).id < run.id) newest.set(run.name, run);
+  }
+  for (const run of newest.values()) {
     const state = run.status === "completed" ? run.conclusion : run.status;
     const draftSkip =
       state === "skipped" && since && run.completed_at < since && rerunSuites.has(run.check_suite?.id);
