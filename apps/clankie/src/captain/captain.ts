@@ -32,7 +32,7 @@ import {
   prepareFreeAgentIntent as prepareFreeIntent,
 } from "./free-agent-intent.ts";
 import { requireRuntimeMachineAccess } from "../machine-access.ts";
-import { WATCH_REFUSAL, WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
+import { WATCH_TURN_REFUSAL, createWatchGate } from "../watch.ts";
 import { routeLaneRun } from "./lane-route.ts";
 import {
   joinedMachineShellTool,
@@ -56,10 +56,6 @@ import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
 import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
 import {
-  inspectCheckout,
-  unreconciledLinkedWorktrees,
-  ownerCheckout,
-  syncOwnerCheckout,
   verifyHireCheckout,
   hireWorktreeStart,
   projectPathContains,
@@ -67,14 +63,6 @@ import {
   type HireCheckoutFreshness,
 } from "@clankie/settings";
 import { HireWorktrees, hireWorktreeScope, type HireWorktreeRelocation } from "./hire-worktrees.ts";
-import { recordBulkOperation } from "@clankie/fleet-resources";
-import { reclaimWorktreeCaches } from "./reclaim-worktree-caches.ts";
-import {
-  hasNestedRegisteredWorktree,
-  pruneTidyWorktree,
-  pruneTidyWorktrees,
-  type PruneWorktreeResult,
-} from "./prune-worktree.ts";
 import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
@@ -226,6 +214,7 @@ import {
 } from "./captain-session.ts";
 import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
 import { createWorkerReports } from "./captain-worker-reports.ts";
+import { createCheckoutMaintenance } from "./captain-checkouts.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import {
   claudeWorkerChannelConsent,
@@ -293,7 +282,7 @@ import {
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import { FleetCensusBreaker } from "./fleet-census-breaker.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
-import { HERDR_CORE_FLEET, createHerdrCoreRunner } from "./herdr-core-runner.ts";
+import { HERDR_CORE_FLEET, createHerdrCoreRunner, herdrCoreCensusFleet } from "./herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./herdr-core-seats.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
@@ -435,8 +424,6 @@ const HEAD_LANE_HOLD_MS = 45_000;
 export const REPORT_ROUND_MS = 10 * 60_000;
 /** How often the service considers a fresh restart of the default lead seat (ADR 0271). */
 const LEAD_RESTART_CHECK_MS = 5 * 60_000;
-/** The longest a prune or cache reclaim waits for its light permit (VUH-2933). */
-const BULK_PERMIT_WAIT_MS = 5 * 60_000;
 /** How often this Mac's account usage is read for the burn rate (ADR 0324). */
 const USAGE_SAMPLE_MS = 10 * 60_000;
 /** ADR 0293's accepted work budget, independent of Claude's model window. */
@@ -599,6 +586,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       host: "local",
       run: (args: readonly string[]) => deps.runtimes!.runNamed!(entry.id, args, undefined, undefined, entry),
     })),
+    // Hires in the desktop app's terminals are seats too (ADR 0319).
+    herdrCoreCensusFleet(herdrCoreRunner, () => herdrCoreSeats.available()),
   ];
   // A local Codex seat hears its pane close from the fleet event feed instead
   // of polling `herdr pane get` every few seconds (VUH-2391). A restarted feed
@@ -2762,180 +2751,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   }
 
-  const checkoutRepositories = async () => {
-    const current = await settings();
-    const paths = current.projects.projects.flatMap((project) => [
-      ...project.workspaces
-        .filter((workspace) => workspace.machineId === "local")
-        .map((workspace) => workspace.path),
-      ...project.worktreeRoots.filter((root) => root.machineId === "local").map((root) => root.repoPath),
-    ]);
-    const owners = await Promise.all(
-      [...new Set(paths)].map((path) => ownerCheckout(path).catch(() => path)),
-    );
-    return [...new Set(owners)];
-  };
-  const checkoutReport = async () => {
-    const managed = await managedWorktreePaths({ runtimeRoot: options.repoRoot });
-    const platform = process.platform === "win32" ? "windows" : "posix";
-    const isManaged = (path: string) =>
-      managed.some(
-        (root) => projectPathContains(root, path, platform) || projectPathContains(path, root, platform),
-      );
-    return {
-      observedAt: new Date().toISOString(),
-      refFreshness: "cached-origin/main" as const,
-      checkouts: await Promise.all(
-        (await checkoutRepositories()).map(async (repository) => {
-          const status = await inspectCheckout(repository);
-          if (status.outcome !== "observed") return status;
-          // Managed runtime snapshots are not anyone's work; every other linked tree is.
-          const unreconciled = await unreconciledLinkedWorktrees(repository, isManaged)
-            .then((found) => paneTidy.describeUnreconciled(found))
-            .catch(() => undefined);
-          return unreconciled ? { ...status, unreconciled } : status;
-        }),
-      ),
-    };
-  };
-  const syncCheckouts = async (repository?: string) => {
-    const repositories = await checkoutRepositories();
-    if (repository !== undefined && !repositories.includes(repository))
-      throw Error("Select a registered owner checkout");
-    return Promise.all((repository === undefined ? repositories : [repository]).map(syncOwnerCheckout));
-  };
-  // Beside the fleet resource journal. The batch holds a light permit, so it queues
-  // behind memory pressure and shows in fleet status; low disk never holds it,
-  // since this is the work that frees disk (VUH-2933).
-  const bulkOperationDirectory = join(options.stateDir, "fleet-resources");
-  const bulkOperation = async <T>(
-    operation: "reclaim_caches" | "prune_worktree",
-    work: () => Promise<T>,
-    summary: (result: T) => object,
-  ): Promise<T> => {
-    const recorded = () => recordBulkOperation(bulkOperationDirectory, operation, work, summary);
-    if (!options.fleetResources) return recorded();
-    // An owner request or tidy round reports busy instead of waiting without end.
-    const waited = AbortSignal.timeout(BULK_PERMIT_WAIT_MS);
-    let admitted = false;
-    try {
-      return await options.fleetResources.governor.holdLight(
-        { holderId: `service:${operation}`, operation, signal: waited },
-        () => {
-          admitted = true;
-          return recorded();
-        },
-      );
-    } catch (error) {
-      if (admitted || !waited.aborted) throw error;
-      throw Error(
-        `Fleet resources are busy: ${operation} waited ${BULK_PERMIT_WAIT_MS / 60_000} minutes for a light permit; nothing was removed`,
-      );
-    }
-  };
-  const reclaimCaches = async (
-    repository: string,
-    path?: string,
-    guard: () => Promise<void> = async () => {},
-  ) => {
-    const current = await settings();
-    const roots = current.projects.projects
-      .flatMap((project) => project.worktreeRoots)
-      .filter((root) => root.machineId === "local" && root.repoPath === repository)
-      .map((root) => root.path);
-    if (!roots.length) throw Error("Select a registered local owner checkout");
-    return bulkOperation(
-      "reclaim_caches",
-      () =>
-        reclaimWorktreeCaches(repository, herdrRunner, {
-          roots,
-          ...(path === undefined ? {} : { path }),
-          protection: { runtimeRoot: options.repoRoot },
-          guard: async () => {
-            await guard();
-            if (JSON.stringify((await settings()).projects) !== JSON.stringify(current.projects))
-              throw Error("Project enrollment changed");
-          },
-        }),
-      (result) => ({ reclaimed: result.reclaimed.length, kept: result.kept.length }),
-    );
-  };
-  const admitPrune = async (
-    current: Awaited<ReturnType<typeof settings>>,
-    repository: string,
-    path: string,
-  ): Promise<void> => {
-    const platform = process.platform === "win32" ? "windows" : "posix";
-    const roots = current.projects.projects
-      .flatMap((project) => project.worktreeRoots)
-      .filter((root) => root.machineId === "local");
-    if (!roots.some((root) => root.repoPath === repository && projectPathContains(root.path, path, platform)))
-      throw Error("Select a linked worktree in a registered root; managed runtime trees are protected");
-    if (await hasNestedRegisteredWorktree(await checkoutRepositories(), path))
-      throw Error("Nested registered worktree is still present; keep the parent");
-  };
-  const pruneProtection = {
-    runtimeRoot: options.repoRoot,
-    dropDecided: (path: string, head: string): boolean =>
-      paneTidy.decisions.latest(path, head)?.decision === "safe_to_drop",
-  };
-  const pruneGuard =
-    (current: Awaited<ReturnType<typeof settings>>, guard: () => Promise<void>) => async () => {
-      // Watch removes no worktree (ADR 0308), asked again before every tree's removal.
-      await watch.refuse(WATCH_REFUSAL);
-      await guard();
-      const latest = await settings();
-      if (JSON.stringify(latest.projects) !== JSON.stringify(current.projects))
-        throw Error("Project enrollment changed");
-    };
-  const pruneWorktree = async (
-    repository: string,
-    path: string,
-    guard: () => Promise<void> = async () => {},
-  ): Promise<PruneWorktreeResult> => {
-    const current = await settings();
-    await admitPrune(current, repository, path);
-    return bulkOperation(
-      "prune_worktree",
-      () =>
-        pruneTidyWorktree(
-          repository,
-          path,
-          join(options.stateDir, "worktree-evidence"),
-          herdrRunner,
-          pruneGuard(current, guard),
-          pruneProtection,
-        ),
-      (result) => ({ worktrees: 1, removed: result.outcome === "removed" ? 1 : 0 }),
-    );
-  };
-  /** One fetch and one admission census for the batch; every tree still gets its fresh check (VUH-2932). */
-  const pruneWorktrees = async (
-    repository: string,
-    paths: readonly string[],
-    guard: () => Promise<void> = async () => {},
-  ): Promise<{ results: PruneWorktreeResult[] }> => {
-    const current = await settings();
-    return {
-      results: await bulkOperation(
-        "prune_worktree",
-        () =>
-          pruneTidyWorktrees(
-            repository,
-            paths,
-            join(options.stateDir, "worktree-evidence"),
-            herdrRunner,
-            pruneGuard(current, guard),
-            pruneProtection,
-            (path) => admitPrune(current, repository, path),
-          ),
-        (results) => ({
-          worktrees: results.length,
-          removed: results.filter((result) => result.outcome === "removed").length,
-        }),
-      ),
-    };
-  };
+  const {
+    checkoutRepositories,
+    checkoutReport,
+    syncCheckouts,
+    reclaimCaches,
+    pruneWorktree,
+    pruneWorktrees,
+  } = createCheckoutMaintenance({
+    options,
+    settings,
+    herdrRunner,
+    watch,
+    get paneTidy() {
+      return paneTidy;
+    },
+  });
 
   // One hire path for the compose page and the captain's own `hire_agent`
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
