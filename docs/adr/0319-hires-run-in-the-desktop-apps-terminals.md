@@ -43,8 +43,10 @@ detected.
   `argv`. Clankie names the space once through the app socket
   (`space.rename`). A project's pipeline tab, when it has one, is the
   `herdr.tab`.
-- **A seat's id is its core address.** Locally that is `herdr-core:t7`; for a
-  machine the core reaches over SSH, `herdr-core:pc/t7`. Pane ids, receipts,
+- **A seat's id is its core address.** Locally that is `herdr-core/t7`, routed
+  like a fleet-qualified pane under the reserved `herdr-core` prefix that no
+  execution connection may take; for a machine the core reaches over SSH,
+  `herdr-core/pc/t7`. Pane ids, receipts,
   the mailbox, the census and the connector use it wherever they use a Herdr
   terminal id today. The core address is never typed into a Herdr call.
 - **Clankie names the session, not the terminal.** A Claude hire launches with
@@ -54,8 +56,9 @@ detected.
 - **The worker knows its seat from the core.** When `HERDR_PANE_ID` is absent
   and `HC_TERMINAL_ID` is set, the worker plugin scopes receipts and presence
   by the core socket and terminal, finds its link by the core socket, and sends
-  `x-clankie-seat: herdr-core:<address>`. The service maps that header to the
-  seat directly.
+  `herdr-core/<address>` wherever it would send its pane id (the
+  `x-clankie-pane` header included). The service proves that process against
+  the core's own record of the terminal before it admits the seat.
 - **The core reports life and death.** Finished, lost and removed events end
   or park the seat as a closed pane does now; status and turn events stand in
   for Herdr's agent status; `terminal.read` backs `terminal_read`.

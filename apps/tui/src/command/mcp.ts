@@ -1,4 +1,5 @@
 import { readableMcpResult } from "@clankie/protocol/mcp-result";
+import { seatIdentity } from "./seat-identity.ts";
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, constants, closeSync, fstatSync, openSync } from "node:fs";
@@ -26,7 +27,7 @@ import {
  * the seat as his head. A `reply` tool answers an escalating room.
  *
  * `--seat` is a fleet pane's mailbox: no tools, no `/v1/mcp` client, only the
- * channel. Identity is `HERDR_PANE_ID`. The bridge polls only when that pane
+ * channel. Identity is `HERDR_PANE_ID`, else the desktop-app terminal (ADR 0319). The bridge polls only when that pane
  * id is set *and* the parent `claude` argv loaded this server as a channel
  * (`--dangerously-load-development-channels` immediately followed by
  * `server:clankie-seat`, including the `=` form). Otherwise it serves an
@@ -1285,7 +1286,8 @@ class HarnessStdioTransport extends StdioServerTransport {
 async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   const env = options.env ?? process.env;
   const stderr = options.stderr ?? process.stderr;
-  const paneId = env.HERDR_PANE_ID?.trim() ?? "";
+  const seat = seatIdentity(env);
+  const paneId = seat.pane ?? "";
   const inboundRequest = async (
     suffix: string,
     init?: { method: string; body: string; redirect?: "error" },
@@ -1308,7 +1310,7 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
   };
   const sendInbound = createInboundSender({
     directory: join(env.HOME ?? homedir(), ".clankie", "inbound-receipts"),
-    scope: JSON.stringify([env.HERDR_SOCKET_PATH ?? "", paneId]),
+    scope: JSON.stringify([seat.socket ?? "", paneId]),
     onObservation: async (observation) => {
       const credential = await resolveOperatorCredential({
         env,
@@ -1341,7 +1343,9 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
 
   if (paneId.length === 0) {
     await server.connect(transport);
-    stderr.write("clankie mcp: --seat needs HERDR_PANE_ID; serving an empty channel\n");
+    stderr.write(
+      "clankie mcp: --seat needs HERDR_PANE_ID or a desktop-app terminal; serving an empty channel\n",
+    );
     await closed;
     return 0;
   }

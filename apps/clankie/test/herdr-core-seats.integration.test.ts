@@ -2,9 +2,10 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { createHerdrCoreRunner } from "../src/captain/herdr-core-runner.ts";
 import { CLANKIE_SPACE, SEAT_LABEL, createHerdrCoreSeats } from "../src/captain/herdr-core-seats.ts";
 
 // A hire's terminal in the Herdr desktop app (ADR 0319), end to end against a real
@@ -33,8 +34,10 @@ const env: NodeJS.ProcessEnv = {
   HERDR_PANE_ID: "w9:p9",
   HERDR_SOCKET_PATH: "/nowhere/herdr.sock",
 };
+const workerLink = resolve(import.meta.dirname, "../../../integrations/claude-plugin/worker/bin/link.mjs");
 const stateHome = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
 let cwd = "";
+let warm = "";
 
 async function until(check: () => Promise<boolean>, ms = 10_000): Promise<void> {
   for (const end = Date.now() + ms; Date.now() < end; await new Promise((done) => setTimeout(done, 100)))
@@ -48,7 +51,11 @@ beforeAll(async () => {
   if (hc === undefined || process.platform === "win32") return;
   cwd = await mkdtemp(join(tmpdir(), "clankie-core-seats-"));
   // The first hc call starts the session's core, with the pane identity above in its environment.
-  await exec(hc, ["run", "--bg", "--json", "--name", "warm", "--", "true"], { env, cwd });
+  const started = await exec(hc, ["run", "--bg", "--json", "--name", "warm", "--", "sleep", "300"], {
+    env,
+    cwd,
+  });
+  warm = (JSON.parse(started.stdout) as { address: string }).address;
 });
 
 afterAll(async () => {
@@ -99,4 +106,46 @@ coreIt("a hire starts in Clankie's space with its own identity, and ends when Cl
   await until(async () => (await seats.get(address))?.state !== "live");
   await seats.kill(address);
   expect(await seats.get("t999999")).toBeUndefined();
+});
+
+coreIt("Clankie reads, waits on and closes his own hire, and its worker knows its seat", async () => {
+  const seats = createHerdrCoreSeats({ env });
+  const runner = createHerdrCoreRunner({ seats, pollMs: 50 });
+  const report = join(cwd, "seat.json");
+  const address = await seats.start({
+    argv: [
+      process.execPath,
+      "--input-type=module",
+      "-e",
+      [
+        `const { seatIdentity } = await import(${JSON.stringify(workerLink)});`,
+        `(await import("node:fs")).writeFileSync(${JSON.stringify(report)}, JSON.stringify(seatIdentity()));`,
+        `console.log("hello from the desktop app");`,
+        `setInterval(() => {}, 1000);`,
+      ].join("\n"),
+    ],
+    cwd,
+    seat: "grace",
+  });
+
+  await until(async () => existsSync(report));
+  // A hire's worker names its seat the way Clankie routes it, through the core's own socket.
+  const identity = JSON.parse(await readFile(report, "utf8")) as { pane?: string; socket?: string };
+  expect(identity.pane).toBe(`herdr-core/${address}`);
+  expect(identity.socket).toMatch(/\.sock$/u);
+
+  const seen = await runner.get(address);
+  expect(seen).toMatchObject({ paneId: address, terminalId: address, name: "grace" });
+  expect(seen.status).not.toBe("offline");
+  await until(async () => (await runner.readPane(address, "visible")).includes("hello from the desktop app"));
+
+  // A terminal the owner started is never his to drive.
+  expect(await runner.resolveTerminal(warm)).toBeUndefined();
+  await expect(runner.get(warm)).rejects.toThrow();
+  await runner.closePane(warm);
+  expect((await seats.get(warm))?.state).toBe("live");
+
+  await runner.closePane(address);
+  const ended = await runner.wait(address, AbortSignal.timeout(10_000));
+  expect(ended.status).toBe("offline");
 });

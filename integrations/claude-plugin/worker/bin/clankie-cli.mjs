@@ -4,7 +4,7 @@
 // which reach his service through this pane's fleet link and carry no
 // operator credential.
 import { linkEvidenceClient, pushEvidence } from "./evidence-push.mjs";
-import { authorization, readLink, seatRoute } from "./link.mjs";
+import { authorization, readLink, seatIdentity, seatRoute } from "./link.mjs";
 
 const USAGE =
   "Usage: clankie evidence push [PATH] --issue KEY [--caption TEXT]\n" +
@@ -12,8 +12,8 @@ const USAGE =
 
 /** The pane's proven seat route, as `clankie review submit` reaches it. */
 function paneEvidenceClient(env) {
-  const pane = env.HERDR_PANE_ID?.trim();
-  const link = readLink(env.HERDR_SOCKET_PATH, env);
+  const { pane, socket } = seatIdentity(env);
+  const link = readLink(socket, env);
   if (!link || !pane)
     throw new Error(
       "Run clankie evidence push in your own fleet pane: its link proves which seat sends the evidence.",

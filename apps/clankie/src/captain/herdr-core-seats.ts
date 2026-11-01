@@ -37,7 +37,7 @@ interface HerdrCoreSeatStart {
   readonly tab?: string;
 }
 
-interface HerdrCoreTerminal {
+export interface HerdrCoreTerminal {
   readonly address: string;
   readonly state: "live" | "finished";
   readonly labels: Readonly<Record<string, string>>;
@@ -45,6 +45,10 @@ interface HerdrCoreTerminal {
   readonly exitCode?: number;
   /** The agent's own status report (OSC 7501), when it gives one. */
   readonly status?: string;
+  /** Which agent reported it (`claude-code`, `codex`). */
+  readonly app?: string;
+  readonly title?: string;
+  readonly cwd?: string;
 }
 
 export interface HerdrCoreSeats {
@@ -56,6 +60,8 @@ export interface HerdrCoreSeats {
   get(address: string): Promise<HerdrCoreTerminal | undefined>;
   /** Ends a terminal Clankie started; one that is already gone is not an error. */
   kill(address: string): Promise<void>;
+  /** The terminal's text: its screen, with `lines` of history above it. */
+  read(address: string, lines: number): Promise<string>;
 }
 
 export interface HerdrCoreSeatsOptions {
@@ -113,6 +119,11 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
       }
     },
 
+    async read(address, lines) {
+      const read = (await call("terminal.read", { terminal: address, lines })) as { text?: unknown };
+      return typeof read.text === "string" ? read.text : "";
+    },
+
     async kill(address) {
       try {
         await call("terminal.kill", { terminal: address });
@@ -132,7 +143,9 @@ interface HcRecord {
   readonly labels?: unknown;
   readonly pid?: unknown;
   readonly exit_code?: unknown;
-  readonly status?: { readonly state?: unknown } | null;
+  readonly status?: { readonly state?: unknown; readonly app?: unknown } | null;
+  readonly title?: unknown;
+  readonly cwd?: unknown;
 }
 
 function terminalOf(record: HcRecord): HerdrCoreTerminal {
@@ -147,6 +160,7 @@ function terminalOf(record: HcRecord): HerdrCoreTerminal {
         )
       : {};
   const status = record.status?.state;
+  const app = record.status?.app;
   return {
     address: record.address,
     state: record.state === "finished" ? "finished" : "live",
@@ -154,5 +168,8 @@ function terminalOf(record: HcRecord): HerdrCoreTerminal {
     ...(typeof record.pid === "number" ? { pid: record.pid } : {}),
     ...(typeof record.exit_code === "number" ? { exitCode: record.exit_code } : {}),
     ...(typeof status === "string" ? { status } : {}),
+    ...(typeof app === "string" && app.length > 0 ? { app } : {}),
+    ...(typeof record.title === "string" && record.title.length > 0 ? { title: record.title } : {}),
+    ...(typeof record.cwd === "string" && record.cwd.length > 0 ? { cwd: record.cwd } : {}),
   };
 }

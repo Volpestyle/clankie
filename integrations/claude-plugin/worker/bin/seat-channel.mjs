@@ -43,6 +43,7 @@ import {
   authorization,
   linkFetch as fetch,
   readLink,
+  seatIdentity,
   seatRoute,
   TEXT_MAX,
 } from "./link.mjs";
@@ -525,10 +526,9 @@ async function receiptAwareFleetCall(granted, name, args) {
 
 /** One native receipt operation through this seat's existing linked fleet authority. */
 export async function callNativeReceipt(args, { env = process.env, fetchImpl = fetch } = {}) {
-  const paneId = env.HERDR_PANE_ID?.trim();
-  const socket = env.HERDR_SOCKET_PATH?.trim();
+  const { pane: paneId, socket } = seatIdentity(env);
   if (!paneId || !socket)
-    throw new Error("Call receipts need your native HERDR_PANE_ID and HERDR_SOCKET_PATH.");
+    throw new Error("Call receipts need your seat's Herdr pane or desktop-app terminal.");
   let link = readLink(socket, env);
   if (!link) throw new Error("No linked fleet connection for this native seat.");
   let membershipStopped = false;
@@ -606,7 +606,7 @@ export function runSeatChannel({
   };
   // A session outside his linked fleets (a Codex config loads this server
   // everywhere) serves no tools rather than failing every launch.
-  if (!link) log("no link to Clankie for this Herdr session (HERDR_SOCKET_PATH); serving no tools");
+  if (!link) log("no link to Clankie for this Herdr session or desktop-app core; serving no tools");
   // A bridge run keeps its observation identity through HTTP reconnects.
   // This header carries no authority; the service still authenticates every request.
   let membershipStopped = false;
@@ -689,7 +689,7 @@ export function runSeatChannel({
   };
   const sendPeer = createPeerSender({
     directory: join(homedir(), ".clankie", "peer-receipts"),
-    scope: JSON.stringify([process.env.HERDR_SOCKET_PATH ?? "", paneId]),
+    scope: JSON.stringify([seatIdentity().socket ?? "", paneId]),
     discover: discoverPeers,
     request: (suffix, init) => peerRequest("peer-messages", suffix, init),
   });
@@ -1205,7 +1205,7 @@ export function runSeatChannel({
       report(toolObservation.status, toolObservation.reason);
     },
     directory: join(homedir(), ".clankie", "inbound-receipts"),
-    scope: JSON.stringify([process.env.HERDR_SOCKET_PATH ?? "", paneId]),
+    scope: JSON.stringify([seatIdentity().socket ?? "", paneId]),
     request: inboundRequest,
   });
   let refreshReconciliation;

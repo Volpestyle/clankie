@@ -20,12 +20,29 @@ function normalSocket(path) {
 }
 
 /**
+ * Where this process sits: its Herdr pane and that session's socket, else the Herdr
+ * desktop app's terminal it runs in (ADR 0319), named `herdr-core/<address>` beside
+ * the core's socket. Herdr's own variables win when either is set, and empty ones
+ * are none: Clankie clears those a desktop-app core inherited from the Herdr pane
+ * it was started in.
+ */
+export function seatIdentity(env = process.env) {
+  const pane = env.HERDR_PANE_ID?.trim();
+  const herdr = env.HERDR_SOCKET_PATH?.trim();
+  if (pane || herdr) return { pane: pane || undefined, socket: herdr || undefined };
+  const terminal = env.HC_TERMINAL_ID?.trim();
+  const core = env.HC_TERMINAL_SOCKET?.trim();
+  if (terminal && core && /^t\d+$/u.test(terminal)) return { pane: `herdr-core/${terminal}`, socket: core };
+  return { pane: undefined, socket: undefined };
+}
+
+/**
  * The link for the Herdr session this pane is in, when this machine has one;
  * including Clankie’s own local fleet. One machine can host several of
  * his fleets, one per Herdr session, so the pane's own HERDR_SOCKET_PATH
  * chooses among <CLANKIE_STATE or ~/.clankie>/links/*.json.
  */
-export function readLink(socket = process.env.HERDR_SOCKET_PATH, env = process.env) {
+export function readLink(socket = seatIdentity().socket, env = process.env) {
   const dir = join(env.CLANKIE_STATE?.trim() || join(homedir(), ".clankie"), "links");
   let links = [];
   try {
@@ -109,7 +126,7 @@ export function seatRoute(link, paneId, route) {
 
 export function authorization(link) {
   return link.authentication === "local-process"
-    ? { "x-clankie-pane": process.env.HERDR_PANE_ID?.trim() ?? "" }
+    ? { "x-clankie-pane": seatIdentity().pane ?? "" }
     : { authorization: `Bearer ${link.token}` };
 }
 

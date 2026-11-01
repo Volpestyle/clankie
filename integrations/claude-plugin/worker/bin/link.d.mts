@@ -6,5 +6,10 @@ export interface FleetLink {
   readonly url: string;
   readonly token?: string;
 }
+/** This process's seat: its Herdr pane, else its desktop-app terminal as `herdr-core/<address>` (ADR 0319). */
+export function seatIdentity(env?: NodeJS.ProcessEnv): {
+  readonly pane: string | undefined;
+  readonly socket: string | undefined;
+};
 export function readLink(socket?: string, env?: NodeJS.ProcessEnv): FleetLink | undefined;
 export function seatRoute(link: FleetLink, paneId: string, route: string): URL;
