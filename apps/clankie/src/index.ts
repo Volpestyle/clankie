@@ -155,6 +155,7 @@ import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
+import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import type { LinearRouteParts } from "./app/linear-routes.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
 import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
@@ -214,6 +215,7 @@ import { retireLinearNotifications } from "./linear-notifications.ts";
 import { LinearWakeReadReceipts } from "./linear-wake-read.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
+import { linearMcp } from "./linear-mcp.ts";
 import { linearProjectExists } from "./linear-project-binding.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
 import { LinearRequestBudget } from "./linear-request-budget.ts";
@@ -711,6 +713,7 @@ const trackerPosting = createTrackerPosting({
   logger,
 });
 const mcpHost = createMcpHost({
+  trackerMcp: linearMcp,
   trackerPosting,
   googleApps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env).google ?? {},
   linearApiTracker,
@@ -956,6 +959,7 @@ const agentSessions = createAgentSessions(
 // the repo itself.
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
+  trackerProjects: createLinearWorkProjects,
   projects: async () => (await settingsStore.read()).projects,
   projectsFence: async () => {
     const snapshot = await settingsStore.loadFenced();

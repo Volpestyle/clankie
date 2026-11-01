@@ -18,6 +18,7 @@ import { minecraftProfiles, resolveMinecraftProfile } from "../src/minecraft-des
 import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
 import { MinecraftService } from "../src/minecraft.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 
 const args = process.argv.slice(2);
 const outputIndex = args.indexOf("--output");
@@ -39,6 +40,7 @@ const settings = new SettingsStore(join(output, `smoke-settings-${runId}.json`))
 const env = { ...process.env, CLANKIE_SETTINGS_FILE: settings.path, CLANKIE_OPERATOR_TOKEN: randomUUID() };
 const leases = new BodyLeaseStore(join(output, `smoke-body-${runId}`));
 const host = createMcpHost({
+  trackerMcp: linearMcp,
   minecraftMotor: {
     command: process.execPath,
     args: [join(repoRoot, "integrations/minecraft-mcp/src/main.ts")],

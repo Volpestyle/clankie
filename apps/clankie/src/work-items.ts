@@ -1,5 +1,4 @@
 import { WATCH_REFUSAL } from "./watch.ts";
-import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
 import { execFile } from "node:child_process";
@@ -308,8 +307,30 @@ export interface WorkInboxContext {
 }
 export const INBOX_PENDING_QUESTIONS_TOOL = "inbox_pending_questions";
 
+/** What a remote tracker's project listings are built from (ADR 0328). */
+interface TrackerProjectsParts {
+  readonly call: LinearToolCall;
+  binding(): Promise<string>;
+  projects?(): Promise<ProjectsSettings>;
+  builtInRepos(): Promise<readonly WorkRepo[]>;
+  readonly root: string;
+}
+
+/** A remote tracker's read-only projects in the connected account. */
+interface TrackerProjects {
+  repos(): Promise<WorkRepo[]>;
+  read(
+    request: Extract<WorkRequest, { action: "list" | "show" | "activity" | "project" | "project-details" }>,
+  ): Promise<WorkResult>;
+}
+
 export interface WorkItemsServiceOptions {
   readonly projects?: () => Promise<ProjectsSettings>;
+  /**
+   * The connected tracker's projects, which its extension supplies. Without it,
+   * work lists only the projects on this machine.
+   */
+  readonly trackerProjects?: (parts: TrackerProjectsParts) => TrackerProjects;
   readonly projectsFence?: () => Promise<WorkProjectFence>;
   readonly localMachineId?: string;
   /** Where the registry of readable repos lives. */
@@ -1009,19 +1030,20 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     }
     return "files";
   };
-  const linearProjects = linear
-    ? createLinearWorkProjects({
-        call: linear,
-        binding: async () => {
-          if ((await options.mcpHost?.trackerStatus?.())?.backend === "local")
-            throw new Error("Linear is not connected.");
-          return accountBinding("linear");
-        },
-        ...(options.projects ? { projects: options.projects } : {}),
-        builtInRepos: async () => (await projectReader?.repos()) ?? [],
-        root: options.stateDirectory,
-      })
-    : undefined;
+  const linearProjects: TrackerProjects | undefined =
+    linear && options.trackerProjects
+      ? options.trackerProjects({
+          call: linear,
+          binding: async () => {
+            if ((await options.mcpHost?.trackerStatus?.())?.backend === "local")
+              throw new Error("Linear is not connected.");
+            return accountBinding("linear");
+          },
+          ...(options.projects ? { projects: options.projects } : {}),
+          builtInRepos: async () => (await projectReader?.repos()) ?? [],
+          root: options.stateDirectory,
+        })
+      : undefined;
   const writeScope = async (request: WorkItemWriteReceiptRequest, authority: WorkWriteAuthority) => {
     const target = await prepareWrite(request.repoId, authority);
     const account = await accountBinding(target.convention.backend);

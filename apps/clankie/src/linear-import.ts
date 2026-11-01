@@ -18,8 +18,7 @@ import {
   type LinearRequestBudget,
   type LinearRequestPriority,
 } from "./linear-request-budget.ts";
-import type { EvidenceStore } from "./evidence-store.ts";
-import type { EvidenceUploadRequest } from "@clankie/protocol/evidence";
+import { MediaUploadRefused, storeEvidenceBytes, type EvidenceStore } from "./evidence-store.ts";
 
 export interface LinearImportOptions {
   credentials: CredentialStore;
@@ -180,13 +179,8 @@ function linearUploadUrl(value: string): boolean {
 
 const LINEAR_UPLOAD_MAX_BYTES = 128 * 1024 * 1024;
 
-export class LinearUploadRefused extends Error {
-  readonly reason: "too_large" | "not_found" | "unavailable";
-  constructor(reason: "too_large" | "not_found" | "unavailable", message: string) {
-    super(message);
-    this.reason = reason;
-  }
-}
+/** A Linear upload refused for a reason the work media reports. */
+class LinearUploadRefused extends MediaUploadRefused {}
 
 /** One credentialed read of a Linear upload: allowlisted host, no redirects, bounded size and time. */
 export async function downloadLinearUpload(
@@ -243,27 +237,6 @@ export async function downloadLinearUpload(
 }
 
 /** Records bytes the service already holds as evidence, settling the upload receipt. */
-export async function storeEvidenceBytes(
-  evidence: Pick<EvidenceStore, "upload" | "acceptBlob" | "lookup">,
-  actor: Parameters<EvidenceStore["upload"]>[0],
-  bytes: Uint8Array,
-  request: EvidenceUploadRequest,
-) {
-  const receipt = await evidence.upload(actor, request);
-  if (receipt.state === "pending")
-    await evidence.acceptBlob(
-      EvidenceActorKey(actor),
-      request.idempotencyKey,
-      (async function* () {
-        yield bytes;
-      })(),
-    );
-  const settled = await evidence.lookup(actor, request.idempotencyKey);
-  if (settled.state !== "applied" || !settled.recordId)
-    throw new Error("Linear evidence upload did not settle");
-  return { url: settled.url, recordId: settled.recordId };
-}
-
 export async function importLinearMedia(
   snapshot: LinearImportSnapshot,
   options: LinearImportOptions & {
@@ -356,9 +329,4 @@ export async function importLinearMedia(
           reason: "External link retained; no Linear bearer sent",
         });
   return { count: urls.size, skipped };
-}
-
-// EvidenceStore uses this same canonical key for receipt ownership.
-function EvidenceActorKey(actor: { kind: string; id: string }) {
-  return `${actor.kind}:${actor.id}`;
 }

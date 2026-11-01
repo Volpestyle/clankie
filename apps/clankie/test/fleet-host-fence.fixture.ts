@@ -11,6 +11,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LocalFleetLink, type LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 type Admission = "local" | "stream" | "bearer";
@@ -88,6 +89,7 @@ export async function fixture(
       })
     : undefined;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     curated: [],

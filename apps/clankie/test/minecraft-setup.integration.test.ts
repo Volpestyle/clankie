@@ -8,6 +8,7 @@ import { BodyLeaseStore } from "../src/body-leases.ts";
 import type { BodyConversationIdentity } from "../src/body-lease-router.ts";
 import { createMinecraftHostAuthority } from "../src/minecraft-host-authority.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
 import { MinecraftService } from "../src/minecraft.ts";
 import { minecraftTools } from "../src/captain/minecraft-tools.ts";
@@ -20,6 +21,7 @@ it("configures approved profiles through captain tools with persisted settings a
     discord: { ...value.discord, ownerUserId: "100000", systemActorUserIds: ["200000"] },
   }));
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     settings,
     credentials: new FileCredentialStore(join(dir, "credentials.json")),
     curated: [],

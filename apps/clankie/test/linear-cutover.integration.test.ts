@@ -27,6 +27,7 @@ import { LinearCutover } from "../src/linear-cutover.ts";
 import { linearActorMap } from "../src/linear-import.ts";
 import { LinearMirrors } from "../src/linear-mirror.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { trackerRepoForPrincipal } from "../src/tracker-runner.ts";
@@ -180,6 +181,7 @@ async function cutoverFixture(
   // Runs once after the host's pre-lock READ fence, just before the backend takes its lock.
   let beforeLock: (() => Promise<void>) | undefined;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: {

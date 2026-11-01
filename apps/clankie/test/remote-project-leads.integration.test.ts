@@ -16,6 +16,7 @@ import { RemoteProjectLeads } from "../src/remote-project-leads.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import { logger } from "../src/app/log.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createRemoteLeadBridge } from "../src/remote-lead-bridge.ts";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -146,6 +147,7 @@ it("launches an approved Windows workspace through the real conversation store w
   const providerCalls: string[] = [];
   const observed: { tool: string; owner?: { conversationId: string }; recipient?: unknown }[] = [];
   const mcp = createMcpHost({
+    trackerMcp: linearMcp,
     settings,
     curated: [],
     logger,

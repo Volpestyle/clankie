@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore, type McpServerSettings } from "@clankie/settings";
 import { createMcpHost, type McpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 
 // Opt-in development configuration, deliberately absent from the shipping catalog.
 const gmail: McpServerSettings = {
@@ -32,6 +33,7 @@ async function setup(credentialPath?: string) {
   directories.push(directory);
   const credentials = new FileCredentialStore(credentialPath ?? join(directory, "credentials.json"));
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(directory, "settings.json")),
     curated: [gmail],

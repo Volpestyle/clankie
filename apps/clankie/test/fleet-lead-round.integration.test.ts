@@ -31,6 +31,7 @@ import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fenc
 import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
 import { DeployHolds } from "../src/deploy-holds.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { registerSeatRoutes } from "../src/app/seat-routes.ts";
 import type { ClankieAppDependencies } from "../src/app/types.ts";
@@ -776,7 +777,13 @@ it("ingests content-free seat report health over authenticated HTTP into the rea
   const f = await fixture(60 * 60_000, undefined, false, true, undefined, reports);
   const settings = new SettingsStore(join(f.root, "settings.json"));
   const credentials = new FileCredentialStore(join(f.root, "credentials.json"));
-  const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    credentials,
+    settings,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   const worker = new WorkerMcp({
     directory: join(f.root, "grants"),
     credentials,

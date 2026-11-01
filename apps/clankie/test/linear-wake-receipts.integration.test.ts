@@ -30,6 +30,7 @@ import { LinearAttributionJournal } from "../src/linear-attribution.ts";
 import { LinearWakeReadReceipts } from "../src/linear-wake-read.ts";
 import { LinearRequestBudget } from "../src/linear-request-budget.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { runLinearCommand } from "../../tui/src/command/linear.ts";
 import { linearRoutes } from "../src/app/linear-routes.ts";
 
@@ -189,6 +190,7 @@ async function fixture(
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   await credentials.set("linear", credential);
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     linearRequestBudget: budget,

@@ -1121,3 +1121,34 @@ export function createEvidenceRoutes(
   );
   return app;
 }
+
+/** A fetched upload refused for a reason the work media reports. */
+export class MediaUploadRefused extends Error {
+  readonly reason: "too_large" | "not_found" | "unavailable";
+  constructor(reason: "too_large" | "not_found" | "unavailable", message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+/** Stores bytes already in hand as one evidence upload and waits for it to settle. */
+export async function storeEvidenceBytes(
+  evidence: Pick<EvidenceStore, "upload" | "acceptBlob" | "lookup">,
+  actor: Parameters<EvidenceStore["upload"]>[0],
+  bytes: Uint8Array,
+  request: EvidenceUploadRequest,
+) {
+  const receipt = await evidence.upload(actor, request);
+  if (receipt.state === "pending")
+    await evidence.acceptBlob(
+      `${actor.kind}:${actor.id}`,
+      request.idempotencyKey,
+      (async function* () {
+        yield bytes;
+      })(),
+    );
+  const settled = await evidence.lookup(actor, request.idempotencyKey);
+  if (settled.state !== "applied" || !settled.recordId)
+    throw new Error("Linear evidence upload did not settle");
+  return { url: settled.url, recordId: settled.recordId };
+}

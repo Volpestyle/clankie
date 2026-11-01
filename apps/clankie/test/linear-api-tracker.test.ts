@@ -16,6 +16,7 @@ import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { linearProjectExists } from "../src/linear-project-binding.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import {
   createLinearApiProvider,
   API_ACCESS,
@@ -59,6 +60,7 @@ async function setup() {
   const logs: unknown[] = [];
   const settings = new SettingsStore(join(directory, "settings.json"));
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials: store,
     settings,
     localTracker: createLocalTracker({ directory: join(directory, "tracker") }),

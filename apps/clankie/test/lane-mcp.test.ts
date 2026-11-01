@@ -31,6 +31,7 @@ import { createCaptainMemory } from "../src/captain-memory.ts";
 import { createFileMemory } from "../src/memory.ts";
 import { VOICE_SELF_TOOL_MAX_CHARACTERS } from "../src/voice-self-tools.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { buildLaneToolBank } from "../src/captain/lane-tools.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { AutonomyStore } from "../src/captain/autonomy.ts";
@@ -611,6 +612,7 @@ it("initializes an operator MCP session with native and connected tools", async 
   const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
   const settings = new SettingsStore(join(root, "settings.json"));
   const mcp = createMcpHost({
+    trackerMcp: linearMcp,
     settings,
     credentials: new FileCredentialStore(join(root, "credentials.json")),
     localTracker: createLocalTracker({ directory: join(root, "tracker") }),
@@ -1273,6 +1275,7 @@ it("serves an operator API and its first tool bank while a real remote MCP catal
     },
   }));
   const mcp = createMcpHost({
+    trackerMcp: linearMcp,
     settings,
     credentials: new FileCredentialStore(join(root, "credentials.json")),
     curated: [],

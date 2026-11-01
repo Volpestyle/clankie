@@ -22,6 +22,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearCutover } from "../src/linear-cutover.ts";
 import { LinearMirrors } from "../src/linear-mirror.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
@@ -127,6 +128,7 @@ const cutover = new LinearCutover({
 const credentials = new FileCredentialStore(join(root, "credentials.json"));
 let workItems!: ReturnType<typeof createWorkItemsService>;
 const host = createMcpHost({
+  trackerMcp: linearMcp,
   credentials,
   settings,
   localTracker: live,

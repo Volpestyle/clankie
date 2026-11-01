@@ -6,6 +6,7 @@ import type { SettingsStore } from "@clankie/settings";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { createMcpHost, MINECRAFT_BODY_ACCESS } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
 import { MinecraftService } from "../src/minecraft.ts";
 import { BodyLeaseStore } from "../src/body-leases.ts";
@@ -35,6 +36,7 @@ function hostFixture(reply: unknown = connected) {
     close: async () => {},
   }));
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     settings,
     credentials,
     curated: [],

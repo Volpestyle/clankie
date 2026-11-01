@@ -17,6 +17,7 @@ import { createLocalTracker } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService, type WorkItemsServiceOptions } from "../src/work-items.ts";
 import { githubConnectionToken } from "../src/accounts.ts";
@@ -35,6 +36,7 @@ async function surface(
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const local = createLocalTracker({ directory: join(root, "tracker") });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: local,

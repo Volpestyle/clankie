@@ -30,6 +30,7 @@ import {
 } from "../src/local-fleet-admission.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { createMcpHost, type McpHostOptions } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 const bridgeModule = fileURLToPath(
@@ -217,6 +218,7 @@ async function fixture(
   };
   await setProvider(original.url);
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     curated: [],

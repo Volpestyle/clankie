@@ -9,6 +9,7 @@ import type { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import type { HttpBindings } from "@hono/node-server";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
@@ -36,6 +37,7 @@ it("gives proven local panes the two-tool bridge without project proof and reche
   const calls = vi.fn(async () => ({ content: "issue", isError: false }));
   const observed: unknown[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
     curated: [

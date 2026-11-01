@@ -19,6 +19,7 @@ import * as registryCurrent from "../src/local-codex-seats.ts";
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
 import { closeNativeProcessObservers } from "../src/native-process-transport.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 import { frequencyBaseline } from "./helpers/project-native-proof/frequency-baseline.ts";
@@ -242,7 +243,13 @@ nativeIt(
         fleet: { ...value.fleet, tools: "connected", peerMessages: legacyPeers ? "on" : "off" },
         mcp: { ...value.mcp, servers: [] },
       }));
-      host = createMcpHost({ settings, credentials, curated: [], logger: { info() {}, warn() {} } });
+      host = createMcpHost({
+        trackerMcp: linearMcp,
+        settings,
+        credentials,
+        curated: [],
+        logger: { info() {}, warn() {} },
+      });
       worker = new WorkerMcp({
         directory: join(herdr.root, "grants"),
         credentials,

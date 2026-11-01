@@ -12,6 +12,7 @@ import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 import { RemoteCodexSeats } from "../src/remote-codex-seats.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createWorkerToolRefresh } from "../src/worker-tool-refresh.ts";
 import { createRuntimeUpdateRoutes } from "../src/runtime-update-routes.ts";
 import { runWorkerToolRefreshCommand } from "../../tui/src/command/harness.ts";
@@ -40,6 +41,7 @@ it("no-pane refresh uses persisted occupant ownership and skips owner/other-lead
   owners.bind(rows[2]!.paneId, { conversationId: "lead-b" }, rows[2]!.seatId, undefined, rows[2]!.sessionId);
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(root, "settings.json")),
     curated: [],

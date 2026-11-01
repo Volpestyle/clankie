@@ -23,6 +23,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain, type CaptainPort, type LaneTool } from "../src/captain/port.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { createMcpHost, type McpHostOptions } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { LinearWriteReceipts, linearWriteIssue } from "../src/linear-webhook.ts";
 import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
@@ -347,6 +348,7 @@ async function fixture(primary = "alpha", recipientCaptain?: CaptainPort) {
   const boot = async () => {
     const linearWrites = new LinearWriteReceipts(linearReceiptPath);
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       settings,
       curated: [
