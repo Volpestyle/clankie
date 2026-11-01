@@ -1,5 +1,5 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { NormalizedDiscordTurn } from "./discord-turn.ts";
+import type { NormalizedDiscordTurn } from "./room-turns.ts";
 import type { TurnContext } from "./tools.ts";
 
 export interface LiveRoomRun {

@@ -283,3 +283,20 @@ class Screen {
     return Array.from({ length: this.columns }, () => " ");
   }
 }
+
+/**
+ * The last `lines` lines of a terminal read. A tall screen pads an agent's input box
+ * with empty rows, and a full-screen redraw leaves a screenful of them between the
+ * box and what scrolled above it; those rows carry nothing, so each run of them
+ * reads as one empty line and the count covers what the agent showed.
+ */
+export function screenLines(text: string, lines: number): string {
+  return text
+    .replace(/\r\n?/gu, "\n")
+    .replace(/[ \t]+$/gmu, "")
+    .replace(/\n{3,}/gu, "\n\n")
+    .replace(/^\n+|\n+$/gu, "")
+    .split("\n")
+    .slice(-lines)
+    .join("\n");
+}

@@ -39,12 +39,19 @@ auto|desktop|herdr` pins it per machine for the rare owner who wants the
   other; there is no Common setting. Hires already running stay where they
   are. Until the desktop app's hires are proven on the owner's Mac, `auto`
   keeps them in Herdr panes and `desktop` opts in.
-- **They show in one Clankie space.** Each hire is a `terminal.run` with
-  `labels { herdr.space: "clankie", herdr.tab: <hire>, clankie.seat: <hire> }`
-  and `keep: true`, started in the hire's checkout with its harness command as
-  `argv`. Clankie names the space once through the app socket
-  (`space.rename`). A project's pipeline tab, when it has one, is the
-  `herdr.tab`.
+- **Each project gets a space, each hire its own tab.** Each hire is a
+  `terminal.run` with `labels { herdr.space: "clankie-<project>", herdr.tab:
+<a fresh id>, clankie.seat: <hire> }` and `keep: true`, started in the hire's
+  checkout with its harness command as `argv`. The window treats both labels as
+  ids and makes an unnamed space or tab for a new one (shown by a folder and a
+  number), so the terminal also carries the names it should show
+  (`clankie.space-name` = `<project> workers`, `clankie.tab-name` = the hire's
+  name and task), and Clankie renames them through `herdr-app do space.rename`
+  / `tab.rename` once an open window places the terminal. Only an automatic
+  name is replaced, never one the owner chose. A project's pipeline hires share
+  a tab three at a time, then open its next (`review · 2`). The first version
+  put every hire in one `clankie` space under its display label as the tab id;
+  hires shared that label, so they landed as narrow panes of one tab.
 - **A seat's id is its core address.** Locally that is `herdr-core/t7`, routed
   like a fleet-qualified pane under the reserved `herdr-core` prefix that no
   execution connection may take; for a machine the core reaches over SSH,

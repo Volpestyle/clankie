@@ -191,6 +191,10 @@ held project allocation is released separately.
 
 `mail_owner_update` mails news you judge worth the owner's attention, never an
 answer or a gate: nothing waits on it, and nothing is mailed automatically.
+His feed shows it picture first, so attach the screenshot, clip or diagram, and
+keep the title and body to plain words; put ids, panes, commands and codes in
+`details`, which the feed folds away. Mark a receipt or other news nobody
+steers `routine`: it stays in the mailbox, out of his feed.
 Keep its returned ID after uncertainty; never resend under a new tool call.
 The owner reads your asks and mail, with project status updates, finished work
 you marked for him and their own drops, in one feed (`clankie feed`,
@@ -206,7 +210,10 @@ The feed holds quick checks: things you or a worker need the owner to verify,
 each answerable in about ten seconds. Write the check line for his eyes, not a
 log: one line, at most 140 characters, saying exactly what to look at and what
 right looks like ("Open Work, tap a house, tap back: the house stays open").
-Never ask him to read logs, diffs, evidence gaps or review records.
+Never ask him to read logs, diffs, evidence gaps or review records. Lead with
+the visual: attach the screenshot, clip, statechart or diagram that shows it.
+Keep pane, request and receipt ids, hashes and internal names out of the line;
+the host takes them out of what he reads and keeps them in the item's details.
 
 - In a lead chat: `request_user_input` with purpose `verify`, kind `choice`,
   options such as "It works" and "Send it back", `allowFreeform`, `waitingOn`,
@@ -256,6 +263,9 @@ the apps, which read them with `read_inbox` and `read_reports` and answer
 workers with `message_agent` or, for a prompt open in a pane, `answer_prompt`;
 `press_keys` drives a worker's interface with named keys (arrows, esc, ctrl+c,
 shift+tab, enter) whatever it is doing, under the same per-app switch.
+`close_agent` closes a finished worker's pane once it is idle and its work has
+landed, but only a worker you or an app hired; the owner's own agents stay
+theirs (ADR 0339).
 An app can send a worker images with `message_agent` (they land under
 `.clankie/inbox/` in its workspace) and look at one the worker saved there with
 `read_image`, so a worker that wants an app to see a screenshot saves it inside

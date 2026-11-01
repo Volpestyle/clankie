@@ -18,12 +18,14 @@ import type {
 } from "@clankie/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { BodyLeaseRouter } from "../src/body-lease-router.ts";
 import { BodyLeaseStore } from "../src/body-leases.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { DiscordTurnReceipts } from "../src/captain/discord-turn-receipts.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // The live failure (room_fork_room_authority_unavailable) came from the app's
 // real route authority, which the first fork test never wired. Here the real
@@ -212,7 +214,7 @@ async function fixture() {
   const workspace = join(root, "workspace");
   await mkdir(workspace, { recursive: true });
   const attachments = join(root, "attachments");
-  const captain = createCaptain(deps, {
+  const captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), {
     repoRoot: root,
     stateDir: root,
     workingDirectory: workspace,
@@ -223,6 +225,7 @@ async function fixture() {
   });
   const store = new BodyLeaseStore(root);
   app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain,
     discordTurnReceipts: new DiscordTurnReceipts(join(root, "receipts.json")),
     authenticateCaptain: async (request) =>

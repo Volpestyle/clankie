@@ -260,7 +260,13 @@ again. With `world` off, the Activity's admission and sharing routes are not
 served and he has no Activity sharing or PokeAgent play tools. With `voice`
 off, the phone composer's transcription routes and the room voice routes
 (`/v1/discord/room-voice`, the Discord body's output guard) are not served;
-his Discord voice lanes still run until voice moves with the persona.
+his Discord voice lanes still run until voice moves with the persona. With
+`persona` off, the Discord body's routes (presence, channel turns, forum and
+channel projection messages, the user-session opt-in, voice briefing and
+transcripts), the room routes (`/v1/discord/rooms`, room guidance, Discord
+settings, directory and setup test post), `/v1/operator/persona`,
+`/v1/operator/voice` and `/v1/operator/appearance` answer `404`; the Discord
+body's live state and his captain's Discord turns stay in the core for now.
 
 ### `runtime-health`
 
@@ -1944,7 +1950,7 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
-### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]`
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]` / `connector wake [list | set LEAD | clear LEAD | send LEAD TEXT]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
 a remote MCP server that lets Claude list your agents, read their screens and
@@ -1969,7 +1975,12 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
-`start_agent` existed sign in again to use it. `fleet_capacity` reads what
+`start_agent` existed sign in again to use it. `start_agent` takes an optional
+`account`, a label exactly as `fleet_capacity` names it for that machine and
+harness ([ADR 0340](adr/0340-connected-apps-name-the-hire-account.md)). Left out,
+Clankie picks the account with the most spare capacity and skips any the owner
+held with `clankie accounts hold`; named, it is used exactly, even when held, or
+the start is refused and nothing else is tried. `fleet_capacity` reads what
 the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
 each metered account's plan, usage, remaining limit and reset, heavy-work
@@ -1993,7 +2004,7 @@ read your projects' issues, wherever each project tracks them. `save_issue`
 and `comment_issue` write them as that app, never as you: issue files are
 written right away, and Linear or GitHub follow the project's "Posting to your
 tracker" setting (Read only refuses, Ask me waits for your OK, Clankie decides
-lets it go only while you've handed the lead to the apps, Go ahead lets it go).
+and Go ahead let it go without waking Clankie, [ADR 0335](adr/0335-connected-apps-post-under-clankie-decides.md)).
 `post_note` and `read_notes` share a note board among the connected apps: each
 note is signed with the name you approved that app under, never a name the app
 gives, and the apps read notes as information, not instructions. Clankie and
@@ -2020,6 +2031,14 @@ can approve a prompt too. It works for Herdr panes on every machine and for
 hires in the Herdr desktop app, never types text, and never touches a screen
 whose question Clankie sent to you. Each press leaves a note in that app's name
 on the board.
+
+`close_agent` closes a finished agent's pane
+([ADR 0339](adr/0339-connected-apps-close-finished-hires.md)). It closes only an
+agent Clankie or a connected app hired, only while it is idle or done, and only
+when its worktree has no unlanded work, unless the app gives `leave_unlanded`
+with a reason, which is recorded as left behind. An agent you started, or one
+you asked Clankie to hire, stays yours to close. Each close the app asks is
+logged as `connector.close_agent` with its device.
 
 `clankie connector detect` says whether Herdr sessions are discovered
 ([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you
@@ -2050,6 +2069,23 @@ worker reports to his lead threads stay unread for them. The apps read both with
 reach Clankie. `clankie connector lead clankie` hands it back, and only you can.
 JSON: `{ "ok": true, "lead": "clankie" | "apps", "held": N, "error"?:
 "state_unreadable" }`.
+
+`clankie connector wake set LEAD` stores a connected lead's wake webhook
+([ADR 0336](adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)): the
+address a lead such as Grok Bot made to take jobs, and its key. Both come on
+stdin, the address on the first line and the key on the second (or at prompts,
+the key not shown), never as arguments. They go in the credential broker and
+nothing prints them again. The address is https with a named host, or http on
+loopback. A bare key is sent as `Bearer KEY`. `clankie connector wake` lists the
+leads with a webhook (JSON `{ "ok": true, "leads": [...] }`), `wake clear LEAD`
+forgets one, and `wake send LEAD TEXT` hands the lead a job as you, exiting 1
+unless its webhook took it. Connected apps send one with the connector's
+`wake_lead` tool; the lead answers on the notes board.
+
+```bash
+printf '%s\n%s\n' "$WEBHOOK_URL" "$WEBHOOK_KEY" | clankie connector wake set grok
+clankie connector wake send grok "Reply on the notes board with one line."
+```
 
 ```bash
 claude mcp add --transport http clankie "$(clankie connector --json | jq -r .connectorUrl)"
@@ -7607,7 +7643,13 @@ owner's fix. It does not launch a second worker or type the brief into the pane.
 Nothing accepts the development-channel warning on the owner's behalf.
 
 Local OpenCode workers use `hire_agent` with `harness: "opencode"` on macOS
-and the installed direct native executable, 1.18.18 or newer. A release whose
+and the installed direct native executable, 1.18.18 or newer. OpenCode 2
+(2.2.5 or newer) takes the V2 worker plugin instead: the TUI runs
+`--standalone` with its own private server, and follow-ups take `delivery:
+"steer"` or `"queue"` through the session inbox, with OpenCode's admission as the
+receipt ([ADR 0333](adr/0333-opencode-2-hires-run-a-private-server.md)). Its
+history is not in the registered SQLite profiles, and linked Macs on OpenCode 2
+refuse by name. A release whose
 worker probe fails is refused with its version and the missing surface, before
 any brief. Optional models use `provider/model`;
 `effort` requires an explicit model and a variant it supports. Account, skill,
@@ -8675,7 +8717,11 @@ cannot substitute.
 `source: {conversationId, seatId?}`, optional `links: [{label, url}]`, optional
 `media: [{url, mimeType, alt?}]`, `state`, and optional read/dismiss timestamps.
 The tool requires title (max 200) and short body (max 2000), and accepts optional
-`seatId`, links/media (max eight each) and `issue: {tracker, key, url}`.
+`seatId`, links/media (max eight each), `issue: {tracker, key, url}`, `details`
+(max 2000: the ids, panes, commands and codes the owner's feed folds away, so the
+title and body stay plain words) and `routine: true` (news nobody steers, such
+as a receipt or the host's delivery notice: it stays in the mailbox and out of
+the feed).
 The source conversation is supplied by the host. Asks accept the same optional
 `issue` reference; it enables navigation and grants no tracker authority.
 Only HTTP/HTTPS links are accepted; media must already be published at a URL.
@@ -8696,11 +8742,13 @@ without this metadata receive a fresh host identity for each call. An unknown
 transport failure does not automatically repeat mail: inspect the original
 mailbox state before making another publication.
 
-### Owner feed: `feed [--project ID] [--cursor CURSOR] [--limit N] [--json]`
+### Owner feed: `feed [--project ID] [--details] [--cursor CURSOR] [--limit N] [--json]`
 
-One newest-first page of what is waiting on the owner and what happened, joined
-by the host from the stores above. It keeps no store of its own and changes
-nothing:
+One newest-first page of what the owner steers, joined by the host from the
+stores above ([#187](https://github.com/Volpestyle/clankie/issues/187)). It keeps
+no store of its own and changes nothing. Routine mail (`routine: true`) stays in
+the mailbox, and each project shows only its newest status update; the older
+ones stay in `work_project_details`:
 
 - a **check** is a pending owner ask; answer it with `conversations answer`
   (or `input_answer`) using the `question` and `revision` the item carries.
@@ -8737,9 +8785,20 @@ clankie feed --project garden --limit 10
 clankie feed --project garden --cursor CURSOR --json
 ```
 
-TUI: `/feed [PROJECT_ID]`. Text output names the exact answer and dismiss
-commands, and its next-page command repeats `--project` and `--limit`, since a
-cursor marks only a place in the page; `--json` prints the page.
+Every item carries a `view` for people: `caption`, one line in plain words with
+no pane or terminal ids, request or receipt ids, hashes or `clankie://` links;
+`project`, the project's name; `visual`, the one thing to look at first (a clip,
+else a picture, from the item's own media); and `details`, label and value pairs
+a client shows only when asked. The host moves whatever it took out of the line
+into `details` ("Taken from the line", "Original line"), with the item's ids and
+an owner update's own `details`. The kind's payload stays the exact source for
+answering, dismissing and verdicts. `view` is absent from older hosts.
+
+Text output groups the page by project (items outside any project last); each
+item leads with its picture, then its caption, with no ids. `--details` adds the
+ids and the exact answer and dismiss commands. The next-page command repeats
+`--project`, `--limit` and `--details`, since a cursor marks only a place in the
+page; `--json` prints the page. TUI: `/feed [PROJECT_ID] [--details]`.
 
 An item belongs to a project when its ask's workspace, or its source
 conversation's local workspace, lies inside one of the project's local
@@ -8998,6 +9057,19 @@ worktree roots), `landedToday` (commits on each local workspace's fetched
 `origin` default branch since local midnight, absent without one) and `needsYou`
 (pending owner questions raised in its workspaces), plus a top-level `needsYou`
 counting every pending owner question.
+Adding `includeHealth=true` also returns `needsYouOutsideProjects` (pending owner
+questions raised in no project's local workspaces, so a total above the per-project
+counts says where the rest are) and `reviewSeatLive`, for each project naming a
+reviewer seat, whether a live seat answers to it, resolved as the review gate
+resolves it. Plain views omit both.
+
+`clankie project settings PROJECT` with no change flags prints a short plain read
+of one project: its tracker, focus, Auto, reviewer, posting setting, linked repos,
+gates, this project's own overrides and what is happening now. It flags a focus
+that names a tracker other than the one the project now uses (Auto follows the
+focus, so the line says to set a new one), a reviewer seat no live seat answers to,
+and owner questions waiting outside every project. `--json` prints the full saved
+snapshot instead, for agents. Change flags print the updated read the same way.
 `productPaths` is an optional list of 1–32 repository-relative POSIX globs,
 each at most 256 characters. Absolute paths, backslashes, `..` and control
 characters are refused. A directory such as `inject/` includes its descendants;
@@ -10080,6 +10152,31 @@ owner provide a script and run `clankie harness install --codex-source-setup
 
 An explicitly disabled Codex plugin reports `declined`: its native installer
 would enable it, so refreshing that profile requires a reviewed install.
+
+### OpenCode 2 sessions you open yourself
+
+`clankie harness opencode [status|install]` (JSON). `status` reports the
+OpenCode settings folder (`OPENCODE_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/opencode`), whether Herdr's OpenCode plugin is in place for
+OpenCode 2 (`herdrPlugin`: `./herdr-opencode` listed in `cli.json` with its
+`tui.js`), whether OpenCode 2's shared service is registered and running
+(`sharedService`), `messageable` when both hold, and `next` when something is
+missing. `install` creates the settings folder if needed and runs
+`herdr integration install opencode` through the selected Herdr runtime, then
+reports the same fields with Herdr's last output line as `installed`. Nothing
+else in the OpenCode settings changes. While V1 settings still wait to migrate,
+Herdr defers the OpenCode 2 entry, and `next` says to open `opencode` once and
+install again. `clankie doctor --json` carries the same state under
+`harnessBridges.opencode` when OpenCode 2 is installed, with a remediation line
+while the plugin is missing.
+
+With the plugin in place, a message to an OpenCode 2 pane Clankie didn't start
+goes into that session's inbox on the shared service, as Steer (OpenCode's
+default) or Queue. It is sent only when the pane's process runs without
+`--standalone` or `--server` and holds a connection to the registered service.
+The inbox item is the receipt. A refusal sends nothing, and a lost answer is
+unconfirmed and never sent again
+([ADR 0337](adr/0337-hand-opened-opencode-2-sessions-take-messages-through-the-shared-service.md)).
 Checkout and release installers maintain existing links as part of the
 owner-authorized update, then offer new linking interactively.
 

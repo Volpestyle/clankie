@@ -1,4 +1,12 @@
-import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import { createInterface } from "node:readline";
+import {
+  clearLeadWake,
+  createDefaultCredentialStore,
+  listLeadWakes,
+  resolveOperatorCredential,
+  setLeadWake,
+  type CredentialStore,
+} from "@clankie/credential-broker";
 import {
   CONNECTOR_DETECTION_PATH,
   CONNECTOR_PROMPT_ANSWERS_PATH,
@@ -13,6 +21,9 @@ import {
   type ConnectorDetectionResponse,
   type ConnectorPromptAnswersResponse,
   type ConnectorSignInsResponse,
+  LEAD_WAKE_TEXT_MAX,
+  LeadWakeNameSchema,
+  type LeadWakeResult,
 } from "@clankie/protocol/connector";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
@@ -31,9 +42,11 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // `clankie connector serve` turns the connector on or off per app (ADR 0312).
 // `clankie connector lead` says who leads Clankie's lead threads, and hands
 // them to the connected apps or back to Clankie (ADR 0304).
+// `clankie connector wake` keeps a connected lead's wake webhook (address and key,
+// read from stdin, never argv) in the credential broker, and sends it a job (ADR 0336).
 
 const CONNECTOR_USAGE =
-  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json] | clankie connector detect [on|off herdr] [--json] | clankie connector serve [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json]";
+  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json] | clankie connector detect [on|off herdr] [--json] | clankie connector serve [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json] | clankie connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json]";
 const TIMEOUT_MS = 10_000;
 
 export interface ConnectorCliCommandOptions {
@@ -41,6 +54,10 @@ export interface ConnectorCliCommandOptions {
   readonly host?: string;
   readonly fetchImpl?: typeof fetch;
   readonly operatorCredentialStore?: CredentialStore;
+  /** Where `connector wake set` keeps a lead's webhook; the service reads the same store. */
+  readonly credentialStore?: CredentialStore;
+  /** Where `connector wake set` reads the address and key. */
+  readonly stdin?: NodeJS.ReadableStream & { readonly isTTY?: boolean };
   readonly stdout?: Writable;
   readonly stderr?: Writable;
 }
@@ -125,6 +142,27 @@ function parse(args: readonly string[]) {
     positional.length === 2
   )
     return { json, subcommand: "lead" as const, lead: positional[1] };
+  if (positional[0] === "wake") {
+    if (positional.length === 1 || (positional.length === 2 && positional[1] === "list"))
+      return { json, subcommand: "wake" as const, action: "list" as const };
+    const lead = LeadWakeNameSchema.safeParse(positional[2] ?? "");
+    if ((positional[1] === "set" || positional[1] === "clear") && positional.length === 3) {
+      if (!lead.success) throw new Error("A lead's name is 1 to 32 letters, digits or dashes, such as grok.");
+      return {
+        json,
+        subcommand: "wake" as const,
+        action: positional[1] === "set" ? ("set" as const) : ("clear" as const),
+        lead: lead.data,
+      };
+    }
+    if (positional[1] === "send" && positional.length >= 4) {
+      if (!lead.success) throw new Error("A lead's name is 1 to 32 letters, digits or dashes, such as grok.");
+      const text = positional.slice(3).join(" ").trim();
+      if (text.length === 0 || text.length > LEAD_WAKE_TEXT_MAX)
+        throw new Error(`The job is 1 to ${String(LEAD_WAKE_TEXT_MAX)} characters.`);
+      return { json, subcommand: "wake" as const, action: "send" as const, lead: lead.data, text };
+    }
+  }
   if ((positional[0] === "approve" || positional[0] === "deny") && positional.length === 2) {
     const code = ConnectorSignInCodeSchema.safeParse(positional[1]);
     if (!code.success)
@@ -189,6 +227,52 @@ function formatStatus(status: ConnectorSignInsResponse): string {
   return lines.join("\n");
 }
 
+/**
+ * The webhook's address, then its key, from stdin: two lines piped in, or typed at
+ * prompts with the key not shown. Never from argv, where shell history keeps it.
+ */
+async function readWebhook(
+  stdin: NodeJS.ReadableStream & { readonly isTTY?: boolean },
+  stderr: Writable,
+): Promise<{ url: string; authorization: string }> {
+  if (stdin.isTTY === true) {
+    let muted = false;
+    const rl = createInterface({
+      input: stdin,
+      output: { write: (chunk: string) => (muted ? true : stderr.write(chunk)) } as NodeJS.WritableStream,
+      terminal: true,
+    });
+    const ask = (prompt: string) => new Promise<string>((done) => rl.question(prompt, done));
+    try {
+      const url = await ask("Webhook address: ");
+      stderr.write("Webhook key (not shown): ");
+      muted = true;
+      const authorization = await ask("");
+      muted = false;
+      stderr.write("\n");
+      return { url, authorization };
+    } finally {
+      rl.close();
+    }
+  }
+  let input = "";
+  for await (const chunk of stdin) {
+    input += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
+    if (input.length > 16_384)
+      throw new Error("Expected two lines on stdin: the webhook address, then its key.");
+  }
+  const lines = input
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length !== 2) throw new Error("Expected two lines on stdin: the webhook address, then its key.");
+  return { url: lines[0]!, authorization: lines[1]! };
+}
+
+function formatWake(result: LeadWakeResult): string {
+  return result.outcome === "sent" ? `Sent. ${result.message}` : result.message;
+}
+
 export async function runConnectorCommand(
   args: readonly string[],
   options: ConnectorCliCommandOptions,
@@ -203,12 +287,54 @@ export async function runConnectorCommand(
     stderr.write(`clankie: ${(error as Error).message}\n`);
     return 2;
   }
+  if (parsed.subcommand === "wake" && parsed.action !== "send") {
+    const store = options.credentialStore ?? createDefaultCredentialStore({ env });
+    try {
+      if (parsed.action === "list") {
+        const leads = await listLeadWakes(store);
+        if (parsed.json) outputJson(stdout, { ok: true, leads });
+        else
+          stdout.write(
+            leads.length === 0
+              ? "No lead has a wake webhook. Store one with `clankie connector wake set NAME`, the address and key on stdin.\n"
+              : `Leads with a wake webhook: ${leads.join(", ")}\n`,
+          );
+        return 0;
+      }
+      if (parsed.action === "clear") {
+        const cleared = await clearLeadWake(store, parsed.lead);
+        if (parsed.json) outputJson(stdout, { ok: true, lead: parsed.lead, cleared });
+        else
+          stdout.write(
+            cleared ? `Forgot ${parsed.lead}'s wake webhook.\n` : `${parsed.lead} had no wake webhook.\n`,
+          );
+        return 0;
+      }
+      const lead = "lead" in parsed ? parsed.lead : undefined;
+      if (lead === undefined) throw new Error(CONNECTOR_USAGE);
+      const webhook = await readWebhook(options.stdin ?? process.stdin, stderr);
+      await setLeadWake(store, lead, webhook);
+      if (parsed.json) outputJson(stdout, { ok: true, lead: parsed.lead, stored: true });
+      else
+        stdout.write(
+          `Stored ${parsed.lead}'s wake webhook in the credential broker. Connected apps can now hand ${parsed.lead} a job with wake_lead; try one with \`clankie connector wake send ${parsed.lead} TEXT\`.\n`,
+        );
+      return 0;
+    } catch (error) {
+      // The message names what was wrong with the input, never the input itself.
+      const message = error instanceof Error ? error.message : "The credential store couldn't be reached.";
+      if (parsed.json) outputJson(stdout, { ok: false, status: "refused", error: message });
+      else stderr.write(`clankie: ${message}\n`);
+      return 1;
+    }
+  }
   const operatorCredential = await resolveOperatorCredential({
     env,
     ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
   });
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  // A wake waits on the lead's own webhook, which Clankie gives up to 15 seconds.
+  const timer = setTimeout(() => controller.abort(), parsed.subcommand === "wake" ? 25_000 : TIMEOUT_MS);
   const request = {
     controlPlaneUrl: commandHost({ ...options, env }),
     ...(operatorCredential?.token === undefined ? {} : { operatorToken: operatorCredential.token }),
@@ -216,6 +342,34 @@ export async function runConnectorCommand(
     signal: controller.signal,
   };
   try {
+    if (parsed.subcommand === "wake") {
+      const response = await operatorRequest(
+        OPERATOR_CONVERSATION_DISPATCH_PATH,
+        "POST",
+        request,
+        ConnectorCommandError,
+        {
+          jsonBody: {
+            op: "lead_wake",
+            schemaVersion: 1,
+            lead: parsed.lead,
+            text: "text" in parsed ? parsed.text : "",
+          },
+          contentType: "application/json",
+        },
+      );
+      if (response.status === 401 || response.status === 403) throw new ConnectorCommandError("unauthorized");
+      if (!response.ok) throw new ConnectorCommandError("unavailable");
+      const result = OperatorConversationServiceResultSchema.safeParse(
+        // allow-swallowed-rejection -- a body that is not JSON fails the parse below as malformed
+        await response.json().catch(() => undefined),
+      );
+      if (!result.success || result.data.op !== "lead_wake") throw new ConnectorCommandError("malformed");
+      const wake = result.data.result;
+      if (parsed.json) outputJson(stdout, { ok: wake.outcome === "sent", ...wake });
+      else (wake.outcome === "sent" ? stdout : stderr).write(`${formatWake(wake)}\n`);
+      return wake.outcome === "sent" ? 0 : 1;
+    }
     if (parsed.subcommand === "lead") {
       const response = await operatorRequest(
         OPERATOR_CONVERSATION_DISPATCH_PATH,

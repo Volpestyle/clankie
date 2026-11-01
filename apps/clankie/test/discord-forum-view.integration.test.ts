@@ -14,6 +14,7 @@ import {
   type TrackerForumBody,
 } from "../../discord-bridge/src/tracker-forum.ts";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DiscordForumMirror, type DiscordForumNotice } from "../src/discord-forum-mirror.ts";
 import { FakeDiscord, FORUM, GUILD } from "./helpers/fake-discord-forum.ts";
@@ -71,6 +72,7 @@ async function fixture() {
   const owns = (guildId: string, userId: string) =>
     discordActorOwnsServer(settings, guildId, userId, discord.rest);
   const { app } = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer discord-text"

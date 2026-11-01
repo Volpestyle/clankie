@@ -10,6 +10,7 @@ import {
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { FleetRoomJournal, inboundFleetRoomRecord } from "../src/captain/fleet-room.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -62,6 +63,7 @@ async function fixture() {
     }),
     settings,
     extensionRoutes: [
+      personaRoutes(),
       linearRoutes({
         linearWebhook: {
           secret: async () => SECRET,

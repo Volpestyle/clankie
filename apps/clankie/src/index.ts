@@ -144,6 +144,7 @@ import { SkinDraftService } from "./skin-drafts.ts";
 import { skinDraftRoutes } from "./skin-draft-routes.ts";
 import { skinDraftGenerator } from "./skin-draft-generation.ts";
 import { RemoteProjectLeads } from "./remote-project-leads.ts";
+import { createLeadWakes } from "./lead-wakes.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
 import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
@@ -157,6 +158,9 @@ import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
 import { activityTools } from "./activity-tools.ts";
 import { voiceExtension } from "./voice-extension.ts";
+import { personaExtension } from "./persona-extension.ts";
+import { discordCaptainTools } from "./captain/discord-tools.ts";
+import { createDiscordTurns } from "./captain/captain-discord-turns.ts";
 import { worldExtension } from "./world/extension.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
@@ -562,6 +566,8 @@ const activityPlay = new ActivityPlaySource();
 const activityArtifacts = createActivityArtifactSources({ files: deliveredFiles });
 /** World is one switch at start: its Activity routes and his World tools go together (ADR 0328). */
 const worldOn = switchedOn(startupSettings, "world");
+/** The persona is one switch at start: its routes and his Discord body tools go together (ADR 0328). */
+const personaOn = switchedOn(startupSettings, "persona");
 const activitySharing = new ActivitySharing({
   files: deliveredFiles,
   token: () => resolveActivityProducerCredential(),
@@ -714,15 +720,6 @@ const trackerPosting = createTrackerPosting({
     captain.withdrawOwnerAsk(conversationId, requestId, reason),
   observeQuestionResolutions: (listener) => captain.observeQuestionResolutions(listener),
   wakeConversation: (owner, text) => captain.wakeConversation(owner, text),
-  // A damaged lead setting reads as the apps leading for Clankie's turns; here it holds writes.
-  appsLead: async () => {
-    const lead = await captain.serveOperatorConversation({
-      op: "lead",
-      schemaVersion: 1,
-      command: { action: "status" },
-    });
-    return lead.op === "lead" && lead.result.status.lead === "apps" && lead.result.status.error === undefined;
-  },
   logger,
 });
 const mcpHost = createMcpHost({
@@ -1502,6 +1499,8 @@ const captain = createCaptain(
           playTools: pokeagentTools,
         }
       : {}),
+    // The persona's Discord body tools and room turns reach him only when the persona is on at start.
+    ...(personaOn ? { personaTools: discordCaptainTools, roomTurns: createDiscordTurns } : {}),
     ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined
@@ -1638,14 +1637,19 @@ const captain = createCaptain(
     // rather than offering calls that can only ever refuse.
     ...(discordBodyInLoadout
       ? {
-          streamWatch: {
-            current: () => Promise.resolve(boundApp().streamWatch()),
-          },
           discordMusic: createDiscordMusicClient(),
-          discordVoicePresence: createDiscordVoicePresenceClient(process.env, fetch, {
-            voice: bodyVoiceStays,
-            router: bodyLeases,
-          }),
+          // Joining voice and watching shares are the voice extension's (ADR 0328).
+          ...(switchedOn(startupSettings, "voice")
+            ? {
+                streamWatch: {
+                  current: () => Promise.resolve(boundApp().streamWatch()),
+                },
+                discordVoicePresence: createDiscordVoicePresenceClient(process.env, fetch, {
+                  voice: bodyVoiceStays,
+                  router: bodyLeases,
+                }),
+              }
+            : {}),
         }
       : {}),
     discordActions: createDiscordCaptainActionClient(process.env, fetch, discordTurnReceipts),
@@ -2306,6 +2310,7 @@ extensions.add(
   ),
   { enabled: switchedOn(startupSettings, "voice"), settings: undefined },
 );
+extensions.add(personaExtension(), { enabled: personaOn, settings: undefined });
 await extensions.start();
 const clankie = await createClankieApp({
   voiceCall: {
@@ -2455,6 +2460,10 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
+  leadWakes: createLeadWakes({
+    store: operatorCredentialStore,
+    log: (fields, message) => logger.info({ event: "lead.wake", ...fields }, message),
+  }),
   setupSurveyPath: join(stateRoot, "setup-survey.json"),
   connectorDetection,
   evidenceStore,

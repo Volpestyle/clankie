@@ -5,6 +5,7 @@ import { afterAll, expect, it } from "vitest";
 import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { createBearerAuthenticator, createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 
 const roots: string[] = [];
@@ -43,6 +44,7 @@ it("keeps retained voice transcripts captain-authenticated and unreadable while 
   const settings = () =>
     ClankieSettingsSchema.parse({ schemaVersion: 1, discord: { voiceTranscriptLoggingEnabled: enabled } });
   const { app } = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     voiceTranscriptStore: store,
     settings: { load: async () => settings() },

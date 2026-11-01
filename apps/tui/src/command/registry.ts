@@ -58,7 +58,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["harness"],
     lines: [
-      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh Codex's native plugin and remove older Claude copies under current fleet policy\n  harness refresh-tools [--pane PANE]  Refresh an original native catalog\n  harness restart-tools --pane PANE [--report /absolute/report]  Check native same-thread restart admission (local Codex exit unavailable)",
+      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh Codex's native plugin and remove older Claude copies under current fleet policy\n  harness refresh-tools [--pane PANE]  Refresh an original native catalog\n  harness restart-tools --pane PANE [--report /absolute/report]  Check native same-thread restart admission (local Codex exit unavailable)\n  harness opencode [status|install]  Whether OpenCode 2 sessions you open yourself can take messages; install adds Herdr's OpenCode plugin to your OpenCode settings (JSON)",
     ],
   },
   {
@@ -92,18 +92,14 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  body status | request JSON  Inspect or explicitly request conversation body leases (JSON)"],
   },
   {
-    nouns: ["login", "logout", "whoami", "connect", "disconnect", "fleet", "terminal", "keys", "deprovision"],
+    nouns: ["login", "logout", "whoami", "connect", "disconnect", "keys"],
     lines: [
       "  login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]",
-      "                           Sign in by email code: connects a hosted Clankie if the account has",
-      "                           one, otherwise signs this Mac in for remote access",
-      "  logout | whoami          Hosted sign-out (never touches remote access); whoami is also in `status`",
-      "  Hosted restart/reset/deprovision require the account page/control plane.",
-      "  fleet | terminal         Hosted fleet/terminal catalog; mutations use --json-stdin",
+      "                           Sign this Mac in by email code for remote access (same as remote-access on)",
+      "  logout | disconnect      Say how to take this Mac off remote access; whoami is also in `status`",
       "  keys [status|set PROVIDER --key-stdin|remove PROVIDER|validate PROVIDER MODEL]",
-      "                           Model-provider API keys, here or on a hosted Clankie; the key only on stdin",
-      "  connect hosted           Like login, but requires a hosted Clankie; disconnect is an alias for logout",
-      "  disconnect               Forget this hosted client; hosted work continues",
+      "                           Model-provider API keys on this Mac; the key only on stdin",
+      "  connect                  Retired: Clankie runs on your own machine, so use login",
     ],
   },
   {
@@ -301,6 +297,8 @@ const HEADLESS_COMMAND_HELP = [
       "  connector detect [on|off herdr] [--json]   Whether Herdr sessions are discovered, including ones just cleared",
       "  connector serve [on|off APP] [--json]   Which connected apps the connector serves",
       "  connector lead [clankie|apps] [--json]   Who leads Clankie's lead threads: Clankie, or the connected apps",
+      "  connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json]",
+      "                           A connected lead's wake webhook (address and key on stdin), and a job for it",
     ],
   },
   {
@@ -641,7 +639,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["telemetry"],
     lines: [
       "  telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval S]",
-      "                           Hosted host only: ship a body's metadata telemetry to CloudWatch Logs",
+      "                           Self-hosted Linux on EC2 only: ship a body's metadata telemetry to CloudWatch Logs",
     ],
   },
   {

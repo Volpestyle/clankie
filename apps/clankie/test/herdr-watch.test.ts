@@ -648,6 +648,61 @@ describe("HerdrWatchStore", () => {
     store.close();
   });
 
+  it("a stale lead claim on a hand-started Codex seat doesn't stop the owner's message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-herdr-codex-stale-claim-"));
+    roots.push(root);
+    const sessionId = "01a0740e-ea76-7aa2-8795-524c00368e71";
+    const codex: HerdrAgentSnapshot = {
+      paneId: "w18:p2",
+      terminalId: "term-codex",
+      agent: "codex",
+      status: "idle",
+      title: "Codex seat",
+      session: { source: "herdr:codex", kind: "id", value: sessionId },
+    };
+    // A lead adopted an earlier Codex session in this terminal by messaging it; the owner has
+    // since started a new one there, which no lead claims.
+    await writeFile(
+      join(root, "watches.json.owners.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        hires: [
+          {
+            id: "earlier-adoption",
+            paneId: "w18:p2",
+            seatId: "term-codex",
+            occupantId: "herdr:codex:id:an-earlier-session",
+            hired: false,
+            owner: { conversationId: "lead-thread" },
+          },
+        ],
+      }),
+    );
+    const codexQueue = vi.fn(() => Promise.resolve(true));
+    const promptAgent = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter: () => Promise.resolve() };
+    const store = new HerdrWatchStore(join(root, "watches.json"), {
+      runner: {
+        get: () => Promise.resolve(codex),
+        resolveTerminal: () => Promise.resolve(codex),
+        wait: () => new Promise<HerdrAgentSnapshot>(() => undefined),
+        paneProcesses: () =>
+          Promise.resolve([{ pid: 21290, name: "codex", argv0: "codex", argv: ["codex"] }]),
+        openFiles: () =>
+          Promise.resolve(
+            `n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-${sessionId}.jsonl\n`,
+          ),
+        codexQueue,
+        ...terminalInput,
+      },
+    });
+
+    await expect(store.sendToSeat("term-codex", "please ship it")).resolves.toBe(true);
+    expect(codexQueue).toHaveBeenCalledWith(sessionId, "please ship it", "/Users/james/.codex");
+    expect(promptAgent).not.toHaveBeenCalled();
+    store.close();
+  });
+
   it("a Codex seat with no rollout refuses input without typing", async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-herdr-codex-no-rollout-"));
     roots.push(root);

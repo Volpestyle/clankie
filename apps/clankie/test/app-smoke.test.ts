@@ -15,6 +15,7 @@ import {
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { captainInstructions } from "../src/captain/captain.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { composeVoiceLaneInstructions } from "../src/captain/voice-lane.ts";
@@ -38,6 +39,7 @@ describe("clankie app smoke", () => {
     for (const bundled of [false, true]) {
       let receivedPane: string | undefined;
       const clankie = await createClankieApp({
+        extensionRoutes: [personaRoutes()],
         captain: createStubCaptain({
           serveOperatorConversation: async (request) => {
             if (request.op === "send") receivedPane = request.turn.herdrPaneId;
@@ -77,6 +79,7 @@ describe("clankie app smoke", () => {
       const received: unknown[] = [];
       const binding = { runtime, session: "default", socketPath: "/tmp/chosen.sock" };
       const clankie = await createClankieApp({
+        extensionRoutes: [personaRoutes()],
         herdrBinding: () => binding,
         captain: createStubCaptain({
           serveOperatorConversation: async (request) => {
@@ -158,7 +161,11 @@ describe("clankie app smoke", () => {
   });
   it("reports optional runtime recovery without making the captain unhealthy", async () => {
     let state = "recovering";
-    const clankie = await createClankieApp({ captain: createStubCaptain(), herdrRuntime: () => state });
+    const clankie = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
+      captain: createStubCaptain(),
+      herdrRuntime: () => state,
+    });
     try {
       const recovering = await clankie.app.request("/health");
       expect(recovering.status).toBe(200);
@@ -237,6 +244,7 @@ describe("clankie app smoke", () => {
     ];
     const compose = async (captain: Parameters<typeof createStubCaptain>[0], ownerRoom = true) => {
       const clankie = await createClankieApp({
+        extensionRoutes: [personaRoutes()],
         captain: createStubCaptain({
           voiceLaneInstructions: () => composeVoiceLaneInstructions(captainInstructions()),
           ...captain,
@@ -367,6 +375,7 @@ describe("clankie app smoke", () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-smoke-"));
     roots.push(root);
     const clankie = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain({
         serveOperatorConversation: (request) =>
           Promise.resolve(

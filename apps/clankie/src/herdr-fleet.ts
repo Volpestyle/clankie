@@ -34,6 +34,21 @@ export function splitFleetQualified(
   return match === null ? undefined : { fleet: match[1]!, id: match[2]! };
 }
 
+/** The prefix a Herdr desktop-app terminal's seat id carries (ADR 0319); no Herdr fleet may take it. */
+export const DESKTOP_SEAT_FLEET = "herdr-core";
+
+/**
+ * Where a seat's native process proof is filed. A desktop-app terminal sits on this
+ * machine, so it is proven on the default fleet under its full `herdr-core/<address>`
+ * pane, the way its own worker plugin names itself; any other pane under its fleet
+ * and bare id. Compare a proof against this, never against a split of the seat id.
+ */
+export function nativeProofLocation(paneId: string): { readonly fleet: string; readonly pane: string } {
+  const qualified = splitFleetQualified(paneId);
+  if (qualified?.fleet === DESKTOP_SEAT_FLEET) return { fleet: "default", pane: paneId };
+  return { fleet: qualified?.fleet ?? "default", pane: qualified?.id ?? paneId };
+}
+
 /**
  * The verbs a remote fleet answers. Anything that launches, attaches, stops,
  * updates or reconfigures a server is absent, so a typo or a model-chosen

@@ -46,6 +46,7 @@ import { ViewStore } from "../../clankie/src/views.ts";
 import { FleetRoomJournal } from "../../clankie/src/captain/fleet-room.ts";
 import { createWorkItemsService } from "../../clankie/src/work-items.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
+import { personaRoutes } from "../../clankie/src/persona-extension.ts";
 import { createStubCaptain, type CaptainPort } from "../../clankie/src/captain/port.ts";
 import { RoutineStore } from "../../clankie/src/captain/routines.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../../clankie/src/device-session.ts";
@@ -168,6 +169,7 @@ async function fixture(
       })
     : undefined;
   const service = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain({
       serveOperatorConversation: async () => {
         captainCalls++;

@@ -117,7 +117,7 @@ import {
   type FleetSeatDelivery,
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { HerdrFleetError, nativeProofLocation, splitFleetQualified } from "../herdr-fleet.ts";
 import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
 import {
   chooseWorkerAccount,
@@ -305,6 +305,11 @@ export interface HerdrWatchRunner {
    * never a channel for automated messages (ADR 0207).
    */
   sendText?(paneId: string, text: string): Promise<void>;
+  /**
+   * `herdr agent prompt`: pastes a whole message and presses Enter, refused while the agent is
+   * blocked. Only the direct-prompt fallback for an agent with no native channel (ADR 0334).
+   */
+  promptAgent?(paneId: string, text: string): Promise<void>;
   /** `herdr pane process-info --pane` → `foreground_processes`. */
   paneProcesses?(paneId: string): Promise<readonly HerdrForegroundProcess[]>;
   /** `herdr pane process-info --pane` → the pane's own shell and its foreground processes. */
@@ -336,6 +341,8 @@ export interface HerdrWatchRunner {
     readonly paneLabel?: string;
     readonly pipeline?: string;
     readonly group?: string;
+    /** The verified project's name, when the hire has one; the desktop app's space is named for it. */
+    readonly project?: string;
     readonly placement?: "new-tab" | "split";
     readonly env?: Readonly<Record<string, string>>;
     /** Initial native argv, never terminal input. Only prepared adapters use this. */
@@ -611,6 +618,41 @@ function execHerdr(
   });
 }
 
+/** Herdr's error codes for refusing `agent prompt` before it types anything. */
+const HERDR_PROMPT_REFUSALS = new Set([
+  "agent_blocked",
+  "agent_not_ready",
+  "agent_not_found",
+  "blocked",
+  "pane_not_found",
+  "terminal_not_found",
+]);
+
+/**
+ * Herdr's refusal of `agent prompt`, as a definite not-sent (ADR 0334). Only Herdr's own
+ * error code counts, read from its JSON error or a remote fleet's parsed one: a timeout, or
+ * a failure whose text is the command line (which carries the message), proves nothing
+ * about whether the paste landed.
+ */
+function herdrPromptRefusal(error: unknown): HerdrFleetError | undefined {
+  let code: string | undefined;
+  if (error instanceof HerdrFleetError) code = error.code;
+  else {
+    const message = error instanceof Error ? error.message : String(error);
+    // Node's own failure text is the command line, which holds the message's text.
+    if (!message.startsWith("Command failed"))
+      try {
+        const value = JSON.parse(message.slice(message.indexOf("{"))) as { error?: { code?: unknown } };
+        if (typeof value.error?.code === "string") code = value.error.code;
+      } catch {
+        // Not Herdr's JSON error: the outcome is unknown.
+      }
+  }
+  return code !== undefined && HERDR_PROMPT_REFUSALS.has(code)
+    ? new HerdrFleetError(code, "Herdr refused to type the message", "not_sent")
+    : undefined;
+}
+
 function runExecFile(
   command: string,
   args: readonly string[],
@@ -785,6 +827,13 @@ export function createHerdrWatchRunner(
         );
     },
     sendText: (paneId, text) => runHerdr(["pane", "send-text", paneId, text]).then(() => undefined),
+    promptAgent: (paneId, text) =>
+      runHerdr(["agent", "prompt", paneId, text]).then(
+        () => undefined,
+        (error: unknown) => {
+          throw herdrPromptRefusal(error) ?? error;
+        },
+      ),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
     paneShell: async (paneId) => {
@@ -813,7 +862,11 @@ export function createHerdrWatchRunner(
         codexHome,
         endpoint,
         beforeDispatch,
-      )) ?? { outcome: "undelivered", detail: "Original Codex queue unavailable; nothing was sent." },
+      )) ?? {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: "Original Codex queue unavailable; nothing was sent.",
+      },
     codexSettled: codexProxySettled,
     closePane: async (target, guard) => {
       await guard?.();
@@ -1708,7 +1761,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const before = options?.fence
       ? undefined
       : await this.runner.resolveTerminal(seatId).catch(() => undefined);
-    const owner = before?.session ? this.nativeOwner(before) : undefined;
+    // The lead only arms a follow-up's completion harvest below. A stale claim on this pane or
+    // terminal (an earlier occupant's) names no lead for the current one, and must not stop the
+    // message: the seat control proves the occupant it delivers to on its own.
+    let owner: ConversationOwner | undefined;
+    try {
+      owner = before?.session ? this.nativeOwner(before) : undefined;
+    } catch {
+      owner = undefined;
+    }
     const delivered = await (options === undefined
       ? this.seatControl.deliverToSeat(seatId, text, uncontrolled)
       : this.seatControl.deliverToSeat(seatId, text, uncontrolled, options));
@@ -2437,7 +2498,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
   /** The title this seat was hired under, from Clankie's own hire ledger (LOCAL-VUH-59). */
   public hireTitle(seat: { readonly paneId: string; readonly occupantId: string }): string | undefined {
-    const fleet = splitFleetQualified(seat.paneId)?.fleet ?? "default";
+    const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.hireTitle(fleet, projectHirePane(fleet, seat.paneId), seat.occupantId);
   }
   public projectHireMembershipCandidate(fleet: string, pane: string) {
@@ -3078,6 +3139,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (this.closed || !authority?.current())
         throw new Error("Fresh hire authority is unavailable before adoption");
     };
+    // An earlier hire here whose agent is already gone fences nothing it could duplicate:
+    // Clankie settles it himself from this machine's complete inventory, as the operator would.
+    if (!fresh && thisMachineReceiptFleet(input.fleet ?? "local"))
+      await this.retireGoneLocalHires(baseReceiptKey, async () => {
+        if (authority !== undefined) await assertConversationAuthority(authority);
+      });
     const settled = this.hireReceipts.settled(receiptKey);
     if (settled)
       return {
@@ -3544,8 +3611,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const originals = this.hireReceipts.entries().filter(([key, original]) => {
           const [fleet, harness, cwd] = JSON.parse(key) as string[];
           return (
-            fleet === "local" &&
-            !projectAllocation.request.fleet &&
+            thisMachineReceiptFleet(fleet) &&
+            fleet === (projectAllocation.request.fleet ?? "local") &&
             harness === projectAllocation.request.harness &&
             cwd === projectAllocation.request.workingDirectory &&
             original.paneId === projectAllocation.pane &&
@@ -3724,7 +3791,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
     return (
       original !== undefined &&
-      JSON.parse(original[0])[0] === "local" &&
+      thisMachineReceiptFleet(JSON.parse(original[0])[0]) &&
       !original[1].remoteAdmission &&
       !original[1].freshHire
     );
@@ -3747,6 +3814,38 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /**
+   * Settles each unresolved hire at this place whose agent is gone (ADR 0331): its
+   * recorded pane is absent from this machine's complete inventory or holds no harness.
+   * The same proof the operator's settlement takes; a hire still running is left as is,
+   * and a refusal changes nothing. Never closes, sends or relaunches anything.
+   */
+  private async retireGoneLocalHires(baseKey: string, guard: () => Promise<void>): Promise<void> {
+    let unresolved: readonly (readonly [string, UncertainReceipt])[];
+    try {
+      unresolved = this.hireReceipts.entries().filter(
+        ([key, receipt]) =>
+          (receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key) === baseKey &&
+          // Only a hire that recorded its pane: an unrecorded launch is the operator's to judge.
+          receipt.paneId !== undefined &&
+          !receipt.freshHire &&
+          !this.activeHires.has(key),
+      );
+    } catch {
+      return;
+    }
+    for (const [key, receipt] of unresolved) {
+      if (!this.localHireReceipt(receipt.messageId)) continue;
+      const settled = await this.abandonLocalHireReceipt(receipt.messageId, guard);
+      if (settled.state === "abandoned")
+        console.warn("Settled a hire whose agent is gone", {
+          receiptId: receipt.messageId,
+          place: key,
+          pane: receipt.paneId ?? "none recorded",
+        });
+    }
+  }
+
+  /**
    * Operator settlement of a local hire from this machine's complete Herdr
    * inventory (VUH-2243). Settles only while no harness occupies the original
    * pane (absent, or holding nothing but its shell), then frees the location for
@@ -3766,8 +3865,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (!original) return refused("No unresolved original local hire receipt; nothing settled.");
     const [key, receipt] = original;
     const [fleet, harness, cwd] = JSON.parse(key) as string[];
-    if (fleet !== "local" || !harness || !cwd || receipt.remoteAdmission || receipt.recoveryRequested)
+    if (
+      !thisMachineReceiptFleet(fleet) ||
+      !harness ||
+      !cwd ||
+      receipt.remoteAdmission ||
+      receipt.recoveryRequested
+    )
       return refused("Original is not a local hire receipt; nothing settled.");
+    // The desktop app's terminals are this machine's too (ADR 0319): its own complete
+    // inventory settles them, as Herdr's does for a local pane. The recorded pane decides
+    // which inventory, since a this-machine hire may have been placed in either.
+    const paneFleet = receipt.paneId === undefined ? undefined : splitFleetQualified(receipt.paneId)?.fleet;
+    if (paneFleet !== undefined && paneFleet !== HERDR_CORE_FLEET)
+      return refused("Original pane is not on this machine; nothing settled.");
+    const inventoryFleet = paneFleet ?? (fleet === "local" ? undefined : fleet);
     if (this.closed || this.activeHires.has(key))
       return refused("Original hire is still active; nothing settled.");
     if (!this.runner.list || !this.runner.paneShell)
@@ -3777,7 +3889,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.activeHires.add(key);
     try {
       const observe = async () => {
-        const inventory = await this.runner.list!();
+        const inventory = await this.runner.list!(inventoryFleet);
         if (receipt.paneId === undefined) {
           // No pane was recorded: an unrecorded launch would be a harness in this directory.
           const occupied = inventory.find(
@@ -3850,7 +3962,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await guard();
       if (this.closed || !this.runner.list) throw new Error("Complete local Herdr inventory is unavailable");
       const localOriginal = ([key, receipt]: readonly [string, UncertainReceipt]) =>
-        JSON.parse(key)[0] === "local" && !receipt.remoteAdmission && !receipt.freshHire;
+        thisMachineReceiptFleet(JSON.parse(key)[0]) && !receipt.remoteAdmission && !receipt.freshHire;
       let original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === id);
       let allocation = this.projectHires.allocation(id);
       const settled = this.hireReceipts.settlement(id);
@@ -3908,10 +4020,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         (allocation && this.activeProjectHires.has(allocation.id))
       )
         throw new Error("The original hire is still active");
+      // A this-machine hire may sit in the desktop app's terminals (ADR 0319): the recorded
+      // pane decides which complete inventory observes it, as abandonment does.
+      const paneFleet = splitFleetQualified(paneId)?.fleet;
+      if (paneFleet !== undefined && paneFleet !== HERDR_CORE_FLEET)
+        throw new Error(`Pane ${paneId} is not on this machine`);
       if (original) this.activeHires.add((fenced = original[0]));
       if (allocation) this.activeProjectHires.add((fencedAllocation = allocation.id));
       const observe = async () => {
-        const inventory = await this.runner.list!();
+        const inventory = await this.runner.list!(paneFleet);
         const agent = inventory.find((entry) => entry.paneId === paneId);
         if (!agent)
           throw new Error(
@@ -3963,7 +4080,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           agent.terminalId,
           undefined,
           occupantId,
-          sessionId === undefined ? undefined : JSON.stringify(["local", harness, sessionId]),
+          sessionId === undefined ? undefined : JSON.stringify([paneFleet ?? "local", harness, sessionId]),
           allocation?.projectId,
         );
       let evidence: LocalHireSettlementEvidence | undefined;
@@ -4035,7 +4152,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     owner: ConversationOwner,
     guard: () => Promise<void>,
   ): Promise<HireReceiptSettlement | undefined> {
-    if (this.closed || splitFleetQualified(agent.paneId) || !agent.session) return undefined;
+    const paneFleet = splitFleetQualified(agent.paneId)?.fleet;
+    if (this.closed || (paneFleet !== undefined && paneFleet !== HERDR_CORE_FLEET) || !agent.session)
+      return undefined;
     const candidate = this.projectHires.retirementCandidate("default", agent.paneId);
     if (!candidate || candidate.confirmed || candidate.request.freshIntent) return undefined;
     const occupantId = occupantIdForHerdrSession(agent.session);
@@ -4913,9 +5032,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
           );
       }
       if (authority !== undefined) await assertConversationAuthority(authority);
-      const group = this.projectContexts.get(input)?.projectName ?? input.deliverable;
+      const project = this.projectContexts.get(input)?.projectName;
+      const group = project ?? input.deliverable;
       paneId = await createTab({
         ...(group === undefined ? {} : { group }),
+        ...(project === undefined ? {} : { project }),
         ...(input.pipeline === undefined ? {} : { pipeline: input.pipeline }),
         ...(input.placement === undefined ? {} : { placement: input.placement }),
         cwd: input.workingDirectory,
@@ -6732,7 +6853,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
 /** Remote allocations retain fleet-qualified keys; native census addresses are host-local. */
 function projectHirePane(fleet: string, pane: string): string | undefined {
   const qualified = splitFleetQualified(pane);
-  if (fleet === "default") return qualified === undefined ? pane : undefined;
+  // A desktop-app terminal is a hire on this machine, filed under its full pane (ADR 0319).
+  if (fleet === "default")
+    return qualified === undefined || qualified.fleet === HERDR_CORE_FLEET ? pane : undefined;
   if (qualified && qualified.fleet !== fleet) return undefined;
   const id = qualified?.id ?? pane;
   return /^w[\w]+:p[\w]+$/u.test(id) ? `${fleet}/${id}` : undefined;
@@ -6943,4 +7066,9 @@ function hireProfileBrief(profile: HireProfile, brief?: string): string | undefi
 function effortFreeDefaults(profile: HireProfile): HireProfile {
   const { effort: _retired, ...rest } = profile;
   return rest;
+}
+
+/** A hire receipt this machine's own inventory can settle: Herdr's local panes or the desktop app's. */
+function thisMachineReceiptFleet(fleet: string | undefined): boolean {
+  return fleet === "local" || fleet === HERDR_CORE_FLEET;
 }

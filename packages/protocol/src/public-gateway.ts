@@ -19,6 +19,7 @@ import {
 import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
 import { CAPTAIN_READINESS_PATH } from "./captain-readiness.ts";
+import { EXTENSIONS_PATH } from "./extensions.ts";
 import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
 import {
   ACCOUNT_GOOGLE_START_PATH,
@@ -147,6 +148,9 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: COMPOSER_TRANSCRIPTION_RECEIPT_PATH, target: "control" },
   { method: "GET", path: ACCOUNT_DIAGNOSTICS_PATH, target: "control" },
   { method: "GET", path: CAPTAIN_READINESS_PATH, target: "control" },
+  // The owner's extension switches (ADR 0328): any paired device reads, Take Control changes.
+  { method: "GET", path: EXTENSIONS_PATH, target: "control" },
+  { method: "POST", path: EXTENSIONS_PATH, target: "control" },
   { method: "POST", path: HOSTED_OPERATOR_PATH, target: "control" },
   { method: "POST", path: DISCORD_INGRESS_PATH, target: "control" },
   { method: "GET", path: MODEL_KEYS_PATH, target: "control" },

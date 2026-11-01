@@ -48,6 +48,7 @@ import { SeatEfficiencyStore } from "./seat-efficiency.ts";
 import { prepareSeatTelemetry, readSeatCommitBaseline, type SeatCommitBaseline } from "./seat-telemetry.ts";
 import { fleetReviewContext } from "./fleet-review.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
+import { installedLauncher } from "../project-process-proof.ts";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
@@ -84,7 +85,12 @@ import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
-import { splitFleetQualified, type FleetShellRun, type HerdrFleet } from "../herdr-fleet.ts";
+import {
+  nativeProofLocation,
+  splitFleetQualified,
+  type FleetShellRun,
+  type HerdrFleet,
+} from "../herdr-fleet.ts";
 import { NativePaneNotFoundError, nativeRequest } from "../herdr-native-request.ts";
 import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
@@ -97,12 +103,12 @@ import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { createKeyPresser, createPromptAnswerer } from "./prompt-answer.ts";
 import { LeadStore } from "./lead.ts";
-import { projectStatuses } from "./auto-projects.ts";
+import { countOutsideProjects, projectStatuses } from "./auto-projects.ts";
 import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
-import { createDiscordTurns } from "./captain-discord-turns.ts";
+import { createConversationWakes } from "./conversation-wakes.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
 import { roomForkTool } from "./room-fork-tool.ts";
 import {
@@ -171,7 +177,7 @@ import {
 import { deliveryFingerprint } from "./delivery-fence.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DesktopExpressions } from "./desktop.ts";
-import { discordTurnSessionKey, normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
+import type { NormalizedDiscordTurn, RoomTurnsHost } from "./room-turns.ts";
 import { Evaluator, type EvaluationCapture } from "./evaluator.ts";
 import { PromptEdgeWindow, SeatMessageWindow, LeadVisitWindow, type EdgeSeat } from "./fleet-edges.ts";
 import {
@@ -198,6 +204,7 @@ import { FleetCensusBreaker } from "./fleet-census-breaker.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
 import { HERDR_CORE_FLEET, createHerdrCoreRunner, herdrCoreCensusFleet } from "./herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./herdr-core-seats.ts";
+import { createHerdrWindow } from "./herdr-window.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
   createHerdrWatchRunner,
@@ -320,14 +327,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   }
   const roomForks = new RoomForkReceipts(join(options.stateDir, "room-forks.json"));
-  const {
-    validateConversationOwner,
-    wakeConversation,
-    runDiscordWatchTurn,
-    dispatchDiscordTurn,
-    forkIntoRoom,
-    roomForkGrant,
-  } = createDiscordTurns({
+  // The persona's room turns, when it is on at start (ADR 0328); getters, since
+  // the captain assigns most of what they borrow further down.
+  const roomTurnsHost: RoomTurnsHost = {
     get buildSession() {
       return buildSession;
     },
@@ -374,6 +376,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return turnSettled;
     },
     roomForks,
+    get validateConversationOwner() {
+      return validateConversationOwner;
+    },
+  };
+  const rooms = deps.roomTurns?.(roomTurnsHost);
+  const { validateConversationOwner, wakeConversation } = createConversationWakes({
+    get conversations() {
+      return conversations;
+    },
+    watching: () => watch.watching(),
+    get seatOutbox() {
+      return seatOutbox;
+    },
+    watchRecipientBinding: async (conversationId) =>
+      inboundBinding(await operatorNativeSource(conversationId)),
+    get shutdown() {
+      return shutdown;
+    },
+    rooms: () => rooms,
   });
   const workingDirectory = options.workingDirectory ?? homedir();
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
@@ -487,8 +508,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const herdrCoreSeats = createHerdrCoreSeats();
   const herdrCoreRunner = createHerdrCoreRunner({
     seats: herdrCoreSeats,
+    window: createHerdrWindow(),
     launchDirectory: join(options.stateDir, "desktop-launches"),
     seatDirectory: join(options.stateDir, "desktop-seats"),
+    // The same installed harness the seat's process proof resolves (installedLauncher).
+    harnessCommand: async (harness) => {
+      const launcher = await installedLauncher(harness);
+      return launcher === undefined
+        ? undefined
+        : [launcher.executable, ...(launcher.script === undefined ? [] : [launcher.script])];
+    },
     turn: (session) => {
       const last = seatHooks.latest(session);
       return last?.type === "turn_started" ? "working" : last?.type === "turn_completed" ? "idle" : undefined;
@@ -3409,10 +3438,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : undefined,
     );
     const ownerTools =
-      conversationBound && lane === "operator" && toolLane === "operator" && capture.targetId !== undefined
+      rooms !== undefined &&
+      conversationBound &&
+      lane === "operator" &&
+      toolLane === "operator" &&
+      capture.targetId !== undefined
         ? [
             roomForkTool((input) =>
-              forkIntoRoom({
+              rooms.forkIntoRoom({
                 ...input,
                 sourceConversationId: capture.targetId!,
                 workspace: workingDirectory,
@@ -3985,6 +4018,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       request: DiscordPresenceChannelTurnRequest,
       authority?: { readonly verifiedOwner: boolean; readonly sourceCurrent?: () => boolean },
     ): Promise<CaptainChannelTurnResult> {
+      // Only the persona's routes post room turns, and they run only with it on.
+      const roomTurns = rooms;
+      if (roomTurns === undefined) throw new Error("Room turns are off while the persona is off");
       const lane = request.trigger.kind === "voice_event" ? "discord_voice" : "discord_presence";
       const targetId = `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`;
       const parentId = conversations.roomConversation(lane, targetId);
@@ -4064,7 +4100,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               entry.serverId === request.trigger.guildId && entry.channelId === request.trigger.channelId,
           ),
           plan: planDiscordTurnSession({
-            baseSessionKey: discordTurnSessionKey(request),
+            baseSessionKey: roomTurns.sessionKey(request),
             durable: true,
             actorId: request.trigger.actorId,
             ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
@@ -4083,7 +4119,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const discord = await readAuthoritySettings();
         const admitted = await admission;
         const currentPlan = planDiscordTurnSession({
-          baseSessionKey: discordTurnSessionKey(request),
+          baseSessionKey: roomTurns.sessionKey(request),
           durable: true,
           actorId: request.trigger.actorId,
           ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
@@ -4108,7 +4144,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 durable: false,
                 systemTools: false as const,
                 sessionKey:
-                  participant !== undefined ? discordTurnSessionKey(request) : admitted.plan.sessionKey,
+                  participant !== undefined ? roomTurns.sessionKey(request) : admitted.plan.sessionKey,
               };
         const owner =
           participant !== undefined
@@ -4209,7 +4245,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 throw new Error("durable_pi_room_authority_changed");
             };
             await guard();
-            const heard = await normalizeDiscordTurn(request, deps, {
+            const heard = await roomTurns.normalize(request, deps, {
               ...(admitted.sender === undefined ? {} : { sender: admitted.sender }),
               systemTools: admitted.plan.systemTools,
               carriesHistory: false,
@@ -4221,12 +4257,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               readAuthoritySettings,
               journal,
             };
-            const result = await dispatchDiscordTurn(
+            const result = await roomTurns.dispatchDiscordTurn(
               normalized,
               request.deliveryId,
               false,
               {
-                baseSessionKey: discordTurnSessionKey(request),
+                baseSessionKey: roomTurns.sessionKey(request),
                 deliveryId: request.deliveryId,
                 targetId,
                 actorId: heard.actorId,
@@ -4272,7 +4308,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const grant = await resolveGrant();
             const run = await roomBursts.join(liveHandoff, grant.key);
             if (run === undefined || authority?.sourceCurrent?.() === false) return undefined;
-            const heard = await normalizeDiscordTurn(request, deps, {
+            const heard = await roomTurns.normalize(request, deps, {
               ...(grant.sender === undefined ? {} : { sender: grant.sender }),
               systemTools: grant.plan.systemTools,
               carriesHistory: true,
@@ -4415,7 +4451,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     const source = conversations.nativeSource(characterId);
                     const binding = inboundBinding(source);
                     if (!binding) throw new Error("participant_session_unavailable");
-                    const heard = await normalizeDiscordTurn(request, deps, {
+                    const heard = await roomTurns.normalize(request, deps, {
                       systemTools: false,
                       carriesHistory: true,
                     });
@@ -4559,7 +4595,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   burst.handoff.grant = key;
                   burst.handoff.sessionKey = sessionKey;
                 }
-                const heard = await normalizeDiscordTurn(request, deps, {
+                const heard = await roomTurns.normalize(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
                   systemTools: plan.systemTools,
                   // A warm loop already holds the room; a cold one reads the bounded backlog once.
@@ -4596,7 +4632,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   normalized.guildId !== undefined &&
                   discord.toolProgressChannelIds.includes(normalized.channelId);
                 const origin: DiscordWatchOrigin = {
-                  baseSessionKey: discordTurnSessionKey(request),
+                  baseSessionKey: roomTurns.sessionKey(request),
                   deliveryId: request.deliveryId,
                   targetId: normalized.targetId,
                   actorId: normalized.actorId,
@@ -4804,7 +4840,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     // queued with; that loop's history and tools belong to that grant.
                     if (loopKey !== undefined && (await resolveGrant()).key !== key)
                       throw new Error("room_loop_grant_changed");
-                    return dispatchDiscordTurn(
+                    return roomTurns.dispatchDiscordTurn(
                       {
                         ...normalized,
                         access: loopKey === undefined ? access : roomLoops.access(loopKey, access),
@@ -4893,7 +4929,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           if (error instanceof Error && error.message === "room_handoff_queue_full")
             return {
               state: "settled",
-              captainSessionId: discordTurnSessionKey(request),
+              captainSessionId: roomTurns.sessionKey(request),
               turnId: parentId,
               response:
                 "My room work queue is full. I can run up to four requests, at most two per room, and hold 32 waiting. Please try again after a request finishes.",
@@ -5403,6 +5439,26 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         needsYou: questions.length,
       };
     },
+    projectHealth: async (projects) => {
+      const reviewSeatLive: Record<string, boolean> = {};
+      for (const project of projects)
+        if (project.review !== undefined && "seat" in project.review) {
+          // Resolved as the review gate resolves it: a seat Herdr cannot reach takes no candidate.
+          // allow-swallowed-rejection -- An unresolvable seat is exactly the stale reviewer this reports.
+          const seat = await Promise.race([
+            herdrRunner.resolveTerminal(project.review.seat).catch(() => undefined),
+            new Promise<undefined>((done) => setTimeout(() => done(undefined), 5_000).unref?.()),
+          ]);
+          reviewSeatLive[project.id] = seat?.session !== undefined;
+        }
+      return {
+        needsYouOutsideProjects: countOutsideProjects(
+          projects,
+          conversations.pendingOwnerQuestionWorkspaces(),
+        ),
+        reviewSeatLive,
+      };
+    },
     leadHireMembershipProject: async (_fleet, pane, seat, occupant, allowTrackerReads = true) => {
       const owner = herdrWatches.leadHireMembershipOwner(pane, seat, occupant);
       if (owner === null) return null;
@@ -5686,7 +5742,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       return result;
     },
-    roomForkGrant,
+    roomForkGrant: (id) => rooms?.roomForkGrant(id),
 
     releaseJoinedSeat(conversationId) {
       seatOutboxes.get(conversationId)?.release();
@@ -5933,12 +5989,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             turnStart: hook.event === "UserPromptSubmit",
           });
       const binding = inboundBinding(agent);
-      const qualified = splitFleetQualified(paneId);
       const receiver =
         session &&
         nextTurnReceiverProof(proof, {
-          fleet: qualified?.fleet ?? "default",
-          pane: qualified?.id ?? paneId,
+          ...nativeProofLocation(paneId),
           nativeOccupantId: occupantIdForHerdrSession(session),
         });
       if (binding && receiver) {
@@ -6204,7 +6258,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               return inboundReceipts.refuse(agent.paneId, delivery, text);
             if (target.discord !== undefined)
               runner = async (_id, prompt) => {
-                if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message")))
+                if (
+                  !(await rooms?.runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message"))
+                )
                   throw new Error("Worker report room authority is unavailable");
               };
           }

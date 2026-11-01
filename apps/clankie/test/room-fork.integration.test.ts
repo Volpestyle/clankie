@@ -12,6 +12,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // Real captain, Pi sessions, room admission, conversation journals, delivered-file
 // host and fork receipts against a loopback model. Only the Discord body's
@@ -143,7 +144,7 @@ async function fixture() {
   const workspace = join(root, "workspace");
   await mkdir(workspace, { recursive: true });
   const attachments = join(root, "attachments");
-  const captain = createCaptain(deps, {
+  const captain = createCaptain(Object.assign(deps, { roomTurns: createDiscordTurns }), {
     repoRoot: root,
     stateDir: root,
     workingDirectory: workspace,

@@ -7,7 +7,7 @@ import {
   type OperatorTerminalFrame,
 } from "@clankie/protocol";
 import { SessionRefusal, type Session, type SessionImage, type SessionSource } from "./source.ts";
-import { renderTerminalText } from "./terminal-text.ts";
+import { renderTerminalText, screenLines } from "./terminal-text.ts";
 
 // Herdr as a session source: the agents Clankie seats (and any other agent
 // pane Herdr shows) on each machine. It speaks Clankie's operator ops, so the
@@ -144,10 +144,7 @@ export function createHerdrSessionSource(
       if (read?.op === "terminal_read" && read.status === "read")
         return {
           id,
-          text: trimScreen(read.text ?? "")
-            .split("\n")
-            .slice(-lines)
-            .join("\n"),
+          text: screenLines(read.text ?? "", lines),
           // Only what the pane's current agent showed is read (ADR 0307); say so when that left the screen out.
           ...(read.detail === undefined ? {} : { note: read.detail }),
         };
@@ -169,6 +166,7 @@ export function createHerdrSessionSource(
         ...(request.machine === undefined ? {} : { machine: request.machine }),
         ...(request.workingDirectory === undefined ? {} : { workingDirectory: request.workingDirectory }),
         ...(request.harness === undefined ? {} : { harness: request.harness }),
+        ...(request.account === undefined ? {} : { account: request.account }),
         ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
       });
       if (result.op !== "start_agent") throw new Error("Clankie answered with something else.");
@@ -224,6 +222,18 @@ export function createHerdrSessionSource(
           revision = result.currentRevision;
           continue;
         }
+        // The agent's own session already holds it: it has the message, busy or not.
+        if (
+          result.status === "accepted" &&
+          result.seatDelivery?.state === "queued" &&
+          result.seatDelivery.detail === undefined &&
+          result.deliveryStage === "consumed"
+        )
+          return {
+            id,
+            status: "delivered",
+            detail: `${name} has the message in its session. Read the agent to see it respond.`,
+          };
         if (result.status === "accepted" && result.seatDelivery?.state === "queued")
           return {
             id,
@@ -251,6 +261,50 @@ export function createHerdrSessionSource(
         };
       }
       throw new SessionRefusal("The agent's thread kept changing. Try again.");
+    },
+
+    async close(id, leaveUnlanded) {
+      const result = await port.dispatch({
+        op: "close_seat",
+        schemaVersion: 1,
+        seatId: id,
+        ...(leaveUnlanded === undefined ? {} : { unlandedReason: leaveUnlanded }),
+      });
+      if (result.op !== "close_seat") throw new Error("Clankie answered with something else.");
+      if (result.closed) return { id, status: "closed", detail: "Its pane is closed." };
+      const refusal = result.refusal;
+      if (refusal === undefined)
+        return {
+          id,
+          status: "unavailable",
+          detail:
+            "Clankie couldn't close it or confirm it closed. Read the agent or list the sessions before trying again.",
+        };
+      if (refusal.reason === "not_found")
+        return {
+          id,
+          status: "refused",
+          detail: "No agent Clankie seats has that id now. List the sessions again.",
+        };
+      if (refusal.reason === "not_clankies_hire")
+        return {
+          id,
+          status: "refused",
+          detail:
+            "Clankie or a connected app didn't hire this agent (the owner or another agent started it), so it's the owner's to close.",
+        };
+      if (refusal.reason === "busy")
+        return {
+          id,
+          status: "refused",
+          detail: `It's ${refusal.status}, not finished. Close it once it's idle, or message it to wrap up first.`,
+        };
+      const where = refusal.worktrees.map((worktree) => worktree.path).join(", ");
+      return {
+        id,
+        status: "refused",
+        detail: `Its worktree has work that hasn't landed${where.length === 0 ? "" : ` (${where})`}. Land it first, or close again with leave_unlanded saying why it can stay behind.`,
+      };
     },
 
     async image(id, path) {
@@ -423,13 +477,6 @@ function lastSegment(path: string): string {
 }
 
 /** The screen without its trailing blank rows. */
-function trimScreen(text: string): string {
-  return text
-    .replace(/\r\n?/gu, "\n")
-    .replace(/[ \t]+$/gmu, "")
-    .replace(/\n+$/u, "");
-}
-
 /** Whether a Herdr version is older than another; an unreadable one is not called old. */
 function olderVersion(version: string, minimum: string): boolean {
   const parts = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)/u.exec(value)?.slice(1).map(Number);

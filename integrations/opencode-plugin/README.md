@@ -194,3 +194,52 @@ fallback. See the
 [worker evidence and limits](../../docs/testing/2026-10-04-opencode-workers/README.md)
 for the original deterministic checkpoint, later native persona/exit evidence
 and the live checks still open; those stages are separate.
+
+## OpenCode 2 workers
+
+OpenCode 2 does not run V1 plugins, so a hire on an installed 2.x release
+(`opencode --version` prints `opencode v2.x.y`; floor **2.2.5**) takes the V2
+plugin under `v2/` instead, selected by the probed version. V1 installs keep
+the files above. See [ADR 0333](../../docs/adr/0333-opencode-2-hires-run-a-private-server.md).
+
+- `v2/worker-tui/tui.mjs` is the TUI part (default `{ id, setup }`), passed per
+  launch in `OPENCODE_CLI_CONFIG_CONTENT` with the controller's endpoint and
+  token. It joins the same WebSocket controller protocol as the V1 worker.
+- `v2/worker-server/index.mjs` is the server part, passed in
+  `OPENCODE_CONFIG_CONTENT`. Through `ctx.mcp.transform` it sets
+  `clankie mcp --fleet` and disables inherited personal tracker servers.
+- `v2/worker-runtime.mjs` holds the logic both parts share.
+
+The launch copies `v2/` into the per-launch directory, so editing the checkout
+cannot hot-reload a running worker. The TUI starts as
+`opencode --standalone <cwd>`: its server is a private child whose lease ends
+with the TUI, not the owner's shared background service. The owner's database
+is used as is, because OpenCode 2 keeps provider credentials there; there is no
+dedicated profile and no registered SQLite history for V2 hires.
+
+Setup creates the session at the hire's directory (with the hire's model, as
+OpenCode 2 has no `--model` flag) and navigates to it before the TUI mounts a
+prompt. Each message is admitted with `session.prompt` and an explicit
+`delivery` of `steer` (the next step of the running turn) or `queue` (after
+it), under a client message id; OpenCode returns the inbox item, which is the
+receipt. Pending permissions or forms report `blocked` and hold sends. A
+turn settles at OpenCode's idle marker after the message. Interrupt calls
+`session.interrupt` for the bound session; exit dispatches the TUI's own
+`app.exit`. Linked Macs on OpenCode 2 refuse by name.
+
+`apps/clankie/test/opencode2-worker.integration.test.ts` runs the installed
+OpenCode 2 TUI in a display-only pseudo-terminal (nothing is typed into it)
+with this plugin, the real controller and adapter, and a fixture model
+provider. It skips when `opencode` on `PATH` is not 2.2.5 or newer.
+
+## OpenCode 2 sessions you open yourself
+
+A session the owner opens by hand needs no Clankie plugin. Herdr's own OpenCode
+integration reports each pane's session to Herdr, and Clankie admits a message
+into that session's inbox on OpenCode 2's shared service, as steer or queue
+([ADR 0337](../../docs/adr/0337-hand-opened-opencode-2-sessions-take-messages-through-the-shared-service.md)).
+`clankie harness opencode status` says whether that works here, and
+`clankie harness opencode install` runs `herdr integration install opencode`,
+which adds Herdr's plugin to the OpenCode settings. A `--standalone` or
+`--server` session is not reached, and the service password never leaves the
+request.

@@ -400,6 +400,15 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "harness") {
+      if (rest[0] === "opencode") {
+        outputJson(
+          stdout,
+          await (
+            await import("../src/command/harness-opencode.ts")
+          ).runHarnessOpenCodeCommand(rest.slice(1), options),
+        );
+        return 0;
+      }
       if (rest[0] === "restart-tools") {
         const result = await (
           await import("../src/command/harness.ts")
@@ -430,6 +439,23 @@ export async function runHeadlessCaptainCommand(
       return !Array.isArray(result) && result.ok === false ? 1 : 0;
     }
     if (command === "project") {
+      // A person reads one project's settings as a short view; --json keeps the raw snapshot.
+      if (rest[0] === "settings") {
+        const json = rest.includes("--json");
+        const settings = await import("../src/command/project-settings.ts");
+        const result = await settings.runProjectSettingsCommand(
+          rest.filter((arg) => arg !== "--json"),
+          options,
+        );
+        if (json || !("fleet" in result)) outputJson(stdout, result);
+        else
+          stdout.write(
+            (await import("../src/command/project-settings-view.ts")).projectSettingsView(
+              result as Awaited<ReturnType<typeof settings.runProjectFleetSettings>>,
+            ),
+          );
+        return 0;
+      }
       outputJson(
         stdout,
         await (["list", "settings", "update", "create", "membership"].includes(rest[0] ?? "")

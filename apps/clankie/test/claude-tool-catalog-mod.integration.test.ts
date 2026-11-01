@@ -19,7 +19,19 @@ type Hook = (
   next: (event: Event) => Promise<unknown>,
 ) => unknown | Promise<unknown>;
 
-async function fixture() {
+/** Where the session sits: a Herdr pane, or a desktop-app terminal Clankie started (ADR 0319). */
+interface Seat {
+  readonly env: Readonly<Record<string, string>>;
+  readonly pane: string;
+  readonly socket: string;
+}
+const HERDR_PANE: Seat = {
+  env: { HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "fixture" },
+  pane: "w1:p1",
+  socket: "fixture",
+};
+
+async function fixture(seat: Seat = HERDR_PANE) {
   const directory = await mkdtemp(join(tmpdir(), "clankie-claude-catalog-mod-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const reports: Event[] = [];
@@ -35,14 +47,14 @@ async function fixture() {
     let body = "";
     request.on("data", (chunk) => (body += String(chunk)));
     request.on("end", () => {
-      if (request.url === "/v1/fleet/seats/w1%3Ap1/hook") {
+      if (request.url === `/v1/fleet/seats/${encodeURIComponent(seat.pane)}/hook`) {
         activityReports.push(JSON.parse(body));
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ schemaVersion: 1, recorded: true }));
         return;
       }
-      expect(request.url).toBe("/v1/fleet/seats/w1%3Ap1/tool-catalog");
-      expect(request.headers["x-clankie-pane"]).toBe("w1:p1");
+      expect(request.url).toBe(`/v1/fleet/seats/${encodeURIComponent(seat.pane)}/tool-catalog`);
+      expect(request.headers["x-clankie-pane"]).toBe(seat.pane);
       reports.push(JSON.parse(body));
       if (reply.disconnect) {
         request.socket.destroy();
@@ -75,7 +87,7 @@ async function fixture() {
       schemaVersion: 2,
       authentication: "local-process",
       fleet: "default",
-      socket: "fixture",
+      socket: seat.socket,
       url: `http://127.0.0.1:${address.port}`,
     }),
   );
@@ -107,7 +119,7 @@ async function fixture() {
       root: fileURLToPath(new URL("../../../integrations/claude-plugin/worker", import.meta.url)),
     },
     env: {
-      get: async (name: string) => ({ HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "fixture" })[name],
+      get: async (name: string) => seat.env[name],
     },
     session: { id: async () => sessionId },
     clock: {
@@ -133,8 +145,11 @@ async function fixture() {
               env: {
                 ...process.env,
                 CLANKIE_STATE: directory,
-                HERDR_PANE_ID: "w1:p1",
-                HERDR_SOCKET_PATH: "fixture",
+                HERDR_PANE_ID: "",
+                HERDR_SOCKET_PATH: "",
+                HC_TERMINAL_ID: "",
+                HC_TERMINAL_SOCKET: "",
+                ...seat.env,
               },
               stdio: "pipe",
               timeout: options.timeoutMs,
@@ -447,3 +462,32 @@ test.each(["worker", "clankie"])(
     expect(f.reports[0]).toMatchObject({ tools: ["message_clankie"] });
   },
 );
+
+test("a hire in a desktop-app terminal reports its catalog and its agents' work under that terminal", async () => {
+  // Herdr's own variables are cleared there; the core names the terminal and its socket.
+  const f = await fixture({
+    env: {
+      HERDR_PANE_ID: "",
+      HERDR_SOCKET_PATH: "",
+      HC_TERMINAL_ID: "t2h",
+      HC_TERMINAL_SOCKET: "core.sock",
+    },
+    pane: "herdr-core/t2h",
+    socket: "core.sock",
+  });
+  await f.start();
+  expect(f.reports).toEqual([
+    expect.objectContaining({ sessionId: "original-session", tools: ["message_clankie"] }),
+  ]);
+  f.api.agent.list.mockResolvedValue([{ id: "child-1", status: "running" }] as never);
+  await f.tick();
+  expect(f.activityReports).toEqual([
+    expect.objectContaining({
+      event: "NativeActivity",
+      sessionId: "original-session",
+      activity: expect.objectContaining({
+        children: [expect.objectContaining({ agentId: "child-1", state: "working" })],
+      }),
+    }),
+  ]);
+});

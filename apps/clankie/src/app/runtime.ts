@@ -3,10 +3,9 @@ import { createMachineFleetResources } from "../machine-fleet-resources.ts";
 import { createMachineJoinRoutes } from "../machine-join-routes.ts";
 import { createBodyTransferRoutes } from "../body-transfer.ts";
 import { createJoinedSeats } from "../joined-seats.ts";
-import { createPersonaVoiceSettingsRoutes } from "../persona-voice-settings-routes.ts";
 import { createMachineAccessRoutes } from "../machine-access-routes.ts";
 import { isDeepStrictEqual } from "node:util";
-import { roomForkIdOf } from "../captain/captain-discord-turns.ts";
+import { roomForkIdOf } from "../captain/room-turns.ts";
 import { createWorkerAccountHoldsRoutes } from "../worker-account-holds-routes.ts";
 import { createUsageRoutes } from "../usage-routes.ts";
 import { createHuddleRoutes } from "../huddle-routes.ts";
@@ -85,7 +84,6 @@ import {
   DiscordVoiceHistoryProjection,
   retiredDiscordPresenceEventIds,
 } from "../discord-presence-session.ts";
-import { createDiscordRoomRoutes, type RoomAccess, type RoomAuthorization } from "../discord-room-routes.ts";
 import { DiscordUserSessionOptInProjection } from "../discord-user-session-opt-in.ts";
 import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "../embodiment.ts";
 import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../event-log.ts";
@@ -96,7 +94,6 @@ import { createEvidenceStorageSettingsRoutes } from "../evidence-storage-setting
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createHttpSettingsRoutes } from "../http-settings-routes.ts";
 import { httpCors } from "@clankie/settings";
-import { createAppearanceRoutes } from "../appearance-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
@@ -120,7 +117,7 @@ import {
 } from "../work-items.ts";
 import { WorkerGrantRequestSchema } from "../worker-mcp.ts";
 import { registerConversationRoutes } from "./conversation-routes.ts";
-import { PROFILE_HASH, discordPresenceBindingKey, registerDiscordRoutes } from "./discord-routes.ts";
+import { PROFILE_HASH, discordPresenceBindingKey } from "./body-presence.ts";
 import { registerVoiceCallRoute } from "./voice-call-route.ts";
 import { authenticateCaptain, authenticateOperator, captainTransportKind, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
@@ -141,6 +138,7 @@ import {
   type ClankieApp,
   type ClankieAppDependencies,
   type DeviceAuthDenial,
+  type DiscordBodyRouteState,
   type PendingCompletion,
   type TrustedDeviceIdentity,
 } from "./types.ts";
@@ -530,10 +528,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   };
 
   // Captains, platform hints, and caller-supplied source lanes are never owner proof.
-  const authorizeRoom = async (
-    request: Request,
-    access: RoomAccess,
-  ): Promise<RoomAuthorization | undefined> => {
+  const authorizeRoom: ExtensionRouteHost["room"] = async (request, access) => {
     const operator = await localOperator?.(request);
     if (operator)
       return {
@@ -568,32 +563,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     };
   };
-  if (dependencies.roomObservations !== undefined)
-    app.route(
-      "/",
-      createDiscordRoomRoutes({
-        machineName: hostDisplayName,
-        environment: dependencies.discordEnvironment ?? process.env,
-        ...(dependencies.discordDirectory ? { directory: dependencies.discordDirectory } : {}),
-        ...(dependencies.discordPermissions ? { permissions: dependencies.discordPermissions } : {}),
-        ...(dependencies.discordTestPost ? { testPost: dependencies.discordTestPost } : {}),
-        ...(dependencies.builtInTracker
-          ? {
-              trackerProjectExists: async (projectId: string) => {
-                const project = (await dependencies.builtInTracker!.call("get_project", {
-                  query: projectId,
-                })) as { id?: unknown };
-                return project.id === projectId;
-              },
-            }
-          : {}),
-        authorize: authorizeRoom,
-        captain: dependencies.captain,
-        observations: dependencies.roomObservations,
-        settings: settingsSource,
-      }),
-    );
-
   app.route(
     "/",
     createRuntimeUpdateRoutes({
@@ -726,20 +695,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     }),
   );
-  app.route(
-    "/",
-    createPersonaVoiceSettingsRoutes({
-      settings: settingsSource,
-      authorizePersona: authorizeOwnerSecrets,
-      operator: async (request) => {
-        const identity = await authenticateOperator(request, dependencies);
-        return identity === "unavailable" ? "unavailable" : identity?.operatorId;
-      },
-      ...(dependencies.voiceSettingsEnv === undefined
-        ? {}
-        : { voiceSettingsEnv: dependencies.voiceSettingsEnv }),
-    }),
-  );
+  // Every route registered from here on answers no-store. This was the persona
+  // settings routes' own middleware reaching past its paths; the core now
+  // owns it, so moving those routes behind their extension changed nothing.
+  app.use("*", async (context, next) => {
+    context.header("cache-control", "no-store");
+    await next();
+  });
 
   app.route("/", createCaptainSeatRoutes(authorizeOwnerSecrets, settingsSource, dependencies.captainSeats));
   app.route("/", createHttpSettingsRoutes(authorizeOwnerSecrets, settingsSource));
@@ -760,7 +722,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createEvidenceStorageSettingsRoutes(authorizeOwnerSecrets, settingsSource, dependencies.evidenceStore),
   );
-  app.route("/", createAppearanceRoutes(authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",
     createMaximumTrustModeRoutes(
@@ -845,6 +806,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(dependencies.projectWorktreeRoot ? { worktreeRoot: dependencies.projectWorktreeRoot } : {}),
       ...(dependencies.captain.projectStatus
         ? { status: (projects) => dependencies.captain.projectStatus!(projects) }
+        : {}),
+      ...(dependencies.captain.projectHealth
+        ? { health: (projects) => dependencies.captain.projectHealth!(projects) }
         : {}),
       ...(dependencies.builtInTracker
         ? {
@@ -1603,21 +1567,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return idFactory;
     },
   });
-  registerDiscordRoutes({
-    get app() {
-      return app;
-    },
+  const discordBody: DiscordBodyRouteState = {
     get dependencies() {
       return dependencies;
     },
+    machineName: hostDisplayName,
     get instanceId() {
       return instanceId;
-    },
-    get settingsSource() {
-      return settingsSource;
-    },
-    get clock() {
-      return clock;
     },
     get captainPresence() {
       return captainPresence;
@@ -1655,9 +1611,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     get discordVoiceHistory() {
       return discordVoiceHistory;
     },
-    get authorizeRoom() {
-      return authorizeRoom;
-    },
     get voiceTranscriptStore() {
       return voiceTranscriptStore;
     },
@@ -1679,7 +1632,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     get channelProjectionResults() {
       return channelProjectionResults;
     },
-  });
+  };
   registerMemoryRoutes({
     get app() {
       return app;
@@ -1985,6 +1938,127 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Which harnesses here can drive the owner's apps and Chrome (ADR 0199). It
   // describes the owner's machine and sessions, so only the operator reads it;
   // an explicit read re-probes rather than trusting the prompt's cache.
+  app.post(CONVERSATION_HEAD_PATH, async (context) => {
+    const parsed = ConversationHeadRequestSchema.safeParse(await readJson(context.req.raw));
+    if (!parsed.success) return context.json({ error: "invalid_conversation_head" }, 400);
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (operator === undefined || operator === "unavailable")
+      return context.json({ error: "operator_authentication_required" }, 401);
+    if (context.req.raw.signal.aborted) return context.json({ error: "request_aborted" }, 409);
+    try {
+      return context.json(
+        await dependencies.captain.setDesignatedConversationHead(
+          parsed.data.conversationId,
+          parsed.data.headConversationId,
+        ),
+      );
+    } catch {
+      return context.json({ error: "conversation_head_unavailable" }, 409);
+    }
+  });
+
+  app.get("/v1/body-leases", async (context) => {
+    const operator = await authenticateOperator(context.req.raw, dependencies);
+    if (!operator || operator === "unavailable") {
+      const device = await authenticateDevice(context.req.raw);
+      if (device === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
+      if ("denied" in device) return deviceDenialResponse(context, device);
+      if (!device.grants.terminalObserve)
+        return context.json({ error: "terminal_observe_grant_required" }, 403);
+    }
+    context.header("cache-control", "no-store");
+    if (dependencies.bodyLeases === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
+    try {
+      const computer = dependencies.bodyLeases.store.status("computer");
+      return context.json({
+        // Old clients have a closed body-resource enum, so the computer lease
+        // travels in its own additive key rather than in this list.
+        leases: BodyResourceSchema.options
+          .filter((resource) => resource !== "computer")
+          .flatMap((resource) => {
+            const lease = dependencies.bodyLeases!.store.status(resource);
+            return lease === undefined ? [] : [lease];
+          }),
+        ...(computer === undefined ? {} : { computer }),
+      });
+    } catch {
+      return context.json({ error: "body_leases_unavailable" }, 503);
+    }
+  });
+
+  // Extensions' routes (ADR 0328) use the core's authority checks, never their own.
+  const extensionRouteHost: ExtensionRouteHost = {
+    ownerAuthority: (request) => questionOwnerAuthority(request),
+    operator: (request) => authenticateOperator(request, dependencies),
+    ownerSettings: authorizeOwnerSecrets,
+    settings: settingsSource,
+    clock,
+    trackerWakes: dependencies.captain,
+    room: (request, access) => authorizeRoom(request, access),
+    captainCaller: (request) => authenticateCaptain(request, dependencies),
+    conversations: dependencies.captain,
+    discordBody,
+    async chatDevice(request) {
+      const identity = await authenticateDevice(request);
+      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
+      const eligible = () => {
+        const record = devices.get(identity.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.chat &&
+          record.supportGrantId === undefined &&
+          !request.signal.aborted &&
+          clock().getTime() < Date.parse(identity.sessionExpiresAt)
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        deviceId: identity.deviceId,
+        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
+        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(request);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === identity.deviceId &&
+            fresh.grants.chat &&
+            eligible()
+          );
+        },
+      };
+    },
+    async bodyIdentity(request, conversationId) {
+      const operator = await authenticateOperator(request, dependencies);
+      if (!operator || operator === "unavailable") return undefined;
+      return operatorBodyIdentity(conversationId, request);
+    },
+    async ownerComputerRecovery(request) {
+      const original = await authenticateOperator(request, dependencies);
+      if (!original || original === "unavailable") return undefined;
+      return {
+        operatorId: original.operatorId,
+        holderIdle: (id) => dependencies.captain.conversationServiceTrackedIdle(id),
+        authorize: async () => {
+          const current = await authenticateOperator(request, dependencies);
+          return (
+            !request.signal.aborted &&
+            !!current &&
+            current !== "unavailable" &&
+            current.operatorId === original.operatorId
+          );
+        },
+      };
+    },
+  };
+  const mountExtensionRoutes = (place: ExtensionRoutes["place"]) => {
+    for (const routes of dependencies.extensionRoutes ?? [])
+      if (routes.place === place) routes.register(app, extensionRouteHost);
+  };
+  mountExtensionRoutes("body");
+
+  // After the persona's routes: its /v1/discord/* body limit reaches these too.
   app.post("/v1/discord/voice-reconcile-guard", async (context) => {
     const input = BodyVoiceReconcileGuardSchema.safeParse(await readJson(context.req.raw));
     if (!input.success) return context.json({ authorized: false }, 400);
@@ -2075,125 +2149,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ outcome: "rejected", reason: "store_unavailable" }, 503);
     }
   });
-
-  app.post(CONVERSATION_HEAD_PATH, async (context) => {
-    const parsed = ConversationHeadRequestSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_conversation_head" }, 400);
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (operator === undefined || operator === "unavailable")
-      return context.json({ error: "operator_authentication_required" }, 401);
-    if (context.req.raw.signal.aborted) return context.json({ error: "request_aborted" }, 409);
-    try {
-      return context.json(
-        await dependencies.captain.setDesignatedConversationHead(
-          parsed.data.conversationId,
-          parsed.data.headConversationId,
-        ),
-      );
-    } catch {
-      return context.json({ error: "conversation_head_unavailable" }, 409);
-    }
-  });
-
-  app.get("/v1/body-leases", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, dependencies);
-    if (!operator || operator === "unavailable") {
-      const device = await authenticateDevice(context.req.raw);
-      if (device === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
-      if ("denied" in device) return deviceDenialResponse(context, device);
-      if (!device.grants.terminalObserve)
-        return context.json({ error: "terminal_observe_grant_required" }, 403);
-    }
-    context.header("cache-control", "no-store");
-    if (dependencies.bodyLeases === undefined) return context.json({ error: "body_leases_unavailable" }, 503);
-    try {
-      const computer = dependencies.bodyLeases.store.status("computer");
-      return context.json({
-        // Old clients have a closed body-resource enum, so the computer lease
-        // travels in its own additive key rather than in this list.
-        leases: BodyResourceSchema.options
-          .filter((resource) => resource !== "computer")
-          .flatMap((resource) => {
-            const lease = dependencies.bodyLeases!.store.status(resource);
-            return lease === undefined ? [] : [lease];
-          }),
-        ...(computer === undefined ? {} : { computer }),
-      });
-    } catch {
-      return context.json({ error: "body_leases_unavailable" }, 503);
-    }
-  });
-
-  // Extensions' routes (ADR 0328) use the core's authority checks, never their own.
-  const extensionRouteHost: ExtensionRouteHost = {
-    ownerAuthority: (request) => questionOwnerAuthority(request),
-    operator: (request) => authenticateOperator(request, dependencies),
-    ownerSettings: authorizeOwnerSecrets,
-    settings: settingsSource,
-    clock,
-    trackerWakes: dependencies.captain,
-    room: (request, access) => authorizeRoom(request, access),
-    captainCaller: (request) => authenticateCaptain(request, dependencies),
-    conversations: dependencies.captain,
-    async chatDevice(request) {
-      const identity = await authenticateDevice(request);
-      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
-      const eligible = () => {
-        const record = devices.get(identity.deviceId);
-        return (
-          record?.status === "active" &&
-          record.grants.chat &&
-          record.supportGrantId === undefined &&
-          !request.signal.aborted &&
-          clock().getTime() < Date.parse(identity.sessionExpiresAt)
-        );
-      };
-      if (!eligible()) return undefined;
-      return {
-        deviceId: identity.deviceId,
-        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
-        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
-        current: eligible,
-        authorize: async () => {
-          const fresh = await authenticateDevice(request);
-          return (
-            fresh !== "unavailable" &&
-            !("denied" in fresh) &&
-            fresh.deviceId === identity.deviceId &&
-            fresh.grants.chat &&
-            eligible()
-          );
-        },
-      };
-    },
-    async bodyIdentity(request, conversationId) {
-      const operator = await authenticateOperator(request, dependencies);
-      if (!operator || operator === "unavailable") return undefined;
-      return operatorBodyIdentity(conversationId, request);
-    },
-    async ownerComputerRecovery(request) {
-      const original = await authenticateOperator(request, dependencies);
-      if (!original || original === "unavailable") return undefined;
-      return {
-        operatorId: original.operatorId,
-        holderIdle: (id) => dependencies.captain.conversationServiceTrackedIdle(id),
-        authorize: async () => {
-          const current = await authenticateOperator(request, dependencies);
-          return (
-            !request.signal.aborted &&
-            !!current &&
-            current !== "unavailable" &&
-            current.operatorId === original.operatorId
-          );
-        },
-      };
-    },
-  };
-  const mountExtensionRoutes = (place: ExtensionRoutes["place"]) => {
-    for (const routes of dependencies.extensionRoutes ?? [])
-      if (routes.place === place) routes.register(app, extensionRouteHost);
-  };
-  mountExtensionRoutes("body");
 
   app.post("/v1/body-leases", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

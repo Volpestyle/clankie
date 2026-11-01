@@ -107,3 +107,7 @@ agent showed.
   matches what is held back and can be shown. The read uses unwrapped history, which a resize should not
   reflow, but this hasn't been checked against real Herdr. It and the suspend
   case are tracked as VUH-2979.
+- A hire in the Herdr desktop app's terminals (ADR 0319) is read whole. Its
+  terminal runs only a silent launcher that execs the harness Clankie started, so
+  nothing in it is the owner's, and holding back its first screen would only
+  blind its lead. The owner's own desktop-app terminals keep the cut.

@@ -9,6 +9,10 @@ starts a worker, and the embedded Swarm has been removed. Narrowed by
 [ADR 0312](0312-a-cleared-session-is-rediscovered.md): when Herdr detection is
 on, one operator send may be delivered again after the current session's
 transcript was read and does not contain it. Peer delivery is unchanged.
+Amended by [ADR 0334](0334-herdr-direct-prompting-is-the-fallback.md): an
+owner's or lead's message to an agent with no channel is typed through
+`herdr agent prompt` while it is idle with an empty input line, and confirmed by
+its session.
 
 ## Context
 

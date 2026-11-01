@@ -68,6 +68,18 @@ export async function installedLauncher(harness: string): Promise<NativeLauncher
   return interpreter ? { executable: interpreter, script: launcher } : undefined;
 }
 
+/** A desktop-app terminal's launcher is a POSIX shell that execs the harness in place. */
+const DESKTOP_EXEC_RETRIES = 20;
+const DESKTOP_EXEC_RETRY_MS = 100;
+async function isLaunchShell(executable: string, canonical: (path: string) => Promise<string>) {
+  // allow-swallowed-rejection -- an unresolvable path is not the launcher's shell
+  const [observed, shell] = await Promise.all([
+    canonical(executable).catch(() => executable),
+    canonical("/bin/sh").catch(() => "/bin/sh"),
+  ]);
+  return observed === shell || executable === "/bin/sh";
+}
+
 /** A running seat's harness binary differs from the installed one only by its release. */
 export interface HarnessUpdate {
   readonly harness: string;
@@ -287,22 +299,43 @@ export function createProjectProcessObserver(options: {
         options.nativeTransportDiagnostics && ((reason) => options.nativeTransportDiagnostics!(reason, pane)),
       );
     at("initial_process");
-    // The first observation only finds the harness's parent; the kernel checks it below.
-    const located =
-      seat.pid === process.pid ? undefined : (await snapshot(process.pid, "initial"))?.processes[1];
-    if (!located || located.pid !== seat.pid || located.ppid <= 1 || located.ppid === seat.pid)
-      return refuse("native_initial_unavailable");
-    const initial = await snapshot(located.ppid, "initial");
-    const [shell, agent] = initial?.processes ?? [];
-    if (!initial || !shell || !agent) return refuse("native_initial_unavailable");
-    if (
-      agent.pid !== seat.pid ||
-      agent.ppid !== shell.pid ||
-      nativeProcessStart(agent.birth, agent.kernelIdentity) !==
-        nativeProcessStart(located.birth, located.kernelIdentity)
-    )
-      return refuse("process_changed");
-    const match = await matchesHarnessLauncher(launcher, seat.agent, agent, canonical);
+    const observeInitial = async () => {
+      // The first observation only finds the harness's parent; the kernel checks it below.
+      const located =
+        seat.pid === process.pid ? undefined : (await snapshot(process.pid, "initial"))?.processes[1];
+      if (!located || located.pid !== seat.pid || located.ppid <= 1 || located.ppid === seat.pid)
+        return "native_initial_unavailable" as const;
+      const initial = await snapshot(located.ppid, "initial");
+      const [shell, agent] = initial?.processes ?? [];
+      if (!initial || !shell || !agent) return "native_initial_unavailable" as const;
+      if (
+        agent.pid !== seat.pid ||
+        agent.ppid !== shell.pid ||
+        nativeProcessStart(agent.birth, agent.kernelIdentity) !==
+          nativeProcessStart(located.birth, located.kernelIdentity)
+      )
+        return "process_changed" as const;
+      const match = await matchesHarnessLauncher(launcher, seat.agent, agent, canonical);
+      return { initial, shell, agent, match };
+    };
+    // The terminal's launcher execs the harness in its own process. Seen in that instant,
+    // the process is still the launcher's shell: look again, briefly, for the exec to land.
+    // Nothing else is retried, and the harness must still match the installed launcher.
+    let observed = await observeInitial();
+    for (
+      let attempt = 0;
+      attempt < DESKTOP_EXEC_RETRIES &&
+      typeof observed !== "string" &&
+      !observed.match &&
+      (await isLaunchShell(observed.agent.executable, canonical));
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, DESKTOP_EXEC_RETRY_MS));
+      if (options.signal?.aborted) break;
+      observed = await observeInitial();
+    }
+    if (typeof observed === "string") return refuse(observed);
+    const { initial, shell, agent, match } = observed;
     if (!match) return refuse("launcher_mismatch");
     at("final_process");
     const final = await snapshot(shell.pid, "final");
@@ -358,7 +391,7 @@ export function createProjectProcessObserver(options: {
                 : "observation_failure",
             at,
           );
-    const core = /^herdr-core\/(t\d+)$/u.exec(pane)?.[1];
+    const core = /^herdr-core\/(t[0-9a-z]+)$/u.exec(pane)?.[1];
     if (
       fleet !== "default" ||
       !["darwin", "linux"].includes(options.platform ?? process.platform) ||

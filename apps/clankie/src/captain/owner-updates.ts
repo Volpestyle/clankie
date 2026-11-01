@@ -74,6 +74,8 @@ export class OwnerUpdates {
         ...(u.issue === undefined ? {} : { issue: u.issue }),
         ...(u.links === undefined ? {} : { links: u.links }),
         ...(u.media === undefined ? {} : { media: u.media }),
+        ...(u.details === undefined ? {} : { details: u.details }),
+        ...(u.routine === undefined ? {} : { routine: u.routine }),
       };
       if (!isDeepStrictEqual(original, input)) throw new Error("owner_update_publication_conflict");
       return structuredClone(u);

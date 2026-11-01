@@ -26,6 +26,7 @@ import {
   postDiscordSetupTestMessage,
 } from "@clankie/discord-presence-core";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
 import { DiscordRoomObservations } from "../src/discord-room-observations.ts";
@@ -168,6 +169,7 @@ async function fixture() {
   const operatorEnv: NodeJS.ProcessEnv = { CLANKIE_OPERATOR_TOKEN: "fixture-owner" };
   let afterPermissions = async () => {};
   const service = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(), // Unrelated model lane is never invoked in this integration.
     settings,
     eventLogPath: join(root, "events.jsonl"),

@@ -227,8 +227,20 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
       deliveryOptions?.rediscover === undefined
     )
       deliveryOptions = { ...deliveryOptions, rediscover: true };
+    // The owner's or a lead's own message may be typed into an agent with no channel (ADR
+    // 0334), never while a worker-channel original to this seat is still uncertain.
+    const directPrompt =
+      context.source === "operator" &&
+      context.delivery === undefined &&
+      deliveryOptions?.fence === undefined &&
+      deliveryOptions?.reconcileOnly !== true &&
+      current?.session !== undefined &&
+      fleetMailboxes.get(seatId)?.uncertain() !== true
+        ? { session: current.session.value }
+        : undefined;
     deliveryOptions = {
       ...deliveryOptions,
+      ...(directPrompt === undefined ? {} : { directPrompt }),
       conversationId: context.conversationId,
       ...(ctx.inboundBinding(current) === undefined
         ? {}

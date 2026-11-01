@@ -1,5 +1,10 @@
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
-import type { IssueWriteResult, KeyPressResult, PromptAnswerResult } from "@clankie/protocol/connector";
+import type {
+  IssueWriteResult,
+  KeyPressResult,
+  LeadWakeResult,
+  PromptAnswerResult,
+} from "@clankie/protocol/connector";
 import { writeIssueForApp } from "../connector-issue-writes.ts";
 import type { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import {
@@ -747,6 +752,57 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return reply({
           outcome: "uncertain",
           message: "The keys may or may not have reached the agent. Read its screen before trying again.",
+        });
+      }
+    }
+    if (parsed.success && parsed.data.op === "close_seat" && parsed.data.appDeviceId !== undefined) {
+      // A connected app closing an agent arrives only through the relay's captain bearer,
+      // stamped with the connector device it authenticated. The service then closes only an
+      // idle hire that Clankie or an app started, and names the app in its log.
+      const deviceId = parsed.data.appDeviceId;
+      const relay = captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const record = ctx.devices.get(deviceId);
+      if (!relay || record?.status !== "active" || record.scope !== "connector")
+        return context.json({ error: "app_author_required" }, 403);
+    }
+    if (parsed.success && parsed.data.op === "lead_wake") {
+      // A job handed to a connected lead at the webhook the owner stored (ADR 0336). An app
+      // reaches it only through the relay's captain bearer, which stamps the connector
+      // device it authenticated, and is named from that device's own record; the owner
+      // sends one with their own credential. Only the text goes.
+      const request = parsed.data;
+      const reply = (result: LeadWakeResult) => context.json({ op: "lead_wake", schemaVersion: 1, result });
+      const relay = () =>
+        captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const app = () => {
+        if (request.appDeviceId === undefined) return undefined;
+        const record = ctx.devices.get(request.appDeviceId);
+        return record?.status === "active" && record.scope === "connector" ? record : undefined;
+      };
+      let from: string;
+      if (request.appDeviceId !== undefined) {
+        const named = app();
+        if (!relay() || named === undefined) return context.json({ error: "app_author_required" }, 403);
+        from = named.name;
+      } else {
+        const ownerSends =
+          owner?.current() === true &&
+          (owner.principal.kind === "operator" || ownerDeviceRecord(ctx.devices.get(owner.principal.id)));
+        if (!ownerSends || !owner || !(await owner.authorize()))
+          return context.json({ error: "owner_required" }, 403);
+        from = "the owner";
+      }
+      if (ctx.dependencies.leadWakes === undefined)
+        return reply({ outcome: "unavailable", message: "Waking a lead isn't available on this Clankie." });
+      try {
+        return reply(await ctx.dependencies.leadWakes.send({ lead: request.lead, from, text: request.text }));
+      } catch (error) {
+        logger.warn({ error: error instanceof Error ? error.name : "unknown" }, "Lead wake failed");
+        return reply({
+          outcome: "uncertain",
+          lead: request.lead,
+          message:
+            "The job may or may not have reached the lead. Check the notes board before sending it again.",
         });
       }
     }

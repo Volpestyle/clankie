@@ -13,10 +13,30 @@ which starts with its webhook, wake, settings, mirror and cutover routes
 (`linear-extension.ts`), then World's Activity routes and tools and its
 PokeAgent play tools (`activity-routes.ts`, `activity-tools.ts`,
 `world/pokeagent-tools.ts`, switched as `world/extension.ts`), and voice's
-composer transcription and room voice routes (`voice-extension.ts`). Each
+composer transcription and room voice routes (`voice-extension.ts`), and the
+persona's HTTP routes: rooms, persona and voice settings, appearance and the
+Discord body's routes (`persona-extension.ts`, reading the body's live state the
+core keeps through the route host's `discordBody`), then the persona's Discord
+body tools: voice membership, social actions, the server's REST and project
+mirrors, and music (`captain/discord-tools.ts`, reaching the captain as
+`CaptainDeps.personaTools` only while the persona is on at start, over the
+core's client shapes in `ports/discord.ts`), then the captain's room turns:
+framing and running a Discord message in its room, waking a room from a watch
+or worker report, and the owner's `room_turn` fork (`captain/captain-discord-turns.ts`,
+reaching the captain as `CaptainDeps.roomTurns` only while the persona is on at
+start, over the core's shapes in `captain/room-turns.ts`; the owner check and
+operator and remote-lead wakes stay core in `captain/conversation-wakes.ts`, and
+a Discord-origin owner holds nothing while the persona is off). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
-sets the owner's switch for the next start; the app's Common controls are still to come.
+sets the owner's switch for the next start; the app shows and flips the same switches in Settings → Extensions.
+The core-only end-to-end test (`apps/clankie/test/core-only-composition.integration.test.ts`)
+starts the real service with every switch off and hires, messages, reads and
+hears from an agent in a scratch Herdr; with `voice` off, joining voice and
+watching screen shares now leave his tools too. Still reached with every switch
+off: image and video generation and skin drafts (the appearance question below),
+Minecraft (no switch yet), the persona's music and room tools, and `linear_wake`
+(built inside the captain's tracker wakes).
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside

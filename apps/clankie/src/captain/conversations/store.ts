@@ -2972,14 +2972,18 @@ export class ConversationStore {
     } catch (error) {
       if (!handedOff) throw error;
       console.error(`seat send in ${meta.conversationId} failed after its hand-off`, error);
+      // What stopped it, so a lead can tell a lost answer from a broken channel.
+      const cause = (error instanceof Error ? error.message : String(error))
+        .split("\n")[0]!
+        .trim()
+        .slice(0, 200);
       return {
         schemaVersion: 1,
         status: "seat_delivery_unconfirmed",
         deliveryStage: "uncertain",
         conversationId: meta.conversationId,
         ...offlineIdentity,
-        detail:
-          "This message may have reached the agent before something stopped it. Check the agent before sending it again.",
+        detail: `This message may have reached the agent before something stopped it${cause.length === 0 ? "" : ` (${cause})`}. Check the agent before sending it again.`,
         currentRevision: meta.revision,
         safeCursor,
       };

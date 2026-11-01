@@ -21,7 +21,7 @@ import {
 import { SettingsStore } from "@clankie/settings";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative } from "node:path";
-import { splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
+import { nativeProofLocation, splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { type CaptainOptions } from "./captain-types.ts";
 import { createWorkerReports } from "./captain-worker-reports.ts";
@@ -331,6 +331,10 @@ export function createFleetProjection(ctx: FleetProjectionContext) {
       herdrWatches.withNativeStatus(workSeats, fleet.seats),
     );
     stopGoalStatus();
+    // allow-swallowed-rejection -- A sweep that can't save leaves the tags for the next one.
+    void personas
+      .sweepGoneRoles(seats, (personaId) => conversations.conversationForPersona(personaId)?.updatedAt)
+      .catch(() => undefined);
     // Live proof is refreshed asynchronously. Missing census or an untracked
     // head never establishes that an original process exited.
     // allow-swallowed-rejection -- moved unchanged from the captain (ADR 0325); an unreadable observation leaves the projection as it was.
@@ -344,9 +348,9 @@ export function createFleetProjection(ctx: FleetProjectionContext) {
       const observed = capabilitySeats[index];
       if (!observed) continue;
       const qualified = splitFleetQualified(observed.paneId);
-      const fleetId = qualified?.fleet ?? "default";
-      const pane = qualified?.id ?? observed.paneId;
-      if (options.workerBridgeStatus) seat.workerTools = options.workerBridgeStatus(fleetId, pane);
+      const location = nativeProofLocation(observed.paneId);
+      if (options.workerBridgeStatus)
+        seat.workerTools = options.workerBridgeStatus(location.fleet, location.pane);
       const native = ctx.observedAgent(observed);
       if (seat.harness === "claude") {
         seat.messageReceiver = seatMessageReceiver(native);
@@ -381,7 +385,7 @@ export function createFleetProjection(ctx: FleetProjectionContext) {
           remediation: `Restart needed: automatic legacy restart is disabled. The lead can close this seat when idle and hire a fresh worker. Retain the original thread evidence and settle original receipts without replay.`,
         };
       }
-      const report = options.workerReportBridgeStatus?.(fleetId, pane);
+      const report = options.workerReportBridgeStatus?.(location.fleet, location.pane);
       if (report) seat.workerReportBridge = report;
     }
     const nextWork = JSON.stringify(

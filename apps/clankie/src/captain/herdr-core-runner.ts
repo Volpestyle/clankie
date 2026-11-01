@@ -1,13 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { hostname } from "node:os";
 import type { HerdrForegroundProcess } from "./codex-seat.ts";
 import type { HerdrCensusFleet } from "./herdr-census.ts";
-import type { HerdrAgentSession } from "./herdr-transcript.ts";
+import { readHerdrSeatTranscript, type HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
+import { DESKTOP_SEAT_FLEET } from "../herdr-fleet.ts";
 import { SESSION_LABEL } from "./herdr-core.ts";
 import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr-core-seats.ts";
+import {
+  SPACE_NAME_LABEL,
+  TAB_NAME_LABEL,
+  hireProject,
+  nameClankieTabs,
+  placeHire,
+  type HerdrWindow,
+} from "./herdr-window.ts";
 
 // Clankie's hires in the Herdr desktop app's terminals (ADR 0319), seen the way his
 // seat code sees a Herdr pane. Routed under one reserved prefix (`herdr-core/t7`), so
@@ -16,10 +25,17 @@ import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr
 // read through the connector's session source, never driven here.
 
 /** The prefix a desktop-app terminal's seat id carries; no Herdr fleet may take it. */
-export const HERDR_CORE_FLEET = "herdr-core";
+export const HERDR_CORE_FLEET = DESKTOP_SEAT_FLEET;
 
 /** Labels a hire's terminal carries once its harness starts, so they outlive Clankie's restarts. */
 const AGENT_LABEL = "clankie.agent";
+/**
+ * The agent name Clankie minted for the hire, unique among live seats as a Herdr agent's
+ * name is. The seat label is only what the desktop app shows, and many hires share one
+ * ("clankie · Work"), so it never names a seat: a shared name merged every hire into one
+ * character and sent one hire's messages to another (#208).
+ */
+const NAME_LABEL = "clankie.name";
 
 /** The harnesses a desktop-app terminal can start so far, by the binary its owner runs. */
 const HARNESS_BINARIES: Readonly<Record<string, string>> = { claude: "claude" };
@@ -48,7 +64,12 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const STATUSES = new Set(["idle", "working", "blocked", "done"]);
 const SETTLED = new Set(["idle", "done", "blocked"]);
 const POLL_MS = 500;
+/** How long a start waits for the launcher to take its handoff; it polls every 0.2 s. */
+const LAUNCH_HANDOFF_MS = 3_000;
 const IDLE_WAIT_MS = 30_000;
+/** How often, and how many times, a new hire's tab is looked for to name it. */
+const NAME_RETRY_MS = 500;
+const NAME_ATTEMPTS = 30;
 const HISTORY_LINES = 2_000;
 
 /** The agent name Herdr gives the app a 7501 report names. */
@@ -71,7 +92,7 @@ export interface DesktopSeatRecord {
 }
 
 const recordPath = (directory: string, address: string) => {
-  if (!/^t\d+$/u.test(address)) throw new Error(`Not a desktop-app terminal: ${address}`);
+  if (!/^t[0-9a-z]+$/u.test(address)) throw new Error(`Not a desktop-app terminal: ${address}`);
   return join(directory, `${address}.json`);
 };
 
@@ -142,7 +163,15 @@ export interface HerdrCoreRunnerOptions {
   readonly launchDirectory?: string;
   /** A private directory for the records a seat's proof trusts (readDesktopSeat). */
   readonly seatDirectory?: string;
+  /**
+   * The installed harness as an absolute command (its executable, or interpreter and
+   * script), the same one a seat's process proof checks for. Unset or unresolved, the
+   * launcher looks the harness up on the terminal's own PATH.
+   */
+  readonly harnessCommand?: (harness: string) => Promise<readonly string[] | undefined>;
   readonly pollMs?: number;
+  /** The desktop app's window, to name the spaces and tabs a hire opens; unset, they stay unnamed. */
+  readonly window?: HerdrWindow;
 }
 
 /** A seat runner for the desktop app's core: it starts, reads, waits on and closes Clankie's hires. */
@@ -154,6 +183,34 @@ export function createHerdrCoreRunner(
   const pollMs = options.pollMs ?? POLL_MS;
   /** Terminals waiting at the launcher, by address, with the file their command goes in. */
   const pending = new Map<string, string>();
+  /**
+   * Names a new hire's space and tab once the window places it (on its next listing). One
+   * pass at a time, in the background: a hire never waits on the window, and no window
+   * open leaves the names on the terminals for the next pass.
+   */
+  const appWindow = options.window;
+  let naming: Promise<void> | undefined;
+  let again = false;
+  const nameTabs = () => {
+    if (appWindow === undefined) return;
+    if (naming !== undefined) {
+      again = true;
+      return;
+    }
+    naming = (async () => {
+      for (let attempt = 0; attempt < NAME_ATTEMPTS; attempt += 1) {
+        again = false;
+        const waiting = await nameClankieTabs(seats, appWindow);
+        if (waiting === undefined || (waiting === 0 && !again)) return;
+        await new Promise<void>((resolve) => setTimeout(resolve, NAME_RETRY_MS).unref());
+      }
+    })()
+      // allow-swallowed-rejection -- names are cosmetic; the hire already started
+      .catch(() => undefined)
+      .finally(() => {
+        naming = undefined;
+      });
+  };
   /** The program's own report, else its harness hooks' turn once Clankie started it, else unknown. */
   const statusOf = (terminal: HerdrCoreTerminal, session: HerdrAgentSession | undefined): string => {
     if (terminal.state !== "live") return "offline";
@@ -168,12 +225,12 @@ export function createHerdrCoreRunner(
       labeled === undefined
         ? undefined
         : { source: `herdr:${terminal.labels[AGENT_LABEL] ?? "claude"}`, kind: "id", value: labeled };
-    const seat = terminal.labels[SEAT_LABEL];
+    const name = terminal.labels[NAME_LABEL];
     const live = terminal.state === "live";
     return {
       paneId: terminal.address,
       terminalId: terminal.address,
-      ...(seat === undefined ? {} : { name: seat }),
+      ...(name === undefined ? {} : { name }),
       agent: live ? agentOf(terminal.app ?? terminal.labels[AGENT_LABEL]) : "unknown",
       status: statusOf(terminal, session),
       title: terminal.title ?? "",
@@ -241,6 +298,8 @@ export function createHerdrCoreRunner(
     waitForChange: (address, current, signal) => until(address, (agent) => agent.status !== current, signal),
     waitUntilIdle: (address, signal) =>
       until(address, (agent) => ["idle", "working", "done"].includes(agent.status), signal, IDLE_WAIT_MS),
+    // The harness's own session file, as a Herdr pane's is read: Clankie named the session.
+    transcript: async (agent) => readHerdrSeatTranscript(agent.agent, agent.session),
     readPane: async (address, source) => {
       if ((await own(address)) === undefined)
         throw new Error(`The desktop app has no Clankie terminal ${address}`);
@@ -270,14 +329,29 @@ export function createHerdrCoreRunner(
     createTab: async (request) => {
       if (request.fleet !== undefined) throw new Error("The desktop app's terminals belong to this machine");
       const seat = request.paneLabel ?? request.label;
-      if (request.command !== undefined)
-        return seats.start({
+      // Each hire its own tab in its project's space, named for it (a pipeline's shared a few
+      // at a time), so the window never squeezes every hire into one tab's columns.
+      const place = placeHire(await seats.list(), {
+        project: await hireProject(request.cwd, request.project),
+        tabName: seat,
+        ...(request.pipeline === undefined ? {} : { pipeline: request.pipeline }),
+      });
+      const placement = {
+        space: place.space,
+        tab: place.tab,
+        labels: { [SPACE_NAME_LABEL]: place.spaceName, [TAB_NAME_LABEL]: place.tabName },
+      };
+      if (request.command !== undefined) {
+        const address = await seats.start({
           argv: request.command,
           cwd: request.cwd,
           ...(request.env === undefined ? {} : { env: request.env }),
           seat,
-          ...(request.pipeline === undefined ? {} : { tab: request.pipeline }),
+          ...placement,
         });
+        nameTabs();
+        return address;
+      }
       if (options.launchDirectory === undefined)
         throw new Error("The desktop app's terminals need a launch directory to start a harness");
       await mkdir(options.launchDirectory, { recursive: true, mode: 0o700 });
@@ -298,12 +372,13 @@ export function createHerdrCoreRunner(
         cwd: request.cwd,
         ...(env === undefined ? {} : { env }),
         seat,
-        ...(request.pipeline === undefined ? {} : { tab: request.pipeline }),
+        ...placement,
       });
       pending.set(address, handoff);
+      nameTabs();
       return address;
     },
-    startAgent: async ({ kind, paneId, args = [] }) => {
+    startAgent: async ({ name, kind, paneId, args = [] }) => {
       const handoff = pending.get(paneId);
       if (handoff === undefined)
         throw new Error(`Desktop-app terminal ${paneId} is not waiting for a harness`);
@@ -312,10 +387,28 @@ export function createHerdrCoreRunner(
       const terminal = await own(paneId);
       if (terminal?.state !== "live") throw new Error(`Desktop-app terminal ${paneId} has ended`);
       pending.delete(paneId);
+      // The desktop app's own PATH may find another install than the service's, which the
+      // seat's process proof would then refuse; exec the exact harness the proof expects.
+      // allow-swallowed-rejection -- an unresolved install falls back to the terminal's own PATH, as before
+      const command = (await options.harnessCommand?.(kind).catch(() => undefined)) ?? [binary];
+      await writePrivately(handoff, `rm -f -- "$1"\nexec ${[...command, ...args].map(quote).join(" ")}\n`);
+      // The launcher removes its handoff just before it execs the harness. Until then the
+      // terminal's process is still the launcher, so its session and seat record wait for
+      // that: a session seen any earlier starts the hire's process proof against the launcher.
+      const deadline = Date.now() + LAUNCH_HANDOFF_MS;
+      while (
+        Date.now() < deadline &&
+        (await access(handoff).then(
+          () => true,
+          () => false,
+        ))
+      )
+        await new Promise((resolve) => setTimeout(resolve, 25));
       // The session Clankie named or resumes stays on the terminal, since the core can't detect it.
       const named = args.findIndex((arg) => arg === "--session-id" || arg === "--resume");
       const session = named < 0 ? undefined : args[named + 1];
       await seats.label(paneId, {
+        [NAME_LABEL]: name,
         [AGENT_LABEL]: kind,
         ...(session === undefined ? {} : { [SESSION_LABEL]: session }),
       });
@@ -327,7 +420,6 @@ export function createHerdrCoreRunner(
           JSON.stringify({ pid: terminal.pid, agent: kind, session } satisfies DesktopSeatRecord),
         );
       }
-      await writePrivately(handoff, `rm -f -- "$1"\nexec ${[binary, ...args].map(quote).join(" ")}\n`);
     },
   };
 }

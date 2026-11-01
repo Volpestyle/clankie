@@ -36,10 +36,13 @@ export function createPersonaVoiceSettingsRoutes(options: {
   voiceSettingsEnv?: NodeJS.ProcessEnv;
 }): Hono {
   const app = new Hono();
-  app.use("*", async (context, next) => {
-    context.header("cache-control", "no-store");
-    await next();
-  });
+  // Scoped to its own paths: mounted at the service root, a "*" here reached
+  // every route registered after it.
+  for (const path of [PERSONA, VOICE])
+    app.use(path, async (context, next) => {
+      context.header("cache-control", "no-store");
+      await next();
+    });
   const snapshotPersona = async (current: ClankieSettings, owner: boolean) => {
     const persona = owner ? current.persona : attention(current.persona);
     return {

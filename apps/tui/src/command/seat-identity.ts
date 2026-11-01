@@ -14,6 +14,7 @@ export function seatIdentity(env: NodeJS.ProcessEnv = process.env): {
   if (pane || herdr) return { pane: pane || undefined, socket: herdr || undefined };
   const terminal = env.HC_TERMINAL_ID?.trim();
   const core = env.HC_TERMINAL_SOCKET?.trim();
-  if (terminal && core && /^t\d+$/u.test(terminal)) return { pane: `herdr-core/${terminal}`, socket: core };
+  if (terminal && core && /^t[0-9a-z]+$/u.test(terminal))
+    return { pane: `herdr-core/${terminal}`, socket: core };
   return { pane: undefined, socket: undefined };
 }

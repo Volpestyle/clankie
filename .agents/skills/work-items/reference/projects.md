@@ -30,6 +30,10 @@ separate provider poller.
 
 ## Project settings and narrow writes
 
+`clankie project settings PROJECT` prints a plain read of one project for people,
+with Stale lines for a focus naming another tracker and a gone reviewer seat; pass
+`--json` for the full snapshot you parse.
+
 `clankie project settings PROJECT --auto-updates on|off` sets evidence-first
 progress reports (default on), through the revision-fenced project settings API's
 `autoUpdates`. Off preserves the project's existing owner-loop cadence; silent

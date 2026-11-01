@@ -1,4 +1,3 @@
-import type { DiscordSessionAccess } from "./room-skill-tools.ts";
 import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import {
@@ -8,15 +7,21 @@ import {
   deliveredFileRefConversationKey,
   isDeliveredFileRef,
   type CaptainChannelTurnResult,
-  type CaptainSessionLaneV2,
   type CaptainTurnMedia,
 } from "@clankie/protocol";
 import { conversationStorageKey } from "../delivered-files.ts";
-import { type RoomForkReceipts, type RoomForkResult } from "./room-forks.ts";
-import { resolveDiscordSettings, type ClankieSettings } from "@clankie/settings";
-import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
+import type { RoomForkResult } from "./room-forks.ts";
+import {
+  ROOM_FORK_TOOL,
+  type RoomForkGrant,
+  type RoomForkInput,
+  type RoomOwnerAdmission,
+  type RoomTurns,
+  type RoomTurnsHost,
+} from "./room-turns.ts";
+import { resolveDiscordSettings } from "@clankie/settings";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import { join } from "node:path";
 import { captureDiscordBodyIdentity, planConversationWakeSession } from "./body-identity.ts";
 import {
@@ -27,21 +32,20 @@ import {
   runTurnWithStallWatchdog,
   toImageContent,
 } from "./captain-session.ts";
-import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
-import { ConversationOwnerSchema, type ConversationOwner } from "./conversation-owner.ts";
+import type { LaneSession } from "./captain-types.ts";
+import type { ConversationOwner } from "./conversation-owner.ts";
 import { ConversationServiceRun, waitForConversationRun } from "./conversation-run.ts";
-import { ConversationStore } from "./conversations.ts";
-import type { CaptainDeps } from "./deps.ts";
 import { DiscordToolProgressReporter } from "./discord-tool-progress.ts";
-import { normalizeDiscordTurn, replyIsUnderway, type NormalizedDiscordTurn } from "./discord-turn.ts";
 import {
-  HerdrWatchWakeAbandonedError,
-  type DiscordWatchOrigin,
-  type HerdrWatchWakeContext,
-} from "./herdr-watch.ts";
-import { laneKey, LaneLog } from "./lane-log.ts";
-import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
-import { SeatLinkInterruptedError, SeatOutbox } from "./seat-outbox.ts";
+  discordTurnSessionKey,
+  normalizeDiscordTurn,
+  replyIsUnderway,
+  type NormalizedDiscordTurn,
+} from "./discord-turn.ts";
+import { type DiscordWatchOrigin, type HerdrWatchWakeContext } from "./herdr-watch.ts";
+import { laneKey } from "./lane-log.ts";
+import { roomSeatTurnResult } from "./room-conversations.ts";
+import { SeatLinkInterruptedError } from "./seat-outbox.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
 import { roomKey } from "./tools.ts";
 import {
@@ -50,56 +54,10 @@ import {
   sessionExecutionIdentity,
   tryAppendTurnSettled,
   TurnMetrics,
-  TurnSettledLog,
   type TurnSettledOutcome,
 } from "./turn-metrics.ts";
 
-export interface CreateDiscordTurnsContext {
-  readonly buildSession: (
-    lane: CaptainSessionLaneV2,
-    sessionManager: SessionManager,
-    systemTools: boolean,
-    cwd: string,
-    sideConversation?: boolean,
-    _conversationId?: string,
-    run?: ConversationServiceRun,
-    access?: DiscordSessionAccess,
-  ) => Promise<LaneSession>;
-  readonly workingDirectory: string;
-  readonly options: CaptainOptions;
-  /** Watch (ADR 0308): no wake reaches a lead, native or service, while Clankie only watches. */
-  readonly watching?: () => Promise<boolean>;
-  readonly durableSession: (
-    key: string,
-    lane: CaptainSessionLaneV2,
-    dir: string,
-    systemTools: boolean,
-    cwd: string,
-    sideConversation?: boolean,
-    run?: ConversationServiceRun,
-    fresh?: boolean,
-    conversationId?: string,
-    access?: DiscordSessionAccess,
-  ) => Promise<LaneSession>;
-  readonly conversations: ConversationStore;
-  readonly settings: () => Promise<ClankieSettings>;
-  readonly deps: CaptainDeps;
-  readonly seatOutbox: (conversationId: string) => SeatOutbox;
-  readonly watchRecipientBinding?: (conversationId: string) => Promise<string | undefined>;
-  readonly shutdown: AbortController;
-  readonly roomConversations: RoomConversations;
-  readonly laneLog: LaneLog;
-  readonly captureEvaluationStart: (
-    runId: string,
-    conversationId: string,
-    session: AgentSession,
-    request: string,
-  ) => void;
-  readonly syncModel: (lane: LaneSession) => Promise<void>;
-  readonly turnSettled: TurnSettledLog;
-  readonly roomForks: RoomForkReceipts;
-}
-export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
+export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
   async function conversationDiscordSettings(origin: DiscordWatchOrigin) {
     const discord = resolveDiscordSettings(
       (await ctx.settings()).discord,
@@ -180,30 +138,11 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     );
   }
 
-  /**
-   * A Herdr watch armed from Discord settled (ADR 0186). The room that started
-   * the worker harvests it and answers the message it was armed from. Authority
-   * is planned again for that actor now — a grant revoked since the watch was
-   * armed runs nothing — and no body holds this delivery, so the reply posts
-   * through the Discord action port.
-   */
-  async function validateConversationOwner(
-    input: ConversationOwner,
-    mode: "machine" | "social" = "machine",
-    admission?: {
-      readonly readSettings: () => Promise<Parameters<typeof planDiscordTurnSession>[0]["settings"]>;
-      readonly sourceCurrent?: () => boolean;
-    },
+  async function validateRoomOwner(
+    owner: ConversationOwner & { readonly discord: DiscordWatchOrigin },
+    mode: "machine" | "social",
+    admission?: RoomOwnerAdmission,
   ): Promise<boolean> {
-    const parsed = ConversationOwnerSchema.safeParse(input);
-    if (!parsed.success) return false;
-    const owner = parsed.data;
-    // A remote lead's conversation leads its hires through its native head (ADR 0259).
-    if (owner.discord === undefined)
-      return (
-        ctx.conversations.runsCaptainTurns(owner.conversationId) ||
-        ctx.conversations.runsOnRemoteSeat(owner.conversationId)
-      );
     const scope = ctx.conversations.conversation(owner.conversationId)?.scope;
     const origin = owner.discord;
     if (
@@ -254,177 +193,13 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     );
   }
 
-  async function wakeConversation(
-    input: ConversationOwner,
-    notification: string,
-    guard?: () => Promise<void>,
-    mode: "machine" | "social" = "machine",
-    allowHeadFallback = true,
-    waitForCompletion = false,
-    original?: HerdrWatchWakeContext,
-  ): Promise<boolean> {
-    if (await wakeExactConversation(input, notification, guard, mode, waitForCompletion, original))
-      return true;
-    if (original) return false;
-    if (!allowHeadFallback || !(await validateConversationOwner(input, mode))) return false;
-    const head = ctx.conversations.designatedHead(input.conversationId);
-    if (head === undefined) return false;
-    const finalGuard = async () => {
-      await guard?.();
-      if (!(await validateConversationOwner(input, mode)))
-        throw new Error("Original conversation authority changed");
-      if (
-        ctx.conversations.designatedHead(input.conversationId) !== head ||
-        !ctx.conversations.runsCaptainTurns(head)
-      )
-        throw new Error("Designated head authority changed");
-    };
-    return wakeExactConversation(
-      { conversationId: head },
-      notification,
-      finalGuard,
-      "machine",
-      waitForCompletion,
-      original,
-    );
-  }
-
-  async function wakeExactConversation(
-    input: ConversationOwner,
-    notification: string,
-    guard?: () => Promise<void>,
-    mode: "machine" | "social" = "machine",
-    waitForCompletion = false,
-    original?: HerdrWatchWakeContext,
-  ): Promise<boolean> {
-    const owner = ConversationOwnerSchema.parse(input);
-    if ((await ctx.watching?.()) === true) return false;
-    if (!(await validateConversationOwner(owner, mode))) return false;
-    if (original?.receipt) {
-      const expected = original.receipt;
-      if (expected.messageId !== original.messageId || !isDeepStrictEqual(expected.owner, owner))
-        return false;
-      await guard?.();
-      const outbox = ctx.seatOutbox(owner.conversationId);
-      // An abandoned original is never resent or claimed delivered: the watch ends.
-      if (outbox.recoveryAbandoned(expected.messageId))
-        throw new HerdrWatchWakeAbandonedError(
-          "The owner settled this watch's original wake as abandoned-unknown",
-        );
-      const recipientBinding = ctx.watchRecipientBinding
-        ? await ctx.watchRecipientBinding(owner.conversationId)
-        : outbox.recipientBinding();
-      await guard?.();
-      if (
-        !(await validateConversationOwner(owner, mode)) ||
-        recipientBinding !== expected.recipientBinding ||
-        (outbox.bound() && outbox.recipientBinding() !== expected.recipientBinding)
-      )
-        return false;
-      try {
-        const receipt = outbox.recoveryReceipt(expected.messageId);
-        return (
-          receipt?.messageId === expected.messageId &&
-          receipt.fingerprint === expected.fingerprint &&
-          receipt.sessionId === (expected.recipientBinding ?? "") &&
-          outbox.recoveryAcknowledged(expected.messageId)
-        );
-      } catch {
-        // Active, unreadable or absent originals never authorize a replacement.
-        return false;
-      }
-    }
-    if (owner.discord !== undefined) {
-      // Once the exact room accepts the turn, never replay a failed harvest.
-      return runDiscordWatchTurn(owner, notification, guard, mode, waitForCompletion, "escalation", original);
-    }
-    if (ctx.conversations.runsOnRemoteSeat(owner.conversationId))
-      return wakeRemoteConversation(owner.conversationId, notification, guard, original);
-    await guard?.();
-    if (!ctx.conversations.runsCaptainTurns(owner.conversationId)) return false;
-    const result = ctx.conversations.submitInternal(
-      owner.conversationId,
-      notification,
-      "watch",
-      waitForCompletion ? "queue" : undefined,
-    );
-    if (result.status !== "accepted") return false;
-    // Never redirect an accepted delivery, including one whose turn fails.
-    if (waitForCompletion && !(await ctx.conversations.awaitRunResult(result.runId)))
-      throw new Error("Fleet review turn did not complete");
-    return true;
-  }
-
   /**
-   * A remote lead has no local captain turn to fall back on: its wake goes to
-   * its native head over the bridge channel, or waits (false) for that head to
-   * poll again. A watch's original receipt is reserved before the take, so a
-   * restart reconciles it instead of sending it twice.
+   * A Herdr watch armed from Discord settled (ADR 0186). The room that started
+   * the worker harvests it and answers the message it was armed from. Authority
+   * is planned again for that actor now — a grant revoked since the watch was
+   * armed runs nothing — and no body holds this delivery, so the reply posts
+   * through the Discord action port.
    */
-  async function wakeRemoteConversation(
-    conversationId: string,
-    notification: string,
-    guard?: () => Promise<void>,
-    original?: HerdrWatchWakeContext,
-  ): Promise<boolean> {
-    const owner = { conversationId };
-    return ctx.conversations.runWithConversationDriver<boolean>(
-      conversationId,
-      () => {
-        const outbox = ctx.seatOutbox(conversationId);
-        if (!outbox.routesToSeat(notification, original?.messageId)) return undefined;
-        return {
-          run: async () => {
-            const preparation = new ConversationServiceRun(ctx.shutdown.signal);
-            let recipientBinding: string | undefined;
-            try {
-              await preparation.wait("remote lead authority", guard?.() ?? Promise.resolve());
-              if (original) {
-                recipientBinding = ctx.watchRecipientBinding
-                  ? await preparation.wait("remote lead recipient", ctx.watchRecipientBinding(conversationId))
-                  : outbox.recipientBinding();
-                await preparation.wait("remote lead final authority", guard?.() ?? Promise.resolve());
-                if (original.receipt || outbox.recipientBinding() !== recipientBinding)
-                  return { handled: true as const, result: false };
-              }
-            } finally {
-              preparation.close();
-            }
-            ctx.shutdown.signal.throwIfAborted();
-            const delivery = await outbox.deliver({
-              kind: "watch",
-              conversationId,
-              source: "watch",
-              content: notification,
-              wantsReply: false,
-              signal: ctx.shutdown.signal,
-              ...(original === undefined
-                ? {}
-                : {
-                    original: {
-                      messageId: original.messageId,
-                      prepare: (receipt: {
-                        messageId: string;
-                        fingerprint: string;
-                        recipientBinding?: string;
-                      }) => original.reserve({ ...receipt, owner }),
-                    },
-                    ...(recipientBinding === undefined ? {} : { recipientBinding }),
-                  }),
-            });
-            if (delivery.outcome === "unbound") return { handled: false as const };
-            // Unknown native acceptance is not a refusal that authorizes a replacement wake.
-            if (original === undefined && delivery.outcome === "unconfirmed")
-              throw new SeatLinkInterruptedError(delivery);
-            return { handled: true as const, result: delivery.outcome === "delivered" };
-          },
-        };
-      },
-      async () => false,
-      ctx.shutdown.signal,
-    );
-  }
-
   async function runDiscordWatchTurn(
     owner: ConversationOwner,
     notification: string,
@@ -472,14 +247,14 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       access: {
         privateContext: mode === "machine",
         actorId: origin.actorId,
-        authorize: () => validateConversationOwner(owner, mode),
+        authorize: () => ctx.validateConversationOwner(owner, mode),
       },
       actorId: origin.actorId,
       ...(origin.guildId === undefined ? {} : { guildId: origin.guildId }),
       channelId: origin.channelId,
       messageId: origin.messageId,
     };
-    if (!(await validateConversationOwner(owner, mode))) return false;
+    if (!(await ctx.validateConversationOwner(owner, mode))) return false;
     await guard?.();
     let accepted = false;
     let accept!: () => void;
@@ -532,10 +307,10 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
       origin,
       systemTools,
       async () => {
-        if (!(await validateConversationOwner(owner, mode)))
+        if (!(await ctx.validateConversationOwner(owner, mode)))
           throw new Error("Conversation wake authority was revoked");
         await guard?.();
-        if (!(await validateConversationOwner(owner, mode)))
+        if (!(await ctx.validateConversationOwner(owner, mode)))
           throw new Error("Conversation wake authority was revoked");
       },
       nativeEventKind,
@@ -552,7 +327,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     if (
       result.state !== "settled" ||
       ctx.deps.discordActions === undefined ||
-      !(await validateConversationOwner(owner, mode))
+      !(await ctx.validateConversationOwner(owner, mode))
     )
       return accepted;
     const posted = await ctx.deps.discordActions.execute(
@@ -566,7 +341,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         text: boundedDiscordReply(result.response),
       },
       async () => {
-        if (!(await validateConversationOwner(owner, mode)))
+        if (!(await ctx.validateConversationOwner(owner, mode)))
           throw new Error("Conversation wake route authority was revoked");
       },
     );
@@ -1163,7 +938,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
     if (roomForksRunning.has(id)) return { state: "uncertain", room, code: "room_fork_running" };
     roomForkGrants.set(id, { room, origin });
     // A definite refusal before dispatch is never recorded, so the same request can retry.
-    if (!(await validateConversationOwner(owner, mode))) {
+    if (!(await ctx.validateConversationOwner(owner, mode))) {
       roomForkGrants.delete(id);
       return refuse("room_fork_room_authority_unavailable");
     }
@@ -1198,7 +973,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
         media = { artifactRef: published.artifactRef, filename: published.filename };
       }
       const guard = async () => {
-        if (!(await validateConversationOwner(owner, mode)))
+        if (!(await ctx.validateConversationOwner(owner, mode)))
           throw new Error("Room authority changed during the owner-directed turn");
       };
       const prompt = [
@@ -1225,7 +1000,7 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
           access: {
             privateContext: systemTools,
             actorId: origin.actorId,
-            authorize: () => validateConversationOwner(owner, mode),
+            authorize: () => ctx.validateConversationOwner(owner, mode),
           },
           actorId: origin.actorId,
           guildId,
@@ -1305,44 +1080,14 @@ export function createDiscordTurns(ctx: CreateDiscordTurnsContext) {
   }
 
   return {
-    validateConversationOwner,
-    wakeConversation,
+    validateRoomOwner,
     runDiscordWatchTurn,
     dispatchDiscordTurn,
     forkIntoRoom,
     roomForkGrant,
+    sessionKey: discordTurnSessionKey,
+    normalize: normalizeDiscordTurn,
   };
-}
-
-/** Authority for one in-flight owner-directed room turn (ADR 0218, 2026-10-06). */
-export interface RoomForkGrant {
-  readonly room: string;
-  /** Owner as actor; `deliveryId` is `room-fork-<id>`, never another member's message. */
-  readonly origin: DiscordWatchOrigin;
-}
-
-/** The fork ID an origin's delivery names, when it is an owner-directed room turn. */
-export function roomForkIdOf(deliveryId: string | undefined): string | undefined {
-  return deliveryId?.startsWith("room-fork-") === true ? deliveryId.slice("room-fork-".length) : undefined;
-}
-
-/** The seat's tool for an owner-directed room turn. */
-export const ROOM_FORK_TOOL = "room_turn";
-
-export interface RoomForkInput {
-  /** The owner's conversation the seat is driving; its log records the action. */
-  readonly sourceConversationId: string;
-  /** The room conversation ID, as `conversations` lists it. Exactly one of `room` or `channel`. */
-  readonly room?: string;
-  /** A Discord text channel ID; its room conversation is created when he has none there yet. */
-  readonly channel?: string;
-  readonly brief: string;
-  readonly replyTo?: string;
-  readonly file?: { readonly path: string; readonly filename?: string };
-  /** Where `file.path` resolves: the owner's conversation workspace. */
-  readonly workspace: string;
-  /** Stable retry key; defaults to a hash of the request itself. */
-  readonly requestId?: string;
 }
 
 /** Said in the room when a file he made this turn cannot ride the reply. */

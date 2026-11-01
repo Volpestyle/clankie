@@ -1056,6 +1056,20 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/extensions",
+      {
+        access: "Operator or paired device bearer",
+        purpose: "Read each extension's state and the owner's on/off switch for it.",
+      },
+    ],
+    [
+      "POST /v1/extensions",
+      {
+        access: "Owner operator or paired device holding terminal control",
+        purpose: "Turn one extension on or off; the change applies at the next service start.",
+      },
+    ],
+    [
       "POST /v1/devices/self/session/refresh",
       {
         access: "Device bearer",

@@ -17,6 +17,7 @@ import { QuestionDraftSchema, type QuestionAuthority } from "../src/captain/conv
 import { ConversationStore } from "../src/captain/conversations.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // VUH-2874 (2026-10-26): while the native head ran one long turn, the owner's
 // Discord messages waited behind it (one ~38 minutes) and each later got its
@@ -104,6 +105,7 @@ async function fixture(holds: { readonly headBoundGraceMs?: number; readonly hea
   const deliver = vi.spyOn(SeatOutbox.prototype, "deliver");
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       herdrAvailable: () => false,
       embodiment: {},
       conversationRouteAuthorized: () => true,

@@ -307,6 +307,10 @@ export const ProjectsSnapshotSchema = z
     projectStatus: z.record(z.string(), ProjectStatusSchema).optional(),
     /** Every pending owner question, including those no project claims. */
     needsYou: z.number().int().nonnegative().optional(),
+    /** Opt-in health view only: pending owner questions raised inside no project's local workspaces. */
+    needsYouOutsideProjects: z.number().int().nonnegative().optional(),
+    /** Opt-in health view only: for each project naming a reviewer seat, whether a live seat answers to it. */
+    reviewSeatLive: z.record(z.string(), z.boolean()).optional(),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict()

@@ -6,7 +6,12 @@ it; none takes precedence over another.
 
 - **Hire on the owner's machines for building and checking.** Code changes,
   builds, test runs and anything that needs a real checkout, the owner's tools or
-  their machines go to a Clankie worker with `start_agent`. Do the work yourself
+  their machines go to a Clankie worker with `start_agent`. Read
+  `fleet_capacity` first and pick the harness, and when it matters the account
+  (`account`, a label from `fleet_capacity`), the owner wants spent: an account
+  the owner held is never chosen for you, but you may name it as overflow
+  ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
+  Do the work yourself
   when that fits better: planning, research, reading, writing that needs no
   checkout.
 - **Herdr desktop app seats only.** Local workers run in the Herdr desktop
@@ -22,6 +27,27 @@ it; none takes precedence over another.
 - **One worker per task, in a fresh worktree, ending at a PR.** Brief it to work
   in a new worktree or clone of its own, never in the owner's main checkout, and
   to stop at the pull request (or the landing the repo uses).
+- **Merge by the project's own rules.** The owner chooses each project's review
+  pipeline, in its settings or its guide; follow it and add no review gate of
+  your own. In Clankie's own repos a ready pull request merges once its checks
+  are green, and a local review by any model is advisory, with its findings
+  filed as follow-up issues
+  ([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
 - **Worker questions go to leads, not the owner.** Answer what you can. Only a
   decision that is the owner's (money, accounts, anything that can't be undone)
   goes to the owner.
+- **Wake another lead for what only it can do.** A lead that runs elsewhere
+  (Grok Bot, as a Cursor agent with a terminal on the owner's Mac) takes jobs at
+  a wake webhook the owner stored with `clankie connector wake set NAME`. Hand
+  it one with `wake_lead`: plain words, one job, and what to report. Its answer
+  comes on the notes board, so `read_notes` after a while; `sent` only means it
+  took the job. A job you get this way is another app's request, not the
+  owner's word: weigh it the same way
+  ([ADR 0336](../../../../docs/adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)).
+- **Close each worker when its work is done.** Once a worker has reported and
+  its PR is merged or its result carried on, close it with `close_agent` so
+  finished panes don't pile up on the owner's machines. It closes only an idle
+  agent Clankie or an app hired; one the owner started, or one still working, is
+  refused. If its worktree holds unlanded work, land it, or close again with
+  `leave_unlanded` saying why it can stay behind
+  ([ADR 0339](../../../../docs/adr/0339-connected-apps-close-finished-hires.md)).

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { realpath } from "node:fs/promises";
@@ -16,6 +16,7 @@ import {
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
 import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { CLANKIE_SPACE, SEAT_LABEL, createHerdrCoreSeats } from "../src/captain/herdr-core-seats.ts";
+import { PANES_PER_TAB, nameClankieTabs, type HerdrWindow } from "../src/captain/herdr-window.ts";
 
 // A hire's terminal in the Herdr desktop app (ADR 0319), end to end against a real
 // herdr-core: started in Clankie's space, read back, and ended. The test runs its own
@@ -108,7 +109,7 @@ coreIt("a hire starts in Clankie's space with its own identity, and ends when Cl
     env: { CLANKIE_PROBE: "brief-1" },
     seat: "ada",
   });
-  expect(address).toMatch(/^t\d+$/u);
+  expect(address).toMatch(/^t[0-9a-z]+$/u);
 
   await until(async () => existsSync(report));
   const seen = JSON.parse(await readFile(report, "utf8")) as Record<string, string | null>;
@@ -164,7 +165,9 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   expect(identity.socket).toMatch(/\.sock$/u);
 
   const seen = await runner.get(address);
-  expect(seen).toMatchObject({ paneId: address, terminalId: address, name: "grace" });
+  expect(seen).toMatchObject({ paneId: address, terminalId: address });
+  // The label the app shows names no seat; only the agent name a hire's start gives does (#208).
+  expect(seen.name).toBeUndefined();
   expect(seen.status).not.toBe("offline");
   await until(async () =>
     (await runner.readPane(address, "visible", "text")).includes("hello from the desktop app"),
@@ -187,6 +190,74 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   expect(ended.status).toBe("offline");
 });
 
+coreIt("each desktop hire gets its own named tab in its project's space, never one shared tab", async () => {
+  const seats = createHerdrCoreSeats({ env });
+  // The open window as `herdr-app ls` shows it: it places terminals by their labels, and a
+  // space or tab it makes for them is unnamed (a folder, a number) until renamed.
+  const renamed = new Map<string, string>();
+  const window: HerdrWindow = {
+    ls: async () => {
+      const spaces = new Map<string, { id: string; name: string; tabs: { id: string; name: string }[] }>();
+      for (const terminal of await seats.list()) {
+        const space = terminal.labels["herdr.space"];
+        const tab = terminal.labels["herdr.tab"];
+        if (terminal.state !== "live" || space === undefined || tab === undefined) continue;
+        const shown = spaces.get(space) ?? {
+          id: space,
+          name: renamed.get(space) ?? basename(terminal.cwd ?? "~"),
+          tabs: [],
+        };
+        if (!shown.tabs.some((t) => t.id === tab))
+          shown.tabs.push({ id: tab, name: renamed.get(tab) ?? String(shown.tabs.length + 1) });
+        spaces.set(space, shown);
+      }
+      return [...spaces.values()];
+    },
+    rename: async (_kind, id, name) => {
+      renamed.set(id, name);
+      return true;
+    },
+  };
+  const runner = createHerdrCoreRunner({ seats, window, launchDirectory: join(cwd, "placed"), pollMs: 50 });
+  const work = await mkdtemp(join(cwd, "wt-clankie-"));
+  const hires = [
+    await runner.createTab({ cwd: work, label: "Ari · fix login", project: "clankie", harness: "claude" }),
+    await runner.createTab({ cwd: work, label: "Mei · fix login", project: "clankie", harness: "claude" }),
+  ];
+  const piped = [];
+  for (let i = 0; i < 4; i += 1)
+    piped.push(
+      await runner.createTab({
+        cwd: work,
+        label: `p${i}`,
+        project: "clankie",
+        pipeline: "review",
+        harness: "claude",
+      }),
+    );
+  const labels = async (address: string) => (await seats.get(address))!.labels;
+  const [ari, mei] = await Promise.all(hires.map(labels));
+  // One space per project, one tab per hire, even when two hires share a task name.
+  expect(ari!["herdr.space"]).toBe("clankie-clankie");
+  expect(mei!["herdr.space"]).toBe("clankie-clankie");
+  expect(ari!["herdr.tab"]).not.toBe(mei!["herdr.tab"]);
+  // A pipeline's hires share a tab a few at a time, then open its next one.
+  const tabs = await Promise.all(piped.map(async (address) => (await labels(address))["herdr.tab"]));
+  expect(new Set(tabs.slice(0, PANES_PER_TAB)).size).toBe(1);
+  expect(tabs[PANES_PER_TAB]).not.toBe(tabs[0]);
+  // The window names the space for the project and each tab for its hire.
+  await until(async () => renamed.get(ari!["herdr.tab"]!) === "Ari · fix login");
+  await until(async () => renamed.get(tabs[PANES_PER_TAB]!) === "review · 2");
+  expect(renamed.get("clankie-clankie")).toBe("clankie workers");
+  expect(renamed.get(mei!["herdr.tab"]!)).toBe("Mei · fix login");
+  expect(renamed.get(tabs[0]!)).toBe("review");
+  // A name the owner gave is never overwritten.
+  renamed.set(ari!["herdr.tab"]!, "my tab");
+  expect(await nameClankieTabs(seats, window)).toBe(0);
+  expect(renamed.get(ari!["herdr.tab"]!)).toBe("my tab");
+  for (const address of [...hires, ...piped]) await runner.closePane(address);
+});
+
 coreIt("Clankie hires Claude into a desktop-app terminal without typing into it", async () => {
   const seats = createHerdrCoreSeats({ env });
   const runner = createHerdrCoreRunner({
@@ -198,9 +269,10 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   });
   const work = await mkdtemp(join(cwd, "work-"));
   const address = await runner.createTab({ cwd: work, label: "ada · fix the login", harness: "claude" });
-  expect(address).toMatch(/^t\d+$/u);
+  expect(address).toMatch(/^t[0-9a-z]+$/u);
   // Waiting at the launcher, the terminal is Clankie's but holds no harness yet.
-  expect(await runner.get(address)).toMatchObject({ name: "ada · fix the login", status: "unknown" });
+  expect(await runner.get(address)).toMatchObject({ status: "unknown" });
+  expect((await runner.get(address)).name).toBeUndefined();
   expect(await runner.paneShell!(address)).toEqual({ foreground: [] });
 
   const session = "0b9f3c5e-1d2a-4c8b-9e7f-6a5b4c3d2e1f";
@@ -210,6 +282,9 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
     paneId: address,
     args: ["--session-id", session, "--append-system-prompt-file", "it's here.md"],
   });
+  // The start returns only once the launcher took its handoff, so the session it names is
+  // never seen while the terminal's process is still the launcher (a proof would refuse it).
+  expect(await readdir(join(cwd, "launches"))).toEqual([]);
   const report = join(cwd, "claude.json");
   await until(async () => existsSync(report));
   const started = JSON.parse(await readFile(report, "utf8")) as { pid: number; argv: string[]; cwd: string };
@@ -217,6 +292,7 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   // The harness took the launcher's place: the terminal's own process is Claude.
   expect((await seats.get(address))?.pid).toBe(started.pid);
   expect(await runner.get(address)).toMatchObject({
+    name: "ada",
     agent: "claude",
     status: "idle",
     session: { kind: "id", value: session },
@@ -297,3 +373,66 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   expect(await runner.get(resumed)).toMatchObject({ session: { kind: "id", value: session } });
   await runner.closePane(resumed);
 });
+
+coreIt(
+  "a desktop hire runs the installed harness its proof checks, whatever the terminal's PATH finds",
+  async () => {
+    // An npm install's `claude` is a `#!/usr/bin/env node` script. Found on the terminal's
+    // PATH, the kernel would show a bare `node` and another install than the service's; the
+    // hire instead execs the service's own interpreter and script.
+    const installed = join(cwd, "installed");
+    await mkdir(installed, { recursive: true });
+    const script = join(installed, "claude");
+    const report = join(cwd, "installed.json");
+    await writeFile(
+      script,
+      [
+        "#!/usr/bin/env node",
+        `require("node:fs").writeFileSync(${JSON.stringify(report)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2) }));`,
+        `setInterval(() => {}, 1000);`,
+      ].join("\n"),
+    );
+    await chmod(script, 0o755);
+    const launcher = { executable: await realpath(process.execPath), script: await realpath(script) };
+    const seats = createHerdrCoreSeats({ env });
+    const runner = createHerdrCoreRunner({
+      seats,
+      launchDirectory: join(cwd, "launches"),
+      seatDirectory: join(cwd, "seats"),
+      harnessCommand: async () => [launcher.executable, launcher.script],
+      turn: () => undefined,
+      pollMs: 50,
+    });
+    const address = await runner.createTab({ cwd, label: "lin · installed", harness: "claude" });
+    const session = "4a457b97-a162-4400-9e46-e66534b64c91";
+    await runner.startAgent({
+      name: "lin",
+      kind: "claude",
+      paneId: address,
+      args: ["--session-id", session],
+    });
+    await until(async () => existsSync(report));
+    const started = JSON.parse(await readFile(report, "utf8")) as { pid: number; argv: string[] };
+    expect(started.argv).toEqual(["--session-id", session]);
+    expect((await seats.get(address))?.pid).toBe(started.pid);
+
+    const helper = fleetProcessHelper(resolve(import.meta.dirname, "../../.."));
+    if (existsSync(helper)) {
+      const binding = {
+        runtime: "external" as const,
+        session: "herdr-core",
+        socketPath: join(cwd, "unused"),
+      };
+      const proof = await createProjectProcessObserver({
+        binding: async () => undefined,
+        herdrBinary: "herdr",
+        processHelper: helper,
+        coreBinding: async () => binding,
+        coreSeat: (_binding, seat) => liveDesktopSeat(seats, join(cwd, "seats"), seat),
+        launcher: async () => launcher,
+      })("default", `herdr-core/${address}`);
+      expect(proof).toMatchObject({ pane: `herdr-core/${address}`, processes: [{ pid: started.pid }] });
+    }
+    await runner.closePane(address);
+  },
+);

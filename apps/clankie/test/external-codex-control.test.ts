@@ -199,6 +199,16 @@ describe("external Codex control", () => {
   it("handles an unavailable executable before delivery", async () => {
     expect(await codexProxyControl("/nonexistent/codex", [], 100)("thread", "hello")).toBeUndefined();
   });
+  it("names why a queue sent nothing", async () => {
+    const missing = await codexProxyControl("/nonexistent/codex", [], 100, "queue")("thread", "hello");
+    expect(missing).toMatchObject({ outcome: "undelivered", deliveryStage: "unavailable" });
+    expect(missing?.detail).toMatch(/ENOENT/u);
+    const { queue, requests } = await fixture({ status: "notLoaded" });
+    expect((await queue("thread", "hello"))?.detail).toBe(
+      "Codex queue unavailable (Codex reports this session as notLoaded); nothing was sent.",
+    );
+    expect(requests.some((request) => request.method === "thread/queue/add")).toBe(false);
+  });
 });
 
 it("uses Herdr's daemon session identity and never queues an uncertain steer", async () => {
@@ -430,6 +440,8 @@ it("returns the exact native queue input identity without waiting for its turn",
   expect(delivered).toEqual({
     outcome: "delivered",
     state: "queued",
+    // Held in Codex's queue: acknowledged, not yet read.
+    deliveryStage: "delivered",
     messageId: `codex-input:${String(sent.params!.clientUserMessageId)}`,
   });
   expect(f.requests.filter((r) => r.method === "thread/queue/add")).toHaveLength(1);

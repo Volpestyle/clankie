@@ -72,8 +72,11 @@ test("persisted next-turn mail is visible without consumption, replay or private
     if (updates.op !== "owner_update_list") throw new Error("wrong response");
     expect(updates.result.updates).toHaveLength(1);
     expect(updates.result.updates[0]).toMatchObject({
-      title: "Message waiting in pc/w9:p2",
+      title: "A message is waiting for one of your agents",
       state: "unread",
+      // A delivery notice stays out of the owner's feed; its pane waits in the details (#187).
+      routine: true,
+      details: expect.stringContaining("Pane pc/w9:p2"),
     });
     expect(JSON.stringify(updates)).not.toContain("PRIVATE ORIGINAL CONTENT");
     expect(await fetch(`http://127.0.0.1:${port}/waiting`).then((r) => r.status)).toBe(401);

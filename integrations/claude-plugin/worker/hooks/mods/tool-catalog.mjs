@@ -27,6 +27,22 @@ let reportingActivity = false;
 let activityFingerprint;
 const childActivity = new Map();
 
+/**
+ * Where this session sits, as the worker's link names it: its Herdr pane, else the
+ * Herdr desktop app's terminal Clankie started it in (ADR 0319). Clankie clears the
+ * Herdr variables a desktop terminal would inherit, so empty ones are none.
+ */
+async function seatOf($) {
+  const pane = (await $.env.get("HERDR_PANE_ID"))?.trim();
+  const socket = (await $.env.get("HERDR_SOCKET_PATH"))?.trim();
+  if (pane || socket) return pane && socket ? { pane, socket } : undefined;
+  const terminal = (await $.env.get("HC_TERMINAL_ID"))?.trim();
+  const core = (await $.env.get("HC_TERMINAL_SOCKET"))?.trim();
+  return terminal && core && /^t[0-9a-z]+$/u.test(terminal)
+    ? { pane: `herdr-core/${terminal}`, socket: core }
+    : undefined;
+}
+
 async function reportActivity($) {
   if (!interactive || reportingActivity) return;
   reportingActivity = true;
@@ -41,8 +57,7 @@ async function reportActivity($) {
       activityFingerprint = undefined;
     }
     const instance = activityInstance;
-    const pane = await $.env.get("HERDR_PANE_ID");
-    const socket = await $.env.get("HERDR_SOCKET_PATH");
+    const where = await seatOf($);
     // Native 2.1.310 returns exact child agent IDs and current task states.
     // It excludes the root. Root turn events use generated agent IDs without
     // a verified root discriminator, so they must not renew a root lease.
@@ -63,8 +78,7 @@ async function reportActivity($) {
       return;
     const currentSession = await $.session.id();
     if (
-      !pane ||
-      !socket ||
+      !where ||
       !interactive ||
       currentSession !== sessionId ||
       activitySession !== sessionId ||
@@ -201,9 +215,7 @@ export function register(on) {
 async function scheduleProbe($, startup = true) {
   if (!interactive || probing || activeTools || activeTurns.size) return;
   if (!startup && (await $.clock.now()) < retryAfter) return;
-  const pane = await $.env.get("HERDR_PANE_ID");
-  const socket = await $.env.get("HERDR_SOCKET_PATH");
-  if (!pane || !socket) return;
+  if (!(await seatOf($))) return;
   const deadline = (await $.clock.now()) + (startup ? STARTUP_MS : 0);
   nextWatchAfter = deadline;
   const sessionId = await $.session.id();

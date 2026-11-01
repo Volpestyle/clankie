@@ -53,6 +53,10 @@ function retiredPersona(input: unknown): unknown {
 }
 
 const MAX_AVATAR_BYTES = 512 * 1024;
+/** A character unseen and quiet this long has no agent left to hold its project role (#181). */
+const PERSONA_ROLE_GONE_AFTER_MS = 7 * 86_400_000;
+/** How often, and how long after start, gone characters' roles are swept. */
+const PERSONA_ROLE_SWEEP_MS = 3_600_000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const LegacyPersonaFileSchema = z
   .object({
@@ -127,6 +131,10 @@ export class PersonaStore {
   private pendingPath = "";
   private journalLock: { path: string; nonce: string } | undefined;
   private closed = false;
+  /** Characters a census has seen since this service started; never swept. */
+  private readonly seenThisRun = new Set<string>();
+  private readyAt: number | undefined;
+  private lastRoleSweep = 0;
 
   public constructor(stateDir: string) {
     this.path = join(stateDir, "personas.json");
@@ -178,6 +186,64 @@ export class PersonaStore {
     await this.migration;
     await this.flushProjectRoles();
     this.projectRoles((await settings.load()).projects);
+    this.readyAt ??= Date.now();
+  }
+
+  /**
+   * Drops the project-role tags of characters whose agent is gone (#181). Every hire tags
+   * its character with a role, and nothing removed the tag when the agent ended, so the
+   * tags grew without bound toward the settings' cap. A character is gone when no census
+   * has seen it since this service started (and the first sweep waits an hour, so every
+   * machine is read first), the owner never named it, no role write for it is pending, and
+   * neither its record nor its conversation has changed in a week. The same sweep clears
+   * the tags already saved. Returns how many it dropped.
+   */
+  public sweepGoneRoles(
+    liveSeats: readonly Pick<OperatorFleetSeat, "personaId">[],
+    lastActivity: (personaId: string) => string | undefined,
+    now = Date.now(),
+  ): Promise<number> {
+    for (const seat of liveSeats) this.seenThisRun.add(seat.personaId);
+    const store = this.projectStore;
+    if (
+      !store ||
+      this.closed ||
+      this.readyAt === undefined ||
+      now - this.readyAt < PERSONA_ROLE_SWEEP_MS ||
+      now - this.lastRoleSweep < PERSONA_ROLE_SWEEP_MS
+    )
+      return Promise.resolve(0);
+    this.lastRoleSweep = now;
+    const gone = (personaId: string) => {
+      if (this.seenThisRun.has(personaId) || this.ownerNamed.has(personaId)) return false;
+      if (this.pending.some((entry) => entry.personaId === personaId)) return false;
+      const record = this.records.get(personaId);
+      const last = Math.max(
+        0,
+        ...[record?.createdAt, record?.updatedAt, lastActivity(personaId)]
+          .map((stamp) => (stamp === undefined ? Number.NaN : Date.parse(stamp)))
+          .filter(Number.isFinite),
+      );
+      return now - last >= PERSONA_ROLE_GONE_AFTER_MS;
+    };
+    // Serialized with role writes, so a sweep never races a hire's tag.
+    const run = async () => {
+      if (!(await store.load()).projects.assignments.some((entry) => gone(entry.personaId))) return 0;
+      let dropped = 0;
+      const saved = await store.update((current) => {
+        const assignments = current.projects.assignments.filter((entry) => !gone(entry.personaId));
+        dropped = current.projects.assignments.length - assignments.length;
+        return dropped === 0 ? current : { ...current, projects: { ...current.projects, assignments } };
+      });
+      this.projectRoles(saved.projects);
+      return dropped;
+    };
+    const result = this.flushQueue.then(run, run);
+    this.flushQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private async migrate(settings: SettingsStore): Promise<void> {
@@ -373,7 +439,13 @@ export class PersonaStore {
   ): readonly OperatorFleetSeat[] {
     const restore = this.snapshot();
     let changed = false;
-    const seats = observedSeats.map((observed) => {
+    // A name two live seats share identifies neither: binding both under it would merge
+    // them into one character, and that character's messages would reach whichever seat
+    // bound last (#208). Each keeps the character filed under its own pane instead.
+    const named = new Map<string, number>();
+    for (const seat of observedSeats) named.set(seat.subject, (named.get(seat.subject) ?? 0) + 1);
+    const seats = observedSeats.map((seen) => {
+      const observed = distinctSubject(seen, named);
       const title = hireTitle?.(observed);
       const bound = this.bindSeat(
         observed,
@@ -1016,4 +1088,11 @@ const GENERIC_NAME = /^(?:(?:claude(?: code)?|codex)(?: agent)?$|clankie(?:[ -]?
 /** A name the census took from the pane's own title, or its harness fallback: nobody chose it. */
 function discoveredName(name: string, seat: { readonly title: string; readonly harness: string }): boolean {
   return name === seat.title.trim() || name === `${seat.harness} agent`;
+}
+
+/** A seat whose Herdr name another live seat also carries, filed back under its own pane. */
+function distinctSubject(seat: ObservedFleetSeat, named: ReadonlyMap<string, number>): ObservedFleetSeat {
+  if ((named.get(seat.subject) ?? 0) < 2 || seat.renamed === undefined) return seat;
+  const { renamed, ...rest } = seat;
+  return { ...rest, subject: renamed.from };
 }

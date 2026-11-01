@@ -20,7 +20,6 @@ import { createCaptainConversationDispatch } from "../../relay/src/conversation-
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
 import { runConnectorCommand } from "../../tui/src/command/connector.ts";
-import { LeadStore } from "../src/captain/lead.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { createTrackerPosting, trackerPostingExecutor } from "../src/tracker-posting.ts";
 import { createWorkItemsService, defaultRun, type WorkItemsService } from "../src/work-items.ts";
@@ -289,7 +288,7 @@ it("writes issues: issue files right away, Linear and GitHub under the project's
     }));
 
   // Who leads is the captain's real record; the owner's checks land in a real conversation store.
-  const lead = new LeadStore(join(root, "lead.json"), join(root, "lead-held.json"));
+  const wakes: string[] = [];
   const store = new ConversationStore(join(root, "conversations"), async () => {});
   cleanups.push(() => store.close());
   const posting = createTrackerPosting({
@@ -304,8 +303,10 @@ it("writes issues: issue files right away, Linear and GitHub under the project's
         ...options,
       }),
     observeQuestionResolutions: (listener) => store.observeQuestionResolutions(listener),
-    wakeConversation: async () => false,
-    appsLead: async () => lead.status().lead === "apps",
+    wakeConversation: async (_owner, text) => {
+      wakes.push(text);
+      return true;
+    },
   });
   cleanups.push(() => posting.close());
   const workItems = createWorkItemsService({
@@ -379,21 +380,16 @@ it("writes issues: issue files right away, Linear and GitHub under the project's
     refused: expect.stringContaining("read only"),
   });
 
-  // "Clankie decides": while Clankie leads, he decides an app's write; once the owner hands
-  // the lead to the apps, the app's write is the lead's own and goes.
+  // "Clankie decides": an app leads for the owner too, so its write goes like Clankie's own,
+  // without waking Clankie to decide it (ADR 0335).
   await setPosting("lead");
-  expect(await write("save_issue", { project: pondId, title: "Feed the fish" })).toMatchObject({
-    outcome: "held",
-  });
-  expect(created).toEqual([]);
-  lead.set("apps");
   expect(await write("save_issue", { project: pondId, title: "Clear the pump" })).toMatchObject({
     outcome: "written",
   });
   expect(created.map((issue) => issue.title)).toEqual(["Clear the pump"]);
+  expect(wakes).toEqual([]);
 
-  // "Go ahead" lets it go whoever leads.
-  lead.set("clankie");
+  // "Go ahead" lets it go.
   await setPosting("allow");
   expect(await write("save_issue", { project: pondId, title: "Fix the fountain" })).toMatchObject({
     outcome: "written",
@@ -411,6 +407,7 @@ it("writes issues: issue files right away, Linear and GitHub under the project's
   expect(posed.status).toBe(400);
   expect(await posed.json()).toEqual({ error: "issue_write_app_is_stamped" });
   expect(created).toHaveLength(2);
+  expect(wakes).toEqual([]);
 });
 
 // #98: with no GitHub connection, an app's write goes through the owner's gh login on the Mac.

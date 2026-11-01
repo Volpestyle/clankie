@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Invoked only by the original-native mod. The parent's kernel identity is
 // checked against socket admission, never accepted from the report's stdin.
-import { authorization, readLink, seatRoute } from "../bin/link.mjs";
-const pane = process.env.HERDR_PANE_ID?.trim();
+import { authorization, readLink, seatIdentity, seatRoute } from "../bin/link.mjs";
+// Its Herdr pane, or the desktop-app terminal Clankie started it in (ADR 0319).
+const pane = seatIdentity().pane;
 const link = pane && readLink();
 if (link) {
   try {

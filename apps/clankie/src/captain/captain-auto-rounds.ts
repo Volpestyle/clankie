@@ -27,7 +27,7 @@ import {
 } from "./auto-staffing.ts";
 import { measureVelocityWithin, velocityLine, type VelocityDeps } from "./auto-velocity.ts";
 import type { AutonomyStore } from "./autonomy.ts";
-import type { createDiscordTurns } from "./captain-discord-turns.ts";
+import type { WakeConversation } from "./captain-context.ts";
 import type { CaptainOptions } from "./captain-types.ts";
 import { assertConversationAuthority, type ConversationAuthority } from "./conversation-owner.ts";
 import type { ConversationStore } from "./conversations.ts";
@@ -61,7 +61,7 @@ export interface AutoRoundsContext {
   readonly refreshFleet: () => Promise<readonly OperatorFleetSeat[]>;
   readonly leadChats: () => Promise<readonly LeadChat[]>;
   readonly readWorkerAccounts: ReturnType<typeof createWorkerAccountsReader>;
-  readonly wakeConversation: ReturnType<typeof createDiscordTurns>["wakeConversation"];
+  readonly wakeConversation: WakeConversation;
   readonly noteFleetRoom: (record: FleetRoomRecord) => void;
   readonly leadParty: (conversationId: string) => FleetRoomParty;
 }
