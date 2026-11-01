@@ -77,6 +77,9 @@ importers:
       '@clankie/discord-presence-core':
         specifier: workspace:*
         version: link:../../packages/discord-presence-core
+      '@clankie/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
       '@clankie/fleet-resources':
         specifier: workspace:*
         version: link:../../packages/fleet-resources

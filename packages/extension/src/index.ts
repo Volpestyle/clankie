@@ -49,6 +49,8 @@ export interface ExtensionReport {
 
 interface Entry<Projection> {
   readonly id: string;
+  /** Aborted when this extension is stopped, so each one can stop on its own. */
+  readonly controller: AbortController;
   state: ExtensionState;
   reason?: string;
   runtime?: ExtensionRuntime<Projection>;
@@ -60,7 +62,6 @@ const MAX_EXTENSIONS = 64;
 /** Trusted in-process composition only: the composition root adds reviewed, bundled extensions. */
 export class ExtensionSupervisor<Ports extends object, Projection = never> {
   private readonly entries = new Map<string, Entry<Projection>>();
-  private readonly controller = new AbortController();
   private readonly ports: Ports;
   private readonly onDegraded: (id: string, reason: string) => void;
 
@@ -76,7 +77,7 @@ export class ExtensionSupervisor<Ports extends object, Projection = never> {
   ): ExtensionReport {
     if (this.entries.has(extension.id)) throw new Error("extension_already_added");
     if (this.entries.size >= MAX_EXTENSIONS) throw new Error("extension_list_full");
-    const entry: Entry<Projection> = { id: extension.id, state: "off" };
+    const entry: Entry<Projection> = { id: extension.id, controller: new AbortController(), state: "off" };
     this.entries.set(extension.id, entry);
     if (!options.enabled) return this.reportOf(entry);
     let settings: Settings;
@@ -104,7 +105,7 @@ export class ExtensionSupervisor<Ports extends object, Projection = never> {
         if (runtime === undefined || entry.state !== "stopped") return;
         entry.state = "starting";
         try {
-          await runtime.start(this.controller.signal);
+          await runtime.start(entry.controller.signal);
           if (entry.state !== "starting") return;
           const projection = runtime.projection?.();
           if (projection !== undefined) entry.projection = projection;
@@ -141,10 +142,15 @@ export class ExtensionSupervisor<Ports extends object, Projection = never> {
     );
   }
 
-  public async stop(): Promise<void> {
-    this.controller.abort();
+  /**
+   * Stops the named extensions, or every one, so the composition root can keep
+   * each extension's place in its shutdown order.
+   */
+  public async stop(ids?: readonly string[]): Promise<void> {
     await Promise.all(
       [...this.entries.values()].map(async (entry) => {
+        if (ids !== undefined && !ids.includes(entry.id)) return;
+        entry.controller.abort();
         if (entry.runtime === undefined || entry.state === "off") return;
         delete entry.projection;
         try {

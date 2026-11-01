@@ -29,6 +29,7 @@
     "@clankie/agent-transcript": "workspace:*",
     "@clankie/credential-broker": "workspace:*",
     "@clankie/discord-presence-core": "workspace:*",
+    "@clankie/extension": "workspace:*",
     "@clankie/fleet-resources": "workspace:*",
     "@clankie/game-extension": "workspace:*",
     "@clankie/interactive-environment": "workspace:*",

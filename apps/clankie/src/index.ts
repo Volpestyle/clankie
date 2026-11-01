@@ -152,7 +152,8 @@ import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "@clankie/pokemon/world/session";
-import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
+import { browserEnabled } from "./browser-host.ts";
+import { browserExtension } from "./browser-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
@@ -234,7 +235,8 @@ import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
 import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { connectBodyToGateway } from "./body-doorway.ts";
+import { browserOf, createCoreExtensions, doorwayOf } from "./extension-host.ts";
+import { relayExtension } from "./relay-extension.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
@@ -374,17 +376,35 @@ const hostPower = createHostPowerMonitor({
   keepAwakeRequested: async () => keepAwakeEnabled(await settingsStore.load()),
   onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
 });
-const bodyConnection = await connectBodyToGateway({
-  publicGateway: startupSettings.publicGateway,
-  store: operatorCredentialStore,
+// Media he makes lands under the root the Discord attachment resolver already
+// serves (ADR 0085). The root is derived, never merely read, so the bridge
+// that serves the bytes back resolves the same directory this wrote them to.
+const attachmentRoot = discordAttachmentRoot(process.env);
+// ADR 0328: the parts the fleet can run without. The relay attaches here,
+// before the app, so restored pairing routes reach it; it connects once the
+// server listens.
+let serviceListening: (() => void) | undefined;
+const listening = new Promise<void>((resolve) => {
+  serviceListening = resolve;
+});
+const extensions = createCoreExtensions({
+  credentials: operatorCredentialStore,
   env: process.env,
-  port,
-  relayPort,
+  servicePorts: { port, relayPort },
   logger,
+  capabilityStateRoot,
+  attachmentRoot,
+  settings: settingsStore,
+  whenListening: (run) => void listening.then(run),
   ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
 });
-const publicGatewayConnector = bodyConnection.connector;
-const publicGatewaySignInRequiredSince = bodyConnection.signInRequiredSince;
+extensions.add(relayExtension, {
+  enabled: startupSettings.publicGateway.url !== undefined,
+  settings: startupSettings.publicGateway,
+});
+await extensions.start();
+const publicGatewayConnector = doorwayOf(extensions)?.connector;
+const publicGatewaySignInRequiredSince = doorwayOf(extensions)?.signInRequiredSince;
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -444,10 +464,6 @@ if (deviceSessionKey === undefined) {
 
 const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 
-// Media he makes lands under the root the Discord attachment resolver already
-// serves (ADR 0085). The root is derived, never merely read, so the bridge
-// that serves the bytes back resolves the same directory this wrote them to.
-const attachmentRoot = discordAttachmentRoot(process.env);
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
 const skinDraftOwner = process.env.CLANKIE_OPERATOR_ID ?? "local-operator";
 const skinMediaRoot = join(
@@ -490,25 +506,13 @@ const mediaGenerator = new ConfiguredMediaGenerator({
   configCwd: repoRoot,
 });
 
-// Clankie's private Browser Use Pi session. Chrome launches on the first call.
-let browserHost: BrowserHost | undefined;
-if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
-  try {
-    browserHost = await createBrowserHost({
-      stateRoot: capabilityStateRoot,
-      attachmentRoot,
-      logger,
-      environment: process.env,
-      recordSessions: async () => (await settingsStore.load()).browser.recordSessions,
-    });
-    logger.info({ event: "browser.capability.enabled" }, "in-process browser host started");
-  } catch (error) {
-    logger.error(
-      { err: error instanceof Error ? error.message : String(error) },
-      "browser host failed to start; Clankie has no browser this run",
-    );
-  }
-}
+// Clankie's private Browser Use Pi session (ADR 0328 extension). Chrome launches on the first call.
+extensions.add(browserExtension, {
+  enabled: browserEnabled(process.env.CLANKIE_BROWSER_ENABLED),
+  settings: startupSettings.browser,
+});
+await extensions.start();
+const browserHost = browserOf(extensions);
 
 // His drawing hand (ADR 0096). The tldraw desktop app is a GUI app on the
 // operator's Mac, so "not open" is the normal absent case and stays a refusal
@@ -2676,10 +2680,8 @@ const deviceDoorway = deviceDoorwayHost
 if (deviceDoorway !== undefined) {
   logger.info({ hostname: deviceDoorwayHost, port: deviceDoorwayPort }, "device doorway listening");
 }
-if (publicGatewayConnector !== undefined) {
-  if (server.listening) publicGatewayConnector.start();
-  else server.once("listening", () => publicGatewayConnector?.start());
-}
+if (server.listening) serviceListening?.();
+else server.once("listening", () => serviceListening?.());
 const localFleetServer =
   ["darwin", "linux"].includes(process.platform) && herdr.available()
     ? serve({
@@ -2745,7 +2747,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     );
   runtimeHealth.stop();
   fleetProgress.stop();
-  publicGatewayConnector?.close();
+  void extensions.stop(["relay"]);
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   const closeDoorwayConnections = deviceDoorway === undefined ? undefined : drainHttpServer(deviceDoorway);
@@ -2774,7 +2776,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     linearWakeReads.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
-    await browserHost?.close().catch(() => undefined);
+    await extensions.stop(["browser"]);
     await bodyRequestsStopped;
     await Promise.all(
       externalGames.map((game) =>

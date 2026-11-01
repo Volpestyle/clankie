@@ -16,7 +16,8 @@ checks it adds while it runs.
 `ExtensionSupervisor` is the composition root's side. `add` parses settings and
 creates the runtime; `start` starts every created extension after the core is
 ready, each in its own boundary; `report` reads health; `projections` returns
-only running extensions' additions. A bad setting, a throwing factory, a failed
+only running extensions' additions; `stop` stops every extension, or only the
+ids it is given, so each keeps its place in the host's shutdown order. A bad setting, a throwing factory, a failed
 start or an unhealthy report marks only that extension `degraded` with a fixed
 reason, removes its projection and calls `onDegraded` once. Nothing an
 extension throws reaches the fleet.

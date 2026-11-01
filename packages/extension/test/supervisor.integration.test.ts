@@ -13,7 +13,7 @@ const settings = { key: "x", schema: { parse: (input: unknown) => input as { on:
 function extension(
   id: string,
   behaviour: {
-    start?: () => Promise<void>;
+    start?: (signal: AbortSignal) => Promise<void>;
     health?: () => { state: "ready" } | { state: "degraded"; reason: string };
     create?: (host: Readonly<Pick<Ports, "post">>) => void;
   } = {},
@@ -72,6 +72,11 @@ test("a failing extension leaves the core and the other extensions running", asy
     { enabled: true, settings: {} },
   );
   supervisor.add(extension("tracker-linear"), { enabled: false, settings: {} });
+  const signals: Record<string, AbortSignal> = {};
+  supervisor.add(extension("browser", { start: async (signal) => void (signals.browser = signal) }), {
+    enabled: true,
+    settings: {},
+  });
 
   const started = await supervisor.start();
 
@@ -80,8 +85,9 @@ test("a failing extension leaves the core and the other extensions running", asy
     { id: "relay", state: "degraded", reason: "start_failed" },
     { id: "watch", state: "degraded", reason: "create_failed" },
     { id: "tracker-linear", state: "off" },
+    { id: "browser", state: "running" },
   ]);
-  expect(supervisor.projections()).toEqual([{ tools: ["persona_tool"] }]);
+  expect(supervisor.projections()).toEqual([{ tools: ["persona_tool"] }, { tools: ["browser_tool"] }]);
   expect(posted).toEqual(["persona ready"]);
   expect(Object.keys(seen ?? {})).toEqual(["post"]);
   expect(Object.isFrozen(seen)).toBe(true);
@@ -89,14 +95,19 @@ test("a failing extension leaves the core and the other extensions running", asy
   personaHealth = { state: "degraded", reason: "discord_token_rejected" };
   const later = await supervisor.report();
   expect(later[0]).toEqual({ id: "persona", state: "degraded", reason: "discord_token_rejected" });
-  expect(supervisor.projections()).toEqual([]);
+  expect(supervisor.projections()).toEqual([{ tools: ["browser_tool"] }]);
   expect(degraded).toEqual(["watch:create_failed", "relay:start_failed", "persona:discord_token_rejected"]);
 
+  // The composition root can stop one extension in its own place in shutdown.
+  await supervisor.stop(["browser"]);
+  expect(signals.browser?.aborted).toBe(true);
+  expect(supervisor.projections()).toEqual([]);
   await supervisor.stop();
   expect((await supervisor.report()).map((report) => report.state)).toEqual([
     "degraded",
     "degraded",
     "degraded",
     "off",
+    "stopped",
   ]);
 });
