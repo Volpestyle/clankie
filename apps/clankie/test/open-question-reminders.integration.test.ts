@@ -33,7 +33,7 @@ async function until(check: () => boolean, ms = 3000): Promise<void> {
   }
 }
 
-async function fixture(results: ("accepted" | "deferred")[]) {
+async function fixture(results: ("accepted" | "deferred")[], kind: "ask" | "permission" = "ask") {
   const root = mkdtempSync(join(tmpdir(), "open-question-reminders-"));
   const ref: SeatRef = { harness: "claude", paneId: "worker-pane", sessionId: randomUUID() };
   const agent: HerdrAgentSnapshot = {
@@ -46,9 +46,16 @@ async function fixture(results: ("accepted" | "deferred")[]) {
     session: { source: "herdr:claude", kind: "id", value: ref.sessionId },
   };
   const registry = new ClaudeHookQuestions(join(root, "used.json"), 5000, 100);
+  let failReads = 0;
   const runner: HerdrWatchRunner = {
     get: async () => agent,
-    resolveTerminal: async () => agent,
+    resolveTerminal: async () => {
+      if (failReads > 0) {
+        failReads--;
+        throw new Error("herdr socket unavailable");
+      }
+      return agent;
+    },
     wait: async () => agent,
     transcript: async () => undefined,
   };
@@ -72,13 +79,28 @@ async function fixture(results: ("accepted" | "deferred")[]) {
     wakes.push({ conversationId, text });
     return results.shift() ?? "accepted";
   });
+  let leadMayAnswer = true;
+  const escalations: string[] = [];
+  store.permissionLeadAllowed = async () => leadMayAnswer;
+  store.questionGate = async () => "allow";
+  store.escalateQuestion = async (_owner, _agent, question) => {
+    escalations.push(String(question.requestId));
+  };
   await store.adoptSeat(agent.terminalId, lead("lead"));
   cleanups.push(async () => {
     registry.cancel(ref);
     await store.close();
     rmSync(root, { recursive: true, force: true });
   });
-  const hook: FleetSeatHook = {
+  const permission: FleetSeatHook = {
+    schemaVersion: 1,
+    sessionId: ref.sessionId,
+    event: "PermissionRequest",
+    toolUseId: randomUUID(),
+    toolName: "Read",
+    toolInput: { file_path: join(root, "notes.md") },
+  };
+  const ask: FleetSeatHook = {
     schemaVersion: 1,
     sessionId: ref.sessionId,
     event: "PreToolUse",
@@ -102,11 +124,31 @@ async function fixture(results: ("accepted" | "deferred")[]) {
   const question = new Promise<SeatQuestion>((resolve) => {
     asked = resolve;
   });
-  const output = registry.open(ref, hook, async (q) => {
-    asked(q);
-    await store.forwardNativeQuestion(ref, q);
-  });
-  return { ref, registry, store, wakes, output, question: await question };
+  const output = registry.open(
+    ref,
+    kind === "ask" ? ask : permission,
+    async (q) => {
+      asked(q);
+      await store.forwardNativeQuestion(ref, q);
+    },
+    undefined,
+    root,
+  );
+  return {
+    ref,
+    registry,
+    store,
+    wakes,
+    escalations,
+    output,
+    question: await question,
+    failNextReads: (count: number) => {
+      failReads = count;
+    },
+    leadCannotAnswer: () => {
+      leadMayAnswer = false;
+    },
+  };
 }
 
 it("retries a question no lead took and repeats it until a lead answers", async () => {
@@ -143,4 +185,24 @@ it("tells a second lead that the first answer won", async () => {
   );
   expect(second.outcome).not.toBe("delivered");
   expect(second.detail).toContain("native_question_already_answered");
+});
+
+it("keeps reminding after a reminder round fails to read the worker", async () => {
+  const f = await fixture([]);
+  await until(() => f.wakes.length === 1);
+  f.failNextReads(1);
+  await until(() => f.wakes.some((wake) => wake.text.startsWith("Still open")));
+});
+
+it("sends the question to the owner once its lead can no longer answer it", async () => {
+  const f = await fixture([], "permission");
+  await until(() => f.wakes.length === 1);
+  expect(f.wakes[0]!.text).toContain("asks its lead a native harness question");
+  f.leadCannotAnswer();
+  await until(() => f.escalations.length === 1);
+  expect(f.escalations).toEqual([String(f.question.requestId)]);
+  await until(() => f.wakes.some((wake) => wake.text.includes("escalated question")));
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(f.wakes.filter((wake) => wake.text.startsWith("Still open"))).toEqual([]);
+  expect(f.escalations).toHaveLength(1);
 });

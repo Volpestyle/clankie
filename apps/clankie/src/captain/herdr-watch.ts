@@ -1896,23 +1896,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       )
         throw new Error("The question's native occupant or leading conversation changed");
     };
-    if (
-      (question.permission &&
-        (question.permission.transport === "channel" ||
-          owner.discord ||
-          !(await this.permissionLeadAllowed?.(owner)))) ||
-      (await this.questionGate?.(agent, question)) === "owner"
-    ) {
-      if (!this.escalateQuestion) throw new Error("Owner question escalation unavailable");
-      await guard();
-      await this.escalateQuestion(owner, agent, question, guard);
-      await guard();
-      await this.wake(
-        owner.conversationId,
-        `Worker ${agent.terminalId} escalated question ${String(question.requestId)} to the owner. The lead cannot approve it; answer the structured ask.`,
-        owner.discord,
-        guard,
-      );
+    if (await this.ownerMustAnswer(owner, agent, question)) {
+      await this.escalateToOwner(owner, agent, question, guard);
       return;
     }
     const data = redactSensitiveText(JSON.stringify(question, null, 2));
@@ -1938,6 +1923,40 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.remindOpenQuestion(agent, question.requestId, text, delivered === "deferred");
   }
 
+  /** A question its lead may not answer goes to the owner's structured ask instead. */
+  private async ownerMustAnswer(
+    owner: ConversationOwner,
+    agent: HerdrAgentSnapshot,
+    question: SeatQuestion,
+  ): Promise<boolean> {
+    return (
+      (question.permission !== undefined &&
+        (question.permission.transport === "channel" ||
+          owner.discord !== undefined ||
+          !(await this.permissionLeadAllowed?.(owner)))) ||
+      (await this.questionGate?.(agent, question)) === "owner"
+    );
+  }
+
+  private async escalateToOwner(
+    owner: ConversationOwner,
+    agent: HerdrAgentSnapshot,
+    question: SeatQuestion,
+    guard: () => Promise<void>,
+  ): Promise<void> {
+    if (!this.escalateQuestion) throw new Error("Owner question escalation unavailable");
+    if (!this.wake) throw new Error("The hiring conversation question channel is unavailable");
+    await guard();
+    await this.escalateQuestion(owner, agent, question, guard);
+    await guard();
+    await this.wake(
+      owner.conversationId,
+      `Worker ${agent.terminalId} escalated question ${String(question.requestId)} to the owner. The lead cannot approve it; answer the structured ask.`,
+      owner.discord,
+      guard,
+    );
+  }
+
   /**
    * An open question keeps reaching whoever leads the hire's conversation now
    * (ADR 0322). A wake no lead took is retried, and a taken one is repeated
@@ -1953,13 +1972,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): void {
     const { retryMs, remindMs, windowMs } = this.questionReminders;
     const until = Date.now() + windowMs;
+    let escalated = false;
     const schedule = (wait: number) => {
       if (this.closed || Date.now() + wait > until) return;
       const timer = setTimeout(() => {
         this.retryTimers.delete(timer);
-        void remind().catch((error: unknown) =>
-          console.warn("Open worker question reminder stopped", asked.terminalId, String(error)),
-        );
+        // A failed observation or wake is tried again next round; each round
+        // re-reads the occupant and its owner first.
+        void remind().catch((error: unknown) => {
+          console.warn("Open worker question reminder failed", asked.terminalId, String(error));
+          if (!escalated) schedule(remindMs);
+        });
       }, wait);
       timer.unref?.();
       this.retryTimers.add(timer);
@@ -1978,13 +2001,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (!owner) return;
       const control = await this.seatControl.attachQuestion(current);
       // Undefined is also an answer in flight; it is checked again next round.
-      if ((await control?.pendingQuestion?.(requestId)) === undefined) return schedule(remindMs);
+      const pending = await control?.pendingQuestion?.(requestId);
+      if (pending === undefined) return schedule(remindMs);
       const guard = async () => {
         if (this.closed) throw new Error("Native question channel closed");
         const latest = await this.runner.resolveTerminal(asked.terminalId);
         if (!sameOccupant(latest) || !isDeepStrictEqual(this.nativeOwner(latest!), owner))
           throw new Error("The question's native occupant or leading conversation changed");
       };
+      // The lead now may be one that cannot answer it, such as a Discord room.
+      if (await this.ownerMustAnswer(owner, current, pending)) {
+        escalated = true;
+        await this.escalateToOwner(owner, current, pending, guard);
+        return;
+      }
       await guard();
       const result = await this.wake(
         owner.conversationId,
