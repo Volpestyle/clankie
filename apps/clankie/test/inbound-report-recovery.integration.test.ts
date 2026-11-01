@@ -379,6 +379,37 @@ it("#97: acknowledging a pile of old reports tells the worker once", async () =>
   await store.close();
 });
 
+it("#97: a batch acknowledged after its reports moved on still counts", async () => {
+  const root = fixtureRoot();
+  const store = new ConversationStore(join(root, "conversations"), async () => {});
+  const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  const binding = "b".repeat(64);
+  for (let report = 0; report < 3; report++)
+    receipts.accept(
+      "pane",
+      { id: randomUUID(), binding },
+      `r ${report}`,
+      `r ${report}`,
+      "global-default",
+      async () => {},
+    );
+  const [stored] = store.senderReportEvents("pane", binding);
+  expect(stored?.content).toContain("Stored 3 of your reports");
+  // The lead reads them before the worker's acknowledgment of the stored batch lands.
+  const page = store.readInboundReports("global-default");
+  expect(store.acknowledgeInboundReports("global-default", page.ackDeliveryIds)).toBe(true);
+  expect(store.acknowledgeSenderReportEvent("pane", binding, stored!.id)).toBe(true);
+  const [next, ...rest] = store.senderReportEvents("pane", binding);
+  expect(rest).toEqual([]);
+  expect(next?.id).not.toBe(stored!.id);
+  expect(next?.content).toContain("Clankie acknowledged 3 of your reports");
+  expect(store.acknowledgeSenderReportEvent("pane", binding, next!.id)).toBe(true);
+  expect(store.senderReportEvents("pane", binding)).toEqual([]);
+  // The stored batch retried late is still answered as done.
+  expect(store.acknowledgeSenderReportEvent("pane", binding, stored!.id)).toBe(true);
+  await store.close();
+});
+
 it.each(["unadopted", "adoption"] as const)(
   "retains immediately resolvable %s receipts and sender stage events across reconnect",
   async (source) => {

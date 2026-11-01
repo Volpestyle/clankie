@@ -558,6 +558,28 @@ export function senderReportEvents(
   return [event(`${BATCH_PREFIX}${newest.at}`, newest, batchContent(pending))];
 }
 
+/**
+ * What a batch receipt named after `through` told the worker: every stage
+ * reached by then, even when a report has moved on to a newer stage since.
+ * Undefined when no receipt of this sender happened at `through`.
+ */
+function batchTold(
+  ctx: ConversationStore,
+  paneId: string,
+  binding: string,
+  through: string,
+): PendingReceipt[] | undefined {
+  const reports = senderReports(ctx, paneId, binding);
+  if (!reports.some((report) => reachedStages(report).some(([, at]) => at === through))) return undefined;
+  return reports.flatMap((report) => {
+    const told = reachedStages(report)
+      .filter(([stage, at]) => at <= through && !report.reportDelivery.senderEventAcks?.includes(stage))
+      .map(([stage]) => stage);
+    const newest = told.at(-1);
+    return newest ? [{ report, stage: newest, at: through, covers: told.slice(0, -1) }] : [];
+  });
+}
+
 /** Transport acknowledgment only: it never acknowledges the report on the lead's behalf. */
 export function acknowledgeSenderReportEvent(
   ctx: ConversationStore,
@@ -580,15 +602,11 @@ export function acknowledgeSenderReportEvent(
         const upTo = order.indexOf(stage);
         return [{ ...entry, stage, covers: entry.covers.filter((s) => order.indexOf(s) < upTo) }];
       })
-    : pending.filter((entry) => entry.at <= through!);
+    : batchTold(ctx, paneId, binding, through!);
+  if (!acked) return false;
   if (acked.length === 0) {
-    // A retried batch whose first acknowledgment was saved: the receipt it was named after is acked.
-    if (!single)
-      return senderReports(ctx, paneId, binding).some((report) =>
-        reachedStages(report).some(
-          ([stage, at]) => at === through && report.reportDelivery.senderEventAcks?.includes(stage),
-        ),
-      );
+    // A retried batch whose first acknowledgment was saved.
+    if (!single) return true;
     const meta = [...ctx["metas"].values()].find((entry) => entry.inboundAcceptances?.[single[1]!]);
     const report = meta?.inboundAcceptances?.[single[1]!];
     return (
