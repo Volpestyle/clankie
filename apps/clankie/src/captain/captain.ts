@@ -6396,6 +6396,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
       };
     },
+    withdrawOwnerAsk(conversationId, requestId, reason) {
+      conversations.cancelPendingQuestion(conversationId, reason, undefined, requestId);
+    },
     requestOwnerAsk(conversationId, draft, publicationId, options) {
       return conversations.requestSurfaceQuestion(conversationId, draft, {
         ...(publicationId === undefined ? {} : { publicationId }),

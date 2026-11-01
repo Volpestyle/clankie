@@ -196,6 +196,8 @@ export interface TrackerPostingOptions {
     options: { readonly exactPublication: true },
   ) => Promise<ConversationQuestionResult>;
   readonly readOwnerAsk?: (requestId: string) => ConversationQuestion | undefined;
+  /** Takes back a still-open feed check, as when its post moved to another tracker (#159). */
+  readonly withdrawOwnerAsk?: (conversationId: string, requestId: string, reason: string) => void;
   readonly observeQuestionResolutions?: (listener: (question: ConversationQuestion) => void) => () => void;
   readonly wakeConversation: (owner: { conversationId: string }, text: string) => Promise<boolean>;
   /**
@@ -214,6 +216,15 @@ export interface TrackerPostingBinding {
   readonly repoTarget?: (
     repo: string,
   ) => Promise<{ tracker: OutwardTracker; projectIds: readonly string[] } | undefined>;
+  /**
+   * Where a registered repo's writes land now, read from its saved tracker: `local` when they
+   * stay on this Mac, undefined when it can't be read right now (#159).
+   */
+  readonly place?: (
+    repo: string,
+  ) => Promise<
+    { tracker: OutwardTracker; destination: string; projectIds: readonly string[] } | "local" | undefined
+  >;
   /** Marks a drop's issue file with where it was posted. */
   readonly afterPosted?: (
     drop: { root: string; key: string },
@@ -243,6 +254,8 @@ const isOpen = (post: Stored) => post.state === "waiting" || post.state === "pos
 const POST_IT = "Post it";
 const SEND_IT_BACK = "Send it back";
 const KEEP_DECIDED_MS = 30 * 24 * 60 * 60 * 1000;
+/** How often waiting posts are checked against their projects' trackers (#159). */
+const FOLLOW_EVERY_MS = 60 * 1000;
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const TRACKER_NAMES = { linear: "Linear", github: "GitHub issues" } as const;
 
@@ -784,6 +797,138 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     return ids.length ? postingOf(projectsOf(settings, ids)) : postingOf([]);
   };
 
+  /** The repo a held write's project is read from: a repo tool's, or a `work` request's. */
+  const repoOf = (route: PostingRoute) =>
+    route.kind === "repo"
+      ? route.repo
+      : route.kind === "work" && typeof route.request.repo === "string"
+        ? route.request.repo
+        : undefined;
+
+  /**
+   * Where a held write's project posts now, when that is no longer where it was asked: another
+   * tracker or repo, or nowhere outward. Undefined while it is unchanged or can't be read.
+   */
+  const movedTo = async (record: Stored) => {
+    const repo = repoOf(record.route);
+    if (record.destination === undefined || repo === undefined || !binding?.place) return undefined;
+    // allow-swallowed-rejection -- an unreadable project moves nothing; the post waits, and its approval checks again.
+    const place = await binding.place(repo).catch(() => undefined);
+    if (place === undefined || (place !== "local" && place.destination === record.destination))
+      return undefined;
+    return place;
+  };
+
+  /** Ends a held write that can't follow its project, telling whoever asked; the caller holds the queue. */
+  const end = async (record: Stored, note: string) => {
+    withdraw(record, "Its project tracks its work somewhere else now, so this can't go.");
+    record.state = "refused";
+    record.note = note;
+    record.decidedAt = now().toISOString();
+    save();
+    await tell(record, `${record.summary} was not posted: ${note}`);
+    return note;
+  };
+
+  /** Takes the owner's open feed check for a post back, so an answer to it no longer counts. */
+  const withdraw = (record: Stored, reason: string) => {
+    const { requestId, leadConversationId } = record;
+    // Cleared first: the withdrawal's own resolution then finds no post to decide.
+    delete record.requestId;
+    if (requestId === undefined || leadConversationId === undefined) return;
+    try {
+      // A feed check's reason holds 100 characters.
+      options.withdrawOwnerAsk?.(leadConversationId, requestId, clip(reason, 100));
+    } catch (error) {
+      options.logger?.warn(
+        { event: "tracker.posting.withdraw_failed", id: record.id, error },
+        "A moved post's old feed check stays open; answering it changes nothing",
+      );
+    }
+  };
+
+  /**
+   * A held write whose project now tracks its work somewhere else (#159). A new issue moves
+   * there and waits for the owner's OK again, whatever the setting, because he never saw it
+   * go there; a change to an issue on the old tracker, or a project now on this Mac, ends it
+   * with why. Nothing is left waiting that is certain to fail. The caller holds the queue.
+   */
+  const follow = async (
+    record: Stored,
+    place: Exclude<Awaited<ReturnType<typeof movedTo>>, undefined>,
+  ): Promise<string> => {
+    const from = TRACKER_NAMES[record.tracker];
+    if (place === "local")
+      return end(
+        record,
+        `This project no longer posts to ${from}; its work stays on this Mac now. Nothing was posted; ask again if it's still needed.`,
+      );
+    const to = TRACKER_NAMES[place.tracker];
+    const where = place.tracker === record.tracker ? `another ${to} home` : to;
+    const moved = movedRoute(record.route, record.tracker, place.tracker);
+    if (moved === undefined)
+      return end(
+        record,
+        `It changes something on ${from}, and this project now tracks its work in ${where}, so it can't go. Nothing was posted; ask again there if it's still needed.`,
+      );
+    const settings = await options.settings.load();
+    const projects = projectsOf(settings, place.projectIds);
+    if (postingOf(projects) === "read_only") return end(record, readOnlyMessage(projects, place.tracker));
+    const write: PostingWrite = {
+      tracker: place.tracker,
+      route: moved.route,
+      asker: record.askerRef as PostingAsker,
+      projectIds: place.projectIds,
+      destination: place.destination,
+    };
+    const { summary, detail } = describe(write, projects);
+    const dropped = moved.dropped.length
+      ? ` Left out, because ${to} wouldn't take them as asked: ${moved.dropped.join("; ")}.`
+      : "";
+    const note = clip(`Moved from ${from}: this project now tracks its work in ${where}.${dropped}`, 600);
+    const lines = detail.split("\n");
+    const shown = [lines[0], note, ...lines.slice(1)].join("\n");
+    if (shown.length > 2000)
+      return end(
+        record,
+        `It moved to ${to}, and it is too long to show the owner there whole. Nothing was posted; ask again with a shorter version.`,
+      );
+    withdraw(record, `This post moved to ${to}; it waits for your OK there instead.`);
+    Object.assign(record, {
+      tracker: place.tracker,
+      route: moved.route,
+      destination: place.destination,
+      projectIds: projects.map((project) => project.id),
+      decider: "owner" as const,
+      summary,
+      detail: shown,
+      note,
+      fingerprint: fingerprintOf(write, projects, "owner"),
+    });
+    if (projects[0] !== undefined) record.projectId = projects[0].id;
+    if (!(await askOwner(record)))
+      return end(
+        record,
+        `It moved to ${to} and needs the owner's OK there, and he couldn't be asked. Nothing was posted; ask again later.`,
+      );
+    save();
+    await tell(
+      record,
+      `${summary}: ${note} It waits for the owner's OK there; nothing to do now, and don't send it again.`,
+    );
+    return `${note} It waits for the owner's OK there.`;
+  };
+
+  /** Moves or ends every waiting write whose project's tracker changed (#159). */
+  const sweep = () =>
+    serial(async () => {
+      for (const record of state.posts) {
+        if (record.state !== "waiting") continue;
+        const place = await movedTo(record);
+        if (place !== undefined && record.state === "waiting") await follow(record, place);
+      }
+    });
+
   const decide = async (
     id: string,
     verdict: { approve: true } | { approve: false; note: string },
@@ -817,6 +962,12 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       // Watch (ADR 0308): a post held before it was turned on waits; only the owner can let it out.
       if (by === "lead" && (await options.settings.load()).autonomy.watch === true)
         throw new TrackerPostingStopped("posting_held", WATCH_REFUSAL);
+      // The project may track its work somewhere else since this was asked (#159).
+      const place = await movedTo(record);
+      if (place !== undefined) {
+        const message = await follow(record, place);
+        return { post: publicPost(record), changed: true, message };
+      }
       const setting = await recheck(record);
       if (setting === "read_only") {
         record.state = "refused";
@@ -882,9 +1033,21 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     );
   };
   let unobserve: (() => void) | undefined;
+  let sweeping: ReturnType<typeof setInterval> | undefined;
+  const followMoves = () =>
+    sweep().catch((error: unknown) =>
+      options.logger?.warn(
+        { event: "tracker.posting.follow_failed", error },
+        "Held posts were not checked against their projects' trackers",
+      ),
+    );
   /** Listens for the owner's answers; call once the conversations exist. */
   const start = () => {
     if (unobserve !== undefined) return;
+    // A project that moved trackers while Clankie was stopped, or moves later (#159).
+    void followMoves();
+    sweeping = setInterval(() => void followMoves(), FOLLOW_EVERY_MS);
+    sweeping.unref?.();
     unobserve =
       options.observeQuestionResolutions?.((question) => {
         void answered(question).catch((error: unknown) =>
@@ -1060,10 +1223,61 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
       const record = state.posts.find((entry) => entry.id === id);
       return record && publicPost(record);
     },
+    /** Moves or ends waiting posts whose project now tracks its work elsewhere (#159). */
+    followMoves: sweep,
     close() {
       unobserve?.();
+      if (sweeping !== undefined) clearInterval(sweeping);
     },
   };
+}
+
+const MOVABLE_STATES = new Set([
+  "backlog",
+  "todo",
+  "in progress",
+  "in review",
+  "done",
+  "canceled",
+  "cancelled",
+]);
+
+/**
+ * A held new issue as the project's new tracker takes it (#159): its title, description and
+ * priority, and on GitHub its labels and a plain state; the rest is left out and named. A
+ * `work` create, or one moving to another home on the same tracker, goes as it was asked. Undefined for a change to an existing issue, which
+ * lives only on the old tracker.
+ */
+function movedRoute(
+  route: PostingRoute,
+  from: OutwardTracker,
+  to: OutwardTracker,
+): { route: PostingRoute; dropped: string[] } | undefined {
+  if (route.kind === "work") return route.request.action === "create" ? { route, dropped: [] } : undefined;
+  if (route.kind !== "repo" || route.tool !== "save_issue" || route.arguments.id !== undefined)
+    return undefined;
+  // Another home on the same tracker takes the issue as it was asked.
+  if (from === to) return { route, dropped: [] };
+  const args: Record<string, unknown> = {};
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(route.arguments)) {
+    if (key === "team") continue;
+    if (key === "title" || key === "description" || key === "priority") args[key] = value;
+    else if (to === "github" && key === "labels") args[key] = value;
+    else if (
+      to === "github" &&
+      key === "state" &&
+      typeof value === "string" &&
+      MOVABLE_STATES.has(value.trim().toLowerCase())
+    )
+      args[key] = value;
+    else
+      dropped.push(key === "labels" && Array.isArray(value) ? `labels ${value.map(String).join(", ")}` : key);
+  }
+  if (typeof args.title !== "string") return undefined;
+  // A repo tracker's create names a team as Linear's does; its own is LOCAL.
+  if (to === "github") args.team = "LOCAL";
+  return { route: { ...route, arguments: args }, dropped };
 }
 
 function clip(text: string, max: number): string {
