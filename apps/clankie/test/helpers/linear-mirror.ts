@@ -10,6 +10,7 @@ import { createClankieApp } from "../../src/app.ts";
 import { createStubCaptain } from "../../src/captain/port.ts";
 import { linearActorMap } from "../../src/linear-import.ts";
 import { LinearMirrors } from "../../src/linear-mirror.ts";
+import { linearRoutes } from "../../src/app/linear-routes.ts";
 
 // VUH-1965 proof: signed webhooks shaped like Linear's data-change events, over real
 // HTTP, into a scratch store imported from the captured Clankie Work project.
@@ -123,7 +124,11 @@ export async function linearMirrorFixture(options: { withhold?: string } = {}) {
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === `Bearer ${OPERATOR}` ? { operatorId: "owner" } : undefined,
     linearMirrors: mirrors,
-    linearWebhook: { secret: async () => SECRET, mirror: (event) => mirrors.receive(event) },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: { secret: async () => SECRET, mirror: (event) => mirrors.receive(event) },
+      }),
+    ],
   });
   const server = serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.app.fetch(r) }) as HttpServer;
   await new Promise<void>((resolve, reject) => {

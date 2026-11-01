@@ -94,6 +94,8 @@ async function fixture(boundGraceMs = 20) {
   let pollStarts = 0;
   registerLinearRoutes({
     app,
+    operator: async (request) =>
+      request.headers.get("authorization") === `Bearer ${bearer}` ? { operatorId: "owned-seat" } : undefined,
     dependencies: {
       captain: {
         receiveTrackerActivity: (event, following, target) =>
@@ -102,10 +104,6 @@ async function fixture(boundGraceMs = 20) {
         trackerWakeDeliveries: () => store.trackerWakeDeliveries(),
         trackerWakeRecoveries: () => store.trackerWakeRecoveries(),
       },
-      authenticateOperator: async (request) =>
-        request.headers.get("authorization") === `Bearer ${bearer}`
-          ? { operatorId: "owned-seat" }
-          : undefined,
       linearWebhook: {
         secret: async () => secret,
         ownAccount: async () => own,

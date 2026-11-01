@@ -31,6 +31,7 @@ import { LinearWakeReadReceipts } from "../src/linear-wake-read.ts";
 import { LinearRequestBudget } from "../src/linear-request-budget.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { runLinearCommand } from "../../tui/src/command/linear.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -332,13 +333,17 @@ async function fixture(
     }),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === `Bearer ${token}` ? { operatorId: "owned-seat" } : undefined,
-    linearWebhook: {
-      secret: async () => secret,
-      ownAccount: own,
-      recordActivity: (activity) => attribution.record(activity),
-      issueContext: (activity) => attribution.issueContext(activity, host),
-      projectContext: (activity) => attribution.projectContext(activity, host),
-    },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: {
+          secret: async () => secret,
+          ownAccount: own,
+          recordActivity: (activity) => attribution.record(activity),
+          issueContext: (activity) => attribution.issueContext(activity, host),
+          projectContext: (activity) => attribution.projectContext(activity, host),
+        },
+      }),
+    ],
   });
   for (const id of [leadId, "global-default"])
     await seatBinding.register(service.app, id, { authorization: `Bearer ${token}` });

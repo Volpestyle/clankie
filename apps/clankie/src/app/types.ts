@@ -44,7 +44,6 @@ import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { ComposerTranscriptions } from "../composer-transcription.ts";
-import { type LinearActivityEvent, type LinearWriteReceipts } from "../linear-webhook.ts";
 import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { MinecraftService } from "../minecraft.ts";
@@ -214,7 +213,6 @@ export interface ClankieAppDependencies {
   workMedia?: Pick<import("../work-media.ts").WorkMedia, "observe" | "resolve">;
   workerMcp?: WorkerMcp;
   fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
-  linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
   trackerRequestBudget?: Pick<import("../tracker-request-budget.ts").TrackerRequestBudget, "report">;
   /** The Auto round record (ADR 0270), read by `clankie auto rounds`. */
   autoRounds?: Pick<import("../captain/auto-rounds.ts").AutoRoundRecord, "read">;
@@ -383,23 +381,6 @@ export interface ClankieAppDependencies {
    * a sleeping device simply catches up when it next opens.
    */
   pushWake?: PushWakeSender;
-  /**
-   * The broker-held Linear webhook signing secret (ADR 0165). Absent means no
-   * webhook is configured and the route reports itself unavailable; the wake it
-   * leads to belongs to the captain.
-   */
-  linearWebhook?: {
-    secret(): Promise<string | undefined>;
-    writes?: LinearWriteReceipts;
-    recordActivity?(activity: LinearActivityEvent): void;
-    /** His own verified Linear identity; activity it authors is kept without a wake. */
-    ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
-    /** Bounded read of missing issue context through the verified connected account. */
-    issueContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["issueContext"]>;
-    projectContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["projectContext"]>;
-    /** Owner-enabled Linear mirrors (VUH-1965): applied after the response, never gating a wake. */
-    mirror?(event: import("@clankie/work-items").LinearMirrorEvent): void;
-  };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;

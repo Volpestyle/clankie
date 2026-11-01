@@ -12,43 +12,69 @@ import {
   linearActivityProject,
   linearTrackerActivity,
   type LinearActivityEvent,
+  type LinearWriteReceipts,
 } from "../linear-webhook.ts";
 import { linearMirrorEvent } from "../linear-mirror.ts";
-import { authenticateOperator, readJson } from "./http-auth.ts";
+import { readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
-import type { ClankieAppDependencies } from "./types.ts";
+import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
 import {
   LINEAR_REQUEST_BUDGET_PATH,
   LinearRequestBudgetReportSchema,
 } from "@clankie/protocol/linear-request-budget";
 
+/** What Linear's routes are handed by the composition root (ADR 0328). */
+export interface LinearRouteParts {
+  /**
+   * The broker-held Linear webhook signing secret (ADR 0165). Absent means no
+   * webhook is configured and the route reports itself unavailable; the wake it
+   * leads to belongs to the captain.
+   */
+  readonly linearWebhook?: {
+    secret(): Promise<string | undefined>;
+    writes?: LinearWriteReceipts;
+    recordActivity?(activity: LinearActivityEvent): void;
+    /** His own verified Linear identity; activity it authors is kept without a wake. */
+    ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
+    /** Bounded read of missing issue context through the verified connected account. */
+    issueContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["issueContext"]>;
+    projectContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["projectContext"]>;
+    /** Owner-enabled Linear mirrors (VUH-1965): applied after the response, never gating a wake. */
+    mirror?(event: import("@clankie/work-items").LinearMirrorEvent): void;
+  };
+  readonly linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
+}
+
+/** Linear's webhook, wake and settings routes, mounted by the core where they always were. */
+export function linearRoutes(parts: LinearRouteParts = {}): ExtensionRoutes {
+  return {
+    place: "tracker",
+    register: (app, host) =>
+      registerLinearRoutes({
+        app,
+        dependencies: { ...parts, captain: host.trackerWakes },
+        operator: (request) => host.operator(request),
+        settingsSource: host.settings,
+        clock: host.clock,
+        authorizeOwnerSettings: (request) => host.ownerSettings(request),
+      }),
+  };
+}
+
 export interface RegisterLinearRoutesContext {
   readonly app: Hono;
-  readonly dependencies: Pick<
-    ClankieAppDependencies,
-    "linearWebhook" | "authenticateOperator" | "linearRequestBudget"
-  > & {
-    readonly captain: Pick<
-      ClankieAppDependencies["captain"],
-      "receiveTrackerActivity" | "trackerWakeTargetAllowed"
-    > &
-      Partial<
-        Pick<
-          ClankieAppDependencies["captain"],
-          "trackerWakeDeliveries" | "trackerWakeRecoveries" | "recordInbound"
-        >
-      >;
-  };
-  readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
+  readonly dependencies: LinearRouteParts & { readonly captain: ExtensionRouteHost["trackerWakes"] };
+  /** Absent means operator authentication is unavailable. */
+  readonly operator?: ExtensionRouteHost["operator"];
+  readonly settingsSource: ExtensionRouteHost["settings"];
   readonly clock: () => Date;
-  readonly authorizeOwnerSettings?: (
-    request: Request,
-  ) => Promise<true | "authentication_required" | "forbidden">;
+  readonly authorizeOwnerSettings?: ExtensionRouteHost["ownerSettings"];
 }
 
 export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
+  const operatorOf = ctx.operator ?? (async () => "unavailable" as const);
   ctx.app.on(["GET", "PUT"], "/v1/linear/routes", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
@@ -74,7 +100,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     return context.json({ schemaVersion: 1, projectChats: current.linearWebhook.projectChats });
   });
   ctx.app.get("/v1/linear/deliveries", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
@@ -85,7 +111,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
     });
   });
   ctx.app.get(LINEAR_REQUEST_BUDGET_PATH, async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
@@ -139,7 +165,7 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
   });
 
   ctx.app.on(["GET", "PUT"], "/v1/linear/target", async (context) => {
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+    const operator = await operatorOf(context.req.raw);
     if (operator === "unavailable")
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
