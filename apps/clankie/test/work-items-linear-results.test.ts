@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import type { CredentialStore } from "@clankie/credential-broker";
 import type { SettingsStore } from "@clankie/settings";
 import { createMcpHost, type McpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
 const roots: string[] = [];
@@ -18,6 +19,7 @@ async function fixture(content: string) {
   const root = await mkdtemp(join(tmpdir(), "linear-data-"));
   roots.push(root);
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials: { get: async () => undefined } as unknown as CredentialStore,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
     curated: [

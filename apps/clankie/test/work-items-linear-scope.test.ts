@@ -8,6 +8,7 @@ import { WorkConventionSchema } from "@clankie/protocol/work-items";
 import { readConvention } from "@clankie/work-items";
 import { workRequest } from "../../tui/src/command/work.ts";
 import { createMcpHost, type McpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createWorkItemsService, WorkRequestSchema } from "../src/work-items.ts";
 
 interface Issue {
@@ -45,6 +46,7 @@ async function fixture() {
   issues.push({ ...issues[63]!, id: "VUH-OTHER", title: "Other repo", labels: ["repo-b", "worker"] });
   const calls: { tool: string; args: Record<string, unknown> }[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials: { get: async () => undefined } as unknown as CredentialStore,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
     curated: [

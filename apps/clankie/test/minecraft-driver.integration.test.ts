@@ -19,6 +19,7 @@ import { expect, it } from "vitest";
 import { BodyLeaseStore } from "../src/body-leases.ts";
 import type { BodyConversationIdentity } from "../src/body-lease-router.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
 import { minecraftExtension } from "@clankie/minecraft";
 import { GameExtensionRegistry, GameExtensionBusyError } from "@clankie/game-extension";
@@ -141,6 +142,7 @@ it("keeps one owned stay through native driver handoff, takeback and dispatch re
   `;
   let motorStatusCalls = 0;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     settings,
     credentials,
     curated: [],

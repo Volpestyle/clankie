@@ -13,6 +13,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createClankieApp } from "../../src/app.ts";
 import { createMcpHost } from "../../src/mcp-host.ts";
+import { linearMcp } from "../../src/linear-mcp.ts";
 import * as linearWebhook from "../../src/linear-webhook.ts";
 import { createStubCaptain, type LaneTool } from "../../src/captain/port.ts";
 import { ConversationStore } from "../../src/captain/conversations.ts";
@@ -268,6 +269,7 @@ export async function createConnectedLinearFixture(
   const linearWrites = new linearWebhook.LinearWriteReceipts(join(root, "linear-writes.json"));
   const logs: Record<string, unknown>[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     ...(options.requestBudget ? { linearRequestBudget: options.requestBudget } : {}),
     ...(options.nativePagesOnly || (options.priorityPages === undefined && options.priorityReads !== true)
       ? {}

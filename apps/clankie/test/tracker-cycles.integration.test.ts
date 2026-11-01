@@ -8,6 +8,7 @@ import { createLocalTracker } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { trackerEvidence } from "./helpers/tracker-evidence.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
@@ -30,6 +31,7 @@ it("plans a project cycle, reads its summary from the event stream and rolls unf
   });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: tracker,

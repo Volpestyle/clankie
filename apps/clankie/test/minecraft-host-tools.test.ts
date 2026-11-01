@@ -5,6 +5,7 @@ import type { BodyConversationIdentity } from "../src/body-lease-router.ts";
 import { minecraftHostTools, type MinecraftHostToolPort } from "../src/captain/minecraft-host-tools.ts";
 import type { TurnContext } from "../src/captain/tools.ts";
 import { createMcpHost, MINECRAFT_BODY_ACCESS } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 
 function fixture() {
   const identity: BodyConversationIdentity = {
@@ -95,6 +96,7 @@ describe("Minecraft host captain tools", () => {
       close: async () => {},
     }));
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
       credentials: { get: async () => undefined } as unknown as CredentialStore,
       curated: [],

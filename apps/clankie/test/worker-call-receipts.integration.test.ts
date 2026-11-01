@@ -23,6 +23,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { afterEach, expect, it } from "vitest";
 import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
@@ -200,6 +201,7 @@ async function fixture(
     hook?.();
   };
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     curated: [],

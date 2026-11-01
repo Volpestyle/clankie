@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileCredentialStore, type ProviderCredential } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createAccounts } from "../src/accounts.ts";
 import { createAccountRoutes } from "../src/account-routes.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
@@ -89,6 +90,7 @@ async function fixture(overrides?: {
       : undefined,
   );
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(root, "settings.json")),
     logger: { info() {}, warn() {} },

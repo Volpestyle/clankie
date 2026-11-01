@@ -74,10 +74,6 @@
     "event-log.ts -> discord-presence-session.ts (persona)",
     "game-extension-modules.ts -> discord-active-body.ts (persona)",
     "mcp-host.ts -> @clankie/play (world)",
-    "mcp-host.ts -> linear-graphql.ts (tracker-linear)",
-    "mcp-host.ts -> linear-publishing.ts (tracker-linear)",
-    "mcp-host.ts -> linear-request-budget.ts (tracker-linear)",
-    "mcp-host.ts -> linear-write-receipt.ts (tracker-linear)",
     "worker-mcp.ts -> @clankie/play (world)",
     "worker-mcp.ts -> minecraft.ts (minecraft)"
   ]

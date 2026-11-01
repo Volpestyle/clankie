@@ -13,6 +13,7 @@ import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearWriteReceipts, type LinearActivityEvent } from "../src/linear-webhook.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import type { TrackerActivity } from "../src/captain/tracker-activity.ts";
 import { linearRoutes } from "../src/app/linear-routes.ts";
 
@@ -91,6 +92,7 @@ async function fixture() {
   await credentials.set("linear", { type: "api", key: bearer, account });
   const writes = new LinearWriteReceipts(receiptPath);
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(root, "settings.json")),
     curated: [

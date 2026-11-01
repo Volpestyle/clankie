@@ -14,6 +14,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearAttributionJournal } from "../src/linear-attribution.ts";
 import { LinearWriteReceipts } from "../src/linear-webhook.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const NOW = new Date("2026-10-05T00:00:00.000Z");
@@ -101,6 +102,7 @@ async function fixture() {
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   await credentials.set("linear", { type: "api", key: providerToken, account });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     curated: [

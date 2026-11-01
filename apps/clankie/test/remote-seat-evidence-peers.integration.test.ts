@@ -19,6 +19,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { EvidenceStore } from "../src/evidence-store.ts";
 import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 const exec = promisify(execFile);
@@ -68,7 +69,13 @@ async function service() {
     fleet: { ...current.fleet, tools: "connected", peerMessages: "on" },
   }));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    credentials,
+    settings,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,

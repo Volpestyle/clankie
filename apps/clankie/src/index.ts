@@ -215,6 +215,7 @@ import { retireLinearNotifications } from "./linear-notifications.ts";
 import { LinearWakeReadReceipts } from "./linear-wake-read.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
+import { linearMcp } from "./linear-mcp.ts";
 import { linearProjectExists } from "./linear-project-binding.ts";
 import { createLinearApiTracker } from "./linear-api-tracker.ts";
 import { LinearRequestBudget } from "./linear-request-budget.ts";
@@ -712,6 +713,7 @@ const trackerPosting = createTrackerPosting({
   logger,
 });
 const mcpHost = createMcpHost({
+  trackerMcp: linearMcp,
   trackerPosting,
   googleApps: async () => oauthAppsFrom((await settingsStore.load()).oauthApps, process.env).google ?? {},
   linearApiTracker,

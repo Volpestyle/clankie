@@ -8,6 +8,7 @@ import type { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
@@ -29,6 +30,7 @@ it("runs the remote admitted-pane handshake without native project proof and fen
   const callTool = vi.fn(async () => ({ content: "test issue", isError: false }));
   const authorProofs: { principal: string; proof: ProjectProcessProof }[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     writeAuthorityForWorker: async (principal, observe) => {
       const proof = await observe?.();
       if (proof) authorProofs.push({ principal, proof });

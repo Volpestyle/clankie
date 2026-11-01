@@ -19,6 +19,7 @@ import { SettingsStore, type McpServerSettings } from "@clankie/settings";
 import { createAccounts } from "../src/accounts.ts";
 import { createAccountRoutes } from "../src/account-routes.ts";
 import { createMcpHost, type McpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createGoogleProviderFixture } from "./fixtures/google-provider.ts";
 
 it("reads consented fixture mail, events and selected files through isolated brokers and real HTTP MCP", async () => {
@@ -55,6 +56,7 @@ it("reads consented fixture mail, events and selected files through isolated bro
       enabled: true,
     }));
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       settings,
       curated,
@@ -298,6 +300,7 @@ async function googleAliasFixture(storeFactory?: (root: string) => CredentialSto
     googleEndpoints: provider.endpoints,
   });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     curated: canonicalGmail

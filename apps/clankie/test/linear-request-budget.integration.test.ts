@@ -20,6 +20,7 @@ import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
 import { LinearRequestBudgetReportSchema } from "@clankie/protocol/linear-request-budget";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { LinearRequestBudget, withLinearRequestPriority } from "../src/linear-request-budget.ts";
 import {
   createLinearApiProvider,
@@ -84,6 +85,7 @@ async function setup(
   });
   const tracker = createLinearApiTracker({ credentials, fetch: provider.fetch, requestBudget: budget });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(directory, "settings.json")),
     linearApiTracker: tracker,
@@ -704,6 +706,7 @@ it("counts the GraphQL identity request made when a connected app credential ref
     clientSecret: "fixture-app-secret",
   });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(directory, "refresh-settings.json")),
     curated: [

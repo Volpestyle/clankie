@@ -11,6 +11,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LocalFleetLink, type LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { FleetRoomJournal } from "../src/captain/fleet-room.ts";
 
@@ -44,6 +45,7 @@ async function fixture(
   const calls = vi.fn(async () => ({ content: "result", isError: false }));
   const observed: unknown[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: {
       load: async () => ({

@@ -8,6 +8,7 @@ import { createLocalTracker } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { trackerRunner } from "../src/tracker-runner.ts";
 import { trackerEvidence } from "./helpers/tracker-evidence.ts";
@@ -33,6 +34,7 @@ it("orders the ready queue, expires leases, rolls run cost up to the item and sh
   });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: tracker,

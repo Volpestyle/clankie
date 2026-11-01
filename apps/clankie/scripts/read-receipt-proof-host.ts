@@ -15,6 +15,7 @@ import { isAbsolute, join } from "node:path";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { localFleetAdmissionProof, localProjectProof } from "../src/local-fleet-proof.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 const root = process.argv[2];
@@ -106,6 +107,7 @@ const seeded = (await tracker.call("save_issue", {
   title: "LOCAL-VUH-13 disposable READ receipt proof",
 })) as { id: string; identifier: string };
 const host = createMcpHost({
+  trackerMcp: linearMcp,
   credentials,
   settings,
   curated: [],

@@ -13,6 +13,7 @@ import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker } from "@clankie/work-items";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { LinearRequestBudget } from "../src/linear-request-budget.ts";
 import {
   API_ACCESS,
@@ -93,6 +94,7 @@ async function setup(
   const budget = new LinearRequestBudget({ clock });
   const logs: Record<string, unknown>[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     // The GraphQL path must not depend on Linear's MCP transport being reachable.

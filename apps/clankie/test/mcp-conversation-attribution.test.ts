@@ -4,6 +4,7 @@ import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import type { ConversationAuthority, NativeSeatAuthority } from "../src/captain/conversation-owner.ts";
 import { linearWriteIssue } from "../src/linear-webhook.ts";
 import { createMcpHost, type McpConnection, type McpHostOptions } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 
 const issueId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const otherIssueId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -62,6 +63,7 @@ function authority(conversationId = "original") {
 
 function host(options: Partial<McpHostOptions> = {}) {
   return createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: settings(),
     logger: { info: () => undefined, warn: () => undefined },

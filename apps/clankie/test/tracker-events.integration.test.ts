@@ -9,6 +9,7 @@ import { createClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { trackerEvidence } from "./helpers/tracker-evidence.ts";
@@ -40,6 +41,7 @@ it("moves an item through every stage, asks the owner to check it, verifies on a
   });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: tracker,
