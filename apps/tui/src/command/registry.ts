@@ -92,18 +92,14 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  body status | request JSON  Inspect or explicitly request conversation body leases (JSON)"],
   },
   {
-    nouns: ["login", "logout", "whoami", "connect", "disconnect", "fleet", "terminal", "keys", "deprovision"],
+    nouns: ["login", "logout", "whoami", "connect", "disconnect", "keys"],
     lines: [
       "  login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]",
-      "                           Sign in by email code: connects a hosted Clankie if the account has",
-      "                           one, otherwise signs this Mac in for remote access",
-      "  logout | whoami          Hosted sign-out (never touches remote access); whoami is also in `status`",
-      "  Hosted restart/reset/deprovision require the account page/control plane.",
-      "  fleet | terminal         Hosted fleet/terminal catalog; mutations use --json-stdin",
+      "                           Sign this Mac in by email code for remote access (same as remote-access on)",
+      "  logout | disconnect      Say how to take this Mac off remote access; whoami is also in `status`",
       "  keys [status|set PROVIDER --key-stdin|remove PROVIDER|validate PROVIDER MODEL]",
-      "                           Model-provider API keys, here or on a hosted Clankie; the key only on stdin",
-      "  connect hosted           Like login, but requires a hosted Clankie; disconnect is an alias for logout",
-      "  disconnect               Forget this hosted client; hosted work continues",
+      "                           Model-provider API keys on this Mac; the key only on stdin",
+      "  connect                  Retired: Clankie runs on your own machine, so use login",
     ],
   },
   {
@@ -641,7 +637,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["telemetry"],
     lines: [
       "  telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval S]",
-      "                           Hosted host only: ship a body's metadata telemetry to CloudWatch Logs",
+      "                           Self-hosted Linux on EC2 only: ship a body's metadata telemetry to CloudWatch Logs",
     ],
   },
   {

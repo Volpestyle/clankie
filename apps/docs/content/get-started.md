@@ -5,8 +5,9 @@ leads a team to do it, and owns it until it lands. Start on your Mac with your
 own agent subscriptions, models and tools. The desktop pet is the front door;
 the TUI, CLI and phone app reach the same lead.
 
-The software and Clankie accounts are free. An account supports pairing, phone
-steering while your Mac is awake and the official Discord bot. Model providers
+The software and Clankie accounts are free. Clankie leads the agents in your
+Herdr sessions and joins Discord through a bot you make yourself. An account
+adds pairing and phone steering while your Mac is awake. Model providers
 and connected services may charge. Check [clankie.bot](https://clankie.bot) for
 current account signup and app install availability; a source capability does
 not establish that a public install or account signup is open.

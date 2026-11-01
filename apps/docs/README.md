@@ -16,8 +16,8 @@ before the first conversation.
 The visual language comes from Clankie's existing identity: the sprout robot,
 pixel art, garden greens, warm cream and gold, readable serif headings, and
 quiet motion. Keep functional labels plain. The promo is an introduction, not
-a support matrix: distinguish a configured Mac capability from the hosted
-product's offering, and activity from verified results.
+a support matrix: distinguish a configured Mac capability from what every
+install offers, and activity from verified results.
 
 Setup steps belong in `get-started.md`; everyday behavior in `using-clankie.md`;
 optional customization in `diy.md`; system concepts in `how-it-works.md`.
@@ -29,7 +29,7 @@ prices, release channels, or full command catalogs into those guides.
 | Page              | Source                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/`               | `site/index.html`, hand-authored                                                                                                                        |
-| `/get-started/`   | `content/get-started.md`: hosted onboarding and DIY installation/pairing                                                                                |
+| `/get-started/`   | `content/get-started.md`: installation, setup and pairing                                                                                               |
 | `/using-clankie/` | `content/using-clankie.md`: everyday use, memory, making things, and the app                                                                            |
 | `/diy/`           | `content/diy.md`: models, skills, agents, integrations, and extension points                                                                            |
 | `/reference/`     | `content/reference.md`: links by task into the canonical library                                                                                        |
