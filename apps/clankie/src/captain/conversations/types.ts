@@ -423,6 +423,11 @@ export interface ChannelProjection {
     readonly avatarUrl?: string;
     readonly content: string;
   }) => Promise<void>;
+  /**
+   * The id and token in a webhook URL the owner pasted. Throws on anything that
+   * is not a Discord webhook; the token stays on the host.
+   */
+  parseWebhookUrl: (url: string) => { readonly webhookId: string; readonly webhookToken: string };
   /** Which room a webhook points at, so the operator supplies only its URL. */
   resolve: (credential: { readonly webhookId: string; readonly webhookToken: string }) => Promise<{
     readonly guildId: string;

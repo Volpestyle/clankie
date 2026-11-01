@@ -103,13 +103,12 @@ it("settles the real stuck deliveries terminally without posting, and backs tran
       stateDir: join(root, "captain"),
       settings,
       discordEnvironment: {},
-      personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
     },
   );
   const roomId = captain.bodyRoomConversation("discord_presence", "40000:50000");
   const leases = new BodyLeaseStore(join(root, "body"));
   const service = await createClankieApp({
-    extensionRoutes: [personaRoutes()],
+    extensionRoutes: [personaRoutes({ receipts: new DiscordTurnReceipts(join(root, "receipts.json")) })],
     captain,
     settings,
     roomObservations: new DiscordRoomObservations(join(root, "rooms.json")),
@@ -119,7 +118,6 @@ it("settles the real stuck deliveries terminally without posting, and backs tran
         : undefined,
     discordEnvironment: {},
     // As live: no `discord:<id>` origin predates the receipts these messages missed.
-    discordTurnReceipts: new DiscordTurnReceipts(join(root, "receipts.json")),
     eventLogPath: join(root, "events.jsonl"),
     authenticateCaptain: createBearerAuthenticator("fixture-captain", {
       captainId: "fixture-body",

@@ -68,7 +68,6 @@ import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import { pumpBodyRequests } from "../body-request-pump.ts";
 import { BodyLeaseRecovery } from "../body-lease-recovery.ts";
 import { CaptainPresenceLeaseConflictError, CaptainPresenceManager } from "../captain-presence.ts";
-import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
 import { changeRuntime, manageConnections } from "../connections.ts";
 import { createSetupSurveyRoutes, createSetupSurveyService } from "../setup-survey.ts";
@@ -140,6 +139,7 @@ import {
   type DeviceAuthDenial,
   type DiscordBodyRouteState,
   type PendingCompletion,
+  type RoomDeliveryReceipts,
   type TrustedDeviceIdentity,
 } from "./types.ts";
 
@@ -241,8 +241,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     string,
     { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
   >();
-  const discordTurnReceipts =
-    dependencies.discordTurnReceipts ?? new DiscordTurnReceipts(dependencies.discordTurnReceiptPath);
+  // The persona's routes hand these over when they register (ADR 0328).
+  let discordTurnReceipts: RoomDeliveryReceipts | undefined;
   let bodyRequestsOpen = true;
   let pumpingBodyRequests = false;
   const conversationBodyRouteAuthorized = (
@@ -275,7 +275,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     }
     if (origin !== undefined) {
-      const source = discordTurnReceipts.get(`discord:${origin.deliveryId ?? origin.messageId}`)?.origin;
+      const source = discordTurnReceipts?.get(`discord:${origin.deliveryId ?? origin.messageId}`)?.origin;
       if (
         source === undefined ||
         source.baseSessionKey !== origin.baseSessionKey ||
@@ -1625,8 +1625,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     get discordPresenceResults() {
       return discordPresenceResults;
     },
-    get discordTurnReceipts() {
-      return discordTurnReceipts;
+    useRoomDeliveryReceipts(receipts) {
+      discordTurnReceipts = receipts;
     },
     get captainTurnResults() {
       return captainTurnResults;
@@ -2229,7 +2229,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (resource !== "discord_mouth") return body.confirmStopped(resource, guard);
     await guard();
     const held = body.store.recoveryReference(resource);
-    return held !== undefined && discordTurnReceipts.writesSettled(held.conversationId);
+    // Without the persona's receipts, no Discord write was taken here to wait on.
+    return held !== undefined && (discordTurnReceipts?.writesSettled(held.conversationId) ?? true);
   }
 
   function operatorBodyIdentity(

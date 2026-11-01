@@ -97,7 +97,6 @@ async function fixture() {
       settings,
       discordEnvironment: {},
       seatAdapters: [],
-      personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
     },
   );
   const request: DiscordPresenceChannelTurnRequest = {

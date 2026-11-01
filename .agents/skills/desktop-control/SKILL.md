@@ -28,6 +28,26 @@ person's apps usually goes better as a hired seat:
 harness, the brief, human checks and the report. The rest of this skill is for
 driving the desktop yourself.
 
+## Stay off the owner's screen
+
+The screen belongs to the person using it, so screen work runs in the
+background. Two routes do that on their Mac:
+
+- **Codex computer use**: a Codex seat hired with `mcpServers: ["node_repl"]`
+  works in background windows without taking the pointer or keyboard. Use it
+  for flows in their apps or their signed-in Chrome, like a web form under
+  their account ([delegation](reference/delegation.md)).
+- **agent-desktop** (`agent-desktop status`, then `agent-desktop skills get
+desktop`): reads an app's accessibility tree and acts on its elements. Use its
+  accessibility actions only. `focus`, `focus-window`, `hover` and the mouse
+  commands take the screen; when an element can only be reached that way, stop.
+
+Peekaboo input without `--foreground` stays in the background as well. Never
+bring an app or window to the front, move the pointer, type into a window they
+are using, or open a window over theirs. A Claude in Chrome seat fronts Chrome
+windows, so it needs the owner's yes for that task, asked right then. When the
+work can only happen in front of them, stop and say so.
+
 The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
 does not drive apps. Peekaboo is his own hands, guided by this session's current
 observation. A hired Codex computer-use seat is another visible driver; coordinate

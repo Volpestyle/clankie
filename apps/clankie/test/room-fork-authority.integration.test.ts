@@ -221,13 +221,11 @@ async function fixture() {
     settings,
     discordEnvironment: {},
     deliveredFiles: new DeliveredFileStore(attachments),
-    personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
   });
   const store = new BodyLeaseStore(root);
   app = await createClankieApp({
-    extensionRoutes: [personaRoutes()],
+    extensionRoutes: [personaRoutes({ receipts: new DiscordTurnReceipts(join(root, "receipts.json")) })],
     captain,
-    discordTurnReceipts: new DiscordTurnReceipts(join(root, "receipts.json")),
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer bridge"
         ? { captainId: "body", steerSourceLane: "discord_text" }

@@ -67,7 +67,6 @@ function fixture(local = false) {
         workingDirectory: root,
         settings: new SettingsStore(join(root, "settings.json")),
         discordEnvironment: {},
-        personaImages: async () => ({ images: [], hash: "fake", files: [] }),
       },
     );
   const captain = create();

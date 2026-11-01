@@ -13,7 +13,7 @@ import {
 } from "@clankie/discord-presence-core";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { createDiscordPresenceRuntime } from "../../discord-bridge/src/presence-runtime-module.ts";
-import { createChannelProjection } from "../src/captain/channel-projection.ts";
+import { createChannelProjection } from "../src/captain/discord-channel-projection.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { replayConversation, sendMessage } from "./conversation-requests.ts";
 

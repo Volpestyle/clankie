@@ -181,7 +181,6 @@ it.each(["claude", "codex"] as const)(
         nativeCensusRunner: census,
         nativeHerdrRunner: runner,
         seatAdapters: [],
-        personaImages: async () => ({ images: [], hash: "fixture", files: [] }),
       },
     );
     const seatBinding = operatorSeatBindingFixture();

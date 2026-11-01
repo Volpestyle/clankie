@@ -1,4 +1,3 @@
-import { parseDiscordWebhookUrl } from "@clankie/discord-presence-core";
 import { OPERATOR_CHANNEL_MEMBER_MAX, type UpsertOperatorChannel } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
 import {
@@ -96,7 +95,7 @@ export async function resolveProjection(
     throw new Error("Clankie has no swarm server set, so a room cannot go to Discord.");
   }
   if (choice.kind === "webhook") {
-    const credential = parseDiscordWebhookUrl(choice.webhookUrl);
+    const credential = ctx["projection"].parseWebhookUrl(choice.webhookUrl);
     // Resolved before anything is saved: a webhook that cannot be reached is
     // a projection that would silently never post.
     const resolved = { ...(await ctx["projection"].resolve(credential)), ...credential };

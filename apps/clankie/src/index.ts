@@ -76,7 +76,7 @@ import { createMinecraftHostInvite, createMinecraftPrivateDeliveryClient } from 
 import { minecraftProfiles, resolveMinecraftProfile } from "./minecraft-destination.ts";
 import { BodyLeaseStore } from "./body-leases.ts";
 import { BodyLeaseRouter } from "./body-lease-router.ts";
-import { createPersonaImageSource } from "./persona-images.ts";
+import { createPersonaImageSource, personaLook } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
 import { createServiceFleetResourceRuntime } from "./service-fleet-resources.ts";
 import { CaptainSeats, captainSeatSnapshot } from "./captain-seat.ts";
@@ -162,6 +162,7 @@ import { voiceExtension } from "./voice-extension.ts";
 import { personaExtension } from "./persona-extension.ts";
 import { discordCaptainTools } from "./captain/discord-tools.ts";
 import { createDiscordTurns } from "./captain/captain-discord-turns.ts";
+import { discordChannelProjection } from "./captain/discord-channel-projection.ts";
 import { worldExtension } from "./world/extension.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
@@ -1513,8 +1514,16 @@ const captain = createCaptain(
           playTools: pokeagentTools,
         }
       : {}),
-    // The persona's Discord body tools and room turns reach him only when the persona is on at start.
-    ...(personaOn ? { personaTools: discordCaptainTools, roomTurns: createDiscordTurns } : {}),
+    // The persona's Discord body tools, room turns and channel projection reach him
+    // only when the persona is on at start. The trusted module that owns the bot
+    // token makes a channel's room with it; the captain only asks (ADR 0024, ADR 0146).
+    ...(personaOn
+      ? {
+          personaTools: discordCaptainTools,
+          roomTurns: createDiscordTurns,
+          channelProjection: discordChannelProjection(discordPresenceRuntime),
+        }
+      : {}),
     ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined
@@ -1777,14 +1786,12 @@ const captain = createCaptain(
     joinedMachines: machineJoins,
     reportRoundMs: REPORT_ROUND_MS,
     requireMachineAccess: (fleet, required) => runtimes.requireAccess(fleet, required),
-    personaImages,
+    // His look references are the persona's, so they reach him only while it is on (ADR 0328).
+    ...(personaOn ? { personaLook: personaLook(personaImages) } : {}),
     linearFollowing,
     linearWakeReceived: (references) => linearWakeReads.received(references),
     deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
-    // The same trusted module that owns the bot token owns making a channel's
-    // room with it; the captain only asks (ADR 0024, ADR 0146).
-    ...(discordPresenceRuntime === undefined ? {} : { discordChannels: discordPresenceRuntime }),
   },
 );
 fleetResources.start();
@@ -2324,7 +2331,10 @@ extensions.add(
   ),
   { enabled: switchedOn(startupSettings, "voice"), settings: undefined },
 );
-extensions.add(personaExtension(), { enabled: personaOn, settings: undefined });
+extensions.add(personaExtension({ receipts: discordTurnReceipts }), {
+  enabled: personaOn,
+  settings: undefined,
+});
 extensions.add(minecraftSwitch, { enabled: minecraftOn, settings: undefined });
 await extensions.start();
 const clankie = await createClankieApp({
@@ -2432,7 +2442,6 @@ const clankie = await createClankieApp({
   },
   refreshWorkerCatalogs: workerToolRefresh.refresh,
   roomObservations,
-  discordTurnReceipts,
   bodyVoiceStays,
   resolveBodyVoiceTarget: resolveDiscordVoiceTarget,
   bodyPlaySessions,
@@ -2605,7 +2614,7 @@ const clankie = await createClankieApp({
   runtimes,
   memory,
   settings: settingsStore,
-  personaImages,
+  ...(personaOn ? { personaBriefing: personaLook(personaImages).briefing } : {}),
   mediaGenerator,
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
