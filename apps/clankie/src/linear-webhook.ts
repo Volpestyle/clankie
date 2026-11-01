@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ProviderAccount } from "@clankie/credential-broker";
+import type { TrackerActivity } from "./captain/tracker-activity.ts";
 import { z } from "zod";
 import { canonicalJson } from "@clankie/play";
 import {
@@ -753,6 +754,19 @@ export function linearActivityWakeTypes(
   if (activity.type === "Issue" && Object.hasOwn(activity.updatedFrom ?? {}, "stateId"))
     types.push("issueStatusChanged");
   return types.length ? [...new Set(types)] : [`${activity.type}${activity.action}`];
+}
+
+/** The tracker-neutral activity the captain receives for this Linear event (ADR 0328). */
+export function linearTrackerActivity(activity: LinearActivityEvent): TrackerActivity {
+  const project = linearActivityProject(activity);
+  return {
+    eventId: activity.eventId ?? createHash("sha256").update(JSON.stringify(activity)).digest("hex"),
+    prompt: linearActivityPrompt(activity),
+    ...(project ? { project } : {}),
+    ...(activity.routing ? { route: activity.routing.reason } : {}),
+    ...(activity.notificationReceiver ? { receiver: activity.notificationReceiver } : {}),
+    ...(activity.notificationTypes ? { notificationTypes: activity.notificationTypes } : {}),
+  };
 }
 
 /** Compact, quoted context for the normal conversation journal and coalesced wake. */

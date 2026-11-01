@@ -18,6 +18,7 @@ import { minecraftProfiles, resolveMinecraftProfile } from "../src/minecraft-des
 import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
 import { MinecraftService } from "../src/minecraft.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 
 const args = process.argv.slice(2);
 const outputIndex = args.indexOf("--output");
@@ -39,6 +40,7 @@ const settings = new SettingsStore(join(output, `smoke-settings-${runId}.json`))
 const env = { ...process.env, CLANKIE_SETTINGS_FILE: settings.path, CLANKIE_OPERATOR_TOKEN: randomUUID() };
 const leases = new BodyLeaseStore(join(output, `smoke-body-${runId}`));
 const host = createMcpHost({
+  trackerMcp: linearMcp,
   minecraftMotor: {
     command: process.execPath,
     args: [join(repoRoot, "integrations/minecraft-mcp/src/main.ts")],
@@ -80,10 +82,20 @@ const app = routesOnly
   : await (async () => {
       const { createClankieApp } = await import("../src/app.ts");
       const { createStubCaptain } = await import("../src/captain/port.ts");
+      // The whole app serves Minecraft's routes as the service does: through a game projection.
       return createClankieApp({
         captain: createStubCaptain(),
         settings,
-        minecraft,
+        gameExtensions: {
+          catalog: async () => ({ schemaVersion: 1, extensions: [] }),
+          projections: () => [
+            {
+              paths: ["/v1/minecraft", "/v1/minecraft/host", "/v1/minecraft/configuration"],
+              tools: () => [],
+              routes: (options) => createMinecraftRoutes({ ...options, service: minecraft }),
+            },
+          ],
+        },
         authenticateOperator: async (request) =>
           authenticated(request) ? { operatorId: "local-smoke" } : undefined,
       });

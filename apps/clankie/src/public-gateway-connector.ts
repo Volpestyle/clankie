@@ -34,6 +34,7 @@ import { pairingOfferWire, type StoredPairingOffer } from "./pairing.ts";
 import type { PairingOfferWire } from "@clankie/protocol";
 import { hashPairingCode, hashPairingSecret } from "./pairing.ts";
 import type { PushWakeRequest, PushWakeStatus } from "./push.ts";
+import type { DoorwayChange } from "./extension-host.ts";
 
 /** Set on every request this connector forwards to the local service. */
 const GATEWAY_FORWARDED_HEADER = "x-clankie-gateway";
@@ -81,9 +82,7 @@ export interface PublicGatewayConnectorOptions {
   readonly onDoorwayChange?: (change: PublicGatewayDoorwayChange) => void;
 }
 
-export type PublicGatewayDoorwayChange =
-  | { readonly state: "connected" | "sign_in_required" }
-  | { readonly state: "disconnected"; readonly retryInMs: number; readonly closeCode?: number };
+export type PublicGatewayDoorwayChange = DoorwayChange;
 
 export interface PublicGatewayPairingOffer {
   readonly offerSecret: string;

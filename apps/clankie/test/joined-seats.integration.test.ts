@@ -22,6 +22,7 @@ import { createJoinedSeats } from "../src/joined-seats.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { logger } from "../src/app/log.ts";
 import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
 import { openGatewayValue } from "../src/gateway-encryption.ts";
@@ -42,7 +43,7 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
   const secrets = new FileCredentialStore(join(root, "home-secrets.json"));
   const localFile = join(root, "local-secrets.json");
   const local = new FileCredentialStore(localFile);
-  const mcp = createMcpHost({ settings, credentials: secrets, logger });
+  const mcp = createMcpHost({ trackerMcp: linearMcp, settings, credentials: secrets, logger });
   const captain = createCaptain(
     {
       herdrAvailable: () => false,

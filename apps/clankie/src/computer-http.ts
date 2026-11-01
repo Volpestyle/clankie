@@ -5,6 +5,23 @@ import { MachineAccessRefused } from "@clankie/protocol";
 import { ComputerRequestSchema } from "@clankie/interactive-environment";
 import type { BodyConversationIdentity } from "./body-lease-router.ts";
 import type { ComputerBody, OwnerComputerRecovery } from "./computer-body.ts";
+import type { ExtensionRoutes } from "./ports/routes.ts";
+
+/** The computer routes as an extension's routes, mounted with the body routes (ADR 0328). */
+export function computerRoutes(options: {
+  body?: ComputerBody;
+  joined?: import("./joined-computer.ts").JoinedComputer;
+}): ExtensionRoutes {
+  return {
+    place: "body",
+    register: (app, host) =>
+      registerComputerRoutes(app, {
+        ...options,
+        identity: (request, conversationId) => host.bodyIdentity(request, conversationId),
+        ownerRecovery: (request) => host.ownerComputerRecovery(request),
+      }),
+  };
+}
 
 export function registerComputerRoutes(
   app: Hono,

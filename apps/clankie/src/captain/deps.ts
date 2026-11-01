@@ -10,7 +10,7 @@ import type {
   DiscordPresenceSessionRecord,
   DiscordVoiceStay,
 } from "@clankie/interactive-environment";
-import type { VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
+import type { VoiceSpeechSnapshot } from "../ports/voice.ts";
 import type {
   CaptainSessionLaneV2,
   CaptainTurnSettledMetrics,
@@ -25,15 +25,14 @@ import type {
   GenerateVideoRequest,
   GenerateVideoResult,
 } from "@clankie/protocol";
-import type { BrowserHost } from "../browser-host.ts";
+import type { BrowserToolPort } from "../app/types.ts";
 import type { createDiscordCaptainActionClient } from "../discord-captain-actions.ts";
 import type { createDiscordMusicClient } from "../discord-music.ts";
 import type { createDiscordVoicePresenceClient } from "../discord-voice-presence.ts";
 import type { EmailPort } from "../email.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
-import type { FinishedRender } from "../media-generation.ts";
-import type { TldrawHost } from "../tldraw-host.ts";
+import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
 import type { DiscordTracking } from "../discord-tracking.ts";
 
@@ -42,11 +41,22 @@ import type { DiscordTracking } from "../discord-tracking.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
-  readonly skinDrafts?: import("../skin-drafts.ts").SkinDraftService;
+  readonly skinDrafts?: import("../ports/media.ts").SkinDraftPort;
   readonly harnessProcesses?: import("../fleet-harness-processes.ts").FleetHarnessProcesses;
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
-  readonly activitySharing?: import("../activity-sharing.ts").ActivitySharing;
+  /** World's PokeAgent play tools for a turn, which its extension supplies (ADR 0328). */
+  readonly playTools?: (
+    deps: CaptainDeps,
+    turn: import("./tools.ts").TurnContext,
+    lane: CaptainSessionLaneV2,
+    gameplay: import("@clankie/settings").GameplaySettings,
+  ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
+  /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
+  readonly activityTools?: (
+    turn: import("./tools.ts").TurnContext,
+    launcher: import("../ports/activity.ts").ActivityRoomLauncher | undefined,
+  ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
   /** The app note board's read (ADR 0301): notes connector apps left, information never orders. */
   readonly appNotes?: {
     read(
@@ -71,8 +81,6 @@ export interface CaptainDeps {
   /** This captain's fresh settings and explicit environment, supplied by its host. */
   readonly discordSettings?: () => Promise<import("@clankie/protocol").DiscordSettings>;
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
-  readonly minecraft?: import("../minecraft.ts").MinecraftService;
-  readonly minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
   readonly desktop?: import("./desktop.ts").DesktopExpressions;
   /** Retain the rollback reader's report layout until initial cutover is durably healthy. */
   readonly inboundReportMigrationReady?: () => boolean;
@@ -150,7 +158,7 @@ export interface CaptainDeps {
   readonly mcp: Pick<McpHost, "catalog" | "catalogStatus" | "call">;
   /** The mail tools only; the account catalog owns status and disconnect. */
   readonly email: Pick<EmailPort, "list" | "read" | "search" | "send">;
-  readonly browser: Pick<BrowserHost, "catalog" | "call">;
+  readonly browser: BrowserToolPort;
   readonly media: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
     /** `room` tags the render so the room that asked is told when it lands. */
@@ -162,7 +170,7 @@ export interface CaptainDeps {
    * His drawing hand (ADR 0096). Absent when the capability is switched off;
    * the tools then say so rather than disappearing.
    */
-  readonly diagrams?: TldrawHost;
+  readonly diagrams?: DiagramPort;
   readonly embodiment: {
     submitIntent(
       intent: EmbodimentIntent,

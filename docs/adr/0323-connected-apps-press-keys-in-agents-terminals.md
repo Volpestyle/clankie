@@ -44,7 +44,10 @@ agent's terminal, whatever the agent is doing.
   from that device's record, and leaves a note on the board saying which keys
   went to which agent.
 - **Every machine, and the desktop app.** Herdr panes take keys through `herdr
-pane send-keys`, over ssh for a linked PC. A desktop-app hire takes them
+pane send-keys`, over ssh for a linked PC. Herdr 0.9.3 names no `home`, `end`,
+  `pageup`, `pagedown` or `delete` and refuses them as `invalid_key`, so those
+  go in as the bytes an xterm sends (`ESC [5~`, `ESC [1;5H` with a modifier)
+  through `herdr pane send-text`, which passes them as they are. A desktop-app hire takes them
   through the core's `terminal.keys`, which encodes each key for the program's
   keyboard modes, and only in a terminal Clankie started. A desktop-app hire
   takes no text, so `answer_prompt` there takes named keys only.

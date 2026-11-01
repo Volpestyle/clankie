@@ -15,6 +15,7 @@ import { expect, it } from "vitest";
 import { LocalFleetLink, type LocalFleetProofRequestContext } from "../src/local-fleet-link.ts";
 import { clientPid } from "../src/local-fleet-proof.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 const exec = promisify(execFile);
@@ -88,7 +89,13 @@ async function fixture() {
       ],
     },
   }));
-  const host = createMcpHost({ settings, credentials, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    settings,
+    credentials,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,

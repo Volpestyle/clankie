@@ -7,7 +7,7 @@
  * would not already hold.
  */
 import { randomUUID } from "node:crypto";
-import { withLinearRequestPriority } from "./linear-request-budget.ts";
+import { withLinearRequestPriority } from "./tracker-request-priority.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";

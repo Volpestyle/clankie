@@ -10,6 +10,7 @@ import { createClankieApp } from "../src/app.ts";
 import { ProjectHires } from "../src/captain/project-hires.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { trackerRepoForPrincipal } from "../src/tracker-runner.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
@@ -52,6 +53,7 @@ async function fixture() {
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: tracker,

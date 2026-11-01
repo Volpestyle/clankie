@@ -25,6 +25,7 @@ import { ConversationStore } from "../src/captain/conversations.ts";
 import { createTrackerPosting, trackerPostingExecutor } from "../src/tracker-posting.ts";
 import { createWorkItemsService, defaultRun, type WorkItemsService } from "../src/work-items.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
+import { createLinearWorkProjects } from "../src/linear-work-projects.ts";
 
 // A connected app reads the owner's projects and their issues (ADR 0301) and writes
 // them (ADR 0305): the real work service over private issue files and a GitHub stand-in,
@@ -362,7 +363,8 @@ it("writes issues: issue files right away, Linear and GitHub under the project's
     refused: expect.stringContaining("Name something to change"),
   });
 
-  // GitHub, on the default "Ask me": held for the owner's OK, nothing posted.
+  // GitHub, on "Ask me": held for the owner's OK, nothing posted.
+  await setPosting("ask");
   const asked = await write("save_issue", { project: pondId, title: "Net the leaves" });
   expect(asked).toMatchObject({ outcome: "held", post: expect.any(String) });
   expect(created).toEqual([]);
@@ -606,6 +608,7 @@ it("lands a status in a Linear team's own state, and leaves account-only Linear 
   };
   const workItems = createWorkItemsService({
     stateDirectory: join(root, "work-state"),
+    trackerProjects: createLinearWorkProjects,
     projects: async () => (await settings.load()).projects,
     localMachineId: "local",
     run: defaultRun,

@@ -5,7 +5,6 @@ import { runClaudeAccountsCommand } from "./claude-accounts.ts";
 import { runCodexAccountsCommand } from "./codex-accounts.ts";
 import { text } from "node:stream/consumers";
 import {
-  ACCOUNT_EMAIL_CONNECT_PATH,
   AccountGithubPollRequestSchema,
   AccountGithubPollResultSchema,
   AccountGithubStartResultSchema,
@@ -28,7 +27,7 @@ import { OauthAppsSettingsSchema, SettingsStore, defaultSettingsPath } from "@cl
 import { commandHost } from "./io.ts";
 
 const ACCOUNTS_USAGE =
-  "Usage: clankie accounts [list] | connect github|linear|email|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
+  "Usage: clankie accounts [list] | connect github|linear|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
 
 const WORKER_ACCOUNTS_USAGE =
   "Usage: clankie accounts workers [--machine ID] | hold claude|codex|pi LABEL [--machine ID] [--reason TEXT] | release claude|codex|pi LABEL [--machine ID]";
@@ -227,10 +226,6 @@ export async function runAccountsCommand(
     if (!parsed.success) throw new Error("Invalid Linear app credentials");
     return request("/v1/accounts/linear/app", parsed.data);
   }
-  if (args.length === 2 && args[0] === "connect" && args[1] === "email")
-    // His Clankie mailbox (ADR 0242): the install's account authorizes it, so
-    // connecting is choosing it, through the same API every surface uses.
-    return request(ACCOUNT_EMAIL_CONNECT_PATH, {});
   if (
     args.length === 2 &&
     args[0] === "disconnect" &&

@@ -8,6 +8,7 @@ import type {
 } from "@clankie/credential-broker";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
 import { createMcpHost, type McpConnection } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 
 const silent = { info: () => undefined, warn: () => undefined };
 afterEach(() => {
@@ -65,6 +66,7 @@ describe("mcp host", () => {
       server({ id: "linear", credential: "linear", transport: "http", url: "https://example" }),
     ];
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       settings: settingsStore([]),
       logger: {
@@ -88,6 +90,7 @@ describe("mcp host", () => {
   it("keeps an operator-lane server out of a Discord room, by catalog and by name", async () => {
     const connection = fakeConnection(["read_note"]);
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([server({ id: "notes" })]),
       logger: silent,
@@ -113,6 +116,7 @@ describe("mcp host", () => {
   it("lets an everywhere-lane server through from Discord", async () => {
     const connection = fakeConnection(["list_issues"]);
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([server({ id: "tracker", lane: "everywhere" })]),
       logger: silent,
@@ -145,6 +149,7 @@ describe("mcp host", () => {
       warnings: unknown[] = [];
     let writes = 0;
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       settings: settingsStore([server({ id: "linear", credential: "linear" })]),
       logger: { info: () => undefined, warn: (context) => void warnings.push(context) },
@@ -184,6 +189,7 @@ describe("mcp host", () => {
     const connect = async (): Promise<McpConnection> => fakeConnection(["list_issues"]);
 
     const disconnected = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([]),
       logger: silent,
@@ -193,6 +199,7 @@ describe("mcp host", () => {
     expect(await disconnected.catalog("operator")).toEqual([]);
 
     const connected = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore({ linear: { type: "api", key: "lin_api_x" } }),
       settings: settingsStore([]),
       logger: silent,
@@ -207,6 +214,7 @@ describe("mcp host", () => {
   it("starts every tool active until initialTools narrows it", async () => {
     const connect = async (): Promise<McpConnection> => fakeConnection(["a", "b", "c"]);
     const all = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([server({ id: "wide" })]),
       logger: silent,
@@ -216,6 +224,7 @@ describe("mcp host", () => {
     expect((await all.catalog("operator")).filter((tool) => tool.initial)).toHaveLength(3);
 
     const narrowed = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([server({ id: "wide", initialTools: ["a"] })]),
       logger: silent,
@@ -230,6 +239,7 @@ describe("mcp host", () => {
 
   it("lets an owner entry replace a curated connector of the same id", async () => {
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore({ linear: { type: "api", key: "lin_api_x" } }),
       settings: settingsStore([server({ id: "linear", command: "my-linear-mcp" })]),
       logger: silent,
@@ -245,6 +255,7 @@ describe("mcp host", () => {
 
   it("survives one server being unreachable", async () => {
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([server({ id: "good" }), server({ id: "broken" })]),
       logger: silent,
@@ -267,6 +278,7 @@ describe("mcp host", () => {
 
   it("refuses a server that is not configured at all", async () => {
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([]),
       logger: silent,
@@ -284,6 +296,7 @@ describe("mcp host", () => {
     const connection = fakeConnection(["write"]);
     const close = vi.spyOn(connection, "close");
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore(configured),
       logger: silent,
@@ -305,6 +318,7 @@ describe("mcp host", () => {
     const connection = fakeConnection(["write"]);
     const close = vi.spyOn(connection, "close");
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore({ linear: { type: "api", key: "curated" } }),
       settings: settingsStore(configured),
       logger: silent,
@@ -328,6 +342,7 @@ describe("mcp host", () => {
       const connection = fakeConnection(["write"]);
       const close = vi.spyOn(connection, "close");
       const host = createMcpHost({
+        trackerMcp: linearMcp,
         credentials,
         settings: settingsStore([
           server({ id: "tracker", transport, credential: "tracker", url: "https://example" }),
@@ -352,6 +367,7 @@ describe("mcp host", () => {
     const connection = fakeConnection(["write"]);
     const close = vi.spyOn(connection, "close");
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       settings: settingsStore([server({ id: "tracker", credential: "tracker" })]),
       logger: silent,
@@ -381,6 +397,7 @@ describe("mcp host", () => {
       finish = resolve;
     });
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore(configured),
       logger: silent,
@@ -420,6 +437,7 @@ describe("mcp host", () => {
       finish = resolve;
     });
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials: credentialStore(),
       settings: settingsStore([server({ id: "tracker" })]),
       logger: silent,
@@ -451,6 +469,7 @@ describe("mcp host", () => {
     `;
     const credentials = credentialStore({ tracker: { type: "api", key: "first-test-account" } });
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       logger: silent,
       curated: [],
@@ -522,6 +541,7 @@ describe("mcp host", () => {
       }),
     );
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       logger: silent,
       curated: [],
@@ -572,6 +592,7 @@ it("strict client contract: a rejected third-party entry leaves real stdio healt
   `;
   const warnings: Record<string, unknown>[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials: credentialStore(),
     curated: [],
     logger: {

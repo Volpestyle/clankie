@@ -1,6 +1,7 @@
 # ADR 0241: One official Discord bot serves every Clankie
 
-Status: Superseded by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md); `@clankie/protocol/official-discord` is removed.
+Status: Superseded by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md); `@clankie/protocol/official-discord` is removed, and
+[ADR 0326](0326-the-last-hosted-leftovers-are-removed.md) removes `discord.officialBotEnabled`.
 Accepted (2026-10-06, James; VUH-1372 decision comment). Implemented by
 VUH-1766 (free self-hosted route) and VUH-1765 (wake trigger and ambient chat).
 Builds on [ADR 0183](0183-the-harness-is-public-the-hosted-service-is-private.md)

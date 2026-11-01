@@ -11,6 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@clankie/extension": "workspace:*",
     "@clankie/protocol": "workspace:*"
   },
   "devDependencies": {

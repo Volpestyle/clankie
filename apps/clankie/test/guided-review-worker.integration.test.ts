@@ -16,6 +16,7 @@ import {
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 import type { GuidedReviewRecord } from "../../../packages/work-items/src/tracker-local.ts";
@@ -40,6 +41,7 @@ it("attributes guided review edits to the authenticated worker and preserves own
   });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: tracker,

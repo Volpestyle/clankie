@@ -22,7 +22,7 @@ describe("hosted world BODY/MIND partition", () => {
   });
 
   it("feeds pokeagent_world from the derived mind list", () => {
-    const tools = readFileSync(src("captain", "tools.ts"), "utf8");
+    const tools = readFileSync(src("world", "pokeagent-tools.ts"), "utf8");
     const session = readFileSync(
       join(import.meta.dirname, "../../../integrations/pokemon/src/world/session.ts"),
       "utf8",

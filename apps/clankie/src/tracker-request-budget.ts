@@ -3,7 +3,7 @@ import type {
   TrackerRequestBudgetReport,
 } from "@clankie/protocol/tracker-request-budget";
 import type { TrackerRole } from "@clankie/work-items";
-import type { LinearRequestPriority } from "./linear-request-budget.ts";
+import type { LinearRequestPriority } from "./tracker-request-priority.ts";
 
 const REQUEST_WINDOW_MS = 3_600_000;
 const WRITE_WINDOW_MS = 60_000;

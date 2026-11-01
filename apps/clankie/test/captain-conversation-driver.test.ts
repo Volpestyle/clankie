@@ -21,6 +21,7 @@ import { QuestionDraftSchema } from "../src/captain/conversation-questions.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import * as fleetRunner from "../src/captain/herdr-fleet-runner.ts";
 import * as leadFailover from "../src/captain/lead-seat-failover.ts";
+import { linearTrackerActivity } from "../src/linear-webhook.ts";
 
 const fake = vi.hoisted(() => ({
   prompts: [] as string[],
@@ -659,7 +660,7 @@ it("a Linear event reaches the selected ordinary chat driver exactly once across
     data: { title: "Review the issue" },
     updatedFrom: undefined,
   };
-  expect(captain.receiveLinearActivity(activity, true, target)).toBe(true);
+  expect(captain.receiveTrackerActivity(linearTrackerActivity(activity), true, target)).toBe(true);
   const [event] = await poll;
   expect(event).toMatchObject({
     kind: "wake",
@@ -668,7 +669,7 @@ it("a Linear event reaches the selected ordinary chat driver exactly once across
   });
   expect(fake.prompts).toEqual([]);
   await captain.acknowledgeSeatEvent(event!.id, target);
-  expect(captain.receiveLinearActivity(activity, true, target)).toBe(false);
+  expect(captain.receiveTrackerActivity(linearTrackerActivity(activity), true, target)).toBe(false);
   expect(await captain.pollSeatEvents(0, undefined, id)).toEqual([]);
   expect(fake.prompts).toEqual([]);
 });

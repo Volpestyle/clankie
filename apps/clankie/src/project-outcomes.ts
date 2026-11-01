@@ -6,7 +6,7 @@ import {
   type OutcomeWindow,
   type TrackerOutcomes,
 } from "@clankie/work-items";
-import { withLinearRequestInvocation } from "./linear-request-budget.ts";
+import { withLinearRequestInvocation } from "./tracker-request-priority.ts";
 
 export type ProjectOutcomesRead =
   | { readonly state: "read"; readonly outcomes: TrackerOutcomes }

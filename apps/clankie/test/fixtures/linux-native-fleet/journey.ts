@@ -15,6 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { LocalFleetLink } from "../../../src/local-fleet-link.ts";
 import { localFleetProof, localProjectProof } from "../../../src/local-fleet-proof.ts";
 import { createMcpHost } from "../../../src/mcp-host.ts";
+import { linearMcp } from "../../../src/linear-mcp.ts";
 import { WorkerMcp } from "../../../src/worker-mcp.ts";
 import { ConversationStore } from "../../../src/captain/conversations.ts";
 import { InboundSeatReceipts } from "../../../src/captain/inbound-seat-receipts.ts";
@@ -129,7 +130,13 @@ try {
       ],
     },
   }));
-  const host = createMcpHost({ settings, credentials, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    settings,
+    credentials,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   cleanup.push(() => host.close());
   const worker = new WorkerMcp({
     directory: join(h.root, "grants"),

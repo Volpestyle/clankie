@@ -9,6 +9,7 @@ import { runComputerCommand } from "../../tui/src/command/computer.ts";
 import { createBearerAuthenticator, createClankieApp } from "../src/app.ts";
 import { BodyLeaseStore } from "../src/body-leases.ts";
 import { ComputerBody, type OwnerComputerRecovery } from "../src/computer-body.ts";
+import { computerRoutes } from "../src/computer-http.ts";
 import { PeekabooComputerAdapter } from "../src/computer-peekaboo.ts";
 import { WindowsComputerAdapter } from "../src/computer-windows.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
@@ -60,7 +61,7 @@ async function fixture() {
   let beforeAuth: (() => void) | undefined;
   const app = await createClankieApp({
     captain,
-    computer: body,
+    extensionRoutes: [computerRoutes({ body })],
     authenticateOperator: async (request) => {
       beforeAuth?.();
       const identity = await authenticate(request);

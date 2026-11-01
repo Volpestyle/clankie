@@ -27,6 +27,7 @@ import { LinearCutover } from "../src/linear-cutover.ts";
 import { linearActorMap } from "../src/linear-import.ts";
 import { LinearMirrors } from "../src/linear-mirror.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { projectWorkRepoId } from "../src/project-work-items.ts";
 import { startTrackerOwnerLoop } from "../src/tracker-owner-loop.ts";
 import { trackerRepoForPrincipal } from "../src/tracker-runner.ts";
@@ -35,6 +36,7 @@ import { createWorkItemsService } from "../src/work-items.ts";
 import { runWorkCommand } from "../../tui/src/command/work.ts";
 import { captured, OWNER_ID } from "./helpers/linear-mirror.ts";
 import { trackerEvidence } from "./helpers/tracker-evidence.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 /**
  * VUH-1987 through the real service surfaces: the owner's cutover route over HTTP, a
@@ -179,6 +181,7 @@ async function cutoverFixture(
   // Runs once after the host's pre-lock READ fence, just before the backend takes its lock.
   let beforeLock: (() => Promise<void>) | undefined;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: {
@@ -263,7 +266,7 @@ async function cutoverFixture(
       }),
     readOwnerAsk: (requestId) => conversations.readOwnerAsk(requestId),
     observeQuestionResolutions: (listener) => conversations.observeQuestionResolutions(listener),
-    linearWakeTargetAllowed: (conversationId) => conversations.linearWakeTargetAllowed(conversationId),
+    trackerWakeTargetAllowed: (conversationId) => conversations.trackerWakeTargetAllowed(conversationId),
     wakeConversation: async (_owner, text) => {
       wakes.push(text);
       return true;
@@ -275,8 +278,7 @@ async function cutoverFixture(
     workerMcp: worker,
     workItems,
     builtInTracker: live,
-    linearMirrors: mirrors,
-    linearCutover: cutover,
+    extensionRoutes: [linearRoutes({ linearMirrors: mirrors, linearCutover: cutover })],
     fleetLinks: {
       identity: () => undefined,
       authenticate: (token) => (token === "local-fleet-test" ? "test-fleet" : undefined),

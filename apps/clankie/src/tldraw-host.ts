@@ -9,8 +9,6 @@ import {
   TLDRAW_ARTIFACT_DIRECTORY,
   type DiagramRefusalReason,
   type DrawDiagramResult,
-  type DrawErDiagramRequest,
-  type DrawSequenceDiagramRequest,
 } from "@clankie/protocol";
 
 /**
@@ -80,10 +78,8 @@ export interface TldrawHostOptions {
   readonly fetchImpl?: typeof fetch;
 }
 
-export interface TldrawHost {
-  drawErDiagram(request: DrawErDiagramRequest): Promise<DrawDiagramResult>;
-  drawSequenceDiagram(request: DrawSequenceDiagramRequest): Promise<DrawDiagramResult>;
-}
+export type { DiagramPort as TldrawHost } from "./ports/media.ts";
+import type { DiagramPort as TldrawHost } from "./ports/media.ts";
 
 /** A refusal he can say: "the canvas is not open", not a stack trace. */
 class CanvasRefusal extends Error {

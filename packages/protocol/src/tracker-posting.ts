@@ -12,12 +12,13 @@ import type { FleetGateMode } from "./fleet-gates.ts";
  * - `lead`: Clankie decides. His own writes post; a worker's wait for him.
  * - `allow`: writes post.
  *
- * Absent means the default, `ask`. It is a gate on the existing ladder (`ask` is an
- * `owner` gate) plus a read-only stop, never a credential or a grant.
+ * Absent means the default, `allow` (ADR 0302, amended 2026-11-01). It is a gate on the
+ * existing ladder (`ask` is an `owner` gate) plus a read-only stop, never a credential or
+ * a grant.
  */
 export const TrackerPostingSchema = z.enum(["read_only", "ask", "lead", "allow"]);
 export type TrackerPosting = z.infer<typeof TrackerPostingSchema>;
-export const DEFAULT_TRACKER_POSTING = "ask" satisfies TrackerPosting;
+export const DEFAULT_TRACKER_POSTING = "allow" satisfies TrackerPosting;
 
 /** Plain words for the app and the CLI; the CLI spells `read_only` as `read-only`. */
 export const TRACKER_POSTING_MODES = {

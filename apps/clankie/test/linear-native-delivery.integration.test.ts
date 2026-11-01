@@ -94,18 +94,16 @@ async function fixture(boundGraceMs = 20) {
   let pollStarts = 0;
   registerLinearRoutes({
     app,
+    operator: async (request) =>
+      request.headers.get("authorization") === `Bearer ${bearer}` ? { operatorId: "owned-seat" } : undefined,
     dependencies: {
       captain: {
-        receiveLinearActivity: (event, following, target) =>
-          store.receiveLinearActivity(event, following, target),
-        linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
-        linearWakeDeliveries: () => store.linearWakeDeliveries(),
-        linearWakeRecoveries: () => store.linearWakeRecoveries(),
+        receiveTrackerActivity: (event, following, target) =>
+          store.receiveTrackerActivity(event, following, target),
+        trackerWakeTargetAllowed: (target) => store.trackerWakeTargetAllowed(target),
+        trackerWakeDeliveries: () => store.trackerWakeDeliveries(),
+        trackerWakeRecoveries: () => store.trackerWakeRecoveries(),
       },
-      authenticateOperator: async (request) =>
-        request.headers.get("authorization") === `Bearer ${bearer}`
-          ? { operatorId: "owned-seat" }
-          : undefined,
       linearWebhook: {
         secret: async () => secret,
         ownAccount: async () => own,
@@ -277,7 +275,7 @@ it("recovers signed issue/update comments after an offline receiver returns, onc
       )
     ).json(),
   ).toMatchObject({ ingested: true });
-  await until(() => f.store.linearWakeRecoveries().some((recovery) => recovery.unavailable));
+  await until(() => f.store.trackerWakeRecoveries().some((recovery) => recovery.unavailable));
   expect(f.events().some((event) => event.type === "turn" && event.phase === "failed")).toBe(false);
   expect(f.serviceStarts()).toBe(0);
   const [wake] = await f.poll(4000);
@@ -290,7 +288,7 @@ it("recovers signed issue/update comments after an offline receiver returns, onc
   await until(() => f.events().some((event) => event.type === "turn" && event.phase === "completed"));
   expect(await (await f.post(comment)).json()).toMatchObject({ ingested: false });
   expect(await f.poll(30)).toEqual([]);
-  expect(f.store.linearWakeTargetAllowed("global-default")).toBe(true);
+  expect(f.store.trackerWakeTargetAllowed("global-default")).toBe(true);
   expect(
     await (await f.post(f.body("Comment", { body: "Still addresses the attached operator" }))).json(),
   ).toMatchObject({ ingested: true });
@@ -334,7 +332,7 @@ it.each([false, true])(
 it("suppresses deferred wakes when following turns off and keeps external history", async () => {
   const f = await fixture();
   await f.post(f.body());
-  await until(() => f.store.linearWakeRecoveries().some((recovery) => recovery.unavailable));
+  await until(() => f.store.trackerWakeRecoveries().some((recovery) => recovery.unavailable));
   await f.settings.update((value) => ({
     ...value,
     linearWebhook: { ...value.linearWebhook, following: false },
@@ -349,7 +347,7 @@ it("holds a missing receiver quietly across bursts and restarts, then delivers o
   for (let round = 0; round < 3; round += 1) {
     await f.post(f.body("Comment", { body: `Offline round ${round}` }));
     await until(() =>
-      f.store.linearWakeRecoveries().some((recovery) => recovery.pendingEventIds.length === round + 1),
+      f.store.trackerWakeRecoveries().some((recovery) => recovery.pendingEventIds.length === round + 1),
     );
     await f.restart();
   }
@@ -403,27 +401,27 @@ it.each([false, true])(
     const [wake] = await f.poll(4000);
     expect(wake?.content).toContain("Retained KH2 owner comment");
     await f.ack(wake!.id);
-    const received = await f.store.receiveLinearWake("global-default", wake!.id, async (original) =>
+    const received = await f.store.receiveTrackerWake("global-default", wake!.id, async (original) =>
       f.outbox.confirmReceived(original),
     );
     expect(received.receivedAt).toBeDefined();
     await until(() =>
       f.store
-        .linearWakeRecoveries()
+        .trackerWakeRecoveries()
         .some(
           (recovery) =>
             recovery.conversationId === old.conversationId && Object.keys(recovery.resolutions).length === 1,
         ),
     );
     const report = await f.deliveries();
-    const recovery = (report.recoveries as ReturnType<ConversationStore["linearWakeRecoveries"]>).find(
+    const recovery = (report.recoveries as ReturnType<ConversationStore["trackerWakeRecoveries"]>).find(
       (entry) => entry.conversationId === old.conversationId,
     )!;
     expect(recovery.pendingEventIds).toEqual([]);
     expect(Object.values(recovery.resolutions)).toMatchObject([
       { conversationId: "global-default", state: alreadyRetained ? "already_handled" : "rerouted" },
     ]);
-    const receipt = f.store.linearWakeDeliveries().find((entry) => entry.wakeId === wake!.id)!;
+    const receipt = f.store.trackerWakeDeliveries().find((entry) => entry.wakeId === wake!.id)!;
     expect(receipt.events).toMatchObject([{ project, route: "project_fallback" }]);
     expect(receipt.receivedAt).toBeDefined();
     expect(f.store.conversation(old.conversationId)?.title).toBe("KH2 lead (inactive)");

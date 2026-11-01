@@ -10,6 +10,7 @@ import { SettingsStore } from "@clankie/settings";
 import { expect, it } from "vitest";
 import { LocalFleetLink, type LocalFleetProofRequestContext } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 setFlagsFromString("--expose-gc");
@@ -32,7 +33,13 @@ it("releases every answered request on a long-lived fleet MCP session", async ()
   const root = await mkdtemp(join(tmpdir(), "clankie-worker-mcp-memory-"));
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  const host = createMcpHost({ settings, credentials, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    settings,
+    credentials,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   const worker = new WorkerMcp({ directory: join(root, "grants"), credentials, host, requestTimeoutMs });
   const contexts: WeakRef<LocalFleetProofRequestContext>[] = [];
   const local = new LocalFleetLink({

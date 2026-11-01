@@ -15,6 +15,8 @@ import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 import { createViewRoutes } from "../view-routes.ts";
 import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
 import { RuntimeHealthObservationSchema } from "@clankie/protocol";
+import { ExtensionStatesSchema } from "@clankie/protocol";
+import { createExtensionStateRoutes } from "../extension-state-routes.ts";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { WORKER_ACCOUNTS_PATH } from "@clankie/protocol/worker-accounts";
@@ -39,10 +41,6 @@ import {
   CallBrowserToolRequestSchema,
   CaptainPresenceReportSchema,
   ConversationHeadRequestSchema,
-  DISCORD_ROOM_VOICE_PATH,
-  DISCORD_VOICE_OUTPUT_GUARD_PATH,
-  DiscordRoomVoiceCommandSchema,
-  DiscordVoiceOutputControlSchema,
   EmbodimentIntentSchema,
   GenerateImageRequestSchema,
   GenerateVideoRequestSchema,
@@ -62,7 +60,7 @@ import {
 import { GameplaySettingsSchema, SettingsStore } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { z } from "zod";
 import { createAccountRoutes } from "../account-routes.ts";
@@ -72,10 +70,7 @@ import { pumpBodyRequests } from "../body-request-pump.ts";
 import { BodyLeaseRecovery } from "../body-lease-recovery.ts";
 import { CaptainPresenceLeaseConflictError, CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
-import { registerComputerRoutes } from "../computer-http.ts";
-import { ActivitySharingRequestSchema } from "../activity-sharing.ts";
-import { ActivityAdmissionError } from "../activity-admission.ts";
-import { ActivityShareRequestError } from "@clankie/rendered-surface-client";
+import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
 import { changeRuntime, manageConnections } from "../connections.ts";
 import { createSetupSurveyRoutes, createSetupSurveyService } from "../setup-survey.ts";
 import { DeviceSessionError, DeviceSessionSigner } from "../device-session.ts";
@@ -88,6 +83,7 @@ import {
 import {
   DiscordPresenceSessionProjection,
   DiscordVoiceHistoryProjection,
+  retiredDiscordPresenceEventIds,
 } from "../discord-presence-session.ts";
 import { createDiscordRoomRoutes, type RoomAccess, type RoomAuthorization } from "../discord-room-routes.ts";
 import { DiscordUserSessionOptInProjection } from "../discord-user-session-opt-in.ts";
@@ -95,21 +91,17 @@ import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "
 import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../event-log.ts";
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
-import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
 import { createEvidenceRoutes } from "../evidence-store.ts";
 import { createEvidenceStorageSettingsRoutes } from "../evidence-storage-settings-routes.ts";
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createHttpSettingsRoutes } from "../http-settings-routes.ts";
 import { httpCors } from "@clankie/settings";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
-import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
-import { registerLinearRoutes } from "./linear-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
-import type { MediaGeneratorPort } from "../media-generation.ts";
-import { createMinecraftRoutes } from "../minecraft-routes.ts";
+import type { MediaGeneratorPort } from "../ports/media.ts";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
 import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
@@ -166,7 +158,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Replayed once below, then dropped: after boot the projections hold state
   // and `recentEvents` holds only what redelivery checks need.
   const storedEvents: DomainEvent[] = dependencies.eventLogPath
-    ? loadEventLog(dependencies.eventLogPath, (message) =>
+    ? loadEventLog(dependencies.eventLogPath, retiredDiscordPresenceEventIds, (message) =>
         logger.warn({ event: "event_log.compaction" }, message),
       )
     : [];
@@ -531,76 +523,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   const localOperator = dependencies.authenticateOperator;
 
-  app.post("/v1/activity/admit", bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
-    const admission = dependencies.activityAdmission;
-    if (admission === undefined) return context.json({ error: "activity_admission_unavailable" }, 503);
-    const expected = await admission.token();
-    const supplied = Buffer.from(context.req.header("authorization") ?? "");
-    const wanted = Buffer.from(`Bearer ${expected ?? ""}`);
-    if (
-      expected === undefined ||
-      supplied.byteLength !== wanted.byteLength ||
-      !timingSafeEqual(supplied, wanted)
-    )
-      return context.json({ error: "activity_admission_unauthorized" }, 401);
-    context.header("cache-control", "no-store");
-    try {
-      return context.json(await admission.admit(await readJson(context.req.raw)));
-    } catch (error) {
-      if (error instanceof ActivityAdmissionError)
-        return context.json(
-          { error: error.message, ...(error.detail ? { detail: error.detail } : {}) },
-          error.status,
-        );
-      logger.warn({ phase: "activity_admission" }, "activity admission failed");
-      return context.json({ error: "activity_admission_denied" }, 403);
-    }
-  });
-
-  app.post("/v1/activity/shares", async (context) => {
-    const identity = await authenticateOperator(context.req.raw, dependencies);
-    if (identity === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!identity) return context.json({ error: "operator_authentication_required" }, 401);
-    if (dependencies.activitySharing === undefined)
-      return context.json({ error: "activity_sharing_unavailable" }, 503);
-    const parsed = ActivitySharingRequestSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
-    try {
-      const result = await dependencies.activitySharing.request(parsed.data, async () => {
-        const current = await authenticateOperator(context.req.raw, dependencies);
-        return current !== "unavailable" && current?.operatorId === identity.operatorId;
-      });
-      context.header("cache-control", "no-store");
-      return context.json(result);
-    } catch (error) {
-      if (error instanceof ActivityShareRequestError) {
-        return context.json(
-          {
-            error: "activity_share_request_failed",
-            outcome: error.outcome,
-            operation: error.operation,
-            ...(error.shareId === undefined ? {} : { shareId: error.shareId }),
-            ...(error.generation === undefined ? {} : { generation: error.generation }),
-          },
-          error.outcome === "uncertain" ? 503 : 409,
-        );
-      }
-      const name = error instanceof Error ? error.message : "";
-      if (name === "operator_authentication_required") return context.json({ error: name }, 401);
-      if (name === "activity_destination_refused") return context.json({ error: name }, 403);
-      if (name === "activity_source_unavailable") return context.json({ error: name }, 404);
-      if (name === "activity_share_generation_conflict") return context.json({ error: name }, 409);
-      if (name === "activity_share_gone" || name === "activity_artifact_unavailable")
-        return context.json({ error: name }, 404);
-      if (name === "activity_share_capacity") return context.json({ error: name }, 409);
-      if (name === "activity_share_busy") return context.json({ error: name }, 429);
-      if (error instanceof z.ZodError) return context.json({ error: "invalid_activity_media" }, 400);
-      logger.warn({ phase: "activity_share", action: parsed.data.action }, "activity share request failed");
-      return context.json({ error: "activity_sharing_unavailable" }, 503);
-    }
-  });
-
   const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {
     if (denial.denied === "revoked") return context.json({ error: "revoked" }, 401);
     if (denial.denied === "expired") return context.json({ error: "expired" }, 401);
@@ -671,93 +593,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         settings: settingsSource,
       }),
     );
-
-  app.get(DISCORD_ROOM_VOICE_PATH, async (context) => {
-    const authority = await authorizeRoom(context.req.raw, "observe");
-    if (!authority) return context.json({ error: "room_observe_required" }, 403);
-    if (!dependencies.roomVoice) return context.json({ error: "voice_unavailable" }, 503);
-    try {
-      const status = await dependencies.roomVoice.status();
-      await authority.guard();
-      if (!authority.current()) return context.json({ error: "room_observe_required" }, 403);
-      context.header("cache-control", "no-store");
-      return context.json(status);
-    } catch {
-      return context.json({ error: "voice_unavailable" }, 503);
-    }
-  });
-  app.post(DISCORD_ROOM_VOICE_PATH, async (context) => {
-    const authority = await authorizeRoom(context.req.raw, "settings");
-    if (!authority) return context.json({ error: "operator_required" }, 403);
-    const parsed = DiscordRoomVoiceCommandSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_voice_control" }, 400);
-    if (!dependencies.roomVoice) return context.json({ error: "voice_unavailable" }, 503);
-    const command = parsed.data;
-    if (command.action === "join") {
-      const room = await dependencies.captain.serveOperatorConversation({
-        op: "get",
-        schemaVersion: 1,
-        conversationId: command.conversationId,
-      });
-      const settings = await settingsSource.load();
-      if (
-        room.op !== "get" ||
-        room.conversation?.scope.kind !== "room" ||
-        room.conversation.scope.lane !== "discord_voice" ||
-        !settings.discord.ownerUserId
-      )
-        return context.json({ error: "exact_voice_room_required" }, 409);
-      try {
-        return context.json(
-          await dependencies.roomVoice.join(
-            command.conversationId,
-            room.conversation.scope.targetId,
-            settings.discord.ownerUserId,
-            authority,
-          ),
-        );
-      } catch {
-        return context.json({ error: "voice_control_refused" }, 409);
-      }
-    }
-    if (
-      (command.action !== "mute_output" &&
-        command.action !== "unmute_output" &&
-        command.action !== "leave") ||
-      command.stayId === undefined
-    )
-      return context.json({ error: "voice_control_unsupported" }, 409);
-    try {
-      return context.json(
-        await dependencies.roomVoice.control(
-          command.conversationId,
-          command.stayId,
-          command.action,
-          authority,
-        ),
-      );
-    } catch {
-      return context.json({ error: "voice_control_refused" }, 409);
-    }
-  });
-  app.post(DISCORD_VOICE_OUTPUT_GUARD_PATH, async (context) => {
-    const parsed = DiscordVoiceOutputControlSchema.safeParse(await readJson(context.req.raw));
-    const captain = await authenticateCaptain(context.req.raw, dependencies);
-    if (
-      !captain ||
-      captain === "unavailable" ||
-      (captain.steerSourceLane !== "discord_voice" && captain.steerSourceLane !== "discord_text")
-    )
-      return context.json({ error: "discord_body_required" }, 403);
-    if (!parsed.success || !dependencies.roomVoice)
-      return context.json({ error: "voice_control_unknown" }, 403);
-    try {
-      await dependencies.roomVoice.authorize(parsed.data);
-      return context.json({ authorized: true });
-    } catch {
-      return context.json({ error: "voice_control_unknown" }, 403);
-    }
-  });
 
   app.route(
     "/",
@@ -1124,6 +959,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "unavailable" }, 503);
     }
   });
+  app.route(
+    "/",
+    createExtensionStateRoutes({
+      read: authorizeOwnerDevice,
+      change: authorizeOwnerSecrets,
+      settings: settingsSource,
+      ...(dependencies.extensions === undefined ? {} : { extensions: dependencies.extensions }),
+    }),
+  );
   app.get("/v1/captain/readiness", async (context) => {
     const authorized = await authorizeOwnerDevice(context.req.raw);
     if (authorized !== true)
@@ -1134,40 +978,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "unavailable" }, 503);
     }
   });
-  app.route(
-    "/",
-    createComposerTranscriptionRoutes(dependencies.composerTranscriptions, async (request) => {
-      const identity = await authenticateDevice(request);
-      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
-      const eligible = () => {
-        const record = devices.get(identity.deviceId);
-        return (
-          record?.status === "active" &&
-          record.grants.chat &&
-          record.supportGrantId === undefined &&
-          !request.signal.aborted &&
-          clock().getTime() < Date.parse(identity.sessionExpiresAt)
-        );
-      };
-      if (!eligible()) return undefined;
-      return {
-        deviceId: identity.deviceId,
-        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
-        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
-        current: eligible,
-        authorize: async () => {
-          const fresh = await authenticateDevice(request);
-          return (
-            fresh !== "unavailable" &&
-            !("denied" in fresh) &&
-            fresh.deviceId === identity.deviceId &&
-            fresh.grants.chat &&
-            eligible()
-          );
-        },
-      };
-    }),
-  );
 
   // Evidence (ADR 0258): the operator credential is the caller. The CLI and the
   // operator seat's MCP bridge both present it; social lanes and devices do not.
@@ -1662,16 +1472,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       );
     },
   };
-  if (dependencies.gameExtensions === undefined) {
-    app.route(
-      "/",
-      createMinecraftRoutes({
-        ...gameRouteOptions,
-        ...(dependencies.minecraft === undefined ? {} : { service: dependencies.minecraft }),
-        ...(dependencies.minecraftHost === undefined ? {} : { host: dependencies.minecraftHost }),
-      }),
-    );
-  } else {
+  // Games serve their routes through their extensions (ADR 0328).
+  if (dependencies.gameExtensions !== undefined) {
     app.use("*", async (context, next) => {
       for (const projection of dependencies.gameExtensions!.projections()) {
         if (projection.paths.includes(context.req.path))
@@ -1719,6 +1521,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         })(),
       ),
       ...(herdr === undefined ? {} : { herdr }),
+      ...(() => {
+        try {
+          const states = ExtensionStatesSchema.safeParse({
+            schemaVersion: 1,
+            extensions: dependencies.extensions?.snapshot(),
+          });
+          return states.success ? { extensions: states.data.extensions } : {};
+        } catch {
+          return {};
+        }
+      })(),
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
       ...(runtime === undefined ? {} : { runtime }),
@@ -2311,15 +2124,54 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  registerComputerRoutes(app, {
-    ...(dependencies.computer === undefined ? {} : { body: dependencies.computer }),
-    ...(dependencies.joinedComputer === undefined ? {} : { joined: dependencies.joinedComputer }),
-    async identity(request, conversationId) {
+  // Extensions' routes (ADR 0328) use the core's authority checks, never their own.
+  const extensionRouteHost: ExtensionRouteHost = {
+    ownerAuthority: (request) => questionOwnerAuthority(request),
+    operator: (request) => authenticateOperator(request, dependencies),
+    ownerSettings: authorizeOwnerSecrets,
+    settings: settingsSource,
+    clock,
+    trackerWakes: dependencies.captain,
+    room: (request, access) => authorizeRoom(request, access),
+    captainCaller: (request) => authenticateCaptain(request, dependencies),
+    conversations: dependencies.captain,
+    async chatDevice(request) {
+      const identity = await authenticateDevice(request);
+      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
+      const eligible = () => {
+        const record = devices.get(identity.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.chat &&
+          record.supportGrantId === undefined &&
+          !request.signal.aborted &&
+          clock().getTime() < Date.parse(identity.sessionExpiresAt)
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        deviceId: identity.deviceId,
+        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
+        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(request);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === identity.deviceId &&
+            fresh.grants.chat &&
+            eligible()
+          );
+        },
+      };
+    },
+    async bodyIdentity(request, conversationId) {
       const operator = await authenticateOperator(request, dependencies);
       if (!operator || operator === "unavailable") return undefined;
       return operatorBodyIdentity(conversationId, request);
     },
-    async ownerRecovery(request) {
+    async ownerComputerRecovery(request) {
       const original = await authenticateOperator(request, dependencies);
       if (!original || original === "unavailable") return undefined;
       return {
@@ -2336,7 +2188,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         },
       };
     },
-  });
+  };
+  const mountExtensionRoutes = (place: ExtensionRoutes["place"]) => {
+    for (const routes of dependencies.extensionRoutes ?? [])
+      if (routes.place === place) routes.register(app, extensionRouteHost);
+  };
+  mountExtensionRoutes("body");
 
   app.post("/v1/body-leases", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -2687,13 +2544,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  registerLinearRoutes({
-    app,
-    dependencies,
-    settingsSource,
-    clock,
-    authorizeOwnerSettings: authorizeOwnerSecrets,
-  });
+  mountExtensionRoutes("tracker");
   app.get(AUTO_ROUNDS_PATH, async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
     if (operator === "unavailable")
@@ -2887,10 +2738,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     },
   });
 
-  app.route(
-    "/",
-    createSkinDraftRoutes({ service: dependencies.skinDrafts, authorize: questionOwnerAuthority }),
-  );
+  mountExtensionRoutes("owner");
 
   /**
    * Delivery for devices that authorized it. The dispatcher owns coalescing and
@@ -2973,14 +2821,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       dependencies.modelKeys?.close?.();
       stopBodyRequests();
       clearInterval(supportTimer);
-      dependencies.composerTranscriptions?.close();
       clearInterval(runRevocationTimer);
       stopObservingMessages?.();
       stopObservingRoomFailures?.();
       pushDispatcher?.close();
       captainPresence.close();
       closing.push(laneMcp.close(), dependencies.workerMcp?.close());
-      dependencies.activitySharing?.close();
+      for (const routes of dependencies.extensionRoutes ?? []) routes.close?.();
       // Owners of in-flight handlers settle before the caller removes state they write.
       await Promise.allSettled(closing);
     },

@@ -15,6 +15,7 @@ import { OperatorFleetSeatSchema, type WorkerReportBridgeStatus } from "@clankie
 import { afterEach, expect, it } from "vitest";
 import type { LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { FleetHealthMetrics } from "../src/fleet-health-metrics.ts";
 import { type ConversationRunner, ConversationStore } from "../src/captain/conversations.ts";
@@ -110,7 +111,13 @@ async function fixture(
     fleet: { ...current.fleet, tools: "connected", peerMessages: "off" },
   }));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
-  const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    credentials,
+    settings,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   const metrics = new FleetHealthMetrics();
   const conversations = new ConversationStore(join(root, "conversations"), runner ?? (async () => {}));
   const receiver = new InboundSeatReceipts(join(root, "inbound.json"), conversations);

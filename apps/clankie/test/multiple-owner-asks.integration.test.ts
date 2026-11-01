@@ -281,19 +281,11 @@ it("keeps several worker and captain asks independent through reordered answers,
       true,
     );
     const alpha = pending.result.questions.find((r) => r.question!.workerQuestion?.seatId === "alpha")!;
-    expect(
-      await store.serve(
-        { ...request, requestId: alpha.question!.requestId, incarnationId: alpha.question!.incarnationId },
-        owner,
-      ),
-    ).toMatchObject({ result: { status: "revision_conflict" } });
+    // The conversation moved on since `request` was read, but alpha's ask is the same
+    // immutable ask, so the owner's feed answer to it goes through (#118).
+    expect(request.expectedRevision).not.toBe(alpha.revision);
     const accepted = store.serve(
-      {
-        ...request,
-        requestId: alpha.question!.requestId,
-        incarnationId: alpha.question!.incarnationId,
-        expectedRevision: alpha.revision!,
-      },
+      { ...request, requestId: alpha.question!.requestId, incarnationId: alpha.question!.incarnationId },
       owner,
     );
     const alphaOutput = await outputs.alpha!;

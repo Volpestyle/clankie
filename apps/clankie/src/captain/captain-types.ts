@@ -149,7 +149,7 @@ export interface CaptainOptions {
   /** Live webhook readiness, rechecked before a queued Linear wake starts. */
   readonly linearFollowing?: () => Promise<boolean>;
   readonly linearWakeReceived?: (
-    references: readonly import("../linear-wake-read.ts").LinearWakeNotificationReference[],
+    references: readonly import("./tracker-activity.ts").TrackerWakeReference[],
   ) => Promise<unknown>;
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;

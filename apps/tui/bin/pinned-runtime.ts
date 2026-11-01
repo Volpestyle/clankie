@@ -116,6 +116,14 @@ export async function updateCommit(
   return { newCommit, resolvedRef, ...(warning === undefined ? {} : { warning }) };
 }
 
+/**
+ * Claude Code writes type scaffolding beside a plugin it loads from the pinned
+ * runtime. A pin made before .gitignore named these files still sees them as
+ * untracked, so the guard skips them itself; any other change still stops it.
+ */
+const PLUGIN_SCAFFOLDING =
+  /^\?\? integrations\/claude-plugin\/(?:worker\/)?(?:tsconfig\.json|\.claude-plugin\/types\/.+)$/u;
+
 export function assertPinnedRuntime(
   checkout: string,
   runtime: string,
@@ -130,7 +138,10 @@ export function assertPinnedRuntime(
   const common = (cwd: string) =>
     realpathSync(resolve(cwd, run("git", ["rev-parse", "--git-common-dir"], cwd)));
   if (common(checkout) !== common(runtime)) throw new Error("Pinned runtime belongs to another repository");
-  if (run("git", ["status", "--porcelain", "--untracked-files=all"], runtime) !== "")
+  const changes = run("git", ["status", "--porcelain", "--untracked-files=all"], runtime)
+    .split("\n")
+    .filter((line) => line !== "" && !PLUGIN_SCAFFOLDING.test(line));
+  if (changes.length > 0)
     throw new Error("Pinned runtime has local changes; leaving it and the service untouched");
   if (run("git", ["branch", "--show-current"], runtime) !== "")
     throw new Error("Pinned runtime is not detached");

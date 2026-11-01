@@ -38,6 +38,7 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     captainMemoryModule,
     membershipModule,
     nativeModule,
+    linearMcpModule,
   ] = await Promise.all([
     load("apps/clankie/src/app.ts") as Promise<typeof import("../src/app.ts")>,
     load("apps/clankie/src/captain/captain.ts") as Promise<typeof import("../src/captain/captain.ts")>,
@@ -57,6 +58,7 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     load("apps/clankie/src/fleet-project-membership-native.ts") as Promise<
       typeof import("../src/fleet-project-membership-native.ts")
     >,
+    load("apps/clankie/src/linear-mcp.ts") as Promise<typeof import("../src/linear-mcp.ts")>,
   ]);
   const settings = new settingsModule.SettingsStore(join(config.root, "settings.json"));
   const fleetResources = config.fleetResources
@@ -96,6 +98,7 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     },
   });
   const host = mcpModule.createMcpHost({
+    trackerMcp: linearMcpModule.linearMcp,
     credentials,
     settings,
     curated: [

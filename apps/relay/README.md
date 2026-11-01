@@ -149,7 +149,8 @@ agent saved inside its working directory, returned as MCP image content),
 `list_places` (the places an agent can
 start; it starts nothing), `start_agent` (`machine`, `workingDirectory`,
 `harness` claude or codex, `prompt`; with no machine and directory it lists the
-places too), `fleet_capacity` (read only: plans, usage, permits, tracker
+places too), `fleet_capacity` (read only: plans, usage, burn rate per account
+window, the last hour's tokens per local Claude session, permits, tracker
 budgets and live context; a missing number is `"unknown"`), `post_note`
 (`text`, up to 2,000 characters),
 `read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),

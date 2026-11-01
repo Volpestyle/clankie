@@ -63,20 +63,10 @@ import {
   type ProviderAccount,
 } from "@clankie/credential-broker";
 import type { CaptainSessionLaneV2 } from "@clankie/protocol";
-import { canonicalJson } from "@clankie/play";
+import { canonicalJson } from "@clankie/protocol/canonical-json";
 import { GoogleAccountProviderSchema, type GoogleAccountProvider } from "@clankie/protocol/accounts";
 import type { McpServerSettings, SettingsStore } from "@clankie/settings";
-import { isLinearWorkerTool, LINEAR_WORKER_TOOLS, publishLinearWorker } from "./linear-publishing.ts";
-import { compactLinearWrite } from "./linear-write-receipt.ts";
-import {
-  executeLinearGraphql,
-  LINEAR_GRAPHQL_RECONNECT,
-  LINEAR_GRAPHQL_TOOL,
-  linearGraphqlCredential,
-  LinearGraphqlRefusal,
-  planLinearGraphql,
-  type LinearGraphqlPlan,
-} from "./linear-graphql.ts";
+import type { ProviderRequestBudget, TrackerGraphqlPlan, TrackerMcpAdapter } from "./ports/tracker-mcp.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import { mcpToolSchemaError } from "./mcp-tool-schema.ts";
 import {
@@ -98,12 +88,10 @@ import type { WorkerReadReceiptHost, WorkerReadSnapshot } from "./worker-mcp.ts"
 import { createPrioritySortedLinearIssueReader, callCachedLinearCollection } from "./tracker-tool-router.ts";
 import {
   currentLinearRequestPriority,
-  LinearRequestBudgetRefused,
   withLinearRequestPriority,
   withinLinearRequestInvocation,
-  type LinearRequestBudget,
   type LinearRequestPriority,
-} from "./linear-request-budget.ts";
+} from "./tracker-request-priority.ts";
 import { TrackerRequestBudgetRefused, type TrackerRequestBudget } from "./tracker-request-budget.ts";
 import { isTrackerWriteTool, TRACKER_POSTING_ADMITTED, type TrackerPostingGate } from "./tracker-posting.ts";
 
@@ -212,6 +200,11 @@ interface McpToolDescriptor {
   readonly inputSchema: Record<string, unknown>;
   /** Whether this one is active from the first turn rather than found by search. */
   readonly initial: boolean;
+  /**
+   * Writes as a worker persona: a grant must bind the exact personaId, and a
+   * project's standing access leaves it out.
+   */
+  readonly writesAsPersona?: boolean;
 }
 
 type McpRefusalReason =
@@ -391,7 +384,12 @@ export interface McpHostOptions {
     Partial<Pick<LocalTrackerBackend, "withReadSnapshot" | "readSnapshotCandidate">>;
   /** Registered GraphQL OAuth, with a separate broker audience from MCP. */
   readonly linearApiTracker?: TrackerToolBackend;
-  readonly linearRequestBudget?: LinearRequestBudget;
+  readonly linearRequestBudget?: ProviderRequestBudget;
+  /**
+   * The connected tracker's own tools beyond its server's list, which its extension
+   * supplies (ADR 0328). Without it the host serves only what the server lists.
+   */
+  readonly trackerMcp?: TrackerMcpAdapter;
   readonly trackerIdentity?: string;
   /** Internal clock for list freshness; never a caller/model argument. */
   readonly trackerReadClock?: () => number;
@@ -598,15 +596,21 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     .digest("hex");
   // The GraphQL escape hatch is independent of the MCP transport and of the
   // tracker backend; the call decides whether a connected app can run it.
-  const graphqlDescriptor = (): McpToolDescriptor => ({
-    ...LINEAR_GRAPHQL_TOOL,
-    inputSchema: LINEAR_GRAPHQL_TOOL.inputSchema as Record<string, unknown>,
-    server: "linear",
-    qualifiedName: `linear_${LINEAR_GRAPHQL_TOOL.name}`,
-    initial: false,
-  });
+  const trackerMcp = options.trackerMcp;
+  const graphqlDescriptors = (): McpToolDescriptor[] =>
+    trackerMcp
+      ? [
+          {
+            ...trackerMcp.graphql.tool,
+            inputSchema: trackerMcp.graphql.tool.inputSchema as Record<string, unknown>,
+            server: "linear",
+            qualifiedName: `linear_${trackerMcp.graphql.tool.name}`,
+            initial: false,
+          },
+        ]
+      : [];
   const canonicalTrackerCatalog = (): McpToolDescriptor[] => [
-    graphqlDescriptor(),
+    ...graphqlDescriptors(),
     ...listedTrackerCatalog.map((tool) => ({
       ...tool,
       server: "linear",
@@ -1011,11 +1015,13 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       credential?.type === "oauth" &&
       (credential.linearAuth === "app" || credential.linearAuth === "api") &&
       credential.account?.actor === "app" &&
-      options.linearAuthor
+      options.linearAuthor &&
+      trackerMcp
     ) {
       projected.push(
-        ...LINEAR_WORKER_TOOLS.map((tool) => ({
+        ...trackerMcp.workerTools.map((tool) => ({
           ...tool,
+          inputSchema: tool.inputSchema as Record<string, unknown>,
           server: "linear",
           qualifiedName: `linear_${tool.name}`,
           initial: true,
@@ -1025,12 +1031,18 @@ export function createMcpHost(options: McpHostOptions): McpHost {
     if (
       server.id === "linear" &&
       (options.localTracker || options.linearApiTracker) &&
-      !projected.some((tool) => tool.name === LINEAR_GRAPHQL_TOOL.name)
+      !projected.some((tool) => tool.name === trackerMcp?.graphql.tool.name)
     )
-      projected.push(graphqlDescriptor());
-    state.tools = projected;
+      projected.push(...graphqlDescriptors());
+    // A server's own tool of the same name is still published as the persona.
+    const tools = projected.map((tool) =>
+      server.id === "linear" && trackerMcp?.isWorkerTool(tool.name)
+        ? { ...tool, writesAsPersona: true }
+        : tool,
+    );
+    state.tools = tools;
     delete state.failure;
-    return projected;
+    return tools;
   }
 
   async function account(server: McpServerSettings, expectedCredential?: string) {
@@ -1294,20 +1306,22 @@ export function createMcpHost(options: McpHostOptions): McpHost {
       let dispatched = false;
       const graphqlCall =
         input.server === "linear" &&
-        input.tool === LINEAR_GRAPHQL_TOOL.name &&
+        trackerMcp !== undefined &&
+        input.tool === trackerMcp.graphql.tool.name &&
         (options.localTracker !== undefined || options.linearApiTracker !== undefined);
       const perform = async (): Promise<McpCallResult> => {
-        let graphqlPlan: LinearGraphqlPlan | undefined;
+        let graphqlPlan: TrackerGraphqlPlan | undefined;
         if (graphqlCall) {
           try {
-            graphqlPlan = planLinearGraphql(input.arguments);
+            graphqlPlan = trackerMcp!.graphql.plan(input.arguments);
           } catch (error) {
-            if (!(error instanceof LinearGraphqlRefusal)) throw error;
+            const refusal = trackerMcp!.graphql.refusal(error);
+            if (!refusal) throw error;
             return {
               outcome: "refused",
-              reason: error.reason,
+              reason: refusal.reason,
               possiblyDispatched: false,
-              detail: error.message,
+              detail: refusal.message,
             };
           }
         }
@@ -1368,7 +1382,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             outcome: "refused",
             reason: "server_unavailable",
             possiblyDispatched: false,
-            detail: `linear_graphql requires connected Linear; the tracker is using the durable local store. ${LINEAR_GRAPHQL_RECONNECT}`,
+            detail: `linear_graphql requires connected Linear; the tracker is using the durable local store. ${trackerMcp!.graphql.reconnect}`,
           };
         }
         // Only an operation that can change Linear retires cached tracker lists.
@@ -1730,26 +1744,28 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             throw new Error("Delegated account binding changed; a new grant is required");
           let graphqlAccess: { bearer: string; credential: ProviderCredential } | undefined;
           if (graphqlCall) {
-            const selected = await linearGraphqlCredential(options.credentials);
+            const selected = await trackerMcp!.graphql.credential(options.credentials);
             const bearer =
               selected &&
               (await resolveProviderBearer(selected.id, options.credentials, Date.now(), {
                 fetch: options.linearFetch ?? fetch,
               }));
             // Budget accounting and redaction use the refreshed stored credential.
-            const refreshed = selected && (await linearGraphqlCredential(options.credentials));
+            const refreshed = selected && (await trackerMcp!.graphql.credential(options.credentials));
             if (!bearer || refreshed?.id !== selected?.id)
               return {
                 outcome: "refused",
                 reason: "server_unavailable",
                 possiblyDispatched: false,
-                detail: LINEAR_GRAPHQL_RECONNECT,
+                detail: trackerMcp!.graphql.reconnect,
               };
             graphqlAccess = { bearer, credential: refreshed!.credential };
           }
           await assertCurrent(server, state);
           const workerPost =
-            server.id === "linear" && server.credential !== undefined && isLinearWorkerTool(input.tool);
+            server.id === "linear" &&
+            server.credential !== undefined &&
+            trackerMcp?.isWorkerTool(input.tool) === true;
           const credential = workerPost ? await options.credentials.get(server.credential!) : undefined;
           const source = admittedSource;
           // Attribution is optional: losing an owning conversation does not revoke
@@ -1976,7 +1992,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                   },
                 )
               : graphqlAccess
-                ? await executeLinearGraphql({
+                ? await trackerMcp!.graphql.execute({
                     plan: graphqlPlan!,
                     bearer: graphqlAccess.bearer,
                     credential: graphqlAccess.credential,
@@ -2045,7 +2061,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
                         },
                       )
                     : workerPost
-                      ? await publishLinearWorker({
+                      ? await trackerMcp!.publishWorker({
                           tool: input.tool,
                           args: input.arguments,
                           credential,
@@ -2103,7 +2119,7 @@ export function createMcpHost(options: McpHostOptions): McpHost {
           }
           const compacted =
             input.resultMode !== "data" && server.id === "linear" && !result.isError
-              ? compactLinearWrite(input.tool, result.content)
+              ? (trackerMcp?.compactWrite(input.tool, result.content) ?? result.content)
               : result.content;
           const content = markHistory ? markLinearHistory(compacted) : compacted;
           const settled = {
@@ -2185,17 +2201,17 @@ export function createMcpHost(options: McpHostOptions): McpHost {
             !confirmed &&
             !graphqlCall &&
             !(error instanceof DispatchRefused) &&
-            !(error instanceof LinearRequestBudgetRefused) &&
+            trackerMcp?.budgetRefusal(error) === undefined &&
             state !== undefined &&
             state.failure === undefined
           )
             await retire(server.id, state);
+          const budgetRefusal = trackerMcp?.budgetRefusal(error);
           return {
             outcome: "refused",
-            reason:
-              error instanceof LinearRequestBudgetRefused ? "linear_request_budget" : "server_unavailable",
+            reason: budgetRefusal ? "linear_request_budget" : "server_unavailable",
             possiblyDispatched: dispatched,
-            ...(error instanceof LinearRequestBudgetRefused ? { retryAt: error.retryAt } : {}),
+            ...(budgetRefusal ? { retryAt: budgetRefusal.retryAt } : {}),
             detail: error instanceof Error ? error.message.slice(0, 500) : "mcp_call_failed",
           };
         }
@@ -2292,7 +2308,7 @@ async function connectServer(
   server: McpServerSettings,
   credentials: Pick<CredentialStore, "get">,
   expectedCredential: string,
-  requestBudget?: LinearRequestBudget,
+  requestBudget?: ProviderRequestBudget,
 ): Promise<McpConnection> {
   const client = new Client({ name: "clankie", version: "1" }, { capabilities: {} });
   // The SDK's own transports do not satisfy its `Transport` interface under
@@ -2373,7 +2389,7 @@ async function createTransport(
   server: McpServerSettings,
   credentials: Pick<CredentialStore, "get"> & Partial<Pick<CredentialStore, "updateMany">>,
   expectedCredential: string,
-  requestBudget?: LinearRequestBudget,
+  requestBudget?: ProviderRequestBudget,
 ): Promise<StdioClientTransport | StreamableHTTPClientTransport> {
   const selectedCredential = async (): Promise<ProviderCredential> => {
     const stored = server.credential === undefined ? undefined : await credentials.get(server.credential);

@@ -41,6 +41,7 @@ function fixture(kind: "manifest" | "bridge" = "manifest") {
   );
   for (const path of [
     "scripts/check-doc-links.mjs",
+    "scripts/check-extension-boundary.mjs",
     "scripts/check-retired-claims.mjs",
     "scripts/check-swallowed-rejections.mjs",
     "scripts/testing/evidence-landing-guard.mjs",

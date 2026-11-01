@@ -31,15 +31,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { verifyLinearMcpAccount, type McpHost } from "./mcp-host.ts";
-import { isLinearWorkerTool } from "./linear-publishing.ts";
 import { trackerCatalogForRole } from "@clankie/work-items";
 import {
   MinecraftActionSchema,
   WorkerReportBridgeStatusSchema,
+  type MinecraftAction,
   type WorkerBridgeStatus,
   type WorkerReportBridgeStatus,
 } from "@clankie/protocol";
-import type { MinecraftService } from "./minecraft.ts";
 import {
   WORKER_VIDEO_TOOL,
   WorkerVideoSchema,
@@ -49,7 +48,7 @@ import {
 } from "./worker-video.ts";
 import { DurableReceiptStore } from "./durable-receipt-store.ts";
 import { REVIEW_TOOLS } from "../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
-import { canonicalJson } from "@clankie/play";
+import { canonicalJson } from "@clankie/protocol/canonical-json";
 
 const minecraftWorkerSchemas = {
   clankie_minecraft_observe: z.strictObject({}),
@@ -361,7 +360,17 @@ export class WorkerMcp {
     reportBridgeObserved?(fleet: string, pane: string, report: WorkerReportBridgeStatus): void;
     /** Canonical settings generation, checked without yielding at provider dispatch. */
     fleetToolsSnapshot?(): Promise<{ tools: FleetSettings["tools"]; assertCurrent(): void }>;
-    minecraft?: Pick<MinecraftService, "workerCommand">;
+    /** Minecraft's worker driving, which its extension supplies (ADR 0328). */
+    minecraft?: {
+      workerCommand(
+        command: {
+          action: "observe" | "status" | "cancel" | "act";
+          request?: MinecraftAction | undefined;
+          actionId?: string | undefined;
+        },
+        worker: { readonly principalId: string; readonly guard: () => Promise<void | (() => void)> },
+      ): Promise<unknown>;
+    };
     video?: WorkerVideoPort;
     /** The app note board's read (ADR 0301); a worker never posts to it. */
     appNotes?: {
@@ -833,18 +842,16 @@ export class WorkerMcp {
       // A project's standing access: the server's tools, minus worker publishing,
       // which must name the persona it writes as.
       request.tools = catalog
-        .filter(
-          (tool) =>
-            tool.server === request.server && !(request.server === "linear" && isLinearWorkerTool(tool.name)),
-        )
+        .filter((tool) => tool.server === request.server && !tool.writesAsPersona)
         .map((tool) => ({ name: tool.name, arguments: {}, forbiddenArguments: [] }));
     if (request.tools.length === 0) throw new Error(`No tools are available on ${request.server}`);
     if (new Set(request.tools.map((tool) => tool.name)).size !== request.tools.length)
       throw new Error("Tool names must be unique");
     for (const rule of request.tools) {
       if (
-        request.server === "linear" &&
-        isLinearWorkerTool(rule.name) &&
+        catalog.some(
+          (tool) => tool.server === request.server && tool.name === rule.name && tool.writesAsPersona,
+        ) &&
         typeof rule.arguments.personaId !== "string"
       )
         throw new Error("Worker publishing grants must bind an exact personaId");
@@ -1495,9 +1502,7 @@ export class WorkerMcp {
         try {
           const { account, binding, backend } = await this.binding(server, "operator");
           const tools = catalog
-            .filter(
-              (tool) => tool.server === server && !(server === "linear" && isLinearWorkerTool(tool.name)),
-            )
+            .filter((tool) => tool.server === server && !tool.writesAsPersona)
             .map((tool) => ({ name: tool.name, arguments: {}, forbiddenArguments: [] }));
           if (!tools.length) continue;
           records.push({

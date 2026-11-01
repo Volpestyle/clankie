@@ -13,6 +13,9 @@ import { ConversationJournal } from "../src/captain/conversation-journal.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearWriteReceipts, type LinearActivityEvent } from "../src/linear-webhook.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
+import type { TrackerActivity } from "../src/captain/tracker-activity.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const NOW = new Date("2026-10-04T12:00:00.000Z");
 const SECRET = "fixture-only-linear-webhook-signing-secret";
@@ -89,6 +92,7 @@ async function fixture() {
   await credentials.set("linear", { type: "api", key: bearer, account });
   const writes = new LinearWriteReceipts(receiptPath);
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(root, "settings.json")),
     curated: [
@@ -107,7 +111,7 @@ async function fixture() {
     observeCall: (call) => writes.record(call, NOW),
   });
   const store = new ConversationStore(join(root, "conversations"), async () => {});
-  const admitted: LinearActivityEvent[] = [];
+  const admitted: TrackerActivity[] = [];
   const recorded: LinearActivityEvent[] = [];
   const hooks: Awaited<ReturnType<typeof listen>>[] = [];
   let delivery = 0;
@@ -157,18 +161,22 @@ async function fixture() {
       const hook = await listen(
         await createClankieApp({
           captain: createStubCaptain({
-            receiveLinearActivity: (activity, following) => {
+            receiveTrackerActivity: (activity, following) => {
               admitted.push(activity);
-              return store.receiveLinearActivity(activity, following);
+              return store.receiveTrackerActivity(activity, following);
             },
           }),
-          linearWebhook: {
-            secret: async () => SECRET,
-            writes: reloaded,
-            recordActivity: (activity) => {
-              recorded.push(activity);
-            },
-          },
+          extensionRoutes: [
+            linearRoutes({
+              linearWebhook: {
+                secret: async () => SECRET,
+                writes: reloaded,
+                recordActivity: (activity) => {
+                  recorded.push(activity);
+                },
+              },
+            }),
+          ],
           clock: () => NOW,
         }),
       );
@@ -232,7 +240,9 @@ it("correlates a native display-ID issue write after durable reload, while nonma
       expect(await post(data, envelope)).toMatchObject({ ingested: true });
     // These signed events are not exact own-write echoes, so attribution retains
     // them. None qualifies for a wake; recording is not admission to chat history.
-    expect(f.admitted).toEqual(nonmatching.map(([data]) => expect.objectContaining({ issueId: data.id })));
+    expect(f.admitted).toEqual(
+      nonmatching.map(([data]) => expect.objectContaining({ prompt: expect.stringContaining(data.id) })),
+    );
     expect(f.recorded.slice(1)).toEqual(
       f.admitted.map(({ eventId }) => expect.objectContaining({ eventId })),
     );

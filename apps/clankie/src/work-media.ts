@@ -2,8 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { WorkMediaEntry } from "@clankie/protocol";
-import type { EvidenceStore } from "./evidence-store.ts";
-import { LinearUploadRefused, storeEvidenceBytes } from "./linear-import.ts";
+import { MediaUploadRefused, storeEvidenceBytes, type EvidenceStore } from "./evidence-store.ts";
 
 /** Links a returned item must have carried before the service fetches them. */
 const LINEAR_UPLOAD = /https:\/\/(?:uploads|public)\.linear\.app\/[^\s<>()[\]"'\\`]+/gu;
@@ -128,7 +127,7 @@ export class WorkMedia {
       await this.#record(key, { sha256, size: bytes.byteLength, contentType: type });
       this.#failed.delete(key);
     } catch (error) {
-      const reason = error instanceof LinearUploadRefused ? error.reason : "unavailable";
+      const reason = error instanceof MediaUploadRefused ? error.reason : "unavailable";
       this.#failed.set(key, { reason, at: this.#clock() });
       this.options.log?.(
         {

@@ -1,7 +1,6 @@
 import {
   ACCOUNTS_PATH,
   ACCOUNT_DISCONNECT_PATH,
-  ACCOUNT_EMAIL_CONNECT_PATH,
   ACCOUNT_GITHUB_POLL_PATH,
   ACCOUNT_GITHUB_START_PATH,
   ACCOUNT_LINEAR_COMPLETE_PATH,
@@ -11,8 +10,6 @@ import {
   ACCOUNT_GOOGLE_CHECK_PATH,
   AccountDisconnectRequestSchema,
   AccountDisconnectResultSchema,
-  AccountEmailConnectRequestSchema,
-  AccountEmailConnectResultSchema,
   AccountGithubPollRequestSchema,
   AccountGithubPollResultSchema,
   AccountGithubStartResultSchema,
@@ -177,13 +174,6 @@ export function createAccountsClient(options: {
         ACCOUNT_GOOGLE_CHECK_PATH,
         AccountGoogleCompleteResultSchema,
         input(AccountGoogleStartRequestSchema, { provider }),
-      ),
-    /** His Clankie mailbox in one step (ADR 0242); the result is the `email` row. */
-    connectEmail: () =>
-      request(
-        ACCOUNT_EMAIL_CONNECT_PATH,
-        AccountEmailConnectResultSchema,
-        input(AccountEmailConnectRequestSchema, {}),
       ),
     disconnect: (provider: AccountProvider) =>
       request(

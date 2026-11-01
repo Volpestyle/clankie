@@ -112,12 +112,6 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
       { key: "presenceGuildIds", label: "Presence server IDs", kind: "ids" },
       { key: "presenceChannelIds", label: "Presence channel IDs", kind: "ids" },
       { key: "activeBody", label: "Discord account type", kind: "choice", choices: ["bot", "user_session"] },
-      {
-        key: "officialBotEnabled",
-        label: "Official Clankie bot (free, via your Clankie account)",
-        kind: "boolean",
-        help: "Needs clankie login. Then Add to Discord from your account page; no bot token or developer portal.",
-      },
     ],
   },
   {

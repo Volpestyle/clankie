@@ -133,6 +133,7 @@ import type {
 } from "@clankie/protocol";
 import { WORKER_PANE_ENV, type WorkerSandbox } from "../worker-sandbox.ts";
 import { workerSkills } from "./worker-skills.ts";
+import { herdrKeyRuns } from "./herdr-keys.ts";
 import {
   readHerdrSeatTranscript,
   resolveHerdrSeatTranscriptPath,
@@ -293,7 +294,10 @@ export interface HerdrWatchRunner {
   transcript?(agent: HerdrAgentSnapshot): Promise<HerdrSeatTranscript | undefined>;
   read?(target: string, harness: string, source: "visible" | "recent-unwrapped"): Promise<string>;
   readPane?(target: string, source: "visible" | "recent-unwrapped", format: "text" | "ansi"): Promise<string>;
-  /** `herdr pane send-keys`: named key presses, never text. Claude's Stop presses one `esc` (VUH-2680). */
+  /**
+   * `herdr pane send-keys`: named key presses, never text. Claude's Stop presses one `esc` (VUH-2680).
+   * Keys Herdr has no name for go in as their xterm bytes (ADR 0323).
+   */
   sendKeys?(paneId: string, keys: readonly string[]): Promise<void>;
   /**
    * `herdr pane send-text`: one line typed into the pane, no Enter. Only a
@@ -772,7 +776,14 @@ export function createHerdrWatchRunner(
       ]),
     readPane: (target, source, format) =>
       runHerdr(["pane", "read", target, "--source", source, "--format", format]),
-    sendKeys: (paneId, keys) => runHerdr(["pane", "send-keys", paneId, ...keys]).then(() => undefined),
+    sendKeys: async (paneId, keys) => {
+      for (const run of herdrKeyRuns(keys))
+        await runHerdr(
+          "keys" in run
+            ? ["pane", "send-keys", paneId, ...run.keys]
+            : ["pane", "send-text", paneId, run.text],
+        );
+    },
     sendText: (paneId, text) => runHerdr(["pane", "send-text", paneId, text]).then(() => undefined),
     paneProcesses: async (paneId) =>
       parseHerdrForegroundProcesses(await runHerdr(["pane", "process-info", "--pane", paneId])),
@@ -3433,6 +3444,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /** Retire completed receipts only against a complete census on their unchanged configured host. */
+  /**
+   * A new remote hire at a place whose last hire was settled, or that already
+   * holds fresh-intent history, can start only as a fresh intent after that
+   * last receipt (#100). Returns one for a caller that asks for new work on every
+   * call, such as a connected app's start_agent; undefined when an ordinary
+   * hire still fits. The fence still refuses while any hire there is unresolved.
+   */
+  public nextFreshIntent(
+    fleet: string,
+    harness: string,
+    workingDirectory: string,
+  ): { id: string; afterReceiptId: string } | undefined {
+    return this.hireReceipts.nextFreshIntent(JSON.stringify([fleet, harness, workingDirectory, "new"]));
+  }
+
   private async retireCompletedHires(
     fleet: string,
     scope: { baseKey?: string; paneId?: string },

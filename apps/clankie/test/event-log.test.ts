@@ -7,6 +7,7 @@ import {
   DISCORD_VOICE_HISTORY_LIMIT_MAX,
   DiscordPresenceSessionProjection,
   DiscordVoiceHistoryProjection,
+  retiredDiscordPresenceEventIds,
 } from "../src/discord-presence-session.ts";
 import { RecentEvents, compactEventLog, loadEventLog } from "../src/event-log.ts";
 
@@ -115,7 +116,7 @@ describe("durable event log compaction", () => {
     // The live bot session, still in voice (an open stay).
     events.push(...session("bot-live", "g-live").slice(0, 3));
 
-    const compacted = compactEventLog(events);
+    const compacted = compactEventLog(events, retiredDiscordPresenceEventIds);
     const sessionIds = new Set(
       compacted.flatMap((event) =>
         event.type === "discord.presence.session.phase_changed" ? [event.correlationId] : [],
@@ -148,11 +149,11 @@ describe("durable event log compaction", () => {
     const path = join(root, "state", "events.jsonl");
     const events: DomainEvent[] = [];
     for (let index = 0; index < 40; index += 1) events.push(...session(`bot-${index}`, `g${index}`));
-    loadEventLog(path); // creates the directory for a first boot
+    loadEventLog(path, retiredDiscordPresenceEventIds); // creates the directory for a first boot
     await writeFile(path, events.map((event) => `${JSON.stringify(event)}\n`).join("") + '{"torn');
 
-    const loaded = loadEventLog(path);
-    expect(loaded).toEqual(compactEventLog(events));
+    const loaded = loadEventLog(path, retiredDiscordPresenceEventIds);
+    expect(loaded).toEqual(compactEventLog(events, retiredDiscordPresenceEventIds));
     const written = await readFile(path, "utf8");
     expect(
       written
@@ -160,7 +161,7 @@ describe("durable event log compaction", () => {
         .split("\n")
         .map((line) => JSON.parse(line) as DomainEvent),
     ).toEqual(loaded);
-    expect(loadEventLog(path)).toEqual(loaded);
+    expect(loadEventLog(path, retiredDiscordPresenceEventIds)).toEqual(loaded);
     expect(await readFile(path, "utf8")).toBe(written);
   });
 });

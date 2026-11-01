@@ -11,6 +11,7 @@ import {
   discordServerSettings,
   DiscordSettingsSchema,
   DISCORD_OPTIONAL_SETTING_WRITERS,
+  withoutRetiredDiscordSettings,
   type DiscordSettings,
   discordRoleInviteUrl,
   DISCORD_ADMIN_INVITE_PERMISSIONS,
@@ -281,7 +282,12 @@ export function createDiscordRoomRoutes(options: DiscordRoomRoutesOptions): Hono
   app.post(DISCORD_SETTINGS_PATH, async (context) => {
     const authority = await options.authorize(context.req.raw, "settings");
     if (!authority) return context.json({ error: "operator_required" }, 403);
-    const request: unknown = await context.req.json();
+    const body: unknown = await context.req.json();
+    // An older client still sends settings this version retired; they are dropped, not refused.
+    const request =
+      body !== null && typeof body === "object" && !Array.isArray(body) && "settings" in body
+        ? { ...body, settings: withoutRetiredDiscordSettings(body.settings) }
+        : body;
     const parsed = DiscordSettingsUpdateSchema.safeParse(request);
     if (!parsed.success) return context.json({ error: "invalid_discord_settings" }, 400);
     if (!options.settings.update) return context.json({ error: "settings_unavailable" }, 503);

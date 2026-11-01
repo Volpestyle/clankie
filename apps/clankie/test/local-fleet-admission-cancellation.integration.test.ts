@@ -11,6 +11,7 @@ import { LocalFleetLink } from "../src/local-fleet-link.ts";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 import { localFleetAdmissionProof } from "../src/local-fleet-proof.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { closeNativeProcessObservers, nativeProcessRequest } from "../src/native-process-transport.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
@@ -84,7 +85,13 @@ async function fixture() {
   const binding = { runtime: "external" as const, socketPath, session: "default" };
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const settings = new SettingsStore(join(root, "settings.json"));
-  const host = createMcpHost({ settings, credentials, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    settings,
+    credentials,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
     credentials,

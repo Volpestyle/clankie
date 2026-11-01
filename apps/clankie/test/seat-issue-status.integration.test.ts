@@ -8,6 +8,7 @@ import { createLocalTracker } from "@clankie/work-items";
 import { createAccounts } from "../src/accounts.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { OperatorFleetSeatSchema } from "@clankie/protocol";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import {
@@ -51,6 +52,7 @@ async function setup(
   if (!start.ok) throw new Error("Missing registered flow");
   if (!(await accounts.completeLinear(start.flowId, "good-code")).ok) throw new Error("Missing connection");
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials: store,
     settings: new SettingsStore(join(directory, "settings.json")),
     localTracker: createLocalTracker({ directory: join(directory, "tracker") }),
