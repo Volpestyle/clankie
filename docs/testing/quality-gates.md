@@ -49,6 +49,12 @@ change adds may not drop a rejection silently (`.catch(() => undefined)`,
 `// allow-swallowed-rejection -- REASON`. Tests, docs and evals are exempt, and
 existing sites are not flagged until a change rewrites them; on 2026-10-17 there
 were 604 outside tests, 398 of them in `apps/clankie/src` (VUH-2396).
+`scripts/check-extension-boundary.mjs` (also `pnpm extensions:check`) keeps the
+service's core from gaining an import of an extension (ADR 0328). The imports the
+core still has outside the composition root `index.ts` are listed in
+`scripts/extension-boundary-baseline.json`, 123 on
+2026-11-01; a change that adds one fails, and one that removes one updates the
+baseline with `--update`.
 The checked HEAD, base, source fingerprint, compiler scope, phase times and exit
 are saved to `.local/landing-gate.json`; source changes during the run fail it.
 Pass Vitest reporter options after `--`, for example `pnpm check:landing --
