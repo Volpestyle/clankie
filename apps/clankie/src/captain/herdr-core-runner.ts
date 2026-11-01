@@ -93,6 +93,31 @@ export async function readDesktopSeat(
   }
 }
 
+/** A live terminal Clankie started at this address, with its program's pid; null otherwise. */
+export async function liveDesktopTerminal(
+  seats: HerdrCoreSeats,
+  address: string,
+): Promise<{ readonly pid: number } | null> {
+  const terminal = await seats.get(address);
+  return terminal?.state === "live" && terminal.labels[SEAT_LABEL] !== undefined && terminal.pid !== undefined
+    ? { pid: terminal.pid }
+    : null;
+}
+
+/**
+ * The harness in a live seat of Clankie's, from his private record of it (ADR 0319): null
+ * unless the terminal is live, his, and its pid is still the one the harness took.
+ */
+export async function liveDesktopSeat(
+  seats: HerdrCoreSeats,
+  directory: string,
+  address: string,
+): Promise<DesktopSeatRecord | null> {
+  const terminal = await liveDesktopTerminal(seats, address);
+  const record = terminal === null ? undefined : await readDesktopSeat(directory, address);
+  return record !== undefined && record.pid === terminal?.pid ? record : null;
+}
+
 async function writePrivately(path: string, text: string): Promise<void> {
   const temp = `${path}.${randomUUID()}.tmp`;
   try {

@@ -15,8 +15,8 @@ import { readProjectOutcomes } from "./project-outcomes.ts";
 import { AutoRoundRecord } from "./captain/auto-rounds.ts";
 import type { HerdrBinding } from "@clankie/protocol";
 import { herdrCoreSocketPath } from "./captain/herdr-core.ts";
-import { HERDR_CORE_FLEET, readDesktopSeat } from "./captain/herdr-core-runner.ts";
-import { SEAT_LABEL, createHerdrCoreSeats } from "./captain/herdr-core-seats.ts";
+import { HERDR_CORE_FLEET, liveDesktopSeat, liveDesktopTerminal } from "./captain/herdr-core-runner.ts";
+import { createHerdrCoreSeats } from "./captain/herdr-core-seats.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
@@ -1047,6 +1047,9 @@ const localProjectProcessObserver = createProjectProcessObserver({
   binding: localFleetBinding,
   herdrBinary: "herdr",
   harnessBinary: harnessBinaries.record,
+  // A hire in the Herdr desktop app's terminals (ADR 0319), defined with the listener below.
+  coreBinding: () => herdrCoreBinding(),
+  coreSeat: (binding, address) => herdrCoreSeat(binding, address),
 });
 const remoteCodexSeats = new RemoteCodexSeats(async (id) =>
   (await runtimes.fleets()).find((fleet) => fleet.id === id),
@@ -1914,18 +1917,11 @@ const herdrCoreBinding = async (): Promise<HerdrBinding> => ({
   session: HERDR_CORE_FLEET,
   socketPath: herdrCoreSocketPath(process.env),
 });
-const herdrCoreTerminal = async (binding: HerdrBinding, address: string) => {
-  const terminal = await createHerdrCoreSeats({ socketPath: binding.socketPath }).get(address);
-  return terminal?.state === "live" && terminal.labels[SEAT_LABEL] !== undefined && terminal.pid !== undefined
-    ? { pid: terminal.pid }
-    : null;
-};
+const herdrCoreTerminal = async (binding: HerdrBinding, address: string) =>
+  liveDesktopTerminal(createHerdrCoreSeats({ socketPath: binding.socketPath }), address);
 const desktopSeats = join(stateRoot, "captain", "desktop-seats");
-const herdrCoreSeat = async (binding: HerdrBinding, address: string) => {
-  const terminal = await herdrCoreTerminal(binding, address);
-  const record = terminal === null ? undefined : await readDesktopSeat(desktopSeats, address);
-  return record !== undefined && record.pid === terminal?.pid ? record : null;
-};
+const herdrCoreSeat = async (binding: HerdrBinding, address: string) =>
+  liveDesktopSeat(createHerdrCoreSeats({ socketPath: binding.socketPath }), desktopSeats, address);
 const localFleet = new LocalFleetLink({
   fixtureAdmission: (request, proof, socket, current) =>
     nativeFixtureAdmissions.handleOriginal(request, proof, socket, current),

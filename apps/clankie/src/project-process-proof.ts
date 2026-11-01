@@ -238,9 +238,105 @@ export function createProjectProcessObserver(options: {
   harnessBinary?(pane: string, occupantId: string, update: HarnessUpdate | undefined): void;
   /** One terminal refusal per proof; reporting never changes admission. */
   refusal?(event: ProjectProcessRefusal, pane: string): void;
+  /** The Herdr desktop app's core, for a seat in one of its terminals (ADR 0319). */
+  coreBinding?(): Promise<HerdrBinding | undefined>;
+  /**
+   * The harness Clankie started at that core address, from his private record of it; null
+   * unless the terminal is a live Clankie seat whose pid is still the one the harness took.
+   */
+  coreSeat?(
+    binding: HerdrBinding,
+    address: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly pid: number; readonly agent: string; readonly session: string } | null>;
 }) {
   const execute = options.run ?? run;
   const canonical = options.canonical ?? realpath;
+  /**
+   * A desktop-app seat (ADR 0319) has no shell or foreground group to read: the launcher
+   * execs the harness as the terminal's own process. Clankie's private record names its
+   * pid, the core must still report that pid for a live Clankie terminal, and the kernel
+   * must show the installed harness there, unchanged across both observations. Its parent
+   * (the core) stands in as the shell.
+   */
+  const desktopSeat = async (
+    address: string,
+    at: (checkpoint: ProjectProcessCheckpoint) => void,
+    refuse: (reason: ProjectProcessRefusalReason) => undefined,
+  ): Promise<ProjectProcessProof | undefined> => {
+    const pane = `herdr-core/${address}`;
+    at("binding");
+    const binding = await options.coreBinding!();
+    if (!binding) return refuse("binding_unavailable");
+    at("initial_native");
+    const seat = await options.coreSeat!(binding, address, options.signal);
+    if (!seat) return refuse("pane_unavailable");
+    if (!OPERATOR_SEAT_HARNESSES.some((harness) => harness === seat.agent))
+      return refuse("native_harness_unavailable");
+    at("launcher");
+    const launcher = await (options.launcher ?? installedLauncher)(seat.agent);
+    if (!launcher) return refuse("launcher_unavailable");
+    const snapshot = (parent: number, checkpoint: "initial" | "final") =>
+      observeNativeProcesses(
+        parent,
+        seat.pid,
+        options.processHelper ?? fleetProcessHelper(),
+        options.run,
+        options.signal,
+        options.nativeDiagnostics && ((event) => options.nativeDiagnostics!(event, checkpoint, pane)),
+        options.nativeTransportDiagnostics && ((reason) => options.nativeTransportDiagnostics!(reason, pane)),
+      );
+    at("initial_process");
+    // The first observation only finds the harness's parent; the kernel checks it below.
+    const located =
+      seat.pid === process.pid ? undefined : (await snapshot(process.pid, "initial"))?.processes[1];
+    if (!located || located.pid !== seat.pid || located.ppid <= 1 || located.ppid === seat.pid)
+      return refuse("native_initial_unavailable");
+    const initial = await snapshot(located.ppid, "initial");
+    const [shell, agent] = initial?.processes ?? [];
+    if (!initial || !shell || !agent) return refuse("native_initial_unavailable");
+    if (
+      agent.pid !== seat.pid ||
+      agent.ppid !== shell.pid ||
+      nativeProcessStart(agent.birth, agent.kernelIdentity) !==
+        nativeProcessStart(located.birth, located.kernelIdentity)
+    )
+      return refuse("process_changed");
+    const match = await matchesHarnessLauncher(launcher, seat.agent, agent, canonical);
+    if (!match) return refuse("launcher_mismatch");
+    at("final_process");
+    const final = await snapshot(shell.pid, "final");
+    if (!final) return refuse("native_final_unavailable");
+    if (JSON.stringify(final) !== JSON.stringify(initial)) return refuse("process_changed");
+    at("final_native");
+    if (JSON.stringify(await options.coreSeat!(binding, address, options.signal)) !== JSON.stringify(seat))
+      return refuse("session_changed");
+    at("final_binding");
+    const current = await options.coreBinding!();
+    if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
+      return refuse("binding_changed");
+    const nativeOccupantId = occupantIdForHerdrSession({
+      source: `herdr:${seat.agent}`,
+      kind: "id",
+      value: seat.session,
+    });
+    try {
+      options.harnessBinary?.(pane, nativeOccupantId, match.update);
+    } catch {
+      // A diagnostic observer never changes the proof.
+    }
+    return {
+      fleet: "default",
+      pane,
+      nativeOccupantId,
+      binding: {
+        socketPath: binding.socketPath,
+        ...(binding.session === undefined ? {} : { session: binding.session }),
+      },
+      shell: { pid: shell.pid, startTime: nativeProcessStart(shell.birth, shell.kernelIdentity) },
+      processes: [{ pid: agent.pid, startTime: nativeProcessStart(agent.birth, agent.kernelIdentity) }],
+    };
+  };
   return async (fleet: string, pane: string): Promise<ProjectProcessProof | undefined> => {
     let checkpoint: ProjectProcessCheckpoint = "scope";
     const refuse = (reason: ProjectProcessRefusalReason, at = checkpoint) => {
@@ -262,12 +358,20 @@ export function createProjectProcessObserver(options: {
                 : "observation_failure",
             at,
           );
+    const core = /^herdr-core\/(t\d+)$/u.exec(pane)?.[1];
     if (
       fleet !== "default" ||
       !["darwin", "linux"].includes(options.platform ?? process.platform) ||
-      !/^w[\w]+:p[\w]+$/u.test(pane)
+      !(core !== undefined ? options.coreBinding && options.coreSeat : /^w[\w]+:p[\w]+$/u.test(pane))
     )
       return refuse("unsupported_scope");
+    if (core !== undefined) {
+      try {
+        return await desktopSeat(core, (at) => (checkpoint = at), refuse);
+      } catch (error) {
+        return failure(error);
+      }
+    }
     try {
       checkpoint = "binding";
       const binding = await options.binding();
