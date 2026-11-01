@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { hostname } from "node:os";
+import type { HerdrCensusFleet } from "./herdr-census.ts";
 import type { HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
+import { SESSION_LABEL } from "./herdr-core.ts";
 import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr-core-seats.ts";
 
 // Clankie's hires in the Herdr desktop app's terminals (ADR 0319), seen the way his
@@ -16,7 +19,6 @@ export const HERDR_CORE_FLEET = "herdr-core";
 
 /** Labels a hire's terminal carries once its harness starts, so they outlive Clankie's restarts. */
 const AGENT_LABEL = "clankie.agent";
-const SESSION_LABEL = "clankie.session";
 
 /** The harnesses a desktop-app terminal can start so far, by the binary its owner runs. */
 const HARNESS_BINARIES: Readonly<Record<string, string>> = { claude: "claude" };
@@ -146,7 +148,7 @@ export interface HerdrCoreRunnerOptions {
 export function createHerdrCoreRunner(
   options: HerdrCoreRunnerOptions,
 ): HerdrWatchRunner &
-  Required<Pick<HerdrWatchRunner, "readPane" | "closePane" | "createTab" | "startAgent">> {
+  Required<Pick<HerdrWatchRunner, "list" | "readPane" | "closePane" | "createTab" | "startAgent">> {
   const { seats } = options;
   const pollMs = options.pollMs ?? POLL_MS;
   /** Terminals waiting at the launcher, by address, with the file their command goes in. */
@@ -215,6 +217,11 @@ export function createHerdrCoreRunner(
     }
   };
   return {
+    // Only Clankie's own live terminals: an owner's terminal is never a seat here.
+    list: async () =>
+      (await seats.list())
+        .filter((terminal) => terminal.state === "live" && terminal.labels[SEAT_LABEL] !== undefined)
+        .map(snapshot),
     get,
     resolveTerminal: async (address) => {
       const terminal = await own(address);
@@ -304,6 +311,54 @@ export function createHerdrCoreRunner(
         );
       }
       await writePrivately(handoff, `rm -f -- "$1"\nexec ${[binary, ...args].map(quote).join(" ")}\n`);
+    },
+  };
+}
+
+/**
+ * The desktop app's terminals as one more fleet in Clankie's census (ADR 0319), so a
+ * hire there is a seat like a Herdr pane's: listed with its persona, messageable
+ * through its harness channel, and routed back by its `herdr-core/` id. It answers the
+ * two reads the census makes (`agent list`, `api snapshot`) in Herdr's own shape, from
+ * the runner's own list, so only terminals Clankie started and named a session for
+ * are ever seated.
+ */
+export function herdrCoreCensusFleet(
+  runner: Pick<HerdrWatchRunner, "list">,
+  available: () => Promise<boolean>,
+): HerdrCensusFleet {
+  return {
+    id: HERDR_CORE_FLEET,
+    session: HERDR_CORE_FLEET,
+    host: hostname(),
+    run: async (args) => {
+      const read = args.join(" ");
+      if (read !== "agent list" && read !== "api snapshot")
+        throw new Error(`The desktop app's terminals don't answer herdr ${read}`);
+      // No desktop app running is an empty fleet, not a machine that stopped answering.
+      const agents = await (runner.list?.() ?? Promise.resolve([])).catch(async (error: unknown) => {
+        if (await available()) throw error;
+        return [];
+      });
+      const rows = agents.flatMap((agent) =>
+        agent.session === undefined || agent.status === "offline"
+          ? []
+          : [
+              {
+                pane_id: agent.paneId,
+                terminal_id: agent.terminalId,
+                ...(agent.name === undefined ? {} : { name: agent.name }),
+                agent: agent.agent,
+                agent_status: agent.status,
+                title: agent.title,
+                ...(agent.workingDirectory === undefined ? {} : { cwd: agent.workingDirectory }),
+                agent_session: agent.session,
+              },
+            ],
+      );
+      return JSON.stringify(
+        read === "agent list" ? { result: { agents: rows } } : { result: { snapshot: { agents: rows } } },
+      );
     },
   };
 }

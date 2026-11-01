@@ -8,7 +8,8 @@ import type { HerdrSessionPort } from "./herdr.ts";
 // allowlist applies as it does for Herdr, and a read is bound to the live
 // agent's own output as a Herdr pane's is (ADR 0307). Read-only: herdr-core's
 // only way to message an agent is to paste into its terminal, which ADR 0207
-// rules out, so send always refuses.
+// rules out, so send always refuses. Clankie's own hires there are fleet seats,
+// listed and messaged through the Herdr source instead (ADR 0319).
 
 export interface HerdrCoreSessionSourceOptions {
   /** What a session on this Mac reads as its machine. */
