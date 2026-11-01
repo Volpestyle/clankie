@@ -43,7 +43,7 @@ const RESOURCE_BRIEF = [
   "Dev servers and watch commands use the separate governed server lane automatically; use `clankie heavy --server -- <command> [args...]` for a custom long-lived service, and stop it when finished.",
   "Boot simulators only through `clankie simulator acquire` (never `xcrun simctl boot` or Simulator.app); use its exact UDID and release it when finished. A device you booted by hand holds a fleet slot: lease it by its deviceId or shut it down.",
   "Never run global simulator shutdown/delete commands or touch another seat's devices.",
-  "The owner's screen is theirs: never bring an app or window to the front, type or click in the windows they use, or drive their own Chrome unless your lead says the owner asked for that in this task. Browse in a headless browser of your own, and drive native apps only with background input (the desktop-control skill, never `--foreground`). When work can only happen on their screen, stop and tell your lead.",
+  "The owner's screen is theirs: never bring an app or window to the front, type or click in the windows they use, or drive their own Chrome unless your lead says the owner asked for that in this task. Screen work runs in the background: agent-desktop's accessibility actions (never its focus-window or mouse commands) or a Codex computer-use seat your lead hires (desktop-control skill). When work can only happen in front of them, stop and tell your lead.",
 ].join("\n");
 
 export class ResourceAdmissionError extends Error {

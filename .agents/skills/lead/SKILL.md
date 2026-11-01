@@ -85,9 +85,9 @@ priorities look wrong, propose a change; never reorder silently.
 Route by the task and by results you have actually seen, not by habit or brand:
 code follows the project's hire profile, hard desktop work goes to a
 computer-use seat, signed-in browser work to a seat with that browser
-(`clankie browser harnesses`). Workers stay off the owner's screen: a seat that
-fronts windows or drives their Chrome starts only on their yes for that task
-(desktop-control skill).
+(`clankie browser harnesses`). Screen work stays in the background: Codex computer
+use or agent-desktop; a seat that fronts windows starts only on the owner's yes
+for that task (desktop-control skill).
 
 A refusal or error code is not its cause. Someone must trace the code that
 produced it before anyone names why something failed; hand that trace to a
