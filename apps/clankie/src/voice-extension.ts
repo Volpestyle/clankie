@@ -1,5 +1,5 @@
 import type { ClankieExtension } from "@clankie/extension";
-import { registerVoiceCallRoute } from "./app/voice-call-route.ts";
+import { registerVoiceCallRoute, type VoiceCallOptions } from "./app/voice-call-route.ts";
 import { voiceCallHandoff, voiceCallTranscript } from "./captain/voice-call-handoff.ts";
 import { composeVoiceLaneInstructions } from "./captain/voice-lane.ts";
 import { composerTranscriptionRoutes } from "./composer-transcription.ts";
@@ -26,6 +26,7 @@ export const captainVoice: CaptainVoice = {
  */
 export function voiceExtension(
   roomVoice: DiscordRoomVoice,
+  call?: VoiceCallOptions,
 ): ClankieExtension<undefined, CorePorts, never, CoreProjection> {
   return {
     contractVersion: 1,
@@ -45,7 +46,7 @@ export function voiceExtension(
             register: (app, host) => {
               composer.register(app, host);
               room.register(app, host);
-              registerVoiceCallRoute(app, host);
+              registerVoiceCallRoute(app, host, call);
             },
             close: () => {
               composer.close?.();

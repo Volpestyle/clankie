@@ -67,6 +67,8 @@ export interface ExtensionRouteHost {
  * routes after the owner's conversation routes.
  */
 export interface ExtensionRoutes {
+  /** Persona-owned durable replay and compaction, used before routes mount. */
+  readonly presenceState?: import("./presence.ts").PresenceStateFactory;
   readonly place: "body" | "tracker" | "owner";
   register(app: Hono, host: ExtensionRouteHost): void;
   /** Releases what the routes hold when the app closes. */

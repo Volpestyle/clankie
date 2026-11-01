@@ -1,3 +1,4 @@
+import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import "./fetch-dispatcher.ts";
 import { createInboundReportMigrationGate } from "./captain/conversations/inbound-report-migration.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
@@ -2335,6 +2336,32 @@ extensions.add(
 extensions.add(
   voiceExtension(
     new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore, undefined, undefined, voiceProviderReadiness),
+    {
+      // Read when a call starts, never at boot: the broker is touched only when someone calls.
+      async realtime() {
+        const env = { ...process.env };
+        applyVoiceSettingsToEnvironment((await settingsStore.load()).voice, env);
+        const config = parseVoiceRealtimeEnv(env);
+        const realtime = await operatorCredentialStore.get(config.realtimeProvider);
+        const transcription =
+          config.realtimeProvider === "anthropic" ? await operatorCredentialStore.get("openai") : undefined;
+        const elevenLabs =
+          config.ttsProvider === "elevenlabs" ? await operatorCredentialStore.get("elevenlabs") : undefined;
+        // The same credential shapes a Discord body requires (ADR 0070): brokered API keys only.
+        if (realtime?.type !== "api") return undefined;
+        if (config.realtimeProvider === "anthropic" && transcription?.type !== "api") return undefined;
+        if (config.ttsProvider === "elevenlabs" && elevenLabs?.type !== "api") return undefined;
+        return {
+          ports: createVoiceRealtimePorts({
+            apiKey: realtime.key,
+            ...(transcription?.type === "api" ? { transcriptionApiKey: transcription.key } : {}),
+            ...(elevenLabs?.type === "api" ? { elevenLabsApiKey: elevenLabs.key } : {}),
+            config,
+          }),
+          decayWindowMs: config.decayWindowMs,
+        };
+      },
+    },
   ),
   { enabled: voiceOn, settings: undefined },
 );
@@ -2345,32 +2372,13 @@ extensions.add(personaExtension({ receipts: discordTurnReceipts, appearance: per
 extensions.add(minecraftSwitch, { enabled: minecraftOn, settings: undefined });
 await extensions.start();
 const clankie = await createClankieApp({
-  voiceCall: {
-    // Read when a call starts, never at boot: the broker is touched only when someone calls.
-    async realtime() {
-      const env = { ...process.env };
-      applyVoiceSettingsToEnvironment((await settingsStore.load()).voice, env);
-      const config = parseVoiceRealtimeEnv(env);
-      const realtime = await operatorCredentialStore.get(config.realtimeProvider);
-      const transcription =
-        config.realtimeProvider === "anthropic" ? await operatorCredentialStore.get("openai") : undefined;
-      const elevenLabs =
-        config.ttsProvider === "elevenlabs" ? await operatorCredentialStore.get("elevenlabs") : undefined;
-      // The same credential shapes a Discord body requires (ADR 0070): brokered API keys only.
-      if (realtime?.type !== "api") return undefined;
-      if (config.realtimeProvider === "anthropic" && transcription?.type !== "api") return undefined;
-      if (config.ttsProvider === "elevenlabs" && elevenLabs?.type !== "api") return undefined;
-      return {
-        ports: createVoiceRealtimePorts({
-          apiKey: realtime.key,
-          ...(transcription?.type === "api" ? { transcriptionApiKey: transcription.key } : {}),
-          ...(elevenLabs?.type === "api" ? { elevenLabsApiKey: elevenLabs.key } : {}),
-          config,
-        }),
-        decayWindowMs: config.decayWindowMs,
-      };
-    },
-  },
+  ...(worldOn
+    ? {
+        streamWatch: new DiscordStreamWatchProjection(
+          process.env.CLANKIE_DISCORD_ATTACHMENT_ROOT?.trim() || undefined,
+        ),
+      }
+    : {}),
   workMedia,
   remoteProjectLeads: new RemoteProjectLeads({
     repoRoot,

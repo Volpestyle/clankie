@@ -1,12 +1,3 @@
 {
-  "edges": [
-    "app/runtime.ts -> @clankie/discord-presence-core (persona)",
-    "app/runtime.ts -> discord-presence-session.ts (persona)",
-    "app/runtime.ts -> discord-user-session-opt-in.ts (persona)",
-    "app/runtime.ts -> stream-watch-observation.ts (world)",
-    "app/types.ts -> @clankie/discord-presence-core (persona)",
-    "app/types.ts -> discord-presence-runtime.ts (persona)",
-    "app/types.ts -> discord-room-observations.ts (persona)",
-    "app/types.ts -> discord-room-routes.ts (persona)"
-  ]
+  "edges": []
 }

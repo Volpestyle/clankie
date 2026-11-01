@@ -30,7 +30,7 @@ import {
 import type { ClankieSettings } from "@clankie/settings";
 import { resolveDiscordSettings } from "@clankie/settings";
 import type { CaptainPort } from "./captain/port.ts";
-import type { DiscordRoomObservations } from "./discord-room-observations.ts";
+import type { RoomObservationsPort } from "./ports/presence.ts";
 import { discordSetupChecks } from "./discord-setup.ts";
 
 type RoomAccess = "observe" | "guidance" | "settings";
@@ -61,7 +61,7 @@ export interface DiscordRoomRoutesOptions {
   trackerProjectExists?(projectId: string): Promise<boolean>;
   authorize(request: Request, access: RoomAccess): Promise<RoomAuthorization | undefined>;
   captain: Pick<CaptainPort, "serveOperatorConversation">;
-  observations: DiscordRoomObservations;
+  observations: RoomObservationsPort;
   settings: {
     load(): Promise<ClankieSettings>;
     update?(
