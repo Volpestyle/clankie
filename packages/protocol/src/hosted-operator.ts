@@ -32,6 +32,7 @@ import {
   FLEET_ROSTER_UNDO_PATH,
 } from "./fleet-roster.ts";
 import { ROUTINES_PATH } from "./routines.ts";
+import { EXTENSIONS_PATH } from "./extensions.ts";
 import { RUNTIME_HEALTH_PATH } from "./runtime-health.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
 
@@ -169,6 +170,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       HOST_SETTINGS_PATH,
       APPEARANCE_SETTINGS_PATH,
       MAXIMUM_TRUST_MODE_PATH,
+      EXTENSIONS_PATH,
       "/v1/operator/voice",
       WORKER_ACCOUNT_HOLDS_PATH,
       USAGE_PATH,
@@ -208,6 +210,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       HOST_SETTINGS_PATH,
       APPEARANCE_SETTINGS_PATH,
       MAXIMUM_TRUST_MODE_PATH,
+      EXTENSIONS_PATH,
       "/v1/operator/voice",
       LINEAR_FOLLOW_PATH,
       LINEAR_WAKE_PATH,

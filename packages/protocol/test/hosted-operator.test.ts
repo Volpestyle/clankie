@@ -122,3 +122,11 @@ it("allows explicit Settings projections without broadening query authority", ()
     expect(hostedOperatorAllows("POST", path, "{}")).toBe(false);
   }
 });
+
+it("lets an owner device reach the extension switches through the gateway and a hosted body (ADR 0328)", () => {
+  for (const method of ["GET", "POST"] as const) {
+    expect(publicGatewayTargetFor(method, "/v1/extensions")).toBe("control");
+    expect(hostedOperatorAllows(method, "/v1/extensions", "{}")).toBe(true);
+  }
+  expect(hostedOperatorAllows("DELETE", "/v1/extensions")).toBe(false);
+});
