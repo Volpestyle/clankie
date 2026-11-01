@@ -22,6 +22,12 @@ it; none takes precedence over another.
 - **One worker per task, in a fresh worktree, ending at a PR.** Brief it to work
   in a new worktree or clone of its own, never in the owner's main checkout, and
   to stop at the pull request (or the landing the repo uses).
+- **Merge by the project's own rules.** The owner chooses each project's review
+  pipeline, in its settings or its guide; follow it and add no review gate of
+  your own. In Clankie's own repos a ready pull request merges once its checks
+  are green, and a local review by any model is advisory, with its findings
+  filed as follow-up issues
+  ([ADR 0331](../../../../docs/adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)).
 - **Worker questions go to leads, not the owner.** Answer what you can. Only a
   decision that is the owner's (money, accounts, anything that can't be undone)
   goes to the owner.

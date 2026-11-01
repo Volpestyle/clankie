@@ -1,17 +1,18 @@
 ---
 name: codex-review
-description: Use when you are the Codex reviewer on the owner's Mac and a lead asks you to review a pull request in clankie, clankie-app or clankie-ops, or when you build one and need its review. It covers preparing a read-only checkout of the exact head, posting every finding as one "Codex review", the codex-clean status that merging waits on, and landing.
+description: Use when you are the Codex reviewer on the owner's Mac and a lead asks you to review a pull request in clankie, clankie-app or clankie-ops, or when you build one and need its review. It covers preparing a read-only checkout of the exact head, posting every finding as one "Codex review", the advisory codex-clean status, and filing findings as follow-up issues.
 ---
 
 # Codex review on the Mac
 
-Pull requests in `Volpestyle/clankie`, `clankie-app` and `clankie-ops` are
+Pull requests in `Volpestyle/clankie`, `clankie-app` and `clankie-ops` can be
 reviewed by a Codex worker on the owner's Mac, not by the cloud Codex bot
 ([ADR 0329](../../../docs/adr/0329-codex-reviews-on-the-owners-mac.md)). The
 review posts under the Mac's `gh` login as one GitHub review headed
 **Codex review**, and sets the `codex-clean` commit status on the exact commit
-it read. Merging waits on that status, so every push, a merge from `main`
-included, needs a new review.
+it read. The review is advisory: a pull request merges once its checks are
+green, with or without it, and findings become follow-up issues
+([ADR 0331](../../../docs/adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)).
 
 `scripts/codex-review.mjs` does the GitHub side. Run it from a clean clone of
 clankie's `main` at `~/dev/.clankie-checks/codex-review/tools`
@@ -50,15 +51,15 @@ Questions go to the lead that asked, never to the owner.
 ## As the builder or lead
 
 - Open the pull request as a draft early and push often (ADR 0310).
-- Ask the Mac reviewer for a review through Clankie (`message_agent` to its
-  pane, or `message_seat`), naming `OWNER/REPO#N`. Ask again after each batch
-  of fixes; fix every finding of a round in one push.
+- Merge once the checks are green; don't wait for a review.
+- When a reviewer is free, ask it through Clankie (`message_agent` to its
+  pane, or `message_seat`), naming `OWNER/REPO#N`. File each finding as a
+  follow-up issue, or fix it in the same pull request if it hasn't merged.
 - `node scripts/codex-review.mjs status OWNER/REPO PR` shows `codex-clean` for
   the current head and every other check.
-- `node scripts/codex-review.mjs land OWNER/REPO PR` merges (squash by default)
-  only when the pull request is ready, `codex-clean` passed on its current head
+- `node scripts/codex-review.mjs land OWNER/REPO PR` is optional: it merges
+  (squash by default) only when the pull request is ready, `codex-clean` passed on its current head
   and every other check there finished green; a job skipped while the pull
   request was a draft counts as not run yet until the ready run replaces it. It
-  merges against that exact head. The private repos have no GitHub auto-merge on their plan, so `land` is
-  how they merge; on clankie, GitHub auto-merge also waits on `codex-clean`
-  when the owner lists it as a required check.
+  merges against that exact head. A plain merge on green checks is the usual
+  merge.

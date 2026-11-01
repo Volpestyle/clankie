@@ -12,8 +12,9 @@ selection, declared filesystem-input consumers included), for pushes and same-re
 only, never forks. It stays off until the `CLANKIE_MAC_RUNNER` repository
 variable is `true`. The `codex-clean` commit status, posted by the Codex
 reviewer on the owner's Mac ([ADR 0329](../adr/0329-codex-reviews-on-the-owners-mac.md)),
-passes only once it has reviewed a pull request's head commit with no
-findings; a new push waits for a new review. The landing job restores the Vox cargo cache a
+is advisory: a pull request merges on green checks without it
+([ADR 0331](../adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)),
+and its findings become follow-up issues. The landing job restores the Vox cargo cache a
 push to main saves, and checks three TypeScript programs at once. Run the
 complete CI gate explicitly with `workflow_dispatch`; the release workflow also
 runs it. There are no scheduled full checks. No paid model, Discord account,

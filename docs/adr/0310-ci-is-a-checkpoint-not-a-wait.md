@@ -30,9 +30,9 @@ checkpoints the rest on the side.
 - **A pull request's gate takes minutes.** It is the landing gate's checks with
   the warm typecheck and only the test files the change itself adds or edits
   (`check-landing.mjs --own-tests`), beside the real-app run on the Mac
-  (ADR 0309). `landing`, `mac` and `codex-clean` stay required; `mac` is skipped
-  on a pull request, which passes. `codex-clean` comes from the Mac's Codex
-  review since ADR 0329.
+  (ADR 0309). `landing` and `mac` stay required; `mac` is skipped on a pull
+  request, which passes. `codex-clean`, the Mac's Codex review, is advisory
+  since ADR 0331.
 - **The rest checkpoints on `main`.** After a merge, the `checkpoint` job runs
   the tests the merge reaches through its imports on Linux, and the `mac` job
   runs them on the Mac. A red run there is a bug to file at the front of the

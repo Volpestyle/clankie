@@ -108,16 +108,14 @@ This repository is public. Both neighbors are private and consume
   `pnpm check:landing` for a direct landing. While iterating, run only the tests
   for what you changed.
 - On a pull request, keep its branch current with `main` and resolve conflicts
-  yourself before asking anyone to look. A Codex worker on the owner's Mac
-  reviews every pull request in this repo, `clankie-app` and `clankie-ops`
-  and posts its findings as one "Codex review"; the cloud Codex review is off
-  ([ADR 0329](docs/adr/0329-codex-reviews-on-the-owners-mac.md), the
-  `codex-review` skill). Ask it through Clankie for each round, fix every
-  finding of a round in one push, reply on and resolve each thread you
-  addressed, then ask once more. The `codex-clean` status passes only once it
-  has reviewed the head commit with no findings, so every push, a merge from
-  `main` included, needs that review; merge with
-  `node scripts/codex-review.mjs land OWNER/REPO PR`, which waits on it.
+  yourself. A ready pull request in this repo, `clankie-app` or `clankie-ops`
+  merges once its checks are green, with a plain merge; nothing else gates it
+  ([ADR 0331](docs/adr/0331-clankies-own-pull-requests-merge-on-green-checks.md)).
+  A local review (Codex on the owner's Mac through the `codex-review` skill,
+  OpenCode 2 or any other model) is advisory: run one when it helps, before or
+  after the merge, and file its findings as follow-up issues. The cloud Codex
+  review is off. This is how Clankie itself is built; in the product the owner
+  picks their own review pipeline.
 - Build each task in its own Clankie worker on the owner's machines, one
   worker per task in a fresh worktree, led by a Claude Duet thread or another
   connected lead. Open its pull request as a draft early; the pull request on
