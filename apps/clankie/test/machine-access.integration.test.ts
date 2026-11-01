@@ -131,6 +131,21 @@ it("a runtime named local cannot inherit the primary machine's full access", asy
   await runtimes.requireAccess("default", "screen");
 });
 
+it("a desktop-app hire is this machine's, under this machine's own ceiling", async () => {
+  const f = await fixture();
+  const runtimes = new ExecutionConnections({
+    settings: f.settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+  });
+  // Messaging a hire in the desktop app's terminals (ADR 0319) needs no runtime connection.
+  await runtimes.requireAccess("herdr-core", "workers");
+  await f.set("local", "portal");
+  await expect(runtimes.requireAccess("herdr-core", "workers")).rejects.toThrow("portal access");
+  await expect(runtimes.requireAccess("unregistered", "workers")).rejects.toThrow(
+    "Unknown runtime connection",
+  );
+});
+
 it("portal policy refuses a real hire controller before any native launch or allocation", async () => {
   const f = await fixture();
   const runtimes = new ExecutionConnections({

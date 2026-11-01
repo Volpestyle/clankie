@@ -191,7 +191,11 @@ import {
 import { OperatorSeatBindings } from "./operator-seat-bindings.ts";
 import { operatorSeatInventory, operatorSeatPolicy } from "./operator-seat-inventory.ts";
 import { OperatorSeatMigrations } from "./operator-seat-migrations.ts";
-import { createProjectProcessObserver, HarnessBinaryObservations } from "./project-process-proof.ts";
+import {
+  createProjectProcessObserver,
+  HarnessBinaryObservations,
+  type ProjectProcessRefusal,
+} from "./project-process-proof.ts";
 import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createPrimeNativeHost } from "./captain/prime-native-host.ts";
 import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
@@ -1043,6 +1047,8 @@ const localFleetBinding = async () => {
 };
 // Seats left on a superseded harness release after an auto-update (VUH-1748).
 const harnessBinaries = new HarnessBinaryObservations();
+/** A desktop-app seat's latest proof refusal (fixed vocabulary), named when its hire can't bind (ADR 0319). */
+const desktopProofRefusals = new Map<string, ProjectProcessRefusal>();
 const localProjectProcessObserver = createProjectProcessObserver({
   binding: localFleetBinding,
   herdrBinary: "herdr",
@@ -1050,6 +1056,11 @@ const localProjectProcessObserver = createProjectProcessObserver({
   // A hire in the Herdr desktop app's terminals (ADR 0319), defined with the listener below.
   coreBinding: () => herdrCoreBinding(),
   coreSeat: (binding, address) => herdrCoreSeat(binding, address),
+  refusal: (event, pane) => {
+    if (!pane.startsWith(`${HERDR_CORE_FLEET}/`)) return;
+    desktopProofRefusals.set(pane, event);
+    logger.warn({ event: "desktop_seat.proof_refused", pane, ...event }, "Desktop-app seat proof refused");
+  },
 });
 const remoteCodexSeats = new RemoteCodexSeats(async (id) =>
   (await runtimes.fleets()).find((fleet) => fleet.id === id),
@@ -1070,8 +1081,11 @@ const projectWorktreeRoot: ObserveProjectWorktreeRoot = (input) =>
 const projectGitWorktree: ObserveProjectGitWorktree = (root, cwd) =>
   root.machineId === "local" ? observeLocalProjectGitWorktree(root, cwd) : remoteGitWorktree(root, cwd);
 
-const projectProcessObserver = (fleet: string, pane: string) =>
-  fleet === "default" ? localProjectProcessObserver(fleet, pane) : remoteProjectObserver(fleet, pane);
+const projectProcessObserver = (fleet: string, pane: string) => {
+  if (fleet !== "default") return remoteProjectObserver(fleet, pane);
+  desktopProofRefusals.delete(pane);
+  return localProjectProcessObserver(fleet, pane);
+};
 const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
   path: join(stateRoot, "local-codex-seats.json"),
   observeOccupant: async (pane, signal) => {
@@ -1645,6 +1659,10 @@ const captain = createCaptain(
     builtInTracker,
     onHealthAlertDelivery: (result) => logger.info({ event: "native.health_alert.delivery", ...result }),
     projectHireIdentity: projectProcessObserver,
+    projectHireRefusal: (pane) => {
+      const refused = desktopProofRefusals.get(pane);
+      return refused === undefined ? undefined : `${refused.reason} at ${refused.checkpoint}`;
+    },
     projectHireIdentityBatch: remoteProjectBatchObserver,
     fleetProjectMembership: () => fleetProjectMembership,
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),

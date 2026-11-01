@@ -73,6 +73,8 @@ export interface CaptainOptions {
     fleet: string,
     pane: string,
   ) => Promise<ProjectHireProcessProof | undefined>;
+  /** Why the last process proof for a pane was refused, in fixed words, when its observer says. */
+  readonly projectHireRefusal?: (pane: string) => string | undefined;
   /** Fresh same-call display attribution only; individual steering still revalidates. */
   readonly projectHireIdentityBatch?: (
     fleet: string,
