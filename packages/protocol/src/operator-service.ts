@@ -310,6 +310,27 @@ export const HerdrCoreAgentSchema = z
   .strict();
 export type HerdrCoreAgent = z.infer<typeof HerdrCoreAgentSchema>;
 
+const CloseSeatRefusalSchema = z.discriminatedUnion("reason", [
+  /** Its worktree holds unlanded work and no reason was given. */
+  z
+    .object({
+      reason: z.literal("unlanded_work"),
+      worktrees: z.array(WorktreeReconciliationSchema).max(8),
+    })
+    .strict(),
+  /** A connected app closes only a hire Clankie or an app started, never the owner's. */
+  z.object({ reason: z.literal("not_clankies_hire") }).strict(),
+  /** A connected app closes only an agent that isn't in the middle of a turn. */
+  z
+    .object({
+      reason: z.literal("busy"),
+      status: z.string().trim().min(1).max(OPERATOR_CONVERSATION_CODE_MAX),
+    })
+    .strict(),
+  /** No agent Clankie seats has that id now. */
+  z.object({ reason: z.literal("not_found") }).strict(),
+]);
+
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
   /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
   FeedListRequestSchema.extend({ op: z.literal("feed_list"), schemaVersion: z.literal(1) }).strict(),
@@ -900,6 +921,11 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       seatId: OperatorConversationEventRefSchema,
       /** Why the worker's unlanded commits or uncommitted files may be left behind. */
       unlandedReason: z.string().trim().min(1).max(512).optional(),
+      /**
+       * Stamped by the relay when a connected app closes an agent; a caller that sends it is
+       * refused. The service then closes only an idle hire that Clankie or an app started.
+       */
+      appDeviceId: z.string().min(1).max(256).optional(),
     })
     .strict(),
   z
@@ -1638,14 +1664,8 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       schemaVersion: z.literal(1),
       seatId: OperatorConversationEventRefSchema,
       closed: z.boolean(),
-      /** The seat stayed open: its worktree holds unlanded work and no reason was given. */
-      refusal: z
-        .object({
-          reason: z.literal("unlanded_work"),
-          worktrees: z.array(WorktreeReconciliationSchema).max(8),
-        })
-        .strict()
-        .optional(),
+      /** Why the seat stayed open. */
+      refusal: CloseSeatRefusalSchema.optional(),
     })
     .strict(),
   z
@@ -1781,7 +1801,7 @@ export type OperatorConversationTailItem =
  */
 interface CloseSeatOutcome {
   readonly closed: boolean;
-  readonly refusal?: { reason: "unlanded_work"; worktrees: z.infer<typeof WorktreeReconciliationSchema>[] };
+  readonly refusal?: z.infer<typeof CloseSeatRefusalSchema>;
 }
 export interface OperatorConversationServiceClient {
   /** Missing/expired receipts remain unknown; this read never authorizes a resend. */

@@ -470,6 +470,10 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     // A job handed to a connected lead's stored webhook, stamped with the app (ADR 0336).
     case "lead_wake":
       return true;
+    // Closing a finished hire, stamped with the app; the service closes only an idle
+    // agent that Clankie or an app hired, never one the owner started.
+    case "close_seat":
+      return true;
     default:
       return false;
   }

@@ -755,6 +755,16 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       }
     }
+    if (parsed.success && parsed.data.op === "close_seat" && parsed.data.appDeviceId !== undefined) {
+      // A connected app closing an agent arrives only through the relay's captain bearer,
+      // stamped with the connector device it authenticated. The service then closes only an
+      // idle hire that Clankie or an app started, and names the app in its log.
+      const deviceId = parsed.data.appDeviceId;
+      const relay = captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const record = ctx.devices.get(deviceId);
+      if (!relay || record?.status !== "active" || record.scope !== "connector")
+        return context.json({ error: "app_author_required" }, 403);
+    }
     if (parsed.success && parsed.data.op === "lead_wake") {
       // A job handed to a connected lead at the webhook the owner stored (ADR 0336). An app
       // reaches it only through the relay's captain bearer, which stamps the connector
