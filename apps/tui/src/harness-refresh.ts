@@ -19,7 +19,9 @@ export interface HarnessRefreshResult {
   readonly notices: { state: "announced" | "deferred"; detail?: string };
 }
 const completed = (results: readonly HarnessInstallResult[]) =>
-  results.every((entry) => ["installed", "updated", "source-setup-completed"].includes(entry.status));
+  results.every((entry) =>
+    ["installed", "updated", "source-setup-completed", "removed"].includes(entry.status),
+  );
 
 /** Update is prior approval to maintain existing links, never permission to enroll new profiles. */
 export async function refreshLinkedHarnesses(

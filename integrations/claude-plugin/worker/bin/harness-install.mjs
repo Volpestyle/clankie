@@ -45,13 +45,6 @@ async function rememberProfile(home, harness, profile) {
     { mode: 0o600 },
   );
 }
-const linkedClaude = async (profile) => {
-  const known = await json(join(profile, "plugins", "known_marketplaces.json")).catch(() => ({}));
-  const installed = await json(join(profile, "plugins", "installed_plugins.json")).catch(() => ({}));
-  return Boolean(
-    known.clankie || installed.plugins?.["clankie-worker@clankie"]?.some((entry) => entry.scope === "user"),
-  );
-};
 // Recorded only after the owner approved and completed a source-owned installation.
 const sourceRecord = (profile) => join(profile, "plugins", "clankie-source-setup.json");
 async function rememberedSourceSetup(profile, source) {
@@ -69,10 +62,6 @@ async function rememberSourceSetup(profile, source, setup) {
     temporary = `${path}.${process.pid}.tmp`;
   await writeFile(temporary, JSON.stringify({ source, ...setup }), { mode: 0o600 });
   await rename(temporary, path);
-}
-async function clankieMarketplace(path) {
-  const manifest = await json(join(path, ".claude-plugin", "marketplace.json")).catch(() => undefined);
-  return manifest?.name === "clankie" && manifest.plugins?.some((plugin) => plugin.name === "clankie-worker");
 }
 async function refreshCodexMarketplace(execute, marketplace) {
   const output = await execute("codex", ["plugin", "marketplace", "list", "--json"]);
@@ -94,92 +83,91 @@ async function refreshCodexMarketplace(execute, marketplace) {
   }
   await execute("codex", ["plugin", "marketplace", "add", marketplace]);
 }
-/** Read-only confirmation of one known native enable result; not plugin or tool authority. */
-async function confirmClaudeWorkerEnabled(error, { profile, source, configBefore }) {
-  const alreadyEnabled =
-    /^[×✘] Failed to enable plugin "clankie-worker@clankie": Plugin "clankie-worker@clankie" is already enabled at user scope$/u;
-  if (
-    error?.code !== 1 ||
-    error?.signal ||
-    error?.killed ||
-    String(error?.stdout ?? "").trim() ||
-    !alreadyEnabled.test(String(error?.stderr ?? "").trim())
-  )
-    return false;
-  try {
-    const config = join(profile, "settings.json");
-    const current = await readFile(config, "utf8");
-    const expectedSource =
-      configBefore === undefined ? join(await realpath(profile), "settings.json") : source;
-    return (
-      (await lstat(config)).isFile() &&
-      (await realpath(config)) === expectedSource &&
-      !managedText(current) &&
-      JSON.parse(current).enabledPlugins?.["clankie-worker@clankie"] === true
-    );
-  } catch {
-    return false;
-  }
+const WORKER = "clankie-worker@clankie";
+/**
+ * What an older setup left in a Claude profile: Clankie's installed worker and,
+ * when no other Clankie plugin is installed from it, the `clankie` marketplace.
+ * Claude hires load the worker from Clankie's own files (ADR 0317).
+ */
+async function legacyClaudeWorker(profile) {
+  const known = await json(join(profile, "plugins", "known_marketplaces.json")).catch(() => ({}));
+  const installed = await json(join(profile, "plugins", "installed_plugins.json")).catch(() => ({}));
+  const plugins = installed.plugins ?? {};
+  const worker = Array.isArray(plugins[WORKER]) && plugins[WORKER].some((entry) => entry.scope === "user");
+  const otherFromClankie = Object.keys(plugins).some((id) => id !== WORKER && id.endsWith("@clankie"));
+  return { worker, marketplace: Boolean(known.clankie) && !otherFromClankie };
 }
-/** An alias may refresh its own existing cache, never install/enable or edit shared settings. */
-async function updatableClaudeAlias(profile, profiles, source, marketplace, relocate = false) {
+/** Remove the old worker copy from one profile; undefined when there is nothing to remove. */
+async function removeClaudeWorker({ profile, execute, consent }) {
+  const legacy = await legacyClaudeWorker(profile);
+  if (!legacy.worker && !legacy.marketplace) return undefined;
   try {
-    if (!(await lstat(join(profile, "settings.json"))).isSymbolicLink()) return false;
-    if (/[\\/]\.local[\\/]/iu.test(source) || !(await lstat(source)).isFile()) return false;
-    let owner = false;
-    for (const entry of profiles) {
-      const config = join(entry, "settings.json");
-      if (
-        entry !== profile &&
-        (await lstat(config).catch(() => undefined))?.isFile() &&
-        (await realpath(config)) === source
-      )
-        owner = true;
+    await execute("claude", ["--version"]);
+  } catch {
+    return { status: "absent", detail: "Harness executable unavailable on this machine." };
+  }
+  const config = join(profile, "settings.json");
+  // A profile without settings is the only expected miss; anything else fails the removal.
+  const missing = (error) => {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  };
+  const source = await realpath(config).catch(() => config);
+  const configBefore = await readFile(config, "utf8").catch(missing);
+  const wasSymlink = (await lstat(config).catch(missing))?.isSymbolicLink() ?? false;
+  const linkBefore = wasSymlink ? await readlink(config) : undefined;
+  const managed = wasSymlink || managedText(configBefore ?? "");
+  if (managed) {
+    let declared = {};
+    try {
+      declared = JSON.parse(configBefore ?? "{}");
+    } catch {
+      /* An unreadable source declares nothing this setup can see. */
     }
-    if (!owner) return false;
-    const bytes = await readFile(source, "utf8");
-    if (managedText(bytes) || JSON.parse(bytes).enabledPlugins?.["clankie-worker@clankie"] !== true)
-      return false;
-    const installed = JSON.parse(await readFile(join(profile, "plugins", "installed_plugins.json"), "utf8"));
+    const entries = [
+      ...(declared.enabledPlugins?.[WORKER] !== undefined ? [`enabledPlugins["${WORKER}"]`] : []),
+      ...(legacy.marketplace && declared.extraKnownMarketplaces?.clankie !== undefined
+        ? ["extraKnownMarketplaces.clankie"]
+        : []),
+    ];
+    if (entries.length > 0)
+      return {
+        status: "source-manager-required",
+        detail: `source-managed: ${profile} still declares the old worker copy in ${source}. Remove ${entries.join(" and ")} there through its owner, then run setup again to clear this profile's cached copy; preserve the configuration link. Claude hires load the worker from Clankie's own files (ADR 0317).`,
+      };
+  }
+  const detail = `Remove the old ${WORKER} copy${legacy.marketplace ? " and its clankie marketplace" : ""} from profile ${profile}: Claude hires load the worker from Clankie's own files now (ADR 0317).`;
+  if (!(await consent("claude", detail, { profile, source, managed }))) return { status: "declined", detail };
+  const unchanged = async () => {
     if (
-      !installed.plugins?.["clankie-worker@clankie"]?.some(
-        (entry) => entry.scope === "user" && typeof entry.installPath === "string",
-      )
+      managed &&
+      ((await realpath(config).catch(() => config)) !== source ||
+        (await readFile(config, "utf8").catch(missing)) !== configBefore ||
+        (wasSymlink && (await readlink(config).catch(missing)) !== linkBefore))
     )
-      return false;
-    const registered = JSON.parse(await readFile(join(profile, "plugins", "known_marketplaces.json"), "utf8"))
-      .clankie?.source;
-    return (
-      registered?.source === "directory" &&
-      ((await realpath(registered.path)) === (await realpath(marketplace)) ||
-        (relocate && (await clankieMarketplace(registered.path))))
-    );
-  } catch {
-    return false;
-  }
-}
-/** The owner's settings source already enables the worker and registers this marketplace, so only the profile's own plugin cache needs installing. */
-async function sourceEnabledClaude(profile, source, marketplace) {
+      throw new Error(
+        `Removing the old worker copy changed the Claude settings source ${source}; inspect it through its owner`,
+      );
+  };
   try {
-    if (!(await lstat(join(profile, "settings.json"))).isSymbolicLink() || !(await lstat(source)).isFile())
-      return false;
-    const bytes = await readFile(source, "utf8");
-    const settings = JSON.parse(bytes);
-    const registered = settings.extraKnownMarketplaces?.clankie?.source;
-    return (
-      !managedText(bytes) &&
-      settings.enabledPlugins?.["clankie-worker@clankie"] === true &&
-      registered?.source === "directory" &&
-      typeof registered.path === "string" &&
-      (await realpath(registered.path)) === (await realpath(marketplace))
-    );
-  } catch {
-    return false;
+    await unchanged();
+    if (legacy.worker) await execute("claude", ["plugin", "uninstall", WORKER, "--scope", "user"]);
+    await unchanged();
+    if (legacy.marketplace) await execute("claude", ["plugin", "marketplace", "remove", "clankie"]);
+    await unchanged();
+    const after = await legacyClaudeWorker(profile);
+    if (after.worker || after.marketplace)
+      throw new Error(
+        `Claude still lists the old worker copy in ${profile}; inspect it with claude plugin list`,
+      );
+    return {
+      status: "removed",
+      detail:
+        "Removed the old worker copy. Claude hires load the worker from Clankie's own files; a hand-started session drops the old copy when it restarts.",
+    };
+  } catch (error) {
+    return { status: "failed", detail: error instanceof Error ? error.message : String(error) };
   }
-}
-/** What a symlinked Claude settings source must say before Clankie can install into its profile. */
-function claudeSourceSetup(source, marketplace) {
-  return `Enable the worker in ${source} itself: set enabledPlugins["clankie-worker@clankie"] to true and extraKnownMarketplaces.clankie to {"source":{"source":"directory","path":${JSON.stringify(marketplace)}}}, then run setup again; Clankie then installs only this profile's plugin cache and leaves that file unchanged.`;
 }
 async function installHarnessBridges(options) {
   const env = options.env ?? process.env;
@@ -196,7 +184,7 @@ async function installHarnessBridges(options) {
   // A profile whose refresh failed or was refused can still be repaired here.
   const refreshed = new Set(
     (options.refreshed ?? []).flatMap((entry) =>
-      ["installed", "updated", "source-setup-completed"].includes(entry.status) && entry.profile
+      ["installed", "updated", "removed", "source-setup-completed"].includes(entry.status) && entry.profile
         ? [entry.profile]
         : [],
     ),
@@ -233,18 +221,35 @@ async function installHarnessBridges(options) {
       codexProfile,
     })),
   ];
+  // Claude hires load this worker directory as it is (ADR 0317), so its bundled
+  // skills are materialized here whether or not any profile is touched. A
+  // failure surfaces on the Codex installs that need the same skills.
+  let skills;
+  const prepareSkills = () =>
+    (skills ??= Promise.resolve().then(() =>
+      (options.prepareSkills ?? prepareWorkerSkill)(join(marketplace, "worker")),
+    ));
+  await prepareSkills().catch((error) =>
+    process.stderr.write(`clankie harness install: worker skills not prepared: ${error?.message ?? error}\n`),
+  );
   for (const { harness, profile, codexProfile } of targets) {
     if (refreshed.has(harness === "claude" ? profile : codexProfile)) continue;
-    if (options.linkedOnly && harness === "claude" && !(await linkedClaude(profile))) continue;
-    const targetEnv = {
-      ...env,
-      ...(harness === "claude" ? { CLAUDE_CONFIG_DIR: profile } : { CODEX_HOME: codexProfile }),
-    };
+    if (harness === "claude") {
+      // Claude workers need no install any more; setup and refresh only clear an older copy.
+      const removal = await removeClaudeWorker({
+        profile,
+        execute: (command, args) => run(command, args, { ...env, CLAUDE_CONFIG_DIR: profile }),
+        consent: options.consent,
+      });
+      if (removal) results.push({ harness, profile, ...removal });
+      continue;
+    }
+    const targetEnv = { ...env, CODEX_HOME: codexProfile };
     const execute = (command, args) => run(command, args, targetEnv);
     try {
       await execute(harness, ["--version"]);
     } catch {
-      if (options.linkedOnly && harness === "codex") {
+      if (options.linkedOnly) {
         const config = await readFile(join(codexProfile, "config.toml"), "utf8").catch(() => "");
         const cached = await readdir(
           join(codexProfile, "plugins", "cache", "clankie-fleet", "clankie-worker"),
@@ -266,15 +271,13 @@ async function installHarnessBridges(options) {
       });
       continue;
     }
-    const config = harness === "claude" ? join(profile, "settings.json") : join(codexProfile, "config.toml");
+    const config = join(codexProfile, "config.toml");
     const source = await realpath(config).catch(() => config);
     const configBefore = await readFile(config, "utf8").catch(() => undefined);
     const sourceSetup =
-      harness === "codex"
-        ? (options.codexSourceSetup ??
-          (options.linkedOnly ? await rememberedSourceSetup(codexProfile, source) : undefined))
-        : undefined;
-    if (options.linkedOnly && harness === "codex") {
+      options.codexSourceSetup ??
+      (options.linkedOnly ? await rememberedSourceSetup(codexProfile, source) : undefined);
+    if (options.linkedOnly) {
       let plugins = [];
       try {
         const output = await execute(harness, ["plugin", "list", "--json"]);
@@ -313,41 +316,23 @@ async function installHarnessBridges(options) {
       /(?:generated|do not edit|managed by)/iu.test(
         (await readFile(config, "utf8").catch(() => "")).split("\n").slice(0, 20).join("\n"),
       );
-    const aliasUpdate =
-      harness === "claude" &&
-      managed &&
-      (await updatableClaudeAlias(profile, profiles, source, marketplace, options.linkedOnly));
-    const sourceEnabled =
-      harness === "claude" &&
-      managed &&
-      !aliasUpdate &&
-      (await sourceEnabledClaude(profile, source, marketplace));
-    const pluginId = harness === "claude" ? "clankie-worker@clankie" : "clankie-worker@clankie-fleet";
-    const detail = aliasUpdate
-      ? `Update the existing clankie-worker cache for alias profile ${profile}; shared settings at ${source} stay unchanged.`
-      : sourceEnabled
-        ? `Install clankie-worker@clankie from ${marketplace} into profile ${profile}'s plugin cache; its settings at ${source} already enable it and stay unchanged.`
-        : harness === "claude" && !managed
-          ? `Install and enable clankie-worker@clankie from ${marketplace} for profile ${profile} (bridge, native hooks and packaged skills).`
-          : managed
-            ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
-            : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
+    const pluginId = "clankie-worker@clankie-fleet";
+    const detail = managed
+      ? `${harness} configuration is managed at ${source}. ${sourceSetup ? `Run source setup ${sourceSetup.command} to install ${pluginId}.` : `Use its source setup to install ${pluginId}; no config file will be modified here.`}`
+      : `Install clankie-worker@clankie-fleet from ${marketplace} through Codex's native plugin manager (bridge and skills).`;
     // Missing source setup is a setup refusal, not a declined consent prompt.
-    if (managed && !sourceSetup && !aliasUpdate && !sourceEnabled) {
+    if (managed && !sourceSetup) {
       results.push({
         harness,
-        profile: harness === "codex" ? codexProfile : profile,
+        profile: codexProfile,
         status: "source-manager-required",
-        detail:
-          harness === "codex"
-            ? `source-managed: needs setup in ${codexProfile}. Configuration source: ${source}. Have its owner provide a source-owned script, then run clankie harness install --codex-source-setup /absolute/source-owned/script --approve in this profile. Preserve the configuration link.`
-            : `source-managed: needs setup in ${profile}. ${wasSymlink ? claudeSourceSetup(source, marketplace) : `Apply the worker plugin setup through the owner of ${source}; preserve the configuration link.`}`,
+        detail: `source-managed: needs setup in ${codexProfile}. Configuration source: ${source}. Have its owner provide a source-owned script, then run clankie harness install --codex-source-setup /absolute/source-owned/script --approve in this profile. Preserve the configuration link.`,
       });
       continue;
     }
     if (
       !(await options.consent(harness, detail, {
-        profile: harness === "claude" ? profile : codexProfile,
+        profile: codexProfile,
         source,
         managed,
         ...(sourceSetup ? { sourceSetup } : {}),
@@ -357,73 +342,14 @@ async function installHarnessBridges(options) {
       continue;
     }
     try {
-      await (options.prepareSkills ?? prepareWorkerSkill)(join(marketplace, "worker"));
+      await prepareSkills();
       if (
         (await realpath(config).catch(() => config)) !== source ||
         (await readFile(config, "utf8").catch(() => undefined)) !== configBefore ||
         (wasSymlink && (await readlink(config).catch(() => undefined)) !== linkBefore)
       )
         throw new Error("Harness configuration changed during consent; inspect its source and retry");
-      if (aliasUpdate) {
-        if (!(await updatableClaudeAlias(profile, profiles, source, marketplace, options.linkedOnly)))
-          throw new Error("Claude profile alias or marketplace changed during consent; inspect and retry");
-        const checkAlias = async () => {
-          if (!(await updatableClaudeAlias(profile, profiles, source, marketplace, options.linkedOnly)))
-            throw new Error(
-              "Claude alias plugin, enabled settings, or marketplace changed; inspect and retry",
-            );
-          if (
-            (await realpath(config)) !== source ||
-            !(await lstat(config)).isSymbolicLink() ||
-            (await readlink(config)) !== linkBefore ||
-            (await readFile(source, "utf8")) !== configBefore ||
-            !(await lstat(source)).isFile()
-          )
-            throw new Error(
-              "Native update changed shared Claude configuration; inspect its source before continuing",
-            );
-        };
-        await checkAlias();
-        const registered = (await json(join(profile, "plugins", "known_marketplaces.json"))).clankie.source;
-        if ((await realpath(registered.path)) !== (await realpath(marketplace)))
-          await execute(harness, ["plugin", "marketplace", "add", marketplace]);
-        else await execute(harness, ["plugin", "marketplace", "update", "clankie"]);
-        await checkAlias();
-        await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
-        await checkAlias();
-      } else if (sourceEnabled) {
-        const checkSource = async () => {
-          if (
-            (await realpath(config)) !== source ||
-            !(await lstat(config)).isSymbolicLink() ||
-            (await readlink(config)) !== linkBefore ||
-            (await readFile(source, "utf8")) !== configBefore ||
-            !(await sourceEnabledClaude(profile, source, marketplace))
-          )
-            throw new Error(
-              `Native setup changed the Claude settings source ${source}; inspect it through its owner before continuing`,
-            );
-        };
-        await checkSource();
-        const known = JSON.parse(
-          await readFile(join(profile, "plugins", "known_marketplaces.json"), "utf8").catch(() => "{}"),
-        );
-        const registered = known.clankie?.source;
-        if (
-          registered?.source === "directory" &&
-          // allow-swallowed-rejection -- A registered folder that no longer exists is added again below.
-          (await realpath(registered.path).catch(() => undefined)) === (await realpath(marketplace))
-        )
-          await execute(harness, ["plugin", "marketplace", "update", "clankie"]);
-        else await execute(harness, ["plugin", "marketplace", "add", marketplace]);
-        await checkSource();
-        if (!options.linkedOnly) {
-          await execute(harness, ["plugin", "install", "clankie-worker@clankie", "--scope", "user"]);
-          await checkSource();
-        }
-        await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
-        await checkSource();
-      } else if (managed) {
+      if (managed) {
         await run(sourceSetup.command, sourceSetup.args, {
           ...targetEnv,
           CLANKIE_CODEX_WORKER_MARKETPLACE: marketplace,
@@ -439,46 +365,11 @@ async function installHarnessBridges(options) {
             "Source setup changed the managed configuration link; inspect its source before continuing",
           );
       } else {
-        if (harness === "claude") {
-          const known = JSON.parse(
-            await readFile(join(profile, "plugins", "known_marketplaces.json"), "utf8").catch(() => "{}"),
-          );
-          const registered = known.clankie?.source;
-          if (registered) {
-            if (
-              registered.source !== "directory" ||
-              (await realpath(registered.path)) !== (await realpath(marketplace))
-            )
-              if (
-                !(
-                  options.linkedOnly &&
-                  registered.source === "directory" &&
-                  (await clankieMarketplace(registered.path))
-                )
-              )
-                throw new Error(
-                  `The clankie marketplace in ${profile} has a different source; review it with the native plugin manager`,
-                );
-            if ((await realpath(registered.path)) !== (await realpath(marketplace)))
-              await execute(harness, ["plugin", "marketplace", "add", marketplace]);
-            else await execute(harness, ["plugin", "marketplace", "update", "clankie"]);
-          } else await execute(harness, ["plugin", "marketplace", "add", marketplace]);
-        } else if (options.linkedOnly) await refreshCodexMarketplace(execute, marketplace);
+        if (options.linkedOnly) await refreshCodexMarketplace(execute, marketplace);
         else await execute(harness, ["plugin", "marketplace", "add", marketplace]);
-        if (harness === "claude") {
-          if (!options.linkedOnly)
-            await execute(harness, ["plugin", "install", "clankie-worker@clankie", "--scope", "user"]);
-          await execute(harness, ["plugin", "update", "clankie-worker@clankie", "--scope", "user"]);
-          if (!options.linkedOnly)
-            try {
-              await execute(harness, ["plugin", "enable", "clankie-worker@clankie", "--scope", "user"]);
-            } catch (error) {
-              if (!(await confirmClaudeWorkerEnabled(error, { profile, source, configBefore }))) throw error;
-            }
-        } else await execute(harness, ["plugin", "add", "clankie-worker@clankie-fleet", "--json"]);
+        await execute(harness, ["plugin", "add", "clankie-worker@clankie-fleet", "--json"]);
       }
-      if (harness === "codex" && managed && options.codexSourceSetup)
-        await rememberSourceSetup(codexProfile, source, sourceSetup);
+      if (managed && options.codexSourceSetup) await rememberSourceSetup(codexProfile, source, sourceSetup);
       if (options.linkedOnly) {
         const expectedVersion = (await json(join(marketplace, "worker", ".claude-plugin", "plugin.json")))
           .version;
@@ -490,31 +381,17 @@ async function installHarnessBridges(options) {
             return typeof output === "string" ? output : output.stdout;
           },
         });
-        const observed =
-          harness === "claude"
-            ? inspection.claude.find((entry) => entry.profile === profile)
-            : inspection.codex;
-        if (
-          !observed?.versionMatches ||
-          !observed.bridge ||
-          !observed.skill ||
-          (harness === "claude" ? !observed.hooks : !observed.identityForwarding)
-        )
+        const observed = inspection.codex;
+        if (!observed?.versionMatches || !observed.bridge || !observed.skill || !observed.identityForwarding)
           throw new Error(
             `Native ${harness} refresh did not verify version ${expectedVersion}, bridge and packaged skill; inspect clankie doctor`,
           );
       }
-      if (!options.linkedOnly)
-        await rememberProfile(home, harness, harness === "claude" ? profile : codexProfile);
+      if (!options.linkedOnly) await rememberProfile(home, harness, codexProfile);
       results.push({
         harness,
         profile,
-        status:
-          aliasUpdate || (options.linkedOnly && (!managed || sourceEnabled))
-            ? "updated"
-            : managed && !sourceEnabled
-              ? "source-setup-completed"
-              : "installed",
+        status: options.linkedOnly && !managed ? "updated" : managed ? "source-setup-completed" : "installed",
         detail:
           "Setup completed. Restart this harness and use doctor to inspect activation, skill presence and live membership; installation alone grants no tools.",
       });
@@ -529,7 +406,7 @@ async function installHarnessBridges(options) {
   }
   return results;
 }
-export { installHarnessBridges, confirmClaudeWorkerEnabled };
+export { installHarnessBridges };
 
 /** Execute an owner-selected source script without a shell or a config rewrite. */
 export function codexSourceSetupCommand(

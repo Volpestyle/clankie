@@ -389,8 +389,9 @@ already lists; doctor also observes the named head's operator bridge.
 - `live-process`: the pane has a matching live bridge process. This does not
   verify the native tool catalog, a successful call, or reply delivery.
 - `missing`: a live native harness has no observed descendant or dedicated
-  socket-matched bridge. For Claude, install/enable `clankie-worker@clankie` in
-  that pane's actual profile and restart/resume it. For Codex, check its
+  socket-matched bridge. For Claude, resume it with Clankie's worker loaded for
+  that session (`--plugin-dir` with `--channels plugin:clankie-worker@inline`,
+  ADR 0317; a prepared Mac pane's `claude` adds both). For Codex, check its
   source-owned bridge registration and resume with
   `codex --no-daemon resume <SESSION>`.
 - `pane-mismatch`: the observed bridge claims another pane/socket. Check its
@@ -6468,8 +6469,9 @@ Named machine connections reach the captain immediately; only default workspace 
 
 `prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` readies the
 machine's Claude and Codex workers; running it is the owner's approval. It ships
-this Clankie's own worker bundle to `~/.clankie/claude-plugin`, installs/enables
-Claude in each discovered profile, and approves its worker channel in managed
+this Clankie's own worker bundle to `~/.clankie/claude-plugin`, removes an older
+installed Claude copy from each discovered profile (hires load the staged worker
+for each session, ADR 0317), and approves its worker channel in managed
 policy (`C:\Program Files\ClaudeCode\managed-settings.json` on Windows), keeping
 existing entries. Codex uses its native `clankie-worker@clankie-fleet` plugin.
 A source-managed Codex config requires its source manager, selected with the
@@ -6575,7 +6577,7 @@ What crosses the link, and what cannot:
 - Any agent in a pane on a linked machine (or on this Mac) can write to Clankie
   with the plugin's `message_clankie` tool, hired or not. It wakes him as that
   agent's output, not the owner's instruction; he answers with `message_seat`,
-  which reaches a session that loaded `--channels plugin:clankie-worker@clankie`.
+  which reaches a session that loaded `--channels plugin:clankie-worker@inline`.
   Its receipt reports `stored` only after durable conversation acceptance.
   The roster exposes `workerReportBridge` separately from tool health: the last
   `stored`, `uncertain`, `rejected` or `unavailable` outcome, observation time,
@@ -8048,9 +8050,9 @@ that agent (a DM from the app, or a group-chat turn) arrives as
 instead of being typed into the pane. Identity is `HERDR_PANE_ID`. On a local
 machine the `clankie-worker` Claude plugin's `worker` server runs this command,
 handing it Claude's argv, and it polls only when that session approved
-`plugin:clankie-worker@inline` (a hire) or `plugin:clankie-worker@clankie` (an
-installed copy) through `--channels`. Hires and hand-started panes use that
-plugin channel.
+`plugin:clankie-worker@inline` (ADR 0317) or, from an older installed copy,
+`plugin:clankie-worker@clankie` through `--channels`. Hires and prepared Mac panes
+load the worker for each session.
 
 Registering `clankie-seat` yourself (`claude mcp add -s user clankie-seat --
 clankie mcp --seat`, then starting Claude with
@@ -8065,7 +8067,8 @@ user-scoped registration never consumes mail beside the selected worker plugin.
 ### `mcp --fleet`: fleet tools and native worker messages
 
 Register `clankie mcp --fleet` in Codex with `env_vars = ["HERDR_PANE_ID",
-"HERDR_SOCKET_PATH"]`, or install the `clankie-worker@clankie` Claude plugin.
+"HERDR_SOCKET_PATH"]`; Claude loads the `clankie-worker` plugin for each session
+(ADR 0317).
 Preserve generated/symlinked harness configuration: inspect
 `doctor.harnessBridges.codex.configSource` and edit its owning source.
 Codex seats Clankie hires into a dedicated app-server run the bridge this command
@@ -9526,13 +9529,15 @@ when idle, and a durable owner update names the waiting pane without copying
 message bodies. Restarting the service preserves these warnings; acknowledgment,
 expiry or replacement of the native recipient clears the current roster warning.
 A channel can wake an idle Claude session only when Claude was started with
-`--channels plugin:clankie-worker@clankie` and policy permits it. Installing the
-plugin or enabling policy alone does not enable channels in an existing process.
+Clankie's worker loaded for that session (`--plugin-dir` with
+`--channels plugin:clankie-worker@inline`, ADR 0317) and policy permits it.
+Enabling policy alone does not enable channels in an existing process.
 The service never repairs an unavailable channel by typing a draft into a pane.
 
 A hand-started Claude in a linked Herdr pane now shows a startup warning with
-`claude --resume SESSION_UUID --channels plugin:clankie-worker@clankie` when
-that session lacks the worker channel flag. This is the supported one-command
+`claude --resume SESSION_UUID --plugin-dir WORKER_DIR --channels
+plugin:clankie-worker@inline` when that session lacks the worker channel flag (a
+session started from an older installed copy is shown its `@clankie` form). This is the supported one-command
 restart fix; a plugin hook cannot change the already launched session's flags.
 The notice uses the exact native UUID, stays visible if the lifecycle report
 fails, and says “cannot confirm” if launch observation is unavailable. Existing
@@ -9547,7 +9552,8 @@ poll, and `unverified` when neither is observed. Live polling does not prove
 model consumption. Next-turn-only stays highlighted even before mail is queued
 or after its queue is acknowledged, and stored adoption/message receipts warn
 about the idle-wake limitation. The detail supplies the original session's
-command: `claude --resume SESSION_ID --channels plugin:clankie-worker@clankie`.
+command: `claude --resume SESSION_ID --plugin-dir <that machine's Clankie worker
+plugin folder> --channels plugin:clankie-worker@inline`.
 `clankie herdr agent list` adds these roster fields to Herdr's rows. The roster
 answers within three seconds: when the live projection is still running it
 returns the last completed roster and says on stderr that it is partial and
@@ -10035,23 +10041,16 @@ retains the named target revision across terminal confirmation and sends it to
 the service; changing its SSH target or session refuses dispatch until reviewed.
 An existing canonical workspace with no project uses global policy. Missing, ambiguous,
 mismatched or unverified worktree context refuses.
-It enables Claude in each discovered profile. An already enabled, installed Claude
-profile whose settings symlink points to another discovered unmanaged profile
-can update its own plugin cache without installing, enabling, or changing the
-shared settings. A Claude profile whose settings symlink points to a source the
-owner manages elsewhere, such as dotfiles, installs only its own plugin cache once
-that source itself sets `enabledPlugins["clankie-worker@clankie"]` to `true` and
-`extraKnownMarketplaces.clankie` to this machine's clankie marketplace directory;
-setup fails if a native step changes that file. Until then the refusal names
-both entries. Generated sources, disabled/missing plugins, and unknown targets
-still require their source manager. Refusals include each profile's setup result.
-Native enable's exact "already enabled at user scope" result (with the observed
-Windows `×` or macOS `✘` marker) is successful only
-when a fresh read of that same regular profile confirms the plugin is enabled;
-other native errors still fail.
+Claude profiles get nothing installed (ADR 0317): it removes an older
+`clankie-worker@clankie` copy from each discovered profile with Claude's own
+`plugin uninstall --scope user`, and the clankie marketplace when no other Clankie
+plugin uses it. A Claude profile whose settings come from a source the owner
+manages elsewhere, such as dotfiles, is left alone while that source still sets
+`enabledPlugins["clankie-worker@clankie"]` or `extraKnownMarketplaces.clankie`;
+the refusal names those entries, and setup fails if a native step changes that
+file. Refusals include each profile's setup result.
 Preparation uses native plugin installation for
-Codex, preserves managed Codex configuration, and compares installed Claude
-versions with the service bundle. A source-managed Codex config needs the owning
+Codex and preserves managed Codex configuration. A source-managed Codex config needs the owning
 setup script on that remote machine. Select it explicitly; Clankie never writes
 through the config symlink:
 

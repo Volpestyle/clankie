@@ -364,14 +364,16 @@ restart the seat. A missing native mod/API remains an explicit failure in
 `clankie harness refresh-tools` and the roster. See
 [doctor](../../docs/cli.md#doctor).
 
-`clankie-worker@clankie` serves native hired seats and linked fleet agents.
+`clankie-worker` serves native hired seats and linked fleet agents. Claude loads it
+for one session as `clankie-worker@inline` (ADR 0317); Codex installs it as
+`clankie-worker@clankie-fleet`.
 Its MCP server key is `clankie`; older `swarm` registrations require updating.
 it runs the native seat mailbox or fleet link, with no coordinator runtime.
 
 - **Clankie hire** (VUH-1458): inside the hire's herdr pane it runs
   `clankie mcp --seat`, so the seat's mailbox (brief, `message_seat`, DMs)
   arrives as channel events. The bridge polls only when the Claude session that
-  launched it loaded `plugin:clankie-worker@clankie` under `--channels`.
+  launched it loaded `plugin:clankie-worker@inline` under `--channels`.
   The wrapper's `CLANKIE_SEAT_PARENT_ARGV` identifies that plugin bridge. A
   separately registered `clankie-seat` bridge cannot consume its mailbox just
   because Claude loaded the plugin; it needs its own selected channel.
@@ -448,10 +450,10 @@ is bound, and `unverified` means neither receiver is observed. These are current
 observations, not model consumption or a permanent capability verdict. The TUI
 flags next-turn-only leads even before mail is queued, and a stored adoption or
 message receipt also warns. Its detail includes
-`claude --resume SESSION_ID --channels plugin:clankie-worker@clankie` for the
-original session. Coordinate any stop/reconnect/resume with the owner, preserve
+`claude --resume SESSION_ID --plugin-dir WORKER_DIR --channels
+plugin:clankie-worker@inline` for the original session. Coordinate any stop/reconnect/resume with the owner, preserve
 its original cwd and account/config home, and never start a duplicate session.
-Installing a new plugin cannot enable channels in an already-running process.
+Loading a plugin cannot enable channels in an already-running process.
 
 Clankie’s Claude hire loads the plugin for that session only from Clankie's own
 files and starts Claude Code with `--plugin-dir WORKER_DIR --channels
@@ -460,8 +462,8 @@ plugin:clankie-worker@inline` for immediate delivery; an installed
 ([ADR 0317](../../docs/adr/0317-a-claude-hire-loads-its-worker-plugin-for-that-session.md)).
 On a fleet machine `WORKER_DIR` is the copy `clankie herdr prepare` stages at
 `~/.clankie/claude-plugin/worker`. In prepared Mac zsh panes, Clankie's [PATH shim](../herdr-plugin/README.md#hand-started-claude-on-mac)
-adds the channel to plain `claude` and `claude --resume ID` when the worker
-plugin is enabled. Explicit channels and settings always win. Other unprepared
+loads the worker the same way for plain `claude` and `claude --resume ID` unless a
+settings layer switches it off. Explicit channels and settings always win. Other unprepared
 hand-started sessions without that flag use their observed synchronous prompt hook, which
 receives held replies on the next turn. A session without an observed compatible
 hook or live channel has no reply receiver. Its hooks (`SessionStart`, `UserPromptSubmit`,
@@ -475,8 +477,9 @@ a hire needs `"channelsEnabled": true` and
 `allowedChannelPlugins`, with `disableSideloadFlags` unset (background in
 [managed consent](../../docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md)).
 `clankie herdr prepare` writes it on a fleet machine; on the Mac it is the
-owner's administrator step. Hand-started sessions still use an installed copy
-for now.
+owner's administrator step. Nothing is installed in a Claude profile: `clankie
+harness install` and its update refresh remove an older `clankie-worker@clankie`
+copy, and the clankie marketplace when no other Clankie plugin uses it.
 
 Until the entry is there, a Claude hire reports `consent_required` with the
 missing step and unavailable control. It does not type the brief into the
@@ -613,10 +616,13 @@ physical appearance; the caption preserves that distinction. A restart of Clanki
 
 ### Owner installation across profiles
 
-`clankie harness install` offers consent for each discovered local Claude profile
-and native Codex worker plugin. `clankie herdr prepare NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` explicitly installs
-and enables the worker for hand-started and hired agents across remote Claude
-profiles, including `CLAUDE_CONFIG_DIR` and named `~/.claude-*` directories.
+`clankie harness install` installs the native Codex worker plugin and, with consent
+for each discovered local Claude profile, removes an older installed Claude copy
+(Claude hires load the worker for each session, ADR 0317). `clankie herdr prepare
+NAME [--codex-source-setup ABSOLUTE_REMOTE_SCRIPT]` stages the worker at
+`~/.clankie/claude-plugin/worker`, approves its channel in the machine's managed
+policy, and does the same per-profile cleanup across remote Claude profiles,
+including `CLAUDE_CONFIG_DIR` and named `~/.claude-*` directories.
 The worker MCP server is `clankie`. Bump both worker manifests on every shipment,
 including Claude mods and report helpers, so native caches cannot retain older
 bytes at the same version. A changed marketplace file with an unchanged manifest

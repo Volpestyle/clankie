@@ -65,13 +65,22 @@ export function approveWorkerChannel(existing: string): {
       throw new Error("The managed policy is not a JSON object; leaving it untouched");
     value = parsed as Record<string, unknown>;
   }
-  const allowed = Array.isArray(value.allowedChannelPlugins) ? [...value.allowedChannelPlugins] : [];
+  const listed = Array.isArray(value.allowedChannelPlugins) ? [...value.allowedChannelPlugins] : [];
+  // The installed copy's pair approves nothing once setup has removed that copy (ADR 0317).
+  const allowed = listed.filter(
+    (entry) =>
+      !(
+        (entry as { marketplace?: unknown })?.marketplace === "clankie" &&
+        (entry as { plugin?: unknown })?.plugin === CLAUDE_WORKER_PLUGIN.plugin
+      ),
+  );
   const present = allowed.some(
     (entry) =>
       (entry as { marketplace?: unknown })?.marketplace === CLAUDE_WORKER_PLUGIN.marketplace &&
       (entry as { plugin?: unknown })?.plugin === CLAUDE_WORKER_PLUGIN.plugin,
   );
-  if (value.channelsEnabled === true && present) return { content: existing, changed: false };
+  if (value.channelsEnabled === true && present && allowed.length === listed.length)
+    return { content: existing, changed: false };
   const next = {
     ...value,
     channelsEnabled: true,

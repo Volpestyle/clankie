@@ -29,6 +29,22 @@ describe("preparing a machine for Claude workers (VUH-1527)", () => {
       allowedChannelPlugins: [worker],
     });
     expect(() => approveWorkerChannel("[1]")).toThrow(/untouched/u);
+    // The installed copy's old pair goes once setup removes that copy; every other entry stays.
+    const legacy = approveWorkerChannel(
+      JSON.stringify({
+        channelsEnabled: true,
+        allowedChannelPlugins: [
+          { marketplace: "clankie", plugin: "clankie-worker" },
+          worker,
+          { marketplace: "m", plugin: "p" },
+        ],
+      }),
+    );
+    expect(legacy.changed).toBe(true);
+    expect(JSON.parse(legacy.content).allowedChannelPlugins).toEqual([
+      worker,
+      { marketplace: "m", plugin: "p" },
+    ]);
   });
 
   it("ships a marketplace with only the worker plugin", () => {

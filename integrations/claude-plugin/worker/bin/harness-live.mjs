@@ -1,4 +1,23 @@
 // Read-only host facts. Process presence is not MCP catalog or delivery acceptance.
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * This install's worker plugin, which a Claude session loads with --plugin-dir:
+ * the directory above this file where it ships in place (a checkout or a staged
+ * fleet copy), else the nearest ancestor holding it, since a release bundles
+ * this module into its entry's output file.
+ */
+function workerRoot() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  if (existsSync(join(here, "..", ".claude-plugin", "plugin.json"))) return dirname(here);
+  const relative = join("integrations", "claude-plugin", "worker");
+  for (let directory = here; dirname(directory) !== directory; directory = dirname(directory))
+    if (existsSync(join(directory, relative))) return join(directory, relative);
+  return dirname(here);
+}
+const WORKER_ROOT = workerRoot();
 const MAX_PANES = 48;
 // A working fleet runs hundreds of node and Codex processes (316 and 61 bridges
 // on 2026-10-17, VUH-2391). Command lines and environments are read in batches,
@@ -11,7 +30,7 @@ const daemonFix =
   "After saving affected sessions, stop the shared daemon with codex app-server daemon stop. Resume each session in its own pane with codex --no-daemon resume <SESSION>; keep daemon_auto_start=false in the source-owned config.";
 const fix = (harness) =>
   harness === "claude"
-    ? "In this pane's Claude profile, install/enable clankie-worker@clankie: claude plugin install clankie-worker@clankie --scope user; claude plugin enable clankie-worker@clankie --scope user. Restart/resume Claude, then verify its native tool catalog."
+    ? `Restart this pane's Claude with Clankie's worker loaded for that session (ADR 0317): claude --resume <SESSION> --plugin-dir "${WORKER_ROOT}" --channels plugin:clankie-worker@inline (a prepared Mac pane adds both to claude --resume <SESSION>). Then verify its native tool catalog.`
     : "Check this pane's source-owned Codex bridge registration/plugin. Resume in this pane with codex --no-daemon resume <SESSION>, then verify its native tool catalog.";
 
 function table(stdout) {

@@ -7,8 +7,12 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-const plugin = "clankie-worker@clankie";
+// The worker loads for each launch from Clankie's own files (ADR 0317); an older
+// installed copy is switched off for that session so the worker loads once.
+const plugin = "clankie-worker@inline";
+const installed = "clankie-worker@clankie";
 const channel = `plugin:${plugin}`;
+const settingsArg = JSON.stringify({ enabledPlugins: { [installed]: false } });
 // Release entrypoints live under apps/*/{src,bin}. Their import.meta.url
 // names the bundle; copy the standalone asset shipped alongside it instead.
 const modulePath = fileURLToPath(import.meta.url);
@@ -98,16 +102,25 @@ async function claudeArguments(args, env = process.env, cwd = process.cwd()) {
   )
     return args;
   const profile = env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), ".claude");
+  const workerRoot = env.CLANKIE_WORKER_PLUGIN_DIR;
+  if (!workerRoot) return args;
+  const optional = (path) =>
+    json(path).catch((error) => {
+      if (error.code === "ENOENT") return {};
+      throw error;
+    });
+  // A layer that switches the worker off, by its launch-time or installed name, opts out.
+  let enabled = true;
+  const apply = (settings) => {
+    const choice = settings.enabledPlugins?.[plugin] ?? settings.enabledPlugins?.[installed];
+    if (choice !== undefined) enabled = choice === true;
+  };
   try {
+    await access(join(workerRoot, ".claude-plugin", "plugin.json"));
     // Read on every launch, including resume; never cache an enable/disable decision.
-    let enabled = (await json(join(profile, "settings.json"))).enabledPlugins?.[plugin];
-    for (const name of ["settings.json", "settings.local.json"]) {
-      const settings = await json(join(cwd, ".claude", name)).catch((error) => {
-        if (error.code === "ENOENT") return {};
-        throw error;
-      });
-      if (settings.enabledPlugins?.[plugin] !== undefined) enabled = settings.enabledPlugins[plugin];
-    }
+    apply(await optional(join(profile, "settings.json")));
+    for (const name of ["settings.json", "settings.local.json"])
+      apply(await optional(join(cwd, ".claude", name)));
     // The repository-root local override also applies from subdirectories/worktrees.
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
@@ -119,21 +132,25 @@ async function claudeArguments(args, env = process.env, cwd = process.cwd()) {
     if (git) {
       const root = dirname(resolve(cwd, git.stdout.trim()));
       if (root !== cwd) {
-        const settings = await json(join(root, ".claude", "settings.local.json")).catch((error) => {
-          if (error.code === "ENOENT") return {};
-          throw error;
-        });
-        if (settings.enabledPlugins?.[plugin] !== undefined) enabled = settings.enabledPlugins[plugin];
+        apply(await optional(join(root, ".claude", "settings.local.json")));
       }
     }
-    return enabled === true ? ["--channels", channel, ...args] : args;
+    return enabled
+      ? ["--plugin-dir", workerRoot, "--channels", channel, "--settings", settingsArg, ...args]
+      : args;
   } catch {
     return args;
-  } // Unreadable/invalid settings never manufacture an opt-in.
+  } // Missing worker files or unreadable/invalid settings never manufacture an opt-in.
 }
 
 /** Stable installed files; the config reference never names a checkout or release version. */
-export async function installPaneShell({ root, socketPath, owner = process.env, restore = {} }) {
+export async function installPaneShell({
+  root,
+  socketPath,
+  owner = process.env,
+  restore = {},
+  workerRoot = undefined,
+}) {
   if (process.platform !== "darwin")
     throw new Error("Automatic Claude PATH shim currently supports Mac zsh; linked Windows is a follow-up.");
   const shell = owner.SHELL?.trim() || "/bin/zsh";
@@ -147,7 +164,7 @@ export async function installPaneShell({ root, socketPath, owner = process.env, 
   const launcher = join(root, "bin", "claude");
   await writeFile(
     launcher,
-    `#!/bin/sh\n# clankie-claude-path-shim\nexec ${quote(await stableNode(owner))} ${quote(runner)} "$@"\n`,
+    `#!/bin/sh\n# clankie-claude-path-shim\nexport CLANKIE_WORKER_PLUGIN_DIR=${quote(workerRoot ?? join(dirname(dirname(here)), "claude-plugin", "worker"))}\nexec ${quote(await stableNode(owner))} ${quote(runner)} "$@"\n`,
     { mode: 0o700 },
   );
   await chmod(launcher, 0o700);
