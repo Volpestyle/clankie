@@ -1,4 +1,5 @@
 import { postToDiscordActiveBody } from "./discord-active-body.ts";
+import type { DiscordMusicCallResult, DiscordMusicPort } from "./ports/discord.ts";
 
 /**
  * Captain client for the active Discord body's DJ desk.
@@ -7,24 +8,10 @@ import { postToDiscordActiveBody } from "./discord-active-body.ts";
  * process never talks to YouTube itself.
  */
 
-export interface DiscordMusicCallResult {
-  readonly ok: boolean;
-  readonly message: string;
-}
-
 export function createDiscordMusicClient(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
-): {
-  search(input: { query: string; next?: boolean; authorId: string }): Promise<DiscordMusicCallResult>;
-  play(input: { url?: string; index?: number; authorId: string }): Promise<DiscordMusicCallResult>;
-  queue(input: { url?: string; index?: number; authorId: string }): Promise<DiscordMusicCallResult>;
-  skip(): Promise<DiscordMusicCallResult>;
-  pause(): Promise<DiscordMusicCallResult>;
-  resume(): Promise<DiscordMusicCallResult>;
-  stop(): Promise<DiscordMusicCallResult>;
-  now(): Promise<DiscordMusicCallResult>;
-} {
+): DiscordMusicPort {
   const call = (action: string, body: Record<string, unknown> = {}): Promise<DiscordMusicCallResult> =>
     postMusic(action, body, env, fetchImpl);
   return {

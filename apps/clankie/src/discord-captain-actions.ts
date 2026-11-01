@@ -3,21 +3,18 @@ import type { DiscordTurnReceipts } from "./captain/discord-turn-receipts.ts";
 import {
   DiscordCaptainActionInputSchema,
   DiscordCaptainActionResultSchema,
-  type DiscordServerAction,
-  type DiscordServerActionResult,
-  type DiscordCaptainActionInput,
   type DiscordCaptainActionResult,
 } from "@clankie/protocol";
 import { postToDiscordActiveBody } from "./discord-active-body.ts";
+import { DISCORD_BODY_UNREACHABLE_MESSAGE, type DiscordActionPort } from "./ports/discord.ts";
+
+export { DISCORD_BODY_UNREACHABLE_MESSAGE };
 
 export function createDiscordCaptainActionClient(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
   receipts?: DiscordTurnReceipts,
-): {
-  execute(input: DiscordCaptainActionInput, guard?: () => Promise<void>): Promise<DiscordCaptainActionResult>;
-  serverAction(input: DiscordServerAction): Promise<DiscordServerActionResult>;
-} {
+): DiscordActionPort {
   return {
     serverAction: async (input) => {
       try {
@@ -65,9 +62,6 @@ export function createDiscordCaptainActionClient(
     },
   };
 }
-
-/** Transport failure: the body may or may not have acted, so callers treat it as uncertain. */
-export const DISCORD_BODY_UNREACHABLE_MESSAGE = "I can't reach my live Discord body for that action.";
 
 function unavailable(): DiscordCaptainActionResult {
   return { ok: false, message: DISCORD_BODY_UNREACHABLE_MESSAGE };

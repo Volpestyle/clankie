@@ -28,16 +28,9 @@
     "captain/captain.ts -> persona-images.ts (persona)",
     "captain/channel-projection.ts -> @clankie/discord-presence-core (persona)",
     "captain/conversations/channel-projection.ts -> @clankie/discord-presence-core (persona)",
-    "captain/deps.ts -> discord-captain-actions.ts (persona)",
-    "captain/deps.ts -> discord-music.ts (persona)",
-    "captain/deps.ts -> discord-room-observations.ts (persona)",
-    "captain/deps.ts -> discord-tracking.ts (persona)",
-    "captain/deps.ts -> discord-voice-presence.ts (voice)",
     "captain/port.ts -> captain/captain-discord-turns.ts (persona)",
     "captain/port.ts -> captain/voice-lane.ts (voice)",
     "captain/room-fork-tool.ts -> captain/captain-discord-turns.ts (persona)",
-    "captain/room-handoff-bursts.ts -> captain/discord-turn.ts (persona)",
-    "captain/tools.ts -> @clankie/discord-presence-core (persona)",
-    "captain/tools.ts -> discord-captain-actions.ts (persona)"
+    "captain/room-handoff-bursts.ts -> captain/discord-turn.ts (persona)"
   ]
 }
