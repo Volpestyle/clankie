@@ -1860,6 +1860,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         )
           throw new WorkRequestError("backend_unavailable", "Saved Linear tracker connection changed.");
       };
+      // Pin the GitHub account too (the connected one, else the gh login), so a switched
+      // account refuses the bookkeeping instead of writing as the replacement.
+      const githubBinding = convention.backend === "github" ? await accountBinding("github") : undefined;
+      const assertGithub = async () => {
+        if (githubBinding !== undefined && (await accountBinding("github")) !== githubBinding)
+          throw new WorkRequestError("backend_unavailable", "Saved GitHub account changed.");
+      };
       // Resolve the requested project's UUID explicitly, rather than the first
       // project sharing its workspace in the compatibility dependency lookup.
       const builtIn =
@@ -1884,6 +1891,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         convention,
         project.trackerProjectId,
         linearBinding?.binding,
+        githubBinding,
       ]);
       const beforeWrite = async () => {
         await validateHire();
@@ -1893,6 +1901,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       };
       await beforeWrite();
       await assertLinear();
+      await assertGithub();
       return {
         identity,
         backend: convention.backend,
@@ -1903,6 +1912,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         ) => {
           await beforeWrite();
           await assertLinear();
+          await assertGithub();
           // A seat's own issue status is Clankie writing for this project (ADR 0302).
           const tracker =
             options.posting && isTrackerWriteTool(name) ? await outwardTracker(convention) : undefined;
@@ -1913,6 +1923,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           // when Watch was chosen changes nothing (ADR 0308).
           const writing = async () => {
             await beforeWrite();
+            await assertGithub();
             if (options.posting && isTrackerWriteTool(name)) await refuseWhileWatching();
           };
           if (options.posting && tracker !== undefined)
