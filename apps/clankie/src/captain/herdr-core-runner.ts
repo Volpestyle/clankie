@@ -337,6 +337,7 @@ export function createHerdrCoreRunner(
       }
       // The desktop app's own PATH may find another install than the service's, which the
       // seat's process proof would then refuse; exec the exact harness the proof expects.
+      // allow-swallowed-rejection -- an unresolved install falls back to the terminal's own PATH, as before
       const command = (await options.harnessCommand?.(kind).catch(() => undefined)) ?? [binary];
       await writePrivately(handoff, `rm -f -- "$1"\nexec ${[...command, ...args].map(quote).join(" ")}\n`);
     },
