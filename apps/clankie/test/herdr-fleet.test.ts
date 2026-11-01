@@ -834,13 +834,27 @@ describe("fleet routing", () => {
       status: "refused",
       detail: "That checkout isn't ready to start an agent from. Clankie said: Start checkout is dirty.",
     });
+    // An unconfirmed earlier start fences the place until it is settled; the app learns how.
+    const receiptId = randomUUID();
+    nextHire = {
+      outcome: "failed",
+      reason: "delivery_unconfirmed",
+      receiptId,
+      detail: "The original hire remains uncertain in pane pc/w18:p16",
+    };
+    expect(
+      await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
+    ).toMatchObject({
+      status: "refused",
+      detail: expect.stringContaining(`clankie hire-receipt settle ${receiptId} abandoned`),
+    });
     nextHire = undefined;
     // Once a settled earlier hire fences the place, each start goes as its own fresh intent (#100).
     fresh = { id: randomUUID(), afterReceiptId: randomUUID() };
     expect(
       await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
     ).toMatchObject({ status: "refused", detail: expect.stringContaining("needs its own first message") });
-    expect(hires).toHaveLength(2);
+    expect(hires).toHaveLength(3);
     expect(
       await serve({
         op: "start_agent",
@@ -850,14 +864,14 @@ describe("fleet routing", () => {
         prompt: "add rollback netcode",
       }),
     ).toMatchObject({ status: "started" });
-    expect(hires[2]?.seat).toMatchObject({ freshIntent: fresh });
+    expect(hires[3]?.seat).toMatchObject({ freshIntent: fresh });
     fresh = undefined;
     // With nobody to lead it, nothing starts.
     leading = false;
     expect(
       await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
     ).toMatchObject({ status: "refused" });
-    expect(hires).toHaveLength(3);
+    expect(hires).toHaveLength(4);
   });
 
   it("finds a pane made since the shared poll, such as a seat just hired (VUH-1527)", async () => {
