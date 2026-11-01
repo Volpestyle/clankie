@@ -64,12 +64,8 @@ export function createHealthAlerts<Fleet>(ctx: HealthAlertsContext<Fleet>) {
     fleetMailboxes,
     nextTurnMailboxes,
     observeFleet,
-    workerReportRoute,
     validateConversationOwner,
-    inboundBinding,
     seatOutbox,
-    operatorNativeSource,
-    nativeRecipientCurrent,
     deliverToSeat,
   } = ctx;
   const reportFailureAlerts = new FleetReportFailureAlerts();
@@ -121,7 +117,7 @@ export function createHealthAlerts<Fleet>(ctx: HealthAlertsContext<Fleet>) {
     const original = await herdrRunner.get(pane).catch(() => undefined);
     if (!original?.session) return false;
     const fleet = await observeFleet(true);
-    const route = await workerReportRoute(original, fleet);
+    const route = await ctx.workerReportRoute(original, fleet);
     if (!["adoption", "parent"].includes(route.diagnostic.source)) return false;
     if (!(await validateConversationOwner(route.owner))) return false;
     const guard = async () => {
@@ -129,9 +125,9 @@ export function createHealthAlerts<Fleet>(ctx: HealthAlertsContext<Fleet>) {
         throw new Error("Fleet health alert owner is unavailable");
       // allow-swallowed-rejection -- moved from captain.ts (ADR 0325); a pane that can't be read gets no alert.
       const current = await herdrRunner.get(pane).catch(() => undefined);
-      if (!current || inboundBinding(current) !== inboundBinding(original))
+      if (!current || ctx.inboundBinding(current) !== ctx.inboundBinding(original))
         throw new Error("Fleet health alert occupant changed");
-      const currentRoute = await workerReportRoute(current, await observeFleet(true));
+      const currentRoute = await ctx.workerReportRoute(current, await observeFleet(true));
       if (JSON.stringify(currentRoute.owner) !== JSON.stringify(route.owner))
         throw new Error("Fleet health alert lead changed");
     };
@@ -224,9 +220,9 @@ export function createHealthAlerts<Fleet>(ctx: HealthAlertsContext<Fleet>) {
       const target = recipient
         ? // allow-swallowed-rejection -- moved from captain.ts (ADR 0325); a pane that can't be read gets no alert.
           await herdrRunner.get(recipient.paneId).catch(() => undefined)
-        : await operatorNativeSource(owner.conversationId);
+        : await ctx.operatorNativeSource(owner.conversationId);
       if (!target?.session) return outcome(false, "native_source_unavailable");
-      const binding = inboundBinding(target);
+      const binding = ctx.inboundBinding(target);
       if (recipient && binding !== recipient.binding) return outcome(false, "native_recipient_changed");
       const mailbox = fleetSeatMailbox(
         fleetMailboxes,
@@ -240,7 +236,7 @@ export function createHealthAlerts<Fleet>(ctx: HealthAlertsContext<Fleet>) {
       const finalGuard = async () => {
         await guard();
         if (!(await validateConversationOwner(owner))) throw new Error("Health alert owner changed");
-        if (recipient && !(await nativeRecipientCurrent(recipient)))
+        if (recipient && !(await ctx.nativeRecipientCurrent(recipient)))
           throw new Error("Health alert native lead changed");
         if (outbox.uncertainFor(text) || mailbox.uncertainFor(text)) {
           blocked = true;
@@ -255,7 +251,7 @@ export function createHealthAlerts<Fleet>(ctx: HealthAlertsContext<Fleet>) {
         {
           guard: finalGuard,
           ...(binding === undefined ? {} : { recipientBinding: binding }),
-          fence: async (current) => inboundBinding(current) === binding,
+          fence: async (current) => ctx.inboundBinding(current) === binding,
         },
       ).catch((error: unknown) => {
         if (blocked) return undefined;
