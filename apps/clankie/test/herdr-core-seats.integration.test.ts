@@ -204,4 +204,11 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
 
   await expect(runner.startAgent({ name: "ada", kind: "claude", paneId: address })).rejects.toThrow();
   await runner.closePane(address);
+
+  // A resumed hire keeps the session it resumes.
+  const resumed = await runner.createTab({ cwd: work, label: "ada · fix the login", harness: "claude" });
+  await runner.startAgent({ name: "ada", kind: "claude", paneId: resumed, args: ["--resume", session] });
+  await until(async () => (await runner.get(resumed)).agent === "claude");
+  expect(await runner.get(resumed)).toMatchObject({ session: { kind: "id", value: session } });
+  await runner.closePane(resumed);
 });

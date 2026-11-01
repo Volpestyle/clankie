@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr-core-seats.ts";
@@ -175,10 +175,21 @@ export function createHerdrCoreRunner(
         throw new Error("The desktop app's terminals need a launch directory to start a harness");
       await mkdir(options.launchDirectory, { recursive: true, mode: 0o700 });
       const handoff = join(options.launchDirectory, `${randomUUID()}.sh`);
+      const launcher = ["/bin/sh", "-c", LAUNCHER, "clankie-seat", handoff];
+      // A Herdr pane confines a hire through its SHELL wrapper (worker-sandbox.ts); a core
+      // terminal starts no shell, so the launcher itself runs under the worker's profile
+      // and the harness it execs, with its tools, inherits it.
+      const profile = request.env?.CLANKIE_WORKER_SANDBOX_PROFILE;
+      if (profile === undefined && basename(request.env?.SHELL ?? "") === "worker-shell.sh")
+        throw new Error("A sandboxed hire needs its worker profile; refusing to start it unconfined");
+      const env =
+        profile === undefined || request.env === undefined
+          ? request.env
+          : { ...request.env, SHELL: request.env.CLANKIE_WORKER_SHELL ?? "/bin/zsh" };
       const address = await seats.start({
-        argv: ["/bin/sh", "-c", LAUNCHER, "clankie-seat", handoff],
+        argv: profile === undefined ? launcher : ["/usr/bin/sandbox-exec", "-p", profile, ...launcher],
         cwd: request.cwd,
-        ...(request.env === undefined ? {} : { env: request.env }),
+        ...(env === undefined ? {} : { env }),
         seat,
         ...(request.pipeline === undefined ? {} : { tab: request.pipeline }),
       });
@@ -194,8 +205,8 @@ export function createHerdrCoreRunner(
       const terminal = await own(paneId);
       if (terminal?.state !== "live") throw new Error(`Desktop-app terminal ${paneId} has ended`);
       pending.delete(paneId);
-      // The session Clankie named (Claude's --session-id) stays on the terminal, since the core can't detect it.
-      const named = args.indexOf("--session-id");
+      // The session Clankie named or resumes stays on the terminal, since the core can't detect it.
+      const named = args.findIndex((arg) => arg === "--session-id" || arg === "--resume");
       const session = named < 0 ? undefined : args[named + 1];
       await seats.label(paneId, {
         [AGENT_LABEL]: kind,
