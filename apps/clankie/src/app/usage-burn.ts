@@ -35,7 +35,7 @@ interface Sample {
   readonly resetsAt?: number;
 }
 
-export interface BurnWindowSource {
+interface BurnWindowSource {
   readonly id: string;
   readonly label: string;
   readonly usedPercent: number;
