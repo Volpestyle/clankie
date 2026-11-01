@@ -157,6 +157,7 @@ import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
 import { activityRoutes } from "./activity-routes.ts";
 import { activityTools } from "./activity-tools.ts";
+import { composerTranscriptionRoutes } from "./composer-transcription.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import type { LinearRouteParts } from "./app/linear-routes.ts";
@@ -2387,6 +2388,7 @@ const clankie = await createClankieApp({
     ...routesOf(extensions),
     skinDraftRoutes(skinDrafts),
     activityRoutes({ activitySharing, ...(activityAdmission === undefined ? {} : { activityAdmission }) }),
+    composerTranscriptionRoutes(),
   ],
   bodyLeases: {
     router: bodyLeases,

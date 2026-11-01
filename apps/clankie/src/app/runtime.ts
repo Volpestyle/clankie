@@ -94,7 +94,6 @@ import { EmbodimentManager, embodimentEventScope, isEmbodimentEventType } from "
 import { RecentEvents, appendEventLog, loadEventLog, persistable } from "../event-log.ts";
 import { createFleetProjectMembershipRoutes } from "../fleet-project-membership-routes.ts";
 import { ExecutionConnectSchema } from "../herdr-session.ts";
-import { createComposerTranscriptionRoutes } from "../composer-transcription.ts";
 import { createEvidenceRoutes } from "../evidence-store.ts";
 import { createEvidenceStorageSettingsRoutes } from "../evidence-storage-settings-routes.ts";
 import { createHostSettingsRoutes } from "../host-settings-routes.ts";
@@ -1069,40 +1068,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "unavailable" }, 503);
     }
   });
-  app.route(
-    "/",
-    createComposerTranscriptionRoutes(dependencies.composerTranscriptions, async (request) => {
-      const identity = await authenticateDevice(request);
-      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
-      const eligible = () => {
-        const record = devices.get(identity.deviceId);
-        return (
-          record?.status === "active" &&
-          record.grants.chat &&
-          record.supportGrantId === undefined &&
-          !request.signal.aborted &&
-          clock().getTime() < Date.parse(identity.sessionExpiresAt)
-        );
-      };
-      if (!eligible()) return undefined;
-      return {
-        deviceId: identity.deviceId,
-        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
-        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
-        current: eligible,
-        authorize: async () => {
-          const fresh = await authenticateDevice(request);
-          return (
-            fresh !== "unavailable" &&
-            !("denied" in fresh) &&
-            fresh.deviceId === identity.deviceId &&
-            fresh.grants.chat &&
-            eligible()
-          );
-        },
-      };
-    }),
-  );
 
   // Evidence (ADR 0258): the operator credential is the caller. The CLI and the
   // operator seat's MCP bridge both present it; social lanes and devices do not.
@@ -2257,6 +2222,37 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     settings: settingsSource,
     clock,
     trackerWakes: dependencies.captain,
+    async chatDevice(request) {
+      const identity = await authenticateDevice(request);
+      if (identity === "unavailable" || "denied" in identity || !identity.grants.chat) return undefined;
+      const eligible = () => {
+        const record = devices.get(identity.deviceId);
+        return (
+          record?.status === "active" &&
+          record.grants.chat &&
+          record.supportGrantId === undefined &&
+          !request.signal.aborted &&
+          clock().getTime() < Date.parse(identity.sessionExpiresAt)
+        );
+      };
+      if (!eligible()) return undefined;
+      return {
+        deviceId: identity.deviceId,
+        sessionExpiresAtMs: Date.parse(identity.sessionExpiresAt),
+        support: devices.get(identity.deviceId)?.supportGrantId !== undefined,
+        current: eligible,
+        authorize: async () => {
+          const fresh = await authenticateDevice(request);
+          return (
+            fresh !== "unavailable" &&
+            !("denied" in fresh) &&
+            fresh.deviceId === identity.deviceId &&
+            fresh.grants.chat &&
+            eligible()
+          );
+        },
+      };
+    },
     async bodyIdentity(request, conversationId) {
       const operator = await authenticateOperator(request, dependencies);
       if (!operator || operator === "unavailable") return undefined;
@@ -2912,7 +2908,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       dependencies.modelKeys?.close?.();
       stopBodyRequests();
       clearInterval(supportTimer);
-      dependencies.composerTranscriptions?.close();
       clearInterval(runRevocationTimer);
       stopObservingMessages?.();
       stopObservingRoomFailures?.();

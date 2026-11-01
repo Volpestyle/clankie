@@ -41,7 +41,6 @@ import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
-import type { ComposerTranscriptions } from "../composer-transcription.ts";
 import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
@@ -184,7 +183,6 @@ export interface ClankieAppDependencies {
   modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
-  composerTranscriptions?: ComposerTranscriptions;
   /** Evidence blobs and records (ADR 0258). */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */

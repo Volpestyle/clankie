@@ -11,6 +11,17 @@ export interface OwnerComputerRecovery {
   readonly holderIdle: (conversationId: string) => boolean;
 }
 
+/** A paired device with chat access, proved by this body for one request. */
+export interface ChatDeviceAuthority {
+  readonly deviceId: string;
+  readonly sessionExpiresAtMs: number;
+  readonly support: boolean;
+  /** Whether the device is still active, chat-granted and inside its session. */
+  current(): boolean;
+  /** Proves the device again right before an act. */
+  authorize(): Promise<boolean>;
+}
+
 /** The core's own authority checks, for an extension's routes (ADR 0328). */
 export interface ExtensionRouteHost {
   /** The owner behind a request, for owner-only routes; undefined refuses. */
@@ -23,6 +34,8 @@ export interface ExtensionRouteHost {
   operator(request: Request): Promise<{ readonly operatorId: string } | "unavailable" | undefined>;
   /** The owner operator or a current Take Control device, for account settings and secrets. */
   ownerSettings(request: Request): Promise<true | "authentication_required" | "forbidden">;
+  /** A paired device with chat access behind a request; undefined refuses. */
+  chatDevice(request: Request): Promise<ChatDeviceAuthority | undefined>;
   /** The owner's settings, read when a request is served. */
   readonly settings: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;

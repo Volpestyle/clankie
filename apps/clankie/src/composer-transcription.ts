@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
+import type { ExtensionRoutes } from "./ports/routes.ts";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import {
@@ -446,4 +447,22 @@ export function createComposerTranscriptionRoutes(
     }
   });
   return app;
+}
+
+/**
+ * Voice's composer transcription routes, mounted through the core's route host
+ * (ADR 0328). Without a transcription connection they still answer the phone's
+ * status read, as ineligible.
+ */
+export function composerTranscriptionRoutes(service?: ComposerTranscriptions): ExtensionRoutes {
+  return {
+    place: "body",
+    register: (app, host) => {
+      app.route(
+        "/",
+        createComposerTranscriptionRoutes(service, (request) => host.chatDevice(request)),
+      );
+    },
+    close: () => service?.close(),
+  };
 }
