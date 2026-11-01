@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Native mods have no Node imports. This short-lived helper reuses the same
 // pane-scoped link selection and authentication as the worker bridge.
-import { authorization, readLink, seatRoute } from "../bin/link.mjs";
+import { authorization, readLink, seatIdentity, seatRoute } from "../bin/link.mjs";
 
 // Remote reports need two fresh process observations, not just an HTTP hop.
 const REQUEST_MS = 20_000;
@@ -10,7 +10,8 @@ const RECONNECT =
 const verdict = (reason, detail, remediation) => ({ status: "unverified", reason, detail, remediation });
 const write = (result) => process.stdout.write(JSON.stringify(result) + "\n");
 
-const pane = process.env.HERDR_PANE_ID?.trim();
+// Its Herdr pane, or the desktop-app terminal Clankie started it in (ADR 0319).
+const pane = seatIdentity().pane;
 const link = pane && readLink();
 if (!link) {
   write({ status: "unlinked" });

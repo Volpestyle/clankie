@@ -122,7 +122,8 @@ export function codexSocketControl(
           result.queuedSubmission.clientUserMessageId !== clientUserMessageId
         )
           throw new Error("Codex did not confirm the queued submission");
-        return { outcome: "delivered", state: "queued", messageId };
+        // Codex holds it in its queue: a transport acknowledgment, not proof it was read.
+        return { outcome: "delivered", state: "queued", deliveryStage: "delivered", messageId };
       }
       if (turnId === undefined) return undefined;
       messageId = turnId;

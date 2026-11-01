@@ -7,7 +7,7 @@ import {
   type OperatorTerminalFrame,
 } from "@clankie/protocol";
 import { SessionRefusal, type Session, type SessionImage, type SessionSource } from "./source.ts";
-import { renderTerminalText } from "./terminal-text.ts";
+import { renderTerminalText, screenLines } from "./terminal-text.ts";
 
 // Herdr as a session source: the agents Clankie seats (and any other agent
 // pane Herdr shows) on each machine. It speaks Clankie's operator ops, so the
@@ -144,10 +144,7 @@ export function createHerdrSessionSource(
       if (read?.op === "terminal_read" && read.status === "read")
         return {
           id,
-          text: trimScreen(read.text ?? "")
-            .split("\n")
-            .slice(-lines)
-            .join("\n"),
+          text: screenLines(read.text ?? "", lines),
           // Only what the pane's current agent showed is read (ADR 0307); say so when that left the screen out.
           ...(read.detail === undefined ? {} : { note: read.detail }),
         };
@@ -224,6 +221,18 @@ export function createHerdrSessionSource(
           revision = result.currentRevision;
           continue;
         }
+        // The agent's own session already holds it: it has the message, busy or not.
+        if (
+          result.status === "accepted" &&
+          result.seatDelivery?.state === "queued" &&
+          result.seatDelivery.detail === undefined &&
+          result.deliveryStage === "consumed"
+        )
+          return {
+            id,
+            status: "delivered",
+            detail: `${name} has the message in its session. Read the agent to see it respond.`,
+          };
         if (result.status === "accepted" && result.seatDelivery?.state === "queued")
           return {
             id,
@@ -423,13 +432,6 @@ function lastSegment(path: string): string {
 }
 
 /** The screen without its trailing blank rows. */
-function trimScreen(text: string): string {
-  return text
-    .replace(/\r\n?/gu, "\n")
-    .replace(/[ \t]+$/gmu, "")
-    .replace(/\n+$/u, "");
-}
-
 /** Whether a Herdr version is older than another; an unreadable one is not called old. */
 function olderVersion(version: string, minimum: string): boolean {
   const parts = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)/u.exec(value)?.slice(1).map(Number);

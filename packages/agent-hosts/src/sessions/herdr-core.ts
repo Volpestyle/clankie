@@ -1,6 +1,7 @@
 import { HerdrCoreTerminalSchema } from "@clankie/protocol";
 import { SessionRefusal, type Session, type SessionSource } from "./source.ts";
 import type { HerdrSessionPort } from "./herdr.ts";
+import { screenLines } from "./terminal-text.ts";
 
 // herdr-core as a session source: the agents the Herdr desktop app runs, in
 // its own terminal server beside the terminal Herdr. Clankie's service reads
@@ -54,7 +55,7 @@ export function createHerdrCoreSessionSource(
         );
       return {
         id,
-        text: (read.text ?? "").replace(/\n+$/u, "").split("\n").slice(-lines).join("\n"),
+        text: screenLines(read.text ?? "", lines),
         // Only what the agent showed is read; say so when that left the screen out.
         ...(read.detail === undefined ? {} : { note: read.detail }),
       };
