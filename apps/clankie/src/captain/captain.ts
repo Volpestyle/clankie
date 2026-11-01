@@ -1246,33 +1246,37 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     ...deps,
     desktop,
     appNotes: { read: async (input: AppNotesReadInput) => fleetRoom.readAppNotes(input) },
-    linearWake: {
-      settings: settingsStore,
-      targetAllowed: (id: string) => conversations.trackerWakeTargetAllowed(id),
-      received: (id: string, wakeId: string) =>
-        conversations.receiveTrackerWake(id, wakeId, async (original) => {
-          const source = await operatorNativeSource(id);
-          const binding = inboundBinding(source);
-          const nativeId = source === undefined ? undefined : nativeSessionId(source);
-          // A resolved live source wins over a potentially stale transcript
-          // checkpoint. Only a standalone seat uses the synchronized identity.
-          const sessionKey =
-            source === undefined
-              ? conversations.nativeSeatSessionKey(id)
-              : nativeId === undefined
-                ? undefined
-                : `${source.agent}:${nativeId}`;
-          if (
-            !sameTrackerWakeRecipient(original, {
-              ...(binding === undefined ? {} : { binding }),
-              ...(sessionKey === undefined ? {} : { sessionKey }),
-            })
-          )
-            return false;
-          shutdown.signal.throwIfAborted();
-          return seatOutbox(id).confirmReceived(original);
+    ...(options.linearWakeEnabled === false
+      ? {}
+      : {
+          linearWake: {
+            settings: settingsStore,
+            targetAllowed: (id: string) => conversations.trackerWakeTargetAllowed(id),
+            received: (id: string, wakeId: string) =>
+              conversations.receiveTrackerWake(id, wakeId, async (original) => {
+                const source = await operatorNativeSource(id);
+                const binding = inboundBinding(source);
+                const nativeId = source === undefined ? undefined : nativeSessionId(source);
+                // A resolved live source wins over a potentially stale transcript
+                // checkpoint. Only a standalone seat uses the synchronized identity.
+                const sessionKey =
+                  source === undefined
+                    ? conversations.nativeSeatSessionKey(id)
+                    : nativeId === undefined
+                      ? undefined
+                      : `${source.agent}:${nativeId}`;
+                if (
+                  !sameTrackerWakeRecipient(original, {
+                    ...(binding === undefined ? {} : { binding }),
+                    ...(sessionKey === undefined ? {} : { sessionKey }),
+                  })
+                )
+                  return false;
+                shutdown.signal.throwIfAborted();
+                return seatOutbox(id).confirmReceived(original);
+              }),
+          },
         }),
-    },
     discordSettings: () => readDiscordServerSettings(options.discordEnvironment, settingsStore),
   };
   const personaLook = options.personaLook;
@@ -2632,16 +2636,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // tool (ADR 0187): a hired agent is watched the moment it exists, the way a
   // persona thread created through `create` is — otherwise its first reply
   // lands in a thread nothing is listening to.
-  conversations.linearFollowing = async () =>
-    (await settings()).linearWebhook.following &&
-    (options.linearFollowing === undefined || (await options.linearFollowing()));
-  conversations.onLinearWakeReceived = options.linearWakeReceived;
-  conversations.linearWakeRouting = async () => (await settings()).linearWebhook;
+  if (options.linearWakeEnabled !== false) {
+    conversations.linearFollowing = async () =>
+      (await settings()).linearWebhook.following &&
+      (options.linearFollowing === undefined || (await options.linearFollowing()));
+    conversations.onLinearWakeReceived = options.linearWakeReceived;
+    conversations.linearWakeRouting = async () => (await settings()).linearWebhook;
+    conversations.linearWakeReceiverAvailable = (id) =>
+      !conversations.hasNativeSeat(id) && !conversations.runsOnRemoteSeat(id)
+        ? conversations.runsCaptainTurns(id)
+        : seatOutbox(id).routesToSeat("Linear activity arrived.");
+  } else {
+    conversations.linearFollowing = async () => false;
+  }
   conversations.presenceVoiceLease = () => deps.bodyLeases?.activeIncarnation("voice");
-  conversations.linearWakeReceiverAvailable = (id) =>
-    !conversations.hasNativeSeat(id) && !conversations.runsOnRemoteSeat(id)
-      ? conversations.runsCaptainTurns(id)
-      : seatOutbox(id).routesToSeat("Linear activity arrived.");
   conversations.onQuestionChange = ({ phase, question }) => {
     const asker =
       question.workerQuestion === undefined

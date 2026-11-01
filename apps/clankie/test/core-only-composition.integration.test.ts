@@ -110,9 +110,18 @@ for (;;) {
 
 /** Every extension the owner can switch, off (ADR 0328 "Choosing extensions"). */
 const ALL_OFF = Object.fromEntries(
-  ["persona", "world", "voice", "relay", "browser", "media", "computer", "minecraft", "tracker-linear"].map(
-    (id) => [id, "off"],
-  ),
+  [
+    "persona",
+    "world",
+    "voice",
+    "relay",
+    "browser",
+    "media",
+    "computer",
+    "minecraft",
+    "tracker-linear",
+    "linear-wake",
+  ].map((id) => [id, "off"]),
 );
 
 /** One HTTP route each switched extension mounts; off, none of them is served. */
@@ -123,7 +132,12 @@ const EXTENSION_ROUTES = [
   ["world", "POST", "/v1/activity/shares"],
   ["tracker-linear", "POST", "/v1/tracker/mirror/linear"],
   ["tracker-linear", "POST", "/v1/tracker/cutover/linear"],
-  ["tracker-linear", "GET", "/v1/linear/deliveries"],
+  ["linear-wake", "GET", "/v1/linear/deliveries"],
+  ["linear-wake", "GET", "/v1/linear/wake"],
+  ["linear-wake", "GET", "/v1/linear/follow"],
+  ["linear-wake", "GET", "/v1/linear/target"],
+  ["linear-wake", "GET", "/v1/linear/routes"],
+  ["linear-wake", "POST", "/v1/hooks/linear"],
   ["voice", "GET", "/v1/discord/room-voice"],
   ["voice", "POST", "/v1/discord/voice-output-guard"],
   ["persona", "GET", "/v1/discord/rooms"],
@@ -151,6 +165,7 @@ const DEFERRED_EXTENSION_TOOLS = [
   "skin_draft",
   "draw_er_diagram",
   "draw_sequence_diagram",
+  "linear_wake",
   "minecraft_join",
   "minecraft_configure",
 ];
@@ -274,6 +289,7 @@ it.skipIf(!native)(
       expect(health.extensions.map((entry) => entry.id).sort()).toEqual([
         "browser",
         "computer",
+        "linear-wake",
         "media",
         "minecraft",
         "persona",

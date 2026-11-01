@@ -254,9 +254,13 @@ sign in to remote access, the browser unless `CLANKIE_BROWSER_ENABLED` turns it
 off). Both are owner-only `POST /v1/extensions` calls, take effect at the next
 `clankie restart clankie`, and answer with `restartRequired`. The switches are
 the `extensions` map in settings; an id with no entry is on. With
-`tracker-linear` off, Linear's webhook, its wake, follow, target and route
-settings, and its mirror and cutover commands are not served until it is on
-again. With `world` off, the Activity's admission and sharing routes are not
+`tracker-linear` off, Linear's request budget, mirror and cutover commands
+are not served. `clankie extensions off linear-wake` independently disables
+the signed webhook, wake, follow, target, route and delivery routes and removes
+`linear_wake` from his tools at the next start. Queued Linear wakes stay quiet
+while it is off; saved rules and cursors are kept. `clankie extensions on
+linear-wake` restores the wake on the next start. Both switches appear in
+`clankie status` and `clankie doctor --json`. With `world` off, the Activity's admission and sharing routes are not
 served and he has no Activity sharing or PokeAgent play tools. With `voice`
 off, the phone composer's transcription routes and the room voice routes
 (`/v1/discord/room-voice`, the Discord body's output guard) are not served;

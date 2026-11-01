@@ -224,6 +224,7 @@ import { WorkerPluginNotices } from "./worker-plugin-notices.ts";
 import { LinearWriteReceipts } from "./linear-webhook.ts";
 import { LinearAttributionJournal } from "./linear-attribution.ts";
 import { retireLinearNotifications } from "./linear-notifications.ts";
+import { linearWakeExtension } from "./linear-wake-extension.ts";
 import { LinearWakeReadReceipts } from "./linear-wake-read.ts";
 import { DiscordTracking } from "./discord-tracking.ts";
 import { createMcpHost } from "./mcp-host.ts";
@@ -546,6 +547,7 @@ const worldOn = switchedOn(startupSettings, "world");
 const personaOn = switchedOn(startupSettings, "persona");
 /** Minecraft is one switch at start: its game, host, MCP motor and worker driving go together (ADR 0328). */
 const minecraftOn = switchedOn(startupSettings, "minecraft");
+const linearWakeOn = switchedOn(startupSettings, "linear-wake");
 const activitySharing = new ActivitySharing({
   files: deliveredFiles,
   token: () => resolveActivityProducerCredential(),
@@ -1766,8 +1768,15 @@ const captain = createCaptain(
     requireMachineAccess: (fleet, required) => runtimes.requireAccess(fleet, required),
     // His look references are the persona's, so they reach him only while it is on (ADR 0328).
     ...(personaOn ? { personaLook: personaLook(personaImages) } : {}),
-    linearFollowing,
-    linearWakeReceived: (references) => linearWakeReads.received(references),
+    linearWakeEnabled: linearWakeOn,
+    ...(linearWakeOn
+      ? {
+          linearFollowing,
+          linearWakeReceived: (
+            references: readonly import("./captain/tracker-activity.ts").TrackerWakeReference[],
+          ) => linearWakeReads?.received(references) ?? Promise.resolve(),
+        }
+      : {}),
     deliveredFiles,
     discordEnvironment: captainDiscordEnvironment,
   },
@@ -1784,12 +1793,14 @@ async function linearFollowing(): Promise<boolean> {
 }
 
 const linearAttribution = new LinearAttributionJournal(join(stateRoot, "linear-attribution.json"));
-const linearWakeReads = new LinearWakeReadReceipts({
-  path: join(stateRoot, "linear-wake-read-receipts.json"),
-  attribution: linearAttribution,
-  host: mcpHost,
-  ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
-});
+const linearWakeReads = linearWakeOn
+  ? new LinearWakeReadReceipts({
+      path: join(stateRoot, "linear-wake-read-receipts.json"),
+      attribution: linearAttribution,
+      host: mcpHost,
+      ownAccount: async () => (await mcpHost.account("linear", "operator").catch(() => undefined))?.account,
+    })
+  : undefined;
 retireLinearNotifications(join(stateRoot, "linear-notifications.json"), (message) => logger.info(message));
 // Posting to your tracker (ADR 0302): the owner's answers to waiting posts.
 trackerPosting.start();
@@ -2299,6 +2310,7 @@ extensions.add(linearTrackerExtension({ linearWebhook, linearRequestBudget, line
   enabled: switchedOn(startupSettings, "tracker-linear"),
   settings: undefined,
 });
+extensions.add(linearWakeExtension({ linearWebhook }), { enabled: linearWakeOn, settings: undefined });
 extensions.add(
   worldExtension({ activitySharing, ...(activityAdmission === undefined ? {} : { activityAdmission }) }),
   { enabled: worldOn, settings: undefined },
@@ -2828,7 +2840,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     await runtimeCanary?.close();
     runtimeRetentionReady = false;
     await runtimeRetentionTask;
-    linearWakeReads.close();
+    linearWakeReads?.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
     await extensions.stop(["browser"]);
