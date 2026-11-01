@@ -179,7 +179,7 @@ async function installHarnessBridges(options) {
   // A profile whose refresh failed or was refused can still be repaired here.
   const refreshed = new Set(
     (options.refreshed ?? []).flatMap((entry) =>
-      ["installed", "updated", "source-setup-completed"].includes(entry.status) && entry.profile
+      ["installed", "updated", "removed", "source-setup-completed"].includes(entry.status) && entry.profile
         ? [entry.profile]
         : [],
     ),
@@ -216,6 +216,15 @@ async function installHarnessBridges(options) {
       codexProfile,
     })),
   ];
+  // Claude hires load this worker directory as it is (ADR 0317), so its bundled
+  // skills are materialized here whether or not any profile is touched. A
+  // failure surfaces on the Codex installs that need the same skills.
+  let skills;
+  const prepareSkills = () =>
+    (skills ??= Promise.resolve().then(() =>
+      (options.prepareSkills ?? prepareWorkerSkill)(join(marketplace, "worker")),
+    ));
+  await prepareSkills().catch(() => {});
   for (const { harness, profile, codexProfile } of targets) {
     if (refreshed.has(harness === "claude" ? profile : codexProfile)) continue;
     if (harness === "claude") {
@@ -326,7 +335,7 @@ async function installHarnessBridges(options) {
       continue;
     }
     try {
-      await (options.prepareSkills ?? prepareWorkerSkill)(join(marketplace, "worker"));
+      await prepareSkills();
       if (
         (await realpath(config).catch(() => config)) !== source ||
         (await readFile(config, "utf8").catch(() => undefined)) !== configBefore ||

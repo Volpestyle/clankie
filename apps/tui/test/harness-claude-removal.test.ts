@@ -58,11 +58,16 @@ it.each([false, true])(
       settings: JSON.stringify({ enabledPlugins: { "clankie-worker@clankie": true } }),
     });
     const asked: string[] = [];
+    const skills: string[] = [];
     const results = await installHarnessBridges({
       repoRoot: "/fixture/clankie",
       env: { HOME: fixture.home },
       linkedOnly,
       execute: fixture.execute,
+      // A Claude-only machine still gets the worker's bundled skills, which each hire loads.
+      prepareSkills: async (worker) => {
+        skills.push(worker);
+      },
       consent: async (_harness, detail) => {
         asked.push(detail);
         return true;
@@ -74,6 +79,7 @@ it.each([false, true])(
     expect(asked).toEqual([
       expect.stringContaining("Remove the old clankie-worker@clankie copy and its clankie marketplace"),
     ]);
+    expect(skills).toEqual(["/fixture/clankie/integrations/claude-plugin/worker"]);
     expect(fixture.calls).toEqual(
       expect.arrayContaining([
         "claude plugin uninstall clankie-worker@clankie --scope user",
