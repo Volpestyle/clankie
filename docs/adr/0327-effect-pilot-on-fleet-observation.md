@@ -1,8 +1,7 @@
 # ADR 0327: Effect pilot on fleet observation
 
-Status: Accepted as a pilot, 2026-11-01. Whether Effect goes further in the
-service is the owner's call, made from the measurements below (ADR 0325 named
-this pilot).
+Status: Accepted as a pilot, 2026-11-01 (ADR 0325 named this pilot). The
+owner chose from the measurements below to go further gradually: ADR 0330.
 
 ## Context
 
@@ -29,7 +28,8 @@ small, outside the captain, and read by every roster poll.
   The exported API, the results and the diagnostics' order are unchanged.
 - The service imports Effect modules by path (`effect/Effect`, `effect/Exit`),
   never the package root, because the root re-exports the whole library.
-- Nothing else in the service moves to Effect under this ADR.
+- Nothing else in the service moves to Effect under this ADR; ADR 0330 sets
+  how it goes further.
 
 ## What the pilot measured
 
