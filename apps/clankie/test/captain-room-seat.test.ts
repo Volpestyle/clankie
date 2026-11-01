@@ -17,6 +17,7 @@ import { SeatLinkInterruptedError } from "../src/captain/seat-outbox.ts";
 import { planDiscordTurnSession } from "../src/captain/system-authority.ts";
 import type { NativeRoomHandoffExecutor } from "../src/captain/native-room-handoffs.ts";
 import { linearTrackerActivity, type LinearActivityEvent } from "../src/linear-webhook.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 const fake = vi.hoisted(() => ({
   prompts: [] as string[],
@@ -142,6 +143,7 @@ async function fixture(granted = false, runNativeRoomHandoff?: NativeRoomHandoff
   });
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       herdrAvailable: () => false,
       memory: {},
       conversationRouteAuthorized: route,

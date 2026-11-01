@@ -15,6 +15,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { createFileMemory } from "../src/memory.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 // Native execution must not initialize a provider. Fail before any credential
 // access or model request if production routing mistakenly selects Pi.
@@ -140,6 +141,7 @@ it.each(["claude", "codex"] as const)(
     const memory = createFileMemory({ dataDir: join(root, "memory") });
     const captain = createCaptain(
       {
+        roomTurns: createDiscordTurns,
         herdrAvailable: () => true,
         embodiment: {},
         conversationRouteAuthorized: () => true,

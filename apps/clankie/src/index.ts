@@ -160,6 +160,7 @@ import { activityTools } from "./activity-tools.ts";
 import { voiceExtension } from "./voice-extension.ts";
 import { personaExtension } from "./persona-extension.ts";
 import { discordCaptainTools } from "./captain/discord-tools.ts";
+import { createDiscordTurns } from "./captain/captain-discord-turns.ts";
 import { worldExtension } from "./world/extension.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
@@ -1498,8 +1499,8 @@ const captain = createCaptain(
           playTools: pokeagentTools,
         }
       : {}),
-    // The persona's Discord body tools reach him only when the persona is on at start.
-    ...(personaOn ? { personaTools: discordCaptainTools } : {}),
+    // The persona's Discord body tools and room turns reach him only when the persona is on at start.
+    ...(personaOn ? { personaTools: discordCaptainTools, roomTurns: createDiscordTurns } : {}),
     ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined

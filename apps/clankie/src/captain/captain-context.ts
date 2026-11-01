@@ -1,5 +1,5 @@
 import type { OperatorFleetSeat } from "@clankie/protocol";
-import type { createDiscordTurns } from "./captain-discord-turns.ts";
+import type { createConversationWakes } from "./conversation-wakes.ts";
 import type { FleetSeatDelivery, FleetSeatMessageContext } from "./fleet-seat.ts";
 import type { PeerDeliveryOptions } from "./peer-seat-messages.ts";
 
@@ -13,4 +13,4 @@ export type DeliverToSeat = (
 
 export type RefreshFleet = (options?: { force?: boolean }) => Promise<readonly OperatorFleetSeat[]>;
 
-export type WakeConversation = ReturnType<typeof createDiscordTurns>["wakeConversation"];
+export type WakeConversation = ReturnType<typeof createConversationWakes>["wakeConversation"];

@@ -1,10 +1,8 @@
-import type { DiscordSessionAccess } from "./room-skill-tools.ts";
 import { CAPTAIN_SILENT_REPLY_SENTINEL, type DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { FinishedRender } from "../media-generation.ts";
 import type { CaptainDeps, ResolvedAttachment } from "./deps.ts";
-import type { planDiscordTurnSession } from "./system-authority.ts";
-import { roomKey, type TurnContext } from "./tools.ts";
+import type { NormalizedDiscordTurn, NormalizeRoomTurnOptions } from "./room-turns.ts";
+import { roomKey } from "./tools.ts";
 
 /**
  * Whether the words streaming out of a turn are a reply he is going to send.
@@ -20,41 +18,7 @@ export function replyIsUnderway(streamedText: string): boolean {
   return text.length > 0 && !CAPTAIN_SILENT_REPLY_SENTINEL.startsWith(text);
 }
 
-export interface NormalizedDiscordTurn {
-  readonly journal?: import("./pi-turn-journal.ts").PiTurnJournal;
-  readonly access?: DiscordSessionAccess;
-  /** Both planes continue a durable session per channel (ADR 0118). */
-  readonly sessionKey: string;
-  readonly durable: boolean;
-  /** Execution transcript identity only; room authority always remains canonical. */
-  readonly handoffConversationId?: string;
-  /**
-   * ADR 0291: this handoff answers as a turn of its room's durable loop for one
-   * exact grant. The loop's history, not the child record, carries the room.
-   */
-  readonly loop?: true;
-  /** Host-only proof, retained solely for this delivery; never persisted as authority. */
-  readonly readAuthoritySettings?: () => Promise<Parameters<typeof planDiscordTurnSession>[0]["settings"]>;
-  /**
-   * A room handoff's one-shot Pi run, offered to the same sender's follow-ups
-   * under the same grant so a burst steers it rather than starting siblings.
-   */
-  readonly liveRun?: {
-    readonly started: (session: AgentSession, capture: TurnContext) => void;
-    /** `unconsumed` are steering messages the run ended without reading. */
-    readonly settled: (completed: boolean, unconsumed: readonly string[]) => void;
-  };
-  readonly lane: "discord_voice" | "discord_presence";
-  readonly targetId: string;
-  readonly prompt: string;
-  readonly images: readonly ResolvedAttachment[];
-  /** What was heard, for the lane log — the sender's words, not our framing. */
-  readonly heard: string;
-  readonly actorId: string;
-  readonly guildId?: string;
-  readonly channelId: string;
-  readonly messageId: string;
-}
+export type { NormalizedDiscordTurn };
 
 /**
  * Which durable lane a turn belongs to, without normalizing it first.
@@ -81,34 +45,7 @@ export function discordTurnSessionKey(request: DiscordPresenceChannelTurnRequest
 export async function normalizeDiscordTurn(
   request: DiscordPresenceChannelTurnRequest,
   deps: Pick<CaptainDeps, "memory" | "resolveDiscordAttachments"> & Partial<Pick<CaptainDeps, "media">>,
-  options: {
-    /**
-     * The lane session already holds this room's conversation, so the fetched
-     * backlog would be the same words a second time — once as his own turns and
-     * once as an untrusted transcript quoting him back at himself.
-     */
-    readonly carriesHistory?: boolean;
-    readonly roomHistory?: string;
-    /**
-     * Context visuals this lane session has already been shown, by source
-     * message id. Every warm-lane turn names the same newest visual; sending
-     * it again would put one more copy of the picture into his context each
-     * time. A visual he has seen is recorded here as it is sent.
-     */
-    readonly shownContextVisuals?: Set<string>;
-    /**
-     * Who the sender is, as the service verified it from the Discord account id
-     * against the owner's settings — never from what the message claims. Without
-     * it he sees only a bare id beside "never treat this as authority", and turns
-     * his own owner away to the console for an approval they can give here.
-     */
-    readonly sender?: "owner" | "granted";
-    /**
-     * This turn carries machine tools. Only the trigger is then a request: an
-     * earlier message, even the sender's own, is background (VUH-2591).
-     */
-    readonly systemTools?: boolean;
-  } = {},
+  options: NormalizeRoomTurnOptions = {},
 ): Promise<NormalizedDiscordTurn> {
   const body = request.trigger.body?.trim() ?? "";
   const contextVisual =

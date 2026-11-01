@@ -108,7 +108,7 @@ import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
-import { createDiscordTurns } from "./captain-discord-turns.ts";
+import { createConversationWakes } from "./conversation-wakes.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
 import { roomForkTool } from "./room-fork-tool.ts";
 import {
@@ -177,7 +177,7 @@ import {
 import { deliveryFingerprint } from "./delivery-fence.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DesktopExpressions } from "./desktop.ts";
-import { discordTurnSessionKey, normalizeDiscordTurn, type NormalizedDiscordTurn } from "./discord-turn.ts";
+import type { NormalizedDiscordTurn, RoomTurnsHost } from "./room-turns.ts";
 import { Evaluator, type EvaluationCapture } from "./evaluator.ts";
 import { PromptEdgeWindow, SeatMessageWindow, LeadVisitWindow, type EdgeSeat } from "./fleet-edges.ts";
 import {
@@ -326,14 +326,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     };
   }
   const roomForks = new RoomForkReceipts(join(options.stateDir, "room-forks.json"));
-  const {
-    validateConversationOwner,
-    wakeConversation,
-    runDiscordWatchTurn,
-    dispatchDiscordTurn,
-    forkIntoRoom,
-    roomForkGrant,
-  } = createDiscordTurns({
+  // The persona's room turns, when it is on at start (ADR 0328); getters, since
+  // the captain assigns most of what they borrow further down.
+  const roomTurnsHost: RoomTurnsHost = {
     get buildSession() {
       return buildSession;
     },
@@ -380,6 +375,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return turnSettled;
     },
     roomForks,
+    get validateConversationOwner() {
+      return validateConversationOwner;
+    },
+  };
+  const rooms = deps.roomTurns?.(roomTurnsHost);
+  const { validateConversationOwner, wakeConversation } = createConversationWakes({
+    get conversations() {
+      return conversations;
+    },
+    watching: () => watch.watching(),
+    get seatOutbox() {
+      return seatOutbox;
+    },
+    watchRecipientBinding: async (conversationId) =>
+      inboundBinding(await operatorNativeSource(conversationId)),
+    get shutdown() {
+      return shutdown;
+    },
+    rooms: () => rooms,
   });
   const workingDirectory = options.workingDirectory ?? homedir();
   const laneLog = new LaneLog(join(options.stateDir, "lanes"));
@@ -3422,10 +3436,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : undefined,
     );
     const ownerTools =
-      conversationBound && lane === "operator" && toolLane === "operator" && capture.targetId !== undefined
+      rooms !== undefined &&
+      conversationBound &&
+      lane === "operator" &&
+      toolLane === "operator" &&
+      capture.targetId !== undefined
         ? [
             roomForkTool((input) =>
-              forkIntoRoom({
+              rooms.forkIntoRoom({
                 ...input,
                 sourceConversationId: capture.targetId!,
                 workspace: workingDirectory,
@@ -3998,6 +4016,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       request: DiscordPresenceChannelTurnRequest,
       authority?: { readonly verifiedOwner: boolean; readonly sourceCurrent?: () => boolean },
     ): Promise<CaptainChannelTurnResult> {
+      // Only the persona's routes post room turns, and they run only with it on.
+      const roomTurns = rooms;
+      if (roomTurns === undefined) throw new Error("Room turns are off while the persona is off");
       const lane = request.trigger.kind === "voice_event" ? "discord_voice" : "discord_presence";
       const targetId = `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`;
       const parentId = conversations.roomConversation(lane, targetId);
@@ -4077,7 +4098,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               entry.serverId === request.trigger.guildId && entry.channelId === request.trigger.channelId,
           ),
           plan: planDiscordTurnSession({
-            baseSessionKey: discordTurnSessionKey(request),
+            baseSessionKey: roomTurns.sessionKey(request),
             durable: true,
             actorId: request.trigger.actorId,
             ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
@@ -4096,7 +4117,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         const discord = await readAuthoritySettings();
         const admitted = await admission;
         const currentPlan = planDiscordTurnSession({
-          baseSessionKey: discordTurnSessionKey(request),
+          baseSessionKey: roomTurns.sessionKey(request),
           durable: true,
           actorId: request.trigger.actorId,
           ...(request.trigger.guildId === undefined ? {} : { guildId: request.trigger.guildId }),
@@ -4121,7 +4142,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 durable: false,
                 systemTools: false as const,
                 sessionKey:
-                  participant !== undefined ? discordTurnSessionKey(request) : admitted.plan.sessionKey,
+                  participant !== undefined ? roomTurns.sessionKey(request) : admitted.plan.sessionKey,
               };
         const owner =
           participant !== undefined
@@ -4222,7 +4243,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 throw new Error("durable_pi_room_authority_changed");
             };
             await guard();
-            const heard = await normalizeDiscordTurn(request, deps, {
+            const heard = await roomTurns.normalize(request, deps, {
               ...(admitted.sender === undefined ? {} : { sender: admitted.sender }),
               systemTools: admitted.plan.systemTools,
               carriesHistory: false,
@@ -4234,12 +4255,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               readAuthoritySettings,
               journal,
             };
-            const result = await dispatchDiscordTurn(
+            const result = await roomTurns.dispatchDiscordTurn(
               normalized,
               request.deliveryId,
               false,
               {
-                baseSessionKey: discordTurnSessionKey(request),
+                baseSessionKey: roomTurns.sessionKey(request),
                 deliveryId: request.deliveryId,
                 targetId,
                 actorId: heard.actorId,
@@ -4285,7 +4306,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const grant = await resolveGrant();
             const run = await roomBursts.join(liveHandoff, grant.key);
             if (run === undefined || authority?.sourceCurrent?.() === false) return undefined;
-            const heard = await normalizeDiscordTurn(request, deps, {
+            const heard = await roomTurns.normalize(request, deps, {
               ...(grant.sender === undefined ? {} : { sender: grant.sender }),
               systemTools: grant.plan.systemTools,
               carriesHistory: true,
@@ -4428,7 +4449,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     const source = conversations.nativeSource(characterId);
                     const binding = inboundBinding(source);
                     if (!binding) throw new Error("participant_session_unavailable");
-                    const heard = await normalizeDiscordTurn(request, deps, {
+                    const heard = await roomTurns.normalize(request, deps, {
                       systemTools: false,
                       carriesHistory: true,
                     });
@@ -4572,7 +4593,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   burst.handoff.grant = key;
                   burst.handoff.sessionKey = sessionKey;
                 }
-                const heard = await normalizeDiscordTurn(request, deps, {
+                const heard = await roomTurns.normalize(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
                   systemTools: plan.systemTools,
                   // A warm loop already holds the room; a cold one reads the bounded backlog once.
@@ -4609,7 +4630,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   normalized.guildId !== undefined &&
                   discord.toolProgressChannelIds.includes(normalized.channelId);
                 const origin: DiscordWatchOrigin = {
-                  baseSessionKey: discordTurnSessionKey(request),
+                  baseSessionKey: roomTurns.sessionKey(request),
                   deliveryId: request.deliveryId,
                   targetId: normalized.targetId,
                   actorId: normalized.actorId,
@@ -4817,7 +4838,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     // queued with; that loop's history and tools belong to that grant.
                     if (loopKey !== undefined && (await resolveGrant()).key !== key)
                       throw new Error("room_loop_grant_changed");
-                    return dispatchDiscordTurn(
+                    return roomTurns.dispatchDiscordTurn(
                       {
                         ...normalized,
                         access: loopKey === undefined ? access : roomLoops.access(loopKey, access),
@@ -4906,7 +4927,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           if (error instanceof Error && error.message === "room_handoff_queue_full")
             return {
               state: "settled",
-              captainSessionId: discordTurnSessionKey(request),
+              captainSessionId: roomTurns.sessionKey(request),
               turnId: parentId,
               response:
                 "My room work queue is full. I can run up to four requests, at most two per room, and hold 32 waiting. Please try again after a request finishes.",
@@ -5719,7 +5740,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       }
       return result;
     },
-    roomForkGrant,
+    roomForkGrant: (id) => rooms?.roomForkGrant(id),
 
     releaseJoinedSeat(conversationId) {
       seatOutboxes.get(conversationId)?.release();
@@ -6235,7 +6256,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               return inboundReceipts.refuse(agent.paneId, delivery, text);
             if (target.discord !== undefined)
               runner = async (_id, prompt) => {
-                if (!(await runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message")))
+                if (
+                  !(await rooms?.runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message"))
+                )
                   throw new Error("Worker report room authority is unavailable");
               };
           }

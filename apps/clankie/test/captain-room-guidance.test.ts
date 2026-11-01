@@ -10,6 +10,7 @@ import type { CaptainDeps } from "../src/captain/deps.ts";
 import { DiscordRoomObservations } from "../src/discord-room-observations.ts";
 import { LaneLog } from "../src/captain/lane-log.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 const fake = vi.hoisted(() => ({
   session: undefined as unknown,
@@ -103,6 +104,7 @@ it("parallel room children consume guidance once and keep separate tool captures
   const route = vi.fn(() => true);
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       herdrAvailable: () => false,
       memory: {},
       roomObservations: observations,

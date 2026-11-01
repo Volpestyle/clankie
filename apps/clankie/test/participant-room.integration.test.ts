@@ -11,6 +11,7 @@ import type { CaptainPort } from "../src/captain/port.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { ParticipantRoomSessions } from "../src/captain/participant-room-sessions.ts";
 import { planSeat, parseSeatArgs } from "../../tui/src/command/seat.ts";
+import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
 
 vi.mock("../src/captain/model.ts", () => ({
   createCaptainModelRuntime: async () => {
@@ -203,6 +204,7 @@ it.each([false, true, "absent"] as const)(
     const make = () =>
       createCaptain(
         {
+          roomTurns: createDiscordTurns,
           herdrAvailable: () => true,
           embodiment: {},
           conversationRouteAuthorized: () => true,

@@ -38,6 +38,7 @@ import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
+import type { CreateRoomTurns } from "./room-turns.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
@@ -61,6 +62,8 @@ export interface CaptainDeps {
     turn: import("./tools.ts").TurnContext,
     lane: CaptainSessionLaneV2,
   ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
+  /** The persona's room turns: Discord messages, room wakes and owner forks (ADR 0328). */
+  readonly roomTurns?: CreateRoomTurns;
   /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
   readonly activityTools?: (
     turn: import("./tools.ts").TurnContext,
