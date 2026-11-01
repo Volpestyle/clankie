@@ -331,6 +331,10 @@ export function createFleetProjection(ctx: FleetProjectionContext) {
       herdrWatches.withNativeStatus(workSeats, fleet.seats),
     );
     stopGoalStatus();
+    // allow-swallowed-rejection -- A sweep that can't save leaves the tags for the next one.
+    void personas
+      .sweepGoneRoles(seats, (personaId) => conversations.conversationForPersona(personaId)?.updatedAt)
+      .catch(() => undefined);
     // Live proof is refreshed asynchronously. Missing census or an untracked
     // head never establishes that an original process exited.
     // allow-swallowed-rejection -- moved unchanged from the captain (ADR 0325); an unreadable observation leaves the projection as it was.
