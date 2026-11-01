@@ -155,6 +155,7 @@ import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
+import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import type { LinearRouteParts } from "./app/linear-routes.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
 import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
@@ -956,6 +957,7 @@ const agentSessions = createAgentSessions(
 // the repo itself.
 const workItems = createWorkItemsService({
   stateDirectory: stateRoot,
+  trackerProjects: createLinearWorkProjects,
   projects: async () => (await settingsStore.read()).projects,
   projectsFence: async () => {
     const snapshot = await settingsStore.loadFenced();
