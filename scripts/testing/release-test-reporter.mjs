@@ -1,5 +1,5 @@
-import { writeFileSync } from "node:fs";
-import { relative } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, relative } from "node:path";
 
 // Release recovery needs completed file results, not a grep of console output.
 export default class ReleaseTestReporter {
@@ -12,6 +12,8 @@ export default class ReleaseTestReporter {
   }
 
   onTestRunEnd(modules, errors, reason) {
+    // A fresh CI checkout has no .local yet.
+    mkdirSync(dirname(process.env.CLANKIE_RELEASE_TEST_REPORT), { recursive: true });
     writeFileSync(
       process.env.CLANKIE_RELEASE_TEST_REPORT,
       JSON.stringify({

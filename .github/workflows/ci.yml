@@ -1,8 +1,10 @@
 name: CI
-# Every push gets the quick `check` job. A draft pull request stops there: the
-# landing gate and the Mac job run once it is ready for review, and again on
-# each push after that, so the full checks run before merge, not on every
-# iteration (ADR 0310). A draft cannot merge, so the skipped jobs pass nothing.
+# Every push gets the quick `check` job. A draft pull request stops there. A
+# ready pull request adds the landing gate (typecheck and the test files it
+# changed) and the real-app run on the Mac, a few minutes in all. The tests a
+# change reaches through its imports run on main after the merge (`checkpoint`
+# and `mac`), and the whole suite runs nightly: checkpoints, not waits
+# (ADR 0310). A draft cannot merge, so the skipped jobs pass nothing.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -138,7 +140,8 @@ jobs:
           status=0
           # The checked-out merge commit's first parent is the base it merges into.
           base=$(git rev-parse HEAD^1)
-          node scripts/check-landing.mjs --base "$base" --keep-going -- \
+          # Only the test files this change edits; the rest checkpoint on main.
+          node scripts/check-landing.mjs --base "$base" --keep-going --own-tests -- \
             --reporter=default --reporter=./scripts/testing/release-test-reporter.mjs || status=$?
           checks=$(node -p 'JSON.parse(require("fs").readFileSync(".local/landing-gate.json", "utf8")).checksExitCode')
           failed=$(node -p 'JSON.parse(require("fs").readFileSync(".local/landing-gate.json", "utf8")).phases.at(-1)?.name ?? ""')
@@ -164,6 +167,57 @@ jobs:
             .local/landing-gate.json
             .local/landing-run.json
           retention-days: 7
+
+  # The tests a merge reaches through its imports, on Linux, after it is on main
+  # (ADR 0310). A pull request ran only the test files it edited. A red run here
+  # is a bug to file at the front of the queue, not a gate; a newer push cancels
+  # an older run, and the nightly run covers everything either way.
+  checkpoint:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+          cache: pnpm
+      - run: sudo apt-get install -y --no-install-recommends ffmpeg zsh
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm herdr:build
+      - run: echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
+      - name: Tests the merge reaches
+        env:
+          BEFORE: ${{ github.event.before }}
+          CLANKIE_LANDING_TESTS: "1"
+          CLANKIE_RELEASE_TEST_REPORT: ${{ github.workspace }}/.local/checkpoint-run.json
+        run: |
+          base="$BEFORE"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=$(git rev-parse HEAD^1); fi
+          pnpm exec vitest run --config vitest.config.ts --changed "$base" --bail 0 --passWithNoTests \
+            --reporter=default --reporter=./scripts/testing/release-test-reporter.mjs
+      - name: Name the failures
+        if: ${{ failure() }}
+        run: |
+          test -f .local/checkpoint-run.json || exit 0
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync(".local/checkpoint-run.json", "utf8"));
+            const lines = ["### Failing on main after this merge", ""];
+            for (const f of r.files)
+              if (f.state === "failed") {
+                const tests = f.tests.filter((t) => t.state === "failed").map((t) => t.name);
+                lines.push(`- ${f.path}${tests.length ? ": " + tests.join("; ") : " (outside a test)"}`);
+              }
+            for (const e of r.errors) lines.push(`- unhandled: ${e.name}: ${e.message}`);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+            console.log(lines.join("\n"));
+          '
 
   # Seeds the cargo cache the landing job restores. Caches saved on main are
   # visible to every pull request; one saved by a pull request is not.
@@ -219,52 +273,14 @@ jobs:
           path: .local/tsbuildinfo
           key: tsbuildinfo-${{ runner.os }}-main-${{ github.sha }}
 
-  # Which tests the Mac job would run, worked out on a free Linux runner, so a
-  # change that selects none leaves the Mac idle and the mac check passes as
-  # skipped (ADR 0310). Any failure here runs the Mac job anyway.
-  mac-scope:
-    if: >-
-      vars.CLANKIE_MAC_RUNNER == 'true' &&
-      github.event_name == 'pull_request' &&
-      !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      tests: ${{ steps.scope.outputs.tests }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.11.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 26.7.0
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - id: scope
-        run: |
-          node scripts/check-changed-tests.mjs --base "$(git rev-parse HEAD^1)" --list .local/mac-scope.json
-          count=$(node -p 'JSON.parse(require("fs").readFileSync(".local/mac-scope.json", "utf8")).length')
-          echo "tests=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-
   # The changed tests on James's Mac, so macOS-only tests run on every change
-  # (ADR 0240). This repository is public, so the job never runs code from a
-  # fork on that machine: only pushes here and pull requests from this
-  # repository's own branches. It stays off until the Mac's runner for this
-  # repository is registered and the CLANKIE_MAC_RUNNER variable is "true".
+  # to main (ADR 0240). It is a checkpoint after the merge, not a pull request
+  # wait (ADR 0310): on a pull request it is skipped, which passes the required
+  # check. Only pushes to this repository run here, so no fork code reaches the
+  # Mac. It stays off until the Mac's runner for this repository is registered
+  # and the CLANKIE_MAC_RUNNER variable is "true".
   mac:
-    needs: mac-scope
-    if: >-
-      !cancelled() &&
-      vars.CLANKIE_MAC_RUNNER == 'true' &&
-      (github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
-      !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (needs.mac-scope.result != 'success' || needs.mac-scope.outputs.tests != 'false')))
+    if: vars.CLANKIE_MAC_RUNNER == 'true' && github.event_name == 'push'
     runs-on: [self-hosted, macOS, james-mac]
     timeout-minutes: 30
     steps:
@@ -313,15 +329,15 @@ jobs:
   # The real app on James's Mac (ADR 0309): this checkout's service and relay in a
   # scratch home with his own private Herdr, driven through the CLI and HTTP as an
   # agent or the app would, every outcome checked through the API, the files and
-  # the service's own logs. Same fork rule as the mac job: never code from a fork
-  # on that machine.
+  # the service's own logs. It is the pull request's one Mac job, a few minutes,
+  # and it runs once: main does not rerun what the pull request proved
+  # (ADR 0310). Never code from a fork on that machine.
   real-run:
     if: >-
       vars.CLANKIE_MAC_RUNNER == 'true' &&
-      (github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request' &&
       !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository))
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, james-mac]
     timeout-minutes: 15
     steps:
