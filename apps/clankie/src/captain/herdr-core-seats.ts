@@ -2,9 +2,10 @@ import { HerdrCoreError, herdrCoreCall, herdrCoreSocketPath } from "./herdr-core
 
 // Where Clankie's hires start in the Herdr desktop app (ADR 0319): a terminal in
 // herdr-core, the app's terminal server, labeled into one Clankie space so the
-// window shows it. The core only starts, inspects and ends these terminals. A
-// hire's messages reach it through its worker channel, never through the
-// terminal's input (ADR 0207), so nothing here writes to a terminal.
+// window shows it. The core starts, inspects and ends these terminals. A hire's
+// messages reach it through its worker channel, never through the terminal's
+// input (ADR 0207); the only input is named keys, pressed for the owner or a
+// connected app he turned keys on for (ADR 0323), never text.
 
 /** The desktop app shows a terminal labeled with a space; this one is Clankie's. */
 export const CLANKIE_SPACE = "clankie";
@@ -64,6 +65,8 @@ export interface HerdrCoreSeats {
   read(address: string, lines: number): Promise<string>;
   /** Sets labels on a terminal Clankie started; an empty value removes one. */
   label(address: string, labels: Readonly<Record<string, string>>): Promise<void>;
+  /** Presses named keys (`up`, `esc`, `ctrl+c`) in the terminal, encoded for its program's modes. */
+  keys(address: string, keys: readonly string[]): Promise<void>;
 }
 
 export interface HerdrCoreSeatsOptions {
@@ -128,6 +131,10 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
 
     async label(address, labels) {
       await call("terminal.label", { terminal: address, labels: { ...labels } });
+    },
+
+    async keys(address, keys) {
+      await call("terminal.keys", { terminal: address, keys: [...keys] });
     },
 
     async kill(address) {

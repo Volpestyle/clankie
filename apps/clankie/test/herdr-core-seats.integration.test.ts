@@ -130,6 +130,7 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   const seats = createHerdrCoreSeats({ env });
   const runner = createHerdrCoreRunner({ seats, pollMs: 50 });
   const report = join(cwd, "seat.json");
+  const keysReport = join(cwd, "keys.hex");
   const address = await seats.start({
     argv: [
       process.execPath,
@@ -139,6 +140,11 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
         `const { seatIdentity } = await import(${JSON.stringify(workerLink)});`,
         `(await import("node:fs")).writeFileSync(${JSON.stringify(report)}, JSON.stringify(seatIdentity()));`,
         `console.log("hello from the desktop app");`,
+        // It records the bytes each key press reaches it as.
+        `const fs = await import("node:fs");`,
+        `process.stdin.setRawMode?.(true);`,
+        `let pressed = "";`,
+        `process.stdin.on("data", (bytes) => fs.writeFileSync(${JSON.stringify(keysReport)}, (pressed += bytes.toString("hex"))));`,
         `setInterval(() => {}, 1000);`,
       ].join("\n"),
     ],
@@ -159,7 +165,13 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
     (await runner.readPane(address, "visible", "text")).includes("hello from the desktop app"),
   );
 
+  // Named keys reach his own hire as the bytes a real terminal sends (ADR 0323).
+  await runner.sendKeys!(address, ["up", "ctrl+c", "a"]);
+  await until(async () => existsSync(keysReport) && (await readFile(keysReport, "utf8")).endsWith("61"));
+  expect(await readFile(keysReport, "utf8")).toBe("1b5b410361");
+
   // A terminal the owner started is never his to drive.
+  await expect(runner.sendKeys!(warm, ["ctrl+c"])).rejects.toThrow();
   expect(await runner.resolveTerminal(warm)).toBeUndefined();
   await expect(runner.get(warm)).rejects.toThrow();
   await runner.closePane(warm);

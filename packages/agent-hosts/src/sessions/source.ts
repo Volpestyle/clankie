@@ -99,6 +99,16 @@ export interface SessionAnswerResult {
   readonly detail: string;
 }
 
+/**
+ * `pressed`: the keys went in. `refused` and `unavailable`: nothing went in, and
+ * `detail` says why. `uncertain`: some may have gone in; read the session first.
+ */
+export interface SessionKeysResult {
+  readonly id: string;
+  readonly status: "pressed" | "refused" | "unavailable" | "uncertain";
+  readonly detail: string;
+}
+
 /** Where a new session may start: a known project's checkout on one machine. */
 export interface SessionPlace {
   readonly machine: string;
@@ -139,6 +149,8 @@ export interface SessionSource {
   start?(request: SessionStartRequest): Promise<SessionStartResult>;
   /** Answer the prompt open in a session (a menu, a permission prompt); a source that can't leaves this out. */
   answer?(id: string, answer: SessionPromptAnswer): Promise<SessionAnswerResult>;
+  /** Press named keys in a session's terminal (`up`, `esc`, `ctrl+c`); a source that can't leaves this out. */
+  press?(id: string, keys: readonly string[]): Promise<SessionKeysResult>;
 }
 
 /** A refusal worded for the person or model that asked. */
@@ -212,6 +224,13 @@ export class SessionSources {
     if (source.answer === undefined)
       throw new SessionRefusal("That session's app can't answer prompts from here.");
     return { ...(await source.answer(native, answer)), id };
+  }
+
+  public async press(id: string, keys: readonly string[]): Promise<SessionKeysResult> {
+    const [source, native] = this.resolve(id);
+    if (source.press === undefined)
+      throw new SessionRefusal("That session's app can't take key presses from here.");
+    return { ...(await source.press(native, keys)), id };
   }
 
   public async open(id: string): Promise<SessionOpenResult> {

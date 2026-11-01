@@ -203,6 +203,26 @@ export const PromptAnswerResultSchema = z
 export type PromptAnswerResult = z.infer<typeof PromptAnswerResultSchema>;
 
 /**
+ * Keys a connected app presses in an agent's terminal at any time (ADR 0323), the way the
+ * owner would at the keyboard: a named key, a letter or a digit, with up to three of
+ * ctrl, alt and shift, such as `up`, `esc`, `ctrl+c` or `shift+tab`. Never text.
+ */
+export const KEY_PRESS_MAX = 24;
+export const KeyPressSchema = z
+  .string()
+  .regex(
+    /^(?:(?:ctrl|alt|shift)\+){0,3}(?:enter|esc|tab|backspace|delete|space|up|down|left|right|home|end|pageup|pagedown|[a-z0-9])$/u,
+    "A key is a name like enter, esc, up, a or 7, optionally after ctrl+, alt+ or shift+",
+  );
+export const KeyPressResultSchema = z
+  .object({
+    outcome: z.enum(["pressed", "refused", "uncertain", "unavailable"]),
+    message: z.string().min(1).max(1_000),
+  })
+  .strict();
+export type KeyPressResult = z.infer<typeof KeyPressResultSchema>;
+
+/**
  * Images a connected app passes to and from agents (ADR 0315). Images sent to
  * an agent ride the owner-attachment upload (ADR 0209); this many per message.
  */
@@ -368,6 +388,7 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "start_agent":
     case "app_notes":
     case "prompt_answer":
+    case "key_press":
     case "herdr_core_list":
     case "herdr_core_read":
     case "get":

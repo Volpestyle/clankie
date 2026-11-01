@@ -229,6 +229,12 @@ export function createHerdrCoreRunner(
         throw new Error(`The desktop app has no Clankie terminal ${address}`);
       return seats.read(address, source === "visible" ? 0 : HISTORY_LINES);
     },
+    // Named keys only, in a terminal Clankie started (ADR 0323); never text, so never a brief.
+    sendKeys: async (address, keys) => {
+      if ((await own(address)) === undefined)
+        throw new Error(`The desktop app has no Clankie terminal ${address}`);
+      await seats.keys(address, keys);
+    },
     closePane: async (address, guard) => {
       await guard?.();
       pending.delete(address);

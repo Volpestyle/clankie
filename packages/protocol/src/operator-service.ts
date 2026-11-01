@@ -5,6 +5,9 @@ import {
   PROMPT_ANSWER_EXPECT_MAX,
   PromptAnswerResultSchema,
   PromptAnswerStepSchema,
+  KEY_PRESS_MAX,
+  KeyPressResultSchema,
+  KeyPressSchema,
   SeatImageResultSchema,
 } from "./connector.ts";
 import { FleetCapacitySchema } from "./fleet-capacity.ts";
@@ -588,6 +591,21 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({
       /**
+       * Press keys in an agent's terminal (ADR 0323), whatever it is doing: arrows, esc,
+       * ctrl+c, tab, enter. Only an app signed in to the connector, through the relay,
+       * once the owner turned prompts and keys on for that app.
+       */
+      op: z.literal("key_press"),
+      schemaVersion: z.literal(1),
+      terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
+      keys: z.array(KeyPressSchema).min(1).max(KEY_PRESS_MAX),
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /**
        * A connected app writes an issue in one of the owner's projects (ADR 0305), only
        * through the relay, which stamps the app's device. Linear and GitHub writes pass
        * the project's "Posting to your tracker" setting.
@@ -1065,6 +1083,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .strict(),
   z
     .object({ op: z.literal("prompt_answer"), schemaVersion: z.literal(1), result: PromptAnswerResultSchema })
+    .strict(),
+  z
+    .object({ op: z.literal("key_press"), schemaVersion: z.literal(1), result: KeyPressResultSchema })
     .strict(),
   z
     .object({ op: z.literal("issue_write"), schemaVersion: z.literal(1), result: IssueWriteResultSchema })
