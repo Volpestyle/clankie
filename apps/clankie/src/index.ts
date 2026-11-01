@@ -112,9 +112,7 @@ import {
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
-  CLANKIE_ACCOUNT_PROVIDER_ID,
   LINEAR_WEBHOOK_PROVIDER_ID,
-  createClankieAccountTokenProvider,
   ensureDiscordBridgeCredential,
   ensureDiscordUserBridgeCredential,
   ensureDiscordUserVoiceBridgeCredential,
@@ -172,7 +170,6 @@ import {
   reconcileDiscordVoice,
 } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
-import { accountMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LOCAL_FLEET_KEEP_ALIVE_MS, LocalFleetLink } from "./local-fleet-link.ts";
 import { NativeFixtureAdmissions } from "./native-fixture-admissions.ts";
@@ -852,26 +849,9 @@ const discordTracking = new DiscordTracking({
   onError: () => logger.warn("Discord project tracking retained an unavailable or uncertain delivery"),
 });
 
-// His Clankie address (ADR 0242), reached with his Clankie account.
-const selfHostedMailGateway = async () =>
-  (await settingsStore.load()).publicGateway.url ?? DEFAULT_CLANKIE_GATEWAY_URL;
-const mailAccountTokens = new Map<string, ReturnType<typeof createClankieAccountTokenProvider>>();
 const email = createEmailPort({
   credentials: operatorCredentialStore,
   settings: settingsStore,
-  hosted: accountMailbox({
-    gatewayUrl: selfHostedMailGateway,
-    signedIn: async () => (await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID))?.type === "oauth",
-    token: async () => {
-      const gatewayUrl = await selfHostedMailGateway();
-      let tokens = mailAccountTokens.get(gatewayUrl);
-      if (tokens === undefined) {
-        tokens = createClankieAccountTokenProvider({ gatewayUrl, store: operatorCredentialStore });
-        mailAccountTokens.set(gatewayUrl, tokens);
-      }
-      return tokens();
-    },
-  }),
 });
 
 let proofFleetLinks: FleetLinks | undefined;

@@ -236,7 +236,6 @@ it("an older client's save keeps the newer settings it cannot carry back", async
     settings: {
       ...initial.settings,
       mainConversationChannelIds: ["10007"],
-      officialBotEnabled: true,
       wakeTrigger: "name",
     },
   });
@@ -245,7 +244,6 @@ it("an older client's save keeps the newer settings it cannot carry back", async
     settings: DiscordSettingsSchema.omit({
       wakeTrigger: true,
       ambientChannelIds: true,
-      officialBotEnabled: true,
       roomSkills: true,
       houseHuntingAuthorBindings: true,
       mainConversationChannelIds: true,
@@ -262,7 +260,11 @@ it("an older client's save keeps the newer settings it cannot carry back", async
   const response = await fetchImpl("http://fixture.invalid/v1/discord/settings", {
     method: "POST",
     headers: { authorization: "Bearer fixture-operator", "content-type": "application/json" },
-    body: JSON.stringify({ expectedRevision: old.revision, settings: { ...old.settings, guildId: "12345" } }),
+    // It also still names a setting this version retired (ADR 0326); the save goes through.
+    body: JSON.stringify({
+      expectedRevision: old.revision,
+      settings: { ...old.settings, officialBotEnabled: false, guildId: "12345" },
+    }),
   });
   expect(response.ok).toBe(true);
   const saved = await response.json();
@@ -271,7 +273,7 @@ it("an older client's save keeps the newer settings it cannot carry back", async
   const reread = await client.discordSettings();
   expect(reread.settings.wakeTrigger).toBe("name");
   expect(reread.settings.mainConversationChannelIds).toEqual(["10007"]);
-  expect(reread.settings.officialBotEnabled).toBe(true);
+  expect(reread.settings).not.toHaveProperty("officialBotEnabled");
   // A current writer still clears them: an empty value, or an omitted optional setting.
   const cleared = await client.updateDiscordSettings({
     expectedRevision: reread.revision,
@@ -279,12 +281,10 @@ it("an older client's save keeps the newer settings it cannot carry back", async
       ...seeded.settings,
       guildId: "12345",
       mainConversationChannelIds: [],
-      officialBotEnabled: false,
       wakeTrigger: undefined,
     },
   });
   expect(cleared.settings.mainConversationChannelIds).toEqual([]);
-  expect(cleared.settings.officialBotEnabled).toBe(false);
   expect(cleared.settings).not.toHaveProperty("wakeTrigger");
   expect((await settings.load()).discord.wakeTrigger).toBeUndefined();
 });

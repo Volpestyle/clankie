@@ -868,14 +868,6 @@ function buildNetworkRows() {
       },
     ],
     [
-      "POST /v1/accounts/email/connect",
-      {
-        access: "Encrypted active device bearer with terminalControl (Take Control)",
-        purpose:
-          "Choose his Clankie mailbox in one step once Clankie's mail service answers this install's Clankie account, and return the email row; otherwise refuse with account_required or unavailable and change nothing.",
-      },
-    ],
-    [
       "POST /operator/v1/artifacts/download",
       {
         access: "Encrypted device bearer plus chat grant",
@@ -916,14 +908,6 @@ function buildNetworkRows() {
       {
         access: "One-time completion token",
         purpose: "Accept a subset of the offered grants and activate the device.",
-      },
-    ],
-    [
-      "POST /v1/devices/wake-key",
-      {
-        access: "Encrypted live device bearer; managed bodies only",
-        purpose:
-          "Register this device’s public key for waking its hosted body. Self-hosted bodies return 404.",
       },
     ],
     [

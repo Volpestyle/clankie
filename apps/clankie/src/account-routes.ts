@@ -18,7 +18,6 @@ import {
   AccountGoogleStartResultSchema,
   AccountGoogleCompleteResultSchema,
   ACCOUNT_DISCONNECT_PATH,
-  ACCOUNT_EMAIL_CONNECT_PATH,
   ACCOUNT_GITHUB_POLL_PATH,
   ACCOUNT_GITHUB_START_PATH,
   ACCOUNT_LINEAR_COMPLETE_PATH,
@@ -27,8 +26,6 @@ import {
   ACCOUNT_LINEAR_START_PATH,
   AccountDisconnectRequestSchema,
   AccountDisconnectResultSchema,
-  AccountEmailConnectRequestSchema,
-  AccountEmailConnectResultSchema,
   AccountGithubPollRequestSchema,
   AccountGithubPollResultSchema,
   AccountGithubStartResultSchema,
@@ -60,7 +57,6 @@ export function createAccountRoutes(
     ACCOUNT_LINEAR_COMPLETE_PATH,
     ACCOUNT_LINEAR_APP_PATH,
     ACCOUNT_DISCONNECT_PATH,
-    ACCOUNT_EMAIL_CONNECT_PATH,
   ];
   for (const path of paths) {
     app.use(path, async (context, next) => {
@@ -196,11 +192,6 @@ export function createAccountRoutes(
       ? AccountLinearCompleteResultSchema.parse(await accounts!.connectLinearApp(parsed.data, guard))
       : malformed;
   });
-  post(ACCOUNT_EMAIL_CONNECT_PATH, async (body, guard) =>
-    AccountEmailConnectRequestSchema.safeParse(body).success
-      ? AccountEmailConnectResultSchema.parse(await accounts!.connectMailbox(guard))
-      : malformed,
-  );
   post(ACCOUNT_DISCONNECT_PATH, async (body, guard) => {
     const parsed = AccountDisconnectRequestSchema.safeParse(body);
     return parsed.success

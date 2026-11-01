@@ -33,7 +33,6 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
         scope,
         run,
         supportGrantId,
-        browserSessionId,
         pendingExpiresAt,
       } = parsed.data;
       if (devices.has(deviceId)) throw new Error(`device ${deviceId} already exists on redeemed replay`);
@@ -52,28 +51,17 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
           ...(localCompanion === undefined ? {} : { localCompanion }),
           ...(scope === undefined ? {} : { scope }),
           ...(supportGrantId === undefined ? {} : { supportGrantId }),
-          ...(browserSessionId === undefined ? {} : { browserSessionId }),
           createdAt: event.occurredAt,
           pendingExpiresAt,
         }),
       );
       return;
     }
-    case "device.pairing.restarted": {
-      const record = requireDevice(devices, parsed.data.deviceId);
-      if (record.status !== "pending" || record.browserSessionId === undefined)
-        throw new Error(`device ${record.deviceId} cannot restart browser pairing`);
-      devices.set(
-        record.deviceId,
-        DeviceRecordSchema.parse({
-          ...record,
-          offerId: parsed.data.offerId,
-          grants: parsed.data.offeredGrants,
-          pendingExpiresAt: parsed.data.pendingExpiresAt,
-        }),
-      );
+    case "device.pairing.restarted":
+      // Only the retired hosted browser sign-in wrote this (ADR 0326). Replay
+      // keeps an older log loading and changes nothing: the pending device it
+      // named lost its completion token with that process, so it stays unpaired.
       return;
-    }
     case "device.activated": {
       const record = requireDevice(devices, parsed.data.deviceId);
       if (record.status !== "pending") {

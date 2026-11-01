@@ -30,7 +30,7 @@ import { isAbsolute } from "node:path";
  */
 export const SETTINGS_SCHEMA_VERSION = 1 as const;
 
-import { DiscordSettingsSchema } from "@clankie/protocol/discord-settings";
+import { DiscordSettingsSchema, withoutRetiredDiscordSettings } from "@clankie/protocol/discord-settings";
 import { RuntimeHealthSettingsSchema } from "@clankie/protocol/runtime-health";
 export { DiscordSettingsSchema, type DiscordSettings } from "@clankie/protocol/discord-settings";
 
@@ -545,13 +545,6 @@ const HostnameSchema = z
  */
 export const EmailSettingsSchema = z
   .object({
-    /**
-     * Which mailbox the mail tools use. `clankie`: his address on Clankie's
-     * mail service, reached with this install's Clankie account or hosted
-     * body credential (ADR 0242). `imap`: the owner's own server below.
-     * Unset picks IMAP when it is configured and the Clankie mailbox otherwise.
-     */
-    provider: z.enum(["clankie", "imap"]).optional(),
     imapHost: HostnameSchema.optional(),
     imapPort: z.number().int().min(1).max(65535).default(993),
     smtpHost: HostnameSchema.optional(),
@@ -964,7 +957,6 @@ export function migrateLegacyFleetWorkingPreferences(parsed: unknown): unknown {
  *   is now an ordinary always-on product skill.
  */
 const RETIRED_SETTINGS_KEYS: readonly string[] = ["linear", "swarm", "skills"];
-const RETIRED_DISCORD_SETTINGS_KEYS: readonly string[] = ["possessorVoiceEnabled"];
 // rivalsUrl: Rivals became an external extension (VUH-2419); its URL is now an extension option.
 const RETIRED_GAMEPLAY_SETTINGS_KEYS: readonly string[] = ["pokemonEmulatorEnabled", "rivalsUrl"];
 
@@ -999,14 +991,8 @@ export function dropRetiredSettings(parsed: unknown): unknown {
       );
     settings["execution"] = value;
   }
-  const discord = settings["discord"];
-  if (discord !== null && typeof discord === "object" && !Array.isArray(discord)) {
-    settings["discord"] = Object.fromEntries(
-      Object.entries(discord as Record<string, unknown>).filter(
-        ([key]) => !RETIRED_DISCORD_SETTINGS_KEYS.includes(key),
-      ),
-    );
-  }
+  if (settings["discord"] !== undefined)
+    settings["discord"] = withoutRetiredDiscordSettings(settings["discord"]);
   const gameplay = settings["gameplay"];
   if (gameplay !== null && typeof gameplay === "object" && !Array.isArray(gameplay)) {
     settings["gameplay"] = Object.fromEntries(
@@ -1014,6 +1000,15 @@ export function dropRetiredSettings(parsed: unknown): unknown {
         ([key]) => !RETIRED_GAMEPLAY_SETTINGS_KEYS.includes(key),
       ),
     );
+  }
+  const email = settings["email"];
+  if (email !== null && typeof email === "object" && !Array.isArray(email)) {
+    // Mail is the owner's IMAP server alone now (ADR 0326). A file that chose the
+    // retired Clankie mailbox also holds the address that service assigned, which
+    // would sign IMAP mail wrongly, so that address goes with the choice.
+    const { provider, ...rest } = email as Record<string, unknown>;
+    if (provider === "clankie") delete rest["fromAddress"];
+    settings["email"] = rest;
   }
   const linearWebhook = settings["linearWebhook"];
   if (linearWebhook !== null && typeof linearWebhook === "object" && !Array.isArray(linearWebhook)) {

@@ -2789,21 +2789,12 @@ An unconfigured row means an operator has not configured the developer OAuth cli
 The `email` row is his own mailbox, with the address he sends as and the result
 of the last real exchange, re-checked when older than a minute: `connected`,
 `reconnect_required` with reason `sign_in_rejected` when the mail server refused
-the stored password (or the Clankie account sign-in lapsed), or `unavailable`
-when it could not be reached. The mailbox is his Clankie address on Clankie's
-mail service ([ADR 0242](adr/0242-every-clankie-has-a-mailbox-we-run.md)), or
-the owner's own IMAP/SMTP server. On an install signed in to a Clankie account,
-`accounts connect email` (or `/connect email` → Clankie mailbox, or the app's
-Connect Email) chooses it in one step through `POST /v1/accounts/email/connect`
-and returns the row. It asks the mail service first: without a Clankie account,
-or when the service refuses it, it answers `account_required` (`unavailable` when
-the service can't be reached) and changes nothing. `settings.email.provider` records `clankie` or `imap`, and
-unset means a configured IMAP server wins; a stored IMAP password is kept for a
-switch back. Sends through the Clankie
-mailbox have hourly, daily and different-recipient limits; a refusal at one is
-`limit_reached` and names it. `accounts disconnect email` forgets a stored IMAP
-password (`revoked: false`; an app password is withdrawn at the provider) or
-switches away from the Clankie address, which stays the account's.
+the stored password, or `unavailable` when it could not be reached. The mailbox
+is the owner's own IMAP/SMTP server, set up with `/connect email`; the hosted
+Clankie mailbox is retired
+([ADR 0326](adr/0326-the-last-hosted-leftovers-are-removed.md)).
+`accounts disconnect email` forgets the stored password (`revoked: false`; an
+app password is withdrawn at the provider).
 `accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
 `accounts start github` and `accounts poll github --flow-id ID` expose the same
