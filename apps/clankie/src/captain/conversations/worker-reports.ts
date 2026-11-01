@@ -439,31 +439,41 @@ interface PendingReceipt {
  * Each of this sender's reports, at its newest stage the worker hasn't been
  * told. An earlier stage is never told once a later one has happened.
  */
-function pendingReceipts(ctx: ConversationStore, paneId: string, binding: string): PendingReceipt[] {
-  return inboundReports(ctx, undefined, { includeRead: true, sender: { paneId, binding } }).flatMap(
-    (report) => {
-      const delivery = report.reportDelivery;
-      if (report.paneId !== paneId || report.binding !== binding || !delivery.senderNotifications) return [];
-      const takenAt =
-        delivery.takenAt ??
-        delivery.offeredAt ??
-        (["consumed", "responded"].includes(delivery.stage ?? "") ? delivery.deliveredAt : undefined);
-      const stages = (
-        [
-          ["stored", report.acceptedAt],
-          ["taken", takenAt],
-          ["acknowledged", delivery.readAt],
-        ] as const
-      ).filter(([, at]) => at !== undefined);
-      const newest = stages.at(-1);
-      if (!newest || delivery.senderEventAcks?.includes(newest[0])) return [];
-      const covers = stages
-        .slice(0, -1)
-        .map(([stage]) => stage)
-        .filter((stage) => !delivery.senderEventAcks?.includes(stage));
-      return [{ report, stage: newest[0], at: newest[1]!, covers }];
-    },
+function senderReports(ctx: ConversationStore, paneId: string, binding: string): InboundReport[] {
+  return inboundReports(ctx, undefined, { includeRead: true, sender: { paneId, binding } }).filter(
+    (report) =>
+      report.paneId === paneId && report.binding === binding && report.reportDelivery.senderNotifications,
   );
+}
+
+/** The stages this report has reached, oldest first, with when each happened. */
+function reachedStages(report: InboundReport): (readonly [ReceiptStage, string])[] {
+  const delivery = report.reportDelivery;
+  const takenAt =
+    delivery.takenAt ??
+    delivery.offeredAt ??
+    (["consumed", "responded"].includes(delivery.stage ?? "") ? delivery.deliveredAt : undefined);
+  return (
+    [
+      ["stored", report.acceptedAt],
+      ["taken", takenAt],
+      ["acknowledged", delivery.readAt],
+    ] as const
+  ).filter((entry): entry is readonly [ReceiptStage, string] => entry[1] !== undefined);
+}
+
+function pendingReceipts(ctx: ConversationStore, paneId: string, binding: string): PendingReceipt[] {
+  return senderReports(ctx, paneId, binding).flatMap((report) => {
+    const delivery = report.reportDelivery;
+    const stages = reachedStages(report);
+    const newest = stages.at(-1);
+    if (!newest || delivery.senderEventAcks?.includes(newest[0])) return [];
+    const covers = stages
+      .slice(0, -1)
+      .map(([stage]) => stage)
+      .filter((stage) => !delivery.senderEventAcks?.includes(stage));
+    return [{ report, stage: newest[0], at: newest[1]!, covers }];
+  });
 }
 
 function receiptContent({ report, stage }: PendingReceipt): string {
@@ -572,7 +582,13 @@ export function acknowledgeSenderReportEvent(
       })
     : pending.filter((entry) => entry.at <= through!);
   if (acked.length === 0) {
-    if (!single) return false;
+    // A retried batch whose first acknowledgment was saved: the receipt it was named after is acked.
+    if (!single)
+      return senderReports(ctx, paneId, binding).some((report) =>
+        reachedStages(report).some(
+          ([stage, at]) => at === through && report.reportDelivery.senderEventAcks?.includes(stage),
+        ),
+      );
     const meta = [...ctx["metas"].values()].find((entry) => entry.inboundAcceptances?.[single[1]!]);
     const report = meta?.inboundAcceptances?.[single[1]!];
     return (

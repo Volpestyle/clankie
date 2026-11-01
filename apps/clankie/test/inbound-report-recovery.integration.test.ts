@@ -366,6 +366,11 @@ it("#97: acknowledging a pile of old reports tells the worker once", async () =>
   ]);
   expect(store.acknowledgeSenderReportEvent("pane", binding, events[0]!.id)).toBe(true);
   expect(store.senderReportEvents("pane", binding)).toEqual([]);
+  // The link retries an acknowledgment whose answer it lost; the retry still succeeds.
+  expect(store.acknowledgeSenderReportEvent("pane", binding, events[0]!.id)).toBe(true);
+  expect(store.acknowledgeSenderReportEvent("pane", binding, "report:batch:2000-01-01T00:00:00.000Z")).toBe(
+    false,
+  );
   // A report sent after the batch is still told on its own.
   receipts.accept("pane", { id: randomUUID(), binding }, "new", "new", "global-default", async () => {});
   expect(store.senderReportEvents("pane", binding)).toEqual([
