@@ -156,7 +156,6 @@ async function fixture(
     stateDir: root,
     workingDirectory: root,
     settings: new SettingsStore(join(root, "settings.json")),
-    personaImages: async () => ({ images: [], hash: "fake", files: [] }),
     ...(migrationHeld ? { operatorSeatMigrationHeld: migrationHeld, leadRestartCheckMs: 25 } : {}),
     ...(headBoundGraceMs === undefined ? {} : { headBoundGraceMs }),
     ...(headLaneHoldMs === undefined ? {} : { headLaneHoldMs }),

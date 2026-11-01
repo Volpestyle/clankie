@@ -3,11 +3,13 @@ import {
   loadPersonaImages,
   PERSONA_IMAGE_FRAMING,
   personaImageMessage,
+  personaImageBriefing,
   personaImageContent,
   type PersonaImageSet,
 } from "@clankie/persona-images";
 import type { SettingsStore } from "@clankie/settings";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { PersonaLook } from "./captain/captain-types.ts";
 import { createCaptainModelRuntime } from "./captain/model.ts";
 
 export type PersonaImageSource = () => Promise<PersonaImageSet>;
@@ -47,6 +49,15 @@ export function createPersonaImageSource(
       });
     })());
 }
+/** The persona's mood board as the core's look references (ADR 0328). */
+export function personaLook(source: PersonaImageSource): PersonaLook {
+  return {
+    present: async () => (await source()).images.length > 0,
+    extension: (turnContext) => personaImagesExtension(source, turnContext),
+    briefing: async () => personaImageBriefing(await source()),
+  };
+}
+
 export function personaImagesExtension(
   source: PersonaImageSource,
   turnContext?: (prompt: string) => Promise<string>,

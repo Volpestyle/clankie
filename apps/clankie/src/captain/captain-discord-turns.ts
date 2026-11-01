@@ -1081,6 +1081,20 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
 
   return {
     validateRoomOwner,
+    actorOwnsServer: async (discord, guildId, actorId) =>
+      ctx.deps.discordActions !== undefined &&
+      (await discordActorOwnsServer(discord, guildId, actorId, async (action) => {
+        const result = await ctx.deps.discordActions!.serverAction(action);
+        if (!result.ok) throw new Error("Discord membership unavailable");
+        return result.data;
+      })),
+    ownerAudience: async (discord, guildId, channelId) =>
+      ctx.deps.discordActions !== undefined &&
+      (await discordOwnerAudience(discord, guildId, channelId, async (action) => {
+        const result = await ctx.deps.discordActions!.serverAction(action);
+        if (!result.ok) throw new Error("Discord audience unavailable");
+        return result.data;
+      })),
     runDiscordWatchTurn,
     dispatchDiscordTurn,
     forkIntoRoom,
