@@ -112,7 +112,7 @@ export async function linearMirrorFixture(options: { withhold?: string } = {}) {
   const wakes: string[] = [];
   const app = await createClankieApp({
     captain: createStubCaptain({
-      receiveLinearActivity: (activity) => {
+      receiveTrackerActivity: (activity) => {
         wakes.push(activity.eventId ?? "");
         return true;
       },

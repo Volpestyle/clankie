@@ -161,7 +161,8 @@ would only hand the extension objects the core still builds. The planned order,
 each step one pull request with no change in what he does:
 
 1. A tracker-neutral activity type and one captain port to receive it
-   (`receiveTrackerActivity`), with Linear's webhook adapting into it.
+   (`receiveTrackerActivity`), with Linear's webhook adapting into it. Landed
+   2026-11-01: `captain/tracker-activity.ts`, adapted by `linearTrackerActivity`.
 2. The store's wake queue, receipts and cursors become tracker-neutral. Saved
    metadata keeps loading under the old `linear*` names until every body has
    rewritten it.

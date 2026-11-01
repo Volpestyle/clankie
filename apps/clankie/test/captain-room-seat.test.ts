@@ -16,7 +16,7 @@ import { DeliveryFence } from "../src/captain/delivery-fence.ts";
 import { SeatLinkInterruptedError } from "../src/captain/seat-outbox.ts";
 import { planDiscordTurnSession } from "../src/captain/system-authority.ts";
 import type { NativeRoomHandoffExecutor } from "../src/captain/native-room-handoffs.ts";
-import type { LinearActivityEvent } from "../src/linear-webhook.ts";
+import { linearTrackerActivity, type LinearActivityEvent } from "../src/linear-webhook.ts";
 
 const fake = vi.hoisted(() => ({
   prompts: [] as string[],
@@ -691,7 +691,11 @@ it("refuses a room wake when its machine actor is revoked during the final censu
 it("refuses a Discord room as the configured Linear wake target", async () => {
   const { captain, conversationId, execute } = await fixture(true);
   expect(() =>
-    captain.receiveLinearActivity(linearNotice("Room cannot receive Linear wakes"), true, conversationId),
+    captain.receiveTrackerActivity(
+      linearTrackerActivity(linearNotice("Room cannot receive Linear wakes")),
+      true,
+      conversationId,
+    ),
   ).toThrow("Linear wake target must be an existing ordinary global or workspace chat");
   expect(execute).not.toHaveBeenCalled();
   expect(fake.prompts).toEqual([]);
@@ -705,11 +709,11 @@ it("a Linear wake reaches the lead chat through its normal native operator drive
   }));
   const poll = captain.pollSeatEvents(3000);
   const activity = linearNotice("Lead chat notification");
-  expect(captain.receiveLinearActivity(activity, true)).toBe(true);
+  expect(captain.receiveTrackerActivity(linearTrackerActivity(activity), true)).toBe(true);
   const [event] = await poll;
   expect(event).toMatchObject({ conversationId: "global-default", kind: "wake" });
   expect(event?.content).toContain("Lead chat notification");
-  expect(captain.receiveLinearActivity(activity, true)).toBe(false);
+  expect(captain.receiveTrackerActivity(linearTrackerActivity(activity), true)).toBe(false);
   expect(fake.prompts).toEqual([]);
   expect(execute).not.toHaveBeenCalled();
   await captain.acknowledgeSeatEvent(event!.id, "global-default");

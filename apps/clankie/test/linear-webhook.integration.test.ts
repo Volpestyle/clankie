@@ -119,7 +119,8 @@ async function fixture() {
   let own: { userId: string; workspaceId: string } | undefined = account;
   const clankie = await createClankieApp({
     captain: createStubCaptain({
-      receiveLinearActivity: (activity, wake, target) => store.receiveLinearActivity(activity, wake, target),
+      receiveTrackerActivity: (activity, wake, target) =>
+        store.receiveTrackerActivity(activity, wake, target),
       linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
     }),
     settings,

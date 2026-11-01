@@ -6461,8 +6461,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     linearWakeDeliveries: () => conversations.linearWakeDeliveries(),
     linearWakeRecoveries: () => conversations.linearWakeRecoveries(),
-    receiveLinearActivity: (activity, following, conversationId) =>
-      conversations.receiveLinearActivity(activity, following, conversationId),
+    receiveTrackerActivity: (activity, following, conversationId) =>
+      conversations.receiveTrackerActivity(activity, following, conversationId),
 
     async close(): Promise<void> {
       clearInterval(usageSampler);
