@@ -1,7 +1,9 @@
 import { upgradeWebSocket } from "@hono/node-server";
 import { OPERATOR_VOICE_CALL_PATH, VOICE_CALL_AUDIO_FRAME_MAX_BYTES } from "@clankie/protocol";
 import { characterNames } from "@clankie/settings";
+import type { Hono } from "hono";
 import type { BodyLeaseStore, LeaseRef } from "../body-leases.ts";
+import type { ExtensionRouteHost } from "../ports/routes.ts";
 import { VoiceCall, type VoiceCallLease } from "../voice-call.ts";
 import { authenticateCaptain } from "./http-auth.ts";
 import { logger } from "./log.ts";
@@ -51,7 +53,35 @@ function voiceCallLease(
  * authorized device with the captain bearer; the call itself is
  * `VoiceCall`, his Discord rooms' own session with the device as its media.
  */
-export function registerVoiceCallRoute(ctx: VoiceBriefingRouteContext) {
+export function registerVoiceCallRoute(app: Hono, host: ExtensionRouteHost) {
+  // The Discord body's state is read when a call is served, as the core's own routes read it.
+  const body = host.discordBody;
+  const ctx: VoiceBriefingRouteContext = {
+    app,
+    settingsSource: host.settings,
+    clock: host.clock,
+    get dependencies() {
+      return body.dependencies;
+    },
+    get captainPresence() {
+      return body.captainPresence;
+    },
+    get discordPresenceSessions() {
+      return body.discordPresenceSessions;
+    },
+    get discordStreamWatch() {
+      return body.discordStreamWatch;
+    },
+    get embodiment() {
+      return body.embodiment;
+    },
+    get recordEvent() {
+      return body.recordEvent;
+    },
+    get idFactory() {
+      return body.idFactory;
+    },
+  };
   ctx.app.get(OPERATOR_VOICE_CALL_PATH, async (context) => {
     const captain = await authenticateCaptain(context.req.raw, ctx.dependencies);
     if (captain === "unavailable") return context.json({ error: "captain_authentication_unavailable" }, 503);
