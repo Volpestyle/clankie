@@ -215,6 +215,10 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  extensions [status]      Each extension's state: running, degraded with a reason, off (JSON)",
       "  extensions on|off ID     Switch one extension on or off; applies at the next restart",
+      "  extensions add FOLDER|GIT_URL [--commit SHA] [--path DIR] [--grant all|P,...] [KEY=VALUE...]",
+      "                           Install an outside extension from a folder or a pinned commit (ADR 0338)",
+      "  extensions grant|refuse ID all|PERMISSION...  Change what an outside extension may use",
+      "  extensions remove ID     Uninstall an outside extension",
     ],
   },
   {

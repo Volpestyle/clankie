@@ -15,6 +15,7 @@ import { ProjectsSettingsSchema, RetiredWorkingPreferencesSchema } from "@clanki
 import { MinecraftPlaySettingsSchema, MinecraftServerProfileIdSchema } from "@clankie/protocol/minecraft";
 import { isIP } from "node:net";
 import { isAbsolute } from "node:path";
+import { OUTSIDE_EXTENSION_ID, OUTSIDE_PERMISSIONS, insideRelativePath } from "@clankie/extension";
 
 /**
  * Operator settings: **non-secret** configuration only.
@@ -289,6 +290,50 @@ export const GameExtensionModuleEntrySchema = z.strictObject({
     .optional(),
 });
 export type GameExtensionModuleEntry = z.infer<typeof GameExtensionModuleEntrySchema>;
+
+const ExtensionOptionsSchema = z
+  .record(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u), z.string().max(2048))
+  .refine((value) => Object.keys(value).length <= 32, "at most 32 options");
+
+/**
+ * One outside extension the owner installed (ADR 0338, `clankie extensions
+ * add`). A folder is the owner's own code; a git source is always pinned to a
+ * full commit, fetched once by `add` into the state root and never moved at
+ * start. `granted` lists the permissions the owner allowed out of those the
+ * manifest asks for; the rest are refused. `entry` is only for a module
+ * without a manifest (a game installed before manifests), where it names the
+ * module the manifest would have.
+ */
+export const InstalledExtensionSchema = z.strictObject({
+  id: z.string().regex(OUTSIDE_EXTENSION_ID),
+  source: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("folder"),
+      path: z
+        .string()
+        .min(2)
+        .max(1024)
+        .refine((value) => isAbsolute(value) && !value.includes("\0"), "must be an absolute folder path"),
+    }),
+    z.strictObject({
+      kind: z.literal("git"),
+      url: z
+        .string()
+        .max(1024)
+        .regex(/^(https:\/\/|file:\/\/\/|git@[A-Za-z0-9.-]+:)[^\s]+$/u, "an https, file or ssh git URL")
+        .refine((value) => !/^https:\/\/[^/]*@/u.test(value), "credentials never go in a git URL"),
+      commit: z.string().regex(/^[0-9a-f]{40}$/u, "a full 40-character commit sha"),
+      path: z.string().refine(insideRelativePath, "a relative path inside the repository").optional(),
+    }),
+  ]),
+  entry: z.string().refine(insideRelativePath, "a relative path inside the extension").optional(),
+  options: ExtensionOptionsSchema.optional(),
+  granted: z
+    .array(z.enum(OUTSIDE_PERMISSIONS))
+    .max(OUTSIDE_PERMISSIONS.length)
+    .default(() => []),
+});
+export type InstalledExtension = z.infer<typeof InstalledExtensionSchema>;
 
 /** Whether the captain may offer play at all. */
 export const GameplaySettingsSchema = z
@@ -688,6 +733,16 @@ export const ClankieSettingsSchema = z
     runtimeHealth: RuntimeHealthSettingsSchema.default(() => RuntimeHealthSettingsSchema.parse({})),
     /** The owner's on/off switch per extension (ADR 0328); a missing id is on. */
     extensions: ExtensionSwitchesSchema.default(() => ({})),
+    /**
+     * Outside extensions the owner installed (ADR 0338), loaded at service
+     * start. Each is trusted code the owner chose, not sandboxed; tool calls
+     * and model output never add one or grant it anything.
+     */
+    installedExtensions: z
+      .array(InstalledExtensionSchema)
+      .max(16)
+      .refine((list) => new Set(list.map((item) => item.id)).size === list.length, "duplicate extension id")
+      .optional(),
     publicGateway: PublicGatewaySettingsSchema.default(() => PublicGatewaySettingsSchema.parse({})),
     evidence: EvidenceSettingsSchema.default(() => ({ backend: "local" as const })),
     /**

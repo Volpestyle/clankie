@@ -47,13 +47,20 @@ release the host ledger.
 ## External extensions
 
 A game can live outside this repository and be installed by the owner, with no
-change here: `clankie games extensions add MODULE [KEY=VALUE...]` records the
-absolute module path in `gameplay.extensions`, and the service loads it at start
-(`apps/clankie/src/game-extension-modules.ts`). The path comes from owner
-settings, never a tool argument or model output. The module is trusted,
-in-process code; a module that fails to load is logged and skipped.
+change here, as a `kind: "game"` outside extension
+([ADR 0338](../../docs/adr/0338-outside-extensions-plug-into-the-same-contract.md),
+[`@clankie/extension`](../extension/README.md#outside-extensions)):
+`clankie extensions add FOLDER|GIT_URL --commit SHA` records it in
+`installedExtensions`, and the service loads it at start
+(`apps/clankie/src/outside-extensions.ts`) with the permissions the owner
+granted. A module installed the older way (`clankie games extensions add MODULE`,
+`gameplay.extensions`) moves there at the next start with every game port. The
+source comes from owner settings, never a tool argument or model output. The
+module is trusted, in-process code, not sandboxed; one that fails to load is
+listed degraded and skipped.
 
-The module imports only types from this package (`src/module.ts`) and exports:
+The module imports only types (from this package or `@clankie/extension`, where
+they live) and exports:
 
 - `gameExtensionApis`, including `GAME_EXTENSION_MODULE_API` (1);
 - `gameExtension`, a `GameExtension` whose `create(host)` receives a
