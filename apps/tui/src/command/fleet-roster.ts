@@ -1,5 +1,5 @@
 import {
-  FLEET_ROSTER_WORK_PATH,
+  FLEET_ROSTER_STARTERS_PATH,
   FLEET_ROSTER_RETIRE_PATH,
   FLEET_ROSTER_UNDO_PATH,
   FleetRosterSnapshotSchema,
@@ -12,7 +12,7 @@ import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings
 /** Same owner-only read and guarded close/undo used by the app. Never replay mutations. */
 export async function runFleetRosterCommand(args: readonly string[], options: OwnerSettingsApiOptions = {}) {
   const api = await ownerSettingsApi(options);
-  if (args.length === 0) return api.get(FLEET_ROSTER_WORK_PATH, FleetRosterSnapshotSchema);
+  if (args.length === 0) return api.get(FLEET_ROSTER_STARTERS_PATH, FleetRosterSnapshotSchema);
   if (args[0] === "retire" && args.length === 3)
     return api.write(
       FLEET_ROSTER_RETIRE_PATH,

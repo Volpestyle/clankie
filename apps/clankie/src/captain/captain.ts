@@ -324,6 +324,7 @@ import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { fleetRosterWork } from "./fleet-roster-work.ts";
 import { FleetRoster } from "./fleet-roster.ts";
+import type { FleetRosterAgent, FleetRosterStarter } from "@clankie/protocol/fleet-roster";
 import { fleetRosterAction } from "./fleet-roster-actions.ts";
 import { PaneTidy, parkedRefs } from "./pane-tidy.ts";
 import {
@@ -5298,7 +5299,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   /** Prefer a stable cursor, but a busy or slow fleet must not starve display reads. */
-  async function readFleetRoster({ includeWork = false }: { includeWork?: boolean } = {}) {
+  async function readFleetRoster({
+    includeWork = false,
+    includeStarters = false,
+    appName,
+  }: {
+    includeWork?: boolean;
+    includeStarters?: boolean;
+    /** A paired device's own name, for an agent a connected app started. */
+    appName?: (deviceId: string) => string | undefined;
+  } = {}) {
     const started = Date.now();
     const { snapshot } = await fleetSnapshot();
     const readWarnings = [...(snapshot.readWarnings ?? [])];
@@ -5337,11 +5347,38 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       { ...snapshot, ...(readWarnings.length ? { readWarnings } : {}) },
       waitingRosterSeats(),
     );
+    // Who started each agent (ADR 0321): display only, and no starter outranks another.
+    const starterOf = (agent: FleetRosterAgent): FleetRosterStarter => {
+      const seat = snapshot.seats.find(
+        (entry) =>
+          entry.seatId === agent.seatId &&
+          entry.occupantId === agent.occupantId &&
+          (entry.fleet ?? "local") === agent.machineId,
+      );
+      if (seat?.owner?.hired === true) {
+        const asked = herdrWatches.seatStarter(agent.seatId, agent.occupantId);
+        if (asked?.kind === "app")
+          return { kind: "app", name: appName?.(asked.deviceId) ?? "A connected app" };
+        return asked?.kind === "owner" ? { kind: "owner" } : { kind: "clankie" };
+      }
+      const parentName =
+        seat?.owner === undefined && seat?.parentSeatId !== undefined
+          ? result.agents.find((row) => row.seatId === seat.parentSeatId && row.machineId === agent.machineId)
+              ?.name
+          : undefined;
+      // Not hired and not spawned by another agent: someone started it by hand on the owner's machine.
+      return parentName ? { kind: "agent", name: parentName } : { kind: "owner" };
+    };
     return {
       ...result,
       agents: result.agents.map((agent) => {
         const lead = agent.leadId && conversations.conversation(agent.leadId)?.title;
-        return { ...agent, ...(lead ? { lead } : {}), ...work?.get(agent.seatId) };
+        return {
+          ...agent,
+          ...(lead ? { lead } : {}),
+          ...work?.get(agent.seatId),
+          ...(includeStarters ? { startedBy: starterOf(agent) } : {}),
+        };
       }),
       leads: result.leads.map((lead) => ({
         ...lead,

@@ -893,7 +893,11 @@ export function createOperatorService(
           owner: { conversationId: lead },
           // The owner granted this place; Clankie's thread only leads the seat, so its own
           // agent's project doesn't decide where the new one works.
-          connectorPlace: { projectId: chosen.projectId },
+          // The asking app's device is kept only to say who started the agent (ADR 0321).
+          connectorPlace: {
+            projectId: chosen.projectId,
+            ...(authority?.principal.kind === "device" ? { deviceId: authority.principal.id } : {}),
+          },
           current: () => ctx.conversations.runsCaptainTurns(lead),
           authorize: async () => ctx.conversations.runsCaptainTurns(lead),
         },
