@@ -297,3 +297,66 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
   expect(await runner.get(resumed)).toMatchObject({ session: { kind: "id", value: session } });
   await runner.closePane(resumed);
 });
+
+coreIt(
+  "a desktop hire runs the installed harness its proof checks, whatever the terminal's PATH finds",
+  async () => {
+    // An npm install's `claude` is a `#!/usr/bin/env node` script. Found on the terminal's
+    // PATH, the kernel would show a bare `node` and another install than the service's; the
+    // hire instead execs the service's own interpreter and script.
+    const installed = join(cwd, "installed");
+    await mkdir(installed, { recursive: true });
+    const script = join(installed, "claude");
+    const report = join(cwd, "installed.json");
+    await writeFile(
+      script,
+      [
+        "#!/usr/bin/env node",
+        `require("node:fs").writeFileSync(${JSON.stringify(report)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2) }));`,
+        `setInterval(() => {}, 1000);`,
+      ].join("\n"),
+    );
+    await chmod(script, 0o755);
+    const launcher = { executable: await realpath(process.execPath), script: await realpath(script) };
+    const seats = createHerdrCoreSeats({ env });
+    const runner = createHerdrCoreRunner({
+      seats,
+      launchDirectory: join(cwd, "launches"),
+      seatDirectory: join(cwd, "seats"),
+      harnessCommand: async () => [launcher.executable, launcher.script],
+      turn: () => undefined,
+      pollMs: 50,
+    });
+    const address = await runner.createTab({ cwd, label: "lin · installed", harness: "claude" });
+    const session = "4a457b97-a162-4400-9e46-e66534b64c91";
+    await runner.startAgent({
+      name: "lin",
+      kind: "claude",
+      paneId: address,
+      args: ["--session-id", session],
+    });
+    await until(async () => existsSync(report));
+    const started = JSON.parse(await readFile(report, "utf8")) as { pid: number; argv: string[] };
+    expect(started.argv).toEqual(["--session-id", session]);
+    expect((await seats.get(address))?.pid).toBe(started.pid);
+
+    const helper = fleetProcessHelper(resolve(import.meta.dirname, "../../.."));
+    if (existsSync(helper)) {
+      const binding = {
+        runtime: "external" as const,
+        session: "herdr-core",
+        socketPath: join(cwd, "unused"),
+      };
+      const proof = await createProjectProcessObserver({
+        binding: async () => undefined,
+        herdrBinary: "herdr",
+        processHelper: helper,
+        coreBinding: async () => binding,
+        coreSeat: (_binding, seat) => liveDesktopSeat(seats, join(cwd, "seats"), seat),
+        launcher: async () => launcher,
+      })("default", `herdr-core/${address}`);
+      expect(proof).toMatchObject({ pane: `herdr-core/${address}`, processes: [{ pid: started.pid }] });
+    }
+    await runner.closePane(address);
+  },
+);
