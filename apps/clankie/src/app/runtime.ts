@@ -41,11 +41,7 @@ import {
   CaptainPresenceReportSchema,
   ConversationHeadRequestSchema,
   EmbodimentIntentSchema,
-  GenerateImageRequestSchema,
-  GenerateVideoRequestSchema,
   HERDR_BINDING_PATH,
-  MEDIA_IMAGE_GENERATION_PATH,
-  MEDIA_VIDEO_GENERATION_PATH,
   ProcessHealthSnapshotSchema,
   eventStreamKindForId,
   type CaptainChannelTurnResult,
@@ -98,7 +94,6 @@ import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
-import type { MediaGeneratorPort } from "../ports/media.ts";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
 import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
@@ -2381,41 +2376,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "browser_upstream_failure" }, 502);
     }
   });
-
-  /**
-   * Making a picture or a clip (ADR 0085). A refusal comes back 200 with a
-   * reason he can say out loud; only an unconfigured plane or a malformed body
-   * is an error status.
-   */
-  const mediaRoute = <Request>(
-    path: string,
-    schema: { safeParse(value: unknown): { success: true; data: Request } | { success: false } },
-    run: (generator: MediaGeneratorPort, request: Request, signal: AbortSignal) => Promise<unknown>,
-  ): void => {
-    app.post(path, async (context) => {
-      const authorization = await authenticateCaptainOrOperator(context);
-      if ("denial" in authorization) return authorization.denial;
-      if (dependencies.mediaGenerator === undefined) {
-        return context.json({ error: "media_unavailable" }, 503);
-      }
-      const body = await readJson(context.req.raw);
-      const parsed = schema.safeParse(body);
-      if (!parsed.success) return context.json({ error: "invalid_media_request" }, 400);
-      try {
-        const result = await run(dependencies.mediaGenerator, parsed.data, context.req.raw.signal);
-        return context.json({ result }, 200, { "cache-control": "no-store" });
-      } catch {
-        return context.json({ error: "media_upstream_failure" }, 502);
-      }
-    });
-  };
-
-  mediaRoute(MEDIA_IMAGE_GENERATION_PATH, GenerateImageRequestSchema, (generator, request) =>
-    generator.generateImage(request),
-  );
-  mediaRoute(MEDIA_VIDEO_GENERATION_PATH, GenerateVideoRequestSchema, (generator, request, signal) =>
-    generator.generateVideo(request, { signal }),
-  );
 
   app.get("/v1/embodiment/sessions/:id", async (context) => {
     const captain = await authenticateCaptain(context.req.raw, dependencies);

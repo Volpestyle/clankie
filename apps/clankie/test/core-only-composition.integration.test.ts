@@ -130,14 +130,24 @@ const EXTENSION_ROUTES = [
   ["persona", "GET", "/v1/discord/settings"],
   ["persona", "GET", "/v1/discord/readiness"],
   ["persona", "GET", "/v1/operator/appearance"],
+  ["media", "POST", "/v1/media/images"],
+  ["media", "POST", "/v1/media/videos"],
+  ["media", "GET", "/v1/operator/skin-drafts"],
 ] as const;
 
 /**
  * Operator tools a switched-on extension adds: voice's join, leave and screen
- * shares are listed; media's diagrams wait in the deferred catalog.
+ * shares are listed; media's generation, skin drafts and diagrams wait in the
+ * deferred catalog.
  */
 const LISTED_EXTENSION_TOOLS = ["voice_join", "voice_leave", "observe_share"];
-const DEFERRED_EXTENSION_TOOLS = ["draw_er_diagram", "draw_sequence_diagram"];
+const DEFERRED_EXTENSION_TOOLS = [
+  "generate_image",
+  "generate_video",
+  "skin_draft",
+  "draw_er_diagram",
+  "draw_sequence_diagram",
+];
 
 async function freePort(): Promise<number> {
   for (;;) {
