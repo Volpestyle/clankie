@@ -23,6 +23,8 @@ const unused = () => Promise.reject(new Error("unused"));
 const base = {
   embodiment: { submitIntent: unused, getSession: unused, getLiveSession: unused },
   personaTools: discordCaptainTools,
+  // The media extension running, as it does by default (ADR 0328).
+  media: { generateImage: unused, generateVideo: unused, finishedRenders: unused },
 };
 
 function names(

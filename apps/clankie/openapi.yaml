@@ -7285,8 +7285,8 @@ paths:
       responses:
         "200":
           description: ok or refused
-        "503":
-          description: Media plane unconfigured
+        "404":
+          description: The media extension is off, so the route is not mounted
 
   /v1/media/videos:
     post:
@@ -7305,6 +7305,8 @@ paths:
       responses:
         "200":
           description: ok, pending, or refused
+        "404":
+          description: The media extension is off, so the route is not mounted
 
   /v1/support/grants:
     get:

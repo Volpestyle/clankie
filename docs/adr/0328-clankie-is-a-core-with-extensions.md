@@ -8,7 +8,9 @@ says what moving it would change. Step 1, the contract in
 boundary check, then the relay as the first extension (`relay-extension.ts`;
 machine joins now seal with the core's `sealed-values.ts`), the browser
 (`browser-extension.ts`), the computer body (`computer-extension.ts`) and
-media, which starts with the drawing hand (`media-extension.ts`), and Linear,
+media: the drawing hand, then image and video generation and skin drafts with
+their tools and routes (`media-extension.ts`, `media-routes.ts`, drawing Clankie
+from the core's appearance port in `ports/appearance.ts`), and Linear,
 which starts with its webhook, wake, settings, mirror and cutover routes
 (`linear-extension.ts`), then World's Activity routes and tools and its
 PokeAgent play tools (`activity-routes.ts`, `activity-tools.ts`,
@@ -44,11 +46,12 @@ sets the owner's switch for the next start; the app shows and flips the same swi
 The core-only end-to-end test (`apps/clankie/test/core-only-composition.integration.test.ts`)
 starts the real service with every switch off and hires, messages, reads and
 hears from an agent in a scratch Herdr; with `voice` off, joining voice and
-watching screen shares now leave his tools too, and with `minecraft` off
+watching screen shares now leave his tools too, with `media` off so do
+`generate_image`, `generate_video`, `skin_draft` and a worker's video tool, with
+`/v1/media/*` and the skin draft routes no longer mounted, and with `minecraft` off
 (`minecraft-extension.ts`, a switch beside Minecraft's `GameExtension`) its game,
 routes, tools, host and MCP motor are never built. Still reached with every switch
-off: image and video generation and skin drafts (the appearance question below),
-the persona's music and room tools, and `linear_wake` (built inside the
+off: the persona's music and room tools, and `linear_wake` (built inside the
 captain's tracker wakes).
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
@@ -179,14 +182,25 @@ imports an extension; only the composition root does.
 - `clankie doctor` and `clankie status` list each extension with its state and
   reason.
 
-### Open: one extension using another
+### One extension using another
 
 Media draws Clankie from the persona's appearance images, and the captain's
-Minecraft play reads them too. The contract gives an extension only core
-ports, so before image and video generation move into `media` this needs one
-of two answers: an appearance port the core offers and the persona extension
-fills, or ports one extension offers another. Until then generation stays in
-the composition root.
+Minecraft play reads them too. Decided 2026-11-01: the core offers an
+**appearance port** (`ports/appearance.ts`), and the persona extension fills it
+through its projection. While the persona is off the port reads empty, so a
+picture of himself refuses with "no appearance references" and every other
+picture is unchanged. Extensions keep depending only on the core, the
+supervisor needs no order between extensions, and the port reads the persona's
+projection when a picture is made, so media can start long before the persona
+does. Ports one extension offers another were the other answer; they would
+need the supervisor to order and wire extensions to each other, and nothing
+else asks for that yet.
+
+Media now owns image and video generation and skin drafts: with `media` off
+none of their tools reach the captain or a worker and their routes are not
+mounted (`404`). The persona keeps reading its own images for its briefings.
+Minecraft play still builds its own image source (`minecraft-play-mind.ts`);
+it takes the appearance port when Minecraft gets its switch.
 
 ### Open: tracker wakes live inside the conversation store
 

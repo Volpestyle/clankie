@@ -130,6 +130,9 @@ const EXTENSION_ROUTES = [
   ["persona", "GET", "/v1/discord/settings"],
   ["persona", "GET", "/v1/discord/readiness"],
   ["persona", "GET", "/v1/operator/appearance"],
+  ["media", "POST", "/v1/media/images"],
+  ["media", "POST", "/v1/media/videos"],
+  ["media", "GET", "/v1/operator/skin-drafts"],
   ["minecraft", "GET", "/v1/minecraft"],
   ["minecraft", "POST", "/v1/minecraft/host"],
   ["minecraft", "GET", "/v1/minecraft/configuration"],
@@ -138,11 +141,14 @@ const EXTENSION_ROUTES = [
 
 /**
  * Operator tools a switched-on extension adds: voice's join, leave and screen
- * shares are listed; media's diagrams and Minecraft's play and setup wait in
- * the deferred catalog.
+ * shares are listed; media's generation, skin drafts and diagrams and Minecraft's
+ * play and setup wait in the deferred catalog.
  */
 const LISTED_EXTENSION_TOOLS = ["voice_join", "voice_leave", "observe_share"];
 const DEFERRED_EXTENSION_TOOLS = [
+  "generate_image",
+  "generate_video",
+  "skin_draft",
   "draw_er_diagram",
   "draw_sequence_diagram",
   "minecraft_join",

@@ -1,5 +1,5 @@
 import { PERSONA_IMAGE_FRAMING, PERSONA_VIDEO_FRAMING } from "@clankie/persona-images";
-import type { PersonaImageSource } from "./persona-images.ts";
+import type { AppearancePort } from "./ports/appearance.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -48,7 +48,8 @@ export type { FinishedRender, GenerateVideoOptions, MediaGeneratorPort } from ".
 import type { FinishedRender, GenerateVideoOptions, MediaGeneratorPort } from "./ports/media.ts";
 
 export interface ConfiguredMediaGeneratorOptions {
-  readonly personaImages?: PersonaImageSource;
+  /** His look, for a picture of himself; the persona fills it (ADR 0328). */
+  readonly appearance?: AppearancePort;
   readonly credentials: CredentialStore;
   /** Root the Discord attachment resolver serves; media lands in its `generated/` subdirectory. */
   readonly attachmentRoot: string;
@@ -224,7 +225,7 @@ export class ConfiguredMediaGenerator implements MediaGeneratorPort {
       const model = await this.resolveModel("image_model", "image");
       if (request.personaReference && request.sourceRef)
         throw new MediaRefusal("provider_failed", "Choose personaReference or sourceRef, not both.");
-      const board = request.personaReference ? await this.options.personaImages?.() : undefined;
+      const board = request.personaReference ? await this.options.appearance?.() : undefined;
       const appearance = board?.images.filter((image) => image.role === "appearance") ?? [];
       if (request.personaReference && !appearance.length)
         throw new MediaRefusal(

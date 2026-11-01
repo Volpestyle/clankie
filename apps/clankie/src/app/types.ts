@@ -50,7 +50,6 @@ import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import type { RecentEvents } from "../event-log.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
-import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
@@ -362,7 +361,6 @@ export interface ClankieAppDependencies {
    * Absent on a hosted body; the route then answers an empty list.
    */
   computerUseHarnesses?: { refresh(): Promise<readonly ComputerUseHarness[]> };
-  mediaGenerator?: MediaGeneratorPort;
   /** Private exact Discord transcript log, injected by tests when needed. */
   voiceTranscriptStore?: DiscordVoiceTranscriptStore;
   authenticateCaptain?: CaptainAuthenticator;

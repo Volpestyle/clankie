@@ -5,7 +5,9 @@ import type { SettingsStore } from "@clankie/settings";
 import type { BrowserToolPort, ClankieAppDependencies } from "./app/types.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
 import type { MachineJoins } from "./machine-joins.ts";
-import type { DiagramPort } from "./ports/media.ts";
+import type { DeliveredFileStore } from "./delivered-files.ts";
+import type { AppearancePort } from "./ports/appearance.ts";
+import type { DiagramPort, MediaGeneratorPort, SkinDraftPort } from "./ports/media.ts";
 import type { ExtensionRoutes } from "./ports/routes.ts";
 import type { PushWakeSender } from "./push.ts";
 
@@ -42,6 +44,15 @@ export interface CorePorts {
   readonly bodyLeaseStore?: BodyLeaseStore;
   /** Machines joined to this one. Only the full service has them. */
   readonly machineJoins?: MachineJoins;
+  /** Where `clankie.json` is read from: the repo root. Only the full service has it. */
+  readonly repoRoot?: string;
+  /** Files the captain sent or received. Only the full service has them. */
+  readonly deliveredFiles?: Pick<DeliveredFileStore, "attachment" | "read">;
+  /**
+   * His look, read when a picture of him is made. The persona extension fills
+   * it; it reads empty while the persona is off.
+   */
+  readonly appearance?: AppearancePort;
   /** Runs once the service's HTTP server listens, or at once if it already does. */
   whenListening(run: () => void): void;
   readonly onDoorwayChange?: (change: DoorwayChange) => void;
@@ -63,6 +74,16 @@ export interface CoreProjection {
   readonly diagrams?: DiagramPort;
   /** The browser extension's tools, from its host's catalog and calls. */
   readonly browser?: BrowserToolPort;
+  /** Image and video generation and skin drafts, while the media extension runs. */
+  readonly media?: MediaProjection;
+  /** His look, from the persona extension's images. */
+  readonly appearance?: AppearancePort;
+}
+
+/** What the media extension adds: his generators and the owner's skin drafts. */
+export interface MediaProjection {
+  readonly generator: MediaGeneratorPort & { localPath(artifactRef: string): string };
+  readonly skinDrafts: SkinDraftPort;
 }
 
 export type CoreExtensions = ExtensionSupervisor<CorePorts, CoreProjection>;

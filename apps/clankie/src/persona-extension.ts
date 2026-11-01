@@ -5,6 +5,7 @@ import { createAppearanceRoutes } from "./appearance-routes.ts";
 import { createDiscordRoomRoutes } from "./discord-room-routes.ts";
 import type { CorePorts, CoreProjection } from "./extension-host.ts";
 import { createPersonaVoiceSettingsRoutes } from "./persona-voice-settings-routes.ts";
+import type { AppearancePort } from "./ports/appearance.ts";
 import type { ExtensionRoutes } from "./ports/routes.ts";
 
 /**
@@ -76,10 +77,14 @@ export function personaRoutes(options: { readonly receipts?: DiscordTurnReceipts
   };
 }
 
-/** The persona as an ADR 0328 extension; its routes are all it serves so far. */
-export function personaExtension(
-  options: { readonly receipts?: DiscordTurnReceipts } = {},
-): ClankieExtension<undefined, CorePorts, never, CoreProjection> {
+/**
+ * The persona as an ADR 0328 extension: its routes, and his look, which fills
+ * the core's appearance port for media while the persona runs.
+ */
+export function personaExtension(options: {
+  readonly appearance: AppearancePort;
+  readonly receipts?: DiscordTurnReceipts;
+}): ClankieExtension<undefined, CorePorts, never, CoreProjection> {
   return {
     contractVersion: 1,
     id: "persona",
@@ -91,7 +96,7 @@ export function personaExtension(
         async start() {},
         async stop() {},
         health: () => ({ state: "ready" }),
-        projection: () => ({ routes }),
+        projection: () => ({ routes, appearance: options.appearance }),
       };
     },
   };

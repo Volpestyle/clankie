@@ -480,7 +480,7 @@ it("uses only appearance from a mixed owner board for self-depiction and keeps o
     attachmentRoot: workspace.attachmentRoot,
     configCwd: workspace.configCwd,
     environment: workspace.environment,
-    personaImages: async () => ({
+    appearance: async () => ({
       hash: "board",
       files: [],
       images: ["appearance", "vibe", "appearance"].map((role) => ({
@@ -520,7 +520,7 @@ it("refuses a self-portrait with a vibe-only board before calling the image prov
     attachmentRoot: workspace.attachmentRoot,
     configCwd: workspace.configCwd,
     environment: workspace.environment,
-    personaImages: async () => ({
+    appearance: async () => ({
       hash: "vibe",
       files: [],
       images: [{ role: "vibe", data: "dmlibw==", mimeType: "image/png", width: 1, height: 1 }],
