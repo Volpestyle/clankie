@@ -127,7 +127,9 @@ function placeCommand(fleet: HerdrFleet, workspace: string, messageId: string): 
       "} else { New-Item -ItemType Directory -Path $dir | Out-Null }",
       "}",
       "$inbox = Join-Path $root '.clankie\\inbox'",
-      `[IO.File]::WriteAllText((Join-Path $inbox '.gitignore'), ${powershellLiteral(GITIGNORE_LINE)} + [char]10 + '*' + [char]10, (New-Object Text.UTF8Encoding $false))`,
+      "$ignore = Join-Path $inbox '.gitignore'",
+      `if ((Test-Path -LiteralPath $ignore) -and (((Get-Item -LiteralPath $ignore -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or (Test-Path -LiteralPath $ignore -PathType Container))) { return Refuse ${powershellLiteral(INBOX_REFUSED)} }`,
+      `[IO.File]::WriteAllText($ignore, ${powershellLiteral(GITIGNORE_LINE)} + [char]10 + '*' + [char]10, (New-Object Text.UTF8Encoding $false))`,
       `$target = Join-Path $inbox ${powershellLiteral(messageId)}`,
       `if (Test-Path -LiteralPath $target) { return Refuse ${powershellLiteral(INBOX_REFUSED)} }`,
       // Staging is in the home folder; the workspace may be on another drive.
@@ -148,6 +150,7 @@ function placeCommand(fleet: HerdrFleet, workspace: string, messageId: string): 
       `  [ -d "$dir" ] || mkdir -m 700 "$dir" || refuse ${posixQuote(INBOX_REFUSED)}`,
       "done",
       'inbox="$root/.clankie/inbox"',
+      `if [ -L "$inbox/.gitignore" ] || { [ -e "$inbox/.gitignore" ] && [ ! -f "$inbox/.gitignore" ]; }; then refuse ${posixQuote(INBOX_REFUSED)}; fi`,
       `printf '%s\\n*\\n' ${posixQuote(GITIGNORE_LINE)} > "$inbox/.gitignore" || refuse ${posixQuote(INBOX_REFUSED)}`,
       `target="$inbox/${messageId}"`,
       `[ -e "$target" ] && refuse ${posixQuote(INBOX_REFUSED)}`,

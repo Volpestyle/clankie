@@ -140,6 +140,23 @@ describe("files to a seat on a linked machine", () => {
     });
     expect(missing).toEqual({ undeliverable: "The agent's working directory isn't on that machine." });
     expect(pc.copied).toEqual([".clankie/attachment-staging/msg-two"]);
+
+    // A symlinked .gitignore would have the write land outside the workspace.
+    const other = await machine();
+    await mkdir(join(other.workspace, ".clankie", "inbox"), { recursive: true });
+    await writeFile(join(other.root, "victim"), "keep");
+    await symlink(join(other.root, "victim"), join(other.workspace, ".clankie", "inbox", ".gitignore"));
+    expect(
+      await deliverToFleetSeat({
+        fleet,
+        shell: other.shell,
+        copy: other.copy,
+        workspace: other.workspace,
+        messageId: "msg-four",
+        attachments,
+      }),
+    ).toEqual({ undeliverable: expect.stringContaining("isn't a plain folder") });
+    expect(await readFile(join(other.root, "victim"), "utf8")).toBe("keep");
   });
 });
 
