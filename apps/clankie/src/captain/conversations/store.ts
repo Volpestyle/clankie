@@ -63,7 +63,7 @@ import {
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { type StoredOwnerAttachment } from "../../delivered-files.ts";
-import { type LinearActivityEvent } from "../../linear-webhook.ts";
+import type { TrackerActivity } from "../tracker-activity.ts";
 import { CHANNEL_ROUND_INTERRUPTED_NOTICE, type ChannelTranscriptEntry } from "../channel-turns.ts";
 import { ConversationJournal } from "../conversation-journal.ts";
 import {
@@ -153,7 +153,7 @@ import {
   linearWakeTargetAllowed,
   loadLinearEventReceipts,
   queueLinearActivity,
-  receiveLinearActivity,
+  receiveTrackerActivity,
   retireLinearInbox,
   saveLinearEventReceipts,
 } from "./linear-wakes.ts";
@@ -1592,12 +1592,12 @@ export class ConversationStore {
     return linearWakeTargetAllowed(this, conversationId);
   }
 
-  public receiveLinearActivity(
-    input: LinearActivityEvent,
+  public receiveTrackerActivity(
+    input: TrackerActivity,
     following: boolean,
     conversationId = "global-default",
   ): boolean {
-    return receiveLinearActivity(this, input, following, conversationId);
+    return receiveTrackerActivity(this, input, following, conversationId);
   }
 
   private queueLinearActivity(id: string): void {

@@ -51,7 +51,7 @@ import type {
   SpawnOperatorSeat,
 } from "@clankie/protocol";
 import type { DurableMessageNotice } from "./conversations.ts";
-import type { LinearActivityEvent } from "../linear-webhook.ts";
+import type { TrackerActivity } from "./tracker-activity.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -676,9 +676,9 @@ export interface CaptainPort {
   trackerClosurePolicy?(trackerProjectId: string | null): Promise<"lead" | "owner">;
   linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
   linearWakeRecoveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeRecoveries"]>;
-  /** Append verified external context to the selected ordinary chat and optionally wake it. */
-  receiveLinearActivity(
-    activity: LinearActivityEvent,
+  /** Append a connected tracker's verified context to the selected ordinary chat and optionally wake it. */
+  receiveTrackerActivity(
+    activity: TrackerActivity,
     following: boolean,
     conversationId?: string,
   ): boolean | void;
@@ -807,7 +807,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
     linearWakeDeliveries: () => [],
     linearWakeRecoveries: () => [],
-    receiveLinearActivity: () => true,
+    receiveTrackerActivity: () => true,
     fleetConversationAuthority: async () => undefined,
     fleetWriteAuthority: async () => undefined,
     close: async () => {},

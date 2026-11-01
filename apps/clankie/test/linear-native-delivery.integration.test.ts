@@ -96,8 +96,8 @@ async function fixture(boundGraceMs = 20) {
     app,
     dependencies: {
       captain: {
-        receiveLinearActivity: (event, following, target) =>
-          store.receiveLinearActivity(event, following, target),
+        receiveTrackerActivity: (event, following, target) =>
+          store.receiveTrackerActivity(event, following, target),
         linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
         linearWakeDeliveries: () => store.linearWakeDeliveries(),
         linearWakeRecoveries: () => store.linearWakeRecoveries(),

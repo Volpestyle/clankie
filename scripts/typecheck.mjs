@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -101,6 +101,7 @@ async function main() {
   let failed = false;
   const checkProgram = async (program) => {
     const programConfig = join(directory, `${program.name}.json`);
+    const buildInfo = join(root, ".local", "tsbuildinfo", project || "root", `${program.name}.tsbuildinfo`);
     await writeFile(
       programConfig,
       JSON.stringify(
@@ -114,13 +115,7 @@ async function main() {
             // of the same project rechecks only what changed. CI caches the
             // directory; deleting it costs one full check.
             incremental: true,
-            tsBuildInfoFile: join(
-              root,
-              ".local",
-              "tsbuildinfo",
-              project || "root",
-              `${program.name}.tsbuildinfo`,
-            ),
+            tsBuildInfoFile: buildInfo,
             // The empty run directory permits absolute explicit type directives
             // even when none of the original implicit @types directories exist.
             typeRoots: [
@@ -141,37 +136,59 @@ async function main() {
       `[typecheck] ${project} ${program.name}: ${program.files.length} roots, ${oldSpaceMiB} MiB old-space / ${heapLimitMiB} MiB V8 heap ceiling`,
     );
     const programStarted = performance.now();
-    const child = spawn(
-      process.execPath,
-      [
-        `--max-old-space-size=${oldSpaceMiB}`,
-        `--max-semi-space-size=${semiSpaceMiB}`,
-        compiler,
-        "--noEmit",
-        "--extendedDiagnostics",
-        "-p",
-        programConfig,
-      ],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    const interrupt = (signal) => child.kill(signal);
-    const onInterrupt = () => interrupt("SIGINT");
-    const onTerminate = () => interrupt("SIGTERM");
-    process.once("SIGINT", onInterrupt);
-    process.once("SIGTERM", onTerminate);
-    let output = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk) => {
-      output += chunk;
-    });
-    child.stderr.setEncoding("utf8").on("data", (chunk) => {
-      output += chunk;
-    });
-    const result = await new Promise((accept, reject) => {
-      child.once("error", reject);
-      child.once("close", (code, signal) => accept({ code, signal }));
-    });
-    process.removeListener("SIGINT", onInterrupt);
-    process.removeListener("SIGTERM", onTerminate);
+    const compile = async () => {
+      const child = spawn(
+        process.execPath,
+        [
+          `--max-old-space-size=${oldSpaceMiB}`,
+          `--max-semi-space-size=${semiSpaceMiB}`,
+          compiler,
+          "--noEmit",
+          "--extendedDiagnostics",
+          "-p",
+          programConfig,
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const interrupt = (signal) => child.kill(signal);
+      const onInterrupt = () => interrupt("SIGINT");
+      const onTerminate = () => interrupt("SIGTERM");
+      process.once("SIGINT", onInterrupt);
+      process.once("SIGTERM", onTerminate);
+      let output = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk) => {
+        output += chunk;
+      });
+      child.stderr.setEncoding("utf8").on("data", (chunk) => {
+        output += chunk;
+      });
+      const result = await new Promise((accept, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, signal) => accept({ code, signal }));
+      });
+      process.removeListener("SIGINT", onInterrupt);
+      process.removeListener("SIGTERM", onTerminate);
+      return { result, output };
+    };
+    let { result, output } = await compile();
+    // TypeScript's incremental state can miss a private member read through
+    // element access in a file it did not recheck, and report the member as
+    // unused. A full check is authoritative, so an unused-member failure from
+    // a reused state is checked once more from scratch.
+    if (result.code !== 0 && /error TS613[38]:/u.test(output)) {
+      if (
+        await rm(buildInfo).then(
+          () => true,
+          // allow-swallowed-rejection -- No saved state means the failure already came from a full check.
+          () => false,
+        )
+      ) {
+        console.log(
+          `[typecheck] ${project} ${program.name}: unused-member errors from saved state; checking in full`,
+        );
+        ({ result, output } = await compile());
+      }
+    }
     await writeFile(join(directory, `${program.name}.log`), output);
     const memoryKiB = Number(output.match(/^Memory used:\s+(\d+)K/mu)?.[1]) || null;
     const measuredMiB = memoryKiB === null ? null : memoryKiB / 1024;

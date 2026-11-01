@@ -287,8 +287,8 @@ async function fixture(
     operatorSeatBindings: seatBinding.registry,
     settings,
     captain: createStubCaptain({
-      receiveLinearActivity: (event, following, target) =>
-        store.receiveLinearActivity(event, following, target),
+      receiveTrackerActivity: (event, following, target) =>
+        store.receiveTrackerActivity(event, following, target),
       linearWakeTargetAllowed: (id) => store.linearWakeTargetAllowed(id),
       linearWakeDeliveries: () => store.linearWakeDeliveries(),
       pollSeatEvents: (wait, signal, id = "global-default") =>
