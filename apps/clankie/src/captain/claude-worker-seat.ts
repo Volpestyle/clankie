@@ -165,7 +165,7 @@ function claudeWorkerSettings(
   return JSON.stringify({
     // ADR 0293: a long turn or refused fresh restart still has a native backstop.
     autoCompactWindow: 500_000,
-    // The launch's own copy (ADR 0314); an older installed copy would add its hooks twice.
+    // The launch's own copy (ADR 0317); an older installed copy would add its hooks twice.
     enabledPlugins: { [CLAUDE_WORKER_PLUGIN_ID]: true, [CLAUDE_WORKER_INSTALLED_PLUGIN_ID]: false },
     // A local hire's MCP profile (VUH-2388): Claude starts no other server.
     ...(allowedMcpServers === undefined ? {} : { allowedMcpServers }),
@@ -189,7 +189,7 @@ export function claudeWorkerLaunchArgs(
   return [
     "--settings",
     settings,
-    // The worker plugin rides this session only (ADR 0314): nothing installed in a profile.
+    // The worker plugin rides this session only (ADR 0317): nothing installed in a profile.
     "--plugin-dir",
     workerRoot,
     "--channels",

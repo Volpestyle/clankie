@@ -1,10 +1,11 @@
 import {
+  createOperatorConversationServiceClient,
   OperatorTerminalTailItemSchema,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
   type OperatorTerminalFrame,
 } from "@clankie/protocol";
-import { SessionRefusal, type Session, type SessionSource } from "./source.ts";
+import { SessionRefusal, type Session, type SessionImage, type SessionSource } from "./source.ts";
 import { renderTerminalText } from "./terminal-text.ts";
 
 // Herdr as a session source: the agents Clankie seats (and any other agent
@@ -170,7 +171,7 @@ export function createHerdrSessionSource(
       };
     },
 
-    async send(id, message) {
+    async send(id, message, images) {
       const fleet = await port.dispatch({ op: "fleet", schemaVersion: 1, view: "home" });
       if (fleet.op !== "fleet") throw new Error("The fleet answered with something else.");
       const seat = fleet.snapshot.seats.find((candidate) => candidate.seatId === id);
@@ -188,6 +189,11 @@ export function createHerdrSessionSource(
         title: name || "Agent",
       });
       if (created.op !== "create") throw new Error("Couldn't open the agent's thread.");
+      // Images ride the owner-attachment upload into the agent's own thread (ADR 0209, 0315).
+      const attachments =
+        images === undefined || images.length === 0
+          ? undefined
+          : await uploadImages(port, created.conversation.conversationId, images);
       let revision = created.conversation.revision;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const sent = await port.dispatch({
@@ -200,6 +206,7 @@ export function createHerdrSessionSource(
             expectedRevision: revision,
             kind: "message",
             message,
+            ...(attachments === undefined ? {} : { attachments }),
           },
         });
         if (sent.op !== "send") throw new Error("The send answered with something else.");
@@ -237,6 +244,14 @@ export function createHerdrSessionSource(
       throw new SessionRefusal("The agent's thread kept changing. Try again.");
     },
 
+    async image(id, path) {
+      const read = await port.dispatch({ op: "seat_image", schemaVersion: 1, seatId: id, path });
+      if (read.op !== "seat_image") throw new Error("Clankie answered with something else.");
+      if (read.result.outcome !== "ready") throw new SessionRefusal(read.result.message);
+      const { filename, mediaType, dataBase64 } = read.result;
+      return { id, filename, mediaType, dataBase64 };
+    },
+
     async open(id) {
       const focused = await port.dispatch({ op: "terminal_focus", schemaVersion: 1, terminalId: id });
       if (focused.op !== "terminal_focus") throw new Error("Herdr answered with something else.");
@@ -257,6 +272,32 @@ export function createHerdrSessionSource(
       return { id, status: result.result.outcome, detail: result.result.message };
     },
   };
+}
+
+/** Upload each image into the thread and name the committed files, or refuse with nothing sent. */
+async function uploadImages(
+  port: HerdrSessionPort,
+  conversationId: string,
+  images: readonly SessionImage[],
+): Promise<{ readonly artifactId: string }[]> {
+  const client = createOperatorConversationServiceClient((request) => port.dispatch(request));
+  const attachments: { readonly artifactId: string }[] = [];
+  for (const image of images) {
+    const result = await client.uploadAttachment!({
+      conversationId,
+      filename: image.filename,
+      mediaType: image.mediaType,
+      byteCount: image.bytes.byteLength,
+      sha256: image.sha256,
+      bytes: image.bytes,
+    });
+    if (result.status !== "committed")
+      throw new SessionRefusal(
+        `${image.filename} couldn't be uploaded${result.status === "refused" ? `: ${result.message}` : ""}. Nothing was sent.`,
+      );
+    attachments.push({ artifactId: result.file.artifactId });
+  }
+  return attachments;
 }
 
 // Clankie keeps one observation per terminal and surface, and a new one

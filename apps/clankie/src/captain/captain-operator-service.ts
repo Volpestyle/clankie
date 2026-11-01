@@ -101,6 +101,11 @@ export interface CreateOperatorServiceContext {
   readonly fleetCapacity?: () => Promise<
     Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]
   >;
+  /** One image inside a seated agent's working directory (ADR 0315). */
+  readonly seatImage?: (
+    seatId: string,
+    path: string,
+  ) => Promise<Extract<OperatorConversationServiceResult, { op: "seat_image" }>["result"]>;
   readonly headSeat: ObservedHeadSeat | undefined;
   readonly observeFleet: (localOnly?: boolean) => Promise<ObservedFleet>;
   readonly agentWork: ReturnType<typeof createAgentWorkStore>;
@@ -510,6 +515,16 @@ export function createOperatorService(
     if (request.op === "fleet_capacity") {
       if (ctx.fleetCapacity === undefined) throw new Error("Fleet capacity isn't available on this Clankie.");
       return { op: "fleet_capacity", schemaVersion: 1, result: await ctx.fleetCapacity() };
+    }
+    if (request.op === "seat_image") {
+      const result =
+        ctx.seatImage === undefined
+          ? ({
+              outcome: "unavailable",
+              message: "Reading agents' images isn't available on this Clankie.",
+            } as const)
+          : await ctx.seatImage(request.seatId, request.path);
+      return { op: "seat_image", schemaVersion: 1, result };
     }
     if (request.op === "state_work") {
       const seatId = await readSeatIdForHerdrPane(

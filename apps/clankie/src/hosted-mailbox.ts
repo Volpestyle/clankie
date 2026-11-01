@@ -13,7 +13,7 @@ import {
   type HostedMailRefusal,
   type HostedMailRequest,
 } from "@clankie/protocol/hosted-mail";
-import { hostedOrigin } from "@clankie/protocol/hosted-pairing";
+import { gatewayOrigin } from "@clankie/protocol/public-gateway";
 import type { ClankieAccountTokenProvider } from "@clankie/credential-broker";
 
 /** Where a self-hosted install's Clankie account lives unless remote access names another gateway. */
@@ -41,7 +41,7 @@ export function accountMailbox(input: {
     async request(request) {
       const { token } = await input.token();
       return decode(
-        await fetcher(`${hostedOrigin(await input.gatewayUrl())}${HOSTED_MAIL_ACCOUNT_PATH}`, {
+        await fetcher(`${gatewayOrigin(await input.gatewayUrl())}${HOSTED_MAIL_ACCOUNT_PATH}`, {
           method: "POST",
           redirect: "error",
           headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

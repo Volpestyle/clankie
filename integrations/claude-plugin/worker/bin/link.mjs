@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 export const TEXT_MAX = 16_384;
 export const SUMMARY_MAX = 512;
-// A hire loads the worker per launch as `@inline` (ADR 0314); an older install's copy is `@clankie`.
+// A hire loads the worker per launch as `@inline` (ADR 0317); an older install's copy is `@clankie`.
 const WORKER_CHANNELS = ["plugin:clankie-worker@inline", "plugin:clankie-worker@clankie"];
 
 /** A socket path as this machine compares it: Windows paths are case-insensitive. */

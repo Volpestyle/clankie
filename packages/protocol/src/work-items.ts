@@ -111,6 +111,8 @@ export const WorkInitSettingsSchema = z
     linearTeam: z.string().min(1).max(64).optional(),
     linearProject: z.string().min(1).max(200).optional(),
     linearLabel: WorkLinearLabelSchema.optional(),
+    /** `linear` keeps the recorded Linear scope readable beside a new tracker; `none` drops it. */
+    previous: z.enum(["linear", "none"]).optional(),
     releaseSource: WorkReleaseSourceSchema.optional(),
     releaseLane: z.string().trim().min(1).max(64).optional(),
     decisions: z.string().min(1).max(256).optional(),
@@ -178,6 +180,12 @@ const WorkConventionFieldsSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * A tracker the repo is moving off (#81). Its items stay listed, read and
+     * updated where they are, and it never gets a new item: every create goes to
+     * `backend`. Only Linear to GitHub issues today, scoped by `linear`.
+     */
+    previous: z.literal("linear").optional(),
     /** Release selection is a host setting, shared by every device. */
     releases: z
       .object({
@@ -200,6 +208,10 @@ export const WorkConventionSchema = WorkConventionFieldsSchema.refine(
     convention.backend === "linear" ||
     convention.backend === "builtin",
   { message: "A Linear board label requires the linear backend", path: ["linear", "label"] },
+).refine(
+  (convention) =>
+    convention.previous === undefined || (convention.linear !== undefined && convention.backend === "github"),
+  { message: "A previous Linear tracker needs its Linear scope and the github backend", path: ["previous"] },
 );
 export type WorkConvention = z.infer<typeof WorkConventionSchema>;
 

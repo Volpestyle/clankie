@@ -457,7 +457,7 @@ Clankie’s Claude hire loads the plugin for that session only from Clankie's ow
 files and starts Claude Code with `--plugin-dir WORKER_DIR --channels
 plugin:clankie-worker@inline` for immediate delivery; an installed
 `clankie-worker@clankie` is switched off for that session
-([ADR 0314](../../docs/adr/0314-a-claude-hire-loads-its-worker-plugin-for-that-session.md)).
+([ADR 0317](../../docs/adr/0317-a-claude-hire-loads-its-worker-plugin-for-that-session.md)).
 On a fleet machine `WORKER_DIR` is the copy `clankie herdr prepare` stages at
 `~/.clankie/claude-plugin/worker`. In prepared Mac zsh panes, Clankie's [PATH shim](../herdr-plugin/README.md#hand-started-claude-on-mac)
 adds the channel to plain `claude` and `claude --resume ID` when the worker

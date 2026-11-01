@@ -29,7 +29,7 @@ import { claudeTrackerRulesFor } from "./tracker-isolation.ts";
  * files `clankie herdr prepare` staged there and its managed policy; tracker
  * isolation from its own Claude configuration; and the launch settings are
  * written there as a file. Each launch loads the staged plugin with
- * `--plugin-dir` (ADR 0314), and it reaches Clankie back through the fleet's link.
+ * `--plugin-dir` (ADR 0317), and it reaches Clankie back through the fleet's link.
  */
 
 const ROOT = "---CLANKIE-WORKER-ROOT---";

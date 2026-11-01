@@ -67,8 +67,11 @@ This repository is public. Both neighbors are private and consume
   finding not yet fixed) goes in the issues of the private `clankie-app` or
   `clankie-ops` repo, never here. Create no new issues in the
   [Clankie Linear project](https://linear.app/vuhlp/project/clankie-7f2de0de4a75/overview);
-  issues already there keep being worked and updated there, and milestone
-  updates still go to that project.
+  issues already there keep being worked and updated there. Milestone updates
+  for this repo go to the status updates of the public
+  [Clankie GitHub Project](https://github.com/users/Volpestyle/projects/3), which
+  names only work in this repo; private milestones go to the owner's private
+  project.
 - Match the surrounding code and iterate with focused checks. On a shared
   machine, run builds, typechecks, test suites, installs and formatting/linting
   through `clankie heavy --` (the `fleet-resources` skill); CI runs them directly.
@@ -97,7 +100,9 @@ This repository is public. Both neighbors are private and consume
   the side; nobody sits idle on a run. File each bug as an issue at the front of
   the queue, ordered by how badly it blocks the current goals. Open pull
   requests as drafts: a draft gets the quick checks on every push, and marking
-  it ready runs the landing gate and the Mac job once before merge. A test that
+  it ready runs the landing gate and the real-app run, a few minutes. The tests
+  a change reaches through its imports and the Mac's tests run on `main` after
+  the merge, and the whole suite nightly: red there is a bug to file. A test that
   already fails on `main` warns and does not block a pull request; file it. A
   change gets its full checks in one place, never twice: CI for a pull request,
   `pnpm check:landing` for a direct landing. While iterating, run only the tests

@@ -1,4 +1,4 @@
-# ADR 0314: A Claude hire loads its worker plugin for that session only
+# ADR 0317: A Claude hire loads its worker plugin for that session only
 
 Status: Accepted by James, 2026-10-31. Amends
 [ADR 0187](0187-clankie-hires-his-own-seats.md) for Claude seats.

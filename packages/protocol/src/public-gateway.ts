@@ -20,7 +20,6 @@ import { LINEAR_FOLLOW_PATH, LINEAR_WAKE_PATH } from "./linear-settings.ts";
 import { ACCOUNT_DIAGNOSTICS_PATH } from "./account-diagnostics.ts";
 import { CAPTAIN_READINESS_PATH } from "./captain-readiness.ts";
 import { DISCORD_INGRESS_PATH } from "./discord-ingress.ts";
-import { OFFICIAL_DISCORD_BODY_PATH } from "./official-discord.ts";
 import {
   ACCOUNT_GOOGLE_START_PATH,
   ACCOUNT_GOOGLE_COMPLETE_PATH,
@@ -76,7 +75,6 @@ import {
   PublicGatewayPushWakeFrameSchema,
   PublicGatewayPushWakeResultFrameSchema,
 } from "./device-push.ts";
-import { DEVICE_WAKE_KEY_PATH } from "./wake.ts";
 import { FLEET_HIRE_DEFAULTS_PATH, FLEET_SETTINGS_PATH } from "./fleet-settings.ts";
 import { OPERATOR_PERSONA_PATH } from "./discord-attention.ts";
 import {
@@ -204,7 +202,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: CONNECTOR_SIGN_INS_PATH, target: "control" },
   { method: "POST", path: CONNECTOR_SIGN_IN_APPROVE_PATH, target: "control" },
   { method: "POST", path: CONNECTOR_SIGN_IN_DENY_PATH, target: "control" },
-  { method: "POST", path: DEVICE_WAKE_KEY_PATH, target: "control" },
+  // The Mac answers the retired hosted wake-key route with 404 (ADR 0300).
+  { method: "POST", path: "/v1/devices/wake-key", target: "control" },
   { method: "POST", path: HOSTED_PAIR_OFFER_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },
@@ -215,8 +214,6 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: BODY_LEASE_STATUS_PATH, target: "relay" },
   { method: "GET", path: DISCORD_ROOMS_PATH, target: "relay" },
   { method: "GET", path: DISCORD_SETTINGS_PATH, target: "relay" },
-  // The service itself authorizes observe access; writes use the operator bridge.
-  { method: "GET", path: OFFICIAL_DISCORD_BODY_PATH, target: "control" },
   { method: "GET", path: DISCORD_DIRECTORY_PATH, target: "relay" },
   { method: "GET", path: DISCORD_ROOM_VOICE_PATH, target: "relay" },
   { method: "GET", path: DISCORD_VOICE_TRANSCRIPTS_PATH, target: "relay" },
@@ -342,6 +339,22 @@ export function derivePublicGatewayHostId(accountId: string, installationId: str
   return PublicGatewayHostIdSchema.parse(
     sha256Base64Url(`clankie-host-v1\0${accountId}\0${parsedInstallationId}`),
   );
+}
+
+/** The account gateway's origin, as `clankie login` and the account mailbox reach it. */
+export function gatewayOrigin(value: string): string {
+  const url = new URL(value);
+  if (
+    (url.protocol !== "https:" &&
+      !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  )
+    throw new Error("Gateway URL must be an HTTPS origin (HTTP is loopback-only)");
+  return url.origin;
 }
 
 const ExactHttpsOrLoopbackOriginSchema = z

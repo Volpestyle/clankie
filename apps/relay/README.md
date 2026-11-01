@@ -143,7 +143,10 @@ not an ambiguous unconfirmed.
 ([ADR 0301](../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)),
 stateless Streamable HTTP with JSON responses. Its tools are `list_agents`
 (`machine` optional), `read_agent` (`agent`, `lines` up to 400),
-`message_agent` (`agent`, `message`), `list_places` (the places an agent can
+`message_agent` (`agent`, `message`, `images` optional: up to four `{url}` or
+`{data}` PNG, JPEG, GIF or WebP), `read_image` (`agent`, `path`: an image the
+agent saved inside its working directory, returned as MCP image content),
+`list_places` (the places an agent can
 start; it starts nothing), `start_agent` (`machine`, `workingDirectory`,
 `harness` claude or codex, `prompt`; with no machine and directory it lists the
 places too), `fleet_capacity` (read only: plans, usage, permits, tracker
@@ -171,6 +174,18 @@ only for an app the owner turned on with `clankie connector prompts on APP`,
 only while the expected text is on screen, and once per prompt; it checks
 again before every step on one bound pane and connection, and stops part way
 when anything changed.
+Images (ADR 0315): `message_agent` turns each image into an owner attachment
+in the agent's persona thread with `upload_begin`, `upload_chunk` and
+`upload_commit` (ADR 0209), then sends the message naming them, so the agent
+finds them under `.clankie/inbox/` in its workspace. The relay confirms each
+upload's thread is a persona thread, as for a send. An `https` image address is
+fetched by the relay only when every address its host resolves to is public
+(no loopback, private, link-local or tailnet range), with at most three
+redirects, each rechecked, and 20 MiB. `read_image` is the `seat_image` op under
+`terminalObserve`: the service returns one regular file inside a seated agent's
+real working directory (on a linked machine, read by a contained command there,
+ADR 0316) whose leading bytes are a PNG, JPEG, GIF or WebP,
+up to 3.75 MB. Its base64 is passed through unredacted, like evidence bytes.
 `read_inbox` reads the `lead` op's status and inbox (ADR 0304): what Clankie
 held for the apps while they lead, and the lead threads with unread reports. A
 connector may read the lead, never set it. `read_reports` and

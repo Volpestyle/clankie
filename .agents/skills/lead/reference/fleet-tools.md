@@ -248,6 +248,11 @@ ADR 0304). While they lead, you take no turn of your own in your lead threads:
 your wakes, watches, and your workers' messages, questions and reports wait for
 the apps, which read them with `read_inbox` and `read_reports` and answer
 workers with `message_agent` or, for a prompt open in a pane, `answer_prompt`.
+An app can send a worker images with `message_agent` (they land under
+`.clankie/inbox/` in its workspace) and look at one the worker saved there with
+`read_image`, so a worker that wants an app to see a screenshot saves it inside
+its working directory and names the path (ADR 0315). Both work for workers on
+linked machines too, when that machine's access is Workers or above (ADR 0316).
 They keep issues current with `save_issue` and `comment_issue`, which pass each
 project's posting setting as an agent's writes do (ADR 0305).
 The owner's own messages still reach you. When the owner hands the lead back,

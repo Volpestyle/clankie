@@ -1,6 +1,6 @@
 # Owner-managed channel consent: prepared, not applied
 
-> **Current worker entry (ADR 0314):** a Claude hire loads the worker with
+> **Current worker entry (ADR 0317):** a Claude hire loads the worker with
 > `--plugin-dir`, so the approved pair is
 > `{ "marketplace": "inline", "plugin": "clankie-worker" }`, with
 > `"channelsEnabled": true` and `disableSideloadFlags` unset. The

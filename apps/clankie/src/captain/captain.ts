@@ -157,10 +157,13 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
-import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
+import { HerdrFleetError, splitFleetQualified, type FleetShellRun, type HerdrFleet } from "../herdr-fleet.ts";
 import { NativePaneNotFoundError, nativeRequest } from "../herdr-native-request.ts";
 import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
+import { readSeatImage } from "../seat-images.ts";
+import { deliverToFleetSeat, readFleetSeatImage } from "../fleet-seat-files.ts";
+import type { SeatImageResult } from "@clankie/protocol/connector";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
@@ -2563,6 +2566,61 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
    * in its own workspace, so only a local seat whose working directory is
    * known can take them; anything else is an explicit refusal.
    */
+  /** A local seat's working directory, from the live fleet, its thread or its native chat. */
+  async function seatWorkspace(seatId: string, conversationId?: string): Promise<string | undefined> {
+    return (
+      liveSeats.find((seat) => seat.seatId === seatId)?.workingDirectory ??
+      (conversationId === undefined
+        ? undefined
+        : conversations.nativeSource(conversationId)?.workingDirectory) ??
+      (await herdrWatches.readNativeChat(seatId, undefined).catch(() => undefined))?.agent.workingDirectory
+    );
+  }
+
+  /** One image a seated agent saved in its workspace, for a connected app (ADR 0315). */
+  async function seatImage(seatId: string, path: string): Promise<SeatImageResult> {
+    if (!liveSeats.some((seat) => seat.seatId === seatId))
+      return {
+        outcome: "unavailable",
+        message: "That agent isn't one Clankie seats now. List the agents and pick one that can be messaged.",
+      };
+    const workspace = await seatWorkspace(seatId);
+    if (workspace === undefined)
+      return { outcome: "unavailable", message: "This agent's working directory is unknown." };
+    if (!splitFleetQualified(seatId)) return readSeatImage({ workspace, path });
+    const linked = await linkedSeatMachine(seatId);
+    if ("refused" in linked) return { outcome: "unavailable", message: linked.refused };
+    try {
+      return await readFleetSeatImage({ ...linked, workspace, path });
+    } catch (error) {
+      return {
+        outcome: "unavailable",
+        message: `The image couldn't be read from ${linked.fleet.id} (${error instanceof Error ? error.message.slice(0, 300) : "unknown error"}).`,
+      };
+    }
+  }
+
+  /**
+   * A seat's linked machine and its shell, once that machine's access lets
+   * Clankie work there (ADR 0316): files move only where workers may.
+   */
+  async function linkedSeatMachine(
+    seatId: string,
+  ): Promise<{ fleet: HerdrFleet; shell: FleetShellRun } | { refused: string }> {
+    const machine = splitFleetQualified(seatId)?.fleet;
+    const fleets = (await deps.fleets?.current?.()) ?? deps.fleets?.list ?? [];
+    const fleet = fleets.find((candidate) => candidate.id === machine);
+    const shell = fleet === undefined ? undefined : deps.fleets?.shell?.(fleet);
+    if (fleet === undefined || shell === undefined)
+      return { refused: `Clankie can't reach ${machine ?? "that machine"} to move files right now.` };
+    try {
+      await requireAccess(fleet.id, "workers");
+    } catch (error) {
+      return { refused: error instanceof Error ? error.message : `${fleet.id} doesn't allow this.` };
+    }
+    return { fleet, shell };
+  }
+
   function ownerAttachmentHost(): OwnerAttachmentHost | undefined {
     const store = options.deliveredFiles;
     if (
@@ -2578,21 +2636,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       commitUpload: (conversationId, uploadId) => store.commitUpload!(conversationId, uploadId),
       attachment: (conversationId, artifactId) => store.attachment!(conversationId, artifactId),
       async forSeat(seatId, conversationId, attachments) {
-        if (splitFleetQualified(seatId))
-          return {
-            undeliverable:
-              "This agent runs on another machine. Attachments reach only agents on this one; send the text alone.",
-          };
-        const workspace =
-          liveSeats.find((seat) => seat.seatId === seatId)?.workingDirectory ??
-          conversations.nativeSource(conversationId)?.workingDirectory ??
-          (await herdrWatches.readNativeChat(seatId, undefined).catch(() => undefined))?.agent
-            .workingDirectory;
+        const workspace = await seatWorkspace(seatId, conversationId);
         if (workspace === undefined)
           return {
             undeliverable: "This agent's working directory is unknown, so its files have nowhere safe to go.",
           };
         try {
+          if (splitFleetQualified(seatId)) {
+            const linked = await linkedSeatMachine(seatId);
+            if ("refused" in linked) return { undeliverable: linked.refused };
+            return await deliverToFleetSeat({
+              ...linked,
+              workspace,
+              messageId: `msg-${randomUUID()}`,
+              attachments,
+            });
+          }
           return await materializeOwnerAttachments({
             workspace,
             messageId: `msg-${randomUUID()}`,
@@ -7817,6 +7876,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get headSeat() {
         return headSeat;
       },
+      seatImage,
       fleetCapacity: createFleetCapacityReader({
         settings,
         accounts: (fleetId) => readWorkerAccounts(fleetId),

@@ -158,7 +158,7 @@ export const FLEET_SEAT_MCP_SERVER = "clankie-seat";
  * channel carries the seat's mailbox, and its hooks report each settled turn.
  * Each launch loads it from Clankie's own worker directory (`--plugin-dir`), so
  * nothing is installed in a Claude profile and Claude names it `@inline` (ADR
- * 0314). The owner approves this identity in managed policy once.
+ * 0317). The owner approves this identity in managed policy once.
  */
 export const CLAUDE_WORKER_PLUGIN = { plugin: "clankie-worker", marketplace: "inline" } as const;
 export const CLAUDE_WORKER_PLUGIN_ID = `${CLAUDE_WORKER_PLUGIN.plugin}@${CLAUDE_WORKER_PLUGIN.marketplace}`;

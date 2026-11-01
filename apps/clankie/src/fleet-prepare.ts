@@ -18,7 +18,7 @@ import {
  * `clankie herdr prepare NAME`. Running it is the owner's approval. It ships
  * this Clankie's own worker plugin to that machine (so its version always
  * matches this service), where each Claude hire loads it with `--plugin-dir`
- * and nothing is installed in a Claude profile (ADR 0314), and approves its
+ * and nothing is installed in a Claude profile (ADR 0317), and approves its
  * channel in that machine's managed policy, keeping any entries already there.
  * Policy is machine-wide, so the ssh account must be that machine's
  * administrator; otherwise the step fails and says so.

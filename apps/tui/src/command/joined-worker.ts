@@ -163,7 +163,7 @@ export function joinedWorkerPorts(
         : [
             "--session-id",
             launch.sessionId,
-            // The worker plugin for this session only, as on any hire (ADR 0314): an
+            // The worker plugin for this session only, as on any hire (ADR 0317): an
             // owner-approved channel (managed allowedChannelPlugins), never a development
             // channel whose warning nobody is there to answer (VUH-2607).
             "--plugin-dir",

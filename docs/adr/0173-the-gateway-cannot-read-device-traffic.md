@@ -155,7 +155,7 @@ private fleet serves the signed-in account's machine list and pairing-offer
 endpoint. It resolves the selection through that account, signs an ephemeral
 key/nonce-bound operator ticket, and calls the machine's existing pair-offer
 route. It returns the body's signed ciphertext; it cannot decrypt the offer.
-The Node-free client in `packages/protocol/hosted-pairing` verifies through a
+The Node-free client in `packages/protocol/hosted-pairing` (removed by ADR 0300) verifies through a
 platform crypto adapter before device redemption. Account tokens are discarded
 after login; the broker retains only device credentials and wake signing material.
 

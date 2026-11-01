@@ -49,6 +49,23 @@ export interface SessionSendResult {
   readonly detail: string;
 }
 
+/** An image sent with a message, as the agent's own workspace file (ADR 0315). */
+export interface SessionImage {
+  readonly filename: string;
+  readonly mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  readonly bytes: Uint8Array;
+  /** Hex SHA-256 of the bytes; the upload is refused when they don't match. */
+  readonly sha256: string;
+}
+
+/** One image read back from a session's own workspace. */
+export interface SessionImageRead {
+  readonly id: string;
+  readonly filename: string;
+  readonly mediaType: SessionImage["mediaType"];
+  readonly dataBase64: string;
+}
+
 export interface SessionOpenResult {
   readonly id: string;
   readonly status: "opened" | "unavailable";
@@ -107,7 +124,9 @@ export interface SessionSource {
   readonly id: string;
   list(): Promise<Omit<SessionList, "machines"> & { readonly machines?: readonly string[] }>;
   read(id: string, lines: number): Promise<SessionText>;
-  send(id: string, message: string): Promise<SessionSendResult>;
+  send(id: string, message: string, images?: readonly SessionImage[]): Promise<SessionSendResult>;
+  /** Read one image file the session saved in its workspace; a source that can't leaves this out. */
+  image?(id: string, path: string): Promise<SessionImageRead>;
   /** Bring the session to the front in its own app on its machine. */
   open(id: string): Promise<SessionOpenResult>;
   /** Start a new session in a known place; a source that can't start any leaves this out. */
@@ -166,9 +185,20 @@ export class SessionSources {
     return { ...(await source.read(native, lines)), id };
   }
 
-  public async send(id: string, message: string): Promise<SessionSendResult> {
+  public async send(
+    id: string,
+    message: string,
+    images?: readonly SessionImage[],
+  ): Promise<SessionSendResult> {
     const [source, native] = this.resolve(id);
-    return { ...(await source.send(native, message)), id };
+    return { ...(await source.send(native, message, images)), id };
+  }
+
+  public async image(id: string, path: string): Promise<SessionImageRead> {
+    const [source, native] = this.resolve(id);
+    if (source.image === undefined)
+      throw new SessionRefusal("That session's app can't share images from here.");
+    return { ...(await source.image(native, path)), id };
   }
 
   public async answer(id: string, answer: SessionPromptAnswer): Promise<SessionAnswerResult> {

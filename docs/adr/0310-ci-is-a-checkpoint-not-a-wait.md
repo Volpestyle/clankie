@@ -19,17 +19,24 @@ request until someone fixed it, holding three of them for an afternoon.
 
 ## Decision
 
-Work never waits on CI. CI checkpoints the work on the side and keeps the
-full gate in front of `main`.
+Work never waits on CI. A quick gate stands in front of `main`, and CI
+checkpoints the rest on the side.
 
 - **Iterate in a draft.** A draft pull request gets the quick `check` job on
   every push (format, lint, MCP contracts, fleet fixtures; about a minute).
-  Marking it ready for review runs the landing gate and the Mac job, and every
-  push after that runs them again. A draft cannot merge, so the jobs it skips
-  pass nothing. A newer push still cancels the older run.
-- **The full gate is unchanged in front of `main`.** `landing`, `mac` and
-  `codex-clean` stay required, and a ready pull request runs all of them on its
-  exact head.
+  Marking it ready for review runs the pull request's gate, and every push after
+  that runs it again. A draft cannot merge, so the jobs it skips pass nothing. A
+  newer push still cancels the older run.
+- **A pull request's gate takes minutes.** It is the landing gate's checks with
+  the warm typecheck and only the test files the change itself adds or edits
+  (`check-landing.mjs --own-tests`), beside the real-app run on the Mac
+  (ADR 0309). `landing`, `mac` and `codex-clean` stay required; `mac` is skipped
+  on a pull request, which passes.
+- **The rest checkpoints on `main`.** After a merge, the `checkpoint` job runs
+  the tests the merge reaches through its imports on Linux, and the `mac` job
+  runs them on the Mac. A red run there is a bug to file at the front of the
+  queue, not a gate. A newer push to `main` cancels an older run; the nightly
+  run covers whatever that skipped.
 - **Main's failures are main's.** The landing gate runs every selected test
   instead of stopping at the first failure. When tests fail, CI reruns the
   failed files on the base commit in a scratch worktree, on the same runner. A
@@ -38,11 +45,8 @@ full gate in front of `main`.
   file that failed outside any test, or a run with an unhandled error still
   fails it. Nothing is skipped or quarantined. The lead files each shared
   failure as an issue at the front of the queue.
-- **The Mac runs only when it has tests to run.** A free Linux job works out
-  the Mac job's changed-test selection first; when it selects nothing, the Mac
-  job is skipped and passes. If that job fails, the Mac job runs anyway.
-- **Main gets the whole suite nightly.** A pull request runs only the tests
-  its change selects, so the `Nightly` workflow runs every test on `main` once
+- **Main gets the whole suite nightly.** A pull request runs only the test
+  files it edits and the checkpoint the tests its merge reaches, so the `Nightly` workflow runs every test on `main` once
   a night, release-only tests included, and names each failure in its summary.
   A red night is a bug to file at the front of the queue, not a gate.
 - **The typecheck starts warm.** The typecheck keeps each program's compiler
@@ -79,14 +83,19 @@ comparison for test failures. Building that offer is a follow-up.
 
 ## Consequences
 
-- An iteration push costs about a minute of hosted time and no Mac time. The
-  full gate runs when a pull request is ready, and once more for each fix after
-  that.
+- An iteration push costs about a minute of hosted time and no Mac time. A
+  ready pull request costs a few minutes: before this cut it waited up to 15
+  minutes for a Mac runner behind other changes' Mac tests, then ran its own
+  for up to 15 more, while a change to a core module ran a long test selection
+  through its imports on Linux.
+- A change can merge with a test it breaks through its imports. The checkpoint
+  on `main` names it after the merge and the lead files it first in the queue;
+  that is the trade James chose ("lets not gate ourselves by failing tests").
 - `main` can hold a failing test without blocking others, so it must be filed
   and fixed, not left; the run's warnings name it.
 - GitHub's merge queue is not offered for repositories owned by a personal
   account, so readiness is the draft state rather than a queue.
-- The Mac still takes one job at a time for this repository; more runner
-  instances there are a separate step.
+- The Mac has three runner instances for this repository; a pull request
+  takes one, for its real-app run.
 - Amends [ADR 0240](0240-changes-land-directly-on-main.md) for pull requests:
   the gate is the same; when it runs is new.

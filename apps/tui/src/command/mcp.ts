@@ -120,7 +120,7 @@ const MCP_USAGE =
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
 /**
  * A hired seat's worker plugin channel (VUH-1458), approved under `--channels`: the launch's own
- * `@inline` copy (ADR 0314), or an older install's `@clankie` one.
+ * `@inline` copy (ADR 0317), or an older install's `@clankie` one.
  */
 const WORKER_CHANNEL_PLUGINS = [
   `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
