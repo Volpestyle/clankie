@@ -10,6 +10,7 @@ import { expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { createCaptain } from "../../clankie/src/captain/captain.ts";
+import { createDiscordTurns } from "../../clankie/src/captain/captain-discord-turns.ts";
 import type { CaptainDeps } from "../../clankie/src/captain/deps.ts";
 
 // VUH-2142 live golden: a room turn refused before dispatch (then a file
@@ -21,6 +22,7 @@ it("puts a real room-turn refusal cause in the current bridge's error text", asy
   const settings = new SettingsStore(join(root, "settings.json"));
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       herdrAvailable: () => false,
       embodiment: {},
       memory: {

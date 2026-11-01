@@ -22,6 +22,7 @@ import { DiscordTurnReceipts } from "../../clankie/src/captain/discord-turn-rece
 import { BodyLeaseStore } from "../../clankie/src/body-leases.ts";
 import { BodyLeaseRouter } from "../../clankie/src/body-lease-router.ts";
 import { createCaptain } from "../../clankie/src/captain/captain.ts";
+import { createDiscordTurns } from "../../clankie/src/captain/captain-discord-turns.ts";
 import type { CaptainDeps } from "../../clankie/src/captain/deps.ts";
 import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
 import { DiscordTextInbox } from "../src/text-inbox.ts";
@@ -80,6 +81,7 @@ it("settles the real stuck deliveries terminally without posting, and backs tran
   }));
   const captain = createCaptain(
     {
+      roomTurns: createDiscordTurns,
       herdrAvailable: () => false,
       embodiment: {},
       discordActions: {
