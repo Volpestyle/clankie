@@ -244,6 +244,8 @@ export class ClaudeHookQuestions {
     }
   >();
   private readonly used = new Set<string>();
+  /** Requests a lead or the owner answered in this run; expiry and cancel are not answers. */
+  private readonly answered = new Set<string>();
   private decisions: z.infer<typeof DecisionSchema>[] = [];
 
   private readonly path: string;
@@ -448,7 +450,21 @@ export class ClaudeHookQuestions {
     if (!parsed.success) return { outcome: "refused", detail: "native_question_answer_invalid" };
     answer = parsed.data;
     const pending = this.requests.get(String(answer.requestId));
-    if (!pending || pending.answering || !sameSeat(ref, pending.ref))
+    // ADR 0322: no lead outranks another, so the first answer wins and a later
+    // one learns which way it lost.
+    if (pending?.answering && sameSeat(ref, pending.ref))
+      return {
+        outcome: "refused",
+        detail:
+          "native_question_being_answered: another answer to this question is being sent; no answer was sent",
+      };
+    if (!pending && this.answered.has(String(answer.requestId)))
+      return {
+        outcome: "refused",
+        detail:
+          "native_question_already_answered: another lead or Clankie answered it first; no answer was sent",
+      };
+    if (!pending || !sameSeat(ref, pending.ref))
       return { outcome: "refused", detail: "native_question_already_resolved_or_unknown" };
     const ids = pending.question.questions.map((q) => q.id);
     if (
@@ -487,6 +503,7 @@ export class ClaudeHookQuestions {
           DeciderSchema.parse(decider),
         );
       this.remember(String(answer.requestId));
+      this.answered.add(String(answer.requestId));
     } catch (error) {
       pending.answering = false;
       return { outcome: "refused", detail: String(error) };

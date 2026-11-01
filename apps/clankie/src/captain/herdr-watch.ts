@@ -444,6 +444,8 @@ const SETTLED_STATUSES = new Set(["idle", "done", "blocked"]);
 const REPLY_STATUSES = new Set(["idle", "done"]);
 const AGENT_STATUSES = ["idle", "working", "blocked", "done", "unknown"] as const;
 const RETRY_ADMISSION_MS = 5_000;
+/** ADR 0322: within the nine-minute Claude hook wait, a lead hears an open question again. */
+const QUESTION_REMINDERS = { retryMs: 30_000, remindMs: 3 * 60_000, windowMs: 9 * 60_000 } as const;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
 const SEAT_REPLY_READ_LINES = 240;
 const SEAT_TRANSCRIPT_TAIL_MS = 1_000;
@@ -1020,6 +1022,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly seatTranscriptTailMs: number;
   private readonly lastReply: ((agent: HerdrAgentSnapshot) => Promise<string | undefined>) | undefined;
   private readonly awaitRound: ((conversationId: string, signal: AbortSignal) => Promise<void>) | undefined;
+  private readonly questionReminders: {
+    readonly retryMs: number;
+    readonly remindMs: number;
+    readonly windowMs: number;
+  };
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
   /** Host policy resolution and escalation reuse the owner's ask store. */
@@ -1108,6 +1115,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * completion wakes it (VUH-2274). The watch stays durable meanwhile.
        */
       readonly awaitRound?: (conversationId: string, signal: AbortSignal) => Promise<void>;
+      /**
+       * How an open worker question keeps reaching its lead (ADR 0322): a
+       * deferred wake is retried after `retryMs`, an accepted one is repeated
+       * every `remindMs`, for `windowMs` after it was asked.
+       */
+      readonly questionReminders?: {
+        readonly retryMs: number;
+        readonly remindMs: number;
+        readonly windowMs: number;
+      };
       /** A hosted body's model for pi seats (VUH-1373); absent, pi uses its own configuration. */
       readonly piSeatModel?: () => Promise<PiSeatModel | undefined>;
       /** Host admission before account selection, reuse or native startup. */
@@ -1243,6 +1260,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     this.seatTranscriptTailMs = options.seatTranscriptTailMs ?? SEAT_TRANSCRIPT_TAIL_MS;
     this.lastReply = options.lastReply;
     this.awaitRound = options.awaitRound;
+    this.questionReminders = options.questionReminders ?? QUESTION_REMINDERS;
     this.state = this.read();
   }
 
@@ -1914,9 +1932,72 @@ export class HerdrWatchStore implements HerdrWatchPort {
         : []),
     ].join("\n\n");
     await guard();
-    await this.wake(owner.conversationId, text, owner.discord, guard);
+    const delivered = await this.wake(owner.conversationId, text, owner.discord, guard);
     await guard();
     this.projectSeat?.(agent.terminalId, { kind: "reply", text });
+    this.remindOpenQuestion(agent, question.requestId, text, delivered === "deferred");
+  }
+
+  /**
+   * An open question keeps reaching whoever leads the hire's conversation now
+   * (ADR 0322). A wake no lead took is retried, and a taken one is repeated
+   * while the question stays unanswered, so a lead that connected late, or
+   * Clankie when the lead that was told has gone, still hears it. No lead
+   * outranks another: the first answer wins and later ones are refused.
+   */
+  private remindOpenQuestion(
+    asked: HerdrAgentSnapshot,
+    requestId: string | number,
+    text: string,
+    deferred: boolean,
+  ): void {
+    const { retryMs, remindMs, windowMs } = this.questionReminders;
+    const until = Date.now() + windowMs;
+    const schedule = (wait: number) => {
+      if (this.closed || Date.now() + wait > until) return;
+      const timer = setTimeout(() => {
+        this.retryTimers.delete(timer);
+        void remind().catch((error: unknown) =>
+          console.warn("Open worker question reminder stopped", asked.terminalId, String(error)),
+        );
+      }, wait);
+      timer.unref?.();
+      this.retryTimers.add(timer);
+    };
+    const sameOccupant = (current: HerdrAgentSnapshot | undefined) =>
+      current?.session !== undefined &&
+      current.paneId === asked.paneId &&
+      current.agent === asked.agent &&
+      nativeSessionId(current) === nativeSessionId(asked);
+    const remind = async () => {
+      if (this.closed || !this.wake) return;
+      const current = await this.runner.resolveTerminal(asked.terminalId);
+      if (!current || !sameOccupant(current)) return;
+      // A lead that adopted the seat since is the one to remind now.
+      const owner = this.nativeOwner(current);
+      if (!owner) return;
+      const control = await this.seatControl.attachQuestion(current);
+      // Undefined is also an answer in flight; it is checked again next round.
+      if ((await control?.pendingQuestion?.(requestId)) === undefined) return schedule(remindMs);
+      const guard = async () => {
+        if (this.closed) throw new Error("Native question channel closed");
+        const latest = await this.runner.resolveTerminal(asked.terminalId);
+        if (!sameOccupant(latest) || !isDeepStrictEqual(this.nativeOwner(latest!), owner))
+          throw new Error("The question's native occupant or leading conversation changed");
+      };
+      await guard();
+      const result = await this.wake(
+        owner.conversationId,
+        [
+          `Still open: worker ${asked.terminalId}'s question ${String(requestId)} has no answer yet. Whoever leads this conversation now may answer it. If you are already answering it, ignore this; the first answer wins and a later one is refused.`,
+          text,
+        ].join("\n\n"),
+        owner.discord,
+        guard,
+      );
+      schedule(result === "deferred" ? retryMs : remindMs);
+    };
+    schedule(deferred ? retryMs : remindMs);
   }
 
   /** Reuse native attachment/queue capability; bridge display cards grant nothing. */
