@@ -235,13 +235,6 @@ export const DiscordSettingsSchema = z
      * requires enablement, allowlists, and the durable opt-in.
      */
     activeBody: z.enum(["bot", "user_session"]).default("bot"),
-    /**
-     * Free official Clankie bot through the signed-in Clankie account (VUH-1766).
-     * The hosted edge holds the official token and delivers sealed messages to
-     * this machine; no developer portal, bot token or intents setup. Independent
-     * of `activeBody`: a bring-your-own bot can still run beside it.
-     */
-    officialBotEnabled: z.boolean().default(false),
 
     /**
      * Personal-lab user-session body (ADR 0048). Off by default. Storing a
@@ -307,7 +300,7 @@ export const DISCORD_OPTIONAL_SETTING_WRITERS = {
   serverId: ["role", "fleetEnabled", "trackingLevel"],
   fleetChannelId: ["role", "fleetEnabled", "trackingLevel"],
   teamVisible: ["role", "fleetEnabled", "trackingLevel"],
-  wakeTrigger: ["ambientChannelIds", "officialBotEnabled"],
+  wakeTrigger: ["ambientChannelIds"],
   applicationId: [],
   guildId: [],
   swarmGuildId: [],
@@ -317,6 +310,23 @@ export const DISCORD_OPTIONAL_SETTING_WRITERS = {
   activityTunnelName: [],
   activityTunnelHostname: [],
 } as const satisfies Record<OptionalDiscordSetting, readonly DefaultedDiscordSetting[]>;
+
+/**
+ * Settings this version retired; `officialBotEnabled` chose the free shared
+ * bot through the retired hosted edge (ADR 0326). An older settings file or
+ * client save still names them, and a retired setting can only remove
+ * capability, so it is dropped unread instead of failing the strict schema.
+ */
+const RETIRED_DISCORD_SETTINGS: readonly string[] = ["possessorVoiceEnabled", "officialBotEnabled"];
+
+export function withoutRetiredDiscordSettings(settings: unknown): unknown {
+  if (settings === null || typeof settings !== "object" || Array.isArray(settings)) return settings;
+  return Object.fromEntries(
+    Object.entries(settings as Record<string, unknown>).filter(
+      ([key]) => !RETIRED_DISCORD_SETTINGS.includes(key),
+    ),
+  );
+}
 
 /** Project the server role model into the existing body configuration without granting machine access. */
 function legacyDiscordServerSettings(settings: DiscordSettings, previous?: DiscordSettings): DiscordSettings {

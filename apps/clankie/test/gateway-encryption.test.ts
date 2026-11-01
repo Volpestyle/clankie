@@ -299,14 +299,24 @@ describe("device-to-host encryption security boundary", () => {
   });
 });
 
-it("returns a self-hosted 404 through the encrypted wake-key route", async () => {
-  const own = await account("wake-account");
-  const response = await own.client(`${own.base}/v1/devices/wake-key`, {
+it("refuses an unlisted route before the Mac and returns the Mac's own 404 encrypted", async () => {
+  const own = await account("unlisted-account", undefined, undefined, TAKE_CONTROL_GRANTS);
+  // The retired wake-key route is no longer listed (ADR 0326): the host refuses it unopened.
+  await expect(
+    own.client(`${own.base}/v1/devices/wake-key`, {
+      method: "POST",
+      headers: own.headers,
+      body: JSON.stringify({ publicKey: "A".repeat(87) }),
+    }),
+  ).rejects.toThrow(/refused \(401\)/);
+  expect(own.getDispatched()).toBe(0);
+  // A listed route the Mac answers with 404 comes back through the envelope as that 404.
+  const missing = await own.client(`${own.base}/v1/devices/device-missing/revoke`, {
     method: "POST",
     headers: own.headers,
-    body: JSON.stringify({ publicKey: "A".repeat(87) }),
   });
-  expect(response.status).toBe(404);
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toEqual({ error: "device_not_found" });
 });
 
 it("passes only work classification across the runtime boundary and excludes revoked sends", async () => {
@@ -427,7 +437,6 @@ it("carries account-connection codes only in the encrypted envelope and never re
     startLinear: async () => ({ ok: false, error: "unconfigured" }),
     completeLinear,
     disconnect: async () => ({ ok: true, revoked: true }),
-    connectMailbox: async () => ({ ok: false, error: "unconfigured" }),
   };
   const state = "s".repeat(32);
   for (const grants of [SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS]) {

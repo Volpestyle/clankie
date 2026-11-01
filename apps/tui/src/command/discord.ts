@@ -133,7 +133,6 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     showList("presence channels", settings.presenceChannelIds),
     "",
     `active body: ${settings.activeBody === "user_session" ? "lab user" : "official bot"}`,
-    `free official Clankie bot (account route): ${settings.officialBotEnabled ? "on" : "off"}`,
     `lab user body: ${settings.userSessionEnabled ? "enabled" : "disabled"}`,
     showList("  lab guilds", settings.userSessionGuildIds),
     showList("  lab channels", settings.userSessionChannelIds),
