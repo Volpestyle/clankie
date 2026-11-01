@@ -20,7 +20,7 @@ keep their meaning. `herdr add/remove/fleets`, `runtime connect` and `agents hos
 remain aliases. Only a changed default workspace needs `clankie restart captain`.
 
 Setup can also hire one read-only Claude agent to look around first
-(`clankie setup-agent start`, ADR 0316). It reads, never changes anything, and
+(`clankie setup-agent start`, ADR 0317). It reads, never changes anything, and
 reports one proposal; `setup-agent status` shows it and
 `setup-agent apply SURVEY LINE...` runs only the lines the owner approved. Never
 approve lines for the owner: show him the proposal and pass on his choice.

@@ -1560,7 +1560,7 @@ it("offers retained results through authenticated operator dispatch and only ack
   expect(read.status).toBe(200);
   const result = OperatorConversationServiceResultSchema.parse(await read.json());
   if (result.op !== "worker_reports") throw new Error("Wrong result");
-  // Each report names the seat that sent it, so a reader can match its own hire (ADR 0316).
+  // Each report names the seat that sent it, so a reader can match its own hire (ADR 0317).
   expect(result.page.items).toContainEqual(
     expect.objectContaining({
       deliveryId: receipt.id,

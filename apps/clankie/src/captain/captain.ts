@@ -157,11 +157,12 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import type { SavedAgentSession } from "../agent-sessions.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
-import { HerdrFleetError, splitFleetQualified } from "../herdr-fleet.ts";
+import { HerdrFleetError, splitFleetQualified, type FleetShellRun, type HerdrFleet } from "../herdr-fleet.ts";
 import { NativePaneNotFoundError, nativeRequest } from "../herdr-native-request.ts";
 import { createRemoteHireReceipts } from "../remote-hire-receipts.ts";
 import { materializeOwnerAttachments } from "../owner-attachments.ts";
 import { readSeatImage } from "../seat-images.ts";
+import { deliverToFleetSeat, readFleetSeatImage } from "../fleet-seat-files.ts";
 import type { SeatImageResult } from "@clankie/protocol/connector";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
@@ -2583,16 +2584,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         outcome: "unavailable",
         message: "That agent isn't one Clankie seats now. List the agents and pick one that can be messaged.",
       };
-    if (splitFleetQualified(seatId))
-      return {
-        outcome: "unavailable",
-        message:
-          "This agent runs on another machine. Images can be read only from agents on this Mac for now.",
-      };
     const workspace = await seatWorkspace(seatId);
     if (workspace === undefined)
       return { outcome: "unavailable", message: "This agent's working directory is unknown." };
-    return readSeatImage({ workspace, path });
+    if (!splitFleetQualified(seatId)) return readSeatImage({ workspace, path });
+    const linked = await linkedSeatMachine(seatId);
+    if ("refused" in linked) return { outcome: "unavailable", message: linked.refused };
+    try {
+      return await readFleetSeatImage({ ...linked, workspace, path });
+    } catch (error) {
+      return {
+        outcome: "unavailable",
+        message: `The image couldn't be read from ${linked.fleet.id} (${error instanceof Error ? error.message.slice(0, 300) : "unknown error"}).`,
+      };
+    }
+  }
+
+  /**
+   * A seat's linked machine and its shell, once that machine's access lets
+   * Clankie work there (ADR 0316): files move only where workers may.
+   */
+  async function linkedSeatMachine(
+    seatId: string,
+  ): Promise<{ fleet: HerdrFleet; shell: FleetShellRun } | { refused: string }> {
+    const machine = splitFleetQualified(seatId)?.fleet;
+    const fleets = (await deps.fleets?.current?.()) ?? deps.fleets?.list ?? [];
+    const fleet = fleets.find((candidate) => candidate.id === machine);
+    const shell = fleet === undefined ? undefined : deps.fleets?.shell?.(fleet);
+    if (fleet === undefined || shell === undefined)
+      return { refused: `Clankie can't reach ${machine ?? "that machine"} to move files right now.` };
+    try {
+      await requireAccess(fleet.id, "workers");
+    } catch (error) {
+      return { refused: error instanceof Error ? error.message : `${fleet.id} doesn't allow this.` };
+    }
+    return { fleet, shell };
   }
 
   function ownerAttachmentHost(): OwnerAttachmentHost | undefined {
@@ -2610,17 +2636,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       commitUpload: (conversationId, uploadId) => store.commitUpload!(conversationId, uploadId),
       attachment: (conversationId, artifactId) => store.attachment!(conversationId, artifactId),
       async forSeat(seatId, conversationId, attachments) {
-        if (splitFleetQualified(seatId))
-          return {
-            undeliverable:
-              "This agent runs on another machine. Attachments reach only agents on this one; send the text alone.",
-          };
         const workspace = await seatWorkspace(seatId, conversationId);
         if (workspace === undefined)
           return {
             undeliverable: "This agent's working directory is unknown, so its files have nowhere safe to go.",
           };
         try {
+          if (splitFleetQualified(seatId)) {
+            const linked = await linkedSeatMachine(seatId);
+            if ("refused" in linked) return { undeliverable: linked.refused };
+            return await deliverToFleetSeat({
+              ...linked,
+              workspace,
+              messageId: `msg-${randomUUID()}`,
+              attachments,
+            });
+          }
           return await materializeOwnerAttachments({
             workspace,
             messageId: `msg-${randomUUID()}`,

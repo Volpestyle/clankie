@@ -11,7 +11,7 @@ const USAGE =
   "Usage: clankie setup-agent [status | start [--account <label>] | apply <surveyId> [lineId...] | cancel <surveyId>]";
 
 /**
- * Setup's one read-only agent (ADR 0316), over the same owner API as the app:
+ * Setup's one read-only agent (ADR 0317), over the same owner API as the app:
  * start it, read its proposal, approve lines by id, or say no.
  */
 export async function runSetupAgentCommand(

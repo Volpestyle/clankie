@@ -167,7 +167,7 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
     schemaVersion: 1,
     ...(survey === undefined ? {} : { survey }),
   });
-  /** Watch goes off only for the survey, and comes back when it ends (ADR 0316). */
+  /** Watch goes off only for the survey, and comes back when it ends (ADR 0317). */
   async function setWatch(watch: boolean): Promise<void> {
     await deps.settings.update((current) => {
       const { watch: _watch, ...autonomy } = current.autonomy;

@@ -1352,7 +1352,7 @@ describe("Stop presses one Esc only into the exact working Claude with an empty 
   });
 });
 
-it("a read-only hire starts Claude in dontAsk with only reading and reporting allowed (ADR 0316)", () => {
+it("a read-only hire starts Claude in dontAsk with only reading and reporting allowed (ADR 0317)", () => {
   const args = claudeWorkerLaunchArgs({
     harness: "claude",
     cwd: "/w",

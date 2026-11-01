@@ -22,8 +22,12 @@ const retryTests = (separator < 0 ? args : args.slice(0, separator)).includes("-
 // Run every selected test instead of stopping at the first failure, so CI can
 // tell a change's own failures from ones its base already has (ADR 0310).
 const keepGoing = (separator < 0 ? args : args.slice(0, separator)).includes("--keep-going");
+// Run only the test files the change itself adds or edits, plus declared
+// filesystem consumers. A pull request takes minutes this way; the import-graph
+// selection runs on main's checkpoint and the whole suite nightly (ADR 0310).
+const ownTests = (separator < 0 ? args : args.slice(0, separator)).includes("--own-tests");
 const options = (separator < 0 ? args : args.slice(0, separator)).filter(
-  (arg) => !["--revalidate", "--retry-failed-tests", "--keep-going"].includes(arg),
+  (arg) => !["--revalidate", "--retry-failed-tests", "--keep-going", "--own-tests"].includes(arg),
 );
 const vitestArgs = separator < 0 ? [] : args.slice(separator + 1);
 for (let index = 0; index < options.length; index += 2)
@@ -210,7 +214,20 @@ rmSync(firstReport, { force: true });
 // Listing files does not execute tests; the one run below retains project lanes,
 // exclusions, reporters and the ordinary retry contract.
 let testSelection = ["--changed", base];
-if (!exit && report.fsInputScope.tests.length) {
+if (ownTests && !exit) {
+  testSelection = [
+    ...new Set([
+      ...report.change.files.filter(
+        (file) =>
+          /^(?:apps|packages|integrations)\/[^/]+\/test\/.+\.test\.ts$/u.test(file) &&
+          existsSync(resolve(root, file)),
+      ),
+      ...report.fsInputScope.tests,
+    ]),
+  ].sort();
+  report.ownTests = testSelection;
+  console.log(`[landing] own tests: ${testSelection.join(", ") || "none"}`);
+} else if (!exit && report.fsInputScope.tests.length) {
   const selectionPath = `${reportPath}.selection.json`;
   rmSync(selectionPath, { force: true });
   run(
@@ -246,36 +263,39 @@ if (!exit && report.fsInputScope.tests.length) {
     }
   }
 }
-run(
-  "tests",
-  [
-    "pnpm",
-    "exec",
-    "vitest",
-    "run",
-    "--config",
-    "vitest.config.ts",
-    ...testSelection,
-    "--bail",
-    retryTests || keepGoing ? "0" : "1",
-    "--passWithNoTests",
-    ...(vitestArgs.some((argument) => argument.startsWith("--reporter")) ? [] : ["--reporter=default"]),
-    "--reporter=./scripts/testing/landing-graph-reporter.mjs",
-    ...(retryTests ? ["--reporter=./scripts/testing/release-test-reporter.mjs"] : []),
-    ...vitestArgs,
-  ],
-  {
-    CLANKIE_LANDING_GRAPH: graphPath,
-    CLANKIE_LANDING_TESTS: "1",
-    ...(retryTests
-      ? {
-          CLANKIE_RELEASE_TEST_REPORT: firstReport,
-          CLANKIE_RELEASE_TEST_RUN_ID: testRunId,
-          CLANKIE_RELEASE_RETRY_FILE: "",
-        }
-      : {}),
-  },
-);
+// With --own-tests and no test file in the change, there is nothing to run.
+const testsRan = !(ownTests && !testSelection.length);
+if (testsRan)
+  run(
+    "tests",
+    [
+      "pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "--config",
+      "vitest.config.ts",
+      ...testSelection,
+      "--bail",
+      retryTests || keepGoing ? "0" : "1",
+      "--passWithNoTests",
+      ...(vitestArgs.some((argument) => argument.startsWith("--reporter")) ? [] : ["--reporter=default"]),
+      "--reporter=./scripts/testing/landing-graph-reporter.mjs",
+      ...(retryTests ? ["--reporter=./scripts/testing/release-test-reporter.mjs"] : []),
+      ...vitestArgs,
+    ],
+    {
+      CLANKIE_LANDING_GRAPH: graphPath,
+      CLANKIE_LANDING_TESTS: "1",
+      ...(retryTests
+        ? {
+            CLANKIE_RELEASE_TEST_REPORT: firstReport,
+            CLANKIE_RELEASE_TEST_RUN_ID: testRunId,
+            CLANKIE_RELEASE_RETRY_FILE: "",
+          }
+        : {}),
+    },
+  );
 if (retryTests && exit && report.phases.at(-1)?.name === "tests" && !report.phases.at(-1).signal) {
   report.testRecovery = { firstExitCode: exit, firstReport, flakyFiles: [], reruns: [] };
   const stable = async () => {
@@ -298,7 +318,7 @@ if (retryTests && exit && report.phases.at(-1)?.name === "tests" && !report.phas
   });
   if (recovered) exit = 0;
 }
-if (!exit && !existsSync(graphPath)) {
+if (!exit && testsRan && !existsSync(graphPath)) {
   console.error("[landing] Test dependency report is missing; landing blocked.");
   exit = 1;
 }

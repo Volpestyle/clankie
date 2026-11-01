@@ -2373,7 +2373,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         reason: "not_ready",
         detail: "Owner app provenance must be verified by the owner service route.",
       };
-    // Only Claude has a read-only mode Clankie can start it in (ADR 0316). A
+    // Only Claude has a read-only mode Clankie can start it in (ADR 0317). A
     // resumed transcript keeps the mode it was saved under, so it never resumes.
     if (inputRequest.readOnly === true && (inputRequest.harness !== "claude" || resume !== undefined))
       return {

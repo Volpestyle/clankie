@@ -1954,7 +1954,8 @@ up to four images (by public https address or as base64), which the agent finds
 in its workspace under `.clankie/inbox/`, and `read_image` returns an image an
 agent saved in its working directory, such as a screenshot
 ([ADR 0315](adr/0315-connected-apps-pass-images-to-and-from-agents.md)). Both
-work for agents on this Mac. `list_issues` and `read_issue`
+work for agents on this Mac and on linked machines at Workers access or above
+([ADR 0316](adr/0316-files-reach-agents-on-linked-machines.md)). `list_issues` and `read_issue`
 read your projects' issues, wherever each project tracks them. `save_issue`
 and `comment_issue` write them as that app, never as you: issue files are
 written right away, and Linear or GitHub follow the project's "Posting to your
@@ -5736,7 +5737,7 @@ envelope/body caps. Oversized or stale screen data refuses.
 ### `setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]`
 
 Setup's one read-only agent
-([ADR 0316](adr/0316-setup-starts-with-one-read-only-agent.md)), over the same
+([ADR 0317](adr/0317-setup-starts-with-one-read-only-agent.md)), over the same
 owner API as the app (`GET`/`POST /v1/setup/survey`,
 `POST /v1/setup/survey/apply`, `POST /v1/setup/survey/cancel`). Every verb
 prints the survey snapshot as JSON.

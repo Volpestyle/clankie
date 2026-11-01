@@ -1,4 +1,4 @@
-# ADR 0316: Setup starts with one read-only agent
+# ADR 0317: Setup starts with one read-only agent
 
 Status: Accepted, 2026-11-01, on James's word approving it ("Build it into
 setup"), after "its almost like, onbaording needs an agent from the beginning

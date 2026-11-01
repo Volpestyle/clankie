@@ -149,7 +149,7 @@ const WORKER_SERVER_RULES = [
 ];
 
 /**
- * A read-only hire's whole allow list (ADR 0316). Claude's `dontAsk` mode
+ * A read-only hire's whole allow list (ADR 0317). Claude's `dontAsk` mode
  * refuses every tool not listed here without asking: it reads files, runs four
  * exact commands that only look, and reports to Clankie. No edit, write, web or
  * connected-tool call is on the list, and neither is `clankie_call`.
