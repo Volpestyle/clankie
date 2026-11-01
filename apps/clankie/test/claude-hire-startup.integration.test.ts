@@ -501,3 +501,61 @@ it("settles a legacy pane-absent failed start by allocation ID and releases it w
     operatorRelease: expect.any(Object),
   });
 });
+
+it("settles a desktop-app hire whose terminal is gone, and its place takes a new hire", async () => {
+  const { DeliveryFence, deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const f = await fixture();
+  const path = join(f.root, "desktop-watch.json");
+  const pane = "herdr-core/t21";
+  const key = JSON.stringify(["herdr-core", "claude", f.root, "new"]);
+  const original = new DeliveryFence(`${path}.hire-receipts.json`).begin(key, {
+    fingerprint: deliveryFingerprint("old brief"),
+    paneId: pane,
+    beforeIds: [],
+  });
+  const live: HerdrAgentSnapshot = {
+    paneId: pane,
+    terminalId: pane,
+    agent: "claude",
+    status: "idle",
+    title: "",
+    workingDirectory: f.root,
+  };
+  let inventory: HerdrAgentSnapshot[] = [live];
+  const asked: (string | undefined)[] = [];
+  const store = new HerdrWatchStore(path, {
+    runner: {
+      get: async () => {
+        throw new Error("pane absent");
+      },
+      resolveTerminal: async () => undefined,
+      wait: async () => {
+        throw new Error("pane absent");
+      },
+      list: async (fleet) => {
+        asked.push(fleet);
+        return inventory;
+      },
+      paneShell: async () => ({ shellPid: 4242, foreground: [{ pid: 4242, name: "claude" }] }),
+    },
+  });
+  stores.push(store);
+  // A live harness in the original terminal is never settled away.
+  expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+    state: "refused",
+  });
+  inventory = [];
+  expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+    state: "abandoned",
+    receiptId: original.messageId,
+    evidence: { journal: "local-host-inventory", pane: { paneId: pane, present: false } },
+  });
+  expect(new Set(asked)).toEqual(new Set(["herdr-core"]));
+  store.close();
+  // The place is free again: a new hire there begins its own receipt.
+  const fence = new DeliveryFence(`${path}.hire-receipts.json`);
+  expect(fence.nextFreshIntent(key)).toBeUndefined();
+  expect(
+    fence.begin(key, { fingerprint: deliveryFingerprint("new brief"), beforeIds: [] }).messageId,
+  ).not.toBe(original.messageId);
+});

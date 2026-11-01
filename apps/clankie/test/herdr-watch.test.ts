@@ -680,6 +680,7 @@ describe("HerdrWatchStore", () => {
     );
     const codexQueue = vi.fn(() => Promise.resolve(true));
     const promptAgent = vi.fn(() => Promise.resolve());
+    const terminalInput = { promptAgent, pressEnter: () => Promise.resolve() };
     const store = new HerdrWatchStore(join(root, "watches.json"), {
       runner: {
         get: () => Promise.resolve(codex),
@@ -692,8 +693,7 @@ describe("HerdrWatchStore", () => {
             `n/Users/james/.codex/sessions/2026/09/05/rollout-2026-09-05T19-12-09-${sessionId}.jsonl\n`,
           ),
         codexQueue,
-        promptAgent,
-        pressEnter: () => Promise.resolve(),
+        ...terminalInput,
       },
     });
 
