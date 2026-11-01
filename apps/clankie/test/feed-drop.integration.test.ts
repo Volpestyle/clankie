@@ -541,9 +541,12 @@ it("lists drops newest first beside asks and mail, with their source, and pages 
   ]);
   // The CLI's text names where each came from.
   const shown = await f.cli("--project", "orchard");
-  expect(shown.output).toContain("Drop · orchard · from James’s iPhone");
-  expect(shown.output).toContain("Drop · orchard · from this machine");
-  expect(formatFeedPage(all)).toContain("Item: W-");
+  expect(shown.output).toMatch(/^Orchard\n/u);
+  expect(shown.output).toContain("  Your drop, from James’s iPhone · ");
+  expect(shown.output).toContain("  Your drop, from this machine · ");
+  // The item and repo ids wait in the details.
+  expect(formatFeedPage(all)).not.toContain("W-");
+  expect(formatFeedPage(all, {}, { details: true })).toContain("    Item: W-");
 });
 
 it("keeps each drop with its own project in a shared folder, and files the same picture under two names", async () => {

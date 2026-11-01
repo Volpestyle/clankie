@@ -22,6 +22,10 @@ import { WorkItemStatusSchema, WorkRepoSchema } from "./work-items.ts";
  * are finished built-in tracker items the lead marked with an owner check
  * (ADR 0299), waiting on the owner's verdict.
  *
+ * It holds only what the owner steers (#187): routine mail stays in the mailbox,
+ * and each project shows its newest status update, its older ones staying in
+ * the project's details. Each item carries a `view` for people.
+ *
  * The feed is display only. A check is answered with `input_answer`, an owner
  * update dismissed with `owner_update_dismiss`, and a proof given its verdict
  * with `post_owner_verdict` from the owner's paired app, against the ids each
@@ -198,6 +202,39 @@ export const FeedDropSchema = z
   .strict();
 export type FeedDrop = z.infer<typeof FeedDropSchema>;
 
+/** The longest caption the feed leads an item with. */
+export const FEED_CAPTION_MAX = 160;
+export const FEED_DETAILS_MAX = 16;
+/** One technical fact behind an item: an id, a pane, a command, a code. */
+export const FeedDetailSchema = z
+  .object({
+    label: z.string().trim().min(1).max(100),
+    value: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+export type FeedDetail = z.infer<typeof FeedDetailSchema>;
+
+/**
+ * How a client shows an item to a person (#187): the picture first, then one
+ * line in plain words, filed under the project by name. `caption` carries no
+ * pane or terminal ids, request or receipt ids, hashes or internal names; the
+ * host moves those, and anything it took out of the line, into `details`,
+ * which a client shows only when asked. `visual` is the one thing to look at
+ * first: a clip before a picture (a statechart, diagram or screenshot), taken
+ * from the item's own media. The kind's payload stays the exact source for
+ * answering, dismissing and giving a verdict. Absent from older hosts.
+ */
+export const FeedViewSchema = z
+  .object({
+    caption: z.string().trim().min(1).max(FEED_CAPTION_MAX),
+    /** The project as the owner named it. */
+    project: z.string().trim().min(1).max(100).optional(),
+    visual: FeedMediaSchema.optional(),
+    details: z.array(FeedDetailSchema).max(FEED_DETAILS_MAX).optional(),
+  })
+  .strict();
+export type FeedView = z.infer<typeof FeedViewSchema>;
+
 /**
  * A newer host may add a kind: a reader using `parseProtocolResponse` drops
  * that entry and keeps the rest. The payload key matches `kind`.
@@ -215,6 +252,7 @@ export const FeedItemSchema = z
     at: z.string().datetime(),
     /** The owner's project the item belongs to, when the host can tell. */
     projectId: ProjectIdSchema.optional(),
+    view: FeedViewSchema.optional(),
     check: FeedCheckSchema.optional(),
     update: FeedUpdateSchema.optional(),
     drop: FeedDropSchema.optional(),

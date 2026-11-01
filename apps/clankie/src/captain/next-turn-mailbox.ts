@@ -135,11 +135,19 @@ export class NextTurnMailbox {
     const first = this.pending(seat, binding).find((mail) => !mail.taken);
     if (!first) return undefined;
     return {
-      publicationId: first.id,
+      // v2: the plain wording (#187); an older notice keeps its own words.
+      publicationId: `waiting-v2:${first.id}`,
       draft: {
         seatId: seat,
-        title: `Message waiting in ${pane}`.slice(0, 200),
-        body: `A message was stored for ${pane} because live native delivery was unavailable. It waits for that original session's next user prompt and expires within 24 hours. No terminal input was sent. Check the fleet roster for the current queue and handoff state. Enabling Claude's worker channel requires starting Claude with Clankie's worker loaded for that session (--plugin-dir with --channels plugin:clankie-worker@inline, which a prepared Mac pane adds itself); do not restart an existing lane without authority.`,
+        title: "A message is waiting for one of your agents",
+        body: "Clankie couldn't hand it over live, so the agent gets it when it next takes a turn. It's kept for a day.",
+        // A delivery notice: kept in the mailbox, left out of the owner's feed (#187).
+        routine: true,
+        details:
+          `Pane ${pane}, seat ${seat}. A message was stored for ${pane} because live native delivery was unavailable. It waits for that original session's next user prompt and expires within 24 hours. No terminal input was sent. Check the fleet roster for the current queue and handoff state. Enabling Claude's worker channel requires starting Claude with Clankie's worker loaded for that session (--plugin-dir with --channels plugin:clankie-worker@inline, which a prepared Mac pane adds itself); do not restart an existing lane without authority.`.slice(
+            0,
+            2000,
+          ),
       },
     };
   }

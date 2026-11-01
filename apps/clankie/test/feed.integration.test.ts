@@ -319,7 +319,9 @@ it("joins asks, owner mail and project updates into one owner feed, pages it and
       fetchImpl: async (input, init) => f.service.app.fetch(new Request(input, init)),
     });
   const consoleClient = createCaptainOperatorConversationClient(transport("captain"), transport(OWNER));
-  expect(await feedConsoleCommand(consoleClient)("garden")).toBe(formatFeedPage(after));
+  expect(await feedConsoleCommand(consoleClient)("garden")).toBe(
+    formatFeedPage(after, { projectId: "garden" }),
+  );
   await expect(
     feedConsoleCommand(createCaptainOperatorConversationClient(transport("captain")))(""),
   ).rejects.toThrow("Owner authentication required to read the feed.");

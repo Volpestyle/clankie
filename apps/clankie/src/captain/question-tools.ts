@@ -17,7 +17,7 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       name: "mail_owner_update",
       label: "Mail the owner an update",
       description:
-        "Deliberately send informational mail you choose as worth the owner's attention: results, media or landed work. Supply a title, short body and optional links/media, issue {tracker,key,url}, or source worker seatId. The host binds the source conversation. Nothing waits on this update; reading or dismissing it never starts a turn. No automatic event feed. Keep the returned ID after uncertainty; do not resend with another tool call.",
+        "Deliberately send informational mail you choose as worth the owner's attention: results, media or landed work he needs to steer. It shows in his feed picture first, so attach the screenshot, clip or diagram as media. Write the title and short body in plain words, no pane, request or receipt ids, hashes or internal names; put those in details, which his feed folds away. Set routine for news nobody steers (a receipt, a delivery notice): it stays in the mailbox and out of his feed. Optional links/media, issue {tracker,key,url}, or source worker seatId. The host binds the source conversation. Nothing waits on this update; reading or dismissing it never starts a turn. No automatic event feed. Keep the returned ID after uncertainty; do not resend with another tool call.",
       parameters: Type.Unsafe<OwnerUpdateDraft>(
         withoutPatterns(z.toJSONSchema(OwnerUpdateDraftSchema, { io: "input" })),
       ),

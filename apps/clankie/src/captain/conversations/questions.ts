@@ -379,14 +379,13 @@ export function expireDecisionQuestions(ctx: ConversationStore, conversationId?:
         ctx["ownerUpdates"].publish(
           meta.conversationId,
           {
-            title: `Decision deadline passed: ${q.prompt.slice(0, 160)}`,
-            body: `No owner answer arrived by ${policy.deadlineAt}. Declared default: ${policy.defaultAction}\nNo owner gate is approved. The lead must report what it actually does.`.slice(
-              0,
-              2000,
-            ),
+            title: `No answer in time: ${q.prompt.slice(0, 180)}`,
+            body: `Clankie goes with the default it named: ${policy.defaultAction}`.slice(0, 2000),
+            details: `Deadline ${policy.deadlineAt}, request ${q.requestId}. No owner gate is approved. The lead must report what it actually does.`,
             ...(q.issue ? { issue: q.issue } : {}),
           },
-          `decision-deadline:${q.incarnationId}:${q.requestId}`,
+          // v2: the plain wording (#187); an older publication keeps its own words.
+          `decision-deadline-v2:${q.incarnationId}:${q.requestId}`,
         );
         ctx["enqueue"](
           meta,

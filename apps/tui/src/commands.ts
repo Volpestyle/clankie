@@ -247,9 +247,9 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
     commands.push({
       name: "feed",
       aliases: [],
-      description: "Read the owner feed: checks to answer and updates, newest first",
+      description: "Read what you need to steer, grouped by project, newest first",
       takesArgument: true,
-      argumentHint: "[PROJECT_ID]",
+      argumentHint: "[PROJECT_ID] [--details]",
       async run(argument, shell) {
         try {
           shell.insertCommandResult("/feed", await conversations.feed!(argument), "success");
