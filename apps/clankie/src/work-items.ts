@@ -2028,6 +2028,39 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (tracker === undefined) return undefined;
       return { tracker, projectIds: await projectIdsAt(path) };
     },
+    /**
+     * Where a registered repo's outward writes land now (#159), read from its saved tracker
+     * whether or not that tracker is connected: `local` when they stay on this Mac, undefined
+     * when the repo can't be read right now. A held post that no longer matches is moved or
+     * ended rather than left to fail.
+     */
+    async postingPlace(
+      repo: string,
+    ): Promise<
+      { tracker: "linear" | "github"; destination: string; projectIds: string[] } | "local" | undefined
+    > {
+      let path: string;
+      let convention: WorkConvention | undefined;
+      try {
+        if (/^project-[a-f0-9]{48}$/u.test(repo)) {
+          if (!projectReader) return undefined;
+          const read = await projectReader.prepare(repo);
+          path = read.path;
+          convention = read.convention;
+        } else {
+          path = (await locate(repo, true)).path;
+          convention =
+            (await readConvention(path)) ??
+            ((await discoverConvention(path, run)).suggestion as WorkConvention | undefined);
+        }
+      } catch {
+        return undefined;
+      }
+      const destination = postingDestination(convention);
+      if (destination === undefined || (convention?.backend !== "linear" && convention?.backend !== "github"))
+        return "local";
+      return { tracker: convention.backend, destination, projectIds: await projectIdsAt(path) };
+    },
     /** The Linear team a registered repo's issues live in, so a status lands in that team's own state. */
     async linearTeam(repo: string): Promise<string | undefined> {
       if (/^project-[a-f0-9]{48}$/u.test(repo))
