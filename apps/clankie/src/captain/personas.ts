@@ -439,7 +439,13 @@ export class PersonaStore {
   ): readonly OperatorFleetSeat[] {
     const restore = this.snapshot();
     let changed = false;
-    const seats = observedSeats.map((observed) => {
+    // A name two live seats share identifies neither: binding both under it would merge
+    // them into one character, and that character's messages would reach whichever seat
+    // bound last (#208). Each keeps the character filed under its own pane instead.
+    const named = new Map<string, number>();
+    for (const seat of observedSeats) named.set(seat.subject, (named.get(seat.subject) ?? 0) + 1);
+    const seats = observedSeats.map((seen) => {
+      const observed = distinctSubject(seen, named);
       const title = hireTitle?.(observed);
       const bound = this.bindSeat(
         observed,
@@ -1082,4 +1088,11 @@ const GENERIC_NAME = /^(?:(?:claude(?: code)?|codex)(?: agent)?$|clankie(?:[ -]?
 /** A name the census took from the pane's own title, or its harness fallback: nobody chose it. */
 function discoveredName(name: string, seat: { readonly title: string; readonly harness: string }): boolean {
   return name === seat.title.trim() || name === `${seat.harness} agent`;
+}
+
+/** A seat whose Herdr name another live seat also carries, filed back under its own pane. */
+function distinctSubject(seat: ObservedFleetSeat, named: ReadonlyMap<string, number>): ObservedFleetSeat {
+  if ((named.get(seat.subject) ?? 0) < 2 || seat.renamed === undefined) return seat;
+  const { renamed, ...rest } = seat;
+  return { ...rest, subject: renamed.from };
 }

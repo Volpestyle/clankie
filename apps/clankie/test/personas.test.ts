@@ -52,6 +52,34 @@ describe("PersonaStore", () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
+  // Desktop-app hires once all carried the label "clankie · Work" as their name, so every
+  // one bound one character and each message reached whichever seat bound last (#208).
+  it("never merges two live seats that share a name into one character", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-shared-name-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const desktop = (terminal: string, occupantId: string): ObservedFleetSeat => ({
+      ...observed(`herdr-core/${terminal}`, occupantId, "herdr-core-clankie-work"),
+      paneId: `herdr-core/${terminal}`,
+      harness: "claude",
+      title: "clankie · Work",
+      renamed: {
+        name: "clankie · Work",
+        from: `adhoc-${createHash("sha256").update(`herdr-core/${terminal}`).digest("hex").slice(0, 20)}`,
+      },
+    });
+    const seats = [desktop("t2q", OCCUPANT_ONE), desktop("t2t", OCCUPANT_TWO)];
+    const first = store.reconcile(seats);
+    expect(new Set(first.map((seat) => seat.personaId)).size).toBe(2);
+    // Every later census keeps each seat its own character.
+    for (let round = 0; round < 3; round++)
+      expect(store.reconcile(seats).map((seat) => seat.personaId)).toEqual(
+        first.map((seat) => seat.personaId),
+      );
+    // One seat alone keeps its name as usual.
+    expect(store.reconcile([seats[0]!])[0]!.personaId).not.toBe(first[1]!.personaId);
+  });
+
   it.each(["Codex Reviewer", "Claudette", "Claude Architect"])(
     "keeps the owner rename %s through repeated census and restart",
     (name) => {
