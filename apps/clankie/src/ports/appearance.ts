@@ -3,7 +3,7 @@
 // it is empty. Media draws him from it, so media never imports the persona.
 
 /** One reference picture of him, as the persona's board holds it. */
-export interface AppearanceImage {
+interface AppearanceImage {
   /** `appearance` pictures define how he looks; `vibe` ones only set the mood. */
   readonly role: "appearance" | "vibe";
   readonly mimeType: string;
@@ -13,7 +13,7 @@ export interface AppearanceImage {
   readonly contactSheet?: true;
 }
 
-export interface AppearanceBoard {
+interface AppearanceBoard {
   readonly images: readonly AppearanceImage[];
 }
 
