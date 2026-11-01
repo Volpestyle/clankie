@@ -278,6 +278,8 @@ never adopts the head. Never type into a lead's pane. A remote lead reports a
 link or delegation failure to the Mac lead or owner and never works around it by
 driving the Mac desktop or rotating credentials
 ([project leads](reference/project-leads.md)).
+Apps that lead through Clankie's connector (Claude Duet, Grok and others) follow
+[connected leads](reference/connected-leads.md).
 
 Unowned native panes in the owner's Herdr session, including hand-started ones,
 belong to the fleet: when one holds work you are routing, `message_seat`
