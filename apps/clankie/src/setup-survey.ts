@@ -222,6 +222,14 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
    * instead of holding on them. A close the service still refuses leaves the
    * survey running, so stopping it again retries (ADR 0317).
    */
+  /** Whether the agent's seat still has a live pane, after a fresh look if the last one missed it. */
+  async function stillOpen(seatId: string): Promise<boolean> {
+    try {
+      return (await deps.reports({ conversationId: LEAD, seatId, since: now() })).paneId !== undefined;
+    } catch {
+      return true;
+    }
+  }
   async function closeAgent(survey: SetupSurvey, mustClose: boolean): Promise<void> {
     if (survey.seatId === undefined) return;
     let answer: OperatorConversationServiceResult;
@@ -236,7 +244,10 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
       /* Watch chosen meanwhile refuses every close; the owner can still close its pane in Herdr. */
       return;
     }
-    if (mustClose && answer.op === "close_seat" && !answer.closed && answer.refusal !== undefined)
+    if (!mustClose || answer.op !== "close_seat" || answer.closed) return;
+    // A close that did not happen counts only once the agent's pane is gone, as
+    // when the owner closed it in Herdr; a live one keeps the survey running.
+    if (answer.refusal !== undefined || (await stillOpen(survey.seatId)))
       throw new SetupSurveyConflict(
         "Clankie couldn’t close the setup agent. Close its pane in Herdr, then try again.",
       );

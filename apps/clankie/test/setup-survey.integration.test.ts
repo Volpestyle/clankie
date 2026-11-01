@@ -63,7 +63,7 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
   const commands: OperatorConnectionCommand[] = [];
   let watchedAtHire: boolean | undefined;
   const closed: string[] = [];
-  let refuseCloses = false;
+  let refuseCloses: "refused" | "failed" | undefined;
   const open = new Set(["w1:p7", "w1:p9"]);
   const captain = createStubCaptain({
     // The lead may already have read them; the survey still sees its own agent's
@@ -106,13 +106,21 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
       if (request.op === "close_seat") {
         // As the real service does for a home tracked in Git with uncommitted files,
         // closing holds on them unless the close says why they stay.
-        if (refuseCloses || request.unlandedReason === undefined)
+        if (refuseCloses === "refused" || request.unlandedReason === undefined)
           return {
             op: "close_seat",
             schemaVersion: 1,
             seatId: request.seatId,
             closed: false,
             refusal: { reason: "unlanded_work", worktrees: [] },
+          } as OperatorConversationServiceResult;
+        // A native exit that timed out, or a pane already gone, answers no refusal.
+        if (refuseCloses === "failed" || !open.has(request.seatId))
+          return {
+            op: "close_seat",
+            schemaVersion: 1,
+            seatId: request.seatId,
+            closed: false,
           } as OperatorConversationServiceResult;
         closed.push(request.seatId);
         return {
@@ -187,9 +195,9 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
     closed: () => closed,
     /** The owner closes the agent's pane in Herdr. */
     closePane: (seatId: string) => open.delete(seatId),
-    /** The service refuses every close, whatever reason it is given. */
-    refuseCloses: (refuse = true) => {
-      refuseCloses = refuse;
+    /** Every close is refused outright, or fails without a refusal, until set back. */
+    refuseCloses: (how?: "refused" | "failed") => {
+      refuseCloses = how;
     },
   };
 }
@@ -355,7 +363,7 @@ it("keeps the survey running when the agent cannot be closed, so stopping it aga
   const started = await f.call("POST", "/v1/setup/survey", { schemaVersion: 1 });
   const surveyId = started.body.survey!.id;
   f.reports.push({ seatId: "w1:p7", text: `\`\`\`json\n${JSON.stringify(PROPOSAL)}\n\`\`\`` });
-  f.refuseCloses();
+  f.refuseCloses("refused");
   const applying = await f.call("POST", "/v1/setup/survey/apply", {
     schemaVersion: 1,
     surveyId,
@@ -367,10 +375,29 @@ it("keeps the survey running when the agent cannot be closed, so stopping it aga
   expect((await f.call("GET", "/v1/setup/survey")).body.survey?.status).toBe("proposed");
   expect((await f.call("POST", "/v1/setup/survey/cancel", { schemaVersion: 1, surveyId })).status).toBe(409);
   expect((await f.settings.load()).autonomy.watch).toBeUndefined();
-  f.refuseCloses(false);
+  // A close that fails without a refusal while the pane is still open counts the same.
+  f.refuseCloses("failed");
+  expect((await f.call("POST", "/v1/setup/survey/cancel", { schemaVersion: 1, surveyId })).status).toBe(409);
+  expect((await f.settings.load()).autonomy.watch).toBeUndefined();
+  f.refuseCloses();
   const cancelled = await f.call("POST", "/v1/setup/survey/cancel", { schemaVersion: 1, surveyId });
   expect(cancelled.body.survey?.status).toBe("cancelled");
   expect(f.closed()).toEqual(["w1:p7"]);
+  expect((await f.settings.load()).autonomy.watch).toBe(true);
+});
+
+it("finishes once the owner has closed the agent's pane himself", async () => {
+  const f = await fixture();
+  const started = await f.call("POST", "/v1/setup/survey", { schemaVersion: 1 });
+  f.reports.push({ seatId: "w1:p7", text: `\`\`\`json\n${JSON.stringify(PROPOSAL)}\n\`\`\`` });
+  f.refuseCloses("failed");
+  f.closePane("w1:p7");
+  const applied = await f.call("POST", "/v1/setup/survey/apply", {
+    schemaVersion: 1,
+    surveyId: started.body.survey!.id,
+    lineIds: ["local-workers"],
+  });
+  expect(applied.body.survey?.status).toBe("applied");
   expect((await f.settings.load()).autonomy.watch).toBe(true);
 });
 

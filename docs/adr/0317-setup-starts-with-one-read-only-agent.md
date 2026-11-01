@@ -63,9 +63,10 @@ starts at, refuses every hire.
   `connect_lead` and `owner_step` are the owner's own steps: approving one
   shows him how, and nothing runs. Clankie closes the agent before it applies
   anything. The close says the files in its folder are the owner's own, so a
-  home tracked in Git with uncommitted files doesn't hold it open; a close the
-  service still refuses leaves the survey running, and nothing is applied
-  until a later try closes it.
+  home tracked in Git with uncommitted files doesn't hold it open. A close the
+  service refuses, or one that doesn't happen while the agent's pane is still
+  live, leaves the survey running, and nothing is applied until a later try
+  closes it or the owner closes the pane in Herdr.
 - **One API, every surface.** `GET`/`POST /v1/setup/survey`,
   `POST /v1/setup/survey/apply` and `POST /v1/setup/survey/cancel`, owner or a
   device with Take Control. `clankie setup-agent` covers it in the CLI. One
