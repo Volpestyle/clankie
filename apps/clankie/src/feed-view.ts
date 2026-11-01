@@ -26,7 +26,7 @@ const JARGON = [
 ];
 
 /** One line in plain words, and what was taken out of it. */
-export function plainCaption(text: string): { caption: string; removed: string[] } {
+function plainCaption(text: string): { caption: string; removed: string[] } {
   const removed: string[] = [];
   const first = text.split(/\r?\n/u).find((part) => part.trim() !== "") ?? "";
   let line = first;
@@ -66,7 +66,7 @@ function isPicture(media: FeedMedia): boolean {
   );
 }
 /** The one thing to look at first: a clip, then a picture, then whatever comes first. */
-export function leadVisual(media: readonly FeedMedia[] | undefined): FeedMedia | undefined {
+function leadVisual(media: readonly FeedMedia[] | undefined): FeedMedia | undefined {
   return media?.find(isClip) ?? media?.find(isPicture) ?? media?.[0];
 }
 

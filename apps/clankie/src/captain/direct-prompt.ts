@@ -25,7 +25,7 @@ export interface DirectPromptPort {
 }
 
 /** Why a message can't be typed into this agent now; undefined when it can. */
-export function directPromptRefusal(
+function directPromptRefusal(
   harness: string,
   status: string | undefined,
   input: PaneInputLine,
