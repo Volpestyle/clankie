@@ -40,6 +40,7 @@ import { channelBody } from "./claude-worker-seat.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { codexProxyControl, codexProxySettled, type ExternalCodexControl } from "./external-codex-control.ts";
 import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
+import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
 import { currentOf, withCurrent, type CurrentCheck, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import type { MachineAccessFence } from "../machine-access.ts";
 import {
@@ -270,7 +271,8 @@ export interface HerdrBoundPane {
   resolve(): Promise<HerdrAgentSnapshot | undefined>;
   readScreen(): Promise<string>;
   sendKeys(keys: readonly string[]): Promise<void>;
-  sendText(text: string): Promise<void>;
+  /** Absent where the terminal takes only named keys, as a desktop-app seat does. */
+  sendText?(text: string): Promise<void>;
 }
 
 export interface HerdrWatchRunner {
@@ -1226,10 +1228,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const remoteSeatAdapters = options.remoteSeatAdapters;
     // One adapter set per fleet, made once: an adapter holds its seats' live control.
     const remote = new Map<string, { revision: number; adapters: ReadonlyMap<string, HarnessSeatAdapter> }>();
-    this.remoteSeatAdapters =
+    this.remoteSeatAdapters = (fleet) => {
+      // The desktop app's terminals are this machine's (ADR 0319): a hire there launched
+      // through the local adapters, so its channel and mailbox answer through them too.
+      if (fleet === HERDR_CORE_FLEET) return this.seatAdapters;
+      return remoteFleetAdapters?.(fleet);
+    };
+    const remoteFleetAdapters =
       remoteSeatAdapters === undefined
         ? undefined
-        : (fleet) => {
+        : (fleet: string) => {
             if (options.fleetAvailable?.(fleet) === false) {
               remote.delete(fleet);
               return undefined;

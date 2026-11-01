@@ -2,6 +2,8 @@
 
 Status: Accepted by James, 2026-10-31. Amends
 [ADR 0301](0301-claude-reaches-the-fleet-through-a-narrow-connector.md).
+Amended by [ADR 0324](0324-a-lead-reads-how-fast-the-fleet-spends.md), which
+adds each account's burn rate.
 
 ## Context
 

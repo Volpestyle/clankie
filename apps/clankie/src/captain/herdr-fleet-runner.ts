@@ -198,8 +198,7 @@ export function routeHerdrFleets(
       // Route once: a fleet's runner refuses every call once its connection
       // changes, so a later send can't reach a new endpoint (ADR 0303).
       const { runner, id, fleet } = await route(terminalId);
-      if (!runner.readPane || !runner.sendKeys || !runner.sendText)
-        throw new Error("Herdr key presses are unavailable");
+      if (!runner.readPane || !runner.sendKeys) throw new Error("Herdr key presses are unavailable");
       const found = await runner.resolveTerminal(id);
       if (found === undefined) return undefined;
       const paneId = found.paneId;
@@ -211,7 +210,9 @@ export function routeHerdrFleets(
         },
         readScreen: () => runner.readPane!(paneId, "visible", "text"),
         sendKeys: (keys) => runner.sendKeys!(paneId, keys),
-        sendText: (text) => runner.sendText!(paneId, text),
+        ...(runner.sendText === undefined
+          ? {}
+          : { sendText: (text: string) => runner.sendText!(paneId, text) }),
       };
     },
     wait: (target, signal) => onTarget(target, (runner, id) => runner.wait(id, signal)),

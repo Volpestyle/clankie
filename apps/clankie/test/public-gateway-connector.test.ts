@@ -1076,6 +1076,57 @@ describe("push wakes over the same socket", () => {
     expect(closed).toBe(false);
   });
 
+  it("waits for an open request before closing the tunnel to refresh its credential", async () => {
+    let release: (() => void) | undefined;
+    const relay = await listen(
+      createServer((_request, response) => {
+        release = () => response.end('{"ok":true}');
+      }),
+    );
+    const gateway = await fakeGateway();
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: gateway.origin,
+      hostId,
+      installationId: "YWFhYWFhYWFhYWFhYWFhYQ",
+      resolveHostToken: async () => ({
+        token: "account-access-token",
+        expiresAt: Date.now() + 60 * 60_000,
+        refreshAt: Date.now() + 150,
+      }),
+      controlPlaneUrl: relay,
+      relayUrl: relay,
+      reconnectMinimumMs: 5,
+      reconnectMaximumMs: 10,
+    });
+    connectors.push(connector);
+    connector.start();
+    const connection = await gateway.nextConnection();
+    let closeCode: number | undefined;
+    connection.socket.once("close", (code: number) => {
+      closeCode = code;
+    });
+    // A slow Claude connector call, like start_agent, is in flight when the refresh comes due.
+    connection.send({
+      schemaVersion: PUBLIC_GATEWAY_SCHEMA_VERSION,
+      kind: "request",
+      requestId: "request_slow0001",
+      target: "relay",
+      method: "POST",
+      path: "/mcp",
+      headers: [{ name: "content-type", value: "application/json" }],
+      bodyBase64: Buffer.from('{"jsonrpc":"2.0","id":1,"method":"tools/call"}').toString("base64"),
+    });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(closeCode).toBeUndefined();
+
+    release?.();
+    const frames = await connection.framesThrough("response_end");
+    expect(frames[0]).toMatchObject({ kind: "response_start", requestId: "request_slow0001", status: 200 });
+    await vi.waitFor(() => expect(closeCode).toBe(4000));
+    await gateway.nextConnection();
+  });
+
   it("closes the socket when the gateway sends a host-owned wake frame", async () => {
     const gateway = await fakeGateway();
     await startedConnector(gateway.origin);

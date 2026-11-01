@@ -95,7 +95,10 @@ auto|desktop|herdr` pins it per machine for the rare owner who wants the
   ([ADR 0244](0244-machines-join-clankie-at-an-access-level.md)) and project policy apply unchanged.
 - ADR 0301's "can't be messaged" note ends for Clankie's own hires: they carry
   the worker channel. Terminals the owner starts by hand still can't be
-  messaged.
+  messaged. The census reads the core as one more fleet (`herdr-core`), from
+  the terminals Clankie started and named a session for, so his hires are fleet
+  seats beside Herdr panes, and their seat control uses this machine's harness
+  adapters. The core's own list leaves those out, so a hire shows once.
 - Steps: this ADR; the Mac host and Claude prepared launch; worker identity
   from the core; Codex; the PCs through `on`. Each step lands on its own and
   leaves the Herdr path working.

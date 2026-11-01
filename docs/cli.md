@@ -1950,8 +1950,15 @@ the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
 each metered account's plan, usage, remaining limit and reset, heavy-work
 permits, tracker request budgets, and each live pane's context against its
-budget. A number Clankie does not have is `"unknown"`. It does not include
-homes, emails or credentials, and it hires nothing. `message_agent` can carry
+budget. Its `burn` list says how fast each Claude and Codex account is being
+spent ([ADR 0324](adr/0324-a-lead-reads-how-fast-the-fleet-spends.md)): each
+usage window's percent per hour, recent (from Clankie's own readings at least
+half an hour apart) and the window's average, beside the even pace that spends
+what is left by reset, the percent projected at reset and when it runs out if
+sooner, and the tokens each Claude session on this Mac spent in the last hour,
+named by agent id when it is a known agent. A number Clankie does not have is
+`"unknown"`. It does not include homes, emails, session ids or credentials, and
+it hires nothing. `message_agent` can carry
 up to four images (by public https address or as base64), which the agent finds
 in its workspace under `.clankie/inbox/`, and `read_image` returns an image an
 agent saved in its working directory, such as a screenshot
@@ -1980,6 +1987,15 @@ when two share the name. An app that is on presses keys only while the agent
 waits on input and the prompt it read is still on screen, once per prompt, and
 never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
+
+`press_keys` presses named keys in an agent's terminal whatever it is doing
+([ADR 0323](adr/0323-connected-apps-press-keys-in-agents-terminals.md)): `up`,
+`down`, `esc`, `ctrl+c`, `shift+tab`, `enter`, a letter or a digit, up to 24 at
+a time. The same `clankie connector prompts` switch turns it on, because a key
+can approve a prompt too. It works for Herdr panes on every machine and for
+hires in the Herdr desktop app, never types text, and never touches a screen
+whose question Clankie sent to you. Each press leaves a note in that app's name
+on the board.
 
 `clankie connector detect` says whether Herdr sessions are discovered
 ([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you
@@ -3364,7 +3380,7 @@ Set it with [`project settings PROJECT --posting`](#project-list-project-setting
 | `lead`      | Clankie decides | Clankie's own writes post; a worker's wait for him                        |
 | `allow`     | Go ahead        | It posts                                                                  |
 
-A project with no saved value is on `ask`. Reads are never held. Private issue
+A project with no saved value is on `allow` (ADR 0302, amended 2026-11-01). Reads are never held. Private issue
 files (`.clankie/work`), committed issue files and the built-in tracker stay on
 the owner's Mac, so they are always writable; so is the local store Linear tools
 use while Linear is disconnected. The owner's own writes (the app, `work owner`,
@@ -3375,7 +3391,7 @@ delegated worker, `POST /v1/tracker/call` and repo-routed tracker calls,
 `clankie work create|update|attach` on a Linear or GitHub repo, the seat issue
 status Clankie keeps, and drops. When a write could belong to several projects
 (no repo, project or issue that names one), the strictest of them applies; when
-it names none Clankie can match, it is held as on `ask`.
+it names none Clankie can match, the default applies.
 
 - **Held for the owner.** The write becomes a check in his feed, "Post a comment
   on VUH-12 to Linear" with the exact text, answered **Post it** or **Send it
@@ -8567,7 +8583,10 @@ HTTP clients use `POST /operator/v1/dispatch` with `schemaVersion: 1` and
 `{questions: [ConversationQuestionResult, ...]}`, newest first. A conversation
 can have several open asks, each with its own `waitingOn` and immutable ID.
 Answering or cancelling one leaves the others open. Revision is shared by the
-conversation: after `revision_conflict`, refresh and answer the same request ID.
+conversation, but an ask is immutable under its request ID, so an answer or
+cancellation lands even after other turns moved the conversation on (#118).
+Only a project confirmation, whose proposal can change under the same ID,
+returns `revision_conflict` for an older revision: refresh and answer again.
 Pending asks and uncertain native claims are protected; creation refuses at
 256 records or 512,000 serialized bytes per conversation instead of evicting them.
 `input_get`, `input_answer` and
@@ -9073,7 +9092,7 @@ a service without `projectReview` refuses the flags. The `/project` menu has a
 decides before Clankie or a worker writes to the project's Linear or GitHub
 issues ([above](#posting-to-your-tracker-work-posts);
 [ADR 0302](adr/0302-posting-to-your-tracker-is-the-owners-call.md)). `default`
-clears the saved value, which means `ask`. The output's `posting` shows the
+clears the saved value, which means `allow`. The output's `posting` shows the
 saved and effective value and its label. The JSON update takes
 `trackerPosting` as `"read_only"`, `"ask"`, `"lead"` or `"allow"`, or `null` to
 clear. Readers opt in with `includeTrackerPosting=true` and see `trackerPosting`

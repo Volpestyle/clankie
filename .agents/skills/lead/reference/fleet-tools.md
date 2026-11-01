@@ -253,7 +253,9 @@ The owner can also hand your lead to those apps (`clankie connector lead apps`,
 ADR 0304). While they lead, you take no turn of your own in your lead threads:
 your wakes, watches, and your workers' messages, questions and reports wait for
 the apps, which read them with `read_inbox` and `read_reports` and answer
-workers with `message_agent` or, for a prompt open in a pane, `answer_prompt`.
+workers with `message_agent` or, for a prompt open in a pane, `answer_prompt`;
+`press_keys` drives a worker's interface with named keys (arrows, esc, ctrl+c,
+shift+tab, enter) whatever it is doing, under the same per-app switch.
 An app can send a worker images with `message_agent` (they land under
 `.clankie/inbox/` in its workspace) and look at one the worker saved there with
 `read_image`, so a worker that wants an app to see a screenshot saves it inside

@@ -17,7 +17,7 @@ import { join, resolve } from "node:path";
 import { FleetRoomJournal } from "../src/captain/fleet-room.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import type { HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
-import { createPromptAnswerer } from "../src/captain/prompt-answer.ts";
+import { createKeyPresser, createPromptAnswerer } from "../src/captain/prompt-answer.ts";
 import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../relay/src/connector-mcp.ts";
 import { createCaptainConversationDispatch } from "../../relay/src/conversation-upstream.ts";
@@ -870,6 +870,208 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
       "hasn't turned on",
     );
     expect(sent).toHaveLength(8);
+  } finally {
+    await Promise.all(clients.map((client) => client.close()));
+    relay.closeAllConnections();
+    relay.close();
+    await host.close();
+    await rm(boardRoot, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("an app presses keys in an agent's terminal only once the owner turns it on, on every machine and in the desktop app", async () => {
+  const boardRoot = await mkdtemp(join(tmpdir(), "connector-keys-"));
+  const board = new FleetRoomJournal(boardRoot);
+  const captainToken = randomBytes(24).toString("hex");
+  // Bram works on a linked PC and Ivy sits in a picker there; Pip's question went to the
+  // owner; Kai's terminal moves mid-press. Dot is a hire in the desktop app, which takes
+  // named keys only.
+  const panes = new Map<string, { status: string; paneId?: string }>([
+    ["term-bram", { status: "working" }],
+    ["term-ivy", { status: "idle" }],
+    ["term-pip", { status: "blocked" }],
+    ["term-kai", { status: "working" }],
+  ]);
+  const paneOf = (id: string) => panes.get(id)!.paneId ?? `p-${id}`;
+  const sent: string[][] = [];
+  const pc = {
+    resolveTerminal: async (id: string) => {
+      const pane = panes.get(id);
+      return pane === undefined
+        ? undefined
+        : { paneId: paneOf(id), terminalId: id, name: id, agent: "claude", status: pane.status, title: id };
+    },
+    readPane: async () => "",
+    sendKeys: async (paneId: string, keys: readonly string[]) => {
+      sent.push(["pc", paneId, ...keys]);
+      if (paneId === "p-term-kai") panes.set("term-kai", { status: "working", paneId: "p-term-kai-2" });
+    },
+    sendText: async (paneId: string, text: string) => void sent.push(["pc-text", paneId, text]),
+  } as unknown as HerdrWatchRunner;
+  const desktop = {
+    resolveTerminal: async (id: string) =>
+      id === "t4"
+        ? { paneId: "t4", terminalId: "t4", name: "dot", agent: "claude", status: "blocked", title: "dot" }
+        : undefined,
+    readPane: async () => "Allow this edit?\n❯ 1. Yes\n  2. No",
+    sendKeys: async (paneId: string, keys: readonly string[]) => void sent.push(["desktop", paneId, ...keys]),
+  } as unknown as HerdrWatchRunner;
+  const deps = {
+    paneAddress: async (terminalId: string) =>
+      terminalId === "dot" ? "herdr-core/t4" : panes.has(terminalId) ? `pc/${terminalId}` : undefined,
+    runner: routeHerdrFleets(
+      {} as HerdrWatchRunner,
+      new Map([
+        ["pc", pc],
+        ["herdr-core", desktop],
+      ]),
+    ),
+    ownerAskPending: (seatId: string) => seatId === "pc/term-pip",
+    record: (app: string, text: string) => board.postAppNote(app, text),
+  };
+  const host = await createQaService({
+    captainToken,
+    captain: {
+      pressKeys: createKeyPresser(deps),
+      answerPrompt: createPromptAnswerer(deps),
+      appNotes: async (command) =>
+        command.action === "post"
+          ? board.postAppNote(command.author, command.text)
+          : board.readAppNotes(command),
+    },
+  });
+  const authorizeDevice = new ControlPlaneDeviceAuthorizer({ baseUrl: host.baseUrl });
+  let relayUrl = "";
+  const operator = createOperatorConversationRelayHandler({
+    authorizeDevice,
+    dispatch: createCaptainConversationDispatch({ baseUrl: host.baseUrl, bearerToken: captainToken }),
+  });
+  const connector = createConnectorMcpHandler({
+    authorizeDevice,
+    operator: createLoopbackConnectorOperator("http://placeholder.invalid", (input, init) =>
+      fetch(new URL(new URL(String(input)).pathname, relayUrl), init),
+    ),
+    localAuthorizationServer: host.baseUrl,
+    version: "test",
+    guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
+  });
+  const relay = createServer((request, response) => {
+    void (async () => {
+      if (await connector(request, response)) return;
+      if (await operator(request, response)) return;
+      response.statusCode = 404;
+      response.end();
+    })();
+  });
+  relay.listen(0, "127.0.0.1");
+  await once(relay, "listening");
+  relayUrl = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+  const clients: Client[] = [];
+  try {
+    const signIn = async (name: string, callback: string) => {
+      const { client_id: clientId } = (await (await register(host.baseUrl, [callback], name)).json()) as {
+        client_id: string;
+      };
+      const started = await startSignIn(host.baseUrl, clientId, callback);
+      expect(await cli(host).run(["approve", started.code!])).toBe(0);
+      const code = new URL((await status(host.baseUrl, started.request!)).redirect!).searchParams.get(
+        "code",
+      )!;
+      const { access_token: accessToken } = (await (
+        await token(host.baseUrl, {
+          grant_type: "authorization_code",
+          client_id: clientId,
+          redirect_uri: callback,
+          code,
+          code_verifier: started.verifier,
+        })
+      ).json()) as { access_token: string };
+      const client = new Client({ name: `${name}-e2e`, version: "1" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL("/mcp", relayUrl), {
+          requestInit: { headers: { authorization: `Bearer ${accessToken}` } },
+        }) as unknown as Transport,
+      );
+      clients.push(client);
+      return { client, accessToken };
+    };
+    const claude = await signIn("Claude", CALLBACK);
+    const grok = await signIn("Grok", "https://grok.example/oauth/callback");
+    const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) =>
+      (result.content as Array<{ text: string }>)[0]!.text;
+    const press = (client: Client, agent: string, keys: unknown[]) =>
+      client.callTool({ name: "press_keys", arguments: { agent, keys } });
+
+    // Off until the owner turns it on, with the same switch as answering prompts.
+    const off = await press(claude.client, "herdr:term-bram", ["ctrl+c"]);
+    expect(off.isError).toBe(true);
+    expect(textOf(off)).toContain("hasn't turned on prompts and keys for Claude");
+    const owner = cli(host);
+    expect(await owner.run(["prompts", "on", "Claude"])).toBe(0);
+    expect(owner.output().stdout).toContain("press keys");
+
+    // A working agent takes keys: an interrupt, and a picker walked with arrows.
+    const stop = await press(claude.client, "herdr:term-bram", ["ctrl+c"]);
+    expect(stop.isError).toBeFalsy();
+    expect(JSON.parse(textOf(stop))).toMatchObject({ agent: "herdr:term-bram", status: "pressed" });
+    expect(
+      (await press(claude.client, "herdr:term-ivy", ["down", "down", "shift+tab", "enter"])).isError,
+    ).toBeFalsy();
+    // So does a hire in the desktop app, through its own core.
+    expect((await press(claude.client, "herdr:dot", ["esc"])).isError).toBeFalsy();
+    expect(sent).toEqual([
+      ["pc", "p-term-bram", "ctrl+c"],
+      ["pc", "p-term-ivy", "down"],
+      ["pc", "p-term-ivy", "down"],
+      ["pc", "p-term-ivy", "shift+tab"],
+      ["pc", "p-term-ivy", "enter"],
+      ["desktop", "t4", "esc"],
+    ]);
+
+    // Text, control characters and unknown keys never reach a terminal.
+    for (const keys of [["hello"], ["\u001b[A"], ["ctrl+"], [], Array(25).fill("up")])
+      expect((await press(claude.client, "herdr:term-bram", keys)).isError).toBe(true);
+    // The desktop app takes no typed text, even at a prompt.
+    const typed = await claude.client.callTool({
+      name: "answer_prompt",
+      arguments: { agent: "herdr:dot", expect: "Allow this edit?", steps: [{ text: "1" }] },
+    });
+    expect(textOf(typed)).toContain("only named keys");
+    // A screen Clankie sent to the owner stays the owner's; Grok was never turned on.
+    expect(textOf(await press(claude.client, "herdr:term-pip", ["enter"]))).toContain("owner's to answer");
+    expect(textOf(await press(grok.client, "herdr:term-pip", ["enter"]))).toContain("for Grok");
+    // A terminal that moves mid-press stops the rest.
+    const kai = await press(claude.client, "herdr:term-kai", ["esc", "esc"]);
+    expect(textOf(kai)).toContain("Stopped after 1 of 2 keys");
+    expect(sent).toHaveLength(7);
+
+    // Each press is on the note board, signed by the app.
+    const notes = board.readAppNotes({ limit: 20 });
+    expect(notes.outcome === "ready" && notes.notes.map((note) => note.text)).toEqual([
+      "Pressed keys in term-bram: ctrl+c.",
+      "Pressed keys in term-ivy: down, down, shift+tab, enter.",
+      "Pressed keys in dot: esc.",
+      "Pressed part of 2 keys in term-kai: esc; stopped because the agent's terminal went away.",
+    ]);
+
+    // The relay stamps the app; a caller-named one is refused.
+    const forged = await fetch(new URL("/operator/v1/dispatch", relayUrl), {
+      method: "POST",
+      headers: { authorization: `Bearer ${grok.accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        op: "key_press",
+        schemaVersion: 1,
+        terminalId: "term-bram",
+        keys: ["enter"],
+        appDeviceId: "someone-else",
+      }),
+    });
+    expect(forged.status).toBe(400);
+
+    // Turning it off stops it at once.
+    expect(await owner.run(["prompts", "off", "Claude"])).toBe(0);
+    expect(textOf(await press(claude.client, "herdr:term-bram", ["esc"]))).toContain("hasn't turned on");
+    expect(sent).toHaveLength(7);
   } finally {
     await Promise.all(clients.map((client) => client.close()));
     relay.closeAllConnections();

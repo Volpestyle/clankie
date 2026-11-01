@@ -40,6 +40,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "fleet_room" }
   | { op: "app_notes" }
   | { op: "prompt_answer" }
+  | { op: "key_press" }
   | { op: "issue_write" }
   | { op: "feed_list" }
   | { op: "feed_drop" }
@@ -101,6 +102,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "fleet_room" }
   | { op: "app_notes" }
   | { op: "prompt_answer" }
+  | { op: "key_press" }
   | { op: "issue_write" }
   | { op: "work_repos" }
   | { op: "work_items" }

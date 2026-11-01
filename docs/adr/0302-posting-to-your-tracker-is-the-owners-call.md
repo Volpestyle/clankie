@@ -28,7 +28,8 @@ Each project has one setting, **Posting to your tracker**
 | `lead`      | Clankie decides | posts when it is Clankie's own; a worker's waits for Clankie          |
 | `allow`     | Go ahead        | posts                                                                 |
 
-- **Default `ask`.** A project with no saved value, a write no project can be
+- **Default `ask`** (amended 2026-11-01: the default is now `allow`; see the
+  end of this record). A project with no saved value, a write no project can be
   matched to, and every Linear or GitHub project today start on Ask me. When a
   write could belong to several projects, the strictest of their values applies.
   When unsure, nothing posts without someone saying so.
@@ -82,3 +83,15 @@ nothing goes back.
   tools, are not covered here.
 - The setting holds no credential and grants nothing: Go ahead only stops
   asking, within whatever the role and the connected account already allow.
+
+## Amendment: Go ahead is the default (2026-11-01)
+
+Answering a feed check for every post turned out to be busywork. James: "i dont
+wnana have to give permissions everytiem some agent wants to post to linear...e
+tc, thats a big waste, so lets not do that, just grant permissions if possbile".
+
+A project with no saved value, and a write no project can be matched to, now
+start on `allow` (Go ahead). The four values, the strictest-wins rule, the
+always-writable files on the Mac and the owner's own writes are unchanged.
+Anyone who wants each post shown first picks Ask me for that project, and a
+saved value of any kind keeps applying.

@@ -1,17 +1,18 @@
-import { HerdrCoreError, herdrCoreCall, herdrCoreSocketPath } from "./herdr-core.ts";
+import { HerdrCoreError, SEAT_LABEL, herdrCoreCall, herdrCoreSocketPath } from "./herdr-core.ts";
 
 // Where Clankie's hires start in the Herdr desktop app (ADR 0319): a terminal in
 // herdr-core, the app's terminal server, labeled into one Clankie space so the
-// window shows it. The core only starts, inspects and ends these terminals. A
-// hire's messages reach it through its worker channel, never through the
-// terminal's input (ADR 0207), so nothing here writes to a terminal.
+// window shows it. The core starts, inspects and ends these terminals. A hire's
+// messages reach it through its worker channel, never through the terminal's
+// input (ADR 0207); the only input is named keys, pressed for the owner or a
+// connected app he turned keys on for (ADR 0323), never text.
 
 /** The desktop app shows a terminal labeled with a space; this one is Clankie's. */
 export const CLANKIE_SPACE = "clankie";
 const SPACE_LABEL = "herdr.space";
 const TAB_LABEL = "herdr.tab";
 /** Which hire a terminal holds, so Clankie finds his own terminals again by label. */
-export const SEAT_LABEL = "clankie.seat";
+export { SEAT_LABEL };
 
 /**
  * The core starts a terminal with its own environment and the run's values on top.
@@ -58,12 +59,16 @@ export interface HerdrCoreSeats {
   start(request: HerdrCoreSeatStart): Promise<string>;
   /** The terminal now, or undefined once the core no longer has it. */
   get(address: string): Promise<HerdrCoreTerminal | undefined>;
+  /** Every terminal the core keeps, live or finished, Clankie's or not. */
+  list(): Promise<readonly HerdrCoreTerminal[]>;
   /** Ends a terminal Clankie started; one that is already gone is not an error. */
   kill(address: string): Promise<void>;
   /** The terminal's text: its screen, with `lines` of history above it. */
   read(address: string, lines: number): Promise<string>;
   /** Sets labels on a terminal Clankie started; an empty value removes one. */
   label(address: string, labels: Readonly<Record<string, string>>): Promise<void>;
+  /** Presses named keys (`up`, `esc`, `ctrl+c`) in the terminal, encoded for its program's modes. */
+  keys(address: string, keys: readonly string[]): Promise<void>;
 }
 
 export interface HerdrCoreSeatsOptions {
@@ -121,6 +126,15 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
       }
     },
 
+    async list() {
+      const listed = (await call("terminal.list", {})) as { terminals?: unknown };
+      return (Array.isArray(listed.terminals) ? (listed.terminals as HcRecord[]) : []).flatMap((record) =>
+        record !== null && typeof record === "object" && typeof record.address === "string"
+          ? [terminalOf(record)]
+          : [],
+      );
+    },
+
     async read(address, lines) {
       const read = (await call("terminal.read", { terminal: address, lines })) as { text?: unknown };
       return typeof read.text === "string" ? read.text : "";
@@ -128,6 +142,10 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
 
     async label(address, labels) {
       await call("terminal.label", { terminal: address, labels: { ...labels } });
+    },
+
+    async keys(address, keys) {
+      await call("terminal.keys", { terminal: address, keys: [...keys] });
     },
 
     async kill(address) {

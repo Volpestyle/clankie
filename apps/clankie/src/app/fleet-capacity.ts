@@ -3,8 +3,16 @@ import {
   FleetCapacitySchema,
   FleetResourceSnapshotSchema,
   type FleetCapacity,
+  type FleetCapacityBurn,
 } from "@clankie/protocol";
 import type { TrackerRequestBudgetReport } from "@clankie/protocol/tracker-request-budget";
+import {
+  UsageHistory,
+  claudeAccountHomes,
+  projectUsageBurn,
+  readClaudeSessionBurn,
+  type SessionBurn,
+} from "./usage-burn.ts";
 
 /** How long a successful account read is reused, matching the usage meter's cache. */
 const ACCOUNT_CACHE_MS = 60_000;
@@ -13,6 +21,7 @@ interface AccountWindow {
   readonly id: string;
   readonly label: string;
   readonly usedPercent: number;
+  readonly windowMinutes?: number | undefined;
   readonly resetsAt?: string | undefined;
 }
 
@@ -21,6 +30,7 @@ export interface FleetCapacityAccountSource {
   readonly harness: string;
   readonly label: string;
   readonly home?: string | undefined;
+  readonly homes?: readonly { readonly home: string }[] | undefined;
   readonly identity?: string | undefined;
   readonly accountKey?: string | undefined;
   readonly displayName?: string | undefined;
@@ -70,6 +80,7 @@ export interface FleetCapacityMachineSource {
 
 export interface FleetCapacitySeatSource {
   readonly seatId: string;
+  readonly occupantId?: string | undefined;
   readonly harness: string;
   readonly title: string;
   readonly machine?: string | undefined;
@@ -114,8 +125,10 @@ export function projectFleetCapacity(input: {
   readonly leadSeatId?: string;
   readonly heavy?: unknown;
   readonly tracker?: TrackerRequestBudgetReport;
+  readonly burn?: readonly FleetCapacityBurn[];
+  readonly burnNotices?: readonly string[];
 }): FleetCapacity {
-  const notices: string[] = [];
+  const notices: string[] = [...(input.burnNotices ?? [])];
   const accounts = input.machines.flatMap((machine) => {
     if (machine.unread === true) {
       notices.push(`Accounts on ${machine.machine} couldn't be read.`);
@@ -199,6 +212,7 @@ export function projectFleetCapacity(input: {
       workerTokens: FLEET_REVIEW_BUDGET.worker,
     },
     accounts: accounts.slice(0, 256),
+    ...(input.burn === undefined ? {} : { burn: input.burn.slice(0, 64) }),
     panes: panes.slice(0, 768),
     heavy: projectHeavy(input.heavy),
     tracker: input.tracker === undefined ? "unknown" : projectTracker(input.tracker),
@@ -316,8 +330,17 @@ export function createFleetCapacityReader(input: {
   readonly leadSeatId: () => string | undefined;
   readonly heavy: () => unknown;
   readonly tracker: () => TrackerRequestBudgetReport | undefined;
+  /** Clankie's own usage readings; every account read here is recorded too. */
+  readonly history?: UsageHistory;
+  /** Reads local Claude session burn under these homes; defaults to the transcripts themselves. */
+  readonly sessionBurn?: (
+    homes: readonly string[],
+    now: number,
+  ) => Promise<{ sessions: SessionBurn[]; truncated: boolean }>;
 }): () => Promise<FleetCapacity> {
   const now = input.now ?? Date.now;
+  const history = input.history ?? new UsageHistory();
+  const sessionBurn = input.sessionBurn ?? readClaudeSessionBurn;
   const cache = new Map<string, { at: number; report: FleetCapacityMachineSource }>();
   const readMachine = async (fleetId: string | undefined, machine: string) => {
     const key = fleetId ?? "local";
@@ -342,16 +365,46 @@ export function createFleetCapacityReader(input: {
       readMachine(undefined, "local"),
       ...remotes.map((connection) => readMachine(connection.id, connection.id)),
     ]);
-    const observedAt = new Date(now()).toISOString();
+    const at = now();
+    const observedAt = new Date(at).toISOString();
     const leadSeatId = input.leadSeatId();
     const tracker = input.tracker();
+    const seats = await input.seats();
+    const machines = [local, ...remote];
+    const readable = machines.flatMap((machine) =>
+      machine.unread === true ? [] : [{ machine: machine.machine, accounts: machine.accounts ?? [] }],
+    );
+    // allow-swallowed-rejection -- usage history is best-effort; a reading it misses only delays the recent pace.
+    await history.record(readable.flatMap((machine) => machine.accounts)).catch(() => undefined);
+    const localBurn = new Map<string, { sessions: SessionBurn[]; truncated: boolean }>();
+    const burnNotices: string[] = [];
+    for (const [label, homes] of claudeAccountHomes(local.unread === true ? [] : (local.accounts ?? []))) {
+      try {
+        localBurn.set(label, await sessionBurn(homes, at));
+      } catch {
+        burnNotices.push(`This Mac's Claude transcripts for ${label} couldn't be read.`);
+      }
+    }
+    const burn = await projectUsageBurn({
+      now: at,
+      machines: readable,
+      history,
+      local: localBurn,
+      seats: seats.flatMap((seat) =>
+        seat.occupantId === undefined
+          ? []
+          : [{ seatId: seat.seatId, occupantId: seat.occupantId, title: seat.title }],
+      ),
+    });
     return projectFleetCapacity({
       observedAt,
-      machines: [local, ...remote],
-      seats: await input.seats(),
+      machines,
+      seats,
       ...(leadSeatId === undefined ? {} : { leadSeatId }),
       heavy: input.heavy(),
       ...(tracker === undefined ? {} : { tracker }),
+      burn: burn.burn,
+      burnNotices: [...burnNotices, ...burn.notices],
     });
   };
 }

@@ -1,5 +1,5 @@
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
-import type { IssueWriteResult, PromptAnswerResult } from "@clankie/protocol/connector";
+import type { IssueWriteResult, KeyPressResult, PromptAnswerResult } from "@clankie/protocol/connector";
 import { writeIssueForApp } from "../connector-issue-writes.ts";
 import type { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import {
@@ -709,6 +709,45 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return reply({
           outcome: "uncertain",
           message: "The answer may or may not have reached the agent. Read its screen before trying again.",
+        });
+      }
+    }
+    if (parsed.success && parsed.data.op === "key_press") {
+      // Keys pressed in an agent's terminal (ADR 0323), under the same per-app switch and
+      // the same relay stamp as answering prompts: a key can approve a prompt too.
+      const request = parsed.data;
+      const relay = () =>
+        captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
+      const app = () => {
+        if (request.appDeviceId === undefined) return undefined;
+        const record = ctx.devices.get(request.appDeviceId);
+        return record?.status === "active" && record.scope === "connector" ? record : undefined;
+      };
+      const reply = (result: KeyPressResult) => context.json({ op: "key_press", schemaVersion: 1, result });
+      const named = app();
+      if (!relay() || named === undefined) return context.json({ error: "app_author_required" }, 403);
+      if (ctx.promptAnswers?.allowed(named.deviceId) !== true)
+        return reply({
+          outcome: "refused",
+          message: `The owner hasn't turned on prompts and keys for ${named.name}. The owner turns it on at the Mac with: clankie connector prompts on "${named.name}"`,
+        });
+      if (!ctx.dependencies.captain.pressKeys)
+        return reply({ outcome: "unavailable", message: "Pressing keys isn't available on this Clankie." });
+      try {
+        return reply(
+          await ctx.dependencies.captain.pressKeys({
+            app: named.name,
+            // Rechecked before every key: a revoked app or a switch turned off presses nothing more.
+            current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
+            terminalId: request.terminalId,
+            keys: request.keys,
+          }),
+        );
+      } catch (error) {
+        logger.warn({ error }, "Key press failed");
+        return reply({
+          outcome: "uncertain",
+          message: "The keys may or may not have reached the agent. Read its screen before trying again.",
         });
       }
     }

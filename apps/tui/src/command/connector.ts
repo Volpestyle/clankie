@@ -25,8 +25,8 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // `clankie connector`: the Claude connector (ADR 0301). Shows the URL to add
 // in Claude and the sign-ins waiting, and approves or denies one by its code.
 // Connected connectors are devices: `clankie devices revoke ID` ends one.
-// `clankie connector prompts` lists which apps may answer prompts in agent
-// panes, and turns one on or off by its name or device id (ADR 0303).
+// `clankie connector prompts` lists which apps may answer prompts and press
+// keys in agent panes, and turns one on or off by its name or device id (ADR 0303, ADR 0323).
 // `clankie connector detect` turns Herdr session discovery on or off, and
 // `clankie connector serve` turns the connector on or off per app (ADR 0312).
 // `clankie connector lead` says who leads Clankie's lead threads, and hands
@@ -157,7 +157,7 @@ function formatPromptAnswers(status: ConnectorPromptAnswersResponse): string {
   if (status.apps.length === 0) return "No apps are connected.";
   return [
     ...status.apps.map((app) => `${app.name}: ${app.allowed ? "on" : "off"}  (${app.deviceId})`),
-    "An app that is on may answer menus and permission prompts open in your agents' panes.",
+    "An app that is on may answer menus and permission prompts open in your agents' panes, and press keys there (arrows, esc, ctrl+c).",
   ].join("\n");
 }
 

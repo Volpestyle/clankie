@@ -848,7 +848,10 @@ export async function questionOperation(
     );
     return ctx["questionResult"](meta, record, "refused", "owner_context_lost");
   }
-  if (request.expectedRevision !== meta.revision)
+  // An ask is immutable under its request ID, so other turns in its conversation don't
+  // fence an answer or cancellation to it (#118). A project confirmation's proposal can
+  // be replaced under the same request ID, so it still answers only the revision shown.
+  if (request.expectedRevision !== meta.revision && record.projectCreation)
     return ctx["questionResult"](meta, record, "revision_conflict");
   // Keep legacy workspace asks visible without creating a competing service turn.
   // Semantic source asks retain their normal driver-aware answer delivery.
