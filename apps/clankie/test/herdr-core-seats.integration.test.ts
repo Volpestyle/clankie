@@ -165,7 +165,7 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
     (await runner.readPane(address, "visible", "text")).includes("hello from the desktop app"),
   );
 
-  // Named keys reach his own hire as the bytes a real terminal sends (ADR 0324).
+  // Named keys reach his own hire as the bytes a real terminal sends (ADR 0323).
   await runner.sendKeys!(address, ["up", "ctrl+c", "a"]);
   await until(async () => existsSync(keysReport) && (await readFile(keysReport, "utf8")).endsWith("61"));
   expect(await readFile(keysReport, "utf8")).toBe("1b5b410361");

@@ -1989,7 +1989,7 @@ never on a question Clankie sent to you. Each answer leaves a note in that
 app's name on the board.
 
 `press_keys` presses named keys in an agent's terminal whatever it is doing
-([ADR 0324](adr/0323-connected-apps-press-keys-in-agents-terminals.md)): `up`,
+([ADR 0323](adr/0323-connected-apps-press-keys-in-agents-terminals.md)): `up`,
 `down`, `esc`, `ctrl+c`, `shift+tab`, `enter`, a letter or a digit, up to 24 at
 a time. The same `clankie connector prompts` switch turns it on, because a key
 can approve a prompt too. It works for Herdr panes on every machine and for

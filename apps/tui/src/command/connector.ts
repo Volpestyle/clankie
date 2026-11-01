@@ -26,7 +26,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // in Claude and the sign-ins waiting, and approves or denies one by its code.
 // Connected connectors are devices: `clankie devices revoke ID` ends one.
 // `clankie connector prompts` lists which apps may answer prompts and press
-// keys in agent panes, and turns one on or off by its name or device id (ADR 0303, ADR 0324).
+// keys in agent panes, and turns one on or off by its name or device id (ADR 0303, ADR 0323).
 // `clankie connector detect` turns Herdr session discovery on or off, and
 // `clankie connector serve` turns the connector on or off per app (ADR 0312).
 // `clankie connector lead` says who leads Clankie's lead threads, and hands

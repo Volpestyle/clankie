@@ -1,4 +1,4 @@
-# ADR 0324: Connected apps press keys in agents' terminals
+# ADR 0323: Connected apps press keys in agents' terminals
 
 Status: Accepted, 2026-11-01, on James's ask: "arrow keys and everything you
 should be able to manipulate tui as needed". Amends

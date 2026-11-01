@@ -203,7 +203,7 @@ export const PromptAnswerResultSchema = z
 export type PromptAnswerResult = z.infer<typeof PromptAnswerResultSchema>;
 
 /**
- * Keys a connected app presses in an agent's terminal at any time (ADR 0324), the way the
+ * Keys a connected app presses in an agent's terminal at any time (ADR 0323), the way the
  * owner would at the keyboard: a named key, a letter or a digit, with up to three of
  * ctrl, alt and shift, such as `up`, `esc`, `ctrl+c` or `shift+tab`. Never text.
  */

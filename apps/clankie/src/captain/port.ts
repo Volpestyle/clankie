@@ -383,7 +383,7 @@ export interface CaptainPort {
   }): Promise<import("@clankie/protocol/connector").PromptAnswerResult>;
   /**
    * Press keys in an agent's terminal for a connected app the owner turned prompts and keys
-   * on for (ADR 0324), whatever the agent is doing, recorded on the note board.
+   * on for (ADR 0323), whatever the agent is doing, recorded on the note board.
    */
   pressKeys?(input: {
     readonly app: string;

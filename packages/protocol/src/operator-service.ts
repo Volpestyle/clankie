@@ -591,7 +591,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
   z
     .object({
       /**
-       * Press keys in an agent's terminal (ADR 0324), whatever it is doing: arrows, esc,
+       * Press keys in an agent's terminal (ADR 0323), whatever it is doing: arrows, esc,
        * ctrl+c, tab, enter. Only an app signed in to the connector, through the relay,
        * once the owner turned prompts and keys on for that app.
        */

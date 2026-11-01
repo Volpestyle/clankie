@@ -175,7 +175,7 @@ only for an app the owner turned on with `clankie connector prompts on APP`,
 only while the expected text is on screen, and once per prompt; it checks
 again before every step on one bound pane and connection, and stops part way
 when anything changed.
-`press_keys` (the `key_press` op, ADR 0324) presses named keys only, whatever
+`press_keys` (the `key_press` op, ADR 0323) presses named keys only, whatever
 the agent is doing, under the same switch, stamp (`400
 key_press_app_is_stamped`) and grant; before every key it checks the same pane
 and connection, the owner's switch and the owner-ask hold.
