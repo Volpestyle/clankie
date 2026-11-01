@@ -30,7 +30,6 @@ import type { AccountsPort } from "../accounts.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { BodyLeaseRouter } from "../body-lease-router.ts";
 import type { BodyLeaseStore } from "../body-leases.ts";
-import type { BodyPlaySessions } from "../body-play-sessions.ts";
 import type { BodyVoiceStays } from "../body-voice-stays.ts";
 import { CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
@@ -42,14 +41,13 @@ import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
-import type { ComposerTranscriptions } from "../composer-transcription.ts";
 import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
-import { type VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
+import type { VoiceSpeechSnapshot } from "../ports/voice.ts";
 import { type WorkItemsService } from "../work-items.ts";
 import { type WorkerMcp } from "../worker-mcp.ts";
 /**
@@ -185,7 +183,6 @@ export interface ClankieAppDependencies {
   modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
-  composerTranscriptions?: ComposerTranscriptions;
   /** Evidence blobs and records (ADR 0258). */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */
@@ -307,7 +304,14 @@ export interface ClankieAppDependencies {
     publishChannelId?: string;
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
-  bodyPlaySessions?: BodyPlaySessions;
+  /** Admits an operator's play intent for the conversation that asked; World's play sessions fill it (ADR 0328). */
+  bodyPlaySessions?: {
+    submit(
+      intent: import("@clankie/protocol").EmbodimentIntent,
+      identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
+      manager: EmbodimentManager,
+    ): Promise<import("@clankie/protocol").EmbodimentSubmitResult>;
+  };
   guidePokemonPlay?: (
     text: string,
     identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,

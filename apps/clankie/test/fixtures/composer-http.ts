@@ -11,7 +11,7 @@ import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 import { type GatewayEncryptionCredential } from "@clankie/protocol/gateway-encryption";
 import { createComposerTranscriptionApi } from "../../../../packages/api-client/src/composer-transcription.ts";
 import { createGatewayEncryptedFetch } from "../../../../packages/api-client/src/gateway-encryption.ts";
-import { ComposerTranscriptions } from "../../src/composer-transcription.ts";
+import { ComposerTranscriptions, composerTranscriptionRoutes } from "../../src/composer-transcription.ts";
 import { createClankieApp } from "../../src/app.ts";
 import { createStubCaptain } from "../../src/captain/port.ts";
 import { GatewayEncryptionHost, sealGatewayValue, openGatewayValue } from "../../src/gateway-encryption.ts";
@@ -59,7 +59,11 @@ export async function composerHttpFixture() {
         credential = host.pairingCredential(offer);
       },
     },
-    composerTranscriptions: new ComposerTranscriptions({ root: join(root, "composer"), clock: () => now }),
+    extensionRoutes: [
+      composerTranscriptionRoutes(
+        new ComposerTranscriptions({ root: join(root, "composer"), clock: () => now }),
+      ),
+    ],
   });
   closes.push(async () => app.close());
   const bodyUrl = await listen(
