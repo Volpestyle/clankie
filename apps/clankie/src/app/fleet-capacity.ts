@@ -374,6 +374,7 @@ export function createFleetCapacityReader(input: {
     const readable = machines.flatMap((machine) =>
       machine.unread === true ? [] : [{ machine: machine.machine, accounts: machine.accounts ?? [] }],
     );
+    // allow-swallowed-rejection -- usage history is best-effort; a reading it misses only delays the recent pace.
     await history.record(readable.flatMap((machine) => machine.accounts)).catch(() => undefined);
     const localBurn = new Map<string, { sessions: SessionBurn[]; truncated: boolean }>();
     const burnNotices: string[] = [];

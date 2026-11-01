@@ -561,6 +561,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   const readWorkerAccounts: typeof readWorkerAccountsUnrecorded = async (...args) => {
     const report = await readWorkerAccountsUnrecorded(...args);
+    // allow-swallowed-rejection -- usage history is best-effort; a reading it misses only delays the recent pace.
     void usageHistory.record(report.accounts).catch(() => undefined);
     return report;
   };
@@ -568,6 +569,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // `claude -p /usage` and Codex's rate-limit read spend no model tokens.
   const usageSampler = setInterval(() => {
     if (!shutdown.signal.aborted)
+      // allow-swallowed-rejection -- a background sample; the next one or any caller's read reports the failure.
       void readWorkerAccounts(undefined, ["claude", "codex"]).catch(() => undefined);
   }, USAGE_SAMPLE_MS);
   usageSampler.unref?.();

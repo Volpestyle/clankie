@@ -157,6 +157,7 @@ export class UsageHistory {
       return Promise.resolve();
     }
     this.writing = this.writing
+      // allow-swallowed-rejection -- a failed earlier write is retried by this one, which writes the whole history.
       .catch(() => undefined)
       .then(async () => {
         if (!this.dirty) return;
@@ -167,6 +168,7 @@ export class UsageHistory {
         await writeFile(temporary, body, { mode: 0o600 });
         await rename(temporary, path);
       });
+    // allow-swallowed-rejection -- the history stays in memory and the next reading writes it again.
     return this.writing.catch(() => undefined);
   }
 
