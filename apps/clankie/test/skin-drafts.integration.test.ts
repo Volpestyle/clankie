@@ -23,6 +23,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
 import { DeliveredFileStore } from "../src/delivered-files.ts";
+import { skinDraftRoutes } from "../src/skin-draft-routes.ts";
 import { SkinDraftService } from "../src/skin-drafts.ts";
 import { skinDraftTool } from "../src/captain/skin-draft-tools.ts";
 import type { TurnContext } from "../src/captain/tools.ts";
@@ -361,7 +362,7 @@ describe("owner key-pose draft boundary", () => {
       captain: createStubCaptain(),
       settings,
       deliveredFiles: f.files,
-      skinDrafts: f.service,
+      extensionRoutes: [skinDraftRoutes(f.service)],
       authenticateOperator: createCredentialBackedOperatorAuthenticator({
         env: {},
         store,

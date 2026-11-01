@@ -7,6 +7,8 @@ import type {
   GenerateVideoRequest,
   GenerateVideoResult,
 } from "@clankie/protocol";
+import type { SkinDraftCommand, SkinDraftResult, SkinKeyPose } from "@clankie/protocol/skin-drafts";
+import type { QuestionAuthority } from "../captain/conversation-questions.ts";
 
 // The core's side of the media extension (ADR 0328): what the captain and the
 // app call. The generators and the tldraw host behind them are the extension's.
@@ -57,4 +59,28 @@ export interface FinishedRender {
 export interface DiagramPort {
   drawErDiagram(request: DrawErDiagramRequest): Promise<DrawDiagramResult>;
   drawSequenceDiagram(request: DrawSequenceDiagramRequest): Promise<DrawDiagramResult>;
+}
+
+/** One stored skin draft picture, as the owner's preview reads it. */
+interface SkinDraftImage {
+  readonly bytes: Buffer;
+  readonly sha256: string;
+  readonly mediaType: string;
+}
+
+/** The owner's lead-skin drafts, as the captain's tool and the app's routes call them. */
+export interface SkinDraftPort {
+  handle(authority: QuestionAuthority | undefined, value: SkinDraftCommand): Promise<SkinDraftResult>;
+  referencePreview(
+    authority: QuestionAuthority | undefined,
+    id: string,
+    revision: string,
+  ): Promise<SkinDraftImage>;
+  preview(
+    authority: QuestionAuthority | undefined,
+    id: string,
+    pose: SkinKeyPose,
+    revision: string,
+    kind: "source" | "native",
+  ): Promise<SkinDraftImage>;
 }

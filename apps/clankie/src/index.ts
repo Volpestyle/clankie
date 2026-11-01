@@ -27,6 +27,7 @@ import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
 import { JoinedComputer } from "./joined-computer.ts";
 import { ComputerBody } from "./computer-body.ts";
+import { computerRoutes } from "./computer-http.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
 import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
@@ -145,6 +146,7 @@ import {
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { SkinDraftService } from "./skin-drafts.ts";
+import { skinDraftRoutes } from "./skin-draft-routes.ts";
 import { skinDraftGenerator } from "./skin-draft-generation.ts";
 import { RemoteProjectLeads } from "./remote-project-leads.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
@@ -2335,7 +2337,13 @@ const clankie = await createClankieApp({
   minecraft,
   minecraftHost,
   minecraftPrivateDelivery,
-  ...(computer === undefined ? {} : { computer }),
+  extensionRoutes: [
+    computerRoutes({
+      ...(computer === undefined ? {} : { body: computer }),
+      joined: new JoinedComputer(machineJoins, settingsStore),
+    }),
+    skinDraftRoutes(skinDrafts),
+  ],
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
@@ -2507,7 +2515,6 @@ const clankie = await createClankieApp({
   },
   prepareLocalClaudeShim: (action, binding) => prepareLocalClaudeShim(action, binding),
   deliveredFiles,
-  skinDrafts,
   herdrRuntime: herdr.status,
   activitySharing,
   ...(activityAdmission === undefined ? {} : { activityAdmission }),
@@ -2529,7 +2536,6 @@ const clankie = await createClankieApp({
   startPlayHost: () => playHost.start(playAbort.signal),
   machineJoins,
   gameExtensions,
-  joinedComputer: new JoinedComputer(machineJoins, settingsStore),
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
   autoUpdateManaged: false,
