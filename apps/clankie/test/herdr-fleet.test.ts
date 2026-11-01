@@ -834,19 +834,21 @@ describe("fleet routing", () => {
       status: "refused",
       detail: "That checkout isn't ready to start an agent from. Clankie said: Start checkout is dirty.",
     });
-    // An unconfirmed earlier start fences the place until it is settled; the app learns how.
-    const receiptId = randomUUID();
+    // An earlier start that never confirmed names the receipt the owner settles to free the place.
+    const receiptId = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b";
     nextHire = {
       outcome: "failed",
       reason: "delivery_unconfirmed",
       receiptId,
-      detail: "The original hire remains uncertain in pane pc/w18:p16",
+      detail: "The original hire remains uncertain in pane herdr-core/t23",
     };
     expect(
       await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
     ).toMatchObject({
       status: "refused",
-      detail: expect.stringContaining(`clankie hire-receipt settle ${receiptId} abandoned`),
+      detail: expect.stringContaining(
+        `\`clankie hire-receipt settle ${receiptId} adopt\` if that agent is still running, otherwise \`clankie hire-receipt settle ${receiptId} abandoned\``,
+      ),
     });
     nextHire = undefined;
     // Once a settled earlier hire fences the place, each start goes as its own fresh intent (#100).

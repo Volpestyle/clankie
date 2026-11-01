@@ -1608,17 +1608,17 @@ function startAgentPlaces(settings: ClankieSettings): {
 }
 
 function startAgentRefusal(reason: string, detail?: string, receiptId?: string): string {
-  const words = startAgentRefusalWords(reason);
-  const why = detail?.trim();
-  // An unconfirmed start fences its place until it is settled, and nothing expires it
-  // (ADR 0207). Name the owner's way out, which settles only once the host shows no
-  // agent left in its pane, so the app can say what unblocks the place.
-  const clear =
+  // An earlier start that never confirmed holds its directory until the owner settles it,
+  // so the refusal names the receipt and how: adopt a harness still running in its own
+  // terminal, abandon one whose terminal is gone or holds only a shell.
+  const settle =
     receiptId !== undefined && (reason === "delivery_unconfirmed" || reason === "start_unconfirmed")
-      ? ` If list_agents shows no agent from that start, the owner can clear it on the Mac with \`clankie hire-receipt settle ${receiptId} abandoned\`, which checks its pane first, and then start again.`
+      ? ` To clear it, the owner runs \`clankie hire-receipt settle ${receiptId} adopt\` if that agent is still running, otherwise \`clankie hire-receipt settle ${receiptId} abandoned\`.`
       : "";
-  const said = why ? ` Clankie said: ${why.endsWith(".") ? why : `${why}.`}` : "";
-  const full = `${words}${clear}${said}`;
+  const words = `${startAgentRefusalWords(reason)}${settle}`;
+  const why = detail?.trim();
+  if (!why) return words;
+  const full = `${words} Clankie said: ${why.endsWith(".") ? why : `${why}.`}`;
   return full.length <= 1_200 ? full : `${full.slice(0, 1_199)}…`;
 }
 
