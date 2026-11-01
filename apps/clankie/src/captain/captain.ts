@@ -57,7 +57,6 @@ import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema, formatFleetAutonomyGuidance } from "@clankie/protocol";
 import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
-import type { LeadRestartStatus } from "@clankie/protocol";
 import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
@@ -73,24 +72,8 @@ import {
   readSeatActivity,
   type SeatCommitBaseline,
 } from "./seat-telemetry.ts";
-import {
-  autoTidyHeldReview,
-  fleetReviewContext,
-  fleetRoundEvidence,
-  pendingQuestionReview,
-  startFleetRounds,
-} from "./fleet-review.ts";
-import { FleetEfficiencyReviewSchema, type FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
-import {
-  readCodexGoal,
-  readClaudeSubagents,
-  readCodexSubagents,
-  inspectHerdrSeatTranscriptPathAsync,
-} from "@clankie/agent-transcript";
-import { createLeadSeatRelaunch, readClaudeSessionUsage } from "./lead-seat-relaunch.ts";
-import { createHiredSeatRestarts, RestartRefusal } from "./hired-seat-restarts.ts";
-import { readHiredRestartObservation } from "./hired-restart-observation.ts";
-import { createLeadSeatFailover } from "./lead-seat-failover.ts";
+import { fleetReviewContext, fleetRoundEvidence } from "./fleet-review.ts";
+import { readCodexGoal, readClaudeSubagents, readCodexSubagents } from "@clankie/agent-transcript";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { personaImageBriefing } from "@clankie/persona-images";
 import {
@@ -109,8 +92,6 @@ import {
   type OperatorSeatEventKind,
   type WorkerReportRouting,
 } from "@clankie/protocol";
-import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
-import type { FleetSeatToolCatalog } from "@clankie/protocol/tool-catalog";
 import {
   codexAccounts,
   readDiscordServerSettings,
@@ -143,7 +124,6 @@ import { readSeatImage } from "../seat-images.ts";
 import { deliverToFleetSeat, readFleetSeatImage } from "../fleet-seat-files.ts";
 import type { SeatImageResult } from "@clankie/protocol/connector";
 import { createPersonaImageSource, personaImagesExtension } from "../persona-images.ts";
-import type { ProjectProcessProof } from "../project-process-proof.ts";
 import { createAgentWorkStore, withSeatWork } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
@@ -190,6 +170,9 @@ import { createAutoRounds } from "./captain-auto-rounds.ts";
 import { createPeers } from "./captain-peers.ts";
 import { createCaptainAutoTidy } from "./captain-auto-tidy.ts";
 import { createNativeSources } from "./captain-native-sources.ts";
+import { createFleetRounds } from "./captain-fleet-rounds.ts";
+import { createToolCatalogHealth } from "./captain-tool-catalog.ts";
+import { createLeadSeats, LEAD_RESTART_AGE_MS, LEAD_RESTART_CONTEXT_TOKENS } from "./captain-lead-seats.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import {
   claudeWorkerChannelConsent,
@@ -326,7 +309,6 @@ import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
 import { NativeRoomHandoffs } from "./native-room-handoffs.ts";
 import { RoomConversations, roomSeatTurnResult } from "./room-conversations.ts";
 import { sameLinearWakeRecipient } from "./conversations/linear-wakes.ts";
-import { AccountUsageNotices } from "./account-allocation.ts";
 import { captainRoutingExtension } from "./routing.ts";
 import { captainTurnModelExtension, TurnModelRecorder } from "./turn-model.ts";
 import { RuntimeTerminals } from "./runtime-terminals.ts";
@@ -344,7 +326,7 @@ import { withSeatSubagents } from "./seat-subagents.ts";
 import { CaptainResourceLoader, skillSearchExtension } from "./skill-catalog.ts";
 import { createStanceStore } from "./stances.ts";
 import { planDiscordTurnSession } from "./system-authority.ts";
-import { ToolCatalogHealthStore, type ToolCatalogIdentity } from "./tool-catalog-health.ts";
+import { ToolCatalogHealthStore } from "./tool-catalog-health.ts";
 import { createWorkerSandbox } from "../worker-sandbox.ts";
 import { browserExtension, mcpExtension, roomKey, type TurnContext } from "./tools.ts";
 import {
@@ -379,21 +361,8 @@ const HEAD_LANE_HOLD_MS = 45_000;
  * minutes halved the turns that woke it from idle (VUH-2274).
  */
 export const REPORT_ROUND_MS = 10 * 60_000;
-/** How often the service considers a fresh restart of the default lead seat (ADR 0271). */
-const LEAD_RESTART_CHECK_MS = 5 * 60_000;
 /** How often this Mac's account usage is read for the burn rate (ADR 0324). */
 const USAGE_SAMPLE_MS = 10 * 60_000;
-/** ADR 0293's accepted work budget, independent of Claude's model window. */
-const LEAD_RESTART_CONTEXT_TOKENS = 250_000;
-const LEAD_RESTART_AGE_MS = 12 * 60 * 60_000;
-/** The owner has not written for this long, from the pane or any app. */
-const LEAD_RESTART_QUIET_OWNER_MS = 15 * 60_000;
-/** A brief that did not lead to a restart is not asked for again sooner than this. */
-const LEAD_RESTART_RETRY_MS = 60 * 60_000;
-const LEAD_HANDOFF_REQUEST = [
-  "Scheduled fresh restart (ADR 0271 / 0293). Your session reached 250K context tokens or 12 hours, so Clankie will relaunch you fresh in this pane once this turn ends. The previous session stays resumable.",
-  "Answer this escalation with `reply` and a handoff brief for your successor, who starts from the shared conversation log plus this brief: work in flight and its owners, decisions waiting on James, commitments and timers you hold, and anything you would otherwise lose. Keep it under 2,000 words. Do nothing else in this turn.",
-].join("\n\n");
 
 export function createCaptain(deps: CaptainDeps, options: CaptainOptions): CaptainPort {
   const settingsStore = options.settings ?? new SettingsStore();
@@ -1067,7 +1036,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ...(deps.herdrAvailable?.() === false || fleetFeedSocket === undefined
           ? {}
           : { paneGone: watchPaneGone }),
-        catalogObserved: observeCodexToolCatalog,
+        catalogObserved: (ref, report) => observeCodexToolCatalog(ref, report),
         ...(options.localCodexProcess === undefined
           ? {}
           : {
@@ -1222,7 +1191,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             if (local !== undefined)
               return [
                 createCodexSeatAdapter({
-                  catalogObserved: observeCodexToolCatalog,
+                  catalogObserved: (ref, report) => observeCodexToolCatalog(ref, report),
                   herdr: async (args) => {
                     await guard();
                     return deps.runtimes!.runNamed!(
@@ -1257,7 +1226,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   return deps.fleets!.run(fleet)(...args);
                 },
                 options.remoteCodexProcess,
-                observeCodexToolCatalog,
+                (ref, report) => observeCodexToolCatalog(ref, report),
               ),
               createRemoteClaudeWorkerSeatAdapter(fleet, shell, claudeWorkerDeps),
               ...(options.remoteOpenCode === undefined
@@ -4120,134 +4089,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       : { ...bank, tools: [...bank.tools, ...ownerTools] };
   }
 
-  async function recordNativeToolCatalog(
-    paneId: string,
-    report: FleetSeatToolCatalog,
-    workerTools: readonly string[],
-    proof?: ProjectProcessProof,
-    operatorTools?: readonly string[],
-  ) {
-    if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;
-    const agent = await herdrRunner.get(paneId).catch(() => undefined);
-    if (!agent?.session) return undefined;
-    const identity = catalogIdentity(
-      {
-        paneId,
-        occupantId: occupantIdForHerdrSession(agent.session),
-        harness: agent.agent,
-        session: agent.session,
+  const { recordNativeToolCatalog, observeCodexToolCatalog, catalogIdentity, currentCatalogHealth } =
+    createToolCatalogHealth({
+      options,
+      deps,
+      herdrRunner,
+      settings,
+      conversations,
+      validateConversationOwner,
+      toolCatalogHealth,
+      fleetChanges,
+      laneToolBankFor,
+      get inboundBinding() {
+        return inboundBinding;
       },
-      report.bridge,
-    );
-    if (!identity || identity.sessionId !== report.sessionId || identity.harness !== report.harness)
-      return undefined;
-    const qualified = splitFleetQualified(paneId);
-    if (
-      proof &&
-      (proof.nativeSessionPending ||
-        proof.nativeOccupantId !== identity.occupantId ||
-        proof.pane !== (qualified?.id ?? paneId) ||
-        proof.fleet !== (qualified?.fleet ?? "default"))
-    )
-      return undefined;
-    const currentSettings = await settings();
-    const expected =
-      report.bridge === "worker"
-        ? [
-            "message_clankie",
-            "message_clankie_status",
-            ...workerTools,
-            ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
-          ]
-        : operatorTools;
-    if (expected === undefined) return undefined;
-    if (report.bridge === "operator" && proof && report.conversationId) {
-      // This caller has kernel/native-session proof and explicitly reports its
-      // operator conversation. Preserve that qualified binding while the
-      // transcript attachment and current occupant still agree. A later bare
-      // discovery must not depend on unrelated offline fleet inventories.
-      const current = await herdrRunner.get(paneId).catch(() => undefined);
-      if (
-        !current ||
-        inboundBinding(current) !== inboundBinding(agent) ||
-        conversations.attachedConversationForNative(current) !== report.conversationId ||
-        !(await validateConversationOwner({ conversationId: report.conversationId }))
-      )
-        return undefined;
-      await rememberOperatorSource(report.conversationId, current);
-    }
-    const health = toolCatalogHealth.record(identity, report, expected);
-    fleetChanges.touch();
-    return health;
-  }
-
-  async function observeCodexToolCatalog(ref: { paneId: string }, report: FleetSeatToolCatalog) {
-    const workerTools = (await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? [];
-    return recordNativeToolCatalog(ref.paneId, report, workerTools);
-  }
-
-  function catalogIdentity(
-    observed: {
-      paneId: string;
-      occupantId: string;
-      harness: string;
-      session?: { kind: "id" | "path"; value: string };
-    },
-    bridge: "worker" | "operator",
-  ): ToolCatalogIdentity | undefined {
-    if (observed.harness !== "claude" && observed.harness !== "codex") return undefined;
-    const sessionId =
-      observed.session === undefined
-        ? undefined
-        : observed.session.kind === "id"
-          ? observed.session.value
-          : basename(observed.session.value, ".jsonl");
-    return {
-      paneId: observed.paneId,
-      occupantId: observed.occupantId,
-      harness: observed.harness,
-      ...(sessionId === undefined ? {} : { sessionId }),
-      bridge,
-    };
-  }
-
-  async function currentCatalogHealth(identity: ToolCatalogIdentity) {
-    const operatorIdentity = { ...identity, bridge: "operator" as const };
-    const workerIdentity = { ...identity, bridge: "worker" as const };
-    if (!toolCatalogHealth.hasReport(operatorIdentity) && !toolCatalogHealth.hasReport(workerIdentity))
-      return toolCatalogHealth.readPane(identity);
-    try {
-      const currentSettings = await settings();
-      const worker = [
-        "message_clankie",
-        "message_clankie_status",
-        ...((await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? []),
-        ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
-      ];
-      const operator = toolCatalogHealth.hasReport(operatorIdentity)
-        ? [
-            ...(
-              await laneToolBankFor("operator", toolCatalogHealth.conversationId(operatorIdentity))
-            ).tools.map((tool) => tool.name),
-            "reconcile_seat_call",
-            "reply",
-          ]
-        : undefined;
-      return toolCatalogHealth.readPane(identity, { worker, ...(operator ? { operator } : {}) });
-    } catch (error) {
-      const health = toolCatalogHealth.readPane(identity);
-      return {
-        ...health,
-        status: "unverified" as const,
-        missing: [],
-        detail:
-          `The current bridge catalog could not be read: ${error instanceof Error ? error.message : String(error)}`.slice(
-            0,
-            4096,
-          ),
-      };
-    }
-  }
+      get rememberOperatorSource() {
+        return rememberOperatorSource;
+      },
+    });
 
   const FLEET_FRESH_MS = 1000;
   const FLEET_READ_TIMEOUT_MS = 5_000;
@@ -5124,232 +4983,39 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   routines.start();
 
   evaluator.start();
-  async function ledSeats(owner: ConversationOwner, force = false) {
-    const seats = await refreshFleet({ force });
-    return seats.filter((seat) => JSON.stringify(seatLeadOwners.get(seat)?.owner) === JSON.stringify(owner));
-  }
-  /**
-   * A native lead seat that refuses turns on a usage limit stops receiving
-   * wakes and rounds until it resets; they run on the service lane meanwhile
-   * (VUH-2273). The conversation hears once when that starts.
-   */
-  function observeSeatUsageLimit(
-    conversationId: string,
-    entries: readonly import("@clankie/agent-transcript").SeatTranscriptUpload["entries"][number][],
-  ): void {
-    const limited = seatOutbox(conversationId).observeAgentMessages(
-      entries.flatMap((entry) => (entry.type === "message" && entry.role === "agent" ? [entry] : [])),
-    );
-    if (!limited) return;
-    conversations.recordServiceNotice(
-      conversationId,
-      `Your native seat hit its ${limited.window === "other" ? "usage" : limited.window} limit (resets ${new Date(limited.until).toISOString()}). Until then, wakes and rounds run on Clankie's service lane instead of being sent into it.`,
-    );
-    // A local lead moves to the account with the most headroom; a remote head has no local launcher.
-    if (conversations.runsCaptainTurns(conversationId))
-      void leadFailover
-        .limited(conversationId, limited)
-        .catch((error: unknown) => console.warn("Lead seat failover failed", conversationId, String(error)));
-  }
-
-  const efficiencyActions = {
-    async run(authority: ConversationAuthority, input?: FleetEfficiencyReview) {
-      // One deadline for the whole call, so the CLI hears an answer before its
-      // own abort. Explicit inspection never reuses a completed projection
-      // (Git and native files change without a fleet event): a census still
-      // running answers when no fleet change landed during it, otherwise one
-      // starts after this request. Waiting out a running census and then a
-      // forced one could not fit the deadline while a linked fleet stays
-      // silent (LOCAL-VUH-19).
-      const { readWarnings, bounded } = boundedFleetRead(
-        options.fleetEfficiencyDeadlineMs ?? FLEET_EFFICIENCY_DEADLINE_MS,
-      );
-      const review = input === undefined ? undefined : FleetEfficiencyReviewSchema.parse(input);
-      // Renew admission before the native census that proves ownership.
-      await assertConversationAuthority(authority);
-      const cursor = fleetChanges.current();
-      let observed = await bounded("native_fleet_projection", fleetRefresh ?? refreshFleet({ force: true }));
-      if (observed !== undefined && cursor !== fleetChanges.current())
-        observed = await bounded("native_fleet_projection", refreshFleet({ force: true }));
-      // A late census never records this review; the caller hears that nothing was written.
-      if (observed === undefined && review)
-        throw new Error(
-          `Review not recorded; nothing was written. ${readWarnings.map((warning) => warning.message).join(" ")}`,
-        );
-      for (const source of [...unansweredFleetSources].slice(0, 16 - readWarnings.length))
-        readWarnings.push({
-          source,
-          reason: "unavailable",
-          message: `${source} did not answer the latest census; its seats are unknown, not absent.`,
-        });
-      const owned = (observed?.value ?? lastProjectedSeats).filter(
-        (seat) => JSON.stringify(seatLeadOwners.get(seat)?.owner) === JSON.stringify(authority.owner),
-      );
-      const answer = (seats: readonly OperatorFleetSeat[]) => ({
-        conversationId: authority.owner.conversationId,
-        seats,
-        ...(readWarnings.length === 0 ? {} : { readWarnings }),
-      });
-      if (!review) {
-        await assertConversationAuthority(authority);
-        return answer(owned);
-      }
-      const seat = owned.find((candidate) => candidate.seatId === review.seatId);
-      if (!seat) throw new Error("This conversation does not lead that native seat");
-      if (!seatLeadOwners.get(seat)?.admitted)
-        throw new Error("The native occupant must be re-adopted before recording a review");
-      // No await separates this census's ownership proof from writing the display-only review.
-      if (!authority.current()) throw new Error("Native seat ownership changed during review");
-      const { seatId: _seat, ...finding } = review;
-      const efficiency = seatEfficiency.review({
-        occupantId: seat.occupantId,
-        owner: authority.owner,
-        ...finding,
-      });
-      fleetChanges.touch();
-      return {
-        ...answer(owned.map((candidate) => (candidate === seat ? { ...seat, efficiency } : candidate))),
-        review: { seatId: seat.seatId, occupantId: seat.occupantId, reviewedAt: efficiency.reviewedAt! },
-      };
+  const { ledSeats, observeSeatUsageLimit, efficiencyActions, stopFleetRounds } = createFleetRounds({
+    options,
+    deps,
+    shutdown,
+    settings,
+    conversations,
+    herdrWatches,
+    seatLeadOwners,
+    seatOutbox,
+    refreshFleet,
+    boundedFleetRead,
+    FLEET_EFFICIENCY_DEADLINE_MS,
+    fleetChanges,
+    unansweredFleetSources,
+    seatEfficiency,
+    readWorkerAccounts,
+    validateConversationOwner,
+    wakeConversation,
+    privateLeadConversation,
+    issueStatus,
+    get leadFailover() {
+      return leadFailover;
     },
-  };
-  herdrWatches.efficiency = efficiencyActions;
-  herdrWatches.workerAccountsReport = (fleet) => readWorkerAccounts(fleet);
-  const pendingFleetRounds = new Set<string>();
-  const completedFleetRounds = new Map<string, string>();
-  // Each lead hears a run-out projection once per window reset (VUH-1974).
-  const usageNotices = new Map<string, AccountUsageNotices>();
-  const usageNoticeOwners = new Map<string, ConversationOwner>();
-  const warnRunOuts = async (owners: ReadonlyMap<string, ConversationOwner>) => {
-    const usage = (await settings()).usage;
-    if (!usage.runOutWarning || shutdown.signal.aborted) return;
-    const reading = await readWorkerAccounts(undefined, ["claude", "codex"]);
-    for (const [ownerKey, owner] of owners) {
-      const notices = usageNotices.get(ownerKey) ?? new AccountUsageNotices();
-      usageNotices.set(ownerKey, notices);
-      const fresh = notices.pending(reading, usage);
-      if (!fresh.length || !(await validateConversationOwner(owner))) continue;
-      const accepted = await wakeConversation(
-        owner,
-        fresh.map((warning) => warning.text).join("\n\n"),
-        async () => {
-          if (shutdown.signal.aborted) throw new Error("Usage warning stopped");
-        },
-        "machine",
-        false,
-        false,
-      );
-      if (!accepted) continue;
-      notices.delivered(fresh);
-      usageNoticeOwners.set(ownerKey, owner);
-    }
-  };
-  const stopFleetRounds = startFleetRounds(async () => {
-    if (shutdown.signal.aborted) return;
-    const seats = await refreshFleet();
-    // Keep checking a warned lead even after its last seat finishes.
-    const owners = new Map(usageNoticeOwners);
-    for (const seat of seats) {
-      const owner = seatLeadOwners.get(seat)?.owner;
-      if (owner) owners.set(JSON.stringify(owner), owner);
-    }
-    const pendingQuestions = conversations.pendingLeadQuestions();
-    for (const pending of pendingQuestions) {
-      if (!pendingQuestionReview([pending]) || !privateLeadConversation(pending.conversationId)) continue;
-      if (![...owners.values()].some((owner) => owner.conversationId === pending.conversationId)) {
-        const owner = { conversationId: pending.conversationId };
-        owners.set(JSON.stringify(owner), owner);
-      }
-    }
-    for (const ownerKey of completedFleetRounds.keys()) {
-      if (!owners.has(ownerKey)) completedFleetRounds.delete(ownerKey);
-    }
-    // Once a day the lead hears every In Progress issue no live seat owns (VUH-1990).
-    void issueStatus
-      .dailyCheck()
-      .then(async (text) => {
-        if (text === undefined || shutdown.signal.aborted) return;
-        const lead = { conversationId: conversations.defaultGlobalConversationId() };
-        if (!(await wakeConversation(lead, text, undefined, "machine", true, false)))
-          console.warn("Daily issue status check was not delivered");
-      })
-      .catch((error: unknown) => {
-        if (!shutdown.signal.aborted) console.warn("Daily issue status check unavailable", String(error));
-      });
-    if (owners.size)
-      await warnRunOuts(owners).catch((error: unknown) => {
-        if (!shutdown.signal.aborted) console.warn("Usage warning unavailable", String(error));
-      });
-    for (const [ownerKey, owner] of owners) {
-      if (pendingFleetRounds.has(ownerKey)) continue;
-      try {
-        if (!(await validateConversationOwner(owner))) continue;
-        const current = await ledSeats(owner);
-        const questionNotice = pendingQuestionReview(
-          pendingQuestions.filter((pending) => pending.conversationId === owner.conversationId),
-        );
-        if ((!current.length && !questionNotice) || shutdown.signal.aborted) continue;
-        const holds = (await deps.deployHolds?.().catch(() => undefined)) ?? [];
-        const disk = options.fleetResources?.status()?.pressure;
-        const diskNotice = disk?.diskWarning
-          ? `Low disk: ${disk.freeDiskGb?.toFixed(1)} GiB free. Inspect clankie doctor before starting more work.\n`
-          : "";
-        const held = autoTidyHeldReview(autoTidy.held(owner.conversationId));
-        const evidence = fleetRoundEvidence(current, holds);
-        const roundKey = held.key ? `${evidence.fingerprint}:${held.key}` : evidence.fingerprint;
-        if (
-          !diskNotice &&
-          !questionNotice &&
-          !evidence.flagged &&
-          completedFleetRounds.get(ownerKey) === roundKey
-        )
-          continue;
-        pendingFleetRounds.add(ownerKey);
-        void wakeConversation(
-          owner,
-          [
-            diskNotice,
-            questionNotice,
-            held.text,
-            fleetReviewContext(
-              current,
-              Math.max(0, 10_000 - diskNotice.length - questionNotice.length - held.text.length - 3),
-              holds,
-            ),
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          async () => {
-            if (
-              shutdown.signal.aborted ||
-              (!(await ledSeats(owner)).length &&
-                !pendingQuestionReview(
-                  conversations
-                    .pendingLeadQuestions()
-                    .filter((pending) => pending.conversationId === owner.conversationId),
-                ))
-            )
-              throw new Error("Fleet review stopped or has no owned seats or pending questions");
-            if (shutdown.signal.aborted) throw new Error("Fleet review stopped");
-          },
-          "machine",
-          false,
-          true,
-        )
-          .then((accepted) => {
-            if (accepted) completedFleetRounds.set(ownerKey, roundKey);
-          })
-          .catch((error: unknown) => {
-            if (!shutdown.signal.aborted)
-              console.warn("Fleet lead round unavailable", owner.conversationId, String(error));
-          })
-          .finally(() => pendingFleetRounds.delete(ownerKey));
-      } catch (error) {
-        if (!shutdown.signal.aborted)
-          console.warn("Fleet lead round unavailable", owner.conversationId, String(error));
-      }
-    }
-  }, options.fleetRoundIntervalMs);
+    get autoTidy() {
+      return autoTidy;
+    },
+    get fleetRefresh() {
+      return fleetRefresh;
+    },
+    get lastProjectedSeats() {
+      return lastProjectedSeats;
+    },
+  });
   const { projectMirrors, velocityDeps, recordDriftCorrection, stopAutoRounds } = createAutoRounds({
     options,
     settings,
@@ -5369,287 +5035,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     noteFleetRoom,
     leadParty,
   });
-  // ADR 0271: the default lead seat restarts fresh in its own pane instead of
-  // compacting for days. VUH-2273 moves a usage-limited seat with the same call.
-  const leadSeatPane = (source: HerdrAgentSnapshot) => {
-    const sessionId = nativeSessionId(source);
-    const binding = inboundBinding(source);
-    return {
-      paneId: source.paneId,
-      terminalId: source.terminalId,
-      harness: source.agent,
-      ...(sessionId === undefined ? {} : { sessionId }),
-      ...(binding === undefined ? {} : { binding }),
-    };
-  };
-  const leadSeats = createLeadSeatRelaunch({
-    journalPath: join(options.stateDir, "lead-seat-relaunches.json"),
-    seat: async (conversationId) => {
-      const source = await operatorNativeSource(conversationId);
-      // The launcher resolves --conversation through seat-context, which can
-      // override the shell cwd. Check the directory it will actually launch in.
-      const directory = seatContext(conversationId)?.cwd;
-      return source === undefined
-        ? undefined
-        : {
-            ...leadSeatPane(source),
-            ...(directory === undefined ? {} : { workingDirectory: directory }),
-          };
+  const {
+    leadSeatPane,
+    leadSeats,
+    rememberOperatorSource,
+    leadFailover,
+    stopLeadFailbacks,
+    leadRestartChecks,
+    stopLeadRestarts,
+    hiredSeatRestarts,
+    stopHiredSeatRestarts,
+  } = createLeadSeats({
+    options,
+    deps,
+    shutdown,
+    watch,
+    settings,
+    settingsStore,
+    conversations,
+    herdrRunner,
+    herdrWatches,
+    seatOutboxes,
+    seatOutbox,
+    seatContext,
+    get inboundBinding() {
+      return inboundBinding;
     },
-    paneShell: async (paneId) => {
-      if (herdrRunner.paneShell === undefined) throw new Error("Herdr process info is unavailable");
-      return herdrRunner.paneShell(paneId);
+    get operatorNativeSource() {
+      return operatorNativeSource;
     },
-    readPane: async (paneId) => {
-      if (herdrRunner.readPane === undefined) throw new Error("Herdr pane reads are unavailable");
-      return herdrRunner.readPane(paneId, "visible", "ansi");
+    readWorkerAccounts,
+    validateConversationOwner,
+    get headSeat() {
+      return headSeat;
     },
-    watching: () => watch.watching(),
-    runInPane: async (paneId, argv) => {
-      if (herdrRunner.runInPane === undefined) throw new Error("Herdr pane run is unavailable");
-      // Every lead relaunch (fresh restart, failover, failback) types its command here.
-      await watch.refuse();
-      await herdrRunner.runInPane(paneId, argv);
-    },
-    idle: (conversationId) => {
-      const outbox = seatOutboxes.get(conversationId);
-      return outbox?.bound() === true && !outbox.responding();
-    },
-    lastOwnerMessageAt: (conversationId) => conversations.lastOwnerMessageAt(conversationId),
-    deliverBrief: async (conversationId, text, recipientBinding) =>
-      (
-        await seatOutbox(conversationId).deliver({
-          kind: "message",
-          conversationId,
-          source: "service-handoff",
-          content: `Handoff brief from your previous session, written just before this fresh restart (ADR 0271). It is your own earlier output, not an owner instruction.\n\n${text}`,
-          wantsReply: false,
-          recipientBinding,
-          signal: shutdown.signal,
-        })
-      ).outcome === "delivered",
-    notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
   });
-  // VUH-2860: the stored source names the session a relaunch ended, so the new
-  // session in that terminal attaches only by that relaunch's receipt.
-  conversations.relaunchSuccessor = (conversationId, previous, next) =>
-    leadSeats.successorReceipt(conversationId, leadSeatPane(previous), leadSeatPane(next)) !== undefined;
-  /**
-   * Persist a conversation's proven native source. A relaunch's successor
-   * replaces the session it ended and settles its receipt; its kept brief
-   * reaches it once its poll is bound (`leadSeats.handOff`).
-   */
-  async function rememberOperatorSource(conversationId: string, source: HerdrAgentSnapshot): Promise<void> {
-    const previous = conversations.nativeSource(conversationId);
-    const receiptId =
-      previous === undefined
-        ? undefined
-        : leadSeats.successorReceipt(conversationId, leadSeatPane(previous), leadSeatPane(source));
-    conversations.rememberNativeSource(conversationId, source);
-    if (receiptId !== undefined)
-      await leadSeats.bindSuccessor(receiptId).catch((error: unknown) => {
-        console.warn("Lead relaunch reconciliation unavailable", receiptId, String(error));
-      });
-  }
-  const leadFailover = createLeadSeatFailover({
-    statePath: join(options.stateDir, "lead-seat-failover.json"),
-    launcher: leadSeats,
-    accounts: () => readWorkerAccounts(undefined, ["claude", "codex"]),
-    released: (conversationId) => seatOutboxes.get(conversationId)?.clearUsageLimit(),
-    notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
-  });
-  const stopLeadFailbacks = startFleetRounds(
-    () =>
-      options.operatorSeatMigrationHeld?.(conversations.defaultGlobalConversationId())
-        ? Promise.resolve()
-        : leadFailover.failBack(),
-    options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS,
-  );
-  let leadRestartAskedAt: number | undefined;
-  /** The latest restart check, for `clankie fleet status` (VUH-2821). */
-  let leadRestartCheck: LeadRestartStatus["check"];
-  let leadRestartUnknownCheck: LeadRestartStatus["unknownCheck"];
-  const stopLeadRestarts = startFleetRounds(async () => {
-    const conversationId = conversations.defaultGlobalConversationId();
-    if (options.operatorSeatMigrationHeld?.(conversationId)) return;
-    if (shutdown.signal.aborted) return;
-    if ((await settings()).fleet.leadRestarts === "off") return leadSeats.restartSettled(conversationId);
-    // A service/app lead has no native session to retire. An offline native
-    // lead remains marked native, so losing its source still records a refusal.
-    if (!conversations.hasNativeSeat(conversationId) && headSeat === undefined)
-      return leadSeats.restartSettled(conversationId);
-    if (leadRestartAskedAt !== undefined && Date.now() - leadRestartAskedAt < LEAD_RESTART_RETRY_MS) return;
-    // v1 readers require check.due. Omit that legacy optional check when the
-    // budget is unknown, keeping the refusal readable through additive decoding.
-    // Only a refusal this round establishes replaces the latest check: a read
-    // while the round is still running sees the previous result (VUH-2870).
-    const attemptedAt = new Date().toISOString();
-    const unknown = (observed: NonNullable<LeadRestartStatus["unknownCheck"]> = { at: attemptedAt }) => {
-      leadRestartCheck = undefined;
-      leadRestartUnknownCheck = observed;
-    };
-    let sourceDetail = "No native Claude session could be proven for the default lead.";
-    let source: HerdrAgentSnapshot | undefined;
-    try {
-      source = await operatorNativeSource(conversationId, (detail) => {
-        sourceDetail = detail;
-      });
-    } catch (error) {
-      sourceDetail = String(error);
-    }
-    if (source?.agent !== "claude" || source.session === undefined) {
-      unknown();
-      return leadSeats.restartRefused(conversationId, "source_unproven", sourceDetail);
-    }
-    let usage: Awaited<ReturnType<typeof readClaudeSessionUsage>>;
-    let usageDetail: string;
-    try {
-      const lookup = await inspectHerdrSeatTranscriptPathAsync(source.agent, source.session);
-      usageDetail = `${source.session.value}: candidates ${JSON.stringify(lookup.candidates)}${lookup.candidates.length ? "" : `; searched ${JSON.stringify(lookup.searched)}`}`;
-      if (lookup.path === undefined) {
-        unknown();
-        return leadSeats.restartRefused(conversationId, "usage_unreadable", usageDetail);
-      }
-      usage = await readClaudeSessionUsage(lookup.path);
-    } catch (error) {
-      unknown();
-      return leadSeats.restartRefused(conversationId, "usage_unreadable", String(error));
-    }
-    const large = (usage.contextTokens ?? 0) >= LEAD_RESTART_CONTEXT_TOKENS;
-    const old = usage.startedAt !== undefined && Date.now() - usage.startedAt >= LEAD_RESTART_AGE_MS;
-    const observed = {
-      at: new Date().toISOString(),
-      ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
-      ...(usage.startedAt === undefined ? {} : { sessionStartedAt: new Date(usage.startedAt).toISOString() }),
-    };
-    if (!large && !old && (usage.contextTokens === undefined || usage.startedAt === undefined)) {
-      unknown(observed);
-      return leadSeats.restartRefused(conversationId, "usage_unreadable", usageDetail);
-    }
-    leadRestartUnknownCheck = undefined;
-    leadRestartCheck = { ...observed, due: large || old };
-    if (!large && !old) return leadSeats.restartSettled(conversationId);
-    const launch = await leadSeats.leadSeatLaunch(conversationId);
-    if (launch === undefined) return leadSeats.restartRefused(conversationId, "no_launch");
-    const input = {
-      conversationId,
-      harness: launch.harness,
-      ...(launch.account === undefined ? {} : { account: launch.account }),
-      reason: "fresh_restart" as const,
-      guards: { requireNoDraft: true, quietOwnerMs: LEAD_RESTART_QUIET_OWNER_MS, requireIdle: true },
-    };
-    const refused = await leadSeats.preflight(input);
-    if (refused?.outcome === "refused")
-      return leadSeats.restartRefused(conversationId, refused.reason, refused.detail);
-    if (refused !== undefined) return;
-    leadRestartAskedAt = Date.now();
-    const brief = await seatOutbox(conversationId).deliver({
-      kind: "escalation",
-      conversationId,
-      source: "service",
-      content: LEAD_HANDOFF_REQUEST,
-      wantsReply: true,
-      signal: shutdown.signal,
-    });
-    if (brief.outcome !== "replied" || brief.text.trim() === "")
-      return leadSeats.restartRefused(conversationId, "no_brief", brief.outcome);
-    // The brief's own turn has to end before the seat counts as idle again.
-    for (let waited = 0; waited < 5 * 60_000 && !shutdown.signal.aborted; waited += 2_000) {
-      if (seatOutboxes.get(conversationId)?.responding() === false) break;
-      await new Promise((resolve) => setTimeout(resolve, 2_000).unref());
-    }
-    const result = await leadSeats.relaunchLeadSeat({ ...input, handoffBrief: brief.text });
-    if (result.outcome === "refused")
-      return leadSeats.restartRefused(conversationId, result.reason, result.detail);
-    // Relaunched, or uncertain with its own notice: either way this wait is over.
-    leadSeats.restartSettled(conversationId);
-    if (result.outcome === "relaunched") leadRestartAskedAt = undefined;
-    else
-      conversations.recordServiceNotice(
-        conversationId,
-        `Clankie's seat restart is unconfirmed (receipt ${result.receiptId}): ${result.detail} It is never retried automatically; check the pane.`,
-      );
-  }, options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS);
-  const hiredSeatRestarts = createHiredSeatRestarts({
-    path: join(options.stateDir, "hired-seat-restart-policy.json"),
-    enabled: async () => (await settings()).fleet.seatRestarts !== "off" && !(await watch.watching()),
-    candidates: () => herdrWatches.freshRestartCandidates(),
-    receipts: () => herdrWatches.hiredRestartReceipts(),
-    observe: readHiredRestartObservation,
-    authority: async (candidate) => {
-      if (shutdown.signal.aborted || !(await validateConversationOwner(candidate.owner)))
-        throw new RestartRefusal("authority_unavailable");
-      if (await watch.watching()) throw new RestartRefusal("watching");
-    },
-    resources: async (candidate) => {
-      const guard = await options.fleetResources?.restartGuard(candidate.agent);
-      if (!guard?.clear)
-        throw new RestartRefusal(
-          guard?.reason ?? "resource_guard_unavailable",
-          guard && !guard.clear ? guard.detail : undefined,
-        );
-    },
-    lastOwnerMessageAt: (owner) => conversations.lastOwnerMessageAt(owner.conversationId),
-    workItem: async (candidate, nonce, requestedAt) => {
-      if (!deps.workItems?.prepareSeatIssueTracker || !candidate.agent.session || !candidate.workItem)
-        throw new RestartRefusal("work_item_proof_unavailable");
-      const attribution = await prepareSeatIssueAttribution(
-        {
-          fleet: "default",
-          pane: candidate.agent.paneId,
-          nativeOccupantId: occupantIdForHerdrSession(candidate.agent.session),
-        },
-        {
-          proof: (fleet, pane) => options.projectHireIdentity?.(fleet, pane) ?? Promise.resolve(undefined),
-          watches: herdrWatches,
-          workItems: { prepareSeatIssueTracker: deps.workItems.prepareSeatIssueTracker },
-          projects: async () => (await settingsStore.read()).projects,
-        },
-      );
-      const scope = await attribution.resolve();
-      const issue = (await scope.call("get_issue", { id: candidate.workItem }, "background")) as Record<
-        string,
-        unknown
-      >;
-      if (issue.id !== candidate.workItem && issue.identifier !== candidate.workItem)
-        throw new RestartRefusal("work_item_identity_changed");
-      let comment: unknown;
-      let cursor: string | undefined;
-      const seen = new Set<string>();
-      for (;;) {
-        const result = await scope.call(
-          "list_comments",
-          { issueId: candidate.workItem, limit: 100, ...(cursor ? { cursor } : {}) },
-          "background",
-        );
-        const page = result as { comments?: unknown; hasNextPage?: boolean; cursor?: string };
-        const comments = Array.isArray(result) ? result : page.comments;
-        if (!Array.isArray(comments)) throw new RestartRefusal("work_item_comments_unreadable");
-        comment = comments.find(
-          (entry: Record<string, unknown>) =>
-            typeof entry.id === "string" &&
-            typeof entry.body === "string" &&
-            entry.body.includes(nonce) &&
-            typeof entry.createdAt === "string" &&
-            Date.parse(entry.createdAt) >= Date.parse(requestedAt),
-        );
-        if (comment || page.hasNextPage !== true) break;
-        cursor = page.cursor;
-        if (!cursor || seen.has(cursor) || seen.size >= 100)
-          throw new RestartRefusal("work_item_comments_unreadable");
-        seen.add(cursor);
-      }
-      if (!comment) throw new RestartRefusal("work_item_handoff_not_saved");
-      await attribution.resolve();
-      return { scope: scope.identity, issue, comment };
-    },
-    notice: (owner, text) => conversations.recordServiceNotice(owner.conversationId, text),
-    signal: shutdown.signal,
-  });
-  const stopHiredSeatRestarts = startFleetRounds(
-    () => hiredSeatRestarts.tick(),
-    options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS,
-  );
   herdrWatches.start(
     async (conversationId, prompt, discord, guard, original) => {
       const owner = { conversationId, ...(discord === undefined ? {} : { discord }) };
@@ -7451,8 +6871,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         conversationId: conversations.defaultGlobalConversationId(),
         setting: (await settings()).fleet.leadRestarts ?? "on",
         budget: { contextTokens: LEAD_RESTART_CONTEXT_TOKENS, ageMs: LEAD_RESTART_AGE_MS },
-        ...(leadRestartCheck === undefined ? {} : { check: leadRestartCheck }),
-        ...(leadRestartUnknownCheck === undefined ? {} : { unknownCheck: leadRestartUnknownCheck }),
+        ...(leadRestartChecks.check === undefined ? {} : { check: leadRestartChecks.check }),
+        ...(leadRestartChecks.unknownCheck === undefined
+          ? {}
+          : { unknownCheck: leadRestartChecks.unknownCheck }),
       });
     },
     async fleetEfficiency(conversationId, review) {
