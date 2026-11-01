@@ -37,7 +37,6 @@ import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
-import type { ActivitySharing } from "../activity-sharing.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DiscordRoomObservations } from "../discord-room-observations.ts";
 import type { DiscordRoomVoice } from "../discord-room-voice.ts";
@@ -270,16 +269,6 @@ export interface ClankieAppDependencies {
   ) => Promise<import("@clankie/protocol/projects").FleetMembershipReport>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read"> & Partial<Pick<DeliveredFileStore, "attachment">>;
-  /** Local owner-authorized projection of delivered artifacts; hosted launch/admission is separate. */
-  activitySharing?: ActivitySharing;
-  /**
-   * Self-hosted official Activity admission (VUH-2833). Only the local activity
-   * server reaches it, presenting the broker-held activity producer bearer.
-   */
-  activityAdmission?: {
-    token(): Promise<string | undefined>;
-    admit(input: unknown): Promise<import("../activity-admission.ts").SelfHostedActivityAdmission>;
-  };
   /** Records the bot's own Activity launches so admission serves only those channels. */
   activityLaunches?: {
     allowsLaunch(idempotencyKey: string): boolean;

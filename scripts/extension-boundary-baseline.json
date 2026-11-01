@@ -1,9 +1,6 @@
 {
   "edges": [
     "app/runtime.ts -> @clankie/discord-presence-core (persona)",
-    "app/runtime.ts -> @clankie/rendered-surface-client (world)",
-    "app/runtime.ts -> activity-admission.ts (world)",
-    "app/runtime.ts -> activity-sharing.ts (world)",
     "app/runtime.ts -> app/discord-routes.ts (persona)",
     "app/runtime.ts -> app/voice-call-route.ts (voice)",
     "app/runtime.ts -> appearance-routes.ts (persona)",
@@ -17,8 +14,6 @@
     "app/runtime.ts -> stream-watch-observation.ts (world)",
     "app/runtime.ts -> voice-receipt-activity.ts (voice)",
     "app/types.ts -> @clankie/discord-presence-core (persona)",
-    "app/types.ts -> activity-admission.ts (world)",
-    "app/types.ts -> activity-sharing.ts (world)",
     "app/types.ts -> body-play-sessions.ts (world)",
     "app/types.ts -> body-voice-stays.ts (voice)",
     "app/types.ts -> captain/discord-turn-receipts.ts (persona)",

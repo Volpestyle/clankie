@@ -155,6 +155,7 @@ import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
+import { activityRoutes } from "./activity-routes.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import type { LinearRouteParts } from "./app/linear-routes.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
@@ -2379,7 +2380,11 @@ const clankie = await createClankieApp({
   bodyPlaySessions,
   guidePokemonPlay: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
   minecraftPrivateDelivery,
-  extensionRoutes: [...routesOf(extensions), skinDraftRoutes(skinDrafts)],
+  extensionRoutes: [
+    ...routesOf(extensions),
+    skinDraftRoutes(skinDrafts),
+    activityRoutes({ activitySharing, ...(activityAdmission === undefined ? {} : { activityAdmission }) }),
+  ],
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
@@ -2537,8 +2542,6 @@ const clankie = await createClankieApp({
   deliveredFiles,
   herdrRuntime: herdr.status,
   extensions,
-  activitySharing,
-  ...(activityAdmission === undefined ? {} : { activityAdmission }),
   ...(activityLaunches === undefined ? {} : { activityLaunches }),
   herdrBinding: herdr.binding,
   runtimes,

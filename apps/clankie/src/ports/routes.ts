@@ -40,4 +40,6 @@ export interface ExtensionRouteHost {
 export interface ExtensionRoutes {
   readonly place: "body" | "tracker" | "owner";
   register(app: Hono, host: ExtensionRouteHost): void;
+  /** Releases what the routes hold when the app closes. */
+  close?(): void;
 }

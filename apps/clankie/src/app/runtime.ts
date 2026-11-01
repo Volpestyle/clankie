@@ -64,7 +64,7 @@ import {
 import { GameplaySettingsSchema, SettingsStore } from "@clankie/settings";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { z } from "zod";
 import { createAccountRoutes } from "../account-routes.ts";
@@ -75,9 +75,6 @@ import { BodyLeaseRecovery } from "../body-lease-recovery.ts";
 import { CaptainPresenceLeaseConflictError, CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
-import { ActivitySharingRequestSchema } from "../activity-sharing.ts";
-import { ActivityAdmissionError } from "../activity-admission.ts";
-import { ActivityShareRequestError } from "@clankie/rendered-surface-client";
 import { changeRuntime, manageConnections } from "../connections.ts";
 import { createSetupSurveyRoutes, createSetupSurveyService } from "../setup-survey.ts";
 import { DeviceSessionError, DeviceSessionSigner } from "../device-session.ts";
@@ -529,76 +526,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   const localOperator = dependencies.authenticateOperator;
-
-  app.post("/v1/activity/admit", bodyLimit({ maxSize: 4 * 1024 }), async (context) => {
-    const admission = dependencies.activityAdmission;
-    if (admission === undefined) return context.json({ error: "activity_admission_unavailable" }, 503);
-    const expected = await admission.token();
-    const supplied = Buffer.from(context.req.header("authorization") ?? "");
-    const wanted = Buffer.from(`Bearer ${expected ?? ""}`);
-    if (
-      expected === undefined ||
-      supplied.byteLength !== wanted.byteLength ||
-      !timingSafeEqual(supplied, wanted)
-    )
-      return context.json({ error: "activity_admission_unauthorized" }, 401);
-    context.header("cache-control", "no-store");
-    try {
-      return context.json(await admission.admit(await readJson(context.req.raw)));
-    } catch (error) {
-      if (error instanceof ActivityAdmissionError)
-        return context.json(
-          { error: error.message, ...(error.detail ? { detail: error.detail } : {}) },
-          error.status,
-        );
-      logger.warn({ phase: "activity_admission" }, "activity admission failed");
-      return context.json({ error: "activity_admission_denied" }, 403);
-    }
-  });
-
-  app.post("/v1/activity/shares", async (context) => {
-    const identity = await authenticateOperator(context.req.raw, dependencies);
-    if (identity === "unavailable")
-      return context.json({ error: "operator_authentication_unavailable" }, 503);
-    if (!identity) return context.json({ error: "operator_authentication_required" }, 401);
-    if (dependencies.activitySharing === undefined)
-      return context.json({ error: "activity_sharing_unavailable" }, 503);
-    const parsed = ActivitySharingRequestSchema.safeParse(await readJson(context.req.raw));
-    if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
-    try {
-      const result = await dependencies.activitySharing.request(parsed.data, async () => {
-        const current = await authenticateOperator(context.req.raw, dependencies);
-        return current !== "unavailable" && current?.operatorId === identity.operatorId;
-      });
-      context.header("cache-control", "no-store");
-      return context.json(result);
-    } catch (error) {
-      if (error instanceof ActivityShareRequestError) {
-        return context.json(
-          {
-            error: "activity_share_request_failed",
-            outcome: error.outcome,
-            operation: error.operation,
-            ...(error.shareId === undefined ? {} : { shareId: error.shareId }),
-            ...(error.generation === undefined ? {} : { generation: error.generation }),
-          },
-          error.outcome === "uncertain" ? 503 : 409,
-        );
-      }
-      const name = error instanceof Error ? error.message : "";
-      if (name === "operator_authentication_required") return context.json({ error: name }, 401);
-      if (name === "activity_destination_refused") return context.json({ error: name }, 403);
-      if (name === "activity_source_unavailable") return context.json({ error: name }, 404);
-      if (name === "activity_share_generation_conflict") return context.json({ error: name }, 409);
-      if (name === "activity_share_gone" || name === "activity_artifact_unavailable")
-        return context.json({ error: name }, 404);
-      if (name === "activity_share_capacity") return context.json({ error: name }, 409);
-      if (name === "activity_share_busy") return context.json({ error: name }, 429);
-      if (error instanceof z.ZodError) return context.json({ error: "invalid_activity_media" }, 400);
-      logger.warn({ phase: "activity_share", action: parsed.data.action }, "activity share request failed");
-      return context.json({ error: "activity_sharing_unavailable" }, 503);
-    }
-  });
 
   const deviceDenialResponse = (context: Context, denial: DeviceAuthDenial) => {
     if (denial.denied === "revoked") return context.json({ error: "revoked" }, 401);
@@ -2992,7 +2919,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       pushDispatcher?.close();
       captainPresence.close();
       closing.push(laneMcp.close(), dependencies.workerMcp?.close());
-      dependencies.activitySharing?.close();
+      for (const routes of dependencies.extensionRoutes ?? []) routes.close?.();
       // Owners of in-flight handlers settle before the caller removes state they write.
       await Promise.allSettled(closing);
     },
