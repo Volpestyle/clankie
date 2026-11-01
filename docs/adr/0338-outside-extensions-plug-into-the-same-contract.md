@@ -1,8 +1,10 @@
 # ADR 0338: Outside extensions plug into the same contract
 
-Status: Proposed, 2026-11-01, for James to decide. Research and docs only; no
-code changes. Extends [ADR 0328](0328-clankie-is-a-core-with-extensions.md) and
-generalizes the owner-installed game modules of
+Status: Accepted, 2026-11-01. James chose Option A, trusted add-ons now:
+owner-trusted in-process code, not a sandbox. Option C stays required before any
+unreviewed listing. Research and docs only; no code changes. Extends
+[ADR 0328](0328-clankie-is-a-core-with-extensions.md) and generalizes the
+owner-installed game modules of
 [ADR 0234](0234-games-share-one-extension-contract.md#amendment-owner-installed-external-extensions-2026-10-17-vuh-2419).
 Keeps the trust boundaries of [ADR 0251](0251-discord-owners-and-room-skills.md)
 and [ADR 0244](0244-machines-join-clankie-at-an-access-level.md), and the
@@ -63,6 +65,15 @@ and leave trust to the user, and Codex adds a review step whenever something
 that runs changes. None of them runs a server to host plugins.
 
 ## Decision
+
+### Trusted add-ons now, a sandbox before strangers' listings
+
+James decided on 2026-11-01: outside extensions start now as code the owner
+chooses to trust, loaded into the service's own process (Option A). They do not
+wait for a sandbox. The owner installs only what they trust, sees what each one
+asks for, and is told plainly that the permission list is not a sandbox. Before
+any listing offers extensions that James or Clankie's workers have not
+reviewed, the sandboxed out-of-process host (Option C) has to exist first.
 
 ### What an outside extension is
 
@@ -182,7 +193,7 @@ yet. It is mostly reshaping code that already ships for games.
 ## Options considered
 
 - **A. In-process, owner-trusted modules with declared permissions
-  (recommended).** The path above. Matches the harnesses James already uses and
+  (chosen).** The path above. Matches the harnesses James already uses and
   the games loader already in the service. Cheap. Not a sandbox, and says so.
 - **B. Only MCP servers.** Outside authors write an MCP server and Clankie
   connects to it as a tool source. No new contract, and a separate process for
@@ -218,10 +229,8 @@ yet. It is mostly reshaping code that already ships for games.
 
 ## Open questions for James
 
-1. **The one decision:** should outside extensions start as owner-trusted
-   in-process code (Option A: cheap, honest that it's not a sandbox), or wait
-   for a real sandbox (Option C) before anyone else's code loads?
-2. Should a listing exist at all, and if so, who reviews entries: James only,
+1. Should a listing exist at all, and if so, who reviews entries: James only,
    Clankie's workers with James approving, or named outside reviewers?
-3. Should outside extensions be able to add app screens, or only tools, routes
-   and settings? This ADR assumes the latter; app screens touch `clankie-app`.
+2. Should outside extensions be able to add app screens, or only tools, routes
+   and settings? Until James answers, the work proceeds on this ADR's
+   assumption: tools, routes and settings only. App screens touch `clankie-app`.
