@@ -13,18 +13,18 @@ description: Use when changing Clankie's body transfer (ADR 0286) — apps/clank
 
 Re-check when a diff touches any of these, or anything they call that writes `self.json`:
 
-| Code | Model action |
-| --- | --- |
-| `BodyTransfer.freeze` | `Freeze` |
-| `exportBundle`, `outgoingBundle`, `stage`, `stageStream`, `admit` | `Stage` |
-| `apply` | `Apply` |
-| `boot`, `applyStaged` | `Boot` |
-| `release` | `Release` |
-| `discard` | `Discard` |
-| `abort` | `Abort` |
-| `reclaim` | `Reclaim` (off: reclaim is the documented escape) |
-| `runTransferCommand` in `apps/tui/src/command/transfer.ts` | which steps go to the body named at freeze (`Bound`) |
-| `BodySelfSchema`, `BodyTransferRecordSchema`, abort/release request schemas | record fields the model keeps |
+| Code                                                                        | Model action                                         |
+| --------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `BodyTransfer.freeze`                                                       | `Freeze`                                             |
+| `exportBundle`, `outgoingBundle`, `stage`, `stageStream`, `admit`           | `Stage`                                              |
+| `apply`                                                                     | `Apply`                                              |
+| `boot`, `applyStaged`                                                       | `Boot`                                               |
+| `release`                                                                   | `Release`                                            |
+| `discard`                                                                   | `Discard`                                            |
+| `abort`                                                                     | `Abort`                                              |
+| `reclaim`                                                                   | `Reclaim` (off: reclaim is the documented escape)    |
+| `runTransferCommand` in `apps/tui/src/command/transfer.ts`                  | which steps go to the body named at freeze (`Bound`) |
+| `BodySelfSchema`, `BodyTransferRecordSchema`, abort/release request schemas | record fields the model keeps                        |
 
 **Sync commit:** `9a9a4a37997b12b2f4c7db65ca018c8abbff97d2`. The model was last confirmed against the code at this commit. Run `git diff 9a9a4a37997b12b2f4c7db65ca018c8abbff97d2 -- apps/clankie/src/body-transfer.ts packages/protocol/src/body-transfer.ts apps/tui/src/command/transfer.ts`. If that diff is not empty, re-read each changed function against its model action before you trust a pass. Move the sync commit forward only after you have confirmed that the model describes the code at the new commit.
 
@@ -42,21 +42,21 @@ Every line should print `ok`. Lines marked **residual** are expected findings, n
 
 `Bound` in a model config is the set of steps held to the body named at freeze: `stage`, `release`, `abort`.
 
-| Line | What it shows |
-| --- | --- |
-| `model cli: pass` | Main as `clankie transfer` drives it: stage, release and abort all go to the body named at freeze, and one self stays active. |
-| `model code: OneActiveSelf` | **Residual.** The source binds release and abort (PR 112), but the bundle it serves can be staged anywhere. |
-| `model pre-112: OneActiveSelf` | #101 as found: nothing was bound. |
-| `model brk-abort-unbound: OneActiveSelf` | With stage bound but abort not, the bug returns, so PR 112's source check is needed. |
-| `model brk-discard: OneActiveSelf` | The model catches a discard that burns an already-applied id. |
-| `model brk-discard-applying: pass` | Burning an id mid-apply is harmless, because boot then refuses it. The code agrees. |
-| `model brk-release: NeverLost` | The model catches a release that skips the activation check. |
-| `code abort --to A[ booted]` | The real destination refuses to burn an id it is applying or applied (`transfer_applied`). |
-| `code abort --to B` | **#101 fixed.** The source refuses B's burn (`answer_not_from_recorded_destination`). |
-| `code abort B's burn labeled A` | **Residual.** The source checks the `destination` label the caller sends, not who burned the id. |
-| `code cli resume --to B`, `cli abort --to B` | The real CLI refuses to resume or abort with a body other than the one named at freeze. |
-| `code routes resume at B` | **Residual.** Over the real routes, a caller that skips the CLI stages and applies the bundle at B after A applied. |
-| `code routes stage at B, abort --to A` | **Residual,** the model's shortest path: B stages S's bundle, the owner aborts correctly through the CLI, then B applies. |
+| Line                                         | What it shows                                                                                                                 |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `model cli: pass`                            | Main as `clankie transfer` drives it: stage, release and abort all go to the body named at freeze, and one self stays active. |
+| `model code: OneActiveSelf`                  | **Residual.** The source binds release and abort (PR 112), but the bundle it serves can be staged anywhere.                   |
+| `model pre-112: OneActiveSelf`               | #101 as found: nothing was bound.                                                                                             |
+| `model brk-abort-unbound: OneActiveSelf`     | With stage bound but abort not, the bug returns, so PR 112's source check is needed.                                          |
+| `model brk-discard: OneActiveSelf`           | The model catches a discard that burns an already-applied id.                                                                 |
+| `model brk-discard-applying: pass`           | Burning an id mid-apply is harmless, because boot then refuses it. The code agrees.                                           |
+| `model brk-release: NeverLost`               | The model catches a release that skips the activation check.                                                                  |
+| `code abort --to A[ booted]`                 | The real destination refuses to burn an id it is applying or applied (`transfer_applied`).                                    |
+| `code abort --to B`                          | **#101 fixed.** The source refuses B's burn (`answer_not_from_recorded_destination`).                                         |
+| `code abort B's burn labeled A`              | **Residual.** The source checks the `destination` label the caller sends, not who burned the id.                              |
+| `code cli resume --to B`, `cli abort --to B` | The real CLI refuses to resume or abort with a body other than the one named at freeze.                                       |
+| `code routes resume at B`                    | **Residual.** Over the real routes, a caller that skips the CLI stages and applies the bundle at B after A applied.           |
+| `code routes stage at B, abort --to A`       | **Residual,** the model's shortest path: B stages S's bundle, the owner aborts correctly through the CLI, then B applies.     |
 
 ## Read a model result
 
