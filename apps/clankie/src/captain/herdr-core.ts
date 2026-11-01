@@ -16,6 +16,11 @@ import { AgentReadScope, isShell, type LiveAgentOccupant } from "./agent-read-sc
 // running. JSON-RPC 2.0, one message per line, protocol generation 1.
 
 const GENERATION = 1;
+
+/** Names the seat on a terminal Clankie started for a hire (ADR 0319). */
+export const SEAT_LABEL = "clankie.seat";
+/** The agent session Clankie named for a hire, once its harness starts. */
+export const SESSION_LABEL = "clankie.session";
 const CALL_MS = 5_000;
 const FOCUS_MS = 5_000;
 const LIST_MAX = 48;
@@ -73,7 +78,9 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
         return {
           status: "listed",
           agents: terminals
-            .filter((terminal) => liveAgentOccupant(terminal) !== undefined)
+            // A hire Clankie started and named a session for is a seat in his fleet (ADR 0319),
+            // listed and messaged there; listing it here too would show it twice.
+            .filter((terminal) => liveAgentOccupant(terminal) !== undefined && !clankieSeat(terminal))
             .slice(0, LIST_MAX)
             .map(toAgent),
         };
@@ -138,6 +145,14 @@ interface HcProcess {
   readonly argv?: unknown;
 }
 
+function clankieSeat(terminal: HcTerminal): boolean {
+  const labels = terminal.labels !== null && typeof terminal.labels === "object" ? terminal.labels : {};
+  return (
+    typeof (labels as Record<string, unknown>)[SEAT_LABEL] === "string" &&
+    typeof (labels as Record<string, unknown>)[SESSION_LABEL] === "string"
+  );
+}
+
 interface HcTerminal {
   readonly address?: unknown;
   readonly state?: unknown;
@@ -149,6 +164,7 @@ interface HcTerminal {
   readonly cwd?: unknown;
   readonly title?: unknown;
   readonly status?: { readonly app?: unknown; readonly state?: unknown } | null;
+  readonly labels?: unknown;
   /** The foreground process group's leader now. */
   readonly foreground?: HcProcess | null;
 }

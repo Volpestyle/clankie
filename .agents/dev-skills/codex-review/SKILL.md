@@ -7,7 +7,7 @@ description: Use when you are the Codex reviewer on the owner's Mac and a lead a
 
 Pull requests in `Volpestyle/clankie`, `clankie-app` and `clankie-ops` are
 reviewed by a Codex worker on the owner's Mac, not by the cloud Codex bot
-([ADR 0323](../../../docs/adr/0323-codex-reviews-on-the-owners-mac.md)). The
+([ADR 0329](../../../docs/adr/0329-codex-reviews-on-the-owners-mac.md)). The
 review posts under the Mac's `gh` login as one GitHub review headed
 **Codex review**, and sets the `codex-clean` commit status on the exact commit
 it read. Merging waits on that status, so every push, a merge from `main`

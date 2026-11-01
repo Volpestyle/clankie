@@ -15,6 +15,8 @@ import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 import { createViewRoutes } from "../view-routes.ts";
 import { createRuntimeHealthRoutes } from "../runtime-health-routes.ts";
 import { RuntimeHealthObservationSchema } from "@clankie/protocol";
+import { ExtensionStatesSchema } from "@clankie/protocol";
+import { createExtensionStateRoutes } from "../extension-state-routes.ts";
 import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { WORKER_ACCOUNTS_PATH } from "@clankie/protocol/worker-accounts";
@@ -72,7 +74,7 @@ import { pumpBodyRequests } from "../body-request-pump.ts";
 import { BodyLeaseRecovery } from "../body-lease-recovery.ts";
 import { CaptainPresenceLeaseConflictError, CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
-import { registerComputerRoutes } from "../computer-http.ts";
+import type { ExtensionRouteHost, ExtensionRoutes } from "../ports/routes.ts";
 import { ActivitySharingRequestSchema } from "../activity-sharing.ts";
 import { ActivityAdmissionError } from "../activity-admission.ts";
 import { ActivityShareRequestError } from "@clankie/rendered-surface-client";
@@ -102,13 +104,12 @@ import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createHttpSettingsRoutes } from "../http-settings-routes.ts";
 import { httpCors } from "@clankie/settings";
 import { createAppearanceRoutes } from "../appearance-routes.ts";
-import { createSkinDraftRoutes } from "../skin-draft-routes.ts";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
 import { registerLinearRoutes } from "./linear-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
-import type { MediaGeneratorPort } from "../media-generation.ts";
+import type { MediaGeneratorPort } from "../ports/media.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
@@ -1124,6 +1125,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "unavailable" }, 503);
     }
   });
+  app.route(
+    "/",
+    createExtensionStateRoutes({
+      read: authorizeOwnerDevice,
+      change: authorizeOwnerSecrets,
+      settings: settingsSource,
+      ...(dependencies.extensions === undefined ? {} : { extensions: dependencies.extensions }),
+    }),
+  );
   app.get("/v1/captain/readiness", async (context) => {
     const authorized = await authorizeOwnerDevice(context.req.raw);
     if (authorized !== true)
@@ -1719,6 +1729,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         })(),
       ),
       ...(herdr === undefined ? {} : { herdr }),
+      ...(() => {
+        try {
+          const states = ExtensionStatesSchema.safeParse({
+            schemaVersion: 1,
+            extensions: dependencies.extensions?.snapshot(),
+          });
+          return states.success ? { extensions: states.data.extensions } : {};
+        } catch {
+          return {};
+        }
+      })(),
       ...(doorway === undefined ? {} : { doorway }),
       ...(power === undefined ? {} : { power }),
       ...(runtime === undefined ? {} : { runtime }),
@@ -2311,15 +2332,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }
   });
 
-  registerComputerRoutes(app, {
-    ...(dependencies.computer === undefined ? {} : { body: dependencies.computer }),
-    ...(dependencies.joinedComputer === undefined ? {} : { joined: dependencies.joinedComputer }),
-    async identity(request, conversationId) {
+  // Extensions' routes (ADR 0328) use the core's authority checks, never their own.
+  const extensionRouteHost: ExtensionRouteHost = {
+    ownerAuthority: (request) => questionOwnerAuthority(request),
+    async bodyIdentity(request, conversationId) {
       const operator = await authenticateOperator(request, dependencies);
       if (!operator || operator === "unavailable") return undefined;
       return operatorBodyIdentity(conversationId, request);
     },
-    async ownerRecovery(request) {
+    async ownerComputerRecovery(request) {
       const original = await authenticateOperator(request, dependencies);
       if (!original || original === "unavailable") return undefined;
       return {
@@ -2336,7 +2357,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         },
       };
     },
-  });
+  };
+  const mountExtensionRoutes = (place: ExtensionRoutes["place"]) => {
+    for (const routes of dependencies.extensionRoutes ?? [])
+      if (routes.place === place) routes.register(app, extensionRouteHost);
+  };
+  mountExtensionRoutes("body");
 
   app.post("/v1/body-leases", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
@@ -2887,10 +2913,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     },
   });
 
-  app.route(
-    "/",
-    createSkinDraftRoutes({ service: dependencies.skinDrafts, authorize: questionOwnerAuthority }),
-  );
+  mountExtensionRoutes("owner");
 
   /**
    * Delivery for devices that authorized it. The dispatcher owns coalescing and

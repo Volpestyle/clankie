@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { replayConversation } from "./conversation-requests.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
-import type { LinearActivityEvent } from "../src/linear-webhook.ts";
+import { linearTrackerActivity, type LinearActivityEvent } from "../src/linear-webhook.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -66,7 +66,7 @@ async function events(store: ConversationStore, conversationId = "global-default
 
 it("writes verified context and wakes the ordinary global-default chat without an inbox protocol", async () => {
   const f = fixture();
-  f.store.receiveLinearActivity(notice("Lead notification"), true);
+  f.store.receiveTrackerActivity(linearTrackerActivity(notice("Lead notification")), true);
   await f.store.close();
   expect(f.wakes).toEqual([{ id: "global-default", prompt: expect.stringContaining("Lead notification") }]);
   expect(f.wakes[0]?.prompt).toContain("VUH-1678");
@@ -87,21 +87,23 @@ it("writes verified context and wakes the ordinary global-default chat without a
 it("uses the selected ordinary chat and ignores old per-issue or native reply recipients", async () => {
   const f = fixture();
   const target = await chat(f.store);
-  f.store.receiveLinearActivity(
-    notice("Chosen chat", {
-      replyRecipient: {
-        parentType: "ProjectUpdate",
-        parentId: "d9b90f52-0b0e-463d-a1e9-9457d250592c",
-        recordedAt: Date.now(),
-        recipient: {
-          kind: "native",
-          paneId: "other/w3",
-          seatId: "other/seat",
-          occupantId: "other-session",
-          binding: "a".repeat(64),
+  f.store.receiveTrackerActivity(
+    linearTrackerActivity(
+      notice("Chosen chat", {
+        replyRecipient: {
+          parentType: "ProjectUpdate",
+          parentId: "d9b90f52-0b0e-463d-a1e9-9457d250592c",
+          recordedAt: Date.now(),
+          recipient: {
+            kind: "native",
+            paneId: "other/w3",
+            seatId: "other/seat",
+            occupantId: "other-session",
+            binding: "a".repeat(64),
+          },
         },
-      },
-    }),
+      }),
+    ),
     true,
     target,
   );
@@ -110,15 +112,15 @@ it("uses the selected ordinary chat and ignores old per-issue or native reply re
   expect(await events(f.store, "global-default")).toEqual([]);
   expect(f.store.conversation(target)).toMatchObject({ title: "Linear", scope: { kind: "global" } });
   expect(f.store.linearWakeTargetAllowed("missing")).toBe(false);
-  expect(() => f.store.receiveLinearActivity(notice("Missing target"), true, "missing")).toThrow(
-    "existing ordinary global or workspace chat",
-  );
+  expect(() =>
+    f.store.receiveTrackerActivity(linearTrackerActivity(notice("Missing target")), true, "missing"),
+  ).toThrow("existing ordinary global or workspace chat");
 });
 
 it("coalesces deliveries arriving across a burst into one compact chat wake", async () => {
   const f = fixture();
   for (let index = 0; index < 4; index += 1) {
-    f.store.receiveLinearActivity(notice(`Burst ${index}`), true);
+    f.store.receiveTrackerActivity(linearTrackerActivity(notice(`Burst ${index}`)), true);
     if (index < 3) await new Promise((resolve) => setTimeout(resolve, 120));
   }
   await f.store.close();
@@ -141,10 +143,11 @@ it("coalesces new deliveries during an active wake into one queued follow-up", a
     prompts.push(store.linearWakePrompt(id, context.runId)!);
     if (prompts.length === 1) await held;
   });
-  store.receiveLinearActivity(notice("First active wake"), true);
+  store.receiveTrackerActivity(linearTrackerActivity(notice("First active wake")), true);
   const firstClosing = store.close();
   await vi.waitFor(() => expect(prompts).toHaveLength(1));
-  for (let index = 0; index < 4; index += 1) store.receiveLinearActivity(notice(`Follow-up ${index}`), true);
+  for (let index = 0; index < 4; index += 1)
+    store.receiveTrackerActivity(linearTrackerActivity(notice(`Follow-up ${index}`)), true);
   const finalClosing = store.close();
   release();
   await Promise.all([firstClosing, finalClosing]);
@@ -157,12 +160,12 @@ it("coalesces new deliveries during an active wake into one queued follow-up", a
 it("keeps nonmatching events out of the chat without upgrading duplicates into wakes", async () => {
   const f = fixture();
   const passive = notice("Passive history");
-  expect(f.store.receiveLinearActivity(passive, false)).toBe(true);
-  expect(f.store.receiveLinearActivity(passive, true)).toBe(false);
+  expect(f.store.receiveTrackerActivity(linearTrackerActivity(passive), false)).toBe(true);
+  expect(f.store.receiveTrackerActivity(linearTrackerActivity(passive), true)).toBe(false);
   await f.store.close();
   expect(f.wakes).toEqual([]);
   const reopened = fixture(f.root);
-  reopened.store.receiveLinearActivity(notice("New attention"), true);
+  reopened.store.receiveTrackerActivity(linearTrackerActivity(notice("New attention")), true);
   await reopened.store.close();
   expect(reopened.wakes[0]?.prompt).toContain("New attention");
   expect(reopened.wakes[0]?.prompt).not.toContain("Passive history");
@@ -174,12 +177,12 @@ it("keeps nonmatching events out of the chat without upgrading duplicates into w
 it("keeps replay dedupe across restart, chat changes, and removed conversation history", async () => {
   const f = fixture();
   const activity = notice("Retained receipt");
-  f.store.receiveLinearActivity(activity, false);
+  f.store.receiveTrackerActivity(linearTrackerActivity(activity), false);
   const target = await chat(f.store);
   await f.store.close();
   writeFileSync(join(f.root, "global-default", "events.jsonl"), "");
   const reopened = fixture(f.root);
-  expect(reopened.store.receiveLinearActivity(activity, true, target)).toBe(false);
+  expect(reopened.store.receiveTrackerActivity(linearTrackerActivity(activity), true, target)).toBe(false);
   await reopened.store.close();
   expect(reopened.wakes).toEqual([]);
   expect(JSON.parse(readFileSync(join(f.root, "linear-event-receipts.json"), "utf8"))).toHaveProperty(
@@ -232,7 +235,7 @@ it("drops legacy unread inbox items once, removes routing and read/ack state, an
   expect(cleaned).not.toHaveProperty("linearReadCursor");
   expect(cleaned).not.toHaveProperty("linearOfferedCursor");
   expect(cleaned).not.toHaveProperty("linearAckVersion");
-  expect(migrated.store.receiveLinearActivity(old, true)).toBe(false);
+  expect(migrated.store.receiveTrackerActivity(linearTrackerActivity(old), true)).toBe(false);
   const callCount = log.mock.calls.length;
   const again = fixture(f.root);
   await again.store.close();
@@ -253,7 +256,7 @@ it("keeps an interrupted offered wake consumed when no definite delivery refusal
     await held;
   });
   const activity = notice("Crash recovery");
-  original.receiveLinearActivity(activity, true);
+  original.receiveTrackerActivity(linearTrackerActivity(activity), true);
   const closing = original.close();
   await vi.waitFor(() => expect(prompts).toHaveLength(1));
   cpSync(root, snapshot, { recursive: true });
@@ -265,7 +268,7 @@ it("keeps an interrupted offered wake consumed when no definite delivery refusal
   expect(await events(reopened.store)).toContainEqual(
     expect.objectContaining({ type: "message", role: "external" }),
   );
-  expect(reopened.store.receiveLinearActivity(activity, true)).toBe(false);
+  expect(reopened.store.receiveTrackerActivity(linearTrackerActivity(activity), true)).toBe(false);
   const again = fixture(snapshot);
   await again.store.close();
   expect(again.wakes).toEqual([]);
@@ -274,7 +277,7 @@ it("keeps an interrupted offered wake consumed when no definite delivery refusal
 it("drops a queued wake when following turns off and leaves its ordinary history visible", async () => {
   const f = fixture();
   f.store.linearFollowing = async () => false;
-  f.store.receiveLinearActivity(notice("Following disabled"), true);
+  f.store.receiveTrackerActivity(linearTrackerActivity(notice("Following disabled")), true);
   await f.store.close();
   expect(f.wakes).toEqual([]);
   const reopened = fixture(f.root);

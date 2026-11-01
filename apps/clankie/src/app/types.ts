@@ -45,7 +45,7 @@ import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
 import type { ComposerTranscriptions } from "../composer-transcription.ts";
 import { type LinearActivityEvent, type LinearWriteReceipts } from "../linear-webhook.ts";
-import type { MediaGeneratorPort } from "../media-generation.ts";
+import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
 import type { MinecraftService } from "../minecraft.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
@@ -65,8 +65,6 @@ export interface PendingCompletion {
   offeredGrants: DeviceGrantSet;
   expiresAtMs: number;
   consumed: boolean;
-  reissue?: true;
-  authorizedByBrowserSession?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,12 +75,13 @@ interface ActivityObservationReadPort {
   current(signal?: AbortSignal): Promise<ActivityObservationSnapshot | undefined>;
 }
 
-interface BrowserToolPort {
+/** The browser extension's tools as the core calls them (ADR 0328). */
+export interface BrowserToolPort {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
   call(
     request: CallBrowserToolRequest,
     signal?: AbortSignal,
-    authority?: { shell?: boolean; guard?: () => Promise<void>; conversationId?: string },
+    authority?: { shell?: boolean; guard?: () => Promise<void>; conversationId?: string | undefined },
   ): Promise<CallBrowserToolResult>;
 }
 
@@ -127,7 +126,6 @@ export interface TrustedDeviceIdentity {
 export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface ClankieAppDependencies {
-  skinDrafts?: import("../skin-drafts.ts").SkinDraftService;
   /** Host-side voice environment validation; omitted uses the service process environment. */
   voiceSettingsEnv?: NodeJS.ProcessEnv;
   fleetResources?: import("../fleet-resource-runtime.ts").FleetResourceRuntime;
@@ -224,6 +222,11 @@ export interface ClankieAppDependencies {
   machineJoins?: import("../machine-joins.ts").MachineJoins;
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
+  /** Extension states (ADR 0328): last known on `/health`, health read first on `GET /v1/extensions`. */
+  extensions?: {
+    snapshot(): readonly import("@clankie/protocol").ExtensionStateReport[];
+    report(): Promise<readonly import("@clankie/protocol").ExtensionStateReport[]>;
+  };
   /** Only a currently available connection has an active binding. */
   herdrBinding?: () => HerdrBinding | undefined;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
@@ -334,8 +337,8 @@ export interface ClankieAppDependencies {
     ReturnType<typeof import("../minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
     "authorize"
   >;
-  computer?: import("../computer-body.ts").ComputerBody;
-  joinedComputer?: import("../joined-computer.ts").JoinedComputer;
+  /** Routes extensions add, such as computer use and skin drafts (ADR 0328). */
+  extensionRoutes?: readonly import("../ports/routes.ts").ExtensionRoutes[];
   /**
    * Device voice calls (VUH-2682). Resolves the same realtime provider
    * composition and credentials a Discord body uses, when a call starts;

@@ -1,7 +1,6 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import {
   PAIRING_DIRECT_PARAM,
-  type DeviceGrantSet,
   type DomainEvent,
   type PairingRun,
   type PairingOfferWire,
@@ -37,13 +36,6 @@ const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const PAIRING_CODE_GROUPS = 2;
 const PAIRING_CODE_GROUP_LENGTH = 4;
 
-/** A browser session an offer was minted for: it fixes the device id and grants. */
-interface PairingBrowserBinding {
-  readonly sessionId: string;
-  readonly deviceId: string;
-  readonly grants: DeviceGrantSet;
-}
-
 /**
  * What redemption needs once the secrets have left for the operator's screen:
  * the offer keyed by the hashes the gateway also routes on. Secret-free.
@@ -62,8 +54,6 @@ export interface PairingOfferRecord {
   readonly review?: true;
   readonly run?: PairingRun;
   readonly supportGrantId?: string;
-  readonly browser?: PairingBrowserBinding;
-  readonly authorizedByBrowserSession?: string;
 }
 
 /**
@@ -97,8 +87,6 @@ export interface MintPairingOfferOptions {
   readonly ttlMs?: number;
   readonly run?: PairingRun;
   readonly supportGrantId?: string;
-  readonly browser?: PairingBrowserBinding;
-  readonly authorizedByBrowserSession?: string;
   /** Review offer lifetime in days; the route validates the ceiling. */
   readonly review?: { readonly days: number };
   /** Non-secret id source only; code and offer secret always come from crypto randomness. */
@@ -131,10 +119,6 @@ export function mintPairingOffer(options: MintPairingOfferOptions): StoredPairin
     ).toISOString(),
     ...(options.review === undefined ? {} : { review: true as const }),
     ...(options.supportGrantId === undefined ? {} : { supportGrantId: options.supportGrantId }),
-    ...(options.browser === undefined ? {} : { browser: options.browser }),
-    ...(options.authorizedByBrowserSession === undefined
-      ? {}
-      : { authorizedByBrowserSession: options.authorizedByBrowserSession }),
   };
 }
 

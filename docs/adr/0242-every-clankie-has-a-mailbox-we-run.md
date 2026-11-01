@@ -1,6 +1,8 @@
 # ADR 0242: Every Clankie has a mailbox we run
 
-Status: accepted (James approved building it, 2026-10-06, VUH-1764). Supersedes the mailbox part of
+Status: superseded by [ADR 0326](0326-the-last-hosted-leftovers-are-removed.md),
+which removed the hosted mailbox; mail is the owner's IMAP/SMTP server again.
+The design below is historical. Accepted (James approved building it, 2026-10-06, VUH-1764). Supersedes the mailbox part of
 [ADR 0127](0127-his-accounts-are-his.md): his address is no longer a forward
 into a hand-made Gmail account read with an app password. The rest of ADR 0127
 stands: signups by hand, mail as untrusted sender text, mail at the console only.

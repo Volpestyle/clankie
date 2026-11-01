@@ -51,7 +51,7 @@ import type {
   SpawnOperatorSeat,
 } from "@clankie/protocol";
 import type { DurableMessageNotice } from "./conversations.ts";
-import type { LinearActivityEvent } from "../linear-webhook.ts";
+import type { TrackerActivity } from "./tracker-activity.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -381,6 +381,16 @@ export interface CaptainPort {
     readonly expect: string;
     readonly steps: readonly import("@clankie/protocol/connector").PromptAnswerStep[];
   }): Promise<import("@clankie/protocol/connector").PromptAnswerResult>;
+  /**
+   * Press keys in an agent's terminal for a connected app the owner turned prompts and keys
+   * on for (ADR 0323), whatever the agent is doing, recorded on the note board.
+   */
+  pressKeys?(input: {
+    readonly app: string;
+    readonly current: () => boolean;
+    readonly terminalId: string;
+    readonly keys: readonly string[];
+  }): Promise<import("@clankie/protocol/connector").KeyPressResult>;
   /** Records a verified outside delivery in the fleet room (VUH-2403); never blocks or alters its handling. */
   recordInbound?(arrival: import("./fleet-room.ts").InboundArrival): void;
   /**
@@ -666,9 +676,9 @@ export interface CaptainPort {
   trackerClosurePolicy?(trackerProjectId: string | null): Promise<"lead" | "owner">;
   linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
   linearWakeRecoveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeRecoveries"]>;
-  /** Append verified external context to the selected ordinary chat and optionally wake it. */
-  receiveLinearActivity(
-    activity: LinearActivityEvent,
+  /** Append a connected tracker's verified context to the selected ordinary chat and optionally wake it. */
+  receiveTrackerActivity(
+    activity: TrackerActivity,
     following: boolean,
     conversationId?: string,
   ): boolean | void;
@@ -797,7 +807,7 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
     linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
     linearWakeDeliveries: () => [],
     linearWakeRecoveries: () => [],
-    receiveLinearActivity: () => true,
+    receiveTrackerActivity: () => true,
     fleetConversationAuthority: async () => undefined,
     fleetWriteAuthority: async () => undefined,
     close: async () => {},

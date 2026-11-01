@@ -75,6 +75,16 @@
       "pattern": "at 80% of the window",
       "adr": "0293",
       "now": "Leads retire a seat past about 300K tokens of context (lead skill). Accepted ADR 0293 sets the default lead's 250K / 12h restart and 300K Claude backstop; hired-seat automation remains tracked in VUH-2820."
+    },
+    {
+      "pattern": "accounts connect email|his Clankie (mailbox|address)",
+      "adr": "0326",
+      "now": "His mailbox is the owner's own IMAP/SMTP server, connected with /connect email; the hosted Clankie mailbox is gone."
+    },
+    {
+      "pattern": "free official Clankie bot|official Clankie bot \\(free",
+      "adr": "0326",
+      "now": "Discord runs on the owner's own bot or lab user session; the shared official bot setting is gone."
     }
   ]
 }

@@ -7,7 +7,6 @@ import type { CaptainRouteFetcher } from "./session/operator-conversations.ts";
 import { LinearWakeSettingsSchema, SettingsStore, type EmailSettings } from "@clankie/settings";
 import { Readable } from "node:stream";
 import {
-  CLANKIE_ACCOUNT_PROVIDER_ID,
   connectLinearApp,
   LINEAR_MCP_RESOURCE,
   LINEAR_WEBHOOK_PROVIDER_ID,
@@ -17,7 +16,6 @@ import {
   type RedactedCredential,
 } from "@clankie/credential-broker";
 import { LINEAR_WEBHOOK_PATH } from "@clankie/protocol/public-gateway";
-import { AccountEmailConnectResultSchema, type AccountConnection } from "@clankie/protocol/accounts";
 import { runLinearCommand } from "./command/linear.ts";
 import { describeRedactedCredential, runDiscordWizard, showDiscordInvite } from "./discord-commands.ts";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
@@ -746,52 +744,6 @@ async function connectLinearApplication(
   }
 }
 
-/**
- * One step (ADR 0242): the address comes from Clankie's mail service and the
- * install's Clankie account authorizes it, so there is nothing to type.
- */
-async function connectClankieMailbox(shell: ClankieFaceShell, services: ConnectCommandServices) {
-  const flow = shell.setupFlow;
-  const signInFirst = () =>
-    flow.renderLine(
-      "Sign this install in to a Clankie account first: run clankie login, then /connect email.",
-      "error",
-    );
-  let mailbox: AccountConnection | undefined;
-  if (services.accounts !== undefined) {
-    // The same account API the app and every other surface use (ADR 0242).
-    const result = AccountEmailConnectResultSchema.safeParse(await services.accounts(["connect", "email"]));
-    if (result.success && !result.data.ok && result.data.error === "account_required") return signInFirst();
-    if (!result.success || !result.data.ok) {
-      flow.renderLine("Clankie's mailbox could not be chosen. Check clankie accounts list.", "error");
-      return;
-    }
-    mailbox = result.data.connection;
-  } else {
-    if ((await services.getCredential(CLANKIE_ACCOUNT_PROVIDER_ID))?.type !== "oauth") return signInFirst();
-    await services.settings.update((current) => {
-      // A from-address set for an IMAP mailbox would sign Clankie mail with the wrong name.
-      const { fromAddress: _imapIdentity, ...email } = current.email;
-      return { ...current, email: { ...email, provider: "clankie" } };
-    });
-  }
-  if (mailbox?.status === "connected") {
-    shell.insertCommandResult(
-      "/connect email",
-      `His Clankie mailbox is ${mailbox.account ?? "connected"}. Mail is console-only — he will not read or send it from Discord.`,
-      "success",
-    );
-    return;
-  }
-  shell.insertCommandResult(
-    "/connect email",
-    mailbox === undefined
-      ? "Switched to his Clankie mailbox. Check it with clankie accounts list once the service is running."
-      : `Switched to his Clankie mailbox, but it is ${mailbox.status.replaceAll("_", " ")}. Check clankie accounts list.`,
-    mailbox === undefined ? "success" : "error",
-  );
-}
-
 async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandServices): Promise<void> {
   const flow = shell.setupFlow;
   const listed = await services.listCredentials();
@@ -822,12 +774,6 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
   const preset = await flow.readSelect({
     message: "Mailbox provider",
     options: [
-      {
-        value: "clankie",
-        label: "Clankie mailbox",
-        hint: "his own @clankie.bot address · no password",
-        description: "Uses this install's Clankie account. Sending has hourly, daily and recipient limits.",
-      },
       { value: "gmail", label: "Gmail", hint: "needs an app password" },
       { value: "icloud", label: "iCloud", hint: "needs an app-specific password" },
       { value: "fastmail", label: "Fastmail" },
@@ -836,10 +782,6 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
     ],
     allowBack: true,
   });
-  if (preset === "clankie") {
-    await connectClankieMailbox(shell, services);
-    return;
-  }
   const presetId = preset as EmailPresetId | undefined;
   if (presetId === undefined) return;
 
@@ -904,7 +846,6 @@ async function runEmailWizard(shell: ClankieFaceShell, services: ConnectCommandS
   await services.settings.update((currentSettings) => ({
     ...currentSettings,
     email: {
-      provider: "imap",
       imapPort: hosts.imapPort ?? 993,
       smtpPort: hosts.smtpPort ?? 587,
       secure: hosts.secure ?? true,

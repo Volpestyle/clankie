@@ -111,7 +111,7 @@ This repository is public. Both neighbors are private and consume
   yourself before asking anyone to look. A Codex worker on the owner's Mac
   reviews every pull request in this repo, `clankie-app` and `clankie-ops`
   and posts its findings as one "Codex review"; the cloud Codex review is off
-  ([ADR 0323](docs/adr/0323-codex-reviews-on-the-owners-mac.md), the
+  ([ADR 0329](docs/adr/0329-codex-reviews-on-the-owners-mac.md), the
   `codex-review` skill). Ask it through Clankie for each round, fix every
   finding of a round in one push, reply on and resolve each thread you
   addressed, then ask once more. The `codex-clean` status passes only once it

@@ -6,8 +6,13 @@ import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { realpath } from "node:fs/promises";
-import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
-import { createHerdrCoreRunner, liveDesktopSeat, readDesktopSeat } from "../src/captain/herdr-core-runner.ts";
+import { occupantIdForHerdrSession, readFleet } from "../src/captain/herdr-census.ts";
+import {
+  createHerdrCoreRunner,
+  herdrCoreCensusFleet,
+  liveDesktopSeat,
+  readDesktopSeat,
+} from "../src/captain/herdr-core-runner.ts";
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
 import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { CLANKIE_SPACE, SEAT_LABEL, createHerdrCoreSeats } from "../src/captain/herdr-core-seats.ts";
@@ -130,6 +135,7 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   const seats = createHerdrCoreSeats({ env });
   const runner = createHerdrCoreRunner({ seats, pollMs: 50 });
   const report = join(cwd, "seat.json");
+  const keysReport = join(cwd, "keys.hex");
   const address = await seats.start({
     argv: [
       process.execPath,
@@ -139,6 +145,11 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
         `const { seatIdentity } = await import(${JSON.stringify(workerLink)});`,
         `(await import("node:fs")).writeFileSync(${JSON.stringify(report)}, JSON.stringify(seatIdentity()));`,
         `console.log("hello from the desktop app");`,
+        // It records the bytes each key press reaches it as.
+        `const fs = await import("node:fs");`,
+        `process.stdin.setRawMode?.(true);`,
+        `let pressed = "";`,
+        `process.stdin.on("data", (bytes) => fs.writeFileSync(${JSON.stringify(keysReport)}, (pressed += bytes.toString("hex"))));`,
         `setInterval(() => {}, 1000);`,
       ].join("\n"),
     ],
@@ -159,7 +170,13 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
     (await runner.readPane(address, "visible", "text")).includes("hello from the desktop app"),
   );
 
+  // Named keys reach his own hire as the bytes a real terminal sends (ADR 0323).
+  await runner.sendKeys!(address, ["up", "ctrl+c", "a"]);
+  await until(async () => existsSync(keysReport) && (await readFile(keysReport, "utf8")).endsWith("61"));
+  expect(await readFile(keysReport, "utf8")).toBe("1b5b410361");
+
   // A terminal the owner started is never his to drive.
+  await expect(runner.sendKeys!(warm, ["ctrl+c"])).rejects.toThrow();
   expect(await runner.resolveTerminal(warm)).toBeUndefined();
   await expect(runner.get(warm)).rejects.toThrow();
   await runner.closePane(warm);
@@ -238,6 +255,30 @@ coreIt("Clankie hires Claude into a desktop-app terminal without typing into it"
       processes: [{ pid: started.pid }],
     });
   }
+
+  // A seat in Clankie's fleet like a Herdr pane's, under the id he routes it by, so an app
+  // lists it as an agent it can message. The owner's own terminal is never seated.
+  const fleet = await readFleet({
+    localAvailable: false,
+    fleets: [herdrCoreCensusFleet(runner, () => seats.available())],
+  });
+  expect(fleet.seats).toEqual([
+    expect.objectContaining({
+      seatId: `herdr-core/${address}`,
+      paneId: `herdr-core/${address}`,
+      fleet: "herdr-core",
+      harness: "claude",
+      session: { source: "herdr:claude", kind: "id", value: session },
+    }),
+  ]);
+  // No desktop app running is an empty fleet, not a machine that stopped answering.
+  const none = createHerdrCoreSeats({ socketPath: join(cwd, "none.sock") });
+  expect(
+    await herdrCoreCensusFleet(createHerdrCoreRunner({ seats: none }), () => none.available()).run([
+      "agent",
+      "list",
+    ]),
+  ).toBe(JSON.stringify({ result: { agents: [] } }));
 
   await expect(runner.startAgent({ name: "ada", kind: "claude", paneId: address })).rejects.toThrow();
   await runner.closePane(address);

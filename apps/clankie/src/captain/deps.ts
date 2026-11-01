@@ -25,15 +25,14 @@ import type {
   GenerateVideoRequest,
   GenerateVideoResult,
 } from "@clankie/protocol";
-import type { BrowserHost } from "../browser-host.ts";
+import type { BrowserToolPort } from "../app/types.ts";
 import type { createDiscordCaptainActionClient } from "../discord-captain-actions.ts";
 import type { createDiscordMusicClient } from "../discord-music.ts";
 import type { createDiscordVoicePresenceClient } from "../discord-voice-presence.ts";
 import type { EmailPort } from "../email.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
-import type { FinishedRender } from "../media-generation.ts";
-import type { TldrawHost } from "../tldraw-host.ts";
+import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
 import type { DiscordTracking } from "../discord-tracking.ts";
 
@@ -42,7 +41,7 @@ import type { DiscordTracking } from "../discord-tracking.ts";
  * in-process function calls.
  */
 export interface CaptainDeps {
-  readonly skinDrafts?: import("../skin-drafts.ts").SkinDraftService;
+  readonly skinDrafts?: import("../ports/media.ts").SkinDraftPort;
   readonly harnessProcesses?: import("../fleet-harness-processes.ts").FleetHarnessProcesses;
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
@@ -150,7 +149,7 @@ export interface CaptainDeps {
   readonly mcp: Pick<McpHost, "catalog" | "catalogStatus" | "call">;
   /** The mail tools only; the account catalog owns status and disconnect. */
   readonly email: Pick<EmailPort, "list" | "read" | "search" | "send">;
-  readonly browser: Pick<BrowserHost, "catalog" | "call">;
+  readonly browser: BrowserToolPort;
   readonly media: {
     generateImage(request: GenerateImageRequest): Promise<GenerateImageResult>;
     /** `room` tags the render so the room that asked is told when it lands. */
@@ -162,7 +161,7 @@ export interface CaptainDeps {
    * His drawing hand (ADR 0096). Absent when the capability is switched off;
    * the tools then say so rather than disappearing.
    */
-  readonly diagrams?: TldrawHost;
+  readonly diagrams?: DiagramPort;
   readonly embodiment: {
     submitIntent(
       intent: EmbodimentIntent,

@@ -483,12 +483,17 @@ it("never tells a worker its question was answered when no reply reached it (VUH
     unanswered: [question],
     instruction: expect.stringContaining("message_seat"),
   });
-  const receiptFor = (id: string) =>
-    f.store
-      .senderReportEvents("w3Z:pCass", "a".repeat(64))
-      .find((event) => event.id === `report:${id}:acknowledged`)?.content;
-  expect(receiptFor(question)).not.toContain("Already answered");
-  expect(receiptFor(question)).toContain("No reply from Clankie has reached you");
+  // What the worker's pane is told now; reading it drains it, as the worker's link does.
+  const told = () => {
+    const events = f.store.senderReportEvents("w3Z:pCass", "a".repeat(64));
+    for (const event of events)
+      expect(f.store.acknowledgeSenderReportEvent("w3Z:pCass", "a".repeat(64), event.id)).toBe(true);
+    return events.map((event) => event.content).join("\n");
+  };
+  const first = told();
+  expect(first).toContain(question);
+  expect(first).not.toContain("Already answered");
+  expect(first).toContain("No reply from Clankie has reached you");
 
   // A lead message that reached the worker answers its earlier reports.
   f.store.recordInboundReportReply("global-default", "w3Z:pCass", "a".repeat(64));
@@ -498,7 +503,9 @@ it("never tells a worker its question was answered when no reply reached it (VUH
       { env: f.env },
     ),
   ).toEqual({ conversationId: "global-default", acknowledged: 1 });
-  expect(receiptFor(answered)).toContain("Already answered in this session's messages.");
+  const second = told();
+  expect(second).toContain(`acknowledged report ${answered}`);
+  expect(second).toContain("Already answered in this session's messages.");
 });
 
 it("accepts the returned JSON page verbatim and preserves conversation binding", async () => {

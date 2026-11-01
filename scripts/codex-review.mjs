@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local Codex review (ADR 0323). A Codex worker on the owner's Mac reviews a
+// Local Codex review (ADR 0329). A Codex worker on the owner's Mac reviews a
 // pull request in its own read-only checkout, then this script posts every
 // finding as one GitHub review headed "Codex review" under the Mac's `gh`
 // login and sets the `codex-clean` commit status on that exact head commit.

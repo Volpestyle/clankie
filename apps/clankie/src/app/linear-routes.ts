@@ -10,6 +10,7 @@ import {
   linearReplyTo,
   linearActivityWakeTypes,
   linearActivityProject,
+  linearTrackerActivity,
   type LinearActivityEvent,
 } from "../linear-webhook.ts";
 import { linearMirrorEvent } from "../linear-mirror.ts";
@@ -29,7 +30,7 @@ export interface RegisterLinearRoutesContext {
   > & {
     readonly captain: Pick<
       ClankieAppDependencies["captain"],
-      "receiveLinearActivity" | "linearWakeTargetAllowed"
+      "receiveTrackerActivity" | "linearWakeTargetAllowed"
     > &
       Partial<
         Pick<
@@ -378,7 +379,8 @@ export function registerLinearRoutes(ctx: RegisterLinearRoutesContext) {
       !ownWorker &&
       matches;
     const ingested =
-      targetAllowed && ctx.dependencies.captain.receiveLinearActivity(activity, following, target);
+      targetAllowed &&
+      ctx.dependencies.captain.receiveTrackerActivity(linearTrackerActivity(activity), following, target);
     // Only what woke him arrives in the room, once: a replayed event is not ingested again.
     const sourceId = activity.eventId ?? activity.deliveryId;
     if (following && ingested !== false && sourceId !== undefined) {

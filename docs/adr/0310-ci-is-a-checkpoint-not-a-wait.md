@@ -32,7 +32,7 @@ checkpoints the rest on the side.
   (`check-landing.mjs --own-tests`), beside the real-app run on the Mac
   (ADR 0309). `landing`, `mac` and `codex-clean` stay required; `mac` is skipped
   on a pull request, which passes. `codex-clean` comes from the Mac's Codex
-  review since ADR 0323.
+  review since ADR 0329.
 - **The rest checkpoints on `main`.** After a merge, the `checkpoint` job runs
   the tests the merge reaches through its imports on Linux, and the `mac` job
   runs them on the Mac. A red run there is a bug to file at the front of the

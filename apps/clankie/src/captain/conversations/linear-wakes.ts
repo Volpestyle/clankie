@@ -1,13 +1,9 @@
 import { type OperatorConversationStreamEvent } from "@clankie/protocol";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import {
-  linearActivityPrompt,
-  linearActivityProject,
-  type LinearActivityEvent,
-} from "../../linear-webhook.ts";
+import type { TrackerActivity } from "../tracker-activity.ts";
 import {
   LINEAR_BURST_WINDOW_MS,
   LINEAR_REPLAY_RETENTION_MS,
@@ -17,16 +13,16 @@ import {
 import type { ConversationStore } from "./store.ts";
 import { type ConversationRunner } from "./types.ts";
 
-export function receiveLinearActivity(
+export function receiveTrackerActivity(
   ctx: ConversationStore,
-  input: LinearActivityEvent,
+  input: TrackerActivity,
   following: boolean,
   conversationId = "global-default",
 ): boolean {
   if (!ctx["linearWakeTargetAllowed"](conversationId))
     throw new Error("Linear wake target must be an existing ordinary global or workspace chat");
   const meta = ctx["metas"].get(conversationId)!;
-  const eventId = input.eventId ?? createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  const eventId = input.eventId;
   if (
     eventId &&
     ((ctx["linearEventReceipts"][eventId] ?? 0) > Date.now() - LINEAR_REPLAY_RETENTION_MS ||
@@ -46,7 +42,7 @@ export function receiveLinearActivity(
   ctx["append"](meta, {
     type: "message",
     role: "external",
-    text: linearActivityPrompt(input),
+    text: input.prompt,
     streaming: false,
     ...(eventId
       ? {
@@ -54,9 +50,9 @@ export function receiveLinearActivity(
             eventId,
             conversationId,
             following,
-            ...(linearActivityProject(input) ? { project: linearActivityProject(input) } : {}),
-            ...(input.routing ? { route: input.routing.reason } : {}),
-            ...(input.notificationReceiver ? { receiver: input.notificationReceiver } : {}),
+            ...(input.project ? { project: input.project } : {}),
+            ...(input.route ? { route: input.route } : {}),
+            ...(input.receiver ? { receiver: input.receiver } : {}),
             ...(input.notificationTypes ? { notificationTypes: [...input.notificationTypes] } : {}),
           },
         }

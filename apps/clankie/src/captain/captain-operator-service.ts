@@ -899,6 +899,17 @@ export function createOperatorService(
         projectEffort === undefined
           ? { effort: "medium", effortReason: "Started from a connected app; medium is the everyday level" }
           : { effortReason: "Started from a connected app; the project sets this worker effort" };
+      // Each start is new work. Where a settled earlier hire fences this place, it goes
+      // as a fresh intent after that hire, as Clankie's own new work there does (#100).
+      const freshIntent =
+        chosen.fleet === undefined
+          ? undefined
+          : ctx.herdrWatches.nextFreshIntent(chosen.fleet, harness, chosen.place.workingDirectory);
+      if (freshIntent !== undefined && !request.prompt?.trim())
+        return answer("refused", {
+          detail:
+            "An earlier agent here has finished, so a new one there needs its own first message. Try again with a prompt.",
+        });
       const hired = await ctx.hireSeat(
         {
           schemaVersion: 1,
@@ -906,6 +917,7 @@ export function createOperatorService(
           title,
           workingDirectory: chosen.place.workingDirectory,
           ...(chosen.fleet === undefined ? {} : { fleet: chosen.fleet }),
+          ...(freshIntent === undefined ? {} : { freshIntent }),
           projectId: chosen.projectId,
           hireKind: "worker",
           ...effort,
@@ -937,7 +949,9 @@ export function createOperatorService(
         },
         "A connected app's start_agent was refused",
       );
-      return answer("refused", { detail: startAgentRefusal(hired.reason, hired.detail) });
+      return answer("refused", {
+        detail: startAgentRefusal(hired.reason, hired.detail, hired.receiptId),
+      });
     }
     if (request.op === "terminal_focus") {
       return {
@@ -1248,6 +1262,7 @@ export function createOperatorService(
       request.op === "fleet_room" ||
       request.op === "app_notes" ||
       request.op === "prompt_answer" ||
+      request.op === "key_press" ||
       request.op === "feed_list" ||
       request.op === "feed_drop" ||
       request.op === "feed_check"
@@ -1592,8 +1607,15 @@ function startAgentPlaces(settings: ClankieSettings): {
   );
 }
 
-function startAgentRefusal(reason: string, detail?: string): string {
-  const words = startAgentRefusalWords(reason);
+function startAgentRefusal(reason: string, detail?: string, receiptId?: string): string {
+  // An earlier start that never confirmed holds its directory until the owner settles it,
+  // so the refusal names the receipt and how: adopt a harness still running in its own
+  // terminal, abandon one whose terminal is gone or holds only a shell.
+  const settle =
+    receiptId !== undefined && (reason === "delivery_unconfirmed" || reason === "start_unconfirmed")
+      ? ` To clear it, the owner runs \`clankie hire-receipt settle ${receiptId} adopt\` if that agent is still running, otherwise \`clankie hire-receipt settle ${receiptId} abandoned\`.`
+      : "";
+  const words = `${startAgentRefusalWords(reason)}${settle}`;
   const why = detail?.trim();
   if (!why) return words;
   const full = `${words} Clankie said: ${why.endsWith(".") ? why : `${why}.`}`;

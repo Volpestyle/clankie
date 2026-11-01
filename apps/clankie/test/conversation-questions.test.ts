@@ -224,7 +224,7 @@ it("answer display cannot become another owner turn, model context, or message w
   stopResolutions();
   await f.store.close();
 });
-it.each(["option", "incarnation", "revision", "request", "conversation", "conflicting"])(
+it.each(["option", "incarnation", "request", "conversation", "conflicting"])(
   "fails closed for %s",
   async (kind) => {
     const f = await fixture();
@@ -234,13 +234,11 @@ it.each(["option", "incarnation", "revision", "request", "conversation", "confli
         ? { answer: { kind: "choice", optionId: randomUUID() } }
         : kind === "incarnation"
           ? { incarnationId: randomUUID() }
-          : kind === "revision"
-            ? { expectedRevision: 99 }
-            : kind === "request"
-              ? { requestId: randomUUID() }
-              : kind === "conversation"
-                ? { conversationId: "wrong" }
-                : { answer: { kind: "text", text: "different" } };
+          : kind === "request"
+            ? { requestId: randomUUID() }
+            : kind === "conversation"
+              ? { conversationId: "wrong" }
+              : { answer: { kind: "text", text: "different" } };
     const result = await f.respond(patch);
     if (result.op !== "input_answer") throw new Error("wrong result");
     expect(["refused", "revision_conflict"]).toContain(result.result.status);

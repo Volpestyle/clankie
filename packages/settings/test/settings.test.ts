@@ -566,11 +566,15 @@ describe("mcp and email settings", () => {
         schemaVersion: 1,
         linear: { defaultTeamId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
         linearWebhook: { actorEmail: "me@example.com" },
-        discord: { possessorVoiceEnabled: true },
+        discord: { possessorVoiceEnabled: true, officialBotEnabled: true },
+        // ADR 0326: the retired Clankie mailbox goes, with the address it assigned.
+        email: { provider: "clankie", fromAddress: "clankie-0a1b2c3d@clankie.bot" },
       })}\n`,
       "utf8",
     );
     expect((await new SettingsStore(path).load()).mcp.servers).toEqual([]);
+    expect((await new SettingsStore(path).load()).discord).not.toHaveProperty("officialBotEnabled");
+    expect((await new SettingsStore(path).load()).email).toEqual(EmailSettingsSchema.parse({}));
     expect((await new SettingsStore(path).load()).linearWebhook).toMatchObject({
       following: false,
       wake: { actors: ["owner"], excludedNotificationTypes: ["issueSubscribed"] },

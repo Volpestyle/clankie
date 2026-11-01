@@ -2,14 +2,15 @@ import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { BODY_TRANSFER_ROUTES } from "@clankie/protocol/body-transfer";
-import type { SettingsStore } from "@clankie/settings";
+import { discordAttachmentRoot, type SettingsStore } from "@clankie/settings";
 import { createClankieApp, type ClankieApp } from "./app.ts";
 import type { ClankieAppDependencies } from "./app/types.ts";
-import { connectBodyToGateway } from "./body-doorway.ts";
 import type { BodyTransfer } from "./body-transfer.ts";
 import { createStubCaptain } from "./captain/port.ts";
+import { createCoreExtensions, doorwayOf, switchedOn, type CorePorts } from "./extension-host.ts";
 import { loadOrCreateDeviceSessionKey } from "./device-session.ts";
 import { createCredentialBackedOperatorAuthenticator } from "./operator-auth.ts";
+import { relayExtension } from "./relay-extension.ts";
 
 /**
  * What a dormant body admits (ADR 0286, VUH-2583): health, the owner's transfer
@@ -62,20 +63,36 @@ export async function serveDormantBody(options: {
   env: NodeJS.ProcessEnv;
   port: number;
   relayPort: number;
-  logger: Parameters<typeof connectBodyToGateway>[0]["logger"];
-  onDoorwayChange?: Parameters<typeof connectBodyToGateway>[0]["onDoorwayChange"];
+  logger: CorePorts["logger"];
+  onDoorwayChange?: CorePorts["onDoorwayChange"];
 }): Promise<number> {
   const { transfer, env, logger } = options;
   await transfer.prepareOutgoing();
-  const { connector } = await connectBodyToGateway({
-    publicGateway: (await options.settingsStore.load()).publicGateway,
-    store: options.store,
+  // The doorway is the relay extension (ADR 0328); it connects once the server listens.
+  let serviceListening: (() => void) | undefined;
+  const listening = new Promise<void>((resolve) => {
+    serviceListening = resolve;
+  });
+  const extensions = createCoreExtensions({
+    credentials: options.store,
     env,
-    port: options.port,
-    relayPort: options.relayPort,
+    servicePorts: { port: options.port, relayPort: options.relayPort },
     logger,
+    capabilityStateRoot: join(options.stateRoot, "runner"),
+    attachmentRoot: discordAttachmentRoot(env),
+    settings: options.settingsStore,
+    stateRoot: options.stateRoot,
+    whenListening: (run) => void listening.then(run),
     ...(options.onDoorwayChange === undefined ? {} : { onDoorwayChange: options.onDoorwayChange }),
   });
+  const startupSettings = await options.settingsStore.load();
+  const publicGateway = startupSettings.publicGateway;
+  extensions.add(relayExtension, {
+    enabled: switchedOn(startupSettings, "relay", publicGateway.url !== undefined),
+    settings: publicGateway,
+  });
+  await extensions.start();
+  const connector = doorwayOf(extensions)?.connector;
   const deviceSessionKeyPath = env.CLANKIE_DEVICE_SESSION_KEY_PATH
     ? resolve(env.CLANKIE_DEVICE_SESSION_KEY_PATH)
     : join(options.stateRoot, "device-session.key");
@@ -96,17 +113,16 @@ export async function serveDormantBody(options: {
     }),
     ...(connector === undefined ? {} : { publicGatewayHostBaseUrl: connector.hostBaseUrl }),
     publicGatewayDoorway: () => connector?.doorway ?? { state: "disabled" },
+    extensions,
   });
   const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: options.port });
-  if (connector !== undefined) {
-    if (server.listening) connector.start();
-    else server.once("listening", () => connector.start());
-  }
+  if (server.listening) serviceListening?.();
+  else server.once("listening", () => serviceListening?.());
   logger.info({ event: "body.dormant", self: transfer.authority() }, "clankie body is dormant");
   for (const signal of ["SIGINT", "SIGTERM"] as const)
     process.once(signal, () => finish(signal === "SIGINT" ? 130 : 143));
   const code = await finished;
-  connector?.close();
+  await extensions.stop();
   app.close();
   await new Promise<void>((done) => server.close(() => done()));
   return code;

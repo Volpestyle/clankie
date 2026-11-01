@@ -92,10 +92,6 @@ export const DeviceRecordSchema = z
     offerId: z.string().min(1),
     mintedBy: z.string().min(1),
     supportGrantId: z.string().uuid().optional(),
-    browserSessionId: z
-      .string()
-      .regex(/^[A-Za-z0-9_-]{43}$/u)
-      .optional(),
     /** Paired through a long-lived review offer (ADR 0154); revoke after the review. */
     review: z.literal(true).optional(),
     localCompanion: z.literal(true).optional(),
@@ -402,10 +398,6 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
       offeredGrants: DeviceGrantSetSchema,
       mintedBy: z.string().min(1),
       supportGrantId: z.string().uuid().optional(),
-      browserSessionId: z
-        .string()
-        .regex(/^[A-Za-z0-9_-]{43}$/u)
-        .optional(),
       review: z.literal(true).optional(),
       localCompanion: z.literal(true).optional(),
       scope: DeviceScopeSchema.optional(),
@@ -413,6 +405,7 @@ export const DeviceEventSchema = z.discriminatedUnion("type", [
       pendingExpiresAt: z.string().datetime(),
     }),
   }),
+  // Written only by the retired hosted browser sign-in (ADR 0326); parsed so an older log replays.
   EventBaseSchema.extend({
     type: z.literal("device.pairing.restarted"),
     data: z

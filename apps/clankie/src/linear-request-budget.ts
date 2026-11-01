@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import type { ProviderAccount, ProviderCredential } from "@clankie/credential-broker";
 import type {
@@ -6,23 +5,14 @@ import type {
   LinearRequestBudgetReport,
 } from "@clankie/protocol/linear-request-budget";
 
-export type LinearRequestPriority = "interactive" | "background";
-const priority = new AsyncLocalStorage<{ value: LinearRequestPriority; admitted?: Set<string> }>();
-export function withLinearRequestPriority<T>(value: LinearRequestPriority, call: () => T): T {
-  return priority.run({ value }, call);
-}
-/** Start a fresh logical tool request, even inside a caller's polling scope. */
-export function withLinearRequestInvocation<T>(value: LinearRequestPriority, call: () => T): T {
-  return priority.run({ value, admitted: new Set() }, call);
-}
-/** The API adapter may serve several provider pages inside the host's one logical request. */
-export function withinLinearRequestInvocation<T>(value: LinearRequestPriority, call: () => T): T {
-  const context = priority.getStore();
-  return context?.value === value && context.admitted ? call() : withLinearRequestInvocation(value, call);
-}
-export function currentLinearRequestPriority(fallback: LinearRequestPriority): LinearRequestPriority {
-  return priority.getStore()?.value ?? fallback;
-}
+export {
+  currentLinearRequestPriority,
+  withinLinearRequestInvocation,
+  withLinearRequestInvocation,
+  withLinearRequestPriority,
+  type LinearRequestPriority,
+} from "./tracker-request-priority.ts";
+import { currentTrackerRequestContext } from "./tracker-request-priority.ts";
 const WINDOW_MS = 3_600_000;
 const LIMIT = 5_000;
 const BACKGROUND_INTERVAL_MS = 60_000;
@@ -88,7 +78,7 @@ export class LinearRequestBudget {
     const observation = this.observe(state, now);
     // Pending warnings must remain retryable even when no more provider calls can be admitted.
     this.warn(state, now, observation);
-    const context = priority.getStore();
+    const context = currentTrackerRequestContext();
     const selectedPriority = context?.value ?? "interactive";
     if (observation.used >= observation.limit - 1) {
       throw new LinearRequestBudgetRefused("budget_exhausted", this.retryAt(state, now));

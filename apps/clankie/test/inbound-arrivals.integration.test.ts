@@ -46,7 +46,8 @@ async function fixture() {
   const account = { userId: randomUUID(), workspaceId: randomUUID() };
   const app = await createClankieApp({
     captain: createStubCaptain({
-      receiveLinearActivity: (activity, wake, target) => store.receiveLinearActivity(activity, wake, target),
+      receiveTrackerActivity: (activity, wake, target) =>
+        store.receiveTrackerActivity(activity, wake, target),
       linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
       submitDiscordTurn: async () => ({
         state: "settled",

@@ -96,6 +96,10 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
     "",
     `  ${captain}`,
     `  ${report.runtimeHealth?.state === "alarm" ? "✗" : report.runtimeHealth?.state === "healthy" ? "✓" : "○"} ${report.runtimeHealth ? formatRuntimeHealth(report.runtimeHealth) : "Runtime health · unknown"}`,
+    ...(report.extensions ?? []).map(
+      (extension) =>
+        `  ${extension.state === "running" ? "✓" : extension.state === "degraded" ? "✗" : "○"} Extension ${extension.id} · ${extension.state}${extension.reason === undefined ? "" : ` · ${extension.reason}`}`,
+    ),
     ...(endpoint ? [`  ${mark(endpoint.reachable)} Model endpoint · ${endpoint.baseURL}`] : []),
     `  ${mark(report.laneTools.reachable)} Lane tools · ${report.laneTools.url}`,
     `  ${mark(report.doorway.state !== "unreachable")} Doorway · ${report.doorway.state}`,

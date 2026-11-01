@@ -21,12 +21,9 @@ import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
 import { alertRecoveredCrash } from "./crash-report-alert.ts";
-import { requireMachineAccess } from "./machine-access.ts";
 import { assertScratchNetwork, verifyLocalSandbox } from "@clankie/settings";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
-import { JoinedComputer } from "./joined-computer.ts";
-import { ComputerBody } from "./computer-body.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
 import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
@@ -41,7 +38,6 @@ import {
   DISCORD_USER_SESSION_PROVIDER_ID,
   resolveActivityProducerCredential,
 } from "@clankie/credential-broker";
-import { PeekabooComputerAdapter } from "./computer-peekaboo.ts";
 import { detectWindowsComputerUseHarnesses } from "./computer-windows-discovery.ts";
 import { detectComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { execFile } from "node:child_process";
@@ -112,9 +108,7 @@ import {
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
-  CLANKIE_ACCOUNT_PROVIDER_ID,
   LINEAR_WEBHOOK_PROVIDER_ID,
-  createClankieAccountTokenProvider,
   ensureDiscordBridgeCredential,
   ensureDiscordUserBridgeCredential,
   ensureDiscordUserVoiceBridgeCredential,
@@ -147,6 +141,7 @@ import {
 import { WebSocketServer } from "ws";
 import { createBearerAuthenticator, createClankieApp, type ClankieApp } from "./app.ts";
 import { SkinDraftService } from "./skin-drafts.ts";
+import { skinDraftRoutes } from "./skin-draft-routes.ts";
 import { skinDraftGenerator } from "./skin-draft-generation.ts";
 import { RemoteProjectLeads } from "./remote-project-leads.ts";
 import { RuntimeHealthObserver } from "./runtime-health.ts";
@@ -154,9 +149,11 @@ import { ExecutionConnections, startHerdrConnection } from "./herdr-session.ts";
 import { ActivityObservationProjection } from "./activity-observation.ts";
 import { PlaySightProjection } from "./play-sight.ts";
 import { HostedWorldSession } from "@clankie/pokemon/world/session";
-import { browserEnabled, createBrowserHost, type BrowserHost } from "./browser-host.ts";
+import { browserEnabled } from "./browser-host.ts";
+import { browserExtension } from "./browser-extension.ts";
+import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
-import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
+import { mediaExtension } from "./media-extension.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
 import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
@@ -172,7 +169,6 @@ import {
   reconcileDiscordVoice,
 } from "./discord-voice-presence.ts";
 import { createEmailPort } from "./email.ts";
-import { accountMailbox, DEFAULT_CLANKIE_GATEWAY_URL } from "./hosted-mailbox.ts";
 import { LocalCodexSeats } from "./local-codex-seats.ts";
 import { LOCAL_FLEET_KEEP_ALIVE_MS, LocalFleetLink } from "./local-fleet-link.ts";
 import { NativeFixtureAdmissions } from "./native-fixture-admissions.ts";
@@ -237,7 +233,15 @@ import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
 import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { connectBodyToGateway } from "./body-doorway.ts";
+import {
+  browserOf,
+  createCoreExtensions,
+  doorwayOf,
+  projected,
+  routesOf,
+  switchedOn,
+} from "./extension-host.ts";
+import { relayExtension } from "./relay-extension.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
@@ -377,17 +381,42 @@ const hostPower = createHostPowerMonitor({
   keepAwakeRequested: async () => keepAwakeEnabled(await settingsStore.load()),
   onSleep: (sleep) => logger.info({ event: "host.slept", ...sleep }, "the host slept underneath the service"),
 });
-const bodyConnection = await connectBodyToGateway({
-  publicGateway: startupSettings.publicGateway,
-  store: operatorCredentialStore,
+// Media he makes lands under the root the Discord attachment resolver already
+// serves (ADR 0085). The root is derived, never merely read, so the bridge
+// that serves the bytes back resolves the same directory this wrote them to.
+const attachmentRoot = discordAttachmentRoot(process.env);
+// ADR 0328: the parts the fleet can run without. The relay attaches here,
+// before the app, so restored pairing routes reach it; it connects once the
+// server listens.
+let serviceListening: (() => void) | undefined;
+const listening = new Promise<void>((resolve) => {
+  serviceListening = resolve;
+});
+const extensions = createCoreExtensions({
+  credentials: operatorCredentialStore,
   env: process.env,
-  port,
-  relayPort,
+  servicePorts: { port, relayPort },
   logger,
+  capabilityStateRoot,
+  attachmentRoot,
+  settings: settingsStore,
+  stateRoot,
+  get bodyLeaseStore() {
+    return bodyLeaseStore;
+  },
+  get machineJoins() {
+    return machineJoins;
+  },
+  whenListening: (run) => void listening.then(run),
   ...(onDoorwayChange === undefined ? {} : { onDoorwayChange }),
 });
-const publicGatewayConnector = bodyConnection.connector;
-const publicGatewaySignInRequiredSince = bodyConnection.signInRequiredSince;
+extensions.add(relayExtension, {
+  enabled: switchedOn(startupSettings, "relay", startupSettings.publicGateway.url !== undefined),
+  settings: startupSettings.publicGateway,
+});
+await extensions.start();
+const publicGatewayConnector = doorwayOf(extensions)?.connector;
+const publicGatewaySignInRequiredSince = doorwayOf(extensions)?.signInRequiredSince;
 const discordBridgeToken = await ensureDiscordBridgeCredential({
   env: process.env,
   store: operatorCredentialStore,
@@ -447,10 +476,6 @@ if (deviceSessionKey === undefined) {
 
 const memory = createFileMemory({ dataDir: defaultMemoryDir(process.env) });
 
-// Media he makes lands under the root the Discord attachment resolver already
-// serves (ADR 0085). The root is derived, never merely read, so the bridge
-// that serves the bytes back resolves the same directory this wrote them to.
-const attachmentRoot = discordAttachmentRoot(process.env);
 const deliveredFiles = new DeliveredFileStore(attachmentRoot);
 const skinDraftOwner = process.env.CLANKIE_OPERATOR_ID ?? "local-operator";
 const skinMediaRoot = join(
@@ -493,39 +518,18 @@ const mediaGenerator = new ConfiguredMediaGenerator({
   configCwd: repoRoot,
 });
 
-// Clankie's private Browser Use Pi session. Chrome launches on the first call.
-let browserHost: BrowserHost | undefined;
-if (browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)) {
-  try {
-    browserHost = await createBrowserHost({
-      stateRoot: capabilityStateRoot,
-      attachmentRoot,
-      logger,
-      environment: process.env,
-      recordSessions: async () => (await settingsStore.load()).browser.recordSessions,
-    });
-    logger.info({ event: "browser.capability.enabled" }, "in-process browser host started");
-  } catch (error) {
-    logger.error(
-      { err: error instanceof Error ? error.message : String(error) },
-      "browser host failed to start; Clankie has no browser this run",
-    );
-  }
-}
+// Clankie's private Browser Use Pi session (ADR 0328 extension). Chrome launches on the first call.
+extensions.add(browserExtension, {
+  enabled: switchedOn(startupSettings, "browser", browserEnabled(process.env.CLANKIE_BROWSER_ENABLED)),
+  settings: startupSettings.browser,
+});
+await extensions.start();
+const browserHost = browserOf(extensions);
 
-// His drawing hand (ADR 0096). The tldraw desktop app is a GUI app on the
-// operator's Mac, so "not open" is the normal absent case and stays a refusal
-// he says out loud; nothing here reaches the app until he draws something.
-let tldrawHost: TldrawHost | undefined;
-if (tldrawEnabled(process.env.CLANKIE_TLDRAW_ENABLED)) {
-  tldrawHost = await createTldrawHost({
-    stateRoot: capabilityStateRoot,
-    attachmentRoot,
-    logger,
-    environment: process.env,
-  });
-  logger.info({ event: "tldraw.capability.enabled" }, "diagram host ready");
-}
+// What he makes (ADR 0328 extension), starting with his drawing hand (ADR 0096).
+extensions.add(mediaExtension, { enabled: switchedOn(startupSettings, "media"), settings: undefined });
+await extensions.start();
+const tldrawHost = projected(extensions, "diagrams");
 
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,
@@ -852,26 +856,9 @@ const discordTracking = new DiscordTracking({
   onError: () => logger.warn("Discord project tracking retained an unavailable or uncertain delivery"),
 });
 
-// His Clankie address (ADR 0242), reached with his Clankie account.
-const selfHostedMailGateway = async () =>
-  (await settingsStore.load()).publicGateway.url ?? DEFAULT_CLANKIE_GATEWAY_URL;
-const mailAccountTokens = new Map<string, ReturnType<typeof createClankieAccountTokenProvider>>();
 const email = createEmailPort({
   credentials: operatorCredentialStore,
   settings: settingsStore,
-  hosted: accountMailbox({
-    gatewayUrl: selfHostedMailGateway,
-    signedIn: async () => (await operatorCredentialStore.get(CLANKIE_ACCOUNT_PROVIDER_ID))?.type === "oauth",
-    token: async () => {
-      const gatewayUrl = await selfHostedMailGateway();
-      let tokens = mailAccountTokens.get(gatewayUrl);
-      if (tokens === undefined) {
-        tokens = createClankieAccountTokenProvider({ gatewayUrl, store: operatorCredentialStore });
-        mailAccountTokens.set(gatewayUrl, tokens);
-      }
-      return tokens();
-    },
-  }),
 });
 
 let proofFleetLinks: FleetLinks | undefined;
@@ -1109,12 +1096,12 @@ const roomObservations = new DiscordRoomObservations(join(stateRoot, "discord-ro
 const discordTurnReceipts = new DiscordTurnReceipts(join(stateRoot, "discord-turn-receipts.json"));
 const bodyLeaseStore = new BodyLeaseStore(join(stateRoot, "body"));
 const bodyLeases = new BodyLeaseRouter(bodyLeaseStore);
-const computer =
-  process.platform === "darwin"
-    ? new ComputerBody(new PeekabooComputerAdapter(), bodyLeaseStore, join(stateRoot, "body"), () =>
-        requireMachineAccess(settingsStore, "local", "screen"),
-      )
-    : undefined;
+// His own computer body (ADR 0328 extension): the Mac's screen and joined machines' screens.
+extensions.add(computerExtension, {
+  enabled: switchedOn(startupSettings, "computer"),
+  settings: undefined,
+});
+await extensions.start();
 const bodyVoiceStays = new BodyVoiceStays(bodyLeaseStore, join(stateRoot, "body", "voice-stays.json"));
 const bodyPlaySessions = new BodyPlaySessions(bodyLeaseStore, join(stateRoot, "body", "play-sessions.json"));
 const gameExtensions = new GameExtensionRegistry<GameExtensionProjection>();
@@ -2351,7 +2338,7 @@ const clankie = await createClankieApp({
   minecraft,
   minecraftHost,
   minecraftPrivateDelivery,
-  ...(computer === undefined ? {} : { computer }),
+  extensionRoutes: [...routesOf(extensions), skinDraftRoutes(skinDrafts)],
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
@@ -2523,8 +2510,8 @@ const clankie = await createClankieApp({
   },
   prepareLocalClaudeShim: (action, binding) => prepareLocalClaudeShim(action, binding),
   deliveredFiles,
-  skinDrafts,
   herdrRuntime: herdr.status,
+  extensions,
   activitySharing,
   ...(activityAdmission === undefined ? {} : { activityAdmission }),
   ...(activityLaunches === undefined ? {} : { activityLaunches }),
@@ -2545,7 +2532,6 @@ const clankie = await createClankieApp({
   startPlayHost: () => playHost.start(playAbort.signal),
   machineJoins,
   gameExtensions,
-  joinedComputer: new JoinedComputer(machineJoins, settingsStore),
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
   autoUpdateManaged: false,
@@ -2696,10 +2682,8 @@ const deviceDoorway = deviceDoorwayHost
 if (deviceDoorway !== undefined) {
   logger.info({ hostname: deviceDoorwayHost, port: deviceDoorwayPort }, "device doorway listening");
 }
-if (publicGatewayConnector !== undefined) {
-  if (server.listening) publicGatewayConnector.start();
-  else server.once("listening", () => publicGatewayConnector?.start());
-}
+if (server.listening) serviceListening?.();
+else server.once("listening", () => serviceListening?.());
 const localFleetServer =
   ["darwin", "linux"].includes(process.platform) && herdr.available()
     ? serve({
@@ -2765,7 +2749,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     );
   runtimeHealth.stop();
   fleetProgress.stop();
-  publicGatewayConnector?.close();
+  void extensions.stop(["relay"]);
   for (const client of webSocketServer.clients) client.close(1001, "service_shutdown");
   webSocketServer.close();
   const closeDoorwayConnections = deviceDoorway === undefined ? undefined : drainHttpServer(deviceDoorway);
@@ -2794,7 +2778,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     linearWakeReads.close();
     await captain.close().catch(() => undefined);
     await herdr.close();
-    await browserHost?.close().catch(() => undefined);
+    await extensions.stop(["browser"]);
     await bodyRequestsStopped;
     await Promise.all(
       externalGames.map((game) =>

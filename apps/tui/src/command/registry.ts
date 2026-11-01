@@ -215,6 +215,13 @@ const HEADLESS_COMMAND_HELP = [
     lines: ["  health | status          Probe every launcher-owned service (JSON)"],
   },
   {
+    nouns: ["extensions"],
+    lines: [
+      "  extensions [status]      Each extension's state: running, degraded with a reason, off (JSON)",
+      "  extensions on|off ID     Switch one extension on or off; applies at the next restart",
+    ],
+  },
+  {
     nouns: ["runtime-health"],
     lines: [
       "  runtime-health [status|on|off]    Runtime CPU and slow-health alarm settings (JSON)",
@@ -290,7 +297,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  connector [status] [--json]   The URL to add in Claude and sign-ins waiting",
       "  connector approve CODE | deny CODE [--json]   Let a Claude sign-in in, or turn it away",
-      "  connector prompts [on|off APP] [--json]   Which connected apps may answer prompts in agents' panes",
+      "  connector prompts [on|off APP] [--json]   Which connected apps may answer prompts and press keys in agents' panes",
       "  connector detect [on|off herdr] [--json]   Whether Herdr sessions are discovered, including ones just cleared",
       "  connector serve [on|off APP] [--json]   Which connected apps the connector serves",
       "  connector lead [clankie|apps] [--json]   Who leads Clankie's lead threads: Clankie, or the connected apps",
@@ -387,7 +394,6 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  accounts [list] | connect github|linear | complete linear --json-stdin | disconnect github|linear   Body account connections (JSON)",
       "  accounts start github | poll github --flow-id ID   Start and check GitHub device authorization separately",
-      "  accounts connect email   Choose his Clankie mailbox in one step (needs a Clankie account sign-in)",
       "  accounts connect linear-app --client-id ID --secret-stdin   Connect a workspace-owned Clankie app",
       "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts claude [list | add HOME --label LABEL | remove LABEL]   Register existing local Claude profiles",

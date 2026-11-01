@@ -1,4 +1,4 @@
-# ADR 0323: Codex reviews on the owner's Mac, and builds run in local workers
+# ADR 0329: Codex reviews on the owner's Mac, and builds run in local workers
 
 Status: Accepted, 2026-11-01, on James's "Yes, add it" to this plan, and his
 word that he turned the cloud Codex review off ("turned it off"). Amends

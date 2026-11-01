@@ -1,4 +1,4 @@
-import { openGatewayValue, sealGatewayValue } from "./gateway-encryption.ts";
+import { openGatewayValue, sealGatewayValue } from "./sealed-values.ts";
 import { machineJoinHash as hash, machineJoinKey } from "./machine-join-crypto.ts";
 /** Service-owned join approval and revocation. No hosted gateway or account control plane. */
 import { randomBytes, randomUUID } from "node:crypto";

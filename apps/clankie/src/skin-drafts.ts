@@ -18,6 +18,7 @@ import {
 import { authorizeQuestion, type QuestionAuthority } from "./captain/conversation-questions.ts";
 import type { SkinDraftGenerator } from "./skin-draft-generation.ts";
 import type { DeliveredFileStore } from "./delivered-files.ts";
+import type { SkinDraftPort } from "./ports/media.ts";
 import { withSerializedLock } from "./app/request-state.ts";
 
 const locks = new Map<string, Promise<unknown>>();
@@ -80,7 +81,7 @@ function seal(input: Omit<SkinDraft, "revision"> | SkinDraft): SkinDraft {
 const complete = (draft: SkinDraft) => SKIN_KEY_POSES.every((pose) => draft.poses[pose]);
 
 /** One host-proven owner domain. Generation requires separate host admission; never animates or selects a look. */
-export class SkinDraftService {
+export class SkinDraftService implements SkinDraftPort {
   private readonly root: string;
   readonly owner: string;
   private readonly files: Pick<DeliveredFileStore, "attachment" | "read">;

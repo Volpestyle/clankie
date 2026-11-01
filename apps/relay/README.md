@@ -149,7 +149,8 @@ agent saved inside its working directory, returned as MCP image content),
 `list_places` (the places an agent can
 start; it starts nothing), `start_agent` (`machine`, `workingDirectory`,
 `harness` claude or codex, `prompt`; with no machine and directory it lists the
-places too), `fleet_capacity` (read only: plans, usage, permits, tracker
+places too), `fleet_capacity` (read only: plans, usage, burn rate per account
+window, the last hour's tokens per local Claude session, permits, tracker
 budgets and live context; a missing number is `"unknown"`), `post_note`
 (`text`, up to 2,000 characters),
 `read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),
@@ -174,6 +175,10 @@ only for an app the owner turned on with `clankie connector prompts on APP`,
 only while the expected text is on screen, and once per prompt; it checks
 again before every step on one bound pane and connection, and stops part way
 when anything changed.
+`press_keys` (the `key_press` op, ADR 0323) presses named keys only, whatever
+the agent is doing, under the same switch, stamp (`400
+key_press_app_is_stamped`) and grant; before every key it checks the same pane
+and connection, the owner's switch and the owner-ask hold.
 Images (ADR 0315): `message_agent` turns each image into an owner attachment
 in the agent's persona thread with `upload_begin`, `upload_chunk` and
 `upload_commit` (ADR 0209), then sends the message naming them, so the agent
