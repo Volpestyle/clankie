@@ -83,6 +83,7 @@ import {
 import {
   DiscordPresenceSessionProjection,
   DiscordVoiceHistoryProjection,
+  retiredDiscordPresenceEventIds,
 } from "../discord-presence-session.ts";
 import { createDiscordRoomRoutes, type RoomAccess, type RoomAuthorization } from "../discord-room-routes.ts";
 import { DiscordUserSessionOptInProjection } from "../discord-user-session-opt-in.ts";
@@ -157,7 +158,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   // Replayed once below, then dropped: after boot the projections hold state
   // and `recentEvents` holds only what redelivery checks need.
   const storedEvents: DomainEvent[] = dependencies.eventLogPath
-    ? loadEventLog(dependencies.eventLogPath, (message) =>
+    ? loadEventLog(dependencies.eventLogPath, retiredDiscordPresenceEventIds, (message) =>
         logger.warn({ event: "event_log.compaction" }, message),
       )
     : [];
