@@ -11,7 +11,7 @@ import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
 import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
 import { MinecraftService } from "../src/minecraft.ts";
-import { minecraftTools } from "../src/captain/minecraft-tools.ts";
+import { minecraftTools } from "@clankie/minecraft/tools";
 
 it("configures approved profiles through captain tools with persisted settings and owner authority", async () => {
   const dir = await mkdtemp(join(tmpdir(), "minecraft-setup-"));

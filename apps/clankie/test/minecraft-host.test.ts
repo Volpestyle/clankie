@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BodyConversationIdentity } from "../src/body-lease-router.ts";
 import { createMinecraftHostAuthority } from "../src/minecraft-host-authority.ts";
 import { MinecraftHostService } from "../src/minecraft-host.ts";
-import { minecraftHostTools } from "../src/captain/minecraft-host-tools.ts";
+import { minecraftHostTools } from "@clankie/minecraft/host-tools";
 import type { McpHost } from "../src/mcp-host.ts";
 import type { MinecraftService } from "../src/minecraft.ts";
 

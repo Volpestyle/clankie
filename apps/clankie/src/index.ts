@@ -1538,8 +1538,6 @@ const captain = createCaptain(
         linear: tracker?.backend === "linear",
       };
     },
-    minecraft,
-    minecraftHost,
     gameExtensions,
     bodyLeases,
     browser: {

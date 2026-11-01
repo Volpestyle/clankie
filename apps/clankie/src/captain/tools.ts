@@ -66,10 +66,8 @@ import { HOSTED_WORLD_MIND_OPERATIONS } from "../world/operations.ts";
 import { desktopTools } from "./desktop.ts";
 import { activityTools, type ActivityRoomLauncher } from "./activity-tools.ts";
 import { DISCORD_BODY_UNREACHABLE_MESSAGE } from "../discord-captain-actions.ts";
-import { minecraftTools } from "./minecraft-tools.ts";
 import { fleetEfficiencyTools } from "./fleet-efficiency-tools.ts";
 import { routineTool } from "./routine-tools.ts";
-import { minecraftHostTools } from "./minecraft-host-tools.ts";
 import { skinDraftTool } from "./skin-draft-tools.ts";
 import { driftCorrectionTools, type RecordDriftCorrection } from "./auto-correction-tools.ts";
 
@@ -284,12 +282,8 @@ export function captainTools(
             },
           },
         ]),
-    ...(deps.gameExtensions === undefined
-      ? [
-          ...(deps.minecraft === undefined ? [] : minecraftTools(deps.minecraft, turn)),
-          ...(deps.minecraftHost === undefined ? [] : minecraftHostTools(deps.minecraftHost, turn)),
-        ]
-      : deps.gameExtensions.projections().flatMap((projection) => projection.tools(turn))),
+    // Games offer their tools through their extensions (ADR 0328).
+    ...(deps.gameExtensions?.projections().flatMap((projection) => projection.tools(turn)) ?? []),
     ...(lane === "operator" && autonomy !== undefined ? autonomyTools(autonomy, turn) : []),
     ...(lane === "operator" ? driftCorrectionTools(turn) : []),
     // The apps' board is the owner's machine context, so it stays off Discord rooms.

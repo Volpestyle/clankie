@@ -24,7 +24,7 @@ import { MinecraftMcpPort } from "../src/minecraft-mcp.ts";
 import { minecraftExtension } from "@clankie/minecraft";
 import { GameExtensionRegistry, GameExtensionBusyError } from "@clankie/game-extension";
 import { createMinecraftRoutes } from "../src/minecraft-routes.ts";
-import { minecraftTools } from "../src/captain/minecraft-tools.ts";
+import { minecraftTools } from "@clankie/minecraft/tools";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 const integrationRequire = createRequire(
