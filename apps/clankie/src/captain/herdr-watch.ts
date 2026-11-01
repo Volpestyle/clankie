@@ -3960,7 +3960,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await guard();
       if (this.closed || !this.runner.list) throw new Error("Complete local Herdr inventory is unavailable");
       const localOriginal = ([key, receipt]: readonly [string, UncertainReceipt]) =>
-        JSON.parse(key)[0] === "local" && !receipt.remoteAdmission && !receipt.freshHire;
+        thisMachineReceiptFleet(JSON.parse(key)[0]) && !receipt.remoteAdmission && !receipt.freshHire;
       let original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === id);
       let allocation = this.projectHires.allocation(id);
       const settled = this.hireReceipts.settlement(id);
@@ -4018,10 +4018,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         (allocation && this.activeProjectHires.has(allocation.id))
       )
         throw new Error("The original hire is still active");
+      // A this-machine hire may sit in the desktop app's terminals (ADR 0319): the recorded
+      // pane decides which complete inventory observes it, as abandonment does.
+      const paneFleet = splitFleetQualified(paneId)?.fleet;
+      if (paneFleet !== undefined && paneFleet !== HERDR_CORE_FLEET)
+        throw new Error(`Pane ${paneId} is not on this machine`);
       if (original) this.activeHires.add((fenced = original[0]));
       if (allocation) this.activeProjectHires.add((fencedAllocation = allocation.id));
       const observe = async () => {
-        const inventory = await this.runner.list!();
+        const inventory = await this.runner.list!(paneFleet);
         const agent = inventory.find((entry) => entry.paneId === paneId);
         if (!agent)
           throw new Error(
@@ -4073,7 +4078,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           agent.terminalId,
           undefined,
           occupantId,
-          sessionId === undefined ? undefined : JSON.stringify(["local", harness, sessionId]),
+          sessionId === undefined ? undefined : JSON.stringify([paneFleet ?? "local", harness, sessionId]),
           allocation?.projectId,
         );
       let evidence: LocalHireSettlementEvidence | undefined;
@@ -4145,7 +4150,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     owner: ConversationOwner,
     guard: () => Promise<void>,
   ): Promise<HireReceiptSettlement | undefined> {
-    if (this.closed || splitFleetQualified(agent.paneId) || !agent.session) return undefined;
+    const paneFleet = splitFleetQualified(agent.paneId)?.fleet;
+    if (this.closed || (paneFleet !== undefined && paneFleet !== HERDR_CORE_FLEET) || !agent.session)
+      return undefined;
     const candidate = this.projectHires.retirementCandidate("default", agent.paneId);
     if (!candidate || candidate.confirmed || candidate.request.freshIntent) return undefined;
     const occupantId = occupantIdForHerdrSession(agent.session);
