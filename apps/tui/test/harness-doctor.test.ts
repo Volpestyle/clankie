@@ -89,7 +89,7 @@ it("reports harness registration, generated config source, and live membership s
   }
 });
 
-it("names an installed but outdated Claude worker plugin as remediation", async () => {
+it("names an older installed Claude worker copy for removal (ADR 0317)", async () => {
   const home = await mkdtemp(join(tmpdir(), "clankie-harness-doctor-stale-"));
   try {
     const bundle = join(home, "bundle");
@@ -111,8 +111,10 @@ it("names an installed but outdated Claude worker plugin as remediation", async 
     const stale = report.remediation.filter((line) => line.includes(join(home, ".claude")));
     expect(stale).toHaveLength(1);
     expect(stale[0]).toMatch(
-      /^Update clankie-worker 0\.2\.0 in .+ to \d+\.\d+\.\d+: clankie harness install$/u,
+      /^Remove the old clankie-worker 0\.2\.0 copy from .+: clankie harness install$/u,
     );
+    // Nothing asks the owner to install or enable a Claude worker any more.
+    expect(report.remediation.some((line) => /claude plugin (?:install|enable)/u.test(line))).toBe(false);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

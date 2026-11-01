@@ -379,6 +379,22 @@ export interface CaptainPort {
   }): Promise<import("@clankie/protocol/connector").PromptAnswerResult>;
   /** Records a verified outside delivery in the fleet room (VUH-2403); never blocks or alters its handling. */
   recordInbound?(arrival: import("./fleet-room.ts").InboundArrival): void;
+  /**
+   * Every retained report one seat sent a conversation since a time, read or
+   * not, without offering it to anyone. Setup's agent reports to the shared
+   * lead thread, whose lead may read it first (ADR 0320). The seat's pane comes
+   * from the live census unless the caller kept it from an earlier answer, so a
+   * closed pane's reports stay readable.
+   */
+  seatReports?(input: {
+    readonly conversationId: string;
+    readonly seatId: string;
+    readonly paneId?: string;
+    readonly since: string;
+  }): Promise<{
+    readonly paneId?: string;
+    readonly reports: readonly { readonly text: string; readonly acceptedAt: string }[];
+  }>;
   serveOperatorConversation(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
@@ -447,7 +463,7 @@ export interface CaptainPort {
   syncSeatTranscript(conversationId: string, transcript: SeatTranscriptUpload): boolean;
   seatContext(
     conversationId?: string,
-  ): { conversationId: string; cwd: string; machineId?: string } | undefined;
+  ): { conversationId: string; cwd: string; machineId?: string; participantRoom?: true } | undefined;
   /** Exact transcript/profile recovery; never substitutes the last seat.json or another session. */
   operatorSeatRecovery?(
     conversationId: string,

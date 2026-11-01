@@ -699,7 +699,7 @@ it.each([false, true])(
     expect((await current()).messageReceiver?.state).toBe("unverified");
     // SessionStart is sufficient: no adoption or queued message is necessary.
     await hook(f.service, parent);
-    const resume = `claude --resume ${parent.agent_session.value} --channels plugin:clankie-worker@clankie`;
+    const resume = `claude --resume ${parent.agent_session.value} --plugin-dir <that machine's Clankie worker plugin folder> --channels plugin:clankie-worker@inline`;
     const receiver = FleetSeatMessageReceiverSchema.parse((await current()).messageReceiver);
     expect(receiver.state).toBe("next-turn-only");
     expect(receiver.detail).toContain(resume);
@@ -1568,6 +1568,43 @@ it("offers retained results through authenticated operator dispatch and only ack
   );
   expect((await f.service.operatorRequest("/operator/v1/dispatch", ack)).status).toBe(200);
   expect(accepted(f.root, receipt.id)[0].inboundAcceptances[receipt.id].reportDelivery.state).toBe("read");
+  // Read by the lead, the report still reaches whoever asks for its seat's reports (ADR 0320).
+  const since = new Date(Date.now() - 60_000).toISOString();
+  const bySeat = await Promise.all(
+    (await roster(f.service)).map(async (seat) => ({
+      seatId: seat.seatId,
+      ...(await f.service.captain.seatReports!({
+        conversationId: "global-default",
+        seatId: seat.seatId,
+        since,
+      })),
+    })),
+  );
+  const sender = bySeat.filter(({ reports }) =>
+    reports.some((entry) => entry.text === "Retained finished result for the lead"),
+  );
+  expect(sender).toHaveLength(1);
+  expect(sender[0]!.paneId).toBe(WORKER);
+  // A kept pane still finds it once its seat is gone from the census, and a later start finds nothing.
+  expect(
+    (
+      await f.service.captain.seatReports!({
+        conversationId: "global-default",
+        seatId: "gone",
+        paneId: WORKER,
+        since,
+      })
+    ).reports,
+  ).toHaveLength(1);
+  expect(
+    (
+      await f.service.captain.seatReports!({
+        conversationId: "global-default",
+        seatId: sender[0]!.seatId,
+        since: new Date(Date.now() + 60_000).toISOString(),
+      })
+    ).reports,
+  ).toEqual([]);
   const unauthenticated = await f.service.app.app.request("/operator/v1/dispatch", {
     method: "POST",
     headers: { "content-type": "application/json" },

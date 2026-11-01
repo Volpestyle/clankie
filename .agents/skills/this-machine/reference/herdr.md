@@ -19,6 +19,12 @@ stopping workers. Historical connection IDs, transcript references and grants
 keep their meaning. `herdr add/remove/fleets`, `runtime connect` and `agents hosts`
 remain aliases. Only a changed default workspace needs `clankie restart captain`.
 
+Setup can also hire one read-only Claude agent to look around first
+(`clankie setup-agent start`, ADR 0320). It reads, never changes anything, and
+reports one proposal; `setup-agent status` shows it and
+`setup-agent apply SURVEY LINE...` runs only the lines the owner approved. Never
+approve lines for the owner: show him the proposal and pass on his choice.
+
 The console's `/machines` lists discovered machines and their Herdr sessions
 before asking for typed names. Named connections apply live. Its session details
 manage workspace grants and capacity; choose native harnesses per hire. The

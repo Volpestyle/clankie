@@ -58,7 +58,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["harness"],
     lines: [
-      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh native plugins under current fleet policy\n  harness refresh-tools [--pane PANE]  Refresh an original native catalog\n  harness restart-tools --pane PANE [--report /absolute/report]  Check native same-thread restart admission (local Codex exit unavailable)",
+      "  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh Codex's native plugin and remove older Claude copies under current fleet policy\n  harness refresh-tools [--pane PANE]  Refresh an original native catalog\n  harness restart-tools --pane PANE [--report /absolute/report]  Check native same-thread restart admission (local Codex exit unavailable)",
     ],
   },
   {
@@ -487,6 +487,13 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  navigation [status|set work,messages,world]",
       "                           Choose primary app destinations; first is the landing view (JSON)",
+    ],
+  },
+  {
+    nouns: ["setup-agent"],
+    lines: [
+      "  setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]",
+      "                           Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)",
     ],
   },
   {

@@ -193,7 +193,7 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
   const seatBinding = (
     context: Context,
     lane: string,
-  ): { conversationId?: string; cwd?: string } | { denial: Response } => {
+  ): { conversationId?: string; cwd?: string; participantRoom?: true } | { denial: Response } => {
     const raw = context.req.query("conversationId");
     if (raw !== undefined && !z.string().trim().min(1).max(256).safeParse(raw).success)
       return { denial: context.json({ error: "invalid_conversation" }, 400) };

@@ -451,7 +451,7 @@ it("reattaches the same Claude bridge and accepts its report after a runtime res
 }, 20_000);
 
 it.each([
-  ["claude", "claude --channels plugin:clankie-worker@clankie"],
+  ["claude", "claude --channels plugin:clankie-worker@inline"],
   ["codex", "codex app-server"],
 ] as const)(
   "matches the %s worker catalog the real bridge serves, review tools included, and still names a missing one",

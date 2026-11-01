@@ -245,13 +245,8 @@ describe.skipIf(!harnessesInstalled)("several accounts per harness, signed in fr
   it("moves a re-signed profile's label to the account now signed in there, for hires too", async () => {
     const f = await fixture(true);
     const work = join(f.home, ".claude-work");
-    // A ready profile: first-run setup done and the worker plugin installed.
+    // A ready profile: first-run setup done. Hires load the worker themselves (ADR 0317).
     await writeFile(join(work, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
-    await mkdir(join(work, "plugins"), { recursive: true });
-    await writeFile(
-      join(work, "plugins", "installed_plugins.json"),
-      JSON.stringify({ plugins: { "clankie-worker@clankie": [] } }),
-    );
     await writeFile(join(work, "fixture-identity.json"), JSON.stringify({ email: "alice@example.com" }));
     const hire = async () => {
       const choice = chooseWorkerAccount("mac", "claude", await f.read(), "work");
@@ -346,15 +341,11 @@ describe.skipIf(!harnessesInstalled)("several accounts per harness, signed in fr
   }, 120_000);
 });
 
-/** A Claude profile a hire can use: signed in, first-run setup done, worker plugin installed. */
+/** A Claude profile a hire can use: signed in and first-run setup done. */
 async function readyProfile(home: string, label: string, email: string): Promise<string> {
   const dir = join(home, `.claude-${label}`);
-  await mkdir(join(dir, "plugins"), { recursive: true });
+  await mkdir(dir, { recursive: true });
   await writeFile(join(dir, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
-  await writeFile(
-    join(dir, "plugins", "installed_plugins.json"),
-    JSON.stringify({ plugins: { "clankie-worker@clankie": [] } }),
-  );
   await writeFile(join(dir, "fixture-identity.json"), JSON.stringify({ email }));
   return dir;
 }

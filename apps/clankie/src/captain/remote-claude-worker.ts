@@ -25,27 +25,29 @@ import { claudeTrackerRulesFor } from "./tracker-isolation.ts";
 /**
  * A Claude seat on another machine (VUH-1527): the same interactive worker and
  * the same clankie-worker channel and hooks as on Clankie's Mac, with the three
- * machine-local steps done on that machine. Consent is read from its installed
- * plugins and its managed policy; tracker isolation from its own Claude
- * configuration; and the launch settings are written there as a file. The
- * plugin reaches Clankie back through the fleet's link.
+ * machine-local steps done on that machine. Consent is read from the worker
+ * files `clankie herdr prepare` staged there and its managed policy; tracker
+ * isolation from its own Claude configuration; and the launch settings are
+ * written there as a file. Each launch loads the staged plugin with
+ * `--plugin-dir` (ADR 0317), and it reaches Clankie back through the fleet's link.
  */
 
-const PLUGINS = "---CLANKIE-PLUGINS---";
+const ROOT = "---CLANKIE-WORKER-ROOT---";
 const POLICY = "---CLANKIE-POLICY---";
+/** Where `clankie herdr prepare` stages the worker plugin, under the remote home. */
+const STAGED_WORKER = ".clankie/claude-plugin/worker";
 
 /** The owner's one step for a machine: `clankie herdr prepare` does both halves. */
 function prepareFix(fleet: string): string {
-  return `Run clankie herdr prepare ${fleet} once: it installs ${CLAUDE_WORKER_PLUGIN_ID} on ${fleet} from this Clankie and approves its channel in that machine's managed policy, as its administrator.`;
+  return `Run clankie herdr prepare ${fleet} once: it copies this Clankie's worker plugin to ${fleet} and approves its ${CLAUDE_WORKER_PLUGIN_ID} channel in that machine's managed policy, as its administrator.`;
 }
 
-function consentScript(fleet: HerdrFleet, configDir?: string): string {
+function consentScript(fleet: HerdrFleet): string {
   if (fleet.ssh.shell === "powershell")
     return powershellScriptCommand(
       [
-        ...(configDir === undefined ? [] : [`$env:CLAUDE_CONFIG_DIR = ${powershellLiteral(configDir)}`]),
-        `Write-Output ${powershellLiteral(PLUGINS)}`,
-        "try { & claude plugin list --json 2>$null } catch { }",
+        `$root = Join-Path $env:USERPROFILE ${powershellLiteral(STAGED_WORKER.replaceAll("/", "\\"))}`,
+        `if (Test-Path -LiteralPath (Join-Path $root '.claude-plugin\\plugin.json')) { Write-Output ${powershellLiteral(ROOT)}; Write-Output $root }`,
         "$dir = 'C:\\Program Files\\ClaudeCode'",
         "$files = @(Join-Path $dir 'managed-settings.json') + @(Get-ChildItem (Join-Path $dir 'managed-settings.d') -Filter *.json -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.FullName })",
         `foreach ($file in $files) { if (Test-Path -LiteralPath $file) { Write-Output ${powershellLiteral(POLICY)}; [IO.File]::ReadAllText($file) } }`,
@@ -53,9 +55,8 @@ function consentScript(fleet: HerdrFleet, configDir?: string): string {
     );
   return posixScriptCommand(
     [
-      ...(configDir === undefined ? [] : [`export CLAUDE_CONFIG_DIR=${posixQuote(configDir)}`]),
-      `echo ${posixQuote(PLUGINS)}`,
-      "claude plugin list --json 2>/dev/null || true",
+      `root="$HOME/${STAGED_WORKER}"`,
+      `if [ -f "$root/.claude-plugin/plugin.json" ]; then echo ${posixQuote(ROOT)}; printf '%s\\n' "$root"; fi`,
       'for file in "/Library/Application Support/ClaudeCode/managed-settings.json" "/Library/Application Support/ClaudeCode/managed-settings.d/"*.json /etc/claude-code/managed-settings.json /etc/claude-code/managed-settings.d/*.json; do',
       `  if [ -f "$file" ]; then echo ${posixQuote(POLICY)}; cat "$file"; echo; fi`,
       "done",
@@ -63,20 +64,23 @@ function consentScript(fleet: HerdrFleet, configDir?: string): string {
   );
 }
 
-/** The plugin list and policy files from a consent script's output. */
-export function parseConsentOutput(stdout: string): { plugins: string; policies: string[] } {
-  const afterPlugins = stdout.split(PLUGINS)[1] ?? "";
-  const [plugins = "", ...policies] = afterPlugins.split(POLICY);
-  return { plugins: plugins.trim(), policies: policies.map((policy) => policy.trim()) };
+/** The staged worker root (absent when none is staged) and policy files from a consent script's output. */
+export function parseConsentOutput(stdout: string): { root?: string; policies: string[] } {
+  const [head = "", ...policies] = stdout.split(POLICY);
+  const root = head.split(ROOT)[1]?.trim().split(/\r?\n/u)[0]?.trim();
+  return {
+    ...(root === undefined || root.length === 0 ? {} : { root }),
+    policies: policies.map((policy) => policy.trim()),
+  };
 }
 
+/** Consent, and the staged worker root each launch loads, read once per check on that machine. */
 export function remoteClaudeConsent(fleet: HerdrFleet, shell: FleetShellRun) {
-  return async (env?: Readonly<Record<string, string>>): Promise<ClaudeWorkerConsent> => {
-    const configDir = env?.CLAUDE_CONFIG_DIR;
-    const where = configDir === undefined ? `on ${fleet.id}` : `in ${fleet.id}'s profile ${configDir}`;
-    let output: { plugins: string; policies: string[] };
+  let root: string | undefined;
+  const consent = async (): Promise<ClaudeWorkerConsent> => {
+    let output: { root?: string; policies: string[] };
     try {
-      output = parseConsentOutput(await shell(consentScript(fleet, configDir), 30_000));
+      output = parseConsentOutput(await shell(consentScript(fleet), 30_000));
     } catch (error) {
       return {
         approved: false,
@@ -84,19 +88,16 @@ export function remoteClaudeConsent(fleet: HerdrFleet, shell: FleetShellRun) {
         fix: prepareFix(fleet.id),
       };
     }
-    let installed = false;
-    try {
-      const plugins = JSON.parse(output.plugins) as unknown;
-      installed =
-        Array.isArray(plugins) &&
-        plugins.some((entry) => (entry as { id?: unknown })?.id === CLAUDE_WORKER_PLUGIN_ID);
-    } catch {
-      installed = false;
-    }
-    if (!installed)
+    if (output.root === undefined)
       return {
         approved: false,
-        detail: `${CLAUDE_WORKER_PLUGIN_ID} is not installed ${where}.`,
+        detail: `${fleet.id} has no worker plugin staged by Clankie.`,
+        fix: prepareFix(fleet.id),
+      };
+    if (/[\p{Cc}"]/u.test(output.root))
+      return {
+        approved: false,
+        detail: `unsupported: the worker plugin path on ${fleet.id} contains quotes or control characters`,
         fix: prepareFix(fleet.id),
       };
     if (!policiesApproveWorker(output.policies))
@@ -105,7 +106,16 @@ export function remoteClaudeConsent(fleet: HerdrFleet, shell: FleetShellRun) {
         detail: `${fleet.id}'s managed policy does not approve the ${CLAUDE_WORKER_PLUGIN_ID} channel, and a development channel would stop at a warning only the owner may accept.`,
         fix: prepareFix(fleet.id),
       };
+    root = output.root;
     return { approved: true };
+  };
+  return {
+    consent,
+    workerRoot: async (): Promise<string> => {
+      if (root === undefined && !(await consent()).approved)
+        throw new Error(`${fleet.id} has no approved worker plugin to load`);
+      return root!;
+    },
   };
 }
 
@@ -309,7 +319,7 @@ export function createRemoteClaudeWorkerSeatAdapter(
       const staged = await stageWindowsMessage(shell, text);
       return { text: stagedMessagePointer(staged, text), remove: staged.remove };
     },
-    consent: remoteClaudeConsent(fleet, shell),
+    ...remoteClaudeConsent(fleet, shell),
     trackerDeny: remoteClaudeTrackerDeny(fleet, shell),
     settingsArg: remoteClaudeSettings(fleet, shell),
     briefFile: remoteClaudeSettings(fleet, shell, "clankie-brief-"),

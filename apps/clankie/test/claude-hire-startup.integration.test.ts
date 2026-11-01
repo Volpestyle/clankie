@@ -90,6 +90,8 @@ async function fixture() {
     },
     trackerDeny: () => [],
     timing: { readyMs: 30, receiptMs: 30, pollMs: 1, firstTurnMs: 1 },
+    // Claude names its transcript after the session id it is launched with.
+    newSessionId: () => sessionId,
   });
   return { root, path, agent, sessionId, hooks, adapter, transcript, sends: () => sends };
 }

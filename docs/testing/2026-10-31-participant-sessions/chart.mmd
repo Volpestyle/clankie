@@ -1,0 +1,45 @@
+---
+title: "Clankie's Discord character"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: waiting
+    lg1: stopped
+    lg2: normal
+  }
+  class lg0 orange
+  class lg1 pink
+  class lg2 teal
+  s0: No character session yet
+  s1: Starting the isolated session
+  s2: Configuration revoked#59; withhold the reply
+  s3: Room character is connected
+  s4: Launch uncertain#59; inspect the original
+  s5: Answering in the room's own history
+  s6: Waiting for the owner's permission
+  s7: Only this message's reply returns to Discord
+  [*] --> s0
+  s0 --> s1: first admitted room message
+  s0 --> s2: owner changes access
+  s1 --> s3: native channel connects
+  s1 --> s4: launch response is lost
+  s1 --> s2: owner changes access
+  s3 --> s2: owner changes access
+  s3 --> s5: deliver the room message
+  s4 --> s3: find the existing session
+  s4 --> s2: owner changes access
+  s5 --> s6: character requests machine work
+  s5 --> s7: send the correlated reply
+  s5 --> s2: owner changes access
+  s6 --> s2: owner changes access
+  s6 --> s5: owner declines or owner approves in the native UI
+  s7 --> s2: owner changes access
+  s7 --> s3: another message reuses the character
+  class s0 teal
+  class s1 teal
+  class s2 pink
+  class s3 teal
+  class s4 orange
+  class s5 teal
+  class s6 orange
+  class s7 teal

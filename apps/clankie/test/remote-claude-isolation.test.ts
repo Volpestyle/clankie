@@ -323,7 +323,7 @@ it.each(["unavailable", "malformed", "oversized"])(
     const shell = vi
       .fn()
       .mockResolvedValueOnce(
-        '---CLANKIE-PLUGINS---\n[{"id":"clankie-worker@clankie"}]\n---CLANKIE-POLICY---\n{"channelsEnabled":true,"allowedChannelPlugins":[{"marketplace":"clankie","plugin":"clankie-worker"}]}',
+        '---CLANKIE-WORKER-ROOT---\n/home/fixture/.clankie/claude-plugin/worker\n---CLANKIE-POLICY---\n{"channelsEnabled":true,"allowedChannelPlugins":[{"marketplace":"inline","plugin":"clankie-worker"}]}',
       );
     if (failure === "unavailable")
       shell.mockRejectedValueOnce(new Error("fake-secret unreadable owner config"));

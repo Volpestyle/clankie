@@ -243,6 +243,91 @@ issues) and `all_issues`. Private event and destination mappings survive
 turning tracking off. Unconfirmed mutations stay uncertain without automatic
 replay. Disabling fleet display retains that server’s room webhooks.
 
+Participant rooms always answer in a dedicated character session, created on
+first admitted use and reused across speakers. Choose its harness once:
+
+```sh
+clankie discord server --server SERVER_ID --role participant --participant-harness claude
+```
+
+`discord.guilds[SERVER_ID].participantHarness` is `pi` by default; `claude`
+starts the native interactive Claude Code TUI in Herdr. Character execution has
+a separate conversation record from the public room, so switching an Admin
+room to Participant does not resume or replace its old owner session. Its private character
+directory and native history are separate from owner projects. The projected
+plugin contains public persona, the room channel and transcript synchronization. It has
+no owner memory hooks, fleet skills, inherited MCP servers or account tools;
+the channel exposes only `reply` for the original room message. Commands,
+file changes, network research and skills require the owner's native permission
+prompt. Discord administrator roles, Everyone ownership and individual machine
+grants cannot raise a participant session's authority. Even an owner message
+keeps the room's public context and this permission boundary.
+
+The native launch journal survives service restarts. Concurrent messages reuse
+one launch; a lost launch response requires reconciling the original pane.
+There is no automatic redispatch through Pi or the owner's session. A changed
+native occupant or configuration withholds the reply. Up to four live native
+characters may be allocated; close an unused character in Herdr to make room.
+A native startup/trust prompt may need the owner before the channel connects.
+If a launch ends in a shell before binding, later messages hold that original
+launch instead of opening more tabs. Private service handoffs, held owner wakes
+and worker reports are not replayed into the character.
+The service never answers that prompt from Discord text. Pi participant loops
+start automatically too and retain existing explicitly granted room-skill
+adapters; native Claude characters currently expose only their reply channel.
+
+### Recovering an uncertain character launch
+
+The private journal is `<stateDir>/participant-room-launches.json`, normally
+`~/.clankie/captain/participant-room-launches.json`; `CLANKIE_STATE` changes the
+body state root, with `captain` below it. `starting` or `uncertain` without a
+reconciled pane blocks a second launch; `waiting` is held if its process ended
+before the channel bound. Use the hash from the character execution directory,
+which is distinct from the public room record. A malformed journal blocks every native
+participant launch while leaving other service work available.
+
+First inspect the complete Herdr inventory (`herdr agent list` and
+`herdr pane process-info --pane ID`) for the character's working directory,
+`<stateDir>/participant-rooms/room-HASH`, and its recorded native session.
+If the original exists, reconnect that pane; the next message reconciles and
+reuses it. An unreachable inventory or unresolved process is uncertainty, so
+keep the entry. Never clear it just because a timeout expired.
+
+After the owner confirms that the original process and launcher are gone,
+stop Clankie with `clankie stop clankie` and keep it stopped during the repair.
+Back up the journal, then remove only that exact room's entry. For example,
+replace `room-HASH` with its full canonical ID:
+
+```sh
+participant_state="${CLANKIE_STATE:-$HOME/.clankie}/captain"
+python3 - "$participant_state/participant-room-launches.json" room-HASH <<'PYREPAIR'
+import json, os, pathlib, re, shutil, sys, time
+path, room = pathlib.Path(sys.argv[1]), sys.argv[2]
+assert re.fullmatch(r"room-[a-f0-9]{24}", room)
+entries = json.loads(path.read_text())
+assert entries[room]["phase"] in ("starting", "waiting", "uncertain")
+shutil.copy2(path, path.with_name(path.name + f".backup-{time.time_ns()}"))
+del entries[room]
+temporary = path.with_name(path.name + ".owner-repair")
+with temporary.open("x") as stream:
+    os.chmod(temporary, 0o600)
+    stream.write(json.dumps(entries))
+os.replace(temporary, path)
+PYREPAIR
+clankie start clankie
+```
+
+The next admitted message creates one session; later messages reuse it. Failed
+message receipts remain failed and are not automatically replayed. This repair
+does not erase character files, native history or delivery receipts.
+
+For corrupt JSON, retain the damaged file and restore a known-valid backup
+while the service is stopped. If there is no usable backup, inspect every
+character directory against a complete native inventory first. Only after
+confirming all those launchers and sessions are gone, move the damaged journal
+aside and replace it with an owner-readable `0600` file containing `{}`. Restart
+Clankie; persisted native history is resumed by the normal admission checks.
+
 Each server has a role (`participant` or `admin`) and owners: Just me (`me`,
 the configured `ownerUserId`), Everyone (`everyone`), or a Discord role (`role`
 with `ownerRoleId`). `discord.guilds` records these choices. Admin manages the
@@ -272,12 +357,12 @@ from the connected account. Raw policy JSON and IDs stay under Advanced. App
 and hosted dashboard ownership/skill pickers are follow-ups in their respective
 repositories; their existing setup controls retain the new fields when saving.
 
-Ownership is resolved on each delivery. Discord role membership comes from the
+For Admin servers and owner DMs, ownership is resolved on each delivery. Discord role membership comes from the
 credential-owning body, never from message text. An owner in a mixed room keeps
 one-shot machine tools, but the context withholds private work and fleet detail,
 including when an owner asks. Non-owners get social tools and exactly the room's
-skill adapter. Skill and mixed-room turns use fresh Pi sessions with bounded
-room history. Revocation rechecks settings at tool execution.
+skill adapter. Mixed-room machine turns use fresh Pi sessions with bounded
+room history. Participant Pi rooms reuse a loop under the same skill grant. Revocation rechecks settings at tool execution.
 
 Owner outreach, room relays, tracking messages and fleet webhooks require an
 owner-only audience. Everyone-owned servers satisfy that ownership condition;

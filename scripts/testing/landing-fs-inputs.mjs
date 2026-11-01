@@ -283,6 +283,10 @@ const landingNonVitestInputs = [
     ],
     ["scripts/smoke-herdr-viewer.py", "Explicit manual Herdr viewer smoke driver."],
     [
+      ".githooks/pre-push",
+      "Opt-in pre-push hook: it only runs scripts/pre-push.mjs, which runs the format and lint checks the landing gate runs itself.",
+    ],
+    [
       "integrations/herdr-plugin/status.sh",
       "Herdr status integration: exercised through its explicit installed-plugin smoke check.",
     ],

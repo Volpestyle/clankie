@@ -282,6 +282,8 @@ const onDoorwayChange =
  */
 const repoRoot = resolve(import.meta.dirname, "../../..");
 function loadRepoEnvFile(): void {
+  // Scratch services use their generated environment, never the owner's keys.
+  if (process.env.CLANKIE_SCRATCH === "1") return;
   let contents: string;
   try {
     contents = readFileSync(join(repoRoot, ".env.local"), "utf8");
@@ -2363,6 +2365,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
+  setupSurveyPath: join(stateRoot, "setup-survey.json"),
   connectorDetection,
   evidenceStore,
   builtInTracker,

@@ -251,7 +251,8 @@ workers with `message_agent` or, for a prompt open in a pane, `answer_prompt`.
 An app can send a worker images with `message_agent` (they land under
 `.clankie/inbox/` in its workspace) and look at one the worker saved there with
 `read_image`, so a worker that wants an app to see a screenshot saves it inside
-its working directory and names the path (ADR 0315).
+its working directory and names the path (ADR 0315). Both work for workers on
+linked machines too, when that machine's access is Workers or above (ADR 0316).
 They keep issues current with `save_issue` and `comment_issue`, which pass each
 project's posting setting as an agent's writes do (ADR 0305).
 The owner's own messages still reach you. When the owner hands the lead back,
@@ -377,9 +378,9 @@ and readable exact transcript.
 ## Hand-started Claude channels
 
 A hand-started Claude in a linked Herdr pane shows an exact-session restart
-command when the worker channel flag is missing; plugin installation alone
-cannot enable a live channel, so the owner uses the shown
-`claude --resume UUID --channels plugin:clankie-worker@clankie`. Do not restart
+command when Clankie's worker was not loaded for that session; the owner uses the
+shown `claude --resume UUID --plugin-dir <worker folder> --channels
+plugin:clankie-worker@inline` (ADR 0317). Do not restart
 existing panes or substitute terminal input for messages.
 
 The roster's `inputCapabilities` lists observed `deliveryModes`, exact-task

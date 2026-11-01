@@ -114,7 +114,8 @@ describe("retired hosted routes", () => {
         const answer = await fetch(`${origin}/h/${hostId}${path}`, { method: "POST", body: "{}" });
         expect(answer.status, `${hostId}${path}`).toBe(status);
       }
-      expect((await fetch(`${origin}/h/${hostId}/v1/hosted/credits`)).status).toBe(404);
+      for (const path of ["/v1/hosted/credits", "/v1/discord/official"])
+        expect((await fetch(`${origin}/h/${hostId}${path}`)).status, `${hostId}${path}`).toBe(404);
     }
     expect(seen.account).toEqual([]);
     expect(seen.mac).toEqual([]);

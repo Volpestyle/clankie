@@ -291,7 +291,7 @@ it("validates a persisted exact room against current grants and never falls back
     discord: {
       ...current.discord,
       ownerUserId: "789012345678901234",
-      servers: [{ serverId: "123456789012345678", role: "participant", owners: "me" }],
+      servers: [{ serverId: "123456789012345678", role: "admin", owners: "me" }],
       systemActorUserIds: ["789012345678901234"],
     },
   }));

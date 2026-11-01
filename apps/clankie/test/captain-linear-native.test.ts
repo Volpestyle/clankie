@@ -129,7 +129,7 @@ it("retains original room attribution authority and refuses it after the actor's
     discord: {
       ...current.discord,
       ownerUserId: "11111",
-      servers: [{ serverId: "12345", role: "participant", owners: "me" }],
+      servers: [{ serverId: "12345", role: "admin", owners: "me" }],
       systemActorUserIds: ["11111"],
     },
   }));

@@ -58,6 +58,7 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import {
   CaptainSessionLaneV2Schema,
   CLAUDE_WORKER_PLUGIN_ID,
+  CLAUDE_WORKER_INSTALLED_PLUGIN_ID,
   FLEET_SEAT_MCP_SERVER,
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_SEAT_BRIDGE_CLAIM_HEADER,
@@ -79,6 +80,10 @@ import {
 import { commandHost } from "./io.ts";
 import { runWorkerMcp } from "./worker-mcp.ts";
 import { callEvidenceTool, EVIDENCE_TOOLS, isEvidenceTool, type EvidenceOptions } from "./evidence.ts";
+import {
+  PARTICIPANT_SESSION_ENV,
+  PARTICIPANT_INSTRUCTIONS,
+} from "../../../clankie/src/captain/participant-room-profile.ts";
 import { clankieStateHome } from "../state-home.ts";
 
 /**
@@ -117,8 +122,14 @@ const execFileAsync = promisify(execFileCallback);
 const MCP_USAGE =
   "Usage: clankie mcp [--lane operator [--conversation ID] | --seat | --fleet | --grant FILE]";
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
-/** A hired seat's worker plugin channel (VUH-1458), approved under `--channels`. */
-const WORKER_CHANNEL_PLUGIN = `plugin:${CLAUDE_WORKER_PLUGIN_ID}`;
+/**
+ * A hired seat's worker plugin channel (VUH-1458), approved under `--channels`: the launch's own
+ * `@inline` copy (ADR 0317), or an older install's `@clankie` one.
+ */
+const WORKER_CHANNEL_PLUGINS = [
+  `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
+  `plugin:${CLAUDE_WORKER_INSTALLED_PLUGIN_ID}`,
+];
 const OPERATOR_CHANNEL_ENTRIES = [
   "plugin:clankie@inline",
   "plugin:clankie@clankie",
@@ -293,7 +304,7 @@ export function parentArgvLoadsFleetChannel(argv: string | undefined, workerPlug
   // Only the selected server may consume the mailbox; Claude drops events
   // from the other connection even though both advertise the capability.
   return workerPlugin
-    ? parentArgvApprovesChannel(argv, WORKER_CHANNEL_PLUGIN)
+    ? WORKER_CHANNEL_PLUGINS.some((entry) => parentArgvApprovesChannel(argv, entry))
     : parentArgvLoadsChannel(argv, FLEET_CHANNEL_SERVER);
 }
 
@@ -401,21 +412,31 @@ export function createSeatBridge(
   lane: CaptainSessionLaneV2,
   /** Operator lane only: serve the evidence tools locally, resolving paths from this process's directory. */
   evidence?: EvidenceOptions,
+  participant = false,
 ): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
     { name: "clankie", version: "0.2.0" },
     {
       capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
-      instructions: `${upstream.instructions ?? `Clankie's own tools, in his ${lane} lane.`}\n\n${CHANNEL_INSTRUCTIONS}`,
+      instructions: participant
+        ? PARTICIPANT_INSTRUCTIONS
+        : `${upstream.instructions ?? `Clankie's own tools, in his ${lane} lane.`}\n\n${CHANNEL_INSTRUCTIONS}`,
     },
   );
   upstream.onReconnect?.(() => {
     void server.sendToolListChanged().catch(() => undefined);
   });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...(await upstream.listTools()), REPLY_TOOL, ...(evidence === undefined ? [] : EVIDENCE_TOOLS)],
+    tools: participant
+      ? [REPLY_TOOL]
+      : [...(await upstream.listTools()), REPLY_TOOL, ...(evidence === undefined ? [] : EVIDENCE_TOOLS)],
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (participant && request.params.name !== REPLY_TOOL_NAME)
+      return {
+        isError: true,
+        content: [{ type: "text", text: "This character channel only supports replying to its room event." }],
+      };
     if (evidence !== undefined && isEvidenceTool(request.params.name))
       return callEvidenceTool(request.params.name, request.params.arguments ?? {}, evidence);
     if (request.params.name !== REPLY_TOOL_NAME) {
@@ -1413,7 +1434,7 @@ export async function runMcpCommand(
     OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry)) ||
     // A joined worker loads the installed worker plugin as an approved channel (VUH-2607).
     (env.CLANKIE_JOINED_WORKER_SESSION !== undefined &&
-      parentArgvApprovesChannel(parentArgv, WORKER_CHANNEL_PLUGIN));
+      WORKER_CHANNEL_PLUGINS.some((entry) => parentArgvApprovesChannel(parentArgv, entry)));
   const journal =
     lane === "operator" && channel ? seatPumpJournal(env, conversationId ?? "global-default") : undefined;
   const upstream = await (options.connectUpstream ?? defaultUpstream)({
@@ -1423,7 +1444,7 @@ export async function runMcpCommand(
   const server = createSeatBridge(
     upstream,
     lane,
-    lane === "operator" && options.connectUpstream === undefined
+    lane === "operator" && env[PARTICIPANT_SESSION_ENV] !== "1" && options.connectUpstream === undefined
       ? {
           env,
           host: commandHost({ ...options, env }),
@@ -1432,6 +1453,7 @@ export async function runMcpCommand(
             : { operatorCredentialStore: options.operatorCredentialStore }),
         }
       : undefined,
+    env[PARTICIPANT_SESSION_ENV] === "1",
   );
   const transport = options.transport ?? new HarnessStdioTransport();
   const closing = new AbortController();

@@ -1255,6 +1255,12 @@ export const SpawnOperatorSeatSchema = z
     deliverable: z.string().trim().min(1).max(512).optional(),
     /** The hired persona's team role (ADR 0208); absent leaves it as it was. */
     role: OperatorAgentRoleSchema.optional(),
+    /**
+     * Start the harness in its own read-only mode (ADR 0320): it may read and
+     * report, and every other tool is refused without asking. Only Claude has
+     * one today; other harnesses refuse the hire. Maximum trust never applies.
+     */
+    readOnly: z.literal(true).optional(),
   })
   .strict();
 export type SpawnOperatorSeat = z.infer<typeof SpawnOperatorSeatSchema>;

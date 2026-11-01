@@ -441,6 +441,7 @@ export {
   FLEET_SEAT_MCP_SERVER,
   CLAUDE_WORKER_PLUGIN,
   CLAUDE_WORKER_PLUGIN_ID,
+  CLAUDE_WORKER_INSTALLED_PLUGIN_ID,
   FleetSeatHookSchema,
   ClaudeChannelPermissionRequestSchema,
   type ClaudeChannelPermissionRequest,
@@ -862,3 +863,4 @@ export * from "./fleet-room.ts";
 export * from "./work-tracker-settings.ts";
 export * from "./reviews.ts";
 export * from "./operator-seat-migration.ts";
+export * from "./setup-survey.ts";
