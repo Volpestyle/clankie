@@ -15,13 +15,14 @@ sessions and apps.
 
 ## Pick the harness
 
-- **Native app, or a flow that crosses apps:** the Codex desktop capability on
-  the intended machine. Windows entries name their fleet; its shared body
+- **Native app, their signed-in Chrome, or a flow that crosses apps:** Codex
+  computer use on the intended machine. On macOS it works in background windows
+  without taking the pointer, so it is the default whenever the person may be at
+  the machine. Windows entries name their fleet; its shared body
   adapter observes by default, and its input is not yet released. Verify native app grants and input before
   promising a driving task, and use the fleet-qualified seat on that machine.
-- **Browser-only work in their Chrome:** either Chrome harness. Chrome-only work
-  drives tabs without taking the pointer, so prefer it whenever the person may
-  be at the machine.
+- **Claude in Chrome:** it opens and fronts Chrome windows on their screen, so it
+  needs the same yes as any desktop-driving seat. Prefer Codex computer use.
 - A harness marked "hire with `chrome: true`" (claude) gets that flag on
   `hire_agent`, or it starts without its browser. A local Codex hire marked
   "hire with `mcpServers: ["node_repl"]`" gets that list: Codex runs its
@@ -31,9 +32,9 @@ sessions and apps.
   Read `fleet.notes` for their preference, and say which you picked when it
   isn't obvious.
 
-Hire one computer-use seat per desktop at a time. If the person may be at the
-machine, ask before a desktop-driving seat starts, and never have one type into
-the window they're working in.
+Hire one computer-use seat per desktop at a time. A seat that takes the screen
+(fronts windows or moves the pointer) starts only on the owner's yes for that
+task, asked right then; never have one type into the window they're working in.
 
 ## Brief and hire
 

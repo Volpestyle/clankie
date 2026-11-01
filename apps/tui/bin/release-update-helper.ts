@@ -72,7 +72,12 @@ const result = await executeReleaseUpdate(plan, {
   },
   applicationsDirectory: process.env.CLANKIE_APPLICATIONS_DIR,
   launchApp: async (release, path) => {
-    const paired = await launchMacApp(release, path, { ...process.env, CLANKIE_UPDATE_OPERATION: plan.id });
+    const paired = await launchMacApp(
+      release,
+      path,
+      { ...process.env, CLANKIE_UPDATE_OPERATION: plan.id },
+      { background: true },
+    );
     writeFileSync(join(directory, "app-handoff.json"), JSON.stringify({ paired }) + "\n", {
       mode: 0o600,
       flag: "wx",
