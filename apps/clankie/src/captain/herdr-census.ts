@@ -6,6 +6,8 @@ import { realpath } from "node:fs/promises";
 import { hostname, homedir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import {
   OPERATOR_HEAD_AGENT_NAME,
   OPERATOR_FLEET_ROSTER_MAX,
@@ -816,6 +818,25 @@ export interface ObservedFleet {
 }
 
 /**
+ * One census source (ADR 0327's Effect pilot): its pending diagnostic opens as
+ * the read starts and closes with how it ended, whatever ended it.
+ */
+function observeSource<T>(
+  source: string,
+  onPending: ((source: string, pending: boolean, outcome?: "ok" | "error") => void) | undefined,
+  read: () => Promise<T>,
+): Effect.Effect<T, unknown> {
+  return Effect.suspend(() => {
+    onPending?.(source, true);
+    return Effect.tryPromise({ try: read, catch: (cause) => cause });
+  }).pipe(
+    Effect.onExit((exit) =>
+      Effect.sync(() => onPending?.(source, false, Exit.isSuccess(exit) ? "ok" : "error")),
+    ),
+  );
+}
+
+/**
  * The fleet as occupied, messageable seats (ADR 0147), and the head seat when
  * a pane holds his name. Fail-soft: a down herdr socket renders an empty roster —
  * seats offline, never a failed conversation surface.
@@ -837,49 +858,46 @@ export async function readFleet(
 ): Promise<ObservedFleet> {
   // Herdr's snapshot contains the same complete AgentInfo rows as agent.list,
   // alongside placement. Read them together, once, without an authority cache.
-  async function observe<T>(source: string, read: () => Promise<T>): Promise<T> {
-    options.onPending?.(source, true);
-    let outcome: "ok" | "error" = "error";
-    try {
-      const value = await read();
-      outcome = "ok";
-      return value;
-    } finally {
-      options.onPending?.(source, false, outcome);
-    }
-  }
-  const [local, remote] = await Promise.all([
+  const localRead =
     options.localAvailable === false
-      ? Promise.resolve<ObservedFleet>({ seats: [] })
-      : observe("herdr:default", async () => {
+      ? Effect.succeed<ObservedFleet>({ seats: [] })
+      : observeSource("herdr:default", options.onPending, async () => {
           const local = await readLocalFleet(options);
           if (local.unavailable) throw new Error("Local Herdr census unavailable");
           return local;
-        }).catch((): ObservedFleet => ({ seats: [] })),
-    Promise.all(
-      (options.fleets ?? []).map(async (fleet) => {
-        try {
-          const { stdout, snapshot } = await observe(`herdr:${fleet.id}`, async () => {
-            const stdout = await fleet.run(["api", "snapshot"]);
-            const snapshot = JSON.parse(stdout)?.result?.snapshot;
-            if (!Array.isArray(snapshot?.agents)) throw new Error("Complete Herdr snapshot unavailable");
-            return { stdout, snapshot };
-          });
-          return {
-            fleet,
-            agents: parseHerdrAgentList(JSON.stringify({ result: { agents: snapshot.agents } })).map(
-              (entry) => qualifyAgent(fleet.id, entry),
-            ),
-            placements: parseHerdrTerminalCatalog(stdout).map(
-              ({ terminalId, workspace, tab }) => [`${fleet.id}/${terminalId}`, { workspace, tab }] as const,
-            ),
-          };
-        } catch {
-          return { fleet, agents: [], placements: [] };
-        }
-      }),
-    ),
-  ]);
+        }).pipe(Effect.orElseSucceed((): ObservedFleet => ({ seats: [] })));
+  const remoteReads = Effect.forEach(
+    options.fleets ?? [],
+    (fleet) =>
+      observeSource(`herdr:${fleet.id}`, options.onPending, async () => {
+        const stdout = await fleet.run(["api", "snapshot"]);
+        const snapshot = JSON.parse(stdout)?.result?.snapshot;
+        if (!Array.isArray(snapshot?.agents)) throw new Error("Complete Herdr snapshot unavailable");
+        return { stdout, snapshot };
+      }).pipe(
+        // Parsing after a finished read is still this fleet's failure, not a defect.
+        Effect.flatMap(({ stdout, snapshot }) =>
+          Effect.try({
+            try: () => ({
+              fleet,
+              agents: parseHerdrAgentList(JSON.stringify({ result: { agents: snapshot.agents } })).map(
+                (entry) => qualifyAgent(fleet.id, entry),
+              ),
+              placements: parseHerdrTerminalCatalog(stdout).map(
+                ({ terminalId, workspace, tab }) =>
+                  [`${fleet.id}/${terminalId}`, { workspace, tab }] as const,
+              ),
+            }),
+            catch: (cause) => cause,
+          }),
+        ),
+        Effect.orElseSucceed(() => ({ fleet, agents: [] as HerdrCensusAgent[], placements: [] })),
+      ),
+    { concurrency: "unbounded" },
+  );
+  const [local, remote] = await Effect.runPromise(
+    Effect.all([localRead, remoteReads], { concurrency: "unbounded" }),
+  );
   const placements = new Map<string, OperatorHerdrPlacement>(remote.flatMap((entry) => entry.placements));
   const remoteSeats = remote.flatMap((entry) =>
     "error" in entry
