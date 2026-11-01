@@ -937,7 +937,9 @@ export function createOperatorService(
         },
         "A connected app's start_agent was refused",
       );
-      return answer("refused", { detail: startAgentRefusal(hired.reason, hired.detail) });
+      return answer("refused", {
+        detail: startAgentRefusal(hired.reason, hired.detail, hired.receiptId),
+      });
     }
     if (request.op === "terminal_focus") {
       return {
@@ -1593,8 +1595,15 @@ function startAgentPlaces(settings: ClankieSettings): {
   );
 }
 
-function startAgentRefusal(reason: string, detail?: string): string {
-  const words = startAgentRefusalWords(reason);
+function startAgentRefusal(reason: string, detail?: string, receiptId?: string): string {
+  // An earlier start that never confirmed holds its directory until the owner settles it,
+  // so the refusal names the receipt and how: adopt a harness still running in its own
+  // terminal, abandon one whose terminal is gone or holds only a shell.
+  const settle =
+    receiptId !== undefined && (reason === "delivery_unconfirmed" || reason === "start_unconfirmed")
+      ? ` To clear it, the owner runs \`clankie hire-receipt settle ${receiptId} adopt\` if that agent is still running, otherwise \`clankie hire-receipt settle ${receiptId} abandoned\`.`
+      : "";
+  const words = `${startAgentRefusalWords(reason)}${settle}`;
   const why = detail?.trim();
   if (!why) return words;
   const full = `${words} Clankie said: ${why.endsWith(".") ? why : `${why}.`}`;
