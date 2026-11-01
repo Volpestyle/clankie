@@ -27,7 +27,7 @@ export interface TrackerGraphqlPlan {
   readonly references: readonly string[];
 }
 
-export interface TrackerMcpTool {
+interface TrackerMcpTool {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: unknown;

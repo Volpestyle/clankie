@@ -308,7 +308,7 @@ export interface WorkInboxContext {
 export const INBOX_PENDING_QUESTIONS_TOOL = "inbox_pending_questions";
 
 /** What a remote tracker's project listings are built from (ADR 0328). */
-export interface TrackerProjectsParts {
+interface TrackerProjectsParts {
   readonly call: LinearToolCall;
   binding(): Promise<string>;
   projects?(): Promise<ProjectsSettings>;
@@ -317,7 +317,7 @@ export interface TrackerProjectsParts {
 }
 
 /** A remote tracker's read-only projects in the connected account. */
-export interface TrackerProjects {
+interface TrackerProjects {
   repos(): Promise<WorkRepo[]>;
   read(
     request: Extract<WorkRequest, { action: "list" | "show" | "activity" | "project" | "project-details" }>,

@@ -180,7 +180,7 @@ function linearUploadUrl(value: string): boolean {
 const LINEAR_UPLOAD_MAX_BYTES = 128 * 1024 * 1024;
 
 /** A Linear upload refused for a reason the work media reports. */
-export class LinearUploadRefused extends MediaUploadRefused {}
+class LinearUploadRefused extends MediaUploadRefused {}
 
 /** One credentialed read of a Linear upload: allowlisted host, no redirects, bounded size and time. */
 export async function downloadLinearUpload(
