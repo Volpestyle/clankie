@@ -188,6 +188,7 @@ import { createCheckoutMaintenance } from "./captain-checkouts.ts";
 import { createHealthAlerts } from "./captain-health-alerts.ts";
 import { createAutoRounds } from "./captain-auto-rounds.ts";
 import { createPeers } from "./captain-peers.ts";
+import { createCaptainAutoTidy } from "./captain-auto-tidy.ts";
 import { createChannelProjection } from "./channel-projection.ts";
 import {
   claudeWorkerChannelConsent,
@@ -290,13 +291,7 @@ import { fleetRosterWork } from "./fleet-roster-work.ts";
 import { FleetRoster } from "./fleet-roster.ts";
 import type { FleetRosterStarter } from "@clankie/protocol/fleet-roster";
 import { fleetRosterAction } from "./fleet-roster-actions.ts";
-import { PaneTidy, parkedRefs } from "./pane-tidy.ts";
-import {
-  AUTO_TIDY_PANE_CHECK_MS,
-  AUTO_TIDY_WORKTREE_CHECK_MS,
-  createAutoTidy,
-  reviewerSeatIds,
-} from "./auto-tidy.ts";
+import { PaneTidy } from "./pane-tidy.ts";
 import {
   SeatIssueKeeper,
   liveSeatIssue,
@@ -5785,74 +5780,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // Reports left pending by an earlier process run without waiting for a seat.
   setTimeout(() => recoverAllWorkerReports(), 0).unref?.();
 
-  // VUH-2392: finished, harvested, landed hires close on their own, and landed worktrees in
-  // enrolled roots go, through the same guarded close and prune a lead uses.
-  const autoTidy = createAutoTidy({
-    // Watch closes nothing and prunes nothing (ADR 0308).
-    setting: async () => ((await watch.watching()) ? "off" : (await settings()).fleet.autoTidy),
-    runner: herdrRunner,
-    tidy: paneTidy,
-    reviewerSeats: async () => reviewerSeatIds((await settings()).projects),
-    provenance: (agent) => herdrWatches.tidyProvenance(agent),
-    unreadReports: (agent) => reportSummaries(undefined, agent).length,
-    activityAt: (agent) => {
-      const occupant = agent.session && occupantIdForHerdrSession(agent.session);
-      const seat = liveSeats.find((row) => row.seatId === agent.terminalId && row.occupantId === occupant);
-      return [
-        ...reportSummaries(undefined, agent, true).map((report) => report.acceptedAt),
-        seat?.efficiency?.lastReportAt,
-        seat?.efficiency?.lastProgressAt,
-      ];
+  const { autoTidy, stopAutoTidyPanes, stopClosedSeatHistory, stopAutoTidyWorktrees } = createCaptainAutoTidy(
+    {
+      options,
+      settings,
+      shutdown,
+      watch,
+      conversations,
+      herdrRunner,
+      herdrWatches,
+      paneTidy,
+      get liveSeats() {
+        return liveSeats;
+      },
+      reportSummaries,
+      retireClosedSeatReports,
+      validateConversationOwner,
+      pruneWorktree,
     },
-    ownerValid: validateConversationOwner,
-    adoptUnconfirmed: (agent, owner, guard) => herdrWatches.adoptUnconfirmedForTidy(agent, owner, guard),
-    closed: async (owner, entries, adopted) => {
-      for (const entry of entries) {
-        const issue = await herdrWatches.issueStatus?.closed({
-          seatId: entry.seatId,
-          reason: entry.reason,
-          parked: parkedRefs(entry),
-        });
-        if (issue?.outcome === "failed")
-          console.warn("Seat issue status unavailable", issue.issue, issue.detail);
-      }
-      const panes =
-        entries
-          .slice(0, 20)
-          .map((entry) => {
-            const parked = parkedRefs(entry);
-            return `${entry.title || entry.harness} (${entry.paneId}, undo ${entry.id}${parked.length ? `; clean unlanded commits parked on ${parked.join(", ")}` : ""})`;
-          })
-          .join(", ") +
-        (entries.length > 20 ? ` and ${entries.length - 20} more in worker_pane_history` : "");
-      conversations.recordServiceNotice(
-        owner.conversationId,
-        `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed, was explicitly handed off or was parked on a local keep/ branch: ${panes}.${adopted.length ? ` It first adopted ${adopted.length === 1 ? "an unconfirmed hire" : `${adopted.length} unconfirmed hires`} from the exact native session each original receipt observed (receipts ${adopted.slice(0, 20).join(", ")}).` : ""} undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
-      );
-    },
-    checkouts: async () => {
-      const roots = new Map<string, string[]>();
-      for (const root of (await settings()).projects.projects.flatMap((project) => project.worktreeRoots))
-        if (root.machineId === "local")
-          roots.set(root.repoPath, [...(roots.get(root.repoPath) ?? []), root.path]);
-      return [...roots].map(([repository, paths]) => ({ repository, roots: paths }));
-    },
-    prune: (repository, path) => pruneWorktree(repository, path),
-    stopped: () => shutdown.signal.aborted,
-  });
-  const stopAutoTidyPanes = startFleetRounds(async () => {
-    await autoTidy.panes();
-  }, options.autoTidyPaneCheckMs ?? AUTO_TIDY_PANE_CHECK_MS);
-  // VUH-2806: history from seats that are gone, whatever the auto-tidy setting. Reports and
-  // keeps of any pane still listed in its fleet, or of a fleet that cannot be listed, stay.
-  const stopClosedSeatHistory = startFleetRounds(async () => {
-    if (shutdown.signal.aborted) return;
-    await retireClosedSeatReports();
-    await paneTidy.dropGoneKeeps();
-  }, options.autoTidyPaneCheckMs ?? AUTO_TIDY_PANE_CHECK_MS);
-  const stopAutoTidyWorktrees = startFleetRounds(async () => {
-    await autoTidy.worktrees();
-  }, options.autoTidyWorktreeCheckMs ?? AUTO_TIDY_WORKTREE_CHECK_MS);
+  );
 
   const inboundReceipts = new InboundSeatReceipts(
     join(options.stateDir, "delivery-receipts", "inbound.json"),
