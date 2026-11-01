@@ -155,10 +155,9 @@ import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
-import { activityRoutes } from "./activity-routes.ts";
 import { activityTools } from "./activity-tools.ts";
-import { composerTranscriptionRoutes } from "./composer-transcription.ts";
-import { voiceRoomRoutes } from "./voice-room-routes.ts";
+import { voiceExtension } from "./voice-extension.ts";
+import { worldExtension } from "./world/extension.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import type { LinearRouteParts } from "./app/linear-routes.ts";
@@ -556,6 +555,8 @@ const playSight = new PlaySightProjection({ journalRootDir: defaultGbaPlayJourna
 const hostedWorld = new HostedWorldSession();
 const activityPlay = new ActivityPlaySource();
 const activityArtifacts = createActivityArtifactSources({ files: deliveredFiles });
+/** World is one switch at start: its Activity routes and his World tools go together (ADR 0328). */
+const worldOn = switchedOn(startupSettings, "world");
 const activitySharing = new ActivitySharing({
   files: deliveredFiles,
   token: () => resolveActivityProducerCredential(),
@@ -1474,8 +1475,13 @@ const captain = createCaptain(
           }),
     harnessProcesses,
     refreshWorkerCatalogs: (input, authority) => workerToolRefresh.refresh(input, authority),
-    activityTools: (turn, launcher) => activityTools(activitySharing, turn, launcher),
-    playTools: pokeagentTools,
+    // World's tools reach him only when World is on at start (ADR 0328).
+    ...(worldOn
+      ? {
+          activityTools: (turn, launcher) => activityTools(activitySharing, turn, launcher),
+          playTools: pokeagentTools,
+        }
+      : {}),
     ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined
@@ -2266,6 +2272,16 @@ extensions.add(linearTrackerExtension({ linearWebhook, linearRequestBudget, line
   enabled: switchedOn(startupSettings, "tracker-linear"),
   settings: undefined,
 });
+extensions.add(
+  worldExtension({ activitySharing, ...(activityAdmission === undefined ? {} : { activityAdmission }) }),
+  { enabled: worldOn, settings: undefined },
+);
+extensions.add(
+  voiceExtension(
+    new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore, undefined, undefined, voiceProviderReadiness),
+  ),
+  { enabled: switchedOn(startupSettings, "voice"), settings: undefined },
+);
 await extensions.start();
 const clankie = await createClankieApp({
   voiceCall: {
@@ -2378,15 +2394,7 @@ const clankie = await createClankieApp({
   bodyPlaySessions,
   guidePokemonPlay: (text, identity) => hostedWorld.guide(text, () => bodyPlaySessions.guardOwner(identity)),
   minecraftPrivateDelivery,
-  extensionRoutes: [
-    ...routesOf(extensions),
-    skinDraftRoutes(skinDrafts),
-    activityRoutes({ activitySharing, ...(activityAdmission === undefined ? {} : { activityAdmission }) }),
-    composerTranscriptionRoutes(),
-    voiceRoomRoutes(
-      new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore, undefined, undefined, voiceProviderReadiness),
-    ),
-  ],
+  extensionRoutes: [...routesOf(extensions), skinDraftRoutes(skinDrafts)],
   bodyLeases: {
     router: bodyLeases,
     store: bodyLeaseStore,
