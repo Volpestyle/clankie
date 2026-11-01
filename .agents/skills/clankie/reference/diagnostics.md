@@ -58,7 +58,9 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
   `hired`, adopted hand-started `owner` panes, and `unowned` panes; unadopted
   personal panes remain unowned. Counts still include every row. New device
   clients request `GET /v1/fleet/roster?includeWork=true`; the unnegotiated strict
-  v1 response stays unchanged for shipped apps.
+  v1 response stays unchanged for shipped apps. The CLI also reads `startedBy`
+  (`owner`, `clankie`, `app` with its device name, or `agent` with its parent's
+  name; ADR 0321). It says who asked, never who may act.
 - `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`) and
   `fleet.peerMessages` (`on` or `off`).
 - A linked Claude seat with no live receive loop on an older worker bridge gets

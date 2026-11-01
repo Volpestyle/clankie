@@ -10582,6 +10582,16 @@ are display markers, not control grants. Existing counts still include all rows;
 clients can use the markers to select their team count. Unadopted personal panes
 remain `unowned`; the host cannot infer their purpose.
 
+The CLI and the shared API client also request `includeStarters=true`
+(`GET /v1/fleet/roster?includeWork=true&includeStarters=true`, ADR 0321). That
+read adds `startedBy` to each agent: `{kind: "owner"}` for a hire asked for from
+the owner's app or a hand-started pane that was never hired, `{kind: "clankie"}`
+for a hire Clankie chose himself (and hires recorded before this field),
+`{kind: "app", name}` for a hire a connected app asked for, named by its paired
+device, and `{kind: "agent", name}` for a pane another agent's pane started.
+It belongs to the exact occupant and is display only: it grants and ranks
+nothing.
+
 Unnegotiated `GET /v1/fleet/roster` retains the original strict v1 response shape
 so existing app builds continue parsing it. The shared API client opts in; new
 app/device-session consumers must request `?includeWork=true`. The new schema

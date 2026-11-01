@@ -3,6 +3,7 @@ import {
   FleetRosterSnapshotSchema,
   FleetRosterAgentSchema,
   FLEET_ROSTER_WORK_PATH,
+  FLEET_ROSTER_STARTERS_PATH,
 } from "@clankie/protocol/fleet-roster";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import { runFleetRosterCommand } from "../../tui/src/command/fleet-roster.ts";
@@ -138,6 +139,7 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
     project: null,
     task: null,
     ownership: "unowned",
+    startedBy: { kind: "owner" },
   });
   const command = await runFleetRosterCommand([], {
     ownerFetcher: {
@@ -145,12 +147,33 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
         service.app.request(path, { ...init, headers: { authorization: `Bearer ${token("owner")}` } }),
     },
   });
-  expect(command).toMatchObject({ agents: [{ project: null, task: null, ownership: "unowned" }] });
+  expect(command).toMatchObject({
+    agents: [{ project: null, task: null, ownership: "unowned", startedBy: { kind: "owner" } }],
+  });
+  // ADR 0321: who started each agent is a separate opt-in; the work read keeps its shape.
+  const starters = FleetRosterSnapshotSchema.parse(
+    await (
+      await service.app.request(FLEET_ROSTER_STARTERS_PATH, {
+        headers: { authorization: `Bearer ${token("owner")}` },
+      })
+    ).json(),
+  );
+  // The fixture's lead was opened by hand on the owner's machine, not hired.
+  expect(starters.agents.length).toBeGreaterThan(0);
+  expect(starters.agents.map((agent) => agent.startedBy)).toEqual(
+    starters.agents.map(() => ({ kind: "owner" })),
+  );
+  const work = (await (
+    await service.app.request(FLEET_ROSTER_WORK_PATH, {
+      headers: { authorization: `Bearer ${token("owner")}` },
+    })
+  ).json()) as { agents: object[] };
+  expect(work.agents.every((agent) => !("startedBy" in agent))).toBe(true);
   for (const bearer of [token("visitor"), token("guest"), token("support"), "discord", "unknown"])
-    expect(
-      (await service.app.request(FLEET_ROSTER_WORK_PATH, { headers: { authorization: `Bearer ${bearer}` } }))
-        .status,
-    ).toBe(403);
+    for (const path of [FLEET_ROSTER_WORK_PATH, FLEET_ROSTER_STARTERS_PATH])
+      expect(
+        (await service.app.request(path, { headers: { authorization: `Bearer ${bearer}` } })).status,
+      ).toBe(403);
 
   for (const bearer of [token("visitor"), token("guest"), token("support"), "discord", "unknown"]) {
     expect((await fleetRead(bearer)).status).toBe(403);

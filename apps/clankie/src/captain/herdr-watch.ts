@@ -24,7 +24,7 @@ import {
 } from "./project-hires.ts";
 import type { RetirementGuard } from "./retirement-guard.ts";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
-import { HireOwners } from "./hire-owners.ts";
+import { HireOwners, type HireStarter } from "./hire-owners.ts";
 import { NativeQuestionUnownedError } from "./claude-hook-questions.ts";
 import {
   captureConversationAuthority,
@@ -2012,6 +2012,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return owner;
   }
 
+  /** Who asked for this exact occupant's hire (ADR 0321); display only. */
+  public seatStarter(seatId: string, occupantId: string): HireStarter | undefined {
+    return this.hireOwners.starter(seatId, occupantId);
+  }
+
   /** The persisted lead of this exact native occupant, for the census; grants nothing. */
   public seatClaim(agent: HerdrAgentSnapshot): { owner: ConversationOwner; hired: boolean } | undefined {
     return agent.session === undefined
@@ -2804,7 +2809,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
           authorize: async () => (await admitted.authorize()) && (await this.validateOwner?.(held)) === true,
         };
       } else authority = admitted;
-      authority = { ...authority, intentId: this.hireOwners.intent(authority.owner) };
+      // Who asked, for display only (ADR 0321): a connected app, the owner's own app, else Clankie.
+      const startedBy =
+        authority.connectorPlace?.deviceId !== undefined
+          ? ({ kind: "app", deviceId: authority.connectorPlace.deviceId } as const)
+          : authority.ownerHire !== undefined
+            ? ({ kind: "owner" } as const)
+            : undefined;
+      authority = { ...authority, intentId: this.hireOwners.intent(authority.owner, startedBy) };
     }
     if (resume === undefined)
       return this.performSpawnSeat(input, subjectOverride, brief, resume, authority, adopt, flushAdoption);

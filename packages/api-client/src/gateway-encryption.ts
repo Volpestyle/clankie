@@ -17,7 +17,7 @@ import { FLEET_SETTINGS_PATH, FLEET_HIRE_DEFAULTS_PATH } from "@clankie/protocol
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "@clankie/protocol/projects";
 import { isDiscordDirectoryRoute } from "@clankie/protocol";
 import { isWorkerAccountsRoute } from "@clankie/protocol/worker-accounts";
-import { FLEET_ROSTER_WORK_PATH } from "@clankie/protocol/fleet-roster";
+import { FLEET_ROSTER_STARTERS_PATH, FLEET_ROSTER_WORK_PATH } from "@clankie/protocol/fleet-roster";
 
 /** Implemented with node:crypto, WebCrypto, Expo Crypto, or CryptoKit, never JavaScript ciphers. */
 export interface GatewayCrypto {
@@ -186,7 +186,8 @@ export function createGatewayEncryptedFetch(options: GatewayEncryptedFetchOption
     const fleetRosterWorkQuery =
       request.method === "GET" &&
       hostPath !== null &&
-      `${hostPath[2]}${url.search}` === FLEET_ROSTER_WORK_PATH;
+      (`${hostPath[2]}${url.search}` === FLEET_ROSTER_WORK_PATH ||
+        `${hostPath[2]}${url.search}` === FLEET_ROSTER_STARTERS_PATH);
     if (
       hostId !== credential.hostId ||
       (url.search &&

@@ -128,6 +128,7 @@ import {
   type OperatorConversation,
   type OperatorConversationServiceResult,
   type OperatorFleetSeat,
+  type OperatorFleetSnapshot,
   type OperatorSeatEventKind,
   type WorkerReportRouting,
 } from "@clankie/protocol";
@@ -324,6 +325,7 @@ import { createOpenCodeSeatAdapter } from "./opencode-seat-adapter.ts";
 import { createPiSeatAdapter } from "./pi-seat-adapter.ts";
 import { fleetRosterWork } from "./fleet-roster-work.ts";
 import { FleetRoster } from "./fleet-roster.ts";
+import type { FleetRosterStarter } from "@clankie/protocol/fleet-roster";
 import { fleetRosterAction } from "./fleet-roster-actions.ts";
 import { PaneTidy, parkedRefs } from "./pane-tidy.ts";
 import {
@@ -5298,7 +5300,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   }
 
   /** Prefer a stable cursor, but a busy or slow fleet must not starve display reads. */
-  async function readFleetRoster({ includeWork = false }: { includeWork?: boolean } = {}) {
+  async function readFleetRoster({
+    includeWork = false,
+    includeStarters = false,
+  }: {
+    includeWork?: boolean;
+    includeStarters?: boolean;
+  } = {}) {
     const started = Date.now();
     const { snapshot } = await fleetSnapshot();
     const readWarnings = [...(snapshot.readWarnings ?? [])];
@@ -5337,16 +5345,58 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       { ...snapshot, ...(readWarnings.length ? { readWarnings } : {}) },
       waitingRosterSeats(),
     );
+    const starters = includeStarters ? seatStarters(snapshot) : undefined;
     return {
       ...result,
       agents: result.agents.map((agent) => {
         const lead = agent.leadId && conversations.conversation(agent.leadId)?.title;
-        return { ...agent, ...(lead ? { lead } : {}), ...work?.get(agent.seatId) };
+        return {
+          ...agent,
+          ...(lead ? { lead } : {}),
+          ...work?.get(agent.seatId),
+          ...(starters === undefined
+            ? {}
+            : { startedBy: starters(agent.seatId, agent.occupantId, agent.machineId) }),
+        };
       }),
       leads: result.leads.map((lead) => ({
         ...lead,
         name: conversations.conversation(lead.id)?.title ?? lead.name,
       })),
+    };
+  }
+
+  /** A paired device's own name, set by the HTTP app that holds the device registry. */
+  let deviceName: ((deviceId: string) => string | undefined) | undefined;
+  /**
+   * Who started each agent (ADR 0321): display only, and no starter outranks another.
+   * Adoption sets the current lead, never who started it.
+   */
+  function seatStarters(
+    snapshot: OperatorFleetSnapshot,
+  ): (seatId: string, occupantId: string, machineId: string) => FleetRosterStarter {
+    const names = new Map(snapshot.personas.map((persona) => [persona.personaId, persona.name]));
+    const machineOf = (seat: OperatorFleetSeat) => seat.fleet ?? "local";
+    return (seatId, occupantId, machineId) => {
+      const seat = snapshot.seats.find(
+        (entry) =>
+          entry.seatId === seatId && entry.occupantId === occupantId && machineOf(entry) === machineId,
+      );
+      if (seat?.owner?.hired === true) {
+        const asked = herdrWatches.seatStarter(seatId, occupantId);
+        if (asked?.kind === "app")
+          return { kind: "app", name: deviceName?.(asked.deviceId) ?? "A connected app" };
+        return asked?.kind === "owner" ? { kind: "owner" } : { kind: "clankie" };
+      }
+      const parent =
+        seat?.parentSeatId === undefined
+          ? undefined
+          : snapshot.seats.find(
+              (entry) => entry.seatId === seat.parentSeatId && machineOf(entry) === machineId,
+            );
+      const parentName = parent && (names.get(parent.personaId) ?? parent.title).trim();
+      // Not hired and not spawned by another agent: someone started it by hand on the owner's machine.
+      return parentName ? { kind: "agent", name: parentName.slice(0, 256) } : { kind: "owner" };
     };
   }
 
@@ -8080,6 +8130,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get fleetSnapshot() {
         return fleetSnapshot;
       },
+      seatStarters: (snapshot) => seatStarters(snapshot),
       get headSeat() {
         return headSeat;
       },
@@ -8582,6 +8633,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     pruneWorktrees,
     reclaimWorktreeCaches: reclaimCaches,
     fleetRoster: readFleetRoster,
+    setDeviceNames: (lookup: (deviceId: string) => string | undefined) => {
+      deviceName = lookup;
+    },
     fleetRosterAction: (command, authority) =>
       fleetRosterAction(command, authority, {
         read: async () => {

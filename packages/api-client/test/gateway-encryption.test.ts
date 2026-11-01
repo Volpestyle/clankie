@@ -6,7 +6,7 @@ import {
   GatewayRequestError,
   unbase64,
 } from "../src/gateway-encryption.ts";
-import { FLEET_ROSTER_WORK_PATH } from "@clankie/protocol/fleet-roster";
+import { FLEET_ROSTER_STARTERS_PATH, FLEET_ROSTER_WORK_PATH } from "@clankie/protocol/fleet-roster";
 
 const credential = { hostId: "a".repeat(16), key: "A".repeat(43) + "=", ticket: "A".repeat(40) };
 const crypto = {
@@ -55,39 +55,42 @@ describe("gateway transport refusals", () => {
 });
 
 describe("encrypted roster work projection", () => {
-  it("forwards the exact opt-in query and returns enriched roster fields", async () => {
-    const roster = {
-      agents: [
-        {
-          ownership: "hired",
-          project: { id: "app", name: "Clankie app" },
-          task: { issue: "VUH-2472", title: "Hearth roster" },
-        },
-      ],
-    };
-    const frames =
-      [
-        { kind: "start", status: 200, headers: [{ name: "content-type", value: "application/json" }] },
-        { kind: "chunk", bodyBase64: Buffer.from(JSON.stringify(roster)).toString("base64") },
-        { kind: "end" },
-      ]
-        .map((frame) => JSON.stringify({ sealed: JSON.stringify(frame) }))
-        .join("\n") + "\n";
-    const seal = vi.fn(async (_key: string, _plain: string) => "sealed");
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ version: 1, challenge: "a".repeat(64) }))
-      .mockResolvedValueOnce(new Response(frames));
-    const send = createGatewayEncryptedFetch({
-      credential: () => credential,
-      crypto: { ...crypto, seal, open: async (_key, sealed) => sealed },
-      fetchImpl,
-    });
-    const response = await send(`https://example.test/h/${credential.hostId}${FLEET_ROSTER_WORK_PATH}`);
-    expect(await response.json()).toEqual(roster);
-    expect(JSON.parse(seal.mock.calls[0]![1])).toMatchObject({ method: "GET", path: FLEET_ROSTER_WORK_PATH });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
+  it.each([FLEET_ROSTER_WORK_PATH, FLEET_ROSTER_STARTERS_PATH])(
+    "forwards the exact opt-in query (%s) and returns enriched roster fields",
+    async (rosterPath) => {
+      const roster = {
+        agents: [
+          {
+            ownership: "hired",
+            project: { id: "app", name: "Clankie app" },
+            task: { issue: "VUH-2472", title: "Hearth roster" },
+          },
+        ],
+      };
+      const frames =
+        [
+          { kind: "start", status: 200, headers: [{ name: "content-type", value: "application/json" }] },
+          { kind: "chunk", bodyBase64: Buffer.from(JSON.stringify(roster)).toString("base64") },
+          { kind: "end" },
+        ]
+          .map((frame) => JSON.stringify({ sealed: JSON.stringify(frame) }))
+          .join("\n") + "\n";
+      const seal = vi.fn(async (_key: string, _plain: string) => "sealed");
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json({ version: 1, challenge: "a".repeat(64) }))
+        .mockResolvedValueOnce(new Response(frames));
+      const send = createGatewayEncryptedFetch({
+        credential: () => credential,
+        crypto: { ...crypto, seal, open: async (_key, sealed) => sealed },
+        fetchImpl,
+      });
+      const response = await send(`https://example.test/h/${credential.hostId}${rosterPath}`);
+      expect(await response.json()).toEqual(roster);
+      expect(JSON.parse(seal.mock.calls[0]![1])).toMatchObject({ method: "GET", path: rosterPath });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it.each([
     "/v1/fleet/roster?includeWork=false",
@@ -95,6 +98,9 @@ describe("encrypted roster work projection", () => {
     "/v1/fleet/roster?include%57ork=true",
     "/v1/fleet/roster?includeWork=%74rue",
     "/v1/fleet/roster?includeWork=true&extra=1",
+    "/v1/fleet/roster?includeStarters=true",
+    "/v1/fleet/roster?includeStarters=true&includeWork=true",
+    "/v1/fleet/roster?includeWork=true&includeStarters=false",
     "/v1/fleet/roster/retire?includeWork=true",
   ])("refuses other query spellings before transport (%s)", async (path) => {
     const fetchImpl = vi.fn<typeof fetch>();

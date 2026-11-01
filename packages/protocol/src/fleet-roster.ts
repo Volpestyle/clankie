@@ -2,12 +2,15 @@ import { z } from "zod";
 import {
   ClosedWorkerPaneSchema,
   OPERATOR_FLEET_ROSTER_MAX,
+  OperatorAgentStarterSchema,
   OperatorFleetReadWarningsSchema,
 } from "./operator-conversations.ts";
 
 export const FLEET_ROSTER_PATH = "/v1/fleet/roster";
 /** Opt-in because shipped v1 clients reject unknown row fields. */
 export const FLEET_ROSTER_WORK_PATH = `${FLEET_ROSTER_PATH}?includeWork=true`;
+/** Work plus who started each agent (ADR 0321); opt-in for the same reason. */
+export const FLEET_ROSTER_STARTERS_PATH = `${FLEET_ROSTER_WORK_PATH}&includeStarters=true`;
 export const FLEET_ROSTER_RETIRE_PATH = "/v1/fleet/roster/retire";
 export const FLEET_ROSTER_UNDO_PATH = "/v1/fleet/roster/undo";
 const Ref = z.string().min(1).max(512);
@@ -23,6 +26,11 @@ export const FleetRosterCountsSchema = z
     stale: z.number().int().nonnegative(),
   })
   .strict();
+/**
+ * Who started an agent (ADR 0321): the owner by hand or from their app, Clankie on his own,
+ * a connected app through start_agent, or another agent. No starter outranks another.
+ */
+export const FleetRosterStarterSchema = OperatorAgentStarterSchema;
 export const FleetRosterAgentSchema = z
   .object({
     seatId: Ref,
@@ -49,6 +57,8 @@ export const FleetRosterAgentSchema = z
       .optional(),
     /** owner = hand-started, subsequently adopted; no claim means unowned. */
     ownership: z.enum(["hired", "owner", "unowned"]).optional(),
+    /** Only with includeStarters: who started this agent. */
+    startedBy: FleetRosterStarterSchema.optional(),
     summary: z.string().max(4000).optional(),
     lastProgressAt: z.string().datetime().optional(),
     inactiveSince: z.string().datetime().optional(),
@@ -85,6 +95,7 @@ export const FleetRosterActionResultSchema = z.union([
 ]);
 export type FleetRosterSnapshot = z.infer<typeof FleetRosterSnapshotSchema>;
 export type FleetRosterAgent = z.infer<typeof FleetRosterAgentSchema>;
+export type FleetRosterStarter = z.infer<typeof FleetRosterStarterSchema>;
 export type FleetRosterCounts = z.infer<typeof FleetRosterCountsSchema>;
 export type FleetRosterActionResult = z.infer<typeof FleetRosterActionResultSchema>;
 export type RetireFleetAgent = z.infer<typeof RetireFleetAgentSchema>;
