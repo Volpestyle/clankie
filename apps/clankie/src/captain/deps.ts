@@ -45,6 +45,13 @@ export interface CaptainDeps {
   readonly harnessProcesses?: import("../fleet-harness-processes.ts").FleetHarnessProcesses;
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;
   readonly refreshWorkerCatalogs?: import("../worker-tool-refresh.ts").RefreshWorkerCatalogs;
+  /** World's PokeAgent play tools for a turn, which its extension supplies (ADR 0328). */
+  readonly playTools?: (
+    deps: CaptainDeps,
+    turn: import("./tools.ts").TurnContext,
+    lane: CaptainSessionLaneV2,
+    gameplay: import("@clankie/settings").GameplaySettings,
+  ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
   /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
   readonly activityTools?: (
     turn: import("./tools.ts").TurnContext,

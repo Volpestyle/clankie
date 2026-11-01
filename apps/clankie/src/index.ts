@@ -157,6 +157,7 @@ import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
 import { activityRoutes } from "./activity-routes.ts";
 import { activityTools } from "./activity-tools.ts";
+import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
 import type { LinearRouteParts } from "./app/linear-routes.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
@@ -1472,6 +1473,7 @@ const captain = createCaptain(
     harnessProcesses,
     refreshWorkerCatalogs: (input, authority) => workerToolRefresh.refresh(input, authority),
     activityTools: (turn, launcher) => activityTools(activitySharing, turn, launcher),
+    playTools: pokeagentTools,
     ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined

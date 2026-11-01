@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
 import { captainTools } from "../src/captain/tools.ts";
+import { pokeagentTools } from "../src/world/pokeagent-tools.ts";
 
 describe("captain voice presence tools", () => {
   it("presents Pokemon play as one PokeAgent tool family", () => {
@@ -11,6 +12,7 @@ describe("captain voice presence tools", () => {
         getSession: () => Promise.resolve(undefined),
         getLiveSession: () => Promise.resolve(undefined),
       },
+      playTools: pokeagentTools,
     } as unknown as CaptainDeps;
     const names = (gameplay?: { pokeagentMmoEnabled: boolean }) =>
       captainTools(deps, {}, {} as LaneLog, "operator", gameplay)
@@ -125,6 +127,7 @@ describe("captain voice presence tools", () => {
         getSession: () => Promise.resolve(undefined),
         getLiveSession: () => Promise.resolve(undefined),
       },
+      playTools: pokeagentTools,
     } as unknown as CaptainDeps;
     const join = captainTools(deps, { actorId: "user-1" }, {} as LaneLog, "discord_presence").find(
       (tool) => tool.name === "pokeagent_join_mmo",
@@ -170,6 +173,7 @@ describe("captain voice presence tools", () => {
         getLiveSession: () => Promise.resolve(undefined),
       },
       hostedWorld,
+      playTools: pokeagentTools,
     } as unknown as CaptainDeps;
     const world = captainTools(deps, {}, {} as LaneLog, "operator").find(
       (tool) => tool.name === "pokeagent_world",

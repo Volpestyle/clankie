@@ -55,7 +55,6 @@
     "captain/room-handoff-bursts.ts -> captain/discord-turn.ts (persona)",
     "captain/tools.ts -> @clankie/discord-presence-core (persona)",
     "captain/tools.ts -> discord-captain-actions.ts (persona)",
-    "captain/tools.ts -> world/operations.ts (world)",
     "event-log.ts -> discord-presence-session.ts (persona)",
     "game-extension-modules.ts -> discord-active-body.ts (persona)"
   ]
