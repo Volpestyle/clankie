@@ -155,7 +155,8 @@ import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
 import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
 import { activityTools } from "./activity-tools.ts";
-import { voiceExtension } from "./voice-extension.ts";
+import { captainVoice, voiceExtension } from "./voice-extension.ts";
+import { defaultDiscordLiveReceiptPath, readVoiceSpeechSnapshot } from "./voice-receipt-activity.ts";
 import { personaExtension } from "./persona-extension.ts";
 import { discordCaptainTools } from "./captain/discord-tools.ts";
 import { createDiscordTurns } from "./captain/captain-discord-turns.ts";
@@ -545,6 +546,8 @@ const activityArtifacts = createActivityArtifactSources({ files: deliveredFiles 
 const worldOn = switchedOn(startupSettings, "world");
 /** The persona is one switch at start: its routes and his Discord body tools go together (ADR 0328). */
 const personaOn = switchedOn(startupSettings, "persona");
+/** Voice is one switch at start: its routes, the captain's voice lane and the voice body go together (ADR 0328). */
+const voiceOn = switchedOn(startupSettings, "voice");
 /** Minecraft is one switch at start: its game, host, MCP motor and worker driving go together (ADR 0328). */
 const minecraftOn = switchedOn(startupSettings, "minecraft");
 const linearWakeOn = switchedOn(startupSettings, "linear-wake");
@@ -1500,6 +1503,8 @@ const captain = createCaptain(
           channelProjection: discordChannelProjection(discordPresenceRuntime),
         }
       : {}),
+    // Voice's lane instructions and device-call handoff reach him only when voice is on at start.
+    ...(voiceOn ? { voice: captainVoice } : {}),
     ...(activityLaunches === undefined ? {} : { activitySelfHostedLaunch: activityLaunches }),
     discordTracking,
     ...(runtimeUpdater === undefined
@@ -1642,7 +1647,7 @@ const captain = createCaptain(
       ? {
           discordMusic: createDiscordMusicClient(),
           // Joining voice and watching shares are the voice extension's (ADR 0328).
-          ...(switchedOn(startupSettings, "voice")
+          ...(voiceOn
             ? {
                 streamWatch: {
                   current: () => Promise.resolve(boundApp().streamWatch()),
@@ -1659,7 +1664,19 @@ const captain = createCaptain(
     presence: {
       listSessions: () => Promise.resolve(boundApp().presenceSessions()),
       listVoiceHistory: (limit = 5) => Promise.resolve(boundApp().voiceHistory(limit)),
-      listRecentVoiceSpeech: (limit = 12) => boundApp().recentVoiceSpeech(limit),
+      // His recent speech scalars are voice's receipts; with voice off there are none to read.
+      listRecentVoiceSpeech: async (limit = 12) => {
+        if (!voiceOn) return { recent: [] };
+        const room = boundApp()
+          .presenceSessions()
+          .flatMap((session) => session.voiceRooms ?? [])
+          .find((candidate) => candidate.channelId !== undefined);
+        return readVoiceSpeechSnapshot(
+          defaultDiscordLiveReceiptPath(),
+          limit,
+          room?.channelId === undefined ? undefined : { guildId: room.guildId, channelId: room.channelId },
+        );
+      },
     },
     memory: createCaptainMemory(memory),
     resolveDiscordAttachments: createDiscordAttachmentResolver(),
@@ -2319,7 +2336,7 @@ extensions.add(
   voiceExtension(
     new DiscordRoomVoice(bodyVoiceStays, bodyLeaseStore, undefined, undefined, voiceProviderReadiness),
   ),
-  { enabled: switchedOn(startupSettings, "voice"), settings: undefined },
+  { enabled: voiceOn, settings: undefined },
 );
 extensions.add(personaExtension({ receipts: discordTurnReceipts, appearance: personaImages }), {
   enabled: personaOn,

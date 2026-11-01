@@ -441,8 +441,11 @@ export interface CaptainPort {
     readonly runId?: string;
   }): Promise<readonly CaptainTurnSettledMetrics[]>;
   readIssueMetrics(query: IssueMetricsQuery): Promise<IssueMetricsReport>;
-  /** Prompt fragment describing the voice lane, for the realtime voice briefing. A device call says where he is. */
-  voiceLaneInstructions(surface?: import("./voice-lane.ts").VoiceSurface): string;
+  /**
+   * Prompt fragment describing the voice lane, for the realtime voice briefing.
+   * A device call says where he is. Undefined while voice is off.
+   */
+  voiceLaneInstructions(surface?: import("../ports/voice.ts").VoiceSurface): string | undefined;
   /**
    * One of the captain's own self tools (`recall_episodes`, `get_self_state`,
    * `remember_episode`) run in the `discord_voice` lane for this voice room,

@@ -221,6 +221,8 @@ export async function composeVoiceCallBriefing(
 ): Promise<{ readonly instructions: string; readonly briefing: string }> {
   // A malformed settings file fails closed rather than voicing a default character.
   const persona = (await ctx.settingsSource.load()).persona;
+  const voiceLane = ctx.dependencies.captain.voiceLaneInstructions("call");
+  if (voiceLane === undefined) throw new Error("Voice is off");
   const now = ctx.clock();
   const awareness = boundVoiceBriefingText(
     renderVoiceAwareness(await readVoiceAwareness(ctx.dependencies.captain), "device-call", now),
@@ -230,7 +232,7 @@ export async function composeVoiceCallBriefing(
     [
       personaInstructions(persona, "social"),
       (await ctx.dependencies.personaBriefing?.()) ?? "",
-      ctx.dependencies.captain.voiceLaneInstructions("call"),
+      voiceLane,
       VOICE_CALL_REALTIME_SURFACE_RULES,
       awareness,
     ].join("\n\n"),
@@ -285,6 +287,9 @@ export function registerVoiceBriefingRoute(ctx: VoiceBriefingRouteContext) {
     const parsed = DiscordVoiceBriefingRequestSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_discord_voice_briefing" }, 400);
     const request = parsed.data;
+    // The persona serves this route; with voice off at start there is no voice lane to brief.
+    const voiceLane = ctx.dependencies.captain.voiceLaneInstructions();
+    if (voiceLane === undefined) return context.json({ error: "voice_off" }, 404);
     let persona: ClankieSettings["persona"];
     let privateContext = false;
     try {
@@ -334,7 +339,7 @@ export function registerVoiceBriefingRoute(ctx: VoiceBriefingRouteContext) {
       [
         personaInstructions(persona, "social"),
         (await ctx.dependencies.personaBriefing?.()) ?? "",
-        ctx.dependencies.captain.voiceLaneInstructions(),
+        voiceLane,
         DISCORD_VOICE_REALTIME_SURFACE_RULES,
         awareness,
       ].join("\n\n"),

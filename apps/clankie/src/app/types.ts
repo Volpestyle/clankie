@@ -40,7 +40,6 @@ import type { AccountsPort } from "../accounts.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { BodyLeaseRouter } from "../body-lease-router.ts";
 import type { BodyLeaseStore } from "../body-leases.ts";
-import type { BodyVoiceStays } from "../body-voice-stays.ts";
 import { CaptainPresenceManager } from "../captain-presence.ts";
 import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
@@ -54,7 +53,7 @@ import { type MemoryStores } from "../memory.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import { type PushWakeSender } from "../push.ts";
-import type { VoiceSpeechSnapshot } from "../ports/voice.ts";
+import type { BodyVoiceStaysPort } from "../ports/voice.ts";
 import { type WorkItemsService } from "../work-items.ts";
 import { type WorkerMcp } from "../worker-mcp.ts";
 /**
@@ -314,7 +313,7 @@ export interface ClankieAppDependencies {
     actorId: string;
     publishChannelId?: string;
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
-  bodyVoiceStays?: BodyVoiceStays;
+  bodyVoiceStays?: BodyVoiceStaysPort;
   /** Admits an operator's play intent for the conversation that asked; World's play sessions fill it (ADR 0328). */
   bodyPlaySessions?: {
     submit(
@@ -399,7 +398,6 @@ export interface ClankieApp {
   presenceSessions: () => DiscordPresenceSessionRecord[];
   streamWatch: () => DiscordStreamWatchObservation;
   voiceHistory: (limit: number) => DiscordVoiceStay[];
-  recentVoiceSpeech: (limit: number) => Promise<VoiceSpeechSnapshot>;
   conversationBodyRouteAuthorized(
     owner: import("../captain/conversation-owner.ts").ConversationOwner,
   ): boolean;

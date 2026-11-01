@@ -102,7 +102,6 @@ import { createReviewRoutes } from "../review-routes.ts";
 import { createPushDispatcher, type PushDispatcher } from "../push.ts";
 import { createRuntimeUpdateRoutes } from "../runtime-update-routes.ts";
 import { DiscordStreamWatchProjection } from "../stream-watch-observation.ts";
-import { defaultDiscordLiveReceiptPath, readVoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
 import {
   WORK_EXPORT_PATH,
   WorkExportRequestSchema,
@@ -112,7 +111,6 @@ import {
 import { WorkerGrantRequestSchema } from "../worker-mcp.ts";
 import { registerConversationRoutes } from "./conversation-routes.ts";
 import { PROFILE_HASH, discordPresenceBindingKey } from "./body-presence.ts";
-import { registerVoiceCallRoute } from "./voice-call-route.ts";
 import { authenticateCaptain, authenticateOperator, captainTransportKind, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
@@ -1532,38 +1530,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return authenticateLane;
     },
   });
-  registerVoiceCallRoute({
-    get app() {
-      return app;
-    },
-    get dependencies() {
-      return dependencies;
-    },
-    get settingsSource() {
-      return settingsSource;
-    },
-    get clock() {
-      return clock;
-    },
-    get captainPresence() {
-      return captainPresence;
-    },
-    get discordPresenceSessions() {
-      return discordPresenceSessions;
-    },
-    get discordStreamWatch() {
-      return discordStreamWatch;
-    },
-    get embodiment() {
-      return embodiment;
-    },
-    get recordEvent() {
-      return recordEvent;
-    },
-    get idFactory() {
-      return idFactory;
-    },
-  });
   const discordBody: DiscordBodyRouteState = {
     get dependencies() {
       return dependencies;
@@ -2721,17 +2687,6 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     presenceSessions: () => discordPresenceSessions.list(),
     streamWatch: () => discordStreamWatch.current(),
     voiceHistory: (limit: number) => discordVoiceHistory.list(limit),
-    recentVoiceSpeech: (limit: number) => {
-      const room = discordPresenceSessions
-        .list()
-        .flatMap((session) => session.voiceRooms ?? [])
-        .find((candidate) => candidate.channelId !== undefined);
-      return readVoiceSpeechSnapshot(
-        defaultDiscordLiveReceiptPath(),
-        limit,
-        room?.channelId === undefined ? undefined : { guildId: room.guildId, channelId: room.channelId },
-      );
-    },
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: async (): Promise<void> => {

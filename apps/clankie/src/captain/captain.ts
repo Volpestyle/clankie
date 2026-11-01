@@ -282,8 +282,6 @@ import {
   turnSettledLogPath,
   type TurnMetricsQuery,
 } from "./turn-metrics.ts";
-import { composeVoiceLaneInstructions } from "./voice-lane.ts";
-import { voiceCallHandoff, voiceCallTranscript } from "./voice-call-handoff.ts";
 /** How long a head seat stays held after a completed poll; see the seat outbox. */
 const HEAD_BOUND_GRACE_MS = 30_000;
 /** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
@@ -5174,9 +5172,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return readIssueMetrics(options.stateDir, query, current);
     },
 
-    voiceLaneInstructions(surface) {
+    voiceLaneInstructions(surface = "discord") {
       // The same Identity every lane starts from, then the one voice register.
-      return composeVoiceLaneInstructions(captainInstructions(), surface);
+      return deps.voice?.laneInstructions(captainInstructions(), surface);
     },
 
     mainConversationId: () => conversations.defaultGlobalConversationId(),
@@ -5204,8 +5202,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return tool.call(memoryCall ?? args);
     },
 
-    voiceCallHandoff: (input) => voiceCallHandoff(conversations, shutdown.signal, input),
-    voiceCallTranscript: (input) => voiceCallTranscript(conversations, input),
+    async voiceCallHandoff(input) {
+      if (deps.voice === undefined) throw new Error("Voice is off");
+      return deps.voice.callHandoff(conversations, shutdown.signal, input);
+    },
+    voiceCallTranscript: async (input) =>
+      deps.voice === undefined ? false : deps.voice.callTranscript(conversations, input),
 
     async voiceSelfTool({ guildId, channelId, speakerId, name, arguments: args }) {
       // The voice room's own attribution, stamped by the host exactly as a

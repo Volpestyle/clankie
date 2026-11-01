@@ -15,7 +15,12 @@ which starts with its webhook, wake, settings, mirror and cutover routes
 (`linear-extension.ts`), then World's Activity routes and tools and its
 PokeAgent play tools (`activity-routes.ts`, `activity-tools.ts`,
 `world/pokeagent-tools.ts`, switched as `world/extension.ts`), and voice's
-composer transcription and room voice routes (`voice-extension.ts`), and the
+composer transcription, room voice and device voice call routes
+(`voice-extension.ts`), with the voice lane's instructions and a device call's
+handoff and transcript reaching the captain as `CaptainDeps.voice` only while
+voice is on at start, over the core's shapes in `ports/voice.ts` (which also
+names the body's voice stays as the core's voice-lease routes use them; with
+voice off the persona's voice briefing answers `voice_off`), and the
 persona's HTTP routes: rooms, persona and voice settings, appearance and the
 Discord body's routes (`persona-extension.ts`, reading the body's live state the
 core keeps through the route host's `discordBody`), then the persona's Discord
