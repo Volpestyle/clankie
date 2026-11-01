@@ -922,6 +922,35 @@ describe("Claude connector MCP endpoint", () => {
       expect(refused.isError, account).toBe(true);
     }
     expect(relay.seen.filter((request) => request.op === "start_agent")).toHaveLength(startsBeforeBadAccount);
+    // Screen work runs through a Codex computer-use seat, which needs the owner's node_repl server.
+    await client.callTool({
+      name: "start_agent",
+      arguments: {
+        machine: "volpe@pc1",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "codex",
+        mcpServers: ["node_repl"],
+        prompt: "fill the form in a background window",
+      },
+    });
+    expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+      op: "start_agent",
+      schemaVersion: 1,
+      machine: "volpe@pc1",
+      workingDirectory: "C:\\code\\kh2",
+      harness: "codex",
+      mcpServers: ["node_repl"],
+      prompt: "fill the form in a background window",
+    });
+    const startsBeforeBadServers = relay.seen.filter((request) => request.op === "start_agent").length;
+    for (const mcpServers of [[], ["../node_repl"], "node_repl", [7]]) {
+      const refused = await client.callTool({
+        name: "start_agent",
+        arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", mcpServers },
+      });
+      expect(refused.isError, JSON.stringify(mcpServers)).toBe(true);
+    }
+    expect(relay.seen.filter((request) => request.op === "start_agent")).toHaveLength(startsBeforeBadServers);
     const elsewhere = await client.callTool({
       name: "start_agent",
       arguments: { machine: "volpe@pc1", workingDirectory: "C:\\Windows" },

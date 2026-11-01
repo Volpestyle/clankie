@@ -133,6 +133,8 @@ export interface SessionStartRequest {
   readonly harness?: "claude" | "codex";
   /** The account to hire on, as fleet capacity names it; absent, Clankie picks. */
   readonly account?: string;
+  /** The owner's own MCP servers this hire needs, by harness config name (node_repl for Codex computer use). */
+  readonly mcpServers?: readonly string[];
   /** The first thing the new agent is asked. */
   readonly prompt?: string;
 }
