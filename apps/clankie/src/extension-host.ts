@@ -5,6 +5,7 @@ import type { SettingsStore } from "@clankie/settings";
 import type { BrowserToolPort, ClankieAppDependencies } from "./app/types.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
 import type { MachineJoins } from "./machine-joins.ts";
+import type { DiagramPort } from "./ports/media.ts";
 import type { ExtensionRoutes } from "./ports/routes.ts";
 import type { PushWakeSender } from "./push.ts";
 
@@ -58,6 +59,8 @@ export interface CoreProjection {
   readonly doorway?: DoorwayProjection;
   /** HTTP routes the extension adds, mounted by the app (ports/routes.ts). */
   readonly routes?: ExtensionRoutes;
+  /** His drawing hand, when the media extension has the tldraw app. */
+  readonly diagrams?: DiagramPort;
   /** The browser extension's tools, from its host's catalog and calls. */
   readonly browser?: BrowserToolPort;
 }
@@ -73,6 +76,18 @@ export function createCoreExtensions(ports: CorePorts): CoreExtensions {
         "an extension stopped working",
       ),
   });
+}
+
+/** The first running extension's addition under one projection key, if any. */
+export function projected<Key extends keyof CoreProjection>(
+  extensions: CoreExtensions,
+  key: Key,
+): NonNullable<CoreProjection[Key]> | undefined {
+  for (const projection of extensions.projections()) {
+    const value = projection[key];
+    if (value !== undefined) return value as NonNullable<CoreProjection[Key]>;
+  }
+  return undefined;
 }
 
 /** Every running extension's routes, for the app to mount. */

@@ -153,7 +153,7 @@ import { browserEnabled } from "./browser-host.ts";
 import { browserExtension } from "./browser-extension.ts";
 import { computerExtension } from "./computer-extension.ts";
 import { cachedComputerUseHarnesses } from "./computer-use-harnesses.ts";
-import { createTldrawHost, tldrawEnabled, type TldrawHost } from "./tldraw-host.ts";
+import { mediaExtension } from "./media-extension.ts";
 import { createCaptain, REPORT_ROUND_MS } from "./captain/captain.ts";
 import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
@@ -233,7 +233,7 @@ import { BodyTransfer, bodyTransferRoots } from "./body-transfer.ts";
 import { serveDormantBody } from "./dormant-body.ts";
 import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
-import { browserOf, createCoreExtensions, doorwayOf, routesOf } from "./extension-host.ts";
+import { browserOf, createCoreExtensions, doorwayOf, projected, routesOf } from "./extension-host.ts";
 import { relayExtension } from "./relay-extension.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
@@ -519,19 +519,10 @@ extensions.add(browserExtension, {
 await extensions.start();
 const browserHost = browserOf(extensions);
 
-// His drawing hand (ADR 0096). The tldraw desktop app is a GUI app on the
-// operator's Mac, so "not open" is the normal absent case and stays a refusal
-// he says out loud; nothing here reaches the app until he draws something.
-let tldrawHost: TldrawHost | undefined;
-if (tldrawEnabled(process.env.CLANKIE_TLDRAW_ENABLED)) {
-  tldrawHost = await createTldrawHost({
-    stateRoot: capabilityStateRoot,
-    attachmentRoot,
-    logger,
-    environment: process.env,
-  });
-  logger.info({ event: "tldraw.capability.enabled" }, "diagram host ready");
-}
+// What he makes (ADR 0328 extension), starting with his drawing hand (ADR 0096).
+extensions.add(mediaExtension, { enabled: true, settings: undefined });
+await extensions.start();
+const tldrawHost = projected(extensions, "diagrams");
 
 const discordPresenceRuntime = await loadDiscordPresenceRuntime(
   process.env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE,

@@ -7,7 +7,8 @@ says what moving it would change. Step 1, the contract in
 [`@clankie/extension`](../../packages/extension/README.md), landed 2026-11-01, then the
 boundary check, then the relay as the first extension (`relay-extension.ts`;
 machine joins now seal with the core's `sealed-values.ts`), the browser
-(`browser-extension.ts`) and the computer body (`computer-extension.ts`).
+(`browser-extension.ts`), the computer body (`computer-extension.ts`) and
+media, which starts with the drawing hand (`media-extension.ts`).
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside
@@ -136,6 +137,15 @@ imports an extension; only the composition root does.
   extensions' list.
 - `clankie doctor` and `clankie status` list each extension with its state and
   reason.
+
+### Open: one extension using another
+
+Media draws Clankie from the persona's appearance images, and the captain's
+Minecraft play reads them too. The contract gives an extension only core
+ports, so before image and video generation move into `media` this needs one
+of two answers: an appearance port the core offers and the persona extension
+fills, or ports one extension offers another. Until then generation stays in
+the composition root.
 
 ### Choosing extensions
 
