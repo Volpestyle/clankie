@@ -872,8 +872,9 @@ call-time revocation checks still apply.
 - **Game extensions.** [ADR 0234](adr/0234-games-share-one-extension-contract.md)
   defines typed connector, skill, settings, Activity and lifecycle composition.
   `integrations/pokemon` and `integrations/minecraft` implement it, and owner-installed
-  modules outside this repository (`gameplay.extensions`, `game-extension-modules.ts`)
-  implement its module contract; core retains play leases, authority and
+  outside extensions (`installedExtensions`, loaded by `outside-extensions.ts`,
+  [ADR 0338](adr/0338-outside-extensions-plug-into-the-same-contract.md)) implement its
+  module contract; core retains play leases, authority and
   recovery, persona/model selection, Discord/Activity destinations and evidence
   projections. Pokémon's existing API/CLI/TUI enter that extension through a
   compatibility composition point. Pokémon and Minecraft share the turn scheduler, streamed model transport and journal envelope in `packages/play` ([ADR 0254](adr/0254-turn-based-games-share-a-play-kernel.md)); `integrations/minecraft` owns its native connector lifecycle, play host, capture,

@@ -268,6 +268,49 @@ settings, directory and setup test post), `/v1/operator/persona`,
 `/v1/operator/voice` and `/v1/operator/appearance` answer `404`; the Discord
 body's live state and his captain's Discord turns stay in the core for now.
 
+#### Outside extensions
+
+Extensions written outside this repository plug into the same contract
+([ADR 0338](adr/0338-outside-extensions-plug-into-the-same-contract.md)). They are
+the owner's trusted code, loaded into the service at start; their permissions
+keep an honest extension's reach visible, but they are **not a sandbox**: the
+code runs as your user and can do anything you can.
+
+```sh
+clankie extensions add ~/code/my-extension --grant all
+clankie extensions add https://github.com/OWNER/REPO.git --commit SHA [--path DIR] --grant tools,state
+clankie extensions grant ID PERMISSION...   # or: all
+clankie extensions refuse ID PERMISSION...
+clankie extensions remove ID
+```
+
+`add` takes a local folder (used as it is) or a git URL (`https://`, `file:///`,
+`git@HOST:` or `github:OWNER/REPO`) with `--commit` set to the full 40-character
+sha; Clankie never follows a branch or tag. A git source is fetched once, as a
+partial sparse clone of `--path` only, into
+`$CLANKIE_STATE/extensions/ID/SHA/`, and its dependencies are installed from its
+lockfile with every lifecycle script off. At each start the service checks the
+checkout is still that commit with no edited tracked files (`source_pin_mismatch`,
+`source_modified`).
+
+Clankie reads the extension's manifest (`clankie-extension.json`, or a `clankie`
+field in `package.json`) before any of its code runs and answers with what it
+asks for. Each permission is granted or refused by the owner: `options`,
+`state`, `credentials` (its own broker names, `ID` or `ID-*`), `tools`, `routes`
+(under `/v1/ext/ID/`), and for games `play` and `go-live`. Without `--grant`
+nothing is granted. A refused port is absent; an extension that needs it is
+listed `degraded` with `permission_refused_NAME`. `KEY=VALUE` pairs are
+non-secret options; credentials go through `/auth`. A game module installed
+before manifests needs `--id ID --entry FILE` instead of a manifest.
+
+`clankie extensions` lists outside extensions beside the built-in ones, with an
+`installed` array (source, what each asks for, granted, refused, switch), and
+`on|off ID` switches them like any other; an extension that is off is never
+imported. Every change applies at the next `clankie restart clankie`. The
+settings key is `installedExtensions`; `gameplay.extensions` entries are moved
+there at the next start with the ports they always had. A tool call or model
+output never adds or grants an extension.
+
 ### `runtime-health`
 
 `clankie runtime-health status` reads the live observation and settings from the
@@ -4353,15 +4396,17 @@ state and health. The command never joins a game or calls a model. `ready` is lo
 lifecycle health; it does not prove a reachable world or visible stream. An
 uncertain connector remains registered until exact host recovery proves it ended.
 
-`games extensions add MODULE [KEY=VALUE...]` installs a game extension that lives
-outside this repository, such as Rivals Agent's Spider-Man bridge, by its absolute
-module path; running it again replaces that module's options. `games extensions
+`games extensions add MODULE [KEY=VALUE...]` is the older way to install a game
+extension that lives outside this repository, by its absolute module path; running
+it again replaces that module's options. The next start moves each loaded entry to
+`installedExtensions` with every game port granted, after which
+[`clankie extensions`](#outside-extensions) manages it. `games extensions
 remove MODULE` uninstalls it. Both write `gameplay.extensions` in the settings file,
 print the same JSON as `games status`, and apply on `clankie restart`; the TUI
 accepts `/games extensions add|remove ...`. Options are non-secret values for the
 module; store any credential it needs with `/auth`. A module that fails to load is
 logged as `game_extension.module_unavailable` and skipped without affecting other
-games. The module contract is in [`packages/game-extension`](../packages/game-extension/README.md).
+games. The module contract is in [`packages/extension`](../packages/extension/README.md#outside-extensions).
 
 ### `games [status]` / `games set on|off` / `games budget`
 

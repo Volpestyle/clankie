@@ -88,6 +88,7 @@ The [full command table](reference/launcher.md#command-table) maps every job to 
 | Can he take a turn          | `clankie doctor --json` → `captain` (`ready`, `no_model`, …)         |
 | Are processes up            | `clankie status` (`clankie health` is an alias)                      |
 | Which extensions run        | `clankie extensions`; `clankie extensions off ID` (next restart)     |
+| Add an outside extension    | `clankie extensions add FOLDER\|GIT_URL --commit SHA`, then `grant`  |
 | Service model and effort    | `clankie model status`, `clankie model set provider/model`, `effort` |
 | Account connections         | `clankie accounts list`; `/connect accounts` in the console          |
 | Fleet and working policy    | `clankie fleet status`, `clankie project settings PROJECT`           |

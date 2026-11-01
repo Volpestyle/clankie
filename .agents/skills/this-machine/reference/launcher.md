@@ -62,6 +62,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Restart / stop a service                    | `clankie start`, `stop` or `restart [service]`                                                                                                                     |
 | Play session                                | `clankie play status` / `clankie play stop`                                                                                                                        |
 | Installed game extensions                   | `clankie games extensions`; `games extensions add MODULE [KEY=VALUE...]` / `remove MODULE`, then restart                                                           |
+| Outside extensions (ADR 0338)               | `clankie extensions add FOLDER\|GIT_URL --commit SHA --grant ...`; `grant`/`refuse`/`remove ID`; restart. Trusted owner code, not a sandbox                        |
 
 JSON is on stdout; progress is on stderr. `pair`, `devices`, and
 `operator-credential rotate` default to human text — pass `--json`.
