@@ -15,7 +15,6 @@ import {
 } from "@clankie/game-extension";
 import type { CredentialStore } from "@clankie/credential-broker";
 import type { GameExtensionModuleEntry } from "@clankie/settings";
-import { postToDiscordActiveBody } from "./discord-active-body.ts";
 import type { GameExtensionProjection, InstalledGameExtensions } from "./game-extension-projection.ts";
 
 /** An installed external extension, for host-owned play recovery and shutdown. */
@@ -41,8 +40,8 @@ export async function loadGameExtensionModules(input: {
   leases: PlayLeaseAuthority;
   stateRoot: string;
   credentials: Pick<CredentialStore, "get">;
-  env?: NodeJS.ProcessEnv;
-  fetchImpl?: typeof fetch;
+  /** Asks his active Discord body to go live; the persona's body fills it (ADR 0328). */
+  goLive?: GameExtensionModuleHost["goLive"];
   onError(module: string, error: unknown): void;
 }): Promise<InstalledGameExtensionModule[]> {
   const installed: InstalledGameExtensionModule[] = [];
@@ -97,7 +96,6 @@ async function loadOne(
     throw new Error("game_extension_module_id_invalid");
   const stateDirectory = join(input.stateRoot, "game-extensions", id);
   mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
-  const env = input.env ?? process.env;
   const host: GameExtensionModuleHost = {
     options: Object.freeze({ ...entry.options }),
     stateDirectory,
@@ -113,13 +111,7 @@ async function loadOne(
       if (!/^\d+$/u.test(destination.guildId) || !/^\d+$/u.test(destination.channelId)) return false;
       const { guildId, channelId, snapshotUrl } = destination;
       try {
-        const response = await postToDiscordActiveBody(
-          "/go-live/start",
-          { guildId, channelId, snapshotUrl },
-          env,
-          input.fetchImpl ?? fetch,
-        );
-        return response.ok;
+        return (await input.goLive?.({ guildId, channelId, snapshotUrl })) ?? false;
       } catch {
         return false; // An unreachable Discord body means the stream was not requested.
       }

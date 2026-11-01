@@ -167,6 +167,7 @@ import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
 import { parseHerdrPaneList } from "./captain/herdr-watch.ts";
 import { linearFollowStatus } from "@clankie/settings";
 import { loadGameExtensionModules, recoverExternalPlay } from "./game-extension-modules.ts";
+import { postToDiscordActiveBody } from "./discord-active-body.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
 import { DiscordForumMirror } from "./discord-forum-mirror.ts";
@@ -1197,6 +1198,8 @@ const minecraftRuntime: MinecraftExtensionRuntime = gameExtensions.register(
 const minecraft = minecraftRuntime.service;
 const externalGames = await loadGameExtensionModules({
   entries: startupSettings.gameplay.extensions ?? [],
+  goLive: async (destination) =>
+    (await postToDiscordActiveBody("/go-live/start", destination, process.env, fetch)).ok,
   registry: gameExtensions,
   leases: bodyLeaseStore,
   stateRoot,

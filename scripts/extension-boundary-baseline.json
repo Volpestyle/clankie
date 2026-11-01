@@ -21,18 +21,12 @@
     "app/types.ts -> persona-images.ts (persona)",
     "captain/captain-auto-rounds.ts -> captain/captain-discord-turns.ts (persona)",
     "captain/captain-context.ts -> captain/captain-discord-turns.ts (persona)",
-    "captain/captain-fleet-projection.ts -> captain/personas.ts (persona)",
-    "captain/captain-fleet-roster.ts -> captain/personas.ts (persona)",
-    "captain/captain-hiring.ts -> captain/personas.ts (persona)",
-    "captain/captain-operator-service.ts -> captain/personas.ts (persona)",
-    "captain/captain-seat-delivery.ts -> captain/personas.ts (persona)",
     "captain/captain-types.ts -> discord-presence-runtime.ts (persona)",
     "captain/captain-types.ts -> persona-images.ts (persona)",
     "captain/captain.ts -> @clankie/discord-presence-core (persona)",
     "captain/captain.ts -> @clankie/persona-images (persona)",
     "captain/captain.ts -> captain/captain-discord-turns.ts (persona)",
     "captain/captain.ts -> captain/discord-turn.ts (persona)",
-    "captain/captain.ts -> captain/personas.ts (persona)",
     "captain/captain.ts -> captain/voice-call-handoff.ts (voice)",
     "captain/captain.ts -> captain/voice-lane.ts (voice)",
     "captain/captain.ts -> persona-images.ts (persona)",
@@ -48,8 +42,6 @@
     "captain/room-fork-tool.ts -> captain/captain-discord-turns.ts (persona)",
     "captain/room-handoff-bursts.ts -> captain/discord-turn.ts (persona)",
     "captain/tools.ts -> @clankie/discord-presence-core (persona)",
-    "captain/tools.ts -> discord-captain-actions.ts (persona)",
-    "event-log.ts -> discord-presence-session.ts (persona)",
-    "game-extension-modules.ts -> discord-active-body.ts (persona)"
+    "captain/tools.ts -> discord-captain-actions.ts (persona)"
   ]
 }

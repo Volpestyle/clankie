@@ -5,17 +5,15 @@
  * replay from it on boot.
  *
  * Replay is the log's only reader, so the log is compacted at boot to what
- * replay needs: Discord presence phase changes — nearly all of its growth —
- * keep only the sessions whose events still shape a projection
- * ({@link retiredDiscordPresenceEventIds}); every other event type is kept
- * whole. After boot the full history is not held in memory at all:
+ * replay needs: the caller names the events no projection still needs (the
+ * persona's retired Discord presence phases, nearly all of its growth), and
+ * every other event is kept whole. After boot the full history is not held in memory at all:
  * projections hold current state, and {@link RecentEvents} holds only what
  * idempotent redelivery checks need.
  */
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DomainEvent } from "@clankie/protocol";
-import { retiredDiscordPresenceEventIds } from "./discord-presence-session.ts";
 
 /**
  * Event ids remembered for idempotent redelivery. A redelivery older than this
@@ -29,9 +27,12 @@ export function persistable(event: DomainEvent): boolean {
   return event.type !== "captain.heartbeat";
 }
 
+/** Names the event ids that no projection still needs. */
+export type RetiredEvents = (events: readonly DomainEvent[]) => ReadonlySet<string>;
+
 /** The events replay needs, oldest first. */
-export function compactEventLog(events: readonly DomainEvent[]): DomainEvent[] {
-  const retired = retiredDiscordPresenceEventIds(events);
+export function compactEventLog(events: readonly DomainEvent[], retire: RetiredEvents): DomainEvent[] {
+  const retired = retire(events);
   return retired.size === 0 ? [...events] : events.filter((event) => !retired.has(event.id));
 }
 
@@ -40,7 +41,11 @@ export function compactEventLog(events: readonly DomainEvent[]): DomainEvent[] {
  * events. A torn tail line is skipped rather than stopping the boot. The rewrite
  * is atomic; if it cannot be written the full log is still replayed.
  */
-export function loadEventLog(path: string, warn: (message: string) => void = () => {}): DomainEvent[] {
+export function loadEventLog(
+  path: string,
+  retire: RetiredEvents,
+  warn: (message: string) => void = () => {},
+): DomainEvent[] {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   let raw: string;
   try {
@@ -57,7 +62,7 @@ export function loadEventLog(path: string, warn: (message: string) => void = () 
       continue; // a torn tail line must not stop the boot
     }
   }
-  const compacted = compactEventLog(events);
+  const compacted = compactEventLog(events, retire);
   if (compacted.length === events.length) return events;
   const temporary = `${path}.${process.pid}.tmp`;
   try {

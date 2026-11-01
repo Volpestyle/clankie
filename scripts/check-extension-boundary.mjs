@@ -20,6 +20,8 @@ const baselinePath = join(root, "scripts/extension-boundary-baseline.json");
 
 /** File paths relative to apps/clankie/src, and package names. First match wins. */
 const EXTENSION_RULES = [
+  // The fleet's agent personas (captain/personas.ts: each hire's name, role and
+  // avatar) are part of hiring and the roster, so they stay core.
   [
     "persona",
     [
@@ -27,7 +29,6 @@ const EXTENSION_RULES = [
       /^persona-/u,
       /^appearance-routes\.ts$/u,
       /^app\/discord-routes\.ts$/u,
-      /^captain\/personas\.ts$/u,
       /^captain\/captain-discord-turns\.ts$/u,
       /^captain\/discord-/u,
       /^@clankie\/discord-presence-core(\/|$)/u,
