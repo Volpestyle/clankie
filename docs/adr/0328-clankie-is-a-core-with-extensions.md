@@ -10,7 +10,9 @@ machine joins now seal with the core's `sealed-values.ts`), the browser
 (`browser-extension.ts`), the computer body (`computer-extension.ts`) and
 media, which starts with the drawing hand (`media-extension.ts`), and Linear,
 which starts with its webhook, wake, settings, mirror and cutover routes
-(`linear-extension.ts`). Each
+(`linear-extension.ts`), then World's Activity routes and tools and its
+PokeAgent play tools (`activity-routes.ts`, `activity-tools.ts`,
+`world/pokeagent-tools.ts`), and voice's composer transcription routes. Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app's Common controls are still to come.
