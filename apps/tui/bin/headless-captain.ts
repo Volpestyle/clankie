@@ -400,6 +400,15 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "harness") {
+      if (rest[0] === "opencode") {
+        outputJson(
+          stdout,
+          await (
+            await import("../src/command/harness-opencode.ts")
+          ).runHarnessOpenCodeCommand(rest.slice(1), options),
+        );
+        return 0;
+      }
       if (rest[0] === "restart-tools") {
         const result = await (
           await import("../src/command/harness.ts")

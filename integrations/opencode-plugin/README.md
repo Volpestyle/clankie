@@ -231,3 +231,15 @@ turn settles at OpenCode's idle marker after the message. Interrupt calls
 OpenCode 2 TUI in a display-only pseudo-terminal (nothing is typed into it)
 with this plugin, the real controller and adapter, and a fixture model
 provider. It skips when `opencode` on `PATH` is not 2.2.5 or newer.
+
+## OpenCode 2 sessions you open yourself
+
+A session the owner opens by hand needs no Clankie plugin. Herdr's own OpenCode
+integration reports each pane's session to Herdr, and Clankie admits a message
+into that session's inbox on OpenCode 2's shared service, as steer or queue
+([ADR 0337](../../docs/adr/0337-hand-opened-opencode-2-sessions-take-messages-through-the-shared-service.md)).
+`clankie harness opencode status` says whether that works here, and
+`clankie harness opencode install` runs `herdr integration install opencode`,
+which adds Herdr's plugin to the OpenCode settings. A `--standalone` or
+`--server` session is not reached, and the service password never leaves the
+request.

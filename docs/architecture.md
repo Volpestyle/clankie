@@ -434,7 +434,9 @@ outside Clankie's service process group so a service restart does not disconnect
 or stop the native worker. The adapter reports
 the thread ID explicitly, so the fleet census does not depend on shared-daemon
 hooks. Existing unmanaged Codex seats can use their native `codex queue` when
-available. Automated messages fall back to typing only for an agent with no
+available, and OpenCode 2 sessions the owner opened by hand take steer or queue
+in their inbox on OpenCode's shared service once Herdr's OpenCode plugin reports
+them ([ADR 0337](adr/0337-hand-opened-opencode-2-sessions-take-messages-through-the-shared-service.md)). Automated messages fall back to typing only for an agent with no
 channel at all, through `herdr agent prompt` while it is idle with an empty input
 line, confirmed by its session
 ([ADR 0334](adr/0334-herdr-direct-prompting-is-the-fallback.md)). Missing

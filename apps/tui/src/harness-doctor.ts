@@ -5,6 +5,7 @@ import { readFile, realpath, access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExecFileImpl } from "./install-doctor.ts";
+import { inspectOpenCodeMessaging } from "./command/harness-opencode.ts";
 
 const json = async (path: string) => JSON.parse(await readFile(path, "utf8"));
 
@@ -287,8 +288,27 @@ export async function inspectHarnessBridges(
       profiles.codex.bridge &&
       profiles.codex.identityForwarding &&
       profiles.codex.versionMatches !== false);
+  // Hand-opened OpenCode 2 sessions take messages once Herdr's plugin reports them (ADR 0337).
+  let openCodeVersion: string | undefined;
+  try {
+    openCodeVersion = /\bv?(\d+\.\d+\.\d+)\b/u.exec((await execute("opencode", ["--version"])).stdout)?.[1];
+  } catch {
+    /* OpenCode isn't installed; nothing to message. */
+  }
+  const openCode2 = openCodeVersion !== undefined && Number(openCodeVersion.split(".")[0]) >= 2;
+  const openCode = openCode2 ? await inspectOpenCodeMessaging(env) : undefined;
   return {
     profiles,
+    ...(openCode === undefined
+      ? {}
+      : {
+          opencode: {
+            version: openCodeVersion,
+            herdrPlugin: openCode.herdrPlugin,
+            sharedService: openCode.sharedService,
+            messageable: openCode.messageable,
+          },
+        }),
     codex: {
       registered: codexRegistered,
       configPath,
@@ -301,6 +321,9 @@ export async function inspectHarnessBridges(
     localFleet: local,
     linkedSession,
     remediation: [
+      ...(openCode?.herdrPlugin === false && openCode.next !== undefined
+        ? [`OpenCode sessions you open yourself can't take messages yet. ${openCode.next}`]
+        : []),
       ...(profiles.codex.sourceSetup?.state === "source-manager-required"
         ? [`${profiles.codex.sourceSetup.detail}. ${profiles.codex.sourceSetup.fix}`]
         : []),

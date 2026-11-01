@@ -130,6 +130,11 @@ Each harness's prerequisites, probes and limits are in
   original live controller. **OpenCode 2** (2.2.5 or newer, local Mac only) takes
   the V2 plugin and runs with its own private server (`--standalone`, ADR 0333);
   its hires take `steer` and `queue`. A linked Mac on OpenCode 2 refuses by name.
+  An OpenCode 2 session the owner opened by hand also takes `steer` and `queue`,
+  through OpenCode's shared service, once Herdr's OpenCode plugin reports its
+  session (`clankie harness opencode status`; the owner installs it with
+  `clankie harness opencode install`, ADR 0337). A `--standalone` session stays
+  unreachable.
 - **Grok Build** (macOS, 1.0.46 or newer; review `clankie grok --dry-run`): a
   failed probe briefs nothing. Native permission prompts are the owner's. An
   enabled direct Linear endpoint refuses before the brief: ask the owner to
