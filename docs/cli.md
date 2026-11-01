@@ -238,6 +238,30 @@ process CPU percentage, `/health` latency, fixed CPU/health reasons, alarm state
 delivery state, and the last incident duration. `/status` and `/doctor` show the
 same observation. Missing observations remain unknown.
 
+### `extensions`
+
+`clankie extensions` reads `GET /v1/extensions` (operator or paired device) and
+prints each extension's state as JSON: `running`, `degraded` with a fixed reason
+code such as `start_failed`, `off`, `starting` or `stopped`. It reads each
+running extension's health first, so an extension that just failed shows as
+degraded. `/health` carries the same list as last known, without the health
+read. The core serves the fleet whatever these say
+([ADR 0328](adr/0328-clankie-is-a-core-with-extensions.md)).
+
+`clankie extensions off ID` keeps one extension off, and `clankie extensions on
+ID` lets it run again whenever its own requirement is met (the relay once you
+sign in to remote access, the browser unless `CLANKIE_BROWSER_ENABLED` turns it
+off). Both are owner-only `POST /v1/extensions` calls, take effect at the next
+`clankie restart clankie`, and answer with `restartRequired`. The switches are
+the `extensions` map in settings; an id with no entry is on. With
+`tracker-linear` off, Linear's webhook, its wake, follow, target and route
+settings, and its mirror and cutover commands are not served until it is on
+again. With `world` off, the Activity's admission and sharing routes are not
+served and he has no Activity sharing or PokeAgent play tools. With `voice`
+off, the phone composer's transcription routes and the room voice routes
+(`/v1/discord/room-voice`, the Discord body's output guard) are not served;
+his Discord voice lanes still run until voice moves with the persona.
+
 ### `runtime-health`
 
 `clankie runtime-health status` reads the live observation and settings from the
@@ -1950,8 +1974,15 @@ the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
 each metered account's plan, usage, remaining limit and reset, heavy-work
 permits, tracker request budgets, and each live pane's context against its
-budget. A number Clankie does not have is `"unknown"`. It does not include
-homes, emails or credentials, and it hires nothing. `message_agent` can carry
+budget. Its `burn` list says how fast each Claude and Codex account is being
+spent ([ADR 0324](adr/0324-a-lead-reads-how-fast-the-fleet-spends.md)): each
+usage window's percent per hour, recent (from Clankie's own readings at least
+half an hour apart) and the window's average, beside the even pace that spends
+what is left by reset, the percent projected at reset and when it runs out if
+sooner, and the tokens each Claude session on this Mac spent in the last hour,
+named by agent id when it is a known agent. A number Clankie does not have is
+`"unknown"`. It does not include homes, emails, session ids or credentials, and
+it hires nothing. `message_agent` can carry
 up to four images (by public https address or as base64), which the agent finds
 in its workspace under `.clankie/inbox/`, and `read_image` returns an image an
 agent saved in its working directory, such as a screenshot
@@ -2782,21 +2813,12 @@ An unconfigured row means an operator has not configured the developer OAuth cli
 The `email` row is his own mailbox, with the address he sends as and the result
 of the last real exchange, re-checked when older than a minute: `connected`,
 `reconnect_required` with reason `sign_in_rejected` when the mail server refused
-the stored password (or the Clankie account sign-in lapsed), or `unavailable`
-when it could not be reached. The mailbox is his Clankie address on Clankie's
-mail service ([ADR 0242](adr/0242-every-clankie-has-a-mailbox-we-run.md)), or
-the owner's own IMAP/SMTP server. On an install signed in to a Clankie account,
-`accounts connect email` (or `/connect email` → Clankie mailbox, or the app's
-Connect Email) chooses it in one step through `POST /v1/accounts/email/connect`
-and returns the row. It asks the mail service first: without a Clankie account,
-or when the service refuses it, it answers `account_required` (`unavailable` when
-the service can't be reached) and changes nothing. `settings.email.provider` records `clankie` or `imap`, and
-unset means a configured IMAP server wins; a stored IMAP password is kept for a
-switch back. Sends through the Clankie
-mailbox have hourly, daily and different-recipient limits; a refusal at one is
-`limit_reached` and names it. `accounts disconnect email` forgets a stored IMAP
-password (`revoked: false`; an app password is withdrawn at the provider) or
-switches away from the Clankie address, which stays the account's.
+the stored password, or `unavailable` when it could not be reached. The mailbox
+is the owner's own IMAP/SMTP server, set up with `/connect email`; the hosted
+Clankie mailbox is retired
+([ADR 0326](adr/0326-the-last-hosted-leftovers-are-removed.md)).
+`accounts disconnect email` forgets the stored password (`revoked: false`; an
+app password is withdrawn at the provider).
 `accounts connect github` prints the code to type at
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
 `accounts start github` and `accounts poll github --flow-id ID` expose the same
@@ -5552,7 +5574,10 @@ destination to restart as Clankie. Only then is the source released.
 
 Each step is repeatable: rerun with the printed `--transfer-id` after any failure.
 The source stays frozen until the destination reports itself active with the same
-self id, epoch and transfer id.
+self id, epoch and transfer id. A rerun, `abort` included, must name the same
+`--to` the transfer froze for: the source takes a release or an abort only from
+that body, so an answer from a machine that never saw the move can't leave
+Clankie active on two.
 
 The destination admits a bundle only in three cases:
 

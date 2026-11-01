@@ -4,6 +4,7 @@ import type { SettingsStore } from "@clankie/settings";
 import type { CredentialStore } from "@clankie/credential-broker";
 import { LINEAR_WEBHOOK_PROVIDER_ID } from "@clankie/credential-broker";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
+import { linearRoutes } from "../../clankie/src/app/linear-routes.ts";
 
 /** Real route/schema/store boundary, with service-owned webhook credentials. */
 const closes: Array<() => void> = [];
@@ -16,12 +17,16 @@ export async function linearOwnerFixture(settings: SettingsStore, credentials: P
     captain: createStubCaptain(),
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "fixture-owner" } : undefined,
-    linearWebhook: {
-      secret: async () => {
-        const stored = await credentials.get(LINEAR_WEBHOOK_PROVIDER_ID);
-        return stored?.type === "api" ? stored.key : undefined;
-      },
-    },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: {
+          secret: async () => {
+            const stored = await credentials.get(LINEAR_WEBHOOK_PROVIDER_ID);
+            return stored?.type === "api" ? stored.key : undefined;
+          },
+        },
+      }),
+    ],
   });
   closes.push(service.close);
   return {

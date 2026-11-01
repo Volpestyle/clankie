@@ -1,7 +1,7 @@
 import type { AutoWorkQueue } from "@clankie/protocol/auto-rounds";
 import type { Project } from "@clankie/protocol/projects";
 import type { LinearQuery, LocalTrackerBackend } from "@clankie/work-items";
-import { withLinearRequestInvocation } from "./linear-request-budget.ts";
+import { withLinearRequestInvocation } from "./tracker-request-priority.ts";
 
 type Row = Record<string, unknown>;
 const node = (value: unknown): Row => {

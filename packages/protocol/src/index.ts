@@ -16,6 +16,7 @@ export {
 } from "./hire-profile.ts";
 export * from "./presence.ts";
 export * from "./runtime-health.ts";
+export * from "./extensions.ts";
 export * from "./support-access.ts";
 export * from "./response.ts";
 export * from "./discord-settings.ts";

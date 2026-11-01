@@ -7,6 +7,7 @@ import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerPluginNotices } from "../src/worker-plugin-notices.ts";
 import { createRuntimeUpdateRoutes } from "../src/runtime-update-routes.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
@@ -40,6 +41,7 @@ it.skipIf(process.env.NATIVE_HARNESS_FIXTURES !== "1")(
     const server = spawn("herdr", ["--session", session, "server"], { env, cwd: root, stdio: "ignore" });
     const credentials = new FileCredentialStore(join(root, "credentials.json"));
     const host = createMcpHost({
+      trackerMcp: linearMcp,
       credentials,
       settings: new SettingsStore(join(root, "settings.json")),
       curated: [],

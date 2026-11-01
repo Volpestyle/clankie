@@ -116,6 +116,8 @@ export interface InstallDoctorReport {
   readonly kind: InstallKind;
   readonly version: string;
   readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
+  /** Each extension's last known state (ADR 0328). */
+  readonly extensions?: readonly import("@clankie/protocol").ExtensionStateReport[];
   /** Launcher-owned services that crashed in the last day, or that crash recovery left stopped. */
   readonly serviceRecovery?: readonly import("../bin/service-recovery.ts").ServiceRecoverySummary[];
   /** The Node the login agent runs (checkouts on macOS): missing, or pinned to a version an upgrade removes. */
@@ -450,7 +452,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
   })();
   Object.assign(herdrPlugin, { claudePathShim });
   const laneTools = await inspectLaneTools(commandHost({ env }), options.fetchImpl ?? fetch);
-  const { doorway, lastSleep, runtimeHealth } = await probeHealth({
+  const { doorway, extensions, lastSleep, runtimeHealth } = await probeHealth({
     env,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
@@ -494,6 +496,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     ok: true,
     ...(credentialStore.health ? { credentialStoreHealth: credentialStore.health() } : {}),
     ...(runtimeHealth === undefined ? {} : { runtimeHealth }),
+    ...(extensions === undefined ? {} : { extensions }),
     kind,
     version: await readInstallVersion(options.repoRoot, kind),
     repoRoot: options.repoRoot,

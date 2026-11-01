@@ -108,11 +108,20 @@ This repository is public. Both neighbors are private and consume
   `pnpm check:landing` for a direct landing. While iterating, run only the tests
   for what you changed.
 - On a pull request, keep its branch current with `main` and resolve conflicts
-  yourself before asking anyone to look. Take each Codex review round as a batch:
-  fix every finding together in one push, reply on and resolve each thread you
-  addressed, then comment `@codex review` once. The
-  `codex-clean` check passes only after Codex reviews the head commit with no
-  open findings, so every push, a merge from `main` included, needs that review.
+  yourself before asking anyone to look. A Codex worker on the owner's Mac
+  reviews every pull request in this repo, `clankie-app` and `clankie-ops`
+  and posts its findings as one "Codex review"; the cloud Codex review is off
+  ([ADR 0329](docs/adr/0329-codex-reviews-on-the-owners-mac.md), the
+  `codex-review` skill). Ask it through Clankie for each round, fix every
+  finding of a round in one push, reply on and resolve each thread you
+  addressed, then ask once more. The `codex-clean` status passes only once it
+  has reviewed the head commit with no findings, so every push, a merge from
+  `main` included, needs that review; merge with
+  `node scripts/codex-review.mjs land OWNER/REPO PR`, which waits on it.
+- Build each task in its own Clankie worker on the owner's machines, one
+  worker per task in a fresh worktree, led by a Claude Duet thread or another
+  connected lead. Open its pull request as a draft early; the pull request on
+  GitHub is the last stop. Worker questions go to the lead, not the owner.
 - Before committing, pushing or releasing, read the resolved owner working
   preferences (`clankie fleet status` or `clankie doctor --json`). Defaults permit
   commit and push and ask before official releases; explicit task gates take

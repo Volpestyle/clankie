@@ -93,7 +93,9 @@ Discord's own catch-up, and app clients show him unavailable.
 unknown, the transfer resumes with the same transfer id; it never starts a
 second one. **Abort** returns the source to `active` only after the destination
 confirms that it has not applied that transfer and has burned the transfer id,
-so the destination can never apply it later. A destination that cannot be
+so the destination can never apply it later. Release and abort are taken only
+from the destination recorded at freeze, and a resume never stages at another
+body. A destination that cannot be
 reached leaves the source frozen. `clankie transfer reclaim --force` is the
 owner's explicit way out. It reactivates the source at a still higher epoch and
 is recorded with the warning that any work the other body did is not merged.

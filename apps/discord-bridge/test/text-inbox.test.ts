@@ -570,7 +570,6 @@ it("leaves fresh self-hosted settings considering every admitted message", () =>
   const settings = emptySettings();
   expect(settings.discord.wakeTrigger).toBeUndefined();
   expect(settings.discord.ambientChannelIds).toEqual([]);
-  expect(settings.discord.officialBotEnabled).toBe(false);
   expect(
     discordTextAttention({
       wakeTrigger: settings.discord.wakeTrigger,

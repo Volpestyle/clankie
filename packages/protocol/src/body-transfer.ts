@@ -101,6 +101,8 @@ export const BodyTransferReleaseRequestSchema = z.strictObject({
 });
 export const BodyTransferAbortRequestSchema = z.strictObject({
   transferId: BodyTransferIdSchema,
+  /** The body that burned the id; the source accepts only the one it froze for. */
+  destination: PeerSchema,
   /** What the destination reported after burning the id. */
   discarded: BodyAuthoritySchema,
 });

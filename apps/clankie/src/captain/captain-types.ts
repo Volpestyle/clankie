@@ -73,6 +73,8 @@ export interface CaptainOptions {
     fleet: string,
     pane: string,
   ) => Promise<ProjectHireProcessProof | undefined>;
+  /** Why the last process proof for a pane was refused, in fixed words, when its observer says. */
+  readonly projectHireRefusal?: (pane: string) => string | undefined;
   /** Fresh same-call display attribution only; individual steering still revalidates. */
   readonly projectHireIdentityBatch?: (
     fleet: string,
@@ -149,7 +151,7 @@ export interface CaptainOptions {
   /** Live webhook readiness, rechecked before a queued Linear wake starts. */
   readonly linearFollowing?: () => Promise<boolean>;
   readonly linearWakeReceived?: (
-    references: readonly import("../linear-wake-read.ts").LinearWakeNotificationReference[],
+    references: readonly import("./tracker-activity.ts").TrackerWakeReference[],
   ) => Promise<unknown>;
   /** Real process-level overrides captured before stored settings are projected into child env. */
   readonly discordEnvironment?: NodeJS.ProcessEnv;

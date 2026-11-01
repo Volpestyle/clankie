@@ -14,6 +14,8 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { LinearAttributionJournal } from "../src/linear-attribution.ts";
 import { LinearWriteReceipts } from "../src/linear-webhook.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const NOW = new Date("2026-10-05T00:00:00.000Z");
 const SECRET = "temporary-fixture-webhook-secret";
@@ -36,7 +38,7 @@ async function fixture() {
   }));
   const wakes: { id: string; prompt: string | undefined }[] = [];
   let store = new ConversationStore(join(root, "conversations"), async (id, _text, publish, context) => {
-    wakes.push({ id, prompt: store.linearWakePrompt(id, context.runId) });
+    wakes.push({ id, prompt: store.trackerWakePrompt(id, context.runId) });
     publish({ type: "message", role: "captain", text: "Reviewed the signed event", streaming: false });
   });
   const writesPath = join(root, "writes.json");
@@ -100,6 +102,7 @@ async function fixture() {
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   await credentials.set("linear", { type: "api", key: providerToken, account });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     curated: [
@@ -119,18 +122,23 @@ async function fixture() {
   let own: { userId: string; workspaceId: string } | undefined = account;
   const clankie = await createClankieApp({
     captain: createStubCaptain({
-      receiveLinearActivity: (activity, wake, target) => store.receiveLinearActivity(activity, wake, target),
-      linearWakeTargetAllowed: (target) => store.linearWakeTargetAllowed(target),
+      receiveTrackerActivity: (activity, wake, target) =>
+        store.receiveTrackerActivity(activity, wake, target),
+      trackerWakeTargetAllowed: (target) => store.trackerWakeTargetAllowed(target),
     }),
     settings,
     clock: () => NOW,
-    linearWebhook: {
-      secret: async () => SECRET,
-      writes,
-      ownAccount: async () => own,
-      recordActivity: (event) => attribution.record(event, NOW),
-      issueContext: (event) => attribution.issueContext(event, host),
-    },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: {
+          secret: async () => SECRET,
+          writes,
+          ownAccount: async () => own,
+          recordActivity: (event) => attribution.record(event, NOW),
+          issueContext: (event) => attribution.issueContext(event, host),
+        },
+      }),
+    ],
   });
   const server = serve({
     hostname: "127.0.0.1",
@@ -208,7 +216,7 @@ async function fixture() {
     async restart() {
       await store.close();
       store = new ConversationStore(join(root, "conversations"), async (id, _text, publish, context) => {
-        wakes.push({ id, prompt: store.linearWakePrompt(id, context.runId) });
+        wakes.push({ id, prompt: store.trackerWakePrompt(id, context.runId) });
         publish({ type: "message", role: "captain", text: "Reviewed", streaming: false });
       });
     },

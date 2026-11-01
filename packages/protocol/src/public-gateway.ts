@@ -26,7 +26,6 @@ import {
   ACCOUNT_GOOGLE_CHECK_PATH,
   ACCOUNTS_PATH,
   ACCOUNT_DISCONNECT_PATH,
-  ACCOUNT_EMAIL_CONNECT_PATH,
   ACCOUNT_GITHUB_POLL_PATH,
   ACCOUNT_GITHUB_START_PATH,
   ACCOUNT_LINEAR_COMPLETE_PATH,
@@ -179,7 +178,6 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: ACCOUNT_LINEAR_COMPLETE_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_LINEAR_APP_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_DISCONNECT_PATH, target: "control" },
-  { method: "POST", path: ACCOUNT_EMAIL_CONNECT_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GOOGLE_START_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GOOGLE_COMPLETE_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GOOGLE_CHECK_PATH, target: "control" },
@@ -202,8 +200,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: CONNECTOR_SIGN_INS_PATH, target: "control" },
   { method: "POST", path: CONNECTOR_SIGN_IN_APPROVE_PATH, target: "control" },
   { method: "POST", path: CONNECTOR_SIGN_IN_DENY_PATH, target: "control" },
-  // The Mac answers the retired hosted wake-key route with 404 (ADR 0300).
-  { method: "POST", path: "/v1/devices/wake-key", target: "control" },
+  // The Mac answers the retired hosted pair-offer route with 404 (ADR 0300).
   { method: "POST", path: HOSTED_PAIR_OFFER_PATH, target: "control" },
   { method: "POST", path: "/operator/v1/dispatch", target: "relay" },
   { method: "POST", path: "/operator/v1/tail", target: "relay" },

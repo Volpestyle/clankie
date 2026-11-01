@@ -35,7 +35,10 @@ mode. `packages/protocol` keeps its hosted modules for now, because the app and
 the gateway still import them; they go when those consumers do. Update
 (2026-10-31): the wake, hosted pairing, hosted browser-session and hosted,
 managed and official Discord modules are gone; `hosted-operator`,
-`support-access` and `hosted-mail` remain.
+`support-access` and `hosted-mail` remain. Update (2026-11-01):
+[ADR 0326](0326-the-last-hosted-leftovers-are-removed.md) removes `hosted-mail`
+and the account mailbox route, the wake-key route entry, browser-session
+pairing and `discord.officialBotEnabled`.
 
 ## Consequences
 

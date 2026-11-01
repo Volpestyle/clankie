@@ -8,6 +8,7 @@ import { createLocalTracker } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
@@ -22,6 +23,7 @@ async function surface(root: string) {
   await mkdir(repo, { recursive: true });
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: createLocalTracker({ directory: join(root, "tracker") }),

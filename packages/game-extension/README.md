@@ -3,6 +3,9 @@
 A typed composition contract for game extensions. Games keep their own motors,
 actions and observations; core supplies durable authority and approved host
 ports. See [ADR 0234](../../docs/adr/0234-games-share-one-extension-contract.md).
+Its descriptor and health types come from
+[`@clankie/extension`](../extension/README.md), the contract every Clankie
+extension shares ([ADR 0328](../../docs/adr/0328-clankie-is-a-core-with-extensions.md)).
 
 An extension declares `contractVersion: 1`, `id`, `connector`, `skill`,
 `settings` (existing key and parser), `activity` (surface or `null`), and

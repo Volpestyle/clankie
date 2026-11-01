@@ -30,29 +30,23 @@ import type { AccountsPort } from "../accounts.ts";
 import type { AgentSessions } from "../agent-sessions.ts";
 import type { BodyLeaseRouter } from "../body-lease-router.ts";
 import type { BodyLeaseStore } from "../body-leases.ts";
-import type { BodyPlaySessions } from "../body-play-sessions.ts";
 import type { BodyVoiceStays } from "../body-voice-stays.ts";
 import { CaptainPresenceManager } from "../captain-presence.ts";
 import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import { type CaptainPort } from "../captain/port.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { DeliveredFileStore } from "../delivered-files.ts";
-import type { ActivitySharing } from "../activity-sharing.ts";
 import type { DiscordPresenceRuntimePort } from "../discord-presence-runtime.ts";
 import type { DiscordRoomObservations } from "../discord-room-observations.ts";
-import type { DiscordRoomVoice } from "../discord-room-voice.ts";
 import { EmbodimentManager } from "../embodiment.ts";
 import { type ExecutionConnections } from "../herdr-session.ts";
-import type { ComposerTranscriptions } from "../composer-transcription.ts";
-import { type LinearActivityEvent, type LinearWriteReceipts } from "../linear-webhook.ts";
-import type { MediaGeneratorPort } from "../media-generation.ts";
+import type { MediaGeneratorPort } from "../ports/media.ts";
 import { type MemoryStores } from "../memory.ts";
-import type { MinecraftService } from "../minecraft.ts";
 import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
-import { type VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
+import type { VoiceSpeechSnapshot } from "../ports/voice.ts";
 import { type WorkItemsService } from "../work-items.ts";
 import { type WorkerMcp } from "../worker-mcp.ts";
 /**
@@ -65,8 +59,6 @@ export interface PendingCompletion {
   offeredGrants: DeviceGrantSet;
   expiresAtMs: number;
   consumed: boolean;
-  reissue?: true;
-  authorizedByBrowserSession?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,12 +69,13 @@ interface ActivityObservationReadPort {
   current(signal?: AbortSignal): Promise<ActivityObservationSnapshot | undefined>;
 }
 
-interface BrowserToolPort {
+/** The browser extension's tools as the core calls them (ADR 0328). */
+export interface BrowserToolPort {
   catalog(signal?: AbortSignal): Promise<BrowserToolCatalog>;
   call(
     request: CallBrowserToolRequest,
     signal?: AbortSignal,
-    authority?: { shell?: boolean; guard?: () => Promise<void>; conversationId?: string },
+    authority?: { shell?: boolean; guard?: () => Promise<void>; conversationId?: string | undefined },
   ): Promise<CallBrowserToolResult>;
 }
 
@@ -127,7 +120,6 @@ export interface TrustedDeviceIdentity {
 export type DeviceAuthDenial = { denied: "expired" | "revoked" | "invalid" };
 
 export interface ClankieAppDependencies {
-  skinDrafts?: import("../skin-drafts.ts").SkinDraftService;
   /** Host-side voice environment validation; omitted uses the service process environment. */
   voiceSettingsEnv?: NodeJS.ProcessEnv;
   fleetResources?: import("../fleet-resource-runtime.ts").FleetResourceRuntime;
@@ -190,7 +182,6 @@ export interface ClankieAppDependencies {
   modelDeviceSetup?: { platform: NodeJS.Platform; hosted: boolean };
   /** The owner's GitHub and Linear account connections (ADR 0196). */
   accounts?: AccountsPort;
-  composerTranscriptions?: ComposerTranscriptions;
   /** Evidence blobs and records (ADR 0258). */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /** The built-in tracker, for the owner's own authenticated writes (VUH-1917). */
@@ -202,10 +193,6 @@ export interface ClankieAppDependencies {
   /** Owner project-binding validation through the connected Linear app, never a fallback. */
   linearProjectExists?: (id: string) => Promise<boolean>;
   importLinear?: (projectId: string, scratch: string, assertCurrent: () => Promise<void>) => Promise<unknown>;
-  /** Owner command for a scratch store's webhook mirror (VUH-1965). */
-  linearMirrors?: Pick<import("../linear-mirror.ts").LinearMirrors, "configure">;
-  /** Mirror 3 (VUH-1987): owner-run cutover from Linear and its switch-back. */
-  linearCutover?: Pick<import("../linear-cutover.ts").LinearCutover, "run">;
   /** Any Claude/Codex/Grok/Pi transcript here or on an owner-configured SSH host. */
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */
@@ -216,7 +203,6 @@ export interface ClankieAppDependencies {
   workMedia?: Pick<import("../work-media.ts").WorkMedia, "observe" | "resolve">;
   workerMcp?: WorkerMcp;
   fleetHealthMetrics?: Pick<FleetHealthMetrics, "snapshot">;
-  linearRequestBudget?: Pick<import("../linear-request-budget.ts").LinearRequestBudget, "report">;
   trackerRequestBudget?: Pick<import("../tracker-request-budget.ts").TrackerRequestBudget, "report">;
   /** The Auto round record (ADR 0270), read by `clankie auto rounds`. */
   autoRounds?: Pick<import("../captain/auto-rounds.ts").AutoRoundRecord, "read">;
@@ -224,6 +210,11 @@ export interface ClankieAppDependencies {
   machineJoins?: import("../machine-joins.ts").MachineJoins;
   /** Optional execution health; failure does not make the captain unhealthy. */
   herdrRuntime?: () => string | undefined;
+  /** Extension states (ADR 0328): last known on `/health`, health read first on `GET /v1/extensions`. */
+  extensions?: {
+    snapshot(): readonly import("@clankie/protocol").ExtensionStateReport[];
+    report(): Promise<readonly import("@clankie/protocol").ExtensionStateReport[]>;
+  };
   /** Only a currently available connection has an active binding. */
   herdrBinding?: () => HerdrBinding | undefined;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
@@ -274,16 +265,6 @@ export interface ClankieAppDependencies {
   ) => Promise<import("@clankie/protocol/projects").FleetMembershipReport>;
   /** Exact conversation-scoped artifact bytes; publication and retention live with the captain. */
   deliveredFiles?: Pick<DeliveredFileStore, "read"> & Partial<Pick<DeliveredFileStore, "attachment">>;
-  /** Local owner-authorized projection of delivered artifacts; hosted launch/admission is separate. */
-  activitySharing?: ActivitySharing;
-  /**
-   * Self-hosted official Activity admission (VUH-2833). Only the local activity
-   * server reaches it, presenting the broker-held activity producer bearer.
-   */
-  activityAdmission?: {
-    token(): Promise<string | undefined>;
-    admit(input: unknown): Promise<import("../activity-admission.ts").SelfHostedActivityAdmission>;
-  };
   /** Records the bot's own Activity launches so admission serves only those channels. */
   activityLaunches?: {
     allowsLaunch(idempotencyKey: string): boolean;
@@ -300,7 +281,6 @@ export interface ClankieAppDependencies {
   discordPermissions?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["permissions"];
   discordTestPost?: import("../discord-room-routes.ts").DiscordRoomRoutesOptions["testPost"];
   roomObservations?: DiscordRoomObservations;
-  roomVoice?: DiscordRoomVoice;
   settings?: {
     load(): Promise<ClankieSettings>;
     update?(
@@ -322,20 +302,23 @@ export interface ClankieAppDependencies {
     publishChannelId?: string;
   }) => Promise<import("@clankie/protocol").BodyVoiceTarget | undefined>;
   bodyVoiceStays?: BodyVoiceStays;
-  bodyPlaySessions?: BodyPlaySessions;
+  /** Admits an operator's play intent for the conversation that asked; World's play sessions fill it (ADR 0328). */
+  bodyPlaySessions?: {
+    submit(
+      intent: import("@clankie/protocol").EmbodimentIntent,
+      identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
+      manager: EmbodimentManager,
+    ): Promise<import("@clankie/protocol").EmbodimentSubmitResult>;
+  };
   guidePokemonPlay?: (
     text: string,
     identity: import("../body-lease-router.ts").BodyConversationIdentity | undefined,
   ) => Promise<unknown>;
   gameExtensions?: Pick<InstalledGameExtensions, "catalog" | "projections">;
-  minecraft?: MinecraftService;
-  minecraftHost?: import("../minecraft-host.ts").MinecraftHostService;
-  minecraftPrivateDelivery?: Pick<
-    ReturnType<typeof import("../minecraft-host-invite.ts").createMinecraftPrivateDeliveryClient>,
-    "authorize"
-  >;
-  computer?: import("../computer-body.ts").ComputerBody;
-  joinedComputer?: import("../joined-computer.ts").JoinedComputer;
+  /** Checks a Discord body's private Minecraft login-code delivery; Minecraft's extension supplies it. */
+  minecraftPrivateDelivery?: { authorize(capability: string, payload: unknown): Promise<boolean> };
+  /** Routes extensions add, such as computer use and skin drafts (ADR 0328). */
+  extensionRoutes?: readonly import("../ports/routes.ts").ExtensionRoutes[];
   /**
    * Device voice calls (VUH-2682). Resolves the same realtime provider
    * composition and credentials a Discord body uses, when a call starts;
@@ -380,23 +363,6 @@ export interface ClankieAppDependencies {
    * a sleeping device simply catches up when it next opens.
    */
   pushWake?: PushWakeSender;
-  /**
-   * The broker-held Linear webhook signing secret (ADR 0165). Absent means no
-   * webhook is configured and the route reports itself unavailable; the wake it
-   * leads to belongs to the captain.
-   */
-  linearWebhook?: {
-    secret(): Promise<string | undefined>;
-    writes?: LinearWriteReceipts;
-    recordActivity?(activity: LinearActivityEvent): void;
-    /** His own verified Linear identity; activity it authors is kept without a wake. */
-    ownAccount?(): Promise<{ userId: string; workspaceId: string } | undefined>;
-    /** Bounded read of missing issue context through the verified connected account. */
-    issueContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["issueContext"]>;
-    projectContext?(activity: LinearActivityEvent): Promise<LinearActivityEvent["projectContext"]>;
-    /** Owner-enabled Linear mirrors (VUH-1965): applied after the response, never gating a wake. */
-    mirror?(event: import("@clankie/work-items").LinearMirrorEvent): void;
-  };
   /** Host-scoped public base returned at redeem and used as the paired relay origin. */
   publicGatewayHostBaseUrl?: string;
   hostDisplayName?: string;

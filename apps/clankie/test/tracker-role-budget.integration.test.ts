@@ -14,6 +14,7 @@ import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
 import { PersonaStore } from "../src/captain/personas.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { TrackerRequestBudget } from "../src/tracker-request-budget.ts";
 import {
   trackerRepoForPrincipal,
@@ -61,6 +62,7 @@ async function fixture(budget = new TrackerRequestBudget()) {
   const paneFleets = new Map<string, string>();
   let workItems!: ReturnType<typeof createWorkItemsService>;
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: tracker,

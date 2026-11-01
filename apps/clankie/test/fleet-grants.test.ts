@@ -9,6 +9,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 it("retires fleet grants without copying or mutating them and admits bearer fleets without claiming a pane", async () => {
@@ -27,6 +28,7 @@ it("retires fleet grants without copying or mutating them and admits bearer flee
   await credentials.set("linear", { type: "api", key: "provider-secret", account });
   const calls: { name: string; args: unknown }[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
     curated: [

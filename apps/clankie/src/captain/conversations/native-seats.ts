@@ -10,7 +10,7 @@ import { ConversationServiceRun, waitForConversationRun } from "../conversation-
 import type { HerdrSeatTranscript } from "../herdr-transcript.ts";
 import type { HerdrAgentSnapshot } from "../herdr-watch.ts";
 import { publicConversation } from "./helpers.ts";
-import { recoverLinearActivity } from "./linear-wakes.ts";
+import { recoverTrackerActivity } from "./tracker-wakes.ts";
 import type { ConversationStore } from "./store.ts";
 import { type ConversationDriver, type ConversationMeta } from "./types.ts";
 
@@ -287,7 +287,7 @@ export async function pollConversationDriver<T>(
     // The callback establishes mailbox binding synchronously, before the
     // reservation is released. Never await the parked long poll here.
     started = poll();
-    recoverLinearActivity(ctx, conversationId);
+    recoverTrackerActivity(ctx, conversationId);
   } finally {
     admissions.delete(admission);
     if (admissions.size === 0 && ctx["driverAdmissions"].get(conversationId) === admissions)

@@ -63,7 +63,7 @@ import {
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { type StoredOwnerAttachment } from "../../delivered-files.ts";
-import { type LinearActivityEvent } from "../../linear-webhook.ts";
+import type { TrackerActivity } from "../tracker-activity.ts";
 import { CHANNEL_ROUND_INTERRUPTED_NOTICE, type ChannelTranscriptEntry } from "../channel-turns.ts";
 import { ConversationJournal } from "../conversation-journal.ts";
 import {
@@ -141,22 +141,22 @@ import {
   workspaceOf,
 } from "./helpers.ts";
 import {
-  discardLinearWake,
-  deferLinearWake,
-  flushLinearActivity,
-  freshLinearEvents,
-  linearWakePrompt,
-  linearWakeReceipt,
-  receiveLinearWake,
-  linearWakeDeliveries,
-  linearWakeRecoveries,
-  linearWakeTargetAllowed,
-  loadLinearEventReceipts,
-  queueLinearActivity,
-  receiveLinearActivity,
+  discardTrackerWake,
+  deferTrackerWake,
+  flushTrackerActivity,
+  freshTrackerEvents,
+  trackerWakePrompt,
+  trackerWakeReceipt,
+  receiveTrackerWake,
+  trackerWakeDeliveries,
+  trackerWakeRecoveries,
+  trackerWakeTargetAllowed,
+  loadTrackerEventReceipts,
+  queueTrackerActivity,
+  receiveTrackerActivity,
   retireLinearInbox,
-  saveLinearEventReceipts,
-} from "./linear-wakes.ts";
+  saveTrackerEventReceipts,
+} from "./tracker-wakes.ts";
 import {
   attachedConversationForNative,
   bindPersona,
@@ -492,9 +492,7 @@ export class ConversationStore {
       }) => void)
     | undefined;
   public onLinearWakeReceived:
-    | ((
-        references: readonly import("../../linear-wake-read.ts").LinearWakeNotificationReference[],
-      ) => Promise<unknown>)
+    | ((references: readonly import("../tracker-activity.ts").TrackerWakeReference[]) => Promise<unknown>)
     | undefined;
 
   public constructor(
@@ -530,7 +528,7 @@ export class ConversationStore {
     this.ownerAttachments = ownerAttachments;
     mkdirSync(root, { recursive: true });
     this.ownerUpdates = new OwnerUpdates(join(root, "owner-updates.json"));
-    this.loadLinearEventReceipts();
+    this.loadTrackerEventReceipts();
     this.retireLinearInbox();
     // Complete a reset interrupted after archiving but before installing fresh metadata.
     const archives = join(dirname(root), "conversation-archives");
@@ -712,10 +710,10 @@ export class ConversationStore {
     this.prune();
     for (const meta of this.metas.values())
       if (
-        this.linearWakeTargetAllowed(meta.conversationId) &&
-        this.freshLinearEvents(meta.conversationId).length
+        this.trackerWakeTargetAllowed(meta.conversationId) &&
+        this.freshTrackerEvents(meta.conversationId).length
       )
-        this.queueLinearActivity(meta.conversationId);
+        this.queueTrackerActivity(meta.conversationId);
     this.scheduleDecisionDeadlines();
   }
 
@@ -749,12 +747,12 @@ export class ConversationStore {
     this.decisionDeadlineTimer.unref();
   }
 
-  private loadLinearEventReceipts(): void {
-    return loadLinearEventReceipts(this);
+  private loadTrackerEventReceipts(): void {
+    return loadTrackerEventReceipts(this);
   }
 
-  private saveLinearEventReceipts(): void {
-    return saveLinearEventReceipts(this);
+  private saveTrackerEventReceipts(): void {
+    return saveTrackerEventReceipts(this);
   }
 
   /** Retire the old reading room once; retained IDs still prevent provider replay. */
@@ -1588,36 +1586,36 @@ export class ConversationStore {
   }
 
   /** A configured Linear target is an ordinary owner-openable global chat. */
-  public linearWakeTargetAllowed(conversationId: string): boolean {
-    return linearWakeTargetAllowed(this, conversationId);
+  public trackerWakeTargetAllowed(conversationId: string): boolean {
+    return trackerWakeTargetAllowed(this, conversationId);
   }
 
-  public receiveLinearActivity(
-    input: LinearActivityEvent,
+  public receiveTrackerActivity(
+    input: TrackerActivity,
     following: boolean,
     conversationId = "global-default",
   ): boolean {
-    return receiveLinearActivity(this, input, following, conversationId);
+    return receiveTrackerActivity(this, input, following, conversationId);
   }
 
-  private queueLinearActivity(id: string): void {
-    return queueLinearActivity(this, id);
+  private queueTrackerActivity(id: string): void {
+    return queueTrackerActivity(this, id);
   }
 
-  private flushLinearActivity(id: string): Promise<void> {
+  private flushTrackerActivity(id: string): Promise<void> {
     const current = this.linearHookFlushes.get(id);
     if (current) return current;
-    const pending = flushLinearActivity(this, id).finally(() => this.linearHookFlushes.delete(id));
+    const pending = flushTrackerActivity(this, id).finally(() => this.linearHookFlushes.delete(id));
     this.linearHookFlushes.set(id, pending);
     return pending;
   }
 
-  public deferLinearWake(id: string): void {
-    deferLinearWake(this, id);
+  public deferTrackerWake(id: string): void {
+    deferTrackerWake(this, id);
   }
 
-  private freshLinearEvents(id: string) {
-    return freshLinearEvents(this, id);
+  private freshTrackerEvents(id: string) {
+    return freshTrackerEvents(this, id);
   }
 
   /**
@@ -1667,31 +1665,31 @@ export class ConversationStore {
   }
 
   /** Following disabled before admission consumes the queued wake without running it. */
-  public discardLinearWake(id: string): void {
-    return discardLinearWake(this, id);
+  public discardTrackerWake(id: string): void {
+    return discardTrackerWake(this, id);
   }
 
   /** Compact verified context is prepared when the queued chat turn starts. */
-  public linearWakePrompt(id = "global-default", runId?: string): string | undefined {
-    return linearWakePrompt(this, id, runId);
+  public trackerWakePrompt(id = "global-default", runId?: string): string | undefined {
+    return trackerWakePrompt(this, id, runId);
   }
 
-  public linearWakeReceipt(id: string, runId?: string) {
-    return linearWakeReceipt(this, id, runId);
+  public trackerWakeReceipt(id: string, runId?: string) {
+    return trackerWakeReceipt(this, id, runId);
   }
 
-  public receiveLinearWake(
-    ...args: Parameters<typeof receiveLinearWake> extends [unknown, ...infer Rest] ? Rest : never
+  public receiveTrackerWake(
+    ...args: Parameters<typeof receiveTrackerWake> extends [unknown, ...infer Rest] ? Rest : never
   ) {
-    return receiveLinearWake(this, ...args);
+    return receiveTrackerWake(this, ...args);
   }
 
-  public linearWakeDeliveries(id?: string) {
-    return linearWakeDeliveries(this, id);
+  public trackerWakeDeliveries(id?: string) {
+    return trackerWakeDeliveries(this, id);
   }
 
-  public linearWakeRecoveries() {
-    return linearWakeRecoveries(this);
+  public trackerWakeRecoveries() {
+    return trackerWakeRecoveries(this);
   }
 
   public conversationIdForSeat(seatId: string): string | undefined {
@@ -2361,7 +2359,7 @@ export class ConversationStore {
     for (const conversationId of this.tailListeners.keys()) this.wakeTails(conversationId);
     // Recovery may move activity to another chat and queue its first offer.
     do {
-      await Promise.all([...this.linearHookTimers.keys()].map((id) => this.flushLinearActivity(id)));
+      await Promise.all([...this.linearHookTimers.keys()].map((id) => this.flushTrackerActivity(id)));
       await Promise.all(this.linearHookFlushes.values());
       await Promise.allSettled([
         ...this.runs.values(),
@@ -4166,7 +4164,7 @@ export class ConversationStore {
           (meta) =>
             !meta.isDefault &&
             !meta.linearWakeBlocked &&
-            this.freshLinearEvents(meta.conversationId).length === 0 &&
+            this.freshTrackerEvents(meta.conversationId).length === 0 &&
             !this.hasUnreadInboundReports(meta) &&
             !meta.questions?.records.some((record) => record.question.status === "pending") &&
             meta.sessionState !== "active" &&

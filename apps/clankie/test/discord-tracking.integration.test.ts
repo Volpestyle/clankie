@@ -20,6 +20,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { createDiscordCaptainActionClient } from "../src/discord-captain-actions.ts";
 import { readDiscordBodyPermissions } from "../src/discord-setup-body.ts";
 import { DiscordTracking } from "../src/discord-tracking.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 // Real saved settings/tracker, signed service HTTP, shared body admission and
 // native REST HTTP wire fixtures. No login, live guild, or provider mutation.
@@ -281,11 +282,15 @@ async function fixture() {
     settings,
     eventLogPath: join(root, "events.jsonl"),
     deviceSessionKey: Buffer.alloc(32, 7),
-    linearWebhook: {
-      secret: async () => secret,
-      recordActivity: (activity) => tracking.record(activity),
-      ownAccount: async () => ({ workspaceId: organizationId, userId: "fixture-self" }),
-    },
+    extensionRoutes: [
+      linearRoutes({
+        linearWebhook: {
+          secret: async () => secret,
+          recordActivity: (activity) => tracking.record(activity),
+          ownAccount: async () => ({ workspaceId: organizationId, userId: "fixture-self" }),
+        },
+      }),
+    ],
   });
   cleanups.push(async () => service.close());
   const hook = await listen(serve({ hostname: "127.0.0.1", port: 0, fetch: service.app.fetch }) as Server);

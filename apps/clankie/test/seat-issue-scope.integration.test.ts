@@ -8,6 +8,7 @@ import { SettingsStore } from "@clankie/settings";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createLocalTracker, writeConvention, type LinearImportSnapshot } from "@clankie/work-items";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 import { trackerEvidence } from "./helpers/tracker-evidence.ts";
 import { ProjectHires } from "../src/captain/project-hires.ts";
@@ -33,6 +34,7 @@ it("settles only the current verified hire scope across close, exit, collisions 
   await defaults.importLinear(snapshot, {});
   const defaultBefore = await readFile(join(root, "default", "tracker.json"), "utf8");
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials: new FileCredentialStore(join(root, "credentials.json")),
     settings: new SettingsStore(join(root, "settings.json")),
     localTracker: defaults,
@@ -580,6 +582,7 @@ it("retains saved Linear retirement for bound and legacy projects through a disp
   if (!(await accounts.completeLinear(start.flowId, "good-code")).ok) throw new Error("Fixture OAuth failed");
   const settings = new SettingsStore(join(root, "settings.json"));
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: createLocalTracker({ directory: join(root, "default") }),

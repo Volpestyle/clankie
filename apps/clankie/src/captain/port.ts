@@ -51,7 +51,7 @@ import type {
   SpawnOperatorSeat,
 } from "@clankie/protocol";
 import type { DurableMessageNotice } from "./conversations.ts";
-import type { LinearActivityEvent } from "../linear-webhook.ts";
+import type { TrackerActivity } from "./tracker-activity.ts";
 
 /**
  * The pieces a lane's system prompt is assembled from. `identity`, `persona`,
@@ -666,7 +666,7 @@ export interface CaptainPort {
     nativeWriteProof?: () => Promise<ProjectProcessProof | undefined>,
   ): Promise<WorkerWriteAuthority | undefined>;
   /** True for an existing ordinary global or workspace chat that may receive Linear wakes. */
-  linearWakeTargetAllowed(conversationId: string): boolean;
+  trackerWakeTargetAllowed(conversationId: string): boolean;
   /** Host-only current scoped lead and effective closure policy. */
   prepareTrackerLeadClosure?(
     source: ConversationAuthority,
@@ -674,11 +674,15 @@ export interface CaptainPort {
   ): Promise<() => void>;
   /** Missing or ambiguous policy/scope retains the ordinary owner verification ask. */
   trackerClosurePolicy?(trackerProjectId: string | null): Promise<"lead" | "owner">;
-  linearWakeDeliveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeDeliveries"]>;
-  linearWakeRecoveries(): ReturnType<import("./conversations.ts").ConversationStore["linearWakeRecoveries"]>;
-  /** Append verified external context to the selected ordinary chat and optionally wake it. */
-  receiveLinearActivity(
-    activity: LinearActivityEvent,
+  trackerWakeDeliveries(): ReturnType<
+    import("./conversations.ts").ConversationStore["trackerWakeDeliveries"]
+  >;
+  trackerWakeRecoveries(): ReturnType<
+    import("./conversations.ts").ConversationStore["trackerWakeRecoveries"]
+  >;
+  /** Append a connected tracker's verified context to the selected ordinary chat and optionally wake it. */
+  receiveTrackerActivity(
+    activity: TrackerActivity,
     following: boolean,
     conversationId?: string,
   ): boolean | void;
@@ -804,10 +808,10 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       conversationId,
       reason: "owner_asks_unavailable",
     }),
-    linearWakeTargetAllowed: (conversationId) => conversationId === "global-default",
-    linearWakeDeliveries: () => [],
-    linearWakeRecoveries: () => [],
-    receiveLinearActivity: () => true,
+    trackerWakeTargetAllowed: (conversationId) => conversationId === "global-default",
+    trackerWakeDeliveries: () => [],
+    trackerWakeRecoveries: () => [],
+    receiveTrackerActivity: () => true,
     fleetConversationAuthority: async () => undefined,
     fleetWriteAuthority: async () => undefined,
     close: async () => {},

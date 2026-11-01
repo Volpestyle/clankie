@@ -31,6 +31,7 @@ import { DeliveryFence, deliveryFingerprint } from "../src/captain/delivery-fenc
 import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
 import { DeployHolds } from "../src/deploy-holds.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { registerSeatRoutes } from "../src/app/seat-routes.ts";
 import type { ClankieAppDependencies } from "../src/app/types.ts";
@@ -550,13 +551,8 @@ it("keeps an idle reporter parked through its report receipts and delivers them 
   const alert = f.captain.notifyFleetHealthAlert("w1:p4", "Fleet proof alert: child needs its lead.");
   const events = (await woken)!;
   expect(events[0]?.content).toBe("Worker w1:p4 (codex). Fleet proof alert: child needs its lead.");
-  expect(events.slice(1).map((event) => event.id)).toEqual(
-    expect.arrayContaining([
-      `report:${deliveryId}:stored`,
-      `report:${deliveryId}:taken`,
-      `report:${deliveryId}:acknowledged`,
-    ]),
-  );
+  // Its newest stage supersedes the stages it was never told (#97).
+  expect(events.slice(1).map((event) => event.id)).toEqual([`report:${deliveryId}:acknowledged`]);
   expect(events.slice(1).every((event) => event.source === "worker-report-receipt")).toBe(true);
   for (const event of events) expect(await f.captain.acknowledgeFleetSeatEvent("w1:p1", event.id)).toBe(true);
   expect(await alert).toBe(true);
@@ -781,7 +777,13 @@ it("ingests content-free seat report health over authenticated HTTP into the rea
   const f = await fixture(60 * 60_000, undefined, false, true, undefined, reports);
   const settings = new SettingsStore(join(f.root, "settings.json"));
   const credentials = new FileCredentialStore(join(f.root, "credentials.json"));
-  const host = createMcpHost({ credentials, settings, curated: [], logger: { info() {}, warn() {} } });
+  const host = createMcpHost({
+    trackerMcp: linearMcp,
+    credentials,
+    settings,
+    curated: [],
+    logger: { info() {}, warn() {} },
+  });
   const worker = new WorkerMcp({
     directory: join(f.root, "grants"),
     credentials,

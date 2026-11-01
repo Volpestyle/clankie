@@ -19,6 +19,7 @@ import type { LaneLog } from "../src/captain/lane-log.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { operatorSeatBindingFixture } from "./fixtures/operator-seat-binding-fixture.ts";
 import {
   API_ACCESS,
@@ -79,6 +80,7 @@ it("reaches deferred Linear reads through the CLI without widening room or crede
     },
   });
   const mcp = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(directory, "settings.json")),
     curated: [

@@ -25,6 +25,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { joinedHireTools } from "../src/captain/machine-coding-tools.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { logger } from "../src/app/log.ts";
 import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
 import { openGatewayValue } from "../src/gateway-encryption.ts";
@@ -59,7 +60,7 @@ test("Clankie hires a Claude worker on a joined machine at workers, with named r
       presence: { listSessions: async () => [] },
       embodiment: { getLiveSession: async () => undefined },
       browser: { catalog: async () => ({ available: false, tools: [] }) },
-      mcp: createMcpHost({ settings, credentials: secrets, logger }),
+      mcp: createMcpHost({ trackerMcp: linearMcp, settings, credentials: secrets, logger }),
     } as unknown as CaptainDeps,
     { repoRoot, stateDir: root, settings },
   );

@@ -15,7 +15,6 @@ import {
   PairingRedeemRequestSchema,
   PairingRunRequestSchema,
   TAKE_CONTROL_GRANTS,
-  type DeviceGrantSet,
   type DeviceSelfResponse,
   type DeviceSessionRefreshResponse,
   type DomainEvent,
@@ -470,80 +469,42 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       return context.json({ error: "expired" }, 410);
     if (supportGrant !== undefined && supportGrant.scope !== "read-state")
       return context.json({ error: "support_pairing_requires_read_state" }, 409);
-    const browser = taken.offer.browser;
-    const deviceId = browser?.deviceId ?? `device-${ctx.idFactory().slice(0, 12)}`;
+    const deviceId = `device-${ctx.idFactory().slice(0, 12)}`;
     return withSerializedLock(ctx.deviceLocks, deviceId, async () => {
       if (
         taken.offer.run !== undefined &&
         ctx.pairingOffers.isRunEnded(taken.offer.run.runId, taken.offer.mintedBy)
       )
         return context.json({ error: "run_ended" }, 410);
-      const existing = ctx.devices.get(deviceId);
-      if (existing && browser === undefined) return context.json({ error: "device_identity_conflict" }, 409);
-      if (browser !== undefined) {
-        if (
-          existing &&
-          (existing.browserSessionId !== browser.sessionId || existing.supportGrantId !== undefined)
-        )
-          return context.json({ error: "browser_binding_denied" }, 403);
-      }
-      if (existing?.status === "revoked") return context.json({ error: "revoked" }, 403);
-      const offered =
-        browser?.grants ?? (supportGrantId === undefined ? TAKE_CONTROL_GRANTS : SUPPORT_DEVICE_GRANTS);
-      const offeredGrants =
-        existing === undefined
-          ? offered
-          : {
-              chat: offered.chat && existing.grants.chat,
-              steer: offered.steer && existing.grants.steer,
-              terminalObserve: offered.terminalObserve && existing.grants.terminalObserve,
-              terminalControl: offered.terminalControl && existing.grants.terminalControl,
-            };
+      if (ctx.devices.has(deviceId)) return context.json({ error: "device_identity_conflict" }, 409);
+      const offeredGrants = supportGrantId === undefined ? TAKE_CONTROL_GRANTS : SUPPORT_DEVICE_GRANTS;
       const freshNow = ctx.clock();
       const pendingExpiresAt = new Date(freshNow.getTime() + COMPLETION_TOKEN_TTL_MS).toISOString();
-      if (existing === undefined) {
-        const redeemed = ctx.recordEvent(
-          "device.pairing.redeemed",
-          `device:${deviceId}`,
-          freshNow.toISOString(),
-          {
-            schemaVersion: 1,
-            deviceId,
-            offerId: taken.offer.offerId,
-            name: parsed.data.device.name,
-            platform: parsed.data.device.platform,
-            offeredGrants,
-            mintedBy: taken.offer.mintedBy,
-            ...(supportGrantId === undefined ? {} : { supportGrantId }),
-            ...(browser === undefined ? {} : { browserSessionId: browser.sessionId }),
-            ...(taken.offer.run === undefined ? {} : { run: taken.offer.run }),
-            ...(taken.offer.review === undefined ? {} : { review: true }),
-            pendingExpiresAt,
-          },
-        );
-        applyDeviceEvent(ctx.devices, redeemed);
-      } else if (existing.status === "pending") {
-        applyDeviceEvent(
-          ctx.devices,
-          ctx.recordEvent("device.pairing.restarted", `device:${deviceId}`, freshNow.toISOString(), {
-            schemaVersion: 1,
-            deviceId,
-            offerId: taken.offer.offerId,
-            offeredGrants,
-            pendingExpiresAt,
-          }),
-        );
-      }
+      const redeemed = ctx.recordEvent(
+        "device.pairing.redeemed",
+        `device:${deviceId}`,
+        freshNow.toISOString(),
+        {
+          schemaVersion: 1,
+          deviceId,
+          offerId: taken.offer.offerId,
+          name: parsed.data.device.name,
+          platform: parsed.data.device.platform,
+          offeredGrants,
+          mintedBy: taken.offer.mintedBy,
+          ...(supportGrantId === undefined ? {} : { supportGrantId }),
+          ...(taken.offer.run === undefined ? {} : { run: taken.offer.run }),
+          ...(taken.offer.review === undefined ? {} : { review: true }),
+          pendingExpiresAt,
+        },
+      );
+      applyDeviceEvent(ctx.devices, redeemed);
       const completionToken = randomBytes(32).toString("base64url");
       ctx.completionTokens.set(hashCompletionToken(completionToken), {
         deviceId,
         offeredGrants,
         expiresAtMs: freshNow.getTime() + COMPLETION_TOKEN_TTL_MS,
-        ...(taken.offer.authorizedByBrowserSession === undefined
-          ? {}
-          : { authorizedByBrowserSession: taken.offer.authorizedByBrowserSession }),
         consumed: false,
-        ...(existing?.status === "active" ? { reissue: true as const } : {}),
       });
       logger.info({ deviceId, offerId: taken.offer.offerId }, "pairing offer redeemed");
       return context.json({
@@ -583,16 +544,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
         return context.json({ error: "expired" }, 410);
       if (record.status === "revoked" || isDeviceRunExpired(record, now))
         return context.json({ error: "revoked" }, 403);
-      if (record.status !== (pending.reissue ? "active" : "pending"))
-        return context.json({ error: "consumed" }, 409);
-      // Reissue preserves the accepted grants; this is not a grant-change API.
-      if (
-        pending.reissue &&
-        Object.keys(accepted).some(
-          (key) => accepted[key as keyof DeviceGrantSet] !== record.grants[key as keyof DeviceGrantSet],
-        )
-      )
-        return context.json({ error: "malformed" }, 400);
+      if (record.status !== "pending") return context.json({ error: "consumed" }, 409);
       const current = ctx.completionTokens.get(tokenHash);
       if (current === undefined || current.consumed) return context.json({ error: "consumed" }, 409);
       now = ctx.clock();
@@ -617,22 +569,14 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       });
       const deviceToken = signer.issue(claims);
       const sessionExpiresAt = new Date(claims.expiresAt * 1000).toISOString();
-      const event = ctx.recordEvent(
-        pending.reissue ? "device.session.refreshed" : "device.activated",
-        `device:${pending.deviceId}`,
-        now.toISOString(),
-        {
-          schemaVersion: 1,
-          deviceId: pending.deviceId,
-          grants: accepted,
-          sessionExpiresAt,
-        },
-      );
+      const event = ctx.recordEvent("device.activated", `device:${pending.deviceId}`, now.toISOString(), {
+        schemaVersion: 1,
+        deviceId: pending.deviceId,
+        grants: accepted,
+        sessionExpiresAt,
+      });
       applyDeviceEvent(ctx.devices, event);
-      logger.info(
-        { deviceId: pending.deviceId },
-        pending.reissue ? "device session reissued" : "device activated",
-      );
+      logger.info({ deviceId: pending.deviceId }, "device activated");
       return context.json({
         deviceId: pending.deviceId,
         deviceToken,

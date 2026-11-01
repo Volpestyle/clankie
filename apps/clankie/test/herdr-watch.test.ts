@@ -1703,6 +1703,7 @@ describe("hiring a seat", () => {
     expect(createTab).toHaveBeenCalledWith({
       cwd: tmpdir(),
       label: "Release prep · Work",
+      harness: "codex",
       env: expect.objectContaining({ CODEX_HOME: codexHome }),
     });
     expect(startAgent.mock.calls[0]?.[0]).toMatchObject({ kind: "codex", paneId: "w1C:p9" });
@@ -1756,6 +1757,7 @@ describe("hiring a seat", () => {
       cwd: tmpdir(),
       label: "Release prep · reviewer",
       placement: "new-tab",
+      harness: "codex",
       env: expect.objectContaining({ CODEX_HOME: codexHome }),
     });
     // Hired under the name it already had: that name is the persona's binding

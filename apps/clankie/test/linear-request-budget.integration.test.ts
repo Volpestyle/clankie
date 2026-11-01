@@ -20,6 +20,7 @@ import { OPERATOR_CONVERSATION_DISPATCH_PATH } from "@clankie/protocol";
 import { LinearRequestBudgetReportSchema } from "@clankie/protocol/linear-request-budget";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { LinearRequestBudget, withLinearRequestPriority } from "../src/linear-request-budget.ts";
 import {
   createLinearApiProvider,
@@ -43,6 +44,7 @@ import { WorkerMcp } from "../src/worker-mcp.ts";
 import { runLinearCommand } from "../../tui/src/command/linear.ts";
 import { doctorCommand } from "../../tui/src/command/doctor.ts";
 import { formatDoctorReport } from "../../tui/src/doctor-report.ts";
+import { linearRoutes } from "../src/app/linear-routes.ts";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -83,6 +85,7 @@ async function setup(
   });
   const tracker = createLinearApiTracker({ credentials, fetch: provider.fetch, requestBudget: budget });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(directory, "settings.json")),
     linearApiTracker: tracker,
@@ -703,6 +706,7 @@ it("counts the GraphQL identity request made when a connected app credential ref
     clientSecret: "fixture-app-secret",
   });
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: new SettingsStore(join(directory, "refresh-settings.json")),
     curated: [
@@ -1008,7 +1012,7 @@ it("projects the warning through authenticated HTTP, CLI, and doctor without spe
   expect(alerts).toHaveLength(1);
   const service = await createClankieApp({
     captain: createStubCaptain(),
-    linearRequestBudget: budget,
+    extensionRoutes: [linearRoutes({ linearRequestBudget: budget })],
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer budget-owner"
         ? { operatorId: "budget-owner" }

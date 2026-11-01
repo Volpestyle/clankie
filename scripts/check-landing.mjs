@@ -163,6 +163,7 @@ run("deadcode", ["pnpm", "deadcode"]);
 run("doc-links", ["node", "scripts/check-doc-links.mjs"]);
 run("retired-claims", ["node", "scripts/check-retired-claims.mjs"]);
 run("swallowed-rejections", ["node", "scripts/check-swallowed-rejections.mjs", base]);
+run("extension-boundary", ["node", "scripts/check-extension-boundary.mjs"]);
 run("evidence", ["node", "scripts/testing/evidence-landing-guard.mjs"]);
 // Every route the public gateway forwards needs a public-docs row. The table is
 // built from protocol path constants, so any protocol, docs or OpenAPI change

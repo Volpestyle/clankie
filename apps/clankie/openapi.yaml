@@ -2021,40 +2021,6 @@ paths:
         "401": { description: authentication_required }
         "403": { description: forbidden — terminalControl required }
         "503": { description: unavailable }
-  /v1/accounts/email/connect:
-    post:
-      tags: [Operator]
-      operationId: connectClankieMailbox
-      summary: Choose his Clankie mailbox in one step and return the email row
-      description: |
-        Owner operator bearer or active device with terminalControl only (ADR 0232). Public
-        gateway calls require the encrypted envelope. Cache-Control no-store (ADR 0242).
-        Asks Clankie's mail service first; only when it answers this install's Clankie
-        account with his address does settings.email.provider become clankie, with that
-        address as the from-address. A stored IMAP password is kept, so choosing IMAP again
-        needs no new sign-in. account_required: not signed in to a Clankie account, or the
-        service refused it (clankie login); unavailable: the service could not be reached;
-        unconfigured: this install has no Clankie mail service. Settings are unchanged then.
-      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, additionalProperties: false, properties: {} }
-      responses:
-        "200":
-          description: Switched; the email row as it now stands
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AccountResult" }
-        "400":
-          description: A closed error code (malformed, unconfigured, unavailable, account_required)
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AccountResult" }
-        "401": { description: authentication_required }
-        "403": { description: forbidden — terminalControl required }
-        "503": { description: unavailable }
   /v1/connections:
     get:
       tags: [Operator]
@@ -7748,7 +7714,7 @@ paths:
       summary: Revoke a device
       description: |
         Paired callers require Take Control. Local revocation is durable before
-        the hosted security and wake-key updates. A 503 does not confirm success;
+        the hosted security update. A 503 does not confirm success;
         retry the same device id. Fleet tombstones defeat restored old disks.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
@@ -7817,43 +7783,6 @@ paths:
           description: Too many offers; Retry-After is 60 seconds
         "503":
           description: Pairing publication or replay persistence unavailable
-
-  /v1/devices/wake-key:
-    post:
-      tags: [Devices]
-      operationId: registerDeviceWakeKey
-      summary: Register a paired device wake public key on a managed body
-      description: |
-        Managed bodies only; self-hosted installations answer 404. The gateway
-        carries this route inside the encrypted device envelope. The live device
-        session selects deviceId; callers cannot select a different device.
-        Registration and device revocation are serialized. Revocation disables
-        local access immediately, then removes the fleet key, retrying failures.
-      security: [{ deviceBearer: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [publicKey]
-              properties:
-                publicKey:
-                  type: string
-                  description: Uncompressed P-256 public point encoded as base64url
-                  pattern: "^[A-Za-z0-9_-]{87}$"
-      responses:
-        "200":
-          description: Registered; returns deviceId
-        "400":
-          description: Malformed public key request
-        "401":
-          description: Device session is unknown, expired, or revoked
-        "404":
-          description: Self-hosted body
-        "503":
-          description: Fleet registration unavailable; retry later
 
   /v1/devices/self/push:
     post:
@@ -8630,7 +8559,6 @@ components:
               denied,
               provider_rejected,
               unavailable,
-              account_required,
             ]
     AccountGoogleStartSuccess:
       type: object
@@ -8727,7 +8655,6 @@ components:
               denied,
               provider_rejected,
               unavailable,
-              account_required,
             ]
     ModelSubscriptionsResponse:
       type: object

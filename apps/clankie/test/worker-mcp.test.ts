@@ -8,6 +8,7 @@ import type { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 afterEach(() => {
@@ -31,6 +32,7 @@ it("delegates one verified account to isolated workers, with durable revocation 
   const calls: unknown[] = [];
   const observed: unknown[] = [];
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
     curated: [
@@ -234,6 +236,7 @@ it("verifies OAuth at Linear's MCP audience, preserves grant identity and serial
   const root = await mkdtemp(join(tmpdir(), "clankie-linear-identity-"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings: { load: async () => ({ mcp: { servers: [] } }) } as unknown as SettingsStore,
     logger: { info() {}, warn() {} },

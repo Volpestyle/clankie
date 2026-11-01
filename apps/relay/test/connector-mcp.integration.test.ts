@@ -843,6 +843,14 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { topic: "lead/reference/delivery.md" },
     });
     expect(page.isError).not.toBe(true);
+    // Every connected lead is pointed at the page written for it, and it is served.
+    expect(client.getInstructions()).toContain("lead/reference/connected-leads.md");
+    expect(more!.text).toContain("lead/reference/connected-leads.md");
+    const connected = await client.callTool({
+      name: "clankie_guide",
+      arguments: { topic: "lead/reference/connected-leads.md" },
+    });
+    expect(textOf(connected)).toContain("One watcher per worker");
 
     for (const topic of ["herdr/../../../package.json", "shared-checkout/scripts", "nobody"]) {
       const refused = await client.callTool({ name: "clankie_guide", arguments: { topic } });

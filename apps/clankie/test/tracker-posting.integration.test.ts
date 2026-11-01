@@ -40,6 +40,7 @@ import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createLinearApiTracker } from "../src/linear-api-tracker.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
+import { linearMcp } from "../src/linear-mcp.ts";
 import { createTrackerPosting, trackerPostingExecutor } from "../src/tracker-posting.ts";
 import { createWorkItemsService, defaultRun } from "../src/work-items.ts";
 import { runProjectSettingsCommand } from "../../tui/src/command/project-settings.ts";
@@ -251,6 +252,7 @@ async function fixture(
   const posting = createTrackerPosting(postingOptions);
   cleanups.push(() => posting.close());
   const host = createMcpHost({
+    trackerMcp: linearMcp,
     credentials,
     settings,
     localTracker: createLocalTracker({ directory: join(root, "tracker") }),

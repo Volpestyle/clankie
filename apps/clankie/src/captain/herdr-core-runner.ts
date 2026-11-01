@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { hostname } from "node:os";
+import type { HerdrForegroundProcess } from "./codex-seat.ts";
 import type { HerdrCensusFleet } from "./herdr-census.ts";
 import type { HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
@@ -185,6 +186,15 @@ export function createHerdrCoreRunner(
     const terminal = await seats.get(address);
     return terminal?.labels[SEAT_LABEL] === undefined ? undefined : terminal;
   };
+  /** The harness Clankie started in his own live terminal, as its one process; else undefined. */
+  const harnessProcess = async (address: string): Promise<HerdrForegroundProcess[] | undefined> => {
+    const terminal = await own(address);
+    if (terminal === undefined) throw new Error(`The desktop app has no Clankie terminal ${address}`);
+    const harness = terminal.labels[AGENT_LABEL];
+    return terminal.state === "live" && harness !== undefined && terminal.pid !== undefined
+      ? [{ pid: terminal.pid, name: harness }]
+      : undefined;
+  };
   const get = async (address: string): Promise<HerdrAgentSnapshot> => {
     const terminal = await own(address);
     if (terminal === undefined) throw new Error(`The desktop app has no Clankie terminal ${address}`);
@@ -235,6 +245,13 @@ export function createHerdrCoreRunner(
       if ((await own(address)) === undefined)
         throw new Error(`The desktop app has no Clankie terminal ${address}`);
       return seats.read(address, source === "visible" ? 0 : HISTORY_LINES);
+    },
+    // The launcher execs the harness as the terminal's own process (no shell under it), so
+    // once Clankie has started a harness there the terminal's pid is the harness's.
+    paneProcesses: async (address) => (await harnessProcess(address)) ?? [],
+    paneShell: async (address) => {
+      const foreground = (await harnessProcess(address)) ?? [];
+      return { ...(foreground[0] === undefined ? {} : { shellPid: foreground[0].pid }), foreground };
     },
     // Named keys only, in a terminal Clankie started (ADR 0323); never text, so never a brief.
     sendKeys: async (address, keys) => {

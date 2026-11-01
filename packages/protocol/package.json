@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./canonical-json": "./src/canonical-json.ts",
     "./remote-leads": "./src/remote-leads.ts",
     "./machine-join": "./src/machine-join.ts",
     "./public-gateway": "./src/public-gateway.ts",
@@ -21,6 +22,7 @@
     "./composer-transcription": "./src/composer-transcription.ts",
     "./accounts": "./src/accounts.ts",
     "./host-power": "./src/host-power.ts",
+    "./extensions": "./src/extensions.ts",
     "./work-items": "./src/work-items.ts",
     "./tracker-posting": "./src/tracker-posting.ts",
     "./views": "./src/views.ts",
@@ -29,7 +31,6 @@
     "./discord-ingress": "./src/discord-ingress.ts",
     "./discord-ingress-crypto": "./src/discord-ingress-crypto.ts",
     "./hosted-operator": "./src/hosted-operator.ts",
-    "./hosted-mail": "./src/hosted-mail.ts",
     "./discord-settings": "./src/discord-settings.ts",
     "./projects": "./src/projects.ts",
     "./reviews": "./src/reviews.ts",

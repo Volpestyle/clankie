@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -758,7 +759,9 @@ describe("fleet routing", () => {
     const hires: { seat: Record<string, unknown>; brief?: string; lead: string }[] = [];
     let leading = true;
     let nextHire: Record<string, unknown> | undefined;
+    let fresh: { id: string; afterReceiptId: string } | undefined;
     const serve = createOperatorService({
+      herdrWatches: { nextFreshIntent: () => fresh },
       deps: {
         herdrAvailable: () => true,
         fleets: {
@@ -831,13 +834,46 @@ describe("fleet routing", () => {
       status: "refused",
       detail: "That checkout isn't ready to start an agent from. Clankie said: Start checkout is dirty.",
     });
+    // An earlier start that never confirmed names the receipt the owner settles to free the place.
+    const receiptId = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+    nextHire = {
+      outcome: "failed",
+      reason: "delivery_unconfirmed",
+      receiptId,
+      detail: "The original hire remains uncertain in pane herdr-core/t23",
+    };
+    expect(
+      await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
+    ).toMatchObject({
+      status: "refused",
+      detail: expect.stringContaining(
+        `\`clankie hire-receipt settle ${receiptId} adopt\` if that agent is still running, otherwise \`clankie hire-receipt settle ${receiptId} abandoned\``,
+      ),
+    });
     nextHire = undefined;
+    // Once a settled earlier hire fences the place, each start goes as its own fresh intent (#100).
+    fresh = { id: randomUUID(), afterReceiptId: randomUUID() };
+    expect(
+      await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
+    ).toMatchObject({ status: "refused", detail: expect.stringContaining("needs its own first message") });
+    expect(hires).toHaveLength(3);
+    expect(
+      await serve({
+        op: "start_agent",
+        schemaVersion: 1,
+        machine: "pc",
+        workingDirectory: "C:\\code\\kh2",
+        prompt: "add rollback netcode",
+      }),
+    ).toMatchObject({ status: "started" });
+    expect(hires[3]?.seat).toMatchObject({ freshIntent: fresh });
+    fresh = undefined;
     // With nobody to lead it, nothing starts.
     leading = false;
     expect(
       await serve({ op: "start_agent", schemaVersion: 1, machine: "pc", workingDirectory: "C:\\code\\kh2" }),
     ).toMatchObject({ status: "refused" });
-    expect(hires).toHaveLength(2);
+    expect(hires).toHaveLength(4);
   });
 
   it("finds a pane made since the shared poll, such as a seat just hired (VUH-1527)", async () => {

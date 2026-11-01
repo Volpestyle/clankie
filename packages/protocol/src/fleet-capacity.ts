@@ -104,6 +104,91 @@ export const FleetCapacityPaneSchema = z
   .strict();
 export type FleetCapacityPane = z.infer<typeof FleetCapacityPaneSchema>;
 
+const knownRate = z.union([z.number().finite().min(0), unknown]);
+const TokenCountsSchema = z
+  .object({
+    input: z.number().int().nonnegative(),
+    output: z.number().int().nonnegative(),
+    cacheWrite: z.number().int().nonnegative(),
+    cacheRead: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * How fast one usage window is being spent (ADR 0324). `recent` is the change
+ * between two of Clankie's own readings at least half an hour apart, within
+ * the last three hours of the same window; `windowAverage` is the window's own
+ * average since it began. `toUseAllByReset` is the even pace that spends what
+ * is left exactly at reset. Projections use `recent` when known, otherwise
+ * `windowAverage`.
+ */
+export const FleetCapacityBurnWindowSchema = z
+  .object({
+    id: z.string().min(1).max(80),
+    label: z.string().min(1).max(96),
+    usedPercent: z.number().min(0).max(100),
+    resetsAt: knownInstant,
+    hoursToReset: knownNumber,
+    percentPerHour: z
+      .object({
+        recent: knownRate,
+        recentOverMinutes: knownCount,
+        windowAverage: knownRate,
+        toUseAllByReset: knownRate,
+      })
+      .strict(),
+    /** Percent used at reset at the projected pace. Above 100 means it runs out first. */
+    projectedUsedAtReset: z.union([z.number().finite().min(0), unknown]),
+    runsOutAt: z.union([z.iso.datetime(), z.literal("not before reset"), unknown]),
+  })
+  .strict();
+export type FleetCapacityBurnWindow = z.infer<typeof FleetCapacityBurnWindowSchema>;
+
+/**
+ * One local Claude session's tokens in the last hour, from its own transcript.
+ * `agent` is the `list_agents` id when the session is a seat Clankie knows;
+ * otherwise the session is counted but not named.
+ */
+export const FleetCapacityBurnSessionSchema = z
+  .object({
+    agent: z.union([z.string().min(1).max(256), unknown]),
+    title: z.string().max(200).optional(),
+    lastActiveAt: z.iso.datetime(),
+    tokens: TokenCountsSchema,
+  })
+  .strict();
+export type FleetCapacityBurnSession = z.infer<typeof FleetCapacityBurnSessionSchema>;
+
+/** One metered account's spending pace, once per account however many machines use it. */
+export const FleetCapacityBurnSchema = z
+  .object({
+    harness: z.enum(["claude", "codex"]),
+    account: z.string().min(1).max(128),
+    plan: z.union([z.string().min(1).max(64), unknown]),
+    machines: z.array(z.string().min(1).max(64)).max(16),
+    observedAt: z.iso.datetime(),
+    windows: z.array(FleetCapacityBurnWindowSchema).max(16),
+    /**
+     * Tokens this account's Claude sessions on this Mac spent in the last hour,
+     * from their transcripts. Linked machines are not read; Codex is not read.
+     * `since` is later than an hour ago when a long transcript's readable tail
+     * did not reach back that far.
+     */
+    lastHour: z.union([
+      z
+        .object({
+          since: z.iso.datetime(),
+          sessions: z.number().int().nonnegative(),
+          tokens: TokenCountsSchema,
+          bySession: z.array(FleetCapacityBurnSessionSchema).max(32),
+        })
+        .strict(),
+      unknown,
+    ]),
+  })
+  .strict();
+export type FleetCapacityBurn = z.infer<typeof FleetCapacityBurnSchema>;
+
 export const FleetCapacitySchema = z
   .object({
     observedAt: z.iso.datetime(),
@@ -114,6 +199,8 @@ export const FleetCapacitySchema = z
       })
       .strict(),
     accounts: z.array(FleetCapacityAccountSchema).max(256),
+    /** Absent on a service older than ADR 0324. */
+    burn: z.array(FleetCapacityBurnSchema).max(64).optional(),
     panes: z.array(FleetCapacityPaneSchema).max(768),
     heavy: z.union([
       z
