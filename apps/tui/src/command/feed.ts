@@ -20,7 +20,9 @@ import {
   type FeedDropResult,
   type FeedItem,
   type FeedListRequest,
+  type FeedMedia,
   type FeedPage,
+  type FeedView,
   type OperatorConversationServiceClient,
 } from "@clankie/protocol";
 import {
@@ -31,7 +33,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 import { attachmentFile } from "./send.ts";
 
 export const FEED_USAGE = [
-  "Usage: clankie feed [--project ID] [--cursor CURSOR] [--limit N] [--json]   (owner checks, updates and drops, newest first)",
+  "Usage: clankie feed [--project ID] [--details] [--cursor CURSOR] [--limit N] [--json]   (what you need to steer, grouped by project, newest first; --details adds ids and commands)",
   "       clankie feed drop --project ID [--title TEXT] [--body TEXT | --stdin] [--file PATH]... [--key KEY] [--json]   (file a drop as a private issue file and wake the project's lead)",
   "       clankie feed check [--project ID | --conversation ID] [--longer] [--evidence clankie://evidence/sha256/HASH] [--waiting-on TEXT] [--key KEY] [--json] LINE   (ask the owner to check one thing: at most 140 characters, about a ten-second look)",
 ].join("\n");
@@ -93,6 +95,7 @@ export async function runFeedCommand(
       project: { type: "string" },
       cursor: { type: "string" },
       limit: { type: "string" },
+      details: { type: "boolean" },
       json: { type: "boolean" },
     },
   });
@@ -108,7 +111,7 @@ export async function runFeedCommand(
   const page = await (await ownerClient(options, "The feed")).feedList!(request.data);
   const stdout = options.stdout ?? process.stdout;
   if (values.json) outputJson(stdout, page);
-  else stdout.write(`${formatFeedPage(page, request.data)}\n`);
+  else stdout.write(`${formatFeedPage(page, request.data, { details: values.details === true })}\n`);
   return page.outcome === "ready" ? 0 : 1;
 }
 
@@ -267,14 +270,16 @@ export function formatFeedDrop(result: FeedDropResult): string {
   ].join("\n");
 }
 
-/** `/feed [PROJECT]` in the console: the same page as text. */
+/** `/feed [PROJECT] [--details]` in the console: the same page as text. */
 export function feedConsoleCommand(client: OperatorConversationServiceClient) {
   return async (argument: string): Promise<string> => {
-    const [projectId, ...extra] = argument.trim().split(/\s+/u).filter(Boolean);
+    const words = argument.trim().split(/\s+/u).filter(Boolean);
+    const details = words.includes("--details");
+    const [projectId, ...extra] = words.filter((word) => word !== "--details");
     const request = FeedListRequestSchema.safeParse(projectId ? { projectId } : {});
-    if (extra.length || !request.success) throw new Error("Usage: /feed [PROJECT_ID]");
+    if (extra.length || !request.success) throw new Error("Usage: /feed [PROJECT_ID] [--details]");
     if (!client.feedList) throw new Error("The feed is unavailable");
-    return formatFeedPage(await client.feedList(request.data), request.data);
+    return formatFeedPage(await client.feedList(request.data), request.data, { details });
   };
 }
 
@@ -304,81 +309,166 @@ export function feedDropConsoleCommand(client: OperatorConversationServiceClient
   };
 }
 
-/** The continuation repeats the filter, since the cursor only marks a place in the page. */
-export function formatFeedPage(page: FeedPage, request: FeedListRequest = {}): string {
-  if (page.outcome !== "ready") return page.message;
-  const lines = page.items.map(formatFeedItem);
-  for (const missing of page.unreadable ?? [])
-    lines.push(`Not included: ${missing.projectId ?? missing.repoId}: ${missing.message}`);
-  if (page.nextCursor) {
-    const project = request.projectId === undefined ? "" : ` --project ${request.projectId}`;
-    const limit = request.limit === undefined ? "" : ` --limit ${request.limit}`;
-    lines.push(`More: clankie feed${project}${limit} --cursor ${page.nextCursor}`);
-  }
-  return lines.length ? lines.join("\n\n") : "Nothing in the feed";
+/** How a page reads: plain words for people, or with every id and command (`--details`). */
+export interface FeedPageFormat {
+  readonly details?: boolean;
+  readonly now?: number;
 }
 
-function formatFeedItem(item: FeedItem): string {
-  const project = item.projectId ? ` · ${item.projectId}` : "";
+/**
+ * One page for people (#187): grouped by project, each item its picture first,
+ * then one plain line. `--details` adds the ids and the exact answer and dismiss
+ * commands. The continuation repeats the filter, since the cursor only marks a
+ * place in the page.
+ */
+export function formatFeedPage(
+  page: FeedPage,
+  request: FeedListRequest = {},
+  format: FeedPageFormat = {},
+): string {
+  if (page.outcome !== "ready") return page.message;
+  const groups = new Map<string, string[]>();
+  for (const item of page.items) {
+    const name = item.view?.project ?? item.projectId ?? "Not in a project";
+    const group = groups.get(name) ?? [];
+    group.push(formatFeedItem(item, format));
+    groups.set(name, group);
+  }
+  // A project's group sits where its newest item is; items outside any project come last.
+  const outside = groups.get("Not in a project");
+  groups.delete("Not in a project");
+  if (outside) groups.set("Not in a project", outside);
+  const blocks = [...groups].map(([name, items]) => [name, ...items].join("\n\n"));
+  const lines: string[] = [];
+  for (const missing of page.unreadable ?? [])
+    lines.push(
+      `Couldn't read ${missing.projectId ?? "a project"}'s updates just now.${format.details ? ` ${missing.repoId}: ${missing.message}` : ""}`,
+    );
+  const flags = `${request.projectId === undefined ? "" : ` --project ${request.projectId}`}${
+    request.limit === undefined ? "" : ` --limit ${request.limit}`
+  }`;
+  if (page.nextCursor)
+    lines.push(`More: clankie feed${flags}${format.details ? " --details" : ""} --cursor ${page.nextCursor}`);
+  if (blocks.length && !format.details)
+    lines.push(
+      `Answer, dismiss or give a verdict in the Clankie app. Ids and commands: clankie feed${flags} --details`,
+    );
+  if (!blocks.length && !lines.length) return "Nothing in the feed";
+  return [...blocks, lines.join("\n")].filter(Boolean).join("\n\n");
+}
+
+const indent = (lines: readonly string[]) => lines.filter(Boolean).map((line) => `  ${line}`);
+
+function when(at: string, now: number): string {
+  const ago = Math.max(0, now - Date.parse(at));
+  if (ago < 60_000) return "just now";
+  if (ago < 3_600_000) return `${Math.floor(ago / 60_000)} min ago`;
+  if (ago < 86_400_000) return `${Math.floor(ago / 3_600_000)} h ago`;
+  if (ago < 7 * 86_400_000) return `${Math.floor(ago / 86_400_000)} d ago`;
+  return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function mediaLine(media: FeedMedia): string {
+  const clip = media.mimeType?.startsWith("video/") ?? /\.(?:mp4|mov|webm|m4v)$/iu.test(media.url);
+  return `${clip ? "Clip" : "Picture"}: ${media.alt ? `${media.alt} ` : ""}${media.url}`;
+}
+
+/** The view an older host left out, built from the payload. */
+function viewOf(item: FeedItem): FeedView {
+  if (item.view) return item.view;
+  const caption =
+    item.kind === "check"
+      ? (item.check.line ?? item.check.question.prompt)
+      : item.kind === "proof"
+        ? item.proof.line
+        : item.kind === "drop"
+          ? item.drop.title
+          : (item.update.title ?? item.update.body.split("\n")[0] ?? "Update");
+  const media =
+    item.kind === "check"
+      ? item.check.media
+      : item.kind === "proof"
+        ? item.proof.media
+        : item.kind === "drop"
+          ? item.drop.media
+          : item.update.media;
+  return { caption: caption.slice(0, 160) || "Update", ...(media?.[0] ? { visual: media[0] } : {}) };
+}
+
+function formatFeedItem(item: FeedItem, format: FeedPageFormat): string {
+  const view = viewOf(item);
+  const now = format.now ?? Date.now();
+  const media =
+    item.kind === "check"
+      ? item.check.media
+      : item.kind === "proof"
+        ? item.proof.media
+        : item.kind === "drop"
+          ? item.drop.media
+          : item.update.media;
+  const rest = (media ?? []).filter((entry) => entry.url !== view.visual?.url);
+  const picture = [
+    view.visual ? mediaLine(view.visual) : "",
+    ...(format.details ? rest.map(mediaLine) : rest.length ? [`and ${rest.length} more to look at`] : []),
+  ];
+  let heading: string;
+  const body: string[] = [];
+  const commands: string[] = [];
   if (item.kind === "check") {
-    const { question, revision, line, longer, media } = item.check;
-    return [
-      `Check${longer ? " (takes longer)" : ""}${project} · ${item.at}`,
-      line ?? question.prompt,
-      line !== undefined && line !== question.prompt ? question.prompt : "",
-      ...(media ?? []).map((entry) => `${entry.alt ?? entry.mimeType ?? "Media"}: ${entry.url}`),
-      ...question.options.map((option) => `  - ${option.label} (${option.optionId})`),
-      question.recommendation ? `Recommended: ${question.recommendation}` : "",
-      question.waitingOn ? `Waiting on it: ${question.waitingOn}` : "",
-      question.issue ? `Issue: ${question.issue.key} — ${question.issue.url}` : "",
+    const { question, revision, longer } = item.check;
+    heading = `Check${longer ? ", takes longer than a quick look" : ""}`;
+    body.push(
+      `Answers: ${question.options.map((option) => option.label).join(", ")}${
+        question.recommendation ? ` (Clankie suggests ${question.recommendation})` : ""
+      }`,
+    );
+    for (const option of question.options) commands.push(`Option ${option.label}: ${option.optionId}`);
+    commands.push(
       `Answer: clankie conversations answer ${question.conversationId} ${question.requestId} --incarnation ${question.incarnationId} --revision ${revision} (--option UUID | --text TEXT)`,
-    ]
-      .filter(Boolean)
-      .join("\n");
-  }
-  if (item.kind === "update") {
+    );
+  } else if (item.kind === "proof") {
+    heading = "Finished, check it";
+    body.push(item.proof.title !== view.caption ? item.proof.title : "");
+    body.push("Answer on your paired phone: It works, or Send it back with a note");
+  } else if (item.kind === "drop") {
+    const { drop } = item;
+    const from =
+      drop.source?.kind === "machine"
+        ? ", from this machine"
+        : drop.source?.name
+          ? `, from ${drop.source.name}`
+          : "";
+    const status = drop.status && drop.status !== "todo" ? `, ${drop.status.replace(/_/gu, " ")}` : "";
+    heading = `Your drop${from}${status}`;
+    const text = drop.bodyTruncated ? `${drop.body}…` : drop.body;
+    if (text.trim() && text.trim() !== view.caption) body.push(text.trim());
+  } else {
     const { update } = item;
-    const heading = update.ownerUpdate
-      ? `${update.title ?? "Update"} (${update.ownerUpdate.state})`
-      : `Project update${update.projectUpdate?.health ? ` (${update.projectUpdate.health})` : ""}`;
-    return [
-      `${heading}${project} · ${item.at}`,
-      update.bodyTruncated ? `${update.body}…` : update.body,
-      update.issue ? `Issue: ${update.issue.key} — ${update.issue.url}` : "",
-      ...(update.links ?? []).map((link) => `${link.label}: ${link.url}`),
-      ...(update.media ?? []).map((media) => `${media.alt ?? media.mimeType ?? "Media"}: ${media.url}`),
-      update.ownerUpdate ? `Dismiss: clankie conversations dismiss-update ${update.ownerUpdate.id}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    heading = update.ownerUpdate
+      ? `News${update.ownerUpdate.state === "unread" ? ", new" : ""}`
+      : "Project update";
+    // A project update's caption is its first line; the rest reads below, its pictures already listed.
+    const text = (update.bodyTruncated ? `${update.body}…` : update.body)
+      .replace(/!\[[^\]]*\]\((?:[^()]|\([^)]*\))*\)/gu, "")
+      .replace(/\*\*|__/gu, "")
+      .replace(/\n{3,}/gu, "\n\n")
+      .trim();
+    const shown = update.projectUpdate ? text.replace(/^[^\n]*\n?/u, "").trim() : text;
+    if (shown && shown !== view.caption) body.push(shown);
+    for (const link of update.links ?? []) body.push(`${link.label}: ${link.url}`);
+    if (update.ownerUpdate)
+      commands.push(`Dismiss: clankie conversations dismiss-update ${update.ownerUpdate.id}`);
   }
-  if (item.kind === "proof") {
-    const { proof } = item;
-    return [
-      `Finished, check it${project} · ${item.at}`,
-      proof.line,
-      `${proof.key}: ${proof.title} (${proof.stage})`,
-      ...(proof.media ?? []).map((entry) => `${entry.alt ?? entry.mimeType ?? "Media"}: ${entry.url}`),
-      "Answer: in the Clankie app on your paired phone (It works, or Send it back with a note)",
-    ]
-      .filter(Boolean)
-      .join("\n");
-  }
-  const { drop } = item;
-  const from =
-    drop.source?.kind === "machine"
-      ? " · from this machine"
-      : drop.source?.name
-        ? ` · from ${drop.source.name}`
-        : "";
-  const status = drop.status && drop.status !== "todo" ? ` (${drop.status.replace(/_/gu, " ")})` : "";
-  return [
-    `Drop${status}${project}${from} · ${item.at}`,
-    drop.title,
-    drop.bodyTruncated ? `${drop.body}…` : drop.body,
-    ...(drop.media ?? []).map((media) => `${media.alt ?? media.mimeType ?? "Media"}: ${media.url}`),
-    `Item: ${drop.itemId} in repo ${drop.repoId}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const lines = [`${heading} · ${when(item.at, now)}`, ...picture, view.caption, ...body];
+  if (format.details)
+    lines.push(
+      "Details:",
+      ...[
+        `Feed item: ${item.id}`,
+        `At: ${item.at}`,
+        ...(view.details ?? []).map((d) => `${d.label}: ${d.value}`),
+        ...commands,
+      ].map((line) => `  ${line}`),
+    );
+  return indent(lines.flatMap((line) => line.split("\n"))).join("\n");
 }

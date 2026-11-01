@@ -44,6 +44,16 @@ const content = {
     )
     .max(8)
     .optional(),
+  /**
+   * The technical side for whoever asks to see it: ids, panes, commands, codes. The
+   * owner's feed keeps it folded away under the title and body, which stay plain words.
+   */
+  details: z.string().trim().min(1).max(2000).optional(),
+  /**
+   * Routine news nobody needs to steer, such as a delivery notice: it stays in the
+   * mailbox and out of the owner's feed.
+   */
+  routine: z.literal(true).optional(),
 };
 /** Deliberately mailed news; no answer, continuation or waiting state. */
 export const OwnerUpdateDraftSchema = z

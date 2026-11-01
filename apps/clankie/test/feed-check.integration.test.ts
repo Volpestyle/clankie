@@ -376,9 +376,19 @@ it("an agent asks the owner for a quick check; the feed shows its line, evidence
     },
   });
   expect(checks[1]).not.toHaveProperty("check.longer");
+  // People read the picture first, then the line, under the project's name (#187).
+  expect(checks[1]!.view).toMatchObject({
+    caption: line,
+    project: "Garden",
+    visual: { url: shot.link, mimeType: "image/png" },
+  });
   const text = formatFeedPage(page);
-  expect(text).toContain(`Check (takes longer) · garden`);
-  expect(text).toContain(`image/png: ${shot.link}`);
+  expect(text).toMatch(/^Garden\n\n {2}Check, takes longer than a quick look · /u);
+  expect(text).toContain(`  Picture: ${shot.link}\n  ${line}\n`);
+  expect(text).not.toContain(checks[1]!.kind === "check" ? checks[1]!.check.question.requestId : "?");
+  expect(formatFeedPage(page, {}, { details: true })).toContain(
+    `Request: ${checks[1]!.kind === "check" ? checks[1]!.check.question.requestId : "?"}`,
+  );
 
   // Answering with the existing op, against the target the feed carried, takes it out.
   const target = checks[1]!;
@@ -628,9 +638,21 @@ it("a finished item the lead marked shows as a proof with its clip and screensho
           { url: gate.shot.link, mimeType: "image/png" },
         ],
       },
+      // The clip leads; the item's key and bundle wait in the details.
+      view: {
+        caption: "Open Garden, tap the gate twice: it latches",
+        project: "Garden",
+        visual: { url: gate.clip.link, mimeType: "video/mp4" },
+        details: expect.arrayContaining([
+          { label: "Item", value: `${gate.issue.identifier}: Gate latch` },
+          { label: "Proof bundle", value: gate.bundle.id },
+        ]),
+      },
     },
   ]);
-  expect(formatFeedPage(page)).toContain("Answer: in the Clankie app on your paired phone");
+  expect(formatFeedPage(page)).toContain(
+    "Answer on your paired phone: It works, or Send it back with a note",
+  );
 
   // A pending verify ask on the item is its check instead: the item's line and first clip ride the ask.
   const ask = await f.store.requestSurfaceQuestion(

@@ -8681,7 +8681,11 @@ cannot substitute.
 `source: {conversationId, seatId?}`, optional `links: [{label, url}]`, optional
 `media: [{url, mimeType, alt?}]`, `state`, and optional read/dismiss timestamps.
 The tool requires title (max 200) and short body (max 2000), and accepts optional
-`seatId`, links/media (max eight each) and `issue: {tracker, key, url}`.
+`seatId`, links/media (max eight each), `issue: {tracker, key, url}`, `details`
+(max 2000: the ids, panes, commands and codes the owner's feed folds away, so the
+title and body stay plain words) and `routine: true` (news nobody steers, such
+as a receipt or the host's delivery notice: it stays in the mailbox and out of
+the feed).
 The source conversation is supplied by the host. Asks accept the same optional
 `issue` reference; it enables navigation and grants no tracker authority.
 Only HTTP/HTTPS links are accepted; media must already be published at a URL.
@@ -8702,11 +8706,13 @@ without this metadata receive a fresh host identity for each call. An unknown
 transport failure does not automatically repeat mail: inspect the original
 mailbox state before making another publication.
 
-### Owner feed: `feed [--project ID] [--cursor CURSOR] [--limit N] [--json]`
+### Owner feed: `feed [--project ID] [--details] [--cursor CURSOR] [--limit N] [--json]`
 
-One newest-first page of what is waiting on the owner and what happened, joined
-by the host from the stores above. It keeps no store of its own and changes
-nothing:
+One newest-first page of what the owner steers, joined by the host from the
+stores above ([#187](https://github.com/Volpestyle/clankie/issues/187)). It keeps
+no store of its own and changes nothing. Routine mail (`routine: true`) stays in
+the mailbox, and each project shows only its newest status update; the older
+ones stay in `work_project_details`:
 
 - a **check** is a pending owner ask; answer it with `conversations answer`
   (or `input_answer`) using the `question` and `revision` the item carries.
@@ -8743,9 +8749,20 @@ clankie feed --project garden --limit 10
 clankie feed --project garden --cursor CURSOR --json
 ```
 
-TUI: `/feed [PROJECT_ID]`. Text output names the exact answer and dismiss
-commands, and its next-page command repeats `--project` and `--limit`, since a
-cursor marks only a place in the page; `--json` prints the page.
+Every item carries a `view` for people: `caption`, one line in plain words with
+no pane or terminal ids, request or receipt ids, hashes or `clankie://` links;
+`project`, the project's name; `visual`, the one thing to look at first (a clip,
+else a picture, from the item's own media); and `details`, label and value pairs
+a client shows only when asked. The host moves whatever it took out of the line
+into `details` ("Taken from the line", "Original line"), with the item's ids and
+an owner update's own `details`. The kind's payload stays the exact source for
+answering, dismissing and verdicts. `view` is absent from older hosts.
+
+Text output groups the page by project (items outside any project last); each
+item leads with its picture, then its caption, with no ids. `--details` adds the
+ids and the exact answer and dismiss commands. The next-page command repeats
+`--project`, `--limit` and `--details`, since a cursor marks only a place in the
+page; `--json` prints the page. TUI: `/feed [PROJECT_ID] [--details]`.
 
 An item belongs to a project when its ask's workspace, or its source
 conversation's local workspace, lies inside one of the project's local

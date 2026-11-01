@@ -23,6 +23,7 @@ import type { TrackerToolBackend } from "@clankie/work-items";
 import type { WorkItemsService } from "./work-items.ts";
 import type { createFeedDrops } from "./feed-drops.ts";
 import { evidenceHash, evidenceMedia, withEvidenceTypes, type EvidenceTypes } from "./feed-media.ts";
+import { feedView } from "./feed-view.ts";
 
 /** One read of the existing stores, carrying the caller's owner authority. */
 type FeedServe = (request: OperatorConversationServiceRequest) => Promise<OperatorConversationServiceResult>;
@@ -35,8 +36,9 @@ const UNREADABLE = "This project’s updates can’t be read here right now.";
 
 /**
  * The owner's feed (step 5, slices C1, C3 and C4): a newest-first join of pending
- * owner asks, mailed owner updates, project status updates, the owner's open
- * drops and finished built-in items waiting on his verdict. It keeps no store of
+ * owner asks, mailed owner updates, each project's newest status update, the
+ * owner's open drops and finished built-in items waiting on his verdict, each
+ * with a plain `view` for people (#187). Routine mail stays out. It keeps no store of
  * its own: asks are answered with `input_answer`, mail dismissed with
  * `owner_update_dismiss`, drops are the projects' own issue files, and proofs get
  * the paired app's `post_owner_verdict`. Check lines, status updates and refined
@@ -163,8 +165,11 @@ export function createOwnerFeed(options: {
               ...(proof.media.length ? { media: proof.media } : {}),
             },
           });
+      const mailDetails = new Map<string, string>();
       for (const update of mail.result.updates) {
-        if (update.state === "dismissed") continue;
+        // Routine mail (a delivery notice) stays in the mailbox; the feed holds what the owner steers.
+        if (update.state === "dismissed" || update.routine) continue;
+        if (update.details) mailDetails.set(`owner-update:${update.id}`, update.details);
         const projectId = projectForConversation(update.conversationId);
         items.push({
           kind: "update",
@@ -218,15 +223,20 @@ export function createOwnerFeed(options: {
             }
           }),
         );
+        // Each project shows where it stands now: its newest update. The rest stay in its details.
+        const newest = new Map<string, FeedItem>();
         for (const { repo, projectId, read } of reads) {
           for (const update of read?.updates ?? []) {
             const at = iso(update.createdAt);
             // A project read through two trackers (a repo and its Linear project) shows each update once.
             if (at === undefined || seen.has(update.id)) continue;
             seen.add(update.id);
-            items.push(projectUpdateItem(update, at, repo.id, projectId));
+            const item = projectUpdateItem(update, at, repo.id, projectId);
+            const held = newest.get(projectId);
+            if (held === undefined || compare(item, held) > 0) newest.set(projectId, item);
           }
         }
+        items.push(...newest.values());
       }
 
       // Drops: the open stub and refined issue files of each file-backed project.
@@ -244,7 +254,14 @@ export function createOwnerFeed(options: {
       const after = request.cursor === undefined ? undefined : decodeCursor(request.cursor);
       const remaining = after ? ordered.filter((item) => compare(item, after) < 0) : ordered;
       const sliced = remaining.slice(0, request.limit ?? FEED_LIST_LIMIT_DEFAULT);
-      const page = await withEvidenceTypes(sliced, options.evidence);
+      const names = new Map(projects.map((project) => [project.id, project.name]));
+      const page = (await withEvidenceTypes(sliced, options.evidence)).map((item) => ({
+        ...item,
+        view: feedView(item, {
+          ...(item.projectId && names.has(item.projectId) ? { project: names.get(item.projectId)! } : {}),
+          ...(mailDetails.has(item.id) ? { details: mailDetails.get(item.id)! } : {}),
+        }),
+      }));
       const last = page.at(-1);
       return FeedListResultSchema.parse({
         outcome: "ready",
