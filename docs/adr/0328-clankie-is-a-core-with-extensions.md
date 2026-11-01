@@ -81,6 +81,11 @@ Each of these becomes an extension:
 | `browser`          | The browser host and recording                                                                      |
 | `media`            | Image, video and skin draft generation                                                              |
 
+Which hired harnesses can do computer work (`computer-use-harnesses.ts`) is
+part of hiring and stays in core; the `computer` extension is Clankie's own
+computer body. The core reaches media and diagrams through its own ports
+(`ports/media.ts`).
+
 The first seven are the ones James named. `computer`, `browser` and `media` are
 proposed here because the fleet runs without them; they can move back to core
 in this ADR without changing the contract.

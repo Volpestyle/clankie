@@ -32,8 +32,7 @@ import type { createDiscordVoicePresenceClient } from "../discord-voice-presence
 import type { EmailPort } from "../email.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
-import type { FinishedRender } from "../media-generation.ts";
-import type { TldrawHost } from "../tldraw-host.ts";
+import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
 import type { DiscordTracking } from "../discord-tracking.ts";
 
@@ -162,7 +161,7 @@ export interface CaptainDeps {
    * His drawing hand (ADR 0096). Absent when the capability is switched off;
    * the tools then say so rather than disappearing.
    */
-  readonly diagrams?: TldrawHost;
+  readonly diagrams?: DiagramPort;
   readonly embodiment: {
     submitIntent(
       intent: EmbodimentIntent,

@@ -108,7 +108,7 @@ import { registerLinearRoutes } from "./linear-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
-import type { MediaGeneratorPort } from "../media-generation.ts";
+import type { MediaGeneratorPort } from "../ports/media.ts";
 import { createMinecraftRoutes } from "../minecraft-routes.ts";
 import { GAME_EXTENSIONS_PATH } from "@clankie/protocol";
 import { createModelKeyRoutes } from "../model-key-routes.ts";
