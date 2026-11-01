@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ConversationCommitError } from "./errors.ts";
 import {
   WorkerReportSummarySchema,
@@ -555,29 +556,45 @@ export function senderReportEvents(
     ];
   const newest = pending.reduce((latest, entry) => (entry.at > latest.at ? entry : latest));
   // The id names the newest receipt it covers; acknowledging it covers every one up to then.
-  return [event(`${BATCH_PREFIX}${newest.at}`, newest, batchContent(pending))];
+  return [event(`${BATCH_PREFIX}${newest.at}:${batchDigest(pending)}`, newest, batchContent(pending))];
+}
+
+/** Names exactly the stages a batch told, so its acknowledgment covers no others. */
+function batchDigest(entries: PendingReceipt[]): string {
+  const told = entries
+    .flatMap((entry) => [...entry.covers, entry.stage].map((stage) => `${entry.report.deliveryId}:${stage}`))
+    .sort();
+  return createHash("sha256").update(told.join("\n")).digest("hex").slice(0, 16);
 }
 
 /**
  * What a batch receipt named after `through` told the worker: every stage
  * reached by then, even when a report has moved on to a newer stage since.
- * Undefined when no receipt of this sender happened at `through`.
+ * When the stages reached by then no longer match the batch's digest (one
+ * moved on within the same millisecond, or part of it was already taken),
+ * only stages strictly before `through` count, so a stage the worker may not
+ * have been told is told again rather than dropped. Undefined when no
+ * receipt of this sender happened at `through`.
  */
 function batchTold(
   ctx: ConversationStore,
   paneId: string,
   binding: string,
   through: string,
+  digest: string,
 ): PendingReceipt[] | undefined {
   const reports = senderReports(ctx, paneId, binding);
   if (!reports.some((report) => reachedStages(report).some(([, at]) => at === through))) return undefined;
-  return reports.flatMap((report) => {
-    const told = reachedStages(report)
-      .filter(([stage, at]) => at <= through && !report.reportDelivery.senderEventAcks?.includes(stage))
-      .map(([stage]) => stage);
-    const newest = told.at(-1);
-    return newest ? [{ report, stage: newest, at: through, covers: told.slice(0, -1) }] : [];
-  });
+  const told = (reachedBy: (at: string) => boolean) =>
+    reports.flatMap((report) => {
+      const stages = reachedStages(report)
+        .filter(([stage, at]) => reachedBy(at) && !report.reportDelivery.senderEventAcks?.includes(stage))
+        .map(([stage]) => stage);
+      const newest = stages.at(-1);
+      return newest ? [{ report, stage: newest, at: through, covers: stages.slice(0, -1) }] : [];
+    });
+  const upTo = told((at) => at <= through);
+  return batchDigest(upTo) === digest ? upTo : told((at) => at < through);
 }
 
 /** Transport acknowledgment only: it never acknowledges the report on the lead's behalf. */
@@ -588,7 +605,10 @@ export function acknowledgeSenderReportEvent(
   eventId: string,
 ): boolean {
   const single = /^report:([a-f0-9-]{36}):(stored|taken|acknowledged)$/u.exec(eventId);
-  const through = eventId.startsWith(BATCH_PREFIX) ? eventId.slice(BATCH_PREFIX.length) : undefined;
+  const batch = eventId.startsWith(BATCH_PREFIX)
+    ? /^(.+):([a-f0-9]{16})$/u.exec(eventId.slice(BATCH_PREFIX.length))
+    : null;
+  const through = batch?.[1];
   if (!single && (through === undefined || Number.isNaN(Date.parse(through)))) return false;
   const pending = pendingReceipts(ctx, paneId, binding);
   const order: ReceiptStage[] = ["stored", "taken", "acknowledged"];
@@ -602,7 +622,7 @@ export function acknowledgeSenderReportEvent(
         const upTo = order.indexOf(stage);
         return [{ ...entry, stage, covers: entry.covers.filter((s) => order.indexOf(s) < upTo) }];
       })
-    : batchTold(ctx, paneId, binding, through!);
+    : batchTold(ctx, paneId, binding, through!, batch![2]!);
   if (!acked) return false;
   if (acked.length === 0) {
     // A retried batch whose first acknowledgment was saved.

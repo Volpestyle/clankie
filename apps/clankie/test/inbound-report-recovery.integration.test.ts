@@ -368,9 +368,13 @@ it("#97: acknowledging a pile of old reports tells the worker once", async () =>
   expect(store.senderReportEvents("pane", binding)).toEqual([]);
   // The link retries an acknowledgment whose answer it lost; the retry still succeeds.
   expect(store.acknowledgeSenderReportEvent("pane", binding, events[0]!.id)).toBe(true);
-  expect(store.acknowledgeSenderReportEvent("pane", binding, "report:batch:2000-01-01T00:00:00.000Z")).toBe(
-    false,
-  );
+  expect(
+    store.acknowledgeSenderReportEvent(
+      "pane",
+      binding,
+      "report:batch:2000-01-01T00:00:00.000Z:0123456789abcdef",
+    ),
+  ).toBe(false);
   // A report sent after the batch is still told on its own.
   receipts.accept("pane", { id: randomUUID(), binding }, "new", "new", "global-default", async () => {});
   expect(store.senderReportEvents("pane", binding)).toEqual([
@@ -407,6 +411,39 @@ it("#97: a batch acknowledged after its reports moved on still counts", async ()
   expect(store.senderReportEvents("pane", binding)).toEqual([]);
   // The stored batch retried late is still answered as done.
   expect(store.acknowledgeSenderReportEvent("pane", binding, stored!.id)).toBe(true);
+  await store.close();
+});
+
+it("#97: a batch acknowledged after a stage landed in its same millisecond tells that stage again", async () => {
+  const root = fixtureRoot();
+  const store = new ConversationStore(join(root, "conversations"), async () => {});
+  const receipts = new InboundSeatReceipts(join(root, "inbound.json"), store);
+  const binding = "c".repeat(64);
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-11-01T07:00:00.000Z"));
+    for (let report = 0; report < 2; report++)
+      receipts.accept(
+        "pane",
+        { id: randomUUID(), binding },
+        `r ${report}`,
+        `r ${report}`,
+        "global-default",
+        async () => {},
+      );
+    const [stored] = store.senderReportEvents("pane", binding);
+    expect(stored?.content).toContain("Stored 2 of your reports");
+    // The lead reads them in the batch's own millisecond, after the batch went out.
+    const page = store.readInboundReports("global-default");
+    expect(store.acknowledgeInboundReports("global-default", page.ackDeliveryIds)).toBe(true);
+    expect(store.acknowledgeSenderReportEvent("pane", binding, stored!.id)).toBe(true);
+    // The acknowledgment the batch never carried is still told, not dropped.
+    expect(store.senderReportEvents("pane", binding)).toEqual([
+      expect.objectContaining({ content: expect.stringContaining("Clankie acknowledged 2 of your reports") }),
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
   await store.close();
 });
 
