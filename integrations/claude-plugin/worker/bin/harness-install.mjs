@@ -107,9 +107,14 @@ async function removeClaudeWorker({ profile, execute, consent }) {
     return { status: "absent", detail: "Harness executable unavailable on this machine." };
   }
   const config = join(profile, "settings.json");
+  // A profile without settings is the only expected miss; anything else fails the removal.
+  const missing = (error) => {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  };
   const source = await realpath(config).catch(() => config);
-  const configBefore = await readFile(config, "utf8").catch(() => undefined);
-  const wasSymlink = (await lstat(config).catch(() => undefined))?.isSymbolicLink() ?? false;
+  const configBefore = await readFile(config, "utf8").catch(missing);
+  const wasSymlink = (await lstat(config).catch(missing))?.isSymbolicLink() ?? false;
   const linkBefore = wasSymlink ? await readlink(config) : undefined;
   const managed = wasSymlink || managedText(configBefore ?? "");
   if (managed) {
@@ -137,8 +142,8 @@ async function removeClaudeWorker({ profile, execute, consent }) {
     if (
       managed &&
       ((await realpath(config).catch(() => config)) !== source ||
-        (await readFile(config, "utf8").catch(() => undefined)) !== configBefore ||
-        (wasSymlink && (await readlink(config).catch(() => undefined)) !== linkBefore))
+        (await readFile(config, "utf8").catch(missing)) !== configBefore ||
+        (wasSymlink && (await readlink(config).catch(missing)) !== linkBefore))
     )
       throw new Error(
         `Removing the old worker copy changed the Claude settings source ${source}; inspect it through its owner`,
@@ -224,7 +229,9 @@ async function installHarnessBridges(options) {
     (skills ??= Promise.resolve().then(() =>
       (options.prepareSkills ?? prepareWorkerSkill)(join(marketplace, "worker")),
     ));
-  await prepareSkills().catch(() => {});
+  await prepareSkills().catch((error) =>
+    process.stderr.write(`clankie harness install: worker skills not prepared: ${error?.message ?? error}\n`),
+  );
   for (const { harness, profile, codexProfile } of targets) {
     if (refreshed.has(harness === "claude" ? profile : codexProfile)) continue;
     if (harness === "claude") {
