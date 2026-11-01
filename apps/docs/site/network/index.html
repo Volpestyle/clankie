@@ -42,9 +42,9 @@
         <h1>How your devices reach Clankie.</h1>
         <p class="article-lede">
           This reference describes the gateway's allowed host routes. The gateway carries bounded exchanges to
-          Clankie's authenticated host, whether that is your Mac or a managed machine. That host owns devices,
-          grants, conversations, and terminal authority. Account and billing services at the same public
-          origin have separate contracts; this is not a catalog of every hosted-service endpoint.
+          Clankie's authenticated host, your own Mac or machine. That host owns devices, grants,
+          conversations, and terminal authority. Account sign-in at the same public origin has its own
+          contract; this is not a catalog of every endpoint there.
         </p>
 
         <h2>Connection shape</h2>
@@ -106,10 +106,10 @@
         </p>
         <p>
           The gateway can observe routing identifiers, ciphertext sizes and timing, and can interrupt service.
-          Push delivery retains the metadata described above. Cognito sign-in, signed Linear webhooks, managed
-          web pairing and Discord ingress have separate authentication contracts; they are not ordinary device
-          requests inside this envelope. Matching gateway, host and client versions are required;
-          implementation alone does not establish deployment or release readiness.
+          Push delivery retains the metadata described above. Cognito sign-in and signed Linear webhooks have
+          separate authentication contracts; they are not ordinary device requests inside this envelope.
+          Matching gateway, host and client versions are required; implementation alone does not establish
+          deployment or release readiness.
         </p>
 
         <h2>For integrators</h2>

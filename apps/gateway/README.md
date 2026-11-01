@@ -78,8 +78,8 @@ health route.
 - `POST /gateway/v1/telemetry` takes the app's diagnostics batch
   ([`@clankie/protocol/app-telemetry`](../../packages/protocol/src/app-telemetry.ts)):
   closed event names, outcomes, durations and short codes. No Authorization, so
-  an app can report while it cannot reach its host. Sign-up is open, so every
-  limit assumes a hostile caller. Behind Caddy all callers share one peer, so
+  an app can report while it cannot reach its host. Anyone can call it, so
+  every limit assumes a hostile caller. Behind Caddy all callers share one peer, so
   the budgets bound the whole route:
   - 100 requests in a burst and 5 a second, checked before the body is read;
   - 400 events in a burst and 10 a second after validation, which caps log

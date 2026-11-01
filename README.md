@@ -57,8 +57,10 @@ that harness as him ([seat commands](docs/cli.md#seat-commands)).
 - [Release details](docs/distribution.md): checksums, layout, pinning, and upgrades
 
 Run Clankie on your Mac with your own agent subscriptions. The software is free;
-model providers and connected services may charge. A free Clankie account supports
-phone pairing, steering while your Mac is awake and the official Discord bot.
+model providers and connected services may charge. Clankie leads the Claude Code
+and Codex agents in your Herdr sessions, and joins Discord through a bot you make
+yourself. A free Clankie account adds phone pairing and steering while your Mac
+is awake.
 Check [clankie.bot](https://clankie.bot) for account and install availability.
 
 ## What he does
