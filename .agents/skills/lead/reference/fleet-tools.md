@@ -154,6 +154,12 @@ local Codex async question survives losing Clankie's launch controller, so it
 needs no re-hire; an uncertain async answer keeps its claim across restart, so
 inspect the original worker rather than sending it again.
 
+An open question is repeated to whoever leads the hire now, starting "Still
+open:", until someone answers it (ADR 0322). If you are already answering it,
+ignore the reminder. The first answer wins: `native_question_already_answered`
+or `native_question_being_answered` means another lead or Clankie took it, so
+don't send yours another way.
+
 Only a worker's exact lead answers its routine, scoped Claude permissions within
 its current gates. Peers, rooms and Discord cannot. Native channel previews are
 sanitized and stay owner-only, and unclassified prompts go to the owner
