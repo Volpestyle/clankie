@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import type { QuestionAuthority } from "../captain/conversation-questions.ts";
 import type { CaptainPort } from "../captain/port.ts";
-import type { ClankieAppDependencies } from "../app/types.ts";
+import type { ClankieAppDependencies, DiscordBodyRouteState } from "../app/types.ts";
 
 /** Host-created from the authenticated operator request, never from a command or native tool identity. */
 export interface OwnerComputerRecovery {
@@ -53,6 +53,8 @@ export interface ExtensionRouteHost {
   /** The owner's settings, read when a request is served. */
   readonly settings: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
+  /** The Discord body's live state, which the core keeps for its own admission checks. */
+  readonly discordBody: DiscordBodyRouteState;
   /** Where a connected tracker's verified activity reaches his chats. */
   readonly trackerWakes: Pick<CaptainPort, "receiveTrackerActivity" | "trackerWakeTargetAllowed"> &
     Partial<Pick<CaptainPort, "trackerWakeDeliveries" | "trackerWakeRecoveries" | "recordInbound">>;

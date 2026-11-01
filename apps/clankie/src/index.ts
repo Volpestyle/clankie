@@ -158,6 +158,7 @@ import { mediaExtension } from "./media-extension.ts";
 import { linearTrackerExtension } from "./linear-extension.ts";
 import { activityTools } from "./activity-tools.ts";
 import { voiceExtension } from "./voice-extension.ts";
+import { personaExtension } from "./persona-extension.ts";
 import { worldExtension } from "./world/extension.ts";
 import { pokeagentTools } from "./world/pokeagent-tools.ts";
 import { createLinearWorkProjects } from "./linear-work-projects.ts";
@@ -2298,6 +2299,7 @@ extensions.add(
   ),
   { enabled: switchedOn(startupSettings, "voice"), settings: undefined },
 );
+extensions.add(personaExtension(), { enabled: switchedOn(startupSettings, "persona"), settings: undefined });
 await extensions.start();
 const clankie = await createClankieApp({
   voiceCall: {

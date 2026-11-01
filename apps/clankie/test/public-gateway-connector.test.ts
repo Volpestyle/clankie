@@ -36,6 +36,7 @@ import { createGatewayEncryptedFetch } from "../../../packages/api-client/src/ga
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { sealGatewayValue, openGatewayValue } from "../src/gateway-encryption.ts";
@@ -128,6 +129,7 @@ describe("public gateway Mac connector", () => {
         .join("\n") + "\n",
     );
     const app = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain(),
       settings,
       eventLogPath,
@@ -341,6 +343,7 @@ describe("public gateway Mac connector", () => {
       directory: join(root, "joins"),
     });
     const app = await createClankieApp({
+      extensionRoutes: [personaRoutes()],
       captain: createStubCaptain(),
       settings,
       machineJoins: joins,

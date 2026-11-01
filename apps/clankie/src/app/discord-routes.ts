@@ -1,4 +1,3 @@
-import { DiscordVoiceTranscriptStore } from "@clankie/discord-presence-core";
 import { PiTurnPausedError } from "../captain/pi-turn-journal.ts";
 import {
   DISCORD_PRESENCE_LIVE_PHASE_HEADER,
@@ -9,7 +8,6 @@ import {
   isDiscordPresenceActionAvailable,
   resolveDiscordPresencePhaseToolExposure,
   resolveDiscordPresenceToolExposure,
-  type DiscordPresenceSessionRecord,
 } from "@clankie/interactive-environment";
 import {
   CaptainChannelTurnResultSchema,
@@ -31,103 +29,33 @@ import {
   DiscordVoiceTranscriptCursorSchema,
   discordDeliveryStage,
   type CaptainChannelTurnResult,
-  type DiscordChannelProjectionMessageResult,
   type DiscordPresenceWriteResult,
-  type DomainEvent,
 } from "@clankie/protocol";
 import { resolveDiscordSettings } from "@clankie/settings";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { createHash } from "node:crypto";
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
-import { CaptainPresenceManager } from "../captain-presence.ts";
-import { DiscordTurnReceipts } from "../captain/discord-turn-receipts.ts";
 import { discordTurnSessionKey } from "../captain/discord-turn.ts";
-import {
-  DiscordPresenceSessionProjection,
-  DiscordVoiceHistoryProjection,
-  discordPresenceDomainEvent,
-} from "../discord-presence-session.ts";
-import { type RoomAccess, type RoomAuthorization } from "../discord-room-routes.ts";
+import { discordPresenceDomainEvent } from "../discord-presence-session.ts";
 import {
   DISCORD_USER_SESSION_OPT_IN_RECORDED,
   DISCORD_USER_SESSION_OPT_IN_REVOKED,
   DISCORD_USER_SESSION_OPT_IN_STREAM_ID,
-  DiscordUserSessionOptInProjection,
 } from "../discord-user-session-opt-in.ts";
-import { EmbodimentManager } from "../embodiment.ts";
-import { RecentEvents } from "../event-log.ts";
-import { DiscordStreamWatchProjection } from "../stream-watch-observation.ts";
 import { authenticateCaptain, authenticateOperator, captainTransportKind, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { DELIVERY_RETENTION_MS, pruneExpired, withSerializedLock } from "./request-state.ts";
-import { type ClankieAppDependencies } from "./types.ts";
+import { PROFILE_HASH, discordPresenceBindingKey } from "./body-presence.ts";
+import { type ClankieAppDependencies, type DiscordBodyRouteState } from "./types.ts";
+import type { ExtensionRouteHost } from "../ports/routes.ts";
 import { registerVoiceBriefingRoute } from "./voice-briefing.ts";
-/**
- * Several wire schemas still carry a profile-hash slot from the retired policy
- * engine. One constant fills them all. User-session opt-in still compares
- * against it, so changing the constant re-asks for that consent; nothing else
- * branches on the value.
- */
-export const PROFILE_HASH = "unversioned";
-
 const DISCORD_USER_SESSION_CREDENTIAL_REF = "discord_user_session";
 
-export function discordPresenceBindingKey(identity: {
-  readonly transportKind: "bot" | "user_session";
-  readonly characterId: string;
-  readonly credentialRef: string;
-}): string {
-  return JSON.stringify([identity.transportKind, identity.characterId, identity.credentialRef]);
-}
-export interface RegisterDiscordRoutesContext {
+export interface RegisterDiscordRoutesContext extends Omit<DiscordBodyRouteState, "machineName"> {
   readonly app: Hono;
-  readonly dependencies: ClankieAppDependencies;
-  readonly instanceId: `${string}-${string}-${string}-${string}-${string}`;
   readonly settingsSource: NonNullable<ClankieAppDependencies["settings"]>;
   readonly clock: () => Date;
-  readonly captainPresence: CaptainPresenceManager;
-  readonly discordPresenceSessions: DiscordPresenceSessionProjection;
-  readonly discordStreamWatch: DiscordStreamWatchProjection;
-  readonly embodiment: EmbodimentManager;
-  readonly recordEvent: (
-    type: string,
-    streamId: string,
-    occurredAt: string,
-    data: Record<string, unknown>,
-    envelope?: { correlationId?: string },
-  ) => DomainEvent;
-  readonly idFactory: () => string;
-  readonly discordPresenceLiveSessions: Map<string, DiscordPresenceSessionRecord>;
-  readonly discordUserSessionOptIns: DiscordUserSessionOptInProjection;
-  readonly discordPresenceSessionLocks: Map<string, Promise<unknown>>;
-  readonly recentEvents: RecentEvents;
-  readonly appendEvent: (event: DomainEvent) => void;
-  readonly discordVoiceHistory: DiscordVoiceHistoryProjection;
-  readonly authorizeRoom: (request: Request, access: RoomAccess) => Promise<RoomAuthorization | undefined>;
-  readonly voiceTranscriptStore: DiscordVoiceTranscriptStore;
-  readonly authenticateCaptainOrOperator: (
-    context: Context,
-  ) => Promise<{ principal: { kind: "captain" | "operator"; id: string } } | { denial: Response }>;
-  readonly discordPresenceLocks: Map<string, Promise<unknown>>;
-  readonly discordPresenceResults: Map<
-    string,
-    { fingerprint: string; result: DiscordPresenceWriteResult; expiresAtMs: number }
-  >;
-  readonly discordTurnReceipts: DiscordTurnReceipts;
-  readonly captainTurnResults: Map<
-    string,
-    {
-      fingerprint: string;
-      lane: "discord_text" | "discord_voice";
-      result: Promise<CaptainChannelTurnResult>;
-      settled?: CaptainChannelTurnResult;
-      rejected?: boolean;
-    }
-  >;
-  readonly channelProjectionResults: Map<
-    string,
-    { result: DiscordChannelProjectionMessageResult; expiresAtMs: number }
-  >;
+  readonly authorizeRoom: ExtensionRouteHost["room"];
 }
 
 interface UnansweredMessage {

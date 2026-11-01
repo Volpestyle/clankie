@@ -17,6 +17,7 @@ import {
 } from "@clankie/discord-presence-core";
 import { ClankieApiClient } from "@clankie/api-client";
 import { createClankieApp, createBearerAuthenticator } from "../../clankie/src/app.ts";
+import { personaRoutes } from "../../clankie/src/persona-extension.ts";
 import { DiscordTurnReceipts } from "../../clankie/src/captain/discord-turn-receipts.ts";
 import { BodyLeaseStore } from "../../clankie/src/body-leases.ts";
 import { BodyLeaseRouter } from "../../clankie/src/body-lease-router.ts";
@@ -220,6 +221,7 @@ it("recovers an outage once, delivers saved answers to their original room and a
   const leases = new BodyLeaseStore(join(root, "body"));
   const router = new BodyLeaseRouter(leases);
   const service = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain,
     settings,
     roomObservations: observations,

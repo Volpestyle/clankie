@@ -13,7 +13,10 @@ which starts with its webhook, wake, settings, mirror and cutover routes
 (`linear-extension.ts`), then World's Activity routes and tools and its
 PokeAgent play tools (`activity-routes.ts`, `activity-tools.ts`,
 `world/pokeagent-tools.ts`, switched as `world/extension.ts`), and voice's
-composer transcription and room voice routes (`voice-extension.ts`). Each
+composer transcription and room voice routes (`voice-extension.ts`), and the
+persona's HTTP routes: rooms, persona and voice settings, appearance and the
+Discord body's routes (`persona-extension.ts`, reading the body's live state the
+core keeps through the route host's `discordBody`). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app's Common controls are still to come.

@@ -18,6 +18,7 @@ import type {
 } from "@clankie/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { BodyLeaseRouter } from "../src/body-lease-router.ts";
 import { BodyLeaseStore } from "../src/body-leases.ts";
 import { createCaptain } from "../src/captain/captain.ts";
@@ -223,6 +224,7 @@ async function fixture() {
   });
   const store = new BodyLeaseStore(root);
   app = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain,
     discordTurnReceipts: new DiscordTurnReceipts(join(root, "receipts.json")),
     authenticateCaptain: async (request) =>

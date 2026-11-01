@@ -33,7 +33,7 @@ import type { CaptainPort } from "./captain/port.ts";
 import type { DiscordRoomObservations } from "./discord-room-observations.ts";
 import { discordSetupChecks } from "./discord-setup.ts";
 
-export type RoomAccess = "observe" | "guidance" | "settings";
+type RoomAccess = "observe" | "guidance" | "settings";
 // Current writers send every defaulted setting they know. Omitting one means an
 // older client that cannot carry a newer setting back, so it keeps its value.
 const DEFAULTED_DISCORD_SETTINGS = Object.keys(DiscordSettingsSchema.parse({}));

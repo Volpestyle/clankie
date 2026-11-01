@@ -260,7 +260,13 @@ again. With `world` off, the Activity's admission and sharing routes are not
 served and he has no Activity sharing or PokeAgent play tools. With `voice`
 off, the phone composer's transcription routes and the room voice routes
 (`/v1/discord/room-voice`, the Discord body's output guard) are not served;
-his Discord voice lanes still run until voice moves with the persona.
+his Discord voice lanes still run until voice moves with the persona. With
+`persona` off, the Discord body's routes (presence, channel turns, forum and
+channel projection messages, the user-session opt-in, voice briefing and
+transcripts), the room routes (`/v1/discord/rooms`, room guidance, Discord
+settings, directory and setup test post), `/v1/operator/persona`,
+`/v1/operator/voice` and `/v1/operator/appearance` answer `404`; the Discord
+body's live state and his captain's Discord turns stay in the core for now.
 
 ### `runtime-health`
 

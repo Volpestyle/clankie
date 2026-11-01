@@ -3,6 +3,7 @@ import { FileCredentialStore, mintOperatorToken } from "@clankie/credential-brok
 import { loadConfig, updateGlobalConfig } from "@clankie/model-provider";
 import { createModelKeys } from "../../clankie/src/model-keys.ts";
 import { createClankieApp } from "../../clankie/src/app.ts";
+import { personaRoutes } from "../../clankie/src/persona-extension.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { readFile, writeFile } from "node:fs/promises";
@@ -74,6 +75,7 @@ async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const voiceEnv = { ...env };
   const service = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     modelKeys: createModelKeys({ env, cwd: root, store: credentials }),
     settings: new SettingsStore(defaultSettingsPath(env)),

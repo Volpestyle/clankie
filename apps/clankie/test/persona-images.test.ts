@@ -22,6 +22,7 @@ import { PERSONA_IMAGE_FRAMING } from "@clankie/persona-images";
 import { personaImagesExtension } from "../src/persona-images.ts";
 import { assembleLanePrompt } from "../src/captain/captain.ts";
 import { createClankieApp } from "../src/app.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 const roots: string[] = [];
 afterEach(async () => {
@@ -155,6 +156,7 @@ it.each(["operator", "discord_presence", "discord_voice"] as const)(
 it("protects persona API writes and status behind owner authentication", async () => {
   const settings = new SettingsStore(join(await temp(), "settings.json"));
   const clankie = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     settings,
     authenticateOperator: async (r) =>
@@ -189,6 +191,7 @@ it("protects persona API writes and status behind owner authentication", async (
 });
 it("sends only the bounded description into Discord realtime voice", async () => {
   const clankie = await createClankieApp({
+    extensionRoutes: [personaRoutes()],
     captain: createStubCaptain(),
     settings: { load: async () => emptySettings() },
     personaImages: async () => board,
