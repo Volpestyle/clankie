@@ -16,7 +16,7 @@ PokeAgent play tools (`activity-routes.ts`, `activity-tools.ts`,
 composer transcription and room voice routes (`voice-extension.ts`). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
-sets the owner's switch for the next start; the app's Common controls are still to come.
+sets the owner's switch for the next start; the app shows and flips the same switches in Settings → Extensions.
 Extends
 [ADR 0234](0234-games-share-one-extension-contract.md) and
 [ADR 0181](0181-clankie-is-independent-of-his-connections.md); runs alongside
