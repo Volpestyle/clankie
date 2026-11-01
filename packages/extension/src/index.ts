@@ -59,7 +59,10 @@ interface Entry<Projection> {
 
 const MAX_EXTENSIONS = 64;
 
-/** Trusted in-process composition only: the composition root adds reviewed, bundled extensions. */
+/**
+ * Trusted in-process composition: the composition root adds reviewed, bundled
+ * extensions, and the outside-extension loader adds the owner's (ADR 0338).
+ */
 export class ExtensionSupervisor<Ports extends object, Projection = never> {
   private readonly entries = new Map<string, Entry<Projection>>();
   private readonly ports: Ports;
@@ -73,13 +76,27 @@ export class ExtensionSupervisor<Ports extends object, Projection = never> {
   /** Adds an extension, off or created but not started. Never throws for the extension's own faults. */
   public add<Settings, Need extends keyof Ports>(
     extension: ClankieExtension<Settings, Ports, Need, Projection>,
-    options: { enabled: boolean; settings: unknown },
+    options: {
+      enabled: boolean;
+      settings: unknown;
+      /**
+       * A fixed reason the host already knows it cannot run, such as an outside
+       * extension's refused permission or unpinned source: it is listed
+       * degraded, never created.
+       */
+      unavailable?: string;
+    },
   ): ExtensionReport {
     if (this.entries.has(extension.id)) throw new Error("extension_already_added");
     if (this.entries.size >= MAX_EXTENSIONS) throw new Error("extension_list_full");
     const entry: Entry<Projection> = { id: extension.id, controller: new AbortController(), state: "off" };
     this.entries.set(extension.id, entry);
     if (!options.enabled) return this.reportOf(entry);
+    if (options.unavailable !== undefined)
+      return this.degrade(
+        entry,
+        /^[a-z][a-z0-9_]{0,63}$/u.test(options.unavailable) ? options.unavailable : "unavailable",
+      );
     let settings: Settings;
     try {
       settings = extension.settings.schema.parse(options.settings);
@@ -186,3 +203,8 @@ export class ExtensionSupervisor<Ports extends object, Projection = never> {
       : { id: entry.id, state: entry.state, reason: entry.reason };
   }
 }
+
+export * from "./outside.ts";
+export * from "./game.ts";
+export { createTestHost, type TestHost, type TestHostOptions } from "./test-host.ts";
+export { readExtensionManifest } from "./manifest-file.ts";

@@ -1,67 +1,29 @@
-import type { ExtensionDescriptor, ExtensionHealth } from "@clankie/extension";
+import type { GameExtensionRuntime, GameExtensionStatus, GameRunControl } from "@clankie/extension";
 
 /** Host-owned authority. None of these callbacks are model arguments or credentials. */
 export { GameExtensionRegistry } from "./registry.ts";
+/**
+ * The game contract's types live in the public `@clankie/extension` SDK (ADR
+ * 0338), so an outside game imports one package; this package keeps the host's
+ * runtime pieces and re-exports the types for the games in this repository.
+ */
 export {
   GAME_EXTENSION_MODULE_API,
   type GameConversationIdentity,
+  type GameExtension,
+  type GameExtensionHealth,
   type GameExtensionModule,
   type GameExtensionModuleHost,
   type GameExtensionModuleProjection,
+  type GameExtensionRuntime,
+  type GameExtensionStatus,
   type GameOwnerRoute,
+  type GameRunControl,
   type GameTool,
   type GameToolResult,
   type PlayLeaseAuthority,
   type PlayLeaseRef,
-} from "./module.ts";
-export interface GameRunControl {
-  stopRequested(): boolean;
-  guard(): Promise<void>;
-  /** Exact connector termination evidence, or proof no join happened. Never a deadline. */
-  confirmStopped(): void;
-}
-
-export type GameExtensionStatus =
-  | { state: "idle" }
-  | { state: "starting" | "running" | "stopping" | "uncertain"; sessionId: string };
-
-export type GameExtensionHealth = ExtensionHealth;
-
-export interface GameExtensionRuntime<Request extends { sessionId: string }, Result> {
-  /** Resolves only after the executor and cleanup settle. The host retains its durable lease. */
-  start(request: Request, control: GameRunControl, onRunning: () => Promise<void>): Promise<Result>;
-  /** Request a stop for the exact local session. This result is not termination evidence. */
-  stop(sessionId: string): "requested" | "not_active" | "uncertain";
-  status(): GameExtensionStatus | Promise<GameExtensionStatus>;
-  /** Read-only health; never joins a world or spends model tokens. */
-  health(): GameExtensionHealth | Promise<GameExtensionHealth>;
-  /** Host-only restart recovery; proof must attest exact connector termination. */
-  reconcileStopped?(sessionId: string, proof: () => Promise<boolean>): Promise<boolean>;
-  /** Optional native entry points retain the registry's final admission fence. */
-  bindRegistrationGuard?(guard: () => void): void;
-  /** Quiesce idle capture/polling after starts are fenced, before removal. */
-  deactivate?(): Promise<void>;
-}
-
-/**
- * Different transports and motors share composition, not a synthetic universal action.
- * A game is an ADR 0328 extension with its connector, skill and Activity surface on top.
- */
-export interface GameExtension<
-  Request extends { sessionId: string },
-  Result,
-  Settings,
-  Host,
-> extends ExtensionDescriptor<Settings> {
-  readonly connector:
-    | { readonly kind: "native"; readonly package: string }
-    | { readonly kind: "mcp"; readonly connection: string }
-    | { readonly kind: "skill"; readonly sessionServer: string };
-  readonly skill: { readonly name: string; readonly path: string };
-  readonly activity: { readonly surface: string } | null;
-  create(host: Host): GameExtensionRuntime<Request, Result>;
-}
-
+} from "@clankie/extension";
 export class GameExtensionBusyError extends Error {
   public readonly status: Exclude<GameExtensionStatus, { state: "idle" }>;
   public constructor(status: Exclude<GameExtensionStatus, { state: "idle" }>) {

@@ -171,7 +171,12 @@ import { FleetHarnessProcesses } from "./fleet-harness-processes.ts";
 import { inspectFleetMembership } from "./fleet-membership-doctor.ts";
 import { parseHerdrPaneList } from "./captain/herdr-watch.ts";
 import { linearFollowStatus } from "@clankie/settings";
-import { loadGameExtensionModules, recoverExternalPlay } from "./game-extension-modules.ts";
+import {
+  loadOutsideExtensions,
+  recoverExternalPlay,
+  withOutsideProjections,
+  withOutsideStates,
+} from "./outside-extensions.ts";
 import { postToDiscordActiveBody } from "./discord-active-body.ts";
 import { createDiscordMusicClient } from "./discord-music.ts";
 import { createDiscordCaptainActionClient } from "./discord-captain-actions.ts";
@@ -1211,24 +1216,19 @@ const minecraftRuntime: MinecraftExtensionRuntime = gameExtensions.register(
   (runtime) => minecraftProjection(runtime, () => minecraftHost),
 );
 const minecraft = minecraftRuntime.service;
-const externalGames = await loadGameExtensionModules({
-  entries: startupSettings.gameplay.extensions ?? [],
+// ADR 0338: the owner's outside extensions, including the older game modules.
+const outsideExtensions = await loadOutsideExtensions({
+  settings: startupSettings,
+  settingsStore,
   goLive: async (destination) =>
     (await postToDiscordActiveBody("/go-live/start", destination, process.env, fetch)).ok,
   registry: gameExtensions,
   leases: bodyLeaseStore,
   stateRoot,
   credentials: operatorCredentialStore,
-  onError: (module, error) =>
-    logger.warn(
-      {
-        event: "game_extension.module_unavailable",
-        module,
-        error: error instanceof Error ? error.message : "",
-      },
-      "Installed game extension did not load",
-    ),
+  logger,
 });
+const bankExtensions = withOutsideProjections(gameExtensions, outsideExtensions);
 
 // A checkout follows origin/main; an installed release (`<root>/releases/<version>`)
 // follows official releases. A release run from elsewhere, like an image's seed
@@ -1578,7 +1578,7 @@ const captain = createCaptain(
         linear: tracker?.backend === "linear",
       };
     },
-    gameExtensions,
+    gameExtensions: bankExtensions,
     bodyLeases,
     browser: {
       catalog: () =>
@@ -2443,7 +2443,7 @@ const clankie = await createClankieApp({
         return bodyVoiceStays.reconcile(reconcileDiscordVoice, guard);
       }
       if (resource === "play") {
-        const external = await recoverExternalPlay(externalGames, gameExtensions, guard);
+        const external = await recoverExternalPlay(outsideExtensions.games, gameExtensions, guard);
         if (external !== undefined) return external;
         if (minecraft.ownsPlay()) {
           if (!(await minecraft.recover(guard))) return false;
@@ -2593,7 +2593,7 @@ const clankie = await createClankieApp({
   prepareLocalClaudeShim: (action, binding) => prepareLocalClaudeShim(action, binding),
   deliveredFiles,
   herdrRuntime: herdr.status,
-  extensions,
+  extensions: withOutsideStates(extensions, outsideExtensions),
   ...(activityLaunches === undefined ? {} : { activityLaunches }),
   herdrBinding: herdr.binding,
   runtimes,
@@ -2611,7 +2611,7 @@ const clankie = await createClankieApp({
   playSight,
   startPlayHost: () => playHost.start(playAbort.signal),
   machineJoins,
-  gameExtensions,
+  gameExtensions: bankExtensions,
   ...(deviceSessionKey === undefined ? {} : { deviceSessionKey }),
   hostPower: () => hostPower.report(),
   autoUpdateManaged: false,
@@ -2841,20 +2841,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     await herdr.close();
     await extensions.stop(["browser"]);
     await bodyRequestsStopped;
-    await Promise.all(
-      externalGames.map((game) =>
-        game.close().catch((error: unknown) =>
-          logger.warn(
-            {
-              event: "game_extension.close_failed",
-              id: game.id,
-              error: error instanceof Error ? error.message : "",
-            },
-            "Installed game extension did not close cleanly",
-          ),
-        ),
-      ),
-    );
+    await outsideExtensions.stop();
     if (minecraft.ownsPlay()) {
       await minecraft.close().catch(() => false);
     }

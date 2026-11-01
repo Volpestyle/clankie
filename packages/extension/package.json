@@ -2,18 +2,41 @@
   "name": "@clankie/extension",
   "version": "0.1.0",
   "private": true,
+  "description": "The contract Clankie's extensions plug into: manifest, OutsidePorts, projection and a test host (ADR 0338).",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Volpestyle/clankie.git",
+    "directory": "packages/extension"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
   "scripts": {
     "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

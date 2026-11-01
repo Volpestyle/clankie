@@ -1,8 +1,68 @@
-import type { GameExtension, GameExtensionRuntime, createGameExtensionRuntime } from "./index.ts";
+import type { ExtensionDescriptor, ExtensionHealth } from "./index.ts";
+import type {
+  ExtensionTool,
+  ExtensionToolResult,
+  OutsideConversationIdentity,
+  OutsidePorts,
+} from "./outside.ts";
+
+export interface GameRunControl {
+  stopRequested(): boolean;
+  guard(): Promise<void>;
+  /** Exact connector termination evidence, or proof no join happened. Never a deadline. */
+  confirmStopped(): void;
+}
+
+export type GameExtensionStatus =
+  | { state: "idle" }
+  | { state: "starting" | "running" | "stopping" | "uncertain"; sessionId: string };
+
+export type GameExtensionHealth = ExtensionHealth;
+
+export interface GameExtensionRuntime<Request extends { sessionId: string }, Result> {
+  /** Resolves only after the executor and cleanup settle. The host retains its durable lease. */
+  start(request: Request, control: GameRunControl, onRunning: () => Promise<void>): Promise<Result>;
+  /** Request a stop for the exact local session. This result is not termination evidence. */
+  stop(sessionId: string): "requested" | "not_active" | "uncertain";
+  status(): GameExtensionStatus | Promise<GameExtensionStatus>;
+  /** Read-only health; never joins a world or spends model tokens. */
+  health(): GameExtensionHealth | Promise<GameExtensionHealth>;
+  /** Host-only restart recovery; proof must attest exact connector termination. */
+  reconcileStopped?(sessionId: string, proof: () => Promise<boolean>): Promise<boolean>;
+  /** Optional native entry points retain the registry's final admission fence. */
+  bindRegistrationGuard?(guard: () => void): void;
+  /** Quiesce idle capture/polling after starts are fenced, before removal. */
+  deactivate?(): Promise<void>;
+}
 
 /**
- * Contract for a game extension that lives outside this repository and is
- * installed by the owner as a module path. The module may import only types
+ * Different transports and motors share composition, not a synthetic universal action.
+ * A game is an ADR 0328 extension with its connector, skill and Activity surface on top.
+ */
+export interface GameExtension<
+  Request extends { sessionId: string },
+  Result,
+  Settings,
+  Host,
+> extends ExtensionDescriptor<Settings> {
+  readonly connector:
+    | { readonly kind: "native"; readonly package: string }
+    | { readonly kind: "mcp"; readonly connection: string }
+    | { readonly kind: "skill"; readonly sessionServer: string };
+  readonly skill: { readonly name: string; readonly path: string };
+  readonly activity: { readonly surface: string } | null;
+  create(host: Host): GameExtensionRuntime<Request, Result>;
+}
+
+/** The host's lifecycle wrapper (`createGameExtensionRuntime` in `@clankie/game-extension`). */
+export type CreateGameExtensionRuntime = <Request extends { sessionId: string }, Result>(
+  execute: (request: Request, control: GameRunControl, onRunning: () => Promise<void>) => Promise<Result>,
+) => GameExtensionRuntime<Request, Result>;
+
+/**
+ * Contract for a game extension that lives outside this repository: a
+ * `kind: "game"` outside extension (ADR 0338), or a manifest-less module the
+ * owner installed before manifests existed. The module may import only types
  * from this package; every runtime capability arrives through the host.
  */
 export const GAME_EXTENSION_MODULE_API = 1;
@@ -14,11 +74,8 @@ export interface GameOwnerRoute {
 }
 
 /** The authenticated conversation behind one tool call or operator request. */
-export interface GameConversationIdentity {
-  readonly conversationId: string;
+export interface GameConversationIdentity extends OutsideConversationIdentity {
   readonly route?: GameOwnerRoute;
-  /** The exact seat/session/turn binding is still current. */
-  readonly current: () => boolean;
   /** Existing permission checks, independent of lease ownership. */
   readonly authorize: (resource: "play", action: "effect" | "recover") => Promise<boolean>;
 }
@@ -58,17 +115,15 @@ export interface PlayLeaseAuthority {
   reconcileStopped(ref: PlayLeaseRef): { outcome: "released" } | LeaseRefusal;
 }
 
-/** Approved host ports. None of them are model arguments. */
-export interface GameExtensionModuleHost {
-  /** Owner-set, non-secret values from `gameplay.extensions[].options`, read at service start. */
-  readonly options: Readonly<Record<string, string>>;
-  /** Private directory (0700) for this extension's durable state, keyed by its id. */
-  readonly stateDirectory: string;
+/**
+ * Approved host ports for a game: the outside ports plus play. None of them are
+ * model arguments. A port the owner refused (ADR 0338) is absent at runtime;
+ * without `play` the game does not load.
+ */
+export interface GameExtensionModuleHost extends OutsidePorts {
   readonly leases: PlayLeaseAuthority;
   /** The shared local lifecycle wrapper (`createGameExtensionRuntime`). */
-  readonly createRuntime: typeof createGameExtensionRuntime;
-  /** An API key the owner stored in the credential broker with `/auth NAME`. */
-  credential(name: string): Promise<string | undefined>;
+  readonly createRuntime: CreateGameExtensionRuntime;
   /**
    * Ask the active Discord user-session body to Go Live from a read-only
    * snapshot capability (`http(s)://HOST/frame.png?key=KEY`, PNG replies). The
@@ -77,22 +132,9 @@ export interface GameExtensionModuleHost {
   goLive(input: { guildId: string; channelId: string; snapshotUrl: string }): Promise<boolean>;
 }
 
-export interface GameToolResult {
-  /** JSON details returned to the caller; also the model's text unless `text` is set. */
-  readonly details: Record<string, unknown>;
-  readonly text?: string;
-  readonly image?: { readonly data: string; readonly mimeType: "image/png" | "image/jpeg" };
-}
-
-/** A captain tool. The host binds it to the current turn's authenticated identity. */
-export interface GameTool {
-  readonly name: string;
-  readonly label: string;
-  readonly description: string;
-  /** JSON Schema for the arguments; the tool still validates its own input. */
-  readonly parameters: Readonly<Record<string, unknown>>;
-  execute(input: unknown): Promise<GameToolResult>;
-}
+/** A game's tools are outside-extension tools (ADR 0338). */
+export type GameToolResult = ExtensionToolResult;
+export type GameTool = ExtensionTool;
 
 export interface GameExtensionModuleProjection {
   tools(identity: GameConversationIdentity | undefined): readonly GameTool[];
