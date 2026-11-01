@@ -60,7 +60,7 @@ function setupSurveyBrief(facts: unknown): string {
   return [
     "You are Clankie's setup agent. The owner just installed Clankie and asked you to look around his setup once and propose how to finish setting it up.",
     "",
-    "You are read-only. You can read files, list folders, and run `git status`, `git log`, `git remote -v` and `tailscale status`. Every other tool is refused. Do not try to change anything; Clankie applies only the lines the owner approves.",
+    "You are read-only. You can read and search files, and run exactly `git status --short`, `git log --oneline -20`, `git remote -v` and `tailscale status --json`, as written. Read a repository's `.git/config` for its remotes. Every other tool and command is refused. Do not try to change anything; Clankie applies only the lines the owner approves.",
     "",
     "Look at:",
     "- The machines and Herdr sessions below, and which ones Clankie does not have yet.",
@@ -189,7 +189,8 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
   ): Promise<SetupSurvey> {
     await closeAgent(survey);
     const ended = await write({ ...survey, ...extra, status, endedAt: now() });
-    if (survey.restoresWatch && extra.restoresWatch !== false) await setWatch(true);
+    // Watch comes back only after the agent closes: closing refuses while Watch is on.
+    if (extra.restoresWatch ?? survey.restoresWatch) await setWatch(true);
     return ended;
   }
   /** Reads the agent's reports for a proposal; the survey moves to proposed once one parses. */
@@ -230,8 +231,9 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
         });
         return { lineId: line.id, outcome: "applied" };
       case "autonomy":
-        // The owner's own level choice wins over Watch coming back.
-        survey.restoresWatch = false;
+        // The owner's own level wins over Watch coming back. Choosing Watch itself
+        // applies Off's leaves now and turns Watch on once the agent has closed.
+        survey.restoresWatch = line.level === "watch";
         await deps.settings.update((current) => {
           const { watch: _watch, ...autonomy } = current.autonomy;
           const level = line.level === "watch" ? "off" : line.level;
@@ -241,7 +243,6 @@ export function createSetupSurveyService(deps: SetupSurveyDependencies): SetupSu
               ...autonomy,
               confirmedAt: current.autonomy.confirmedAt ?? now(),
               fleet: FleetAutonomySchema.parse({ ...current.autonomy.fleet, ...autonomyLevelFleet(level) }),
-              ...(line.level === "watch" ? { watch: true as const } : {}),
             },
           };
         });

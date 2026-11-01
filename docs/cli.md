@@ -5743,8 +5743,9 @@ prints the survey snapshot as JSON.
 
 - `start` hires one Claude agent on `--account LABEL` (a signed-in Claude
   account from `accounts workers`), or on the account Clankie would pick. It
-  starts in Claude's `dontAsk` mode with only reading, `git status|log|remote -v`,
-  `ls`, `tailscale status` and its report to Clankie allowed. If Watch is on, it
+  starts in Claude's `dontAsk` mode with only reading, the exact commands
+  `git status --short`, `git log --oneline -20`, `git remote -v` and
+  `tailscale status --json`, and its report to Clankie allowed. If Watch is on, it
   steps aside for this one agent and comes back when the survey ends.
 - `status` shows `surveying` until the agent's report carries a proposal, then
   `proposed` with its summary, findings and lines.

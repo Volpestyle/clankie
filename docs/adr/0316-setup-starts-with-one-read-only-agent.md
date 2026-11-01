@@ -23,8 +23,11 @@ starts at, refuses every hire.
   Add a device controls.
 - **Read-only at the harness.** A hire can ask for `readOnly: true`
   (`SpawnOperatorSeatSchema`). Claude then starts in `dontAsk` mode, with an
-  allow list of `Read`, `Glob`, `Grep`, `git status|log|remote -v`, `ls`,
-  `tailscale status` and its two report tools. Every other tool, including
+  allow list of `Read`, `Glob`, `Grep`, four exact commands
+  (`git status --short`, `git log --oneline -20`, `git remote -v`,
+  `tailscale status --json`) and its two report tools. No command takes other
+  arguments, since an open prefix lets an option such as `git log --output`
+  write a file. Every other tool, including
   edits, other shell commands, the web and `clankie_call`, is refused without
   asking. Maximum trust mode never applies to it, and it refuses any
   permission, settings or extra-directory argument. Only a new Claude hire

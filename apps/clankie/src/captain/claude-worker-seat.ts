@@ -150,8 +150,8 @@ const WORKER_SERVER_RULES = [
 
 /**
  * A read-only hire's whole allow list (ADR 0316). Claude's `dontAsk` mode
- * refuses every tool not listed here without asking: it reads files, runs a few
- * commands that only look, and reports to Clankie. No edit, write, web or
+ * refuses every tool not listed here without asking: it reads files, runs four
+ * exact commands that only look, and reports to Clankie. No edit, write, web or
  * connected-tool call is on the list, and neither is `clankie_call`.
  */
 const READ_ONLY_RULES = [
@@ -162,11 +162,12 @@ const READ_ONLY_RULES = [
     `${server}__message_clankie`,
     `${server}__message_clankie_status`,
   ]),
+  // Exact commands only: an open prefix lets options such as `git log --output`
+  // write a file.
   "Bash(git remote -v)",
-  "Bash(git status:*)",
-  "Bash(git log:*)",
-  "Bash(ls:*)",
-  "Bash(tailscale status:*)",
+  "Bash(git status --short)",
+  "Bash(git log --oneline -20)",
+  "Bash(tailscale status --json)",
 ];
 
 /** Claude flags that would widen or replace a read-only hire's permissions. */

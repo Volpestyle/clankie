@@ -62,6 +62,7 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
   const reports: { text: string; seatId: string }[] = [];
   const commands: OperatorConnectionCommand[] = [];
   let watchedAtHire: boolean | undefined;
+  const closed: string[] = [];
   const captain = createStubCaptain({
     serveOperatorConversation: async (request) => {
       requests.push(request);
@@ -104,13 +105,18 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
             })),
           },
         } as OperatorConversationServiceResult;
-      if (request.op === "close_seat")
+      // As the real service does, closing refuses while Watch is on.
+      if (request.op === "close_seat" && (await settings.load()).autonomy.watch === true)
+        throw new Error("Watch is on");
+      if (request.op === "close_seat") {
+        closed.push(request.seatId);
         return {
           op: "close_seat",
           schemaVersion: 1,
           seatId: request.seatId,
           closed: true,
         } as OperatorConversationServiceResult;
+      }
       throw new Error(`unexpected ${request.op}`);
     },
   });
@@ -173,6 +179,7 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
     commands,
     call,
     watchedAtHire: () => watchedAtHire,
+    closed: () => closed,
   };
 }
 
@@ -280,4 +287,30 @@ it("lets an approved level replace Watch instead of restoring it", async () => {
   const autonomy = (await f.settings.load()).autonomy;
   expect(autonomy.watch).toBeUndefined();
   expect(autonomy.confirmedAt).toBeDefined();
+});
+
+it("closes the agent before an approved Watch level turns Watch on", async () => {
+  const f = await fixture();
+  await f.settings.update((current) => {
+    const { watch: _watch, ...autonomy } = current.autonomy;
+    return { ...current, autonomy };
+  });
+  const started = await f.call("POST", "/v1/setup/survey", { schemaVersion: 1 });
+  expect(started.body.survey?.restoresWatch).toBe(false);
+  f.reports.push({
+    seatId: "w1:p7",
+    text: `\`\`\`json\n${JSON.stringify({
+      schemaVersion: 1,
+      summary: "You only want to watch for now.",
+      lines: [{ kind: "autonomy", id: "level", why: "You said so.", level: "watch" }],
+    })}\n\`\`\``,
+  });
+  await f.call("POST", "/v1/setup/survey/apply", {
+    schemaVersion: 1,
+    surveyId: started.body.survey!.id,
+    lineIds: ["level"],
+  });
+  // The close went through, which it can't once Watch is on.
+  expect(f.closed()).toEqual(["w1:p7"]);
+  expect((await f.settings.load()).autonomy.watch).toBe(true);
 });

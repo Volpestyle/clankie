@@ -7845,6 +7845,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       get headSeat() {
         return headSeat;
       },
+      observedSeats: () => liveEdgeSeats,
       seatImage,
       fleetCapacity: createFleetCapacityReader({
         settings,

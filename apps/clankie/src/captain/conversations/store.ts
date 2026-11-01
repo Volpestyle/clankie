@@ -2206,7 +2206,12 @@ export class ConversationStore {
   /** Offering full, bounded payloads does not mark them read. */
   public readInboundReports(
     conversationId: string,
-    options: { limit?: number | undefined; deliveryIds?: readonly string[] | undefined } = {},
+    options: {
+      limit?: number | undefined;
+      deliveryIds?: readonly string[] | undefined;
+      /** The live pane-to-seat join, so a reader can tell which agent sent each report. */
+      seatIdFor?: ((paneId: string) => string | undefined) | undefined;
+    } = {},
   ): WorkerReportPage {
     return readInboundReports(this, conversationId, options);
   }

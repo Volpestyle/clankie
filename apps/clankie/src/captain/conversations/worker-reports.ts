@@ -154,7 +154,12 @@ export function inboundReportSummaries(
 export function readInboundReports(
   ctx: ConversationStore,
   conversationId: string,
-  options: { limit?: number | undefined; deliveryIds?: readonly string[] | undefined } = {},
+  options: {
+    limit?: number | undefined;
+    deliveryIds?: readonly string[] | undefined;
+    /** The live pane-to-seat join, so a reader can tell which agent sent each report. */
+    seatIdFor?: ((paneId: string) => string | undefined) | undefined;
+  } = {},
 ): WorkerReportPage {
   const meta = ctx["metas"].get(conversationId);
   if (!meta) throw new Error("Unknown worker-report conversation");
@@ -167,10 +172,12 @@ export function readInboundReports(
     0,
     Math.min(100, Math.max(1, options.limit ?? (selectedIds === undefined ? 20 : 100))),
   )) {
+    const seatId = options.seatIdFor?.(report.paneId);
     const item = {
       deliveryId: report.deliveryId,
       conversationId,
       paneId: report.paneId,
+      ...(seatId === undefined ? {} : { seatId }),
       acceptedAt: report.acceptedAt,
       state: report.reportDelivery.state,
       ...(report.reportDelivery.stage === undefined ? {} : { stage: report.reportDelivery.stage }),
