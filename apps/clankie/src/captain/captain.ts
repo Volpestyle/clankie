@@ -2,6 +2,8 @@ import { stageWindowsMessage, stagedMessagePointer } from "./remote-seat-message
 import { discordGuildSettings } from "@clankie/protocol";
 import { listedOnLane } from "./mcp-tool-surface.ts";
 import { RoomLoops } from "./room-loops.ts";
+import { ParticipantRoomSessions } from "./participant-room-sessions.ts";
+import { participantRoomDirectory } from "./participant-room-profile.ts";
 import { createDurableSessions } from "./durable-sessions.ts";
 import { DurablePiRoom, PiTurnPausedError } from "./pi-turn-journal.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
@@ -1545,9 +1547,28 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         conversation.scope.kind !== "workspace")
     )
       return undefined;
+    let participant = false;
+    if (conversation.scope.kind === "room" && conversation.roomHandoff === undefined) {
+      const guildId = conversation.scope.targetId.split(":")[0];
+      const discord = resolveDiscordSettings(
+        settingsStore.readSync().discord,
+        options.discordEnvironment,
+      ).settings;
+      const policy =
+        guildId === undefined
+          ? undefined
+          : (discord.guilds[guildId] ?? discord.servers.find((entry) => entry.serverId === guildId));
+      participant = policy?.role === "participant";
+    }
     return {
       conversationId,
-      cwd: conversation.scope.kind === "workspace" ? conversation.scope.workspaceId : workingDirectory,
+      cwd:
+        conversation.scope.kind === "workspace"
+          ? conversation.scope.workspaceId
+          : participant
+            ? participantRoomDirectory(options.stateDir, conversationId)
+            : workingDirectory,
+      ...(participant ? { participantRoom: true as const } : {}),
       ...(conversation.scope.kind === "workspace" && conversation.scope.machineId !== undefined
         ? { machineId: conversation.scope.machineId }
         : {}),
@@ -2419,6 +2440,30 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       console.warn("Lead continuation report could not be retained", id, String(error));
     }
   };
+  const participantRooms = new ParticipantRoomSessions({
+    stateDir: options.stateDir,
+    runner: herdrRunner,
+    signal: shutdown.signal,
+    retire: (id) => {
+      seatOutboxes.get(id)?.close();
+      seatOutboxes.delete(id);
+    },
+    attach: (id, pane) => conversations.rememberNativeSource(id, pane),
+    sessionId: (id) => {
+      const source = conversations.nativeSource(id);
+      return source === undefined ? undefined : nativeSessionId(source);
+    },
+    bound: (id, pane) => {
+      const source = conversations.nativeSource(id);
+      const binding = inboundBinding(source);
+      return (
+        source?.paneId === pane.paneId &&
+        binding !== undefined &&
+        inboundBinding(pane) === binding &&
+        seatOutbox(id).boundTo(binding)
+      );
+    },
+  });
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.takesInput() === true;
   conversations.executionHeld = (id) => options.operatorSeatMigrationHeld?.(id) === true;
   // Only an idle native seat gains from waiting: a turn already running hears
@@ -4110,6 +4155,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (scope?.kind === "room") {
         // A cached MCP bank has no per-event actor proof. Attachment never
         // turns a room into an operator lane or inherits a later actor's grant.
+        // No cached room bridge may acquire account, browser, memory or fleet tools.
+        if (binding.participantRoom) return { lane: scope.lane, tools: [] };
         toolLane = scope.lane;
         capture.shell = false;
         capture.room = roomKey(scope.lane, scope.targetId);
@@ -6959,8 +7006,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const lane = request.trigger.kind === "voice_event" ? "discord_voice" : "discord_presence";
       const targetId = `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`;
       const parentId = conversations.roomConversation(lane, targetId);
+      // Routing must not yield before the coordinator admits concurrent turns.
+      // Authority is still refreshed when each admitted turn actually runs.
+      const initialDiscord = resolveDiscordSettings(
+        settingsStore.readSync().discord,
+        options.discordEnvironment,
+      ).settings;
+      const initialGuild =
+        request.trigger.guildId === undefined
+          ? undefined
+          : (initialDiscord.guilds[request.trigger.guildId] ??
+            initialDiscord.servers.find((entry) => entry.serverId === request.trigger.guildId));
+      const initialParticipant =
+        initialGuild?.role === "participant"
+          ? { harness: initialDiscord.guilds[request.trigger.guildId!]?.participantHarness ?? "pi" }
+          : undefined;
       const fingerprint = deliveryFingerprint(
-        JSON.stringify({ request, verifiedOwner: authority?.verifiedOwner === true }),
+        JSON.stringify({
+          request,
+          verifiedOwner: authority?.verifiedOwner === true,
+          participant: initialParticipant,
+        }),
       );
       const prior = conversations.findRoomHandoff(parentId, request.deliveryId, fingerprint);
       const readAuthoritySettings = async () => {
@@ -6986,6 +7052,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return authority?.verifiedOwner === true || roleOwner
           ? { ...discord, systemActorUserIds: [...discord.systemActorUserIds, request.trigger.actorId] }
           : discord;
+      };
+      const participantPolicy = (discord: Awaited<ReturnType<typeof readAuthoritySettings>>) => {
+        const guildId = request.trigger.guildId;
+        if (guildId === undefined) return undefined;
+        const policy = discord.guilds[guildId] ?? discord.servers.find((entry) => entry.serverId === guildId);
+        return policy?.role === "participant"
+          ? { harness: discord.guilds[guildId]?.participantHarness ?? "pi" }
+          : undefined;
       };
       const admission = readAuthoritySettings().then((discord) => {
         return {
@@ -7041,25 +7115,32 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 }
               : discord,
         });
+        const participant = participantPolicy(discord);
+        if (JSON.stringify(participant) !== JSON.stringify(initialParticipant))
+          throw new Error("participant_configuration_changed");
         const plan =
-          admitted.plan.systemTools && currentPlan.systemTools
+          participant === undefined && admitted.plan.systemTools && currentPlan.systemTools
             ? currentPlan
             : {
                 kind: "social" as const,
                 durable: false,
                 systemTools: false as const,
-                sessionKey: admitted.plan.sessionKey,
+                sessionKey:
+                  participant !== undefined ? discordTurnSessionKey(request) : admitted.plan.sessionKey,
               };
         const owner =
-          admitted.owner &&
-          (authority?.verifiedOwner === true ||
-            discord.ownerUserId === request.trigger.actorId ||
-            discord.servers.some(
-              (entry) =>
-                entry.serverId === request.trigger.guildId &&
-                (entry.owners === "everyone" ||
-                  (entry.owners === "role" && discord.systemActorUserIds.includes(request.trigger.actorId))),
-            ));
+          participant !== undefined
+            ? authority?.verifiedOwner === true || discord.ownerUserId === request.trigger.actorId
+            : admitted.owner &&
+              (authority?.verifiedOwner === true ||
+                discord.ownerUserId === request.trigger.actorId ||
+                discord.servers.some(
+                  (entry) =>
+                    entry.serverId === request.trigger.guildId &&
+                    (entry.owners === "everyone" ||
+                      (entry.owners === "role" &&
+                        discord.systemActorUserIds.includes(request.trigger.actorId))),
+                ));
         const sender = owner
           ? ("owner" as const)
           : plan.systemTools &&
@@ -7068,24 +7149,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ? ("granted" as const)
             : undefined;
         const ownerAudience =
-          request.trigger.guildId === undefined
-            ? request.identity.transportKind === "bot" && owner
-            : deps.discordActions !== undefined &&
-              (await discordOwnerAudience(
-                discord,
-                request.trigger.guildId,
-                request.trigger.channelId,
-                async (action) => {
-                  const result = await deps.discordActions!.serverAction(action);
-                  if (!result.ok) throw new Error("Discord audience unavailable");
-                  return result.data;
-                },
-              ));
+          participant !== undefined
+            ? false
+            : request.trigger.guildId === undefined
+              ? request.identity.transportKind === "bot" && owner
+              : deps.discordActions !== undefined &&
+                (await discordOwnerAudience(
+                  discord,
+                  request.trigger.guildId,
+                  request.trigger.channelId,
+                  async (action) => {
+                    const result = await deps.discordActions!.serverAction(action);
+                    if (!result.ok) throw new Error("Discord audience unavailable");
+                    return result.data;
+                  },
+                ));
         const currentSkillGrant = discord.roomSkills.find(
           (entry) =>
             entry.serverId === request.trigger.guildId && entry.channelId === request.trigger.channelId,
         );
         const skillGrant =
+          participant?.harness !== "claude" &&
           JSON.stringify(currentSkillGrant) === JSON.stringify(admitted.skillGrant)
             ? currentSkillGrant
             : undefined;
@@ -7101,7 +7185,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         };
         // Linking is an owner choice, never a grant inferred from a role, a
         // channel name or the fact that its latest speaker happens to be us.
-        const mainConversation = admitted.mainConversation;
+        const mainConversation = participant === undefined && admitted.mainConversation;
         if (
           mainConversation &&
           (!discord.mainConversationChannelIds.includes(request.trigger.channelId) ||
@@ -7114,19 +7198,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             currentSkillGrant !== undefined)
         )
           throw new Error("discord_main_conversation_requires_private_owner_channel");
-        const key = JSON.stringify([
-          plan.kind,
-          plan.sessionKey,
-          plan.systemTools,
-          owner,
-          sender ?? null,
-          ownerAudience,
-          skillGrant,
-          mainConversation,
-        ]);
-        return { discord, plan, owner, sender, key, access, mainConversation };
+        const key =
+          participant !== undefined
+            ? JSON.stringify(["participant", parentId, participant.harness, skillGrant])
+            : JSON.stringify([
+                plan.kind,
+                plan.sessionKey,
+                plan.systemTools,
+                owner,
+                sender ?? null,
+                ownerAudience,
+                skillGrant,
+                mainConversation,
+                participant,
+              ]);
+        return { discord, plan, owner, sender, key, access, mainConversation, participant };
       };
-      if (durablePiRoom.accepts(request)) {
+      if (durablePiRoom.accepts(request) && participantPolicy(await readAuthoritySettings()) === undefined) {
         try {
           const admitted = await resolveGrant();
           // Prototype never takes over a native seat or a linked main conversation.
@@ -7315,7 +7403,76 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             }
             try {
               const result = await (async (): Promise<CaptainChannelTurnResult> => {
-                const { discord, plan, owner, sender, key, access, mainConversation } = await resolveGrant();
+                const { discord, plan, owner, sender, key, access, mainConversation, participant } =
+                  await resolveGrant();
+                if (participant?.harness === "claude") {
+                  burst?.close();
+                  // The public room may retain a private owner attachment from
+                  // an earlier Admin policy. Never reuse its history or mailbox.
+                  const characterId = conversations.roomConversation(
+                    lane,
+                    `${targetId}:participant-character`,
+                  );
+                  conversations.nameRoomConversation(
+                    characterId,
+                    `Clankie · character · ${request.room?.channelName ?? "Discord room"}`,
+                  );
+                  // A public character keeps one native history, independent of
+                  // who speaks. Its exact original reply alone reaches Discord.
+                  return roomLoops.serialize(`native-participant:${parentId}`, async () => {
+                    const guard = async () => {
+                      shutdown.signal.throwIfAborted();
+                      await requireAccess(undefined, "shell");
+                      if ((await resolveGrant()).key !== key)
+                        throw new Error("participant_authority_changed");
+                    };
+                    const cwd = participantRoomDirectory(options.stateDir, characterId);
+                    await participantRooms.ensure({ conversationId: characterId, cwd, guard });
+                    await guard();
+                    await participantRooms.assertCurrent(characterId, cwd);
+                    const source = conversations.nativeSource(characterId);
+                    const binding = inboundBinding(source);
+                    if (!binding) throw new Error("participant_session_unavailable");
+                    const heard = await normalizeDiscordTurn(request, deps, {
+                      systemTools: false,
+                      carriesHistory: true,
+                    });
+                    await guard();
+                    conversations.updateRoomHandoff(child.conversationId, {
+                      host: "claude",
+                      state: "running",
+                      doing: "Answering in the room's character session",
+                      ...(source === undefined ? {} : { nativeChildSessionId: nativeSessionId(source) }),
+                    });
+                    const delivered = await seatOutbox(characterId).deliver({
+                      kind: "escalation",
+                      conversationId: characterId,
+                      source: "discord-participant",
+                      content: heard.prompt,
+                      wantsReply: true,
+                      recipientBinding: binding,
+                      original: {
+                        messageId: `discord-participant-${deliveryFingerprint(`${parentId}:${request.deliveryId}`)}`,
+                        prepare: () => {},
+                      },
+                      signal: shutdown.signal,
+                    });
+                    await guard();
+                    await participantRooms.assertCurrent(characterId, cwd);
+                    if (inboundBinding(conversations.nativeSource(characterId)) !== binding)
+                      throw new Error("participant_session_changed");
+                    const result = roomSeatTurnResult(delivered, characterId, child.conversationId);
+                    if (result === undefined) throw new Error("participant_session_unavailable");
+                    if (result.state === "settled")
+                      conversations.publishRoomEvent(child.conversationId, {
+                        type: "message",
+                        role: "captain",
+                        text: result.response,
+                        streaming: false,
+                      });
+                    return result;
+                  });
+                }
                 if (mainConversation) {
                   burst?.close();
                   // It only waits for the main answer now; its room slot goes to the next message.
@@ -7409,9 +7566,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 // ADR 0291: a social text room answers in its durable loop for this exact grant.
                 // Machine turns keep their own sessions; in a mixed room they stay one-shot (ADR 0251).
                 const loopKey =
-                  lane === "discord_presence" &&
+                  (lane === "discord_presence" || participant !== undefined) &&
                   plan.kind === "social" &&
-                  roomLoops.accepts(`${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`)
+                  (participant !== undefined ||
+                    roomLoops.accepts(`${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}`))
                     ? roomLoops.key(plan.sessionKey, key)
                     : undefined;
                 const sessionKey = loopKey ?? `${plan.sessionKey}:handoff:${child.conversationId}`;
@@ -7506,6 +7664,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   nativeCapture.discordOrigin = normalized.lane === "discord_presence" ? origin : undefined;
                   const guard = async () => {
                     shutdown.signal.throwIfAborted();
+                    if (participant !== undefined && (await resolveGrant()).key !== key)
+                      throw new Error("participant_authority_changed");
                     if (
                       access.privateContext &&
                       request.trigger.guildId !== undefined &&
@@ -8157,6 +8317,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       if (conversationId !== undefined && binding === undefined)
         throw new Error("Unknown captain conversation");
       const stored = await settings();
+      if (binding?.participantRoom) {
+        if (sections.some((section) => section !== "persona"))
+          throw new Error("participant_private_context_denied");
+        const scope = conversations.conversation(binding.conversationId)?.scope;
+        if (scope?.kind !== "room") throw new Error("Unknown participant room");
+        return assembleLanePrompt(scope.lane, false, stored, ["persona"]);
+      }
       const currentSettings =
         laneHoldsSystemTools(lane) && sections.includes("fleet") && binding?.machineId === undefined
           ? await settingsForFleetContext(stored, binding?.cwd ?? workingDirectory)
@@ -8535,9 +8702,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const askedAt = Date.now();
       const arrived = outbox.pollArriving();
       // Owner asks remain pending in their source conversation across driver takeover.
-      void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+      if (!binding.participantRoom)
+        void recoverWorkerReports(binding.conversationId).catch((error: unknown) => {
+          console.warn("Worker report recovery unavailable", binding.conversationId, String(error));
+        });
       // A wake held after model failures can go to the seat that just bound.
-      autonomy.releaseHeldWake(binding.conversationId);
+      if (!binding.participantRoom) autonomy.releaseHeldWake(binding.conversationId);
       const pollSignal = signal === undefined ? shutdown.signal : AbortSignal.any([signal, shutdown.signal]);
       let machineFleet: string | undefined;
       try {
@@ -8558,15 +8728,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 capabilities,
               );
               arrived();
-              deliverServiceHandoff(binding.conversationId);
+              if (!binding.participantRoom) deliverServiceHandoff(binding.conversationId);
               // Like the service handoff, a relaunch's kept brief waits for the bound poll (VUH-2860).
-              if (polledSource !== undefined && outbox.usageLimited() === undefined)
+              if (
+                !binding.participantRoom &&
+                polledSource !== undefined &&
+                outbox.usageLimited() === undefined
+              )
                 void leadSeats
                   .handOff(binding.conversationId, leadSeatPane(polledSource))
                   .catch((error: unknown) => {
                     console.warn("Lead relaunch handoff unavailable", binding.conversationId, String(error));
                   });
-              void recoverWorkerReports(binding.conversationId).catch(() => undefined);
+              if (!binding.participantRoom)
+                void recoverWorkerReports(binding.conversationId).catch((error: unknown) => {
+                  console.warn("Worker report recovery unavailable", binding.conversationId, String(error));
+                });
               return pending;
             },
             pollSignal,

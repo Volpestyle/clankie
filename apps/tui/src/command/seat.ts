@@ -32,6 +32,12 @@ import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-iso
 import { operatorHarness } from "./harness-command.ts";
 import { writeClaudeSeatMcpConfig } from "./claude-seat-mcp.ts";
 import { bindLaunchedHarness, mintBridgeNonce, type SeatBinding } from "./seat-binding.ts";
+import { projectParticipantPlugin } from "./claude-participant.ts";
+import {
+  participantRoomSettings,
+  PARTICIPANT_LAUNCH_ENV,
+  PARTICIPANT_INSTRUCTIONS,
+} from "../../../clankie/src/captain/participant-room-profile.ts";
 
 const execFileAsync = promisify(execFileCallback);
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -83,6 +89,7 @@ const HERDR_DETECT_TIMEOUT_MS = 30_000;
 const HERDR_DETECT_POLL_MS = 500;
 
 export interface SeatPlan {
+  readonly participantRoom?: true;
   readonly command: string;
   readonly account?: { readonly label: string; readonly home: string };
   readonly args: readonly string[];
@@ -425,11 +432,6 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     );
   }
   const skills = withoutUserSkills(bundledSkills(options.repoRoot), command, env);
-  const plugin: SeatPlan["plugin"] = {
-    source: "plugin-dir",
-    path: await projectSkillPlugin(source, join(clankieStateHome(env), "clankie"), skills),
-  };
-
   const explicit =
     flags.resumeSessionId === undefined
       ? undefined
@@ -478,14 +480,34 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     dryRun: true,
   });
   const { conversationId } = context;
+  const participant = context.participantRoom === true;
+  if (env[PARTICIPANT_LAUNCH_ENV] === "1" && !participant)
+    throw new Error("Participant configuration changed before launch; no operator session was started.");
+  if (participant && (flags.pluginDir !== undefined || (flags.mcpServers?.length ?? 0) > 0))
+    throw new Error(
+      "Participant sessions use only their isolated room channel; operator plugins and MCP opt-ins are unavailable.",
+    );
+  if (participant && previous !== undefined && previous.cwd !== context.cwd)
+    throw new Error(
+      "An operator session cannot be resumed into a participant room. Start its dedicated session.",
+    );
+  const selectedSkills = participant ? [] : skills;
+  const plugin: SeatPlan["plugin"] = {
+    source: "plugin-dir",
+    path: participant
+      ? projectParticipantPlugin(source, join(clankieStateHome(env), "clankie"))
+      : await projectSkillPlugin(source, join(clankieStateHome(env), "clankie"), selectedSkills),
+  };
   // Claude finds a resumed session only from its own project directory.
   const cwd = explicit?.cwd ?? context.cwd;
   // Session-only plugins have the native @inline identity. Keep wakes on the
   // same projected plugin, without enabling an older installed skill catalog.
   const channel = true;
-  const trust: { enabled: boolean; unreadable?: string } = options.joinedSeat
-    ? await options.joinedSeat.maximumTrust()
-    : await readSeatMaximumTrust(options);
+  const trust: { enabled: boolean; unreadable?: string } = participant
+    ? { enabled: false }
+    : options.joinedSeat
+      ? await options.joinedSeat.maximumTrust()
+      : await readSeatMaximumTrust(options);
   const bridgeNonce = flags.dryRun ? undefined : mintBridgeNonce();
   const mcpConfig = writeClaudeSeatMcpConfig(plugin.path, cwd, env, flags.mcpServers ?? [], bridgeNonce);
   const args = [
@@ -495,13 +517,28 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     "--name",
     "Clankie",
     "--settings",
-    JSON.stringify(seatSettings(cwd, env)),
+    JSON.stringify(participant ? participantRoomSettings() : seatSettings(cwd, env)),
     "--plugin-dir",
     plugin.path,
     "--dangerously-load-development-channels",
     "server:clankie",
     ...(previous === undefined ? ["--session-id", sessionId] : ["--resume", sessionId]),
-    ...(trust.enabled ? MAXIMUM_TRUST_HARNESS_ARGS.claude : ["--permission-mode", "auto"]),
+    ...(participant
+      ? [
+          "--restricted",
+          "--setting-sources",
+          "",
+          "--tools",
+          "default",
+          "Bash",
+          "--permission-mode",
+          "manual",
+          "--append-system-prompt",
+          PARTICIPANT_INSTRUCTIONS,
+        ]
+      : trust.enabled
+        ? MAXIMUM_TRUST_HARNESS_ARGS.claude
+        : ["--permission-mode", "auto"]),
   ];
   // This pane is his head only inside the fleet the service leads (ADR 0164):
   // a seat opened in any other Herdr session names no pane there.
@@ -517,7 +554,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
   const herdrPaneId = fleetSocket !== undefined && env.HERDR_SOCKET_PATH === fleetSocket ? paneId : undefined;
   return {
     command,
-    skills,
+    skills: selectedSkills,
     args,
     plugin,
     channel,
@@ -528,6 +565,7 @@ export async function planSeat(flags: SeatFlags, options: SeatCommandOptions): P
     ...(conversationId === undefined ? {} : { conversationId }),
     ...(context.newConversation === undefined ? {} : { newConversation: context.newConversation }),
     cwd,
+    ...(participant ? { participantRoom: true as const } : {}),
     ...(herdrPaneId === undefined || herdrPaneId.length === 0 ? {} : { herdrPaneId }),
     maximumTrustMode: trust.enabled,
     ...(trust.unreadable === undefined ? {} : { maximumTrustModeUnreadable: trust.unreadable }),
@@ -610,6 +648,7 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
     outputJson(stdout, { ok: true, ...printable });
     return 0;
   }
+  if (plan.participantRoom) mkdirSync(plan.cwd, { recursive: true, mode: 0o700 });
   if (plan.newConversation !== undefined) {
     plan = {
       ...plan,
@@ -637,7 +676,7 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
       options,
     );
   }
-  if (!plan.resumed || plan.explicitResume !== undefined) {
+  if (!plan.participantRoom && (!plan.resumed || plan.explicitResume !== undefined)) {
     writeSeatRecord(
       env,
       {

@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="pele pele-state" viewBox="0 0 1355 1203" width="1355" height="1203" style="max-width:100%;height:auto;--_bg:var(--pele-bg,#fff);--_fg:var(--pele-fg,#1f1f1f);--_m:var(--pele-muted,#6e6e6e);--_l:var(--pele-line,#1f1f1f);--_s:var(--pele-surface,#f3f3f3);--_a:var(--pele-surface-alt,#e6e6e6);--_b:var(--pele-border,#8a8a8a);--_c:var(--pele-accent,#5b7bd5);color:var(--_fg);--_tw:var(--pele-title-weight,bold);--_fm:var(--pele-font-mono,monospace);font:16px sans-serif;letter-spacing:normal;word-spacing:normal;text-transform:none;direction:ltr;font-family:var(--pele-font,sans-serif)" fill="var(--_fg)" role="graphics-document document" aria-roledescription="state"><style>.pele {
+  --pele-bg: #ffffff;
+  --pele-fg: #1c1c1c;
+  --pele-muted: #656565;
+  --pele-line: #808080;
+  --pele-surface: #fcfcfc;
+  --pele-surface-alt: #f1f1f1;
+  --pele-border: #c9c9c9;
+}
+.pele .blue rect { fill: #c3e0ff; }
+.pele .orange rect { fill: #f0d3bf; }
+.pele .purple rect { fill: #e3d5ff; }
+.pele .yellow rect { fill: #f0dcbf; }
+.pele .teal rect { fill: #bfe3df; }
+.pele .tan rect { fill: #e5d9ce; }
+.pele .pink rect { fill: #ffcbe6; }
+.pele .breaks rect {
+  fill: #ffecee !important;
+  stroke: #e72e3b !important;
+  stroke-width: 2.5px !important;
+}
+.pele .breaks text {
+  fill: #cd2834 !important;
+}
+.pele .mayBreak rect {
+  fill: #fff3e6 !important;
+  stroke: #e8730c !important;
+  stroke-width: 2.5px !important;
+}
+.pele .mayBreak text {
+  fill: #b85a06 !important;
+}
+.pele .bugPath rect {
+  stroke: #1680f3 !important;
+  stroke-width: 2.5px !important;
+}
+.pele .repeats rect {
+  stroke: #9b35d6 !important;
+  stroke-width: 2.5px !important;
+  stroke-dasharray: 6 3;
+}
+@media (prefers-color-scheme: dark) {
+  .pele {
+    --pele-bg: #1f1f1f;
+    --pele-fg: #f5f5f5;
+    --pele-muted: #acacac;
+    --pele-line: #939393;
+    --pele-surface: #121212;
+    --pele-surface-alt: #2c2c2c;
+    --pele-border: #4e4e4e;
+  }
+  .pele .blue rect { fill: #1b3857; }
+  .pele .orange rect { fill: #573117; }
+  .pele .purple rect { fill: #3c2e57; }
+  .pele .yellow rect { fill: #573d17; }
+  .pele .teal rect { fill: #174641; }
+  .pele .tan rect { fill: #3d3127; }
+  .pele .pink rect { fill: #57233e; }
+  .pele .breaks rect {
+    fill: #2e2021 !important;
+    stroke: #cf2b35 !important;
+  }
+  .pele .breaks text {
+    fill: #ff6463 !important;
+  }
+  .pele .mayBreak rect {
+    fill: #2e2619 !important;
+    stroke: #d0700f !important;
+  }
+  .pele .mayBreak text {
+    fill: #ffa257 !important;
+  }
+  .pele .bugPath rect {
+    stroke: #116dd2 !important;
+  }
+  .pele .repeats rect {
+    stroke: #9a3fcf !important;
+  }
+}
+</style><rect width="100%" height="100%" style="fill:var(--pele-bg,#fff)"/><text class="pele-title" font-weight="var(--_tw)" text-anchor="middle" xml:space="preserve"><tspan x="677.5" y="25.6">Clankie's Discord character</tspan></text><g transform="translate(0,36)"><g class="pele-clusters"><g class="pele-cluster pele-state-composite" data-id="legend"><rect x="982.41" y="8" width="363.62" height="112" rx="10" fill="var(--_a)" fill-opacity="0.5" stroke="var(--_b)"/><path d="M982.41,44H1346.03" fill="none" stroke="var(--_b)"/><text class="pele-cluster-label" x="1164.22" y="31.6" text-anchor="middle">Legend</text></g></g><g class="pele-edges" fill="none" stroke="var(--_l)" stroke-linecap="round"><g class="pele-edge pele-transition" data-id="edge0"><path d="M935.41,120L935.41,157"/><path class="pele-marker" d="M935.41,164L932.05,156L938.77,156Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge1"><path d="M883.38,208C883.38,217.25 782.64,217.25 782.64,226.5L782.64,270"/><path class="pele-marker" d="M782.64,277L779.28,269L786,269Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge2"><path d="M987.44,208C987.44,242.5 1254.31,242.5 1254.31,277L1254.31,1010.75C1254.31,1047.38 829.39,1047.38 829.39,1084L829.39,1090"/><path class="pele-marker" d="M829.39,1097L826.03,1089L832.75,1089Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge3"><path d="M747.93,339C747.93,347.71 466.51,355.04 466.51,363.75L466.51,532"/><path class="pele-marker" d="M466.51,539L463.15,531L469.87,531Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge4"><path d="M786.04,339L786.04,401"/><path class="pele-marker" d="M786.04,408L782.68,400L789.4,400Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge5"><path d="M817.34,339C817.34,349.14 1058.93,353.61 1058.93,363.75L1058.93,1010.75C1058.93,1047.38 813.39,1047.38 813.39,1084L813.39,1090"/><path class="pele-marker" d="M813.39,1097L810.03,1089L816.75,1089Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge6"><path d="M425.48,601L425.48,613.25C425.47,623.02 360.82,629 255.34,629C149.85,629 85.2,646.58 85.2,675.25L85.2,1010.75C85.2,1046.87 202.66,1069 394.3,1069C585.94,1069 703.4,1074.99 703.4,1084.75L703.4,1090"/><path class="pele-marker" d="M703.4,1097L700.04,1089L706.76,1089Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge7"><path d="M441.48,601L441.47,629C441.47,649 421.34,649 421.34,669L421.34,712.5"/><path class="pele-marker" d="M421.34,719.5L417.98,711.5L424.7,711.5Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge8"><path d="M778.04,470L778.04,513.5C778.04,516.97 503.41,523.91 503.41,527.38L503.41,532"/><path class="pele-marker" d="M503.41,539L500.05,531L506.77,531Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge9"><path d="M841.2,470C841.2,482.38 973.73,482.38 973.73,494.75L973.73,1010.75C973.73,1047.38 797.39,1047.38 797.39,1084L797.39,1090"/><path class="pele-marker" d="M797.39,1097L794.03,1089L800.75,1089Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge10"><path d="M372.23,781.5L372.23,794.5C372.23,822 185.56,822 185.56,849.5L185.56,889.5C185.56,895.13 236.35,895.13 236.35,900.75L236.35,904.5"/><path class="pele-marker" d="M236.35,911.5L232.99,903.5L239.71,903.5Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge11"><path d="M495.61,781.5L495.61,793.75C495.61,803.52 529.85,809.5 585.7,809.5C641.55,809.5 675.78,824.7 675.78,849.5L675.78,904.5"/><path class="pele-marker" d="M675.78,911.5L672.42,903.5L679.14,903.5Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge12"><path d="M479.61,781.5L479.61,809.5C479.61,834.5 504.77,834.5 504.77,859.5L504.77,1010.75C504.77,1031.98 548.59,1045 620.08,1045C691.58,1045 735.4,1059.82 735.4,1084L735.4,1090"/><path class="pele-marker" d="M735.4,1097L732.04,1089L738.76,1089Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge13"><path d="M281.46,973.5L281.46,1017C281.46,1041.8 364.67,1057 500.43,1057C636.19,1057 719.4,1067.26 719.4,1084L719.4,1090"/><path class="pele-marker" d="M719.4,1097L716.04,1089L722.76,1089Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge14"><path d="M326.57,911.5L326.57,901.88C326.57,895.69 413.34,895.69 413.34,889.5L413.34,788.5"/><path class="pele-marker" d="M413.34,781.5L416.7,789.5L409.98,789.5Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge15"><path d="M736.31,973.5L736.31,1017C736.31,1050.5 751.4,1050.5 751.4,1084L751.4,1090"/><path class="pele-marker" d="M751.4,1097L748.04,1089L754.76,1089Z" fill="var(--_l)" stroke="none"/></g><g class="pele-edge pele-transition" data-id="edge16"><path d="M766.82,911.5L766.82,675.25C766.82,644.63 503.41,644.63 503.41,614L503.41,608"/><path class="pele-marker" d="M503.41,601L506.77,609L500.05,609Z" fill="var(--_l)" stroke="none"/></g></g><g class="pele-edge-labels" font-size="14"><g class="pele-edge-label" data-id="edge1"><rect x="690.33" y="228.5" width="184.61" height="21" rx="3" fill="var(--_bg)"/><text x="782.64" y="243.9" text-anchor="middle">first admitted room message</text></g><g class="pele-edge-label" data-id="edge2"><rect x="1179.11" y="559.5" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="1254.31" y="574.9" text-anchor="middle">owner changes access</text></g><g class="pele-edge-label" data-id="edge3"><rect x="387.41" y="428.5" width="158.19" height="21" rx="3" fill="var(--_bg)"/><text x="466.51" y="443.9" text-anchor="middle">native channel connects</text></g><g class="pele-edge-label" data-id="edge4"><rect x="710.85" y="359.5" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="786.04" y="374.9" text-anchor="middle">launch response is lost</text></g><g class="pele-edge-label" data-id="edge5"><rect x="983.73" y="559.5" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="1058.93" y="574.9" text-anchor="middle">owner changes access</text></g><g class="pele-edge-label" data-id="edge6"><rect x="10" y="740" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="85.2" y="755.4" text-anchor="middle">owner changes access</text></g><g class="pele-edge-label" data-id="edge7"><rect x="336.82" y="671" width="169.06" height="21" rx="3" fill="var(--_bg)"/><text x="421.34" y="686.4" text-anchor="middle">deliver the room message</text></g><g class="pele-edge-label" data-id="edge8"><rect x="699.73" y="490.5" width="156.62" height="21" rx="3" fill="var(--_bg)"/><text x="778.04" y="505.9" text-anchor="middle">find the existing session</text></g><g class="pele-edge-label" data-id="edge9"><rect x="898.54" y="740" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="973.73" y="755.4" text-anchor="middle">owner changes access</text></g><g class="pele-edge-label" data-id="edge10"><rect x="95.2" y="851.5" width="180.73" height="36" rx="3" fill="var(--_bg)"/><text text-anchor="middle" xml:space="preserve"><tspan x="185.56" y="865.4">character requests machine</tspan><tspan x="185.56" y="883.4">work</tspan></text></g><g class="pele-edge-label" data-id="edge11"><rect x="594.75" y="859" width="162.07" height="21" rx="3" fill="var(--_bg)"/><text x="675.78" y="874.4" text-anchor="middle">send the correlated reply</text></g><g class="pele-edge-label" data-id="edge12"><rect x="429.57" y="932" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="504.77" y="947.4" text-anchor="middle">owner changes access</text></g><g class="pele-edge-label" data-id="edge13"><rect x="206.26" y="994" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="281.46" y="1009.4" text-anchor="middle">owner changes access</text></g><g class="pele-edge-label" data-id="edge14"><rect x="331.92" y="851.5" width="162.85" height="36" rx="3" fill="var(--_bg)"/><text text-anchor="middle" xml:space="preserve"><tspan x="413.34" y="865.4">owner declines or owner</tspan><tspan x="413.34" y="883.4">approves in the native UI</tspan></text></g><g class="pele-edge-label" data-id="edge15"><rect x="661.11" y="994" width="150.39" height="21" rx="3" fill="var(--_bg)"/><text x="736.31" y="1009.4" text-anchor="middle">owner changes access</text></g><g class="pele-edge-label" data-id="edge16"><rect x="674.11" y="732.5" width="185.42" height="36" rx="3" fill="var(--_bg)"/><text text-anchor="middle" xml:space="preserve"><tspan x="766.82" y="746.4">another message reuses the</tspan><tspan x="766.82" y="764.4">character</tspan></text></g></g><g class="pele-nodes"><g class="pele-node pele-state teal" data-id="s0" transform="translate(935.41,186)"><rect x="-104.03" y="-22" width="208.06" height="44" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" x="0" y="5.6" text-anchor="middle">No character session yet</text></g><g class="pele-node pele-state teal" data-id="s1" transform="translate(782.64,308)"><rect x="-86.7" y="-31" width="173.41" height="62" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" text-anchor="middle" xml:space="preserve"><tspan x="0" y="-4.9">Starting the isolated</tspan><tspan x="0" y="16.1">session</tspan></text></g><g class="pele-node pele-state pink" data-id="s2" transform="translate(768.91,1128)"><rect x="-96.48" y="-31" width="192.96" height="62" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" text-anchor="middle" xml:space="preserve"><tspan x="0" y="-4.9">Configuration revoked;</tspan><tspan x="0" y="16.1">withhold the reply</tspan></text></g><g class="pele-node pele-state teal" data-id="s3" transform="translate(474.51,570)"><rect x="-80.9" y="-31" width="161.81" height="62" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" text-anchor="middle" xml:space="preserve"><tspan x="0" y="-4.9">Room character is</tspan><tspan x="0" y="16.1">connected</tspan></text></g><g class="pele-node pele-state orange" data-id="s4" transform="translate(786.04,439)"><rect x="-107.16" y="-31" width="214.32" height="62" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" text-anchor="middle" xml:space="preserve"><tspan x="0" y="-4.9">Launch uncertain; inspect</tspan><tspan x="0" y="16.1">the original</tspan></text></g><g class="pele-node pele-state teal" data-id="s5" transform="translate(421.34,750.5)"><rect x="-101.11" y="-31" width="202.22" height="62" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" text-anchor="middle" xml:space="preserve"><tspan x="0" y="-4.9">Answering in the room's</tspan><tspan x="0" y="16.1">own history</tspan></text></g><g class="pele-node pele-state orange" data-id="s6" transform="translate(281.46,942.5)"><rect x="-97.11" y="-31" width="194.22" height="62" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" text-anchor="middle" xml:space="preserve"><tspan x="0" y="-4.9">Waiting for the owner's</tspan><tspan x="0" y="16.1">permission</tspan></text></g><g class="pele-node pele-state teal" data-id="s7" transform="translate(736.31,942.5)"><rect x="-106.89" y="-31" width="213.78" height="62" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" text-anchor="middle" xml:space="preserve"><tspan x="0" y="-4.9">Only this message's reply</tspan><tspan x="0" y="16.1">returns to Discord</tspan></text></g><g class="pele-node pele-state-start" data-id="root_start" transform="translate(935.41,113)"><circle r="7" fill="var(--_l)"/></g><g class="pele-node pele-state orange" data-id="lg0" transform="translate(1039.31,82)"><rect x="-40.9" y="-22" width="81.79" height="44" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" x="0" y="5.6" text-anchor="middle">waiting</text></g><g class="pele-node pele-state pink" data-id="lg1" transform="translate(1164.67,82)"><rect x="-44.46" y="-22" width="88.93" height="44" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" x="0" y="5.6" text-anchor="middle">stopped</text></g><g class="pele-node pele-state teal" data-id="lg2" transform="translate(1289.58,82)"><rect x="-40.45" y="-22" width="80.9" height="44" rx="10" fill="var(--_s)" stroke="var(--_b)"/><text class="pele-label" x="0" y="5.6" text-anchor="middle">normal</text></g></g></g></svg>

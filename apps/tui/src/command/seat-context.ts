@@ -31,7 +31,12 @@ export async function resolveSeatContext(
     dryRun: boolean;
   },
   options: SeatCommandOptions,
-): Promise<{ conversationId?: string; cwd: string; newConversation?: NewSeatConversation }> {
+): Promise<{
+  conversationId?: string;
+  cwd: string;
+  newConversation?: NewSeatConversation;
+  participantRoom?: true;
+}> {
   const newConversation: NewSeatConversation = {
     op: "create",
     schemaVersion: 1,
@@ -108,7 +113,11 @@ export async function resolveSeatContext(
     response = await fetchImpl(url, { ...request, signal: AbortSignal.timeout(10000) });
   }
   if (!response.ok) throw new Error(`Seat conversation unavailable (${response.status})`);
-  const binding = (await response.json()) as { conversationId?: unknown; cwd?: unknown };
+  const binding = (await response.json()) as {
+    conversationId?: unknown;
+    cwd?: unknown;
+    participantRoom?: unknown;
+  };
   const id = OperatorConversationIdSchema.safeParse(binding.conversationId);
   if (
     !id.success ||
@@ -117,5 +126,9 @@ export async function resolveSeatContext(
     !binding.cwd
   )
     throw new Error("Invalid service seat context");
-  return { conversationId: id.data, cwd: binding.cwd };
+  return {
+    conversationId: id.data,
+    cwd: binding.cwd,
+    ...(binding.participantRoom === true ? { participantRoom: true as const } : {}),
+  };
 }

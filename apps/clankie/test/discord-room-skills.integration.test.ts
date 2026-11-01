@@ -81,7 +81,7 @@ it("loads the recorded legacy household as a skill grant, retains owners, and pe
       transportKind: "bot",
       settings: discord,
     }).kind,
-  ).toBe("system_turn");
+  ).toBe("social");
   expect(
     resolveDiscordSettings(discord, {
       DISCORD_SYSTEM_ACTOR_GUILD_IDS: SERVER,

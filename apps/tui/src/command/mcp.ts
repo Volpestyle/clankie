@@ -80,6 +80,10 @@ import {
 import { commandHost } from "./io.ts";
 import { runWorkerMcp } from "./worker-mcp.ts";
 import { callEvidenceTool, EVIDENCE_TOOLS, isEvidenceTool, type EvidenceOptions } from "./evidence.ts";
+import {
+  PARTICIPANT_SESSION_ENV,
+  PARTICIPANT_INSTRUCTIONS,
+} from "../../../clankie/src/captain/participant-room-profile.ts";
 import { clankieStateHome } from "../state-home.ts";
 
 /**
@@ -408,21 +412,31 @@ export function createSeatBridge(
   lane: CaptainSessionLaneV2,
   /** Operator lane only: serve the evidence tools locally, resolving paths from this process's directory. */
   evidence?: EvidenceOptions,
+  participant = false,
 ): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
     { name: "clankie", version: "0.2.0" },
     {
       capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
-      instructions: `${upstream.instructions ?? `Clankie's own tools, in his ${lane} lane.`}\n\n${CHANNEL_INSTRUCTIONS}`,
+      instructions: participant
+        ? PARTICIPANT_INSTRUCTIONS
+        : `${upstream.instructions ?? `Clankie's own tools, in his ${lane} lane.`}\n\n${CHANNEL_INSTRUCTIONS}`,
     },
   );
   upstream.onReconnect?.(() => {
     void server.sendToolListChanged().catch(() => undefined);
   });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...(await upstream.listTools()), REPLY_TOOL, ...(evidence === undefined ? [] : EVIDENCE_TOOLS)],
+    tools: participant
+      ? [REPLY_TOOL]
+      : [...(await upstream.listTools()), REPLY_TOOL, ...(evidence === undefined ? [] : EVIDENCE_TOOLS)],
   }));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (participant && request.params.name !== REPLY_TOOL_NAME)
+      return {
+        isError: true,
+        content: [{ type: "text", text: "This character channel only supports replying to its room event." }],
+      };
     if (evidence !== undefined && isEvidenceTool(request.params.name))
       return callEvidenceTool(request.params.name, request.params.arguments ?? {}, evidence);
     if (request.params.name !== REPLY_TOOL_NAME) {
@@ -1430,7 +1444,7 @@ export async function runMcpCommand(
   const server = createSeatBridge(
     upstream,
     lane,
-    lane === "operator" && options.connectUpstream === undefined
+    lane === "operator" && env[PARTICIPANT_SESSION_ENV] !== "1" && options.connectUpstream === undefined
       ? {
           env,
           host: commandHost({ ...options, env }),
@@ -1439,6 +1453,7 @@ export async function runMcpCommand(
             : { operatorCredentialStore: options.operatorCredentialStore }),
         }
       : undefined,
+    env[PARTICIPANT_SESSION_ENV] === "1",
   );
   const transport = options.transport ?? new HarnessStdioTransport();
   const closing = new AbortController();

@@ -818,7 +818,7 @@ describe("Claude connector MCP endpoint", () => {
     const listed = JSON.parse(textOf(await client.callTool({ name: "clankie_guide", arguments: {} })));
     expect(listed.topics).toContainEqual({
       topic: "herdr",
-      about: expect.stringContaining("Control Herdr"),
+      about: expect.stringMatching(/\bcontrol Herdr\b/i),
     });
 
     const herdr = await client.callTool({ name: "clankie_guide", arguments: { topic: "herdr" } });
