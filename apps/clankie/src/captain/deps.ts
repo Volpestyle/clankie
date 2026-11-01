@@ -26,15 +26,18 @@ import type {
   GenerateVideoResult,
 } from "@clankie/protocol";
 import type { BrowserToolPort } from "../app/types.ts";
-import type { createDiscordCaptainActionClient } from "../discord-captain-actions.ts";
-import type { createDiscordMusicClient } from "../discord-music.ts";
-import type { createDiscordVoicePresenceClient } from "../discord-voice-presence.ts";
+import type {
+  DiscordActionPort,
+  DiscordMusicPort,
+  DiscordRoomGuidancePort,
+  DiscordTrackingPort,
+  DiscordVoicePresencePort,
+} from "../ports/discord.ts";
 import type { EmailPort } from "../email.ts";
 import type { ComputerUseHarness } from "../computer-use-harnesses.ts";
 import type { McpHost } from "../mcp-host.ts";
 import type { DiagramPort, FinishedRender } from "../ports/media.ts";
 import type { WorkItemsService } from "../work-items.ts";
-import type { DiscordTracking } from "../discord-tracking.ts";
 
 /**
  * Everything the captain's tools reach in the rest of the service, as plain
@@ -51,6 +54,12 @@ export interface CaptainDeps {
     turn: import("./tools.ts").TurnContext,
     lane: CaptainSessionLaneV2,
     gameplay: import("@clankie/settings").GameplaySettings,
+  ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
+  /** The persona's Discord body tools for a turn, which its extension supplies (ADR 0328). */
+  readonly personaTools?: (
+    deps: CaptainDeps,
+    turn: import("./tools.ts").TurnContext,
+    lane: CaptainSessionLaneV2,
   ) => import("@earendil-works/pi-coding-agent").ToolDefinition[];
   /** World's Activity sharing tools for a turn, which its extension supplies (ADR 0328). */
   readonly activityTools?: (
@@ -77,7 +86,7 @@ export interface CaptainDeps {
   };
   /** Which optional services are set up; tools for the rest stay out of the model's request. */
   readonly serviceReadiness?: () => Promise<import("./service-tools.ts").ServiceReadiness>;
-  readonly discordTracking?: Pick<DiscordTracking, "configureProject">;
+  readonly discordTracking?: DiscordTrackingPort;
   /** This captain's fresh settings and explicit environment, supplied by its host. */
   readonly discordSettings?: () => Promise<import("@clankie/protocol").DiscordSettings>;
   /** Exact conversation-owned Minecraft stay, sharing the Pokémon play lease. */
@@ -91,7 +100,7 @@ export interface CaptainDeps {
     path: string,
     commits: readonly string[],
   ) => Promise<{ commit: string; requestId: string }[]>;
-  readonly roomObservations?: import("../discord-room-observations.ts").DiscordRoomObservations;
+  readonly roomObservations?: DiscordRoomGuidancePort;
   /** Host-proven original body account, presence, source receipt and opt-in. */
   readonly conversationRouteAuthorized?: (
     owner: import("./conversation-owner.ts").ConversationOwner,
@@ -221,17 +230,11 @@ export interface CaptainDeps {
    * Discord DJ desk on the active body (search / play / queue). Absent when
    * the live Discord process is not accepting music.
    */
-  readonly discordMusic?: ReturnType<typeof createDiscordMusicClient>;
+  readonly discordMusic?: DiscordMusicPort;
   /** Voice membership on the active Discord body; the body resolves and authorizes the target. */
-  readonly discordVoicePresence?: ReturnType<typeof createDiscordVoicePresenceClient>;
+  readonly discordVoicePresence?: DiscordVoicePresencePort;
   /** Grounded social actions on the message and body belonging to the active turn. */
-  readonly discordActions?: Omit<ReturnType<typeof createDiscordCaptainActionClient>, "execute"> & {
-    /** Producer retains this host guard through its final authenticated body effect. */
-    execute(
-      input: Parameters<ReturnType<typeof createDiscordCaptainActionClient>["execute"]>[0],
-      guard?: () => Promise<void>,
-    ): ReturnType<ReturnType<typeof createDiscordCaptainActionClient>["execute"]>;
-  };
+  readonly discordActions?: DiscordActionPort;
   readonly presence: {
     listSessions(): Promise<DiscordPresenceSessionRecord[]>;
     listVoiceHistory(limit?: number): Promise<DiscordVoiceStay[]>;

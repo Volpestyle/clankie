@@ -16,7 +16,11 @@ PokeAgent play tools (`activity-routes.ts`, `activity-tools.ts`,
 composer transcription and room voice routes (`voice-extension.ts`), and the
 persona's HTTP routes: rooms, persona and voice settings, appearance and the
 Discord body's routes (`persona-extension.ts`, reading the body's live state the
-core keeps through the route host's `discordBody`). Each
+core keeps through the route host's `discordBody`), then the persona's Discord
+body tools: voice membership, social actions, the server's REST and project
+mirrors, and music (`captain/discord-tools.ts`, reaching the captain as
+`CaptainDeps.personaTools` only while the persona is on at start, over the
+core's client shapes in `ports/discord.ts`). Each
 extension's state shows on `/health`, `GET /v1/extensions`, `clankie extensions`,
 `clankie status` and `clankie doctor --json`, and `clankie extensions on|off ID`
 sets the owner's switch for the next start; the app shows and flips the same switches in Settings → Extensions.

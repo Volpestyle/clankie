@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { LaneLog } from "../src/captain/lane-log.ts";
 import { captainTools } from "../src/captain/tools.ts";
+import { discordCaptainTools } from "../src/captain/discord-tools.ts";
 import { pokeagentTools } from "../src/world/pokeagent-tools.ts";
 
 describe("captain voice presence tools", () => {
@@ -43,6 +44,7 @@ describe("captain voice presence tools", () => {
         getSession: () => Promise.reject(new Error("unused")),
         getLiveSession: () => Promise.reject(new Error("unused")),
       },
+      personaTools: discordCaptainTools,
       discordVoicePresence: { join: () => Promise.reject(new Error("unused")) },
     } as unknown as CaptainDeps;
     for (const lane of ["discord_presence", "operator"] as const) {
@@ -77,6 +79,7 @@ describe("captain voice presence tools", () => {
         getSession: () => Promise.reject(new Error("unused")),
         getLiveSession: () => Promise.reject(new Error("unused")),
       },
+      personaTools: discordCaptainTools,
       discordVoicePresence: {
         join: (input: unknown) => {
           calls.push(input);
@@ -210,6 +213,7 @@ describe("captain voice presence tools", () => {
         getSession: () => Promise.resolve(undefined),
         getLiveSession: () => Promise.resolve(undefined),
       },
+      personaTools: discordCaptainTools,
       discordActions: {
         execute: (input: unknown) => {
           calls.push(input);
