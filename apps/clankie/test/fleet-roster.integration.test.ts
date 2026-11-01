@@ -26,6 +26,20 @@ it.each([false, true])(
       native.seats.map((seat) => seat.seatId).sort(),
     );
     expect(result.machines[0]?.id).toBe(remote ? "pc" : "local");
+    // ADR 0321: a fleet read that asks says who started each seat, here the owner's hand-started lead.
+    const started = await f.captain.serveOperatorConversation({
+      op: "fleet",
+      schemaVersion: 1,
+      includeStarters: true,
+    });
+    if (started.op !== "fleet") throw new Error("Missing fleet");
+    expect(started.snapshot.seats.map((seat) => seat.startedBy)).toEqual(
+      started.snapshot.seats.map(() => ({ kind: "owner" })),
+    );
+    expect(started.snapshot.seats.length).toBeGreaterThan(0);
+    const plain = await f.captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 });
+    if (plain.op !== "fleet") throw new Error("Missing fleet");
+    expect(plain.snapshot.seats.every((seat) => seat.startedBy === undefined)).toBe(true);
     // A host row alone confers no control over an owner-started lead.
     const row = result.agents[0]!;
     expect(

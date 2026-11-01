@@ -872,6 +872,18 @@ export const FleetSeatInputCapabilitiesSchema = z
   .strict();
 export type FleetSeatInputCapabilities = z.infer<typeof FleetSeatInputCapabilitiesSchema>;
 
+/**
+ * Who started an agent (ADR 0321): the owner (from their app, or by hand),
+ * Clankie, a connected app by its device name, or another agent by name.
+ * Display only: it grants and ranks nothing.
+ */
+export const OperatorAgentStarterSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("owner") }).strict(),
+  z.object({ kind: z.literal("clankie") }).strict(),
+  z.object({ kind: z.literal("app"), name: z.string().min(1).max(256) }).strict(),
+  z.object({ kind: z.literal("agent"), name: z.string().min(1).max(256) }).strict(),
+]);
+
 export const OperatorFleetSeatSchema = z
   .object({
     /** Cached owner repository observation; not freshness admission proof. */
@@ -958,6 +970,8 @@ export const OperatorFleetSeatSchema = z
      * the roster simply stops carrying one (ADR 0163).
      */
     parentSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
+    /** Who started this agent, only on a fleet read that asked with `includeStarters` (ADR 0321). */
+    startedBy: OperatorAgentStarterSchema.optional(),
     workerReportRouting: WorkerReportRoutingSchema.optional(),
     workerReports: z.array(WorkerReportSummarySchema).max(100).optional(),
     /** Evidence for the leading conversation's periodic and watch-time review. */

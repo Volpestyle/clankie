@@ -217,7 +217,7 @@ function connectorServer(
         name: "list_agents",
         title: "List agents",
         description:
-          "List the coding agents in Herdr on each of the owner's machines, and in the Herdr desktop app on this Mac (ids starting herdr-core:, which can be read but not messaged): their name, machine, project, status and what they last said they're doing. Every linked machine is named, even with no agents; notices say when a machine's Herdr isn't answering (its agents read unreachable) or is too old. Use the returned agent id with read_agent and message_agent.",
+          "List the coding agents in Herdr on each of the owner's machines, and in the Herdr desktop app on this Mac (ids starting herdr-core:, which can be read but not messaged): their name, machine, project, status, who started them (the owner, Clankie, a connected app or another agent; it says who asked, not who may act) and what they last said they're doing. Every linked machine is named, even with no agents; notices say when a machine's Herdr isn't answering (its agents read unreachable) or is too old. Use the returned agent id with read_agent and message_agent.",
         inputSchema: {
           type: "object" as const,
           properties: {

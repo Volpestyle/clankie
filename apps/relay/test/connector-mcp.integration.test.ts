@@ -139,6 +139,9 @@ async function startConnectorRelay(
     seen.push(request);
     switch (request.op) {
       case "fleet":
+        // An older service's strict schema refuses the field it doesn't know.
+        if (linked.terminalRead === false && request.includeStarters !== undefined)
+          throw new Error("unrecognized key includeStarters");
         return {
           op: "fleet",
           schemaVersion: 1,
@@ -156,6 +159,9 @@ async function startConnectorRelay(
                 workingDirectory: "C:\\code\\kh2",
                 machine: "PC1",
                 fleet: "pc1",
+                ...(request.includeStarters === true
+                  ? { startedBy: { kind: "app" as const, name: "Grok" } }
+                  : {}),
               },
             ],
             personas: [persona("p-bram", "Bram")],
@@ -518,6 +524,7 @@ describe("Claude connector MCP endpoint", () => {
           workingDirectory: "C:\\code\\kh2",
           status: "working",
           title: "kh2 netcode",
+          startedBy: "Grok",
           canMessage: true,
         },
         {
@@ -625,6 +632,10 @@ describe("Claude connector MCP endpoint", () => {
     // Its catalog, asked again without machines, still lists the agents started by hand.
     const listed = JSON.parse(textOf(await first.callTool({ name: "list_agents", arguments: {} })));
     expect(listed.agents.map((agent: { agent: string }) => agent.agent)).toContain("herdr:term-loose");
+    // Its fleet, asked again without starters, still lists every seat (ADR 0321).
+    expect(
+      listed.agents.find((agent: { agent: string }) => agent.agent === "herdr:pc1/kh2"),
+    ).not.toHaveProperty("startedBy");
     const reads = await Promise.all(
       [first, second].map((client) =>
         client.callTool({ name: "read_agent", arguments: { agent: "herdr:term-loose" } }),

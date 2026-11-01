@@ -26,6 +26,7 @@ import { HUDDLE_CLOSE_PATH, HUDDLES_PATH } from "./huddles.ts";
 import { isViewRoute, VIEWS_PATH } from "./views.ts";
 import {
   FLEET_ROSTER_PATH,
+  FLEET_ROSTER_STARTERS_PATH,
   FLEET_ROSTER_WORK_PATH,
   FLEET_ROSTER_RETIRE_PATH,
   FLEET_ROSTER_UNDO_PATH,
@@ -81,7 +82,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
   // Worker accounts read one machine through the only query that route accepts.
   if (isWorkerAccountsRoute(path)) return method === "GET";
   if (isUsageReportRoute(path)) return method === "GET";
-  if (path === FLEET_ROSTER_WORK_PATH) return method === "GET";
+  if (path === FLEET_ROSTER_WORK_PATH || path === FLEET_ROSTER_STARTERS_PATH) return method === "GET";
   if (isViewRoute(path)) return method === "GET";
   if (path === "/operator/v1/dispatch" && method === "POST") {
     let value: unknown;

@@ -252,3 +252,44 @@ it("retains the original configured hire project through adoption and exact nati
   owners.adopt("hand-pane", "hand-seat", "hand-occupant", owner);
   expect(owners.hiredProjectContext("hand-pane", "hand-seat", "hand-occupant")).toBeUndefined();
 });
+
+it("remembers who asked for a hire across restarts and reattachment, and never invents one (ADR 0321)", () => {
+  const f = fixture();
+  const path = join(f.root, "starter-owners.json");
+  const owners = new HireOwners(path);
+  owners.bind(
+    "app-pane",
+    owner,
+    "app-seat",
+    owners.intent(owner, { kind: "app", deviceId: "phone" }),
+    "app-occupant",
+    "app-session",
+  );
+  owners.bind(
+    "own-pane",
+    owner,
+    "own-seat",
+    owners.intent(owner, { kind: "owner" }),
+    "own-occupant",
+    "own-session",
+  );
+  owners.bind("self-pane", owner, "self-seat", owners.intent(owner), "self-occupant", "self-session");
+  owners.adopt("hand-pane", "hand-seat", "hand-occupant", owner);
+  const restarted = new HireOwners(path);
+  expect(restarted.starter("app-seat", "app-occupant")).toEqual({ kind: "app", deviceId: "phone" });
+  expect(restarted.starter("own-seat", "own-occupant")).toEqual({ kind: "owner" });
+  // Clankie chose this hire himself, and an adopted hand-started pane was never hired.
+  expect(restarted.starter("self-seat", "self-occupant")).toBeUndefined();
+  expect(restarted.starter("hand-seat", "hand-occupant")).toBeUndefined();
+  // A replacement occupant in the same seat is not the agent the app asked for.
+  expect(restarted.starter("app-seat", "replacement")).toBeUndefined();
+  // A lead's later message adopts the hire; who asked for it stays.
+  restarted.adopt("app-pane", "app-seat", "app-occupant", owner, "app-session");
+  expect(restarted.starter("app-seat", "app-occupant")).toEqual({ kind: "app", deviceId: "phone" });
+  restarted.readopt("app-pane-2", "app-seat-2", "app-occupant-2", owner, "app-session");
+  restarted.bind("app-pane-2", owner, "app-seat-2", undefined, "app-occupant-2", "app-session");
+  expect(new HireOwners(path).starter("app-seat-2", "app-occupant-2")).toEqual({
+    kind: "app",
+    deviceId: "phone",
+  });
+});

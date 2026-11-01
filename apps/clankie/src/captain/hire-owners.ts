@@ -13,6 +13,12 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { ConversationOwnerSchema, type ConversationOwner } from "./conversation-owner.ts";
 
+/** Who asked for a hire (ADR 0321). Absent on a hire Clankie chose himself, and on older records. */
+const HireStarterSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("owner") }).strict(),
+  z.object({ kind: z.literal("app"), deviceId: z.string().min(1).max(256) }).strict(),
+]);
+export type HireStarter = z.infer<typeof HireStarterSchema>;
 const RecordSchema = z
   .object({
     id: z.string().min(1),
@@ -24,6 +30,7 @@ const RecordSchema = z
     startupFailure: z.string().min(1).max(4000).optional(),
     hireConversationId: z.string().min(1).optional(),
     hireProjectId: z.string().min(1).optional(),
+    startedBy: HireStarterSchema.optional(),
     owner: ConversationOwnerSchema,
   })
   .strict();
@@ -213,6 +220,7 @@ export class HireOwners {
           ...(prior.hired === undefined ? {} : { hired: prior.hired }),
           ...(prior.hireConversationId === undefined ? {} : { hireConversationId: prior.hireConversationId }),
           ...(prior.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
+          ...(prior.startedBy === undefined ? {} : { startedBy: prior.startedBy }),
         },
       ],
     });
@@ -252,6 +260,8 @@ export class HireOwners {
             ? {}
             : { hireConversationId: prior.hireConversationId }),
           ...(prior?.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
+          // Adoption sets the current lead, never who asked for the hire.
+          ...(prior?.startedBy === undefined ? {} : { startedBy: prior.startedBy }),
           ...(prior === undefined
             ? { hired: false }
             : prior.hired === undefined
@@ -262,10 +272,18 @@ export class HireOwners {
       ],
     });
   }
-  public intent(owner: ConversationOwner): string {
+  public intent(owner: ConversationOwner, startedBy?: HireStarter): string {
     const id = randomUUID();
-    this.save({ schemaVersion: 1, hires: [...this.state.hires, { id, owner }] });
+    this.save({
+      schemaVersion: 1,
+      hires: [...this.state.hires, { id, owner, ...(startedBy === undefined ? {} : { startedBy }) }],
+    });
     return id;
+  }
+  /** Who asked for this exact occupant's hire; display only, never authority (ADR 0321). */
+  public starter(seatId: string, occupantId: string): HireStarter | undefined {
+    const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
+    return held?.hired === true ? held.startedBy : undefined;
   }
   /** An original runtime's journaled fresh restart, never ordinary re-adoption. */
   public restartSuccessor(input: {
@@ -325,6 +343,11 @@ export class HireOwners {
     );
     const sessionOwner = sessionKey === undefined ? undefined : this.sessionOwner(sessionKey);
     const held = sessionOwner ?? prior?.owner;
+    // A new hire's own intent says who asked; a re-bind keeps what its record already says.
+    const startedBy =
+      intentId === undefined
+        ? prior?.startedBy
+        : this.state.hires.find((entry) => entry.id === intentId)?.startedBy;
     const sessionClaim =
       sessionKey === undefined
         ? undefined
@@ -360,6 +383,7 @@ export class HireOwners {
           ...(seatId === undefined ? {} : { seatId }),
           ...(occupantId === undefined ? {} : { occupantId }),
           ...(sessionKey === undefined ? {} : { sessionKey }),
+          ...(startedBy === undefined ? {} : { startedBy }),
         },
       ],
     });

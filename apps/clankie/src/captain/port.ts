@@ -182,7 +182,11 @@ export interface CaptainPort {
   canResumeDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
   fleetRoster?(options?: {
     includeWork?: boolean;
+    /** Say who started each agent (ADR 0321). */
+    includeStarters?: boolean;
   }): Promise<import("@clankie/protocol/fleet-roster").FleetRosterSnapshot>;
+  /** Paired devices' own names, so a hire a connected app asked for can say which (ADR 0321). */
+  setDeviceNames?(lookup: (deviceId: string) => string | undefined): void;
   fleetRosterAction?(
     command: import("@clankie/protocol/fleet-roster").RetireFleetAgent | { id: string },
     authority: { current(): boolean; authorize(): Promise<boolean> },

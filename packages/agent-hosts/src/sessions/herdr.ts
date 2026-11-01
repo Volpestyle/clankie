@@ -3,6 +3,7 @@ import {
   OperatorTerminalTailItemSchema,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
+  type OperatorFleetSeat,
   type OperatorTerminalFrame,
 } from "@clankie/protocol";
 import { SessionRefusal, type Session, type SessionImage, type SessionSource } from "./source.ts";
@@ -36,6 +37,10 @@ export interface HerdrSessionSourceOptions {
   readonly localMachine?: string;
 }
 
+function starterWords(starter: NonNullable<OperatorFleetSeat["startedBy"]>): string {
+  return starter.kind === "owner" ? "the owner" : starter.kind === "clankie" ? "Clankie" : starter.name;
+}
+
 export function createHerdrSessionSource(
   port: HerdrSessionPort,
   options: HerdrSessionSourceOptions,
@@ -45,7 +50,10 @@ export function createHerdrSessionSource(
     id: "herdr",
     async list() {
       const [fleet, catalog] = await Promise.all([
-        port.dispatch({ op: "fleet", schemaVersion: 1, view: "home" }),
+        port
+          .dispatch({ op: "fleet", schemaVersion: 1, view: "home", includeStarters: true })
+          // A service from before includeStarters refuses it; its fleet still lists every seat.
+          .catch(() => port.dispatch({ op: "fleet", schemaVersion: 1, view: "home" })),
         port
           .dispatch({ op: "terminal_catalog", schemaVersion: 1, includeSeatIds: true, includeMachines: true })
           // A service from before includeMachines refuses it; its catalog still lists hand-started agents.
@@ -78,6 +86,7 @@ export function createHerdrSessionSource(
           status: answering ? seat.status : "unreachable",
           ...(seat.title.length === 0 ? {} : { title: seat.title }),
           ...(doing === undefined ? {} : { doing }),
+          ...(seat.startedBy === undefined ? {} : { startedBy: starterWords(seat.startedBy) }),
           canMessage: true,
         };
       });
