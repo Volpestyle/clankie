@@ -28,7 +28,10 @@ typing:
 
 - The agent has no harness channel, no Codex queue and no live or next-turn hook
   receiver for its session. Any of those keeps its lane; typing is never a
-  second lane for the same session.
+  second lane for the same session. A Codex queue that proves it can't take the
+  message and sent nothing, as a plain Codex TUI with no shared app server does,
+  is no lane: the message may then be typed, and a send that can't be typed keeps
+  the queue's own reason.
 - The message is the owner's or a lead's own send, cleared by the service for
   the exact session the sender saw, with no uncertain worker-channel original to
   that seat. A peer's message, a room turn, a huddle or review request, a chosen

@@ -517,14 +517,23 @@ export function createFleetSeatControl(
           : { outcome: "unconfirmed", detail: String(error) };
       }
     }
+    // A Codex queue that proved it can't take the message and sent nothing, such as a plain
+    // TUI with no shared app server, is no lane, so direct prompting may still type it (ADR 0334).
+    let unreachableQueue: FleetSeatDelivery | undefined;
     if (isMessageableSeat(current) && current.agent === "codex") {
       const delivery = await deliverCodexQueue(current, text, begin, authorized, options?.delivery);
-      if (delivery !== undefined) return delivery;
+      if (
+        delivery !== undefined &&
+        !(delivery.outcome === "undelivered" && delivery.deliveryStage === "unavailable")
+      )
+        return delivery;
+      unreachableQueue = delivery;
       clear();
     }
-    if (options?.delivery) return modeUnavailable(options.delivery);
+    if (options?.delivery) return unreachableQueue ?? modeUnavailable(options.delivery);
     const typed = await promptWithoutChannel(current, text, begin, clear, authorized, options);
     if (typed !== undefined) return typed;
+    if (unreachableQueue !== undefined) return unreachableQueue;
     if (uncontrolled !== undefined) {
       if (authorized && !(await authorized())) return refused();
       if (options?.stableReceiptKey !== undefined) begin();
@@ -1179,6 +1188,10 @@ export function createFleetSeatControl(
       const clear = () => {
         if (receipt !== undefined) fence.reconcile(key, receipt.messageId);
         receipt = undefined;
+        // A lane that proved nothing was sent frees the seat, so the next lane of this same
+        // send (direct prompting after an unreachable Codex queue) can reserve it again.
+        if (ownsActiveDelivery) active.delete(seatId);
+        ownsActiveDelivery = false;
       };
       try {
         const result = await dispatch(agent, text, begin, clear, uncontrolled, options);
