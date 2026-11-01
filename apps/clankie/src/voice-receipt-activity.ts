@@ -7,39 +7,13 @@ import {
   type DiscordVoicePipeline,
   type DiscordVoiceStayPipelines,
 } from "@clankie/protocol";
+import type { VoiceSpeechScalar, VoiceSpeechSnapshot } from "./ports/voice.ts";
 
 /**
  * Content-free projection of Discord voice receipts for `get_self_state`.
  * Words never live here — only whether he spoke, whether play commentary was
  * dropped, and the scalars already on the receipt.
  */
-
-interface VoiceSpeechScalar {
-  readonly occurredAt: string;
-  readonly kind: "spoken" | "suppressed";
-  readonly deliveryId?: string;
-  readonly stayId?: string;
-  readonly trigger?: string;
-  readonly wake?: string;
-  readonly playbackMs?: number;
-  readonly toFirstAudioMs?: number;
-  readonly reason?: string;
-  readonly inputTokens?: number;
-  readonly outputTokens?: number;
-}
-
-interface VoiceStaySpeechSummary {
-  readonly stayId?: string;
-  readonly spoken: number;
-  readonly suppressed: number;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-}
-
-export interface VoiceSpeechSnapshot {
-  readonly recent: readonly VoiceSpeechScalar[];
-  readonly currentStay?: VoiceStaySpeechSummary;
-}
 
 export interface VoiceRoomFilter {
   readonly guildId: string;

@@ -47,7 +47,7 @@ import type { ModelKeysPort } from "../model-keys.ts";
 import { pairingOfferWire, type PairingOfferRecord, type StoredPairingOffer } from "../pairing.ts";
 import type { PersonaImageSource } from "../persona-images.ts";
 import { type PushWakeSender } from "../push.ts";
-import { type VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
+import type { VoiceSpeechSnapshot } from "../ports/voice.ts";
 import { type WorkItemsService } from "../work-items.ts";
 import { type WorkerMcp } from "../worker-mcp.ts";
 /**

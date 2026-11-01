@@ -10,7 +10,7 @@ import type {
   DiscordPresenceSessionRecord,
   DiscordVoiceStay,
 } from "@clankie/interactive-environment";
-import type { VoiceSpeechSnapshot } from "../voice-receipt-activity.ts";
+import type { VoiceSpeechSnapshot } from "../ports/voice.ts";
 import type {
   CaptainSessionLaneV2,
   CaptainTurnSettledMetrics,
