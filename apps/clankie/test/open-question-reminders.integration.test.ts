@@ -81,9 +81,14 @@ async function fixture(results: ("accepted" | "deferred")[], kind: "ask" | "perm
   });
   let leadMayAnswer = true;
   const escalations: string[] = [];
+  let failEscalations = 0;
   store.permissionLeadAllowed = async () => leadMayAnswer;
   store.questionGate = async () => "allow";
   store.escalateQuestion = async (_owner, _agent, question) => {
+    if (failEscalations > 0) {
+      failEscalations--;
+      throw new Error("owner ask unavailable");
+    }
     escalations.push(String(question.requestId));
   };
   await store.adoptSeat(agent.terminalId, lead("lead"));
@@ -148,6 +153,9 @@ async function fixture(results: ("accepted" | "deferred")[], kind: "ask" | "perm
     leadCannotAnswer: () => {
       leadMayAnswer = false;
     },
+    failNextEscalations: (count: number) => {
+      failEscalations = count;
+    },
   };
 }
 
@@ -205,4 +213,15 @@ it("sends the question to the owner once its lead can no longer answer it", asyn
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(f.wakes.filter((wake) => wake.text.startsWith("Still open"))).toEqual([]);
   expect(f.escalations).toHaveLength(1);
+});
+
+it("tries the owner again when sending them the question fails", async () => {
+  const f = await fixture([], "permission");
+  await until(() => f.wakes.length === 1);
+  f.failNextEscalations(1);
+  f.leadCannotAnswer();
+  await until(() => f.escalations.length === 1);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(f.escalations).toHaveLength(1);
+  expect(f.wakes.filter((wake) => wake.text.startsWith("Still open"))).toEqual([]);
 });

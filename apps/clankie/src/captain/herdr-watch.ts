@@ -1943,11 +1943,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     agent: HerdrAgentSnapshot,
     question: SeatQuestion,
     guard: () => Promise<void>,
+    asked?: () => void,
   ): Promise<void> {
     if (!this.escalateQuestion) throw new Error("Owner question escalation unavailable");
     if (!this.wake) throw new Error("The hiring conversation question channel is unavailable");
     await guard();
     await this.escalateQuestion(owner, agent, question, guard);
+    asked?.();
     await guard();
     await this.wake(
       owner.conversationId,
@@ -2010,9 +2012,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           throw new Error("The question's native occupant or leading conversation changed");
       };
       // The lead now may be one that cannot answer it, such as a Discord room.
+      // Reminding stops only once the owner's ask exists; a round that fails
+      // before that is tried again.
       if (await this.ownerMustAnswer(owner, current, pending)) {
-        escalated = true;
-        await this.escalateToOwner(owner, current, pending, guard);
+        await this.escalateToOwner(owner, current, pending, guard, () => {
+          escalated = true;
+        });
         return;
       }
       await guard();
