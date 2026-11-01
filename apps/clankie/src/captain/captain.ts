@@ -103,7 +103,7 @@ import { LeadStore } from "./lead.ts";
 import { countOutsideProjects, projectStatuses } from "./auto-projects.ts";
 import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
-import { createRoutineRunner, serviceLauncher } from "./routine-runner.ts";
+import { createRoutineRunner } from "./routine-runner.ts";
 import { createConversationRunner, runAutonomyTurn } from "./captain-conversation-runner.ts";
 import { createConversationWakes } from "./conversation-wakes.ts";
 import { RoomForkReceipts } from "./room-forks.ts";
@@ -3625,7 +3625,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       },
       notify: (conversationId, text) =>
         wakeConversation({ conversationId }, text, undefined, "machine", false, false),
-      launcher: serviceLauncher(options.repoRoot),
+      governor: () => options.fleetResources?.governor,
     }),
   });
   herdrWatches.routines = (command, conversationId) =>

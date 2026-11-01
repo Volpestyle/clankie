@@ -133,12 +133,16 @@ const EXTENSION_ROUTES = [
   ["media", "POST", "/v1/media/images"],
   ["media", "POST", "/v1/media/videos"],
   ["media", "GET", "/v1/operator/skin-drafts"],
+  ["minecraft", "GET", "/v1/minecraft"],
+  ["minecraft", "POST", "/v1/minecraft/host"],
+  ["minecraft", "GET", "/v1/minecraft/configuration"],
+  ["minecraft", "POST", "/v1/internal/minecraft-login-code/authorize"],
 ] as const;
 
 /**
  * Operator tools a switched-on extension adds: voice's join, leave and screen
- * shares are listed; media's generation, skin drafts and diagrams wait in the
- * deferred catalog.
+ * shares are listed; media's generation, skin drafts and diagrams and Minecraft's
+ * play and setup wait in the deferred catalog.
  */
 const LISTED_EXTENSION_TOOLS = ["voice_join", "voice_leave", "observe_share"];
 const DEFERRED_EXTENSION_TOOLS = [
@@ -147,6 +151,8 @@ const DEFERRED_EXTENSION_TOOLS = [
   "skin_draft",
   "draw_er_diagram",
   "draw_sequence_diagram",
+  "minecraft_join",
+  "minecraft_configure",
 ];
 
 async function freePort(): Promise<number> {
@@ -269,6 +275,7 @@ it.skipIf(!native)(
         "browser",
         "computer",
         "media",
+        "minecraft",
         "persona",
         "relay",
         "tracker-linear",
@@ -289,6 +296,12 @@ it.skipIf(!native)(
         });
         expect({ path, status: response.status }).toEqual({ path, status: 404 });
       }
+
+      // Minecraft off: the games catalog, where its play lease and tools live, has no Minecraft.
+      const games = await fetch(`${url}/v1/games/extensions`, { headers: operator });
+      expect(games.status).toBe(200);
+      const catalog = (await games.json()) as { extensions: { id: string }[] };
+      expect(catalog.extensions.map((entry) => entry.id)).not.toContain("minecraft");
 
       // Issues on a local-files tracker, through the CLI and the service.
       expect((await clankie(["work", "init"])).repo.backend).toBe("default");

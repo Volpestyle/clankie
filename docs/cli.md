@@ -267,6 +267,11 @@ transcripts), the room routes (`/v1/discord/rooms`, room guidance, Discord
 settings, directory and setup test post), `/v1/operator/persona`,
 `/v1/operator/voice` and `/v1/operator/appearance` answer `404`; the Discord
 body's live state and his captain's Discord turns stay in the core for now.
+With `minecraft` off, Minecraft is not in the games catalog, its routes
+(`/v1/minecraft`, `/v1/minecraft/host`, `/v1/minecraft/configuration` and the
+Discord body's login-code check) answer `404`, his and his workers' Minecraft
+tools are gone, and its MCP motor, host service and play polling never start;
+a world he was in stays put until he comes back.
 
 ### `runtime-health`
 
