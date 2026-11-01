@@ -49,7 +49,7 @@ export interface HerdrCoreOptions {
 }
 
 /** Where `hc` itself looks for the core: `$XDG_STATE_HOME/herdr-core/<session>/<session>.sock`. */
-function herdrCoreSocketPath(env: NodeJS.ProcessEnv = process.env): string {
+export function herdrCoreSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   if (env.HC_SOCKET !== undefined && env.HC_SOCKET.length > 0) return env.HC_SOCKET;
   const session = env.HC_SESSION !== undefined && env.HC_SESSION.length > 0 ? env.HC_SESSION : "default";
   const state =
@@ -224,7 +224,18 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-class HerdrCoreError extends Error {}
+export class HerdrCoreError extends Error {
+  /** The core's own word for a refusal (`not_found`, `finished`), when it gave one. */
+  readonly kind?: string;
+  constructor(message: string, kind?: string) {
+    super(message);
+    if (kind !== undefined) this.kind = kind;
+  }
+}
+
+/** One call on the core's socket, for the seat host that starts hires there (ADR 0319). */
+export const herdrCoreCall = (socketPath: string, method: string, params: Record<string, unknown>) =>
+  call(socketPath, method, params);
 
 /** One call on a fresh connection: `hello` to check the generation and the method, then the call. */
 async function call(socketPath: string, method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -273,6 +284,7 @@ async function call(socketPath: string, method: string, params: Record<string, u
               kind === "not_found"
                 ? "herdr-core has no terminal by that name now."
                 : `herdr-core refused: ${String(kind)}`,
+              typeof kind === "string" ? kind : undefined,
             ),
           );
         }
