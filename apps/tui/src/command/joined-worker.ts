@@ -28,20 +28,22 @@ import type { JoinedMachineCredential, JoinedMachinePorts } from "../../bin/join
 import { joinedSeatTransport } from "./joined-seat.ts";
 
 const exec = promisify(execFile);
+// The reported session names its harness; the agent's own label waits for launch.
+const AgentSession = z.object({
+  agent: z.string(),
+  kind: z.enum(["id", "path"]),
+  value: z.string().min(1).max(4096),
+});
 const Native = z.object({
-  result: z.object({
-    agent: z.object({
-      pane_id: z.string().optional(),
-      // The reported session names its harness; the agent's own label waits for launch.
-      agent_session: z.object({
-        agent: z.string(),
-        kind: z.enum(["id", "path"]),
-        value: z.string().min(1).max(4096),
-      }),
-    }),
-  }),
+  result: z.object({ agent: z.object({ pane_id: z.string().optional(), agent_session: AgentSession }) }),
 });
 type Native = z.infer<typeof Native>;
+/** A pane read before its harness has reported a session: that session is still to come. */
+const NativeRead = z.object({
+  result: z.object({ agent: z.object({ agent_session: AgentSession.optional() }) }),
+});
+/** How long a worker bridge waits for its harness's first session report (#492). */
+const SESSION_REPORT_WAIT_MS = 15_000;
 /** This install's worker bridge; its joined branch serves the worker over the join channel. */
 const WORKER_BRIDGE = shippedWorkerFile("bin", "swarm-mcp.mjs");
 /** What the bridge needs from the pane; Codex passes an MCP server only the variables it names. */
@@ -241,22 +243,22 @@ export async function verifyJoinedWorker(env: NodeJS.ProcessEnv, admitted?: () =
   if (!env.CLANKIE_JOINED_WORKER_SESSION) return;
   if (!env.HERDR_PANE_ID) throw Error("joined_worker_native_pane_required");
   const harness = env.CLANKIE_JOINED_WORKER_HARNESS === "codex" ? "codex" : "claude";
-  const observed = Native.parse(
-    JSON.parse(
-      (
-        await exec("herdr", ["agent", "get", env.HERDR_PANE_ID], {
-          env,
-          timeout: 10_000,
-          maxBuffer: 1024 * 1024,
-        })
-      ).stdout,
-    ),
-  );
+  // The harness reports its session to Herdr as it starts, alongside this bridge, so
+  // a first request can arrive before that report. An unreported session is waited
+  // for, briefly; a different one is refused at once.
+  let session: z.infer<typeof AgentSession> | undefined;
+  for (const deadline = Date.now() + SESSION_REPORT_WAIT_MS; session === undefined;) {
+    const { stdout } = await exec("herdr", ["agent", "get", env.HERDR_PANE_ID], {
+      env,
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    });
+    session = NativeRead.parse(JSON.parse(stdout)).result.agent.agent_session;
+    if (session !== undefined) break;
+    if (Date.now() > deadline) throw Error("joined_worker_native_session_missing");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
   const expected = harness === "codex" ? await admitted?.() : env.CLANKIE_JOINED_WORKER_SESSION;
-  if (
-    observed.result.agent.agent_session.agent !== harness ||
-    expected === undefined ||
-    observed.result.agent.agent_session.value !== expected
-  )
+  if (session.agent !== harness || expected === undefined || session.value !== expected)
     throw Error("joined_worker_native_session_mismatch");
 }

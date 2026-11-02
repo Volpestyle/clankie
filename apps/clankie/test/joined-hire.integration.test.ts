@@ -117,8 +117,10 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 const argv = process.argv.slice(2);
 writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv, env: process.env }));
-execFileSync("herdr", ["pane", "report-agent", process.env.HERDR_PANE_ID, "--source", "herdr:claude", "--agent", "claude",
-  "--state", "idle", "--agent-session-id", argv[argv.indexOf("--session-id") + 1]]);
+// Claude reports its session as it starts, while its MCP bridge also starts: here the
+// report lands after the bridge's first request, which must wait for it (#492).
+setTimeout(() => execFileSync("herdr", ["pane", "report-agent", process.env.HERDR_PANE_ID, "--source", "herdr:claude",
+  "--agent", "claude", "--state", "idle", "--agent-session-id", argv[argv.indexOf("--session-id") + 1]]), 1500);
 setInterval(() => {}, 1 << 30);
 `,
   );
