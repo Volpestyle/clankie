@@ -11,6 +11,12 @@ export interface FleetSeatMessageContext {
   readonly conversationId: string;
   readonly channelContent?: string;
   readonly source: string;
+  /**
+   * The sender is this worker's own lead: the conversation that hired it or now
+   * owns it, proven by adoption at send time, never by the message text (#442).
+   * The worker's channel event then carries `sender="lead"`.
+   */
+  readonly fromLead?: true;
   readonly recipientBinding?: string;
   readonly delivery?: "steer" | "queue";
   readonly workHandoff?: import("@clankie/protocol").WorkHandoffIntent;
@@ -162,7 +168,7 @@ export async function deliverFleetSeatMessage(
       .deliver({
         kind: "message",
         conversationId: context.conversationId,
-        source: context.source,
+        source: context.fromLead ? "lead" : context.source,
         content: message,
         ...(context.channelContent === undefined ? {} : { channelContent: context.channelContent }),
         wantsReply: false,
