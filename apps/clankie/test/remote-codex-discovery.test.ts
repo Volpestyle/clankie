@@ -166,7 +166,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
             : rpc.method === "thread/loaded/list"
               ? { data: ["thread"], nextCursor: null }
               : rpc.method === "thread/read"
-                ? { thread: { id: "thread", name: threadName } }
+                ? { thread: { id: "thread", cwd: "C:\\fixture", name: threadName } }
                 : rpc.method === "thread/resume"
                   ? { thread: { id: "thread", turns: [] } }
                   : rpc.method === "thread/turns/list"
