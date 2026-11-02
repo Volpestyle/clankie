@@ -735,6 +735,7 @@ it("delivers resource instructions once without a user brief and retains the acc
   expect(brief).toContain("fleet-resources skill");
   expect(brief).toContain("clankie simulator");
   expect(brief).toContain("The owner's screen is theirs");
+  expect(brief).toContain("herdr-browser do browser.open --profile agent");
   expect(brief.match(/Machine resource safety:/gu)).toHaveLength(1);
   f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
   await expect(f.resources.admitHire({})).rejects.toThrow("Local hire refused");

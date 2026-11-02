@@ -2,7 +2,9 @@
 
 Status: Proposed, 2026-11-02, from James's direction the same day ("Clankie will
 have a setting for how it does desktop use, 'raw-dog' or 'vm'", and "private
-browser is ok as long as we have a way to securely store and pass credentials").
+browser is ok as long as we have a way to securely store and pass credentials"). Amended the same day: agents get only their own private browser by default, full
+screen control is its own `screen` mode, the VM is a sandbox option, and a lead
+may carry its own mode.
 Tracks [#229](https://github.com/Volpestyle/clankie/issues/229). Narrows
 [ADR 0199](0199-hard-computer-work-goes-to-a-computer-use-harness.md) (hard
 computer work goes to a computer-use harness) by saying _where_ that harness
@@ -43,43 +45,63 @@ There are three honest places for that work:
   are its windows. The cost is disk (a guest image is tens of gigabytes), RAM
   while it runs, and sign-ins made again inside the guest.
 
-Each fits a different owner. A new user with no spare disk wants the first; an
-owner who trusts the agent with his real apps wants the second; James, who
-wants agents never to touch his screen, wants the third.
+Each fits a different owner, and none of them is the starting point. By
+default an agent gets only its own private browser, in a Herdr browser pane
+where the workspace has one (ADR 0344), with no reach into the owner's
+desktop, apps or signed-in browsers. On top of that, some owners want agents in
+their real apps in the background, through the accessibility tree, without
+taking the pointer. Some want an agent to drive their screen outright. Some want a
+sandbox, so an agent's clicks land in a guest that can be thrown away. And a
+connected lead such as Grok Bot may bring a VM of its own. James's direction
+(2026-11-02): the VM is a sandbox option, not the way to keep agents off the
+owner's screen, and every one of these should be a choice the owner makes.
 
 ## Decision
 
 **Desktop work runs in one mode the owner picks, per machine:
-`computer.desktopMode` = `none` | `host` | `vm`.**
+`computer.desktopMode` = `host` | `screen` | `vm` | `none`, with an
+override per lead.**
 
-| Mode   | Where the work happens                                                                                      | Default                     |
-| ------ | ----------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `none` | No desktop. Web work runs in Clankie's private headless browser. A hire that needs a native app is refused. | Yes, on every new install   |
-| `host` | The owner's own Mac, in the background only, with his consent for this machine                              | Opt-in                      |
-| `vm`   | A macOS guest on this Mac, booted with the Virtualization framework, with agent-desktop inside it           | Opt-in, needs the disk room |
+| Mode     | Where the work happens                                                                                                                                                    | Default                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `none`   | No desktop. The agent gets only its own private browser: a Herdr browser pane where there is one, otherwise a headless browser. A hire that needs a native app is refused | Yes, on every install                         |
+| `host`   | The owner's own Mac, in the background only: accessibility actions and background computer use, never the pointer or the front window                                     | Opt-in, needs the machine's screen ceiling on |
+| `screen` | The owner's own screen, in full: the agent may front windows, move the pointer and type, as the owner would                                                               | Opt-in, needs the machine's screen ceiling on |
+| `vm`     | A macOS guest on this Mac, booted with the Virtualization framework, with agent-desktop inside it: a sandbox                                                              | Opt-in, needs the disk room                   |
+
+**Per lead.** `computer.desktopMode` is the machine's default. A connected lead
+can carry its own mode for the hires it leads, set by the owner: Grok Bot's
+hires can go to a VM while Claude Duet's work in the background on the host.
+A lead that brings its own VM or desktop declares it when it connects (see
+"A connected app's own browser, desktop or vault comes first" below), and then
+Clankie's mode does not apply to that lead at all.
 
 **A hire asks for a desktop; Clankie routes it.** `start_agent` and
 `hire_agent` take `desktop: true` when the work needs a screen. Clankie reads
 the machine's mode and either:
 
-- `none`: starts the hire without a desktop and tells it to use the private
-  browser (`clankie browser`), or refuses with "this machine has no desktop
-  for agents; the owner can turn one on with `clankie computer mode host|vm`"
-  when the brief needs a native app;
 - `host`: starts it with the background-only screen rule from #230 in its
   brief and a Codex computer-use or agent-desktop seat; anything that can only
   happen in front of the owner stops and goes to the lead;
+- `screen`: starts it with a seat that may drive the owner's screen in full
+  (agent-desktop with its focus and mouse commands, Peekaboo in the
+  foreground, a Claude in Chrome seat); the brief says the owner chose this;
+- `none`: starts the hire without a desktop and tells it to use a browser pane
+  or a private browser, or refuses with "this machine has no desktop for
+  agents; the owner can turn one on with `clankie computer mode host|screen|vm`"
+  when the brief needs a native app;
 - `vm`: starts the guest if it is stopped (headless, no window on the owner's
   screen), and starts the hire with its desktop tools pointed into the guest.
   Inside the guest the agent may front windows and use the mouse.
 
 A hire that does not ask for a desktop never gets one, in any mode. The
-machine's ADR 0244 screen ceiling still caps every mode: `host` needs the
-screen ceiling on; `vm` does not use the owner's screen and only needs
+machine's ADR 0244 screen ceiling still caps every mode: `host` and `screen`
+need the screen ceiling on; `vm` does not use the owner's screen and only needs
 `workers`.
 
 **The setting lives in the CLI first and is Advanced.**
-`clankie computer mode [none|host|vm] [--machine ID] --json` shows and sets it.
+`clankie computer mode [host|screen|vm|none] [--machine ID] [--lead NAME] --json`
+shows and sets it; `--lead` sets that lead's override.
 `clankie computer vm status|start|stop|create` manages the guest: `create`
 says the image size and free disk and needs `--yes`, because it downloads
 macOS and spends tens of gigabytes. `clankie doctor` reports the mode, and for
@@ -155,11 +177,12 @@ secret from Clankie's vault; the two vaults stay separate.
 ## Consequences
 
 - The screen takeover of 2026-11-01 has nowhere to happen by default: a new
-  install has no desktop for agents at all, and `host` mode is background-only
-  by rule and by brief.
-- James's Mac goes to `vm` once a guest exists. The GitHub App form, and work
-  like it, runs inside the guest with his GitHub sign-in made once through the
-  vault card (and his 2FA code through the same card).
+  install gives agents only their own private browser. Background control
+  (`host`), full control (`screen`) and a sandbox (`vm`) each start only when
+  the owner turns them on, for a machine or for one lead.
+- James picks his Mac's mode. Its `clankie-desktop` guest is ready for a lead
+  or task he wants sandboxed, with any sign-in made inside it through the vault
+  card (and a 2FA code through the same card).
 - New code: the `computer.desktopMode` setting and CLI, hire routing and the
   `desktop` hire flag, the guest manager over Tart or Lume (whichever the
   owner's Mac already has; Tart first otherwise), the vault card on the app,
