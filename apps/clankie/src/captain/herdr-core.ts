@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { OPERATOR_TERMINAL_READ_MAX, type HerdrCoreAgent } from "@clankie/protocol";
+import { logger } from "../app/log.ts";
 import { AgentReadScope, isShell, type LiveAgentOccupant } from "./agent-read-scope.ts";
 
 // herdr-core (`hc`) is the terminal server behind the Herdr desktop app: a
@@ -256,15 +257,38 @@ export const herdrCoreCall = (socketPath: string, method: string, params: Record
 /** One call on a fresh connection: `hello` to check the generation and the method, then the call. */
 async function call(socketPath: string, method: string, params: Record<string, unknown>): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    const started = Date.now();
+    // How far the call got, so a timeout says whether the socket, the handshake or the method stalled.
+    let stage: "connecting" | "hello" | "method" = "connecting";
+    // When the event loop last ran a tick during this call: a late timer with no lag means herdr-core
+    // itself was slow; a large lag means this service was busy and the answer may have been waiting.
+    let lastTick = started;
+    const ticker = setInterval(() => (lastTick = Date.now()), 250);
+    ticker.unref();
     const connection = createConnection(socketPath);
     let buffered = "";
     const finish = (error: Error | undefined, result?: unknown) => {
       clearTimeout(timer);
+      clearInterval(ticker);
       connection.destroy();
       if (error === undefined) resolve(result);
       else reject(error);
     };
-    const timer = setTimeout(() => finish(new HerdrCoreError("herdr-core didn't answer in time.")), CALL_MS);
+    const timer = setTimeout(() => {
+      const now = Date.now();
+      logger.warn(
+        {
+          event: "herdr_core.call_timeout",
+          method,
+          stage,
+          elapsedMs: now - started,
+          eventLoopGapMs: now - lastTick,
+          bufferedBytes: buffered.length,
+        },
+        "A herdr-core call timed out",
+      );
+      finish(new HerdrCoreError(`herdr-core didn't answer ${method} in time (stuck at ${stage}).`));
+    }, CALL_MS);
     connection.on("error", (error: NodeJS.ErrnoException) =>
       finish(
         error.code === "ENOENT" || error.code === "ECONNREFUSED"
@@ -273,6 +297,7 @@ async function call(socketPath: string, method: string, params: Record<string, u
       ),
     );
     connection.on("connect", () => {
+      stage = "hello";
       connection.write(
         `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hello", params: { generation: GENERATION } })}\n`,
       );
@@ -308,6 +333,7 @@ async function call(socketPath: string, method: string, params: Record<string, u
           const methods = (message.result as { methods?: unknown } | undefined)?.methods;
           if (!Array.isArray(methods) || !methods.includes(method))
             return finish(new HerdrCoreError(`This herdr-core doesn't offer ${method}.`));
+          stage = "method";
           connection.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method, params })}\n`);
         } else if (message.id === 2) return finish(undefined, message.result ?? {});
       }
