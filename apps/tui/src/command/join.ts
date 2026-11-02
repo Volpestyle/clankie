@@ -107,6 +107,7 @@ export async function runJoinCommand(
         signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
       });
       if (!response.ok) {
+        // allow-swallowed-rejection -- a non-JSON error still raises join_unavailable below.
         const result = await response.json().catch(() => null);
         if (result?.error === "legacy_joins_disabled")
           throw Error(
