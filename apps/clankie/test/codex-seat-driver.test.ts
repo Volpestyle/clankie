@@ -67,7 +67,7 @@ function fixture(
             : [],
         };
         if (message.method === "thread/loaded/list") result = { data: nativeLoaded ? [id] : [] };
-        if (message.method === "thread/read") result = { thread: { id, turns: [turn] } };
+        if (message.method === "thread/read") result = { thread: { id, cwd: "/tmp", turns: [turn] } };
         if (message.method === "thread/turns/list") {
           expect(message.params).toEqual({
             threadId: id,

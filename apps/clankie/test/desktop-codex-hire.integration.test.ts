@@ -23,6 +23,7 @@ import {
   herdrCoreCensusFleet,
   readDesktopSeat,
 } from "../src/captain/herdr-core-runner.ts";
+import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
 import { localProjectProof } from "../src/local-fleet-proof.ts";
@@ -35,8 +36,10 @@ const helper = fleetProcessHelper(checkout);
 const processIt = it.skipIf(!["darwin", "linux"].includes(process.platform) || !existsSync(helper));
 
 const children: ChildProcess[] = [];
+const cleanups: (() => Promise<void>)[] = [];
 const roots: string[] = [];
 afterEach(async () => {
+  for (const cleanup of cleanups.splice(0)) await cleanup();
   for (const child of children.splice(0)) child.kill();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
   await closeNativeProcessObservers();
@@ -118,6 +121,8 @@ processIt(
     // Clankie's own app-server for this hire: a real process the worker bridge runs under.
     const server = spawn(node, [codex], { stdio: "ignore" });
     children.push(server);
+    const native = await codex0160Protocol(root, { threadId: thread, socketPath: join(root, "rpc.sock") });
+    cleanups.push(native.close);
     let viewArgs: readonly string[] | undefined;
     const boundAs: HerdrCoreTerminal[] = [];
     const adapter = createCodexSeatAdapter({
@@ -127,17 +132,7 @@ processIt(
       herdr: async (args) => {
         throw new Error(`No Herdr CLI answers for a desktop-app terminal: herdr ${args.join(" ")}`);
       },
-      start: async (options) => {
-        options.onServerStarted?.(server.pid!);
-        await options.startView(["--remote", "unix:///owned/codex.sock"]);
-        return {
-          threadId: thread,
-          viewArgs: ["--remote", "unix:///owned/codex.sock"],
-          send: async () => ({ turnId: "turn-1", state: "started" as const }),
-          close: async () => {},
-          interrupt: async () => true,
-        };
-      },
+      server: async (input) => ({ ...(await native.launch(input)), pid: server.pid! }),
     });
     const view: SeatView = {
       paneId,
@@ -147,6 +142,7 @@ processIt(
       },
       start: async (harness, argv) => {
         viewArgs = argv;
+        native.startView();
         await runner.startAgent({ name: "kh7", kind: harness, paneId: address, args: argv });
       },
       bound: async (ref: SeatRef) => {
@@ -162,8 +158,9 @@ processIt(
     };
 
     const started = await adapter.start({ harness: "codex", cwd: root, brief: "" }, view);
-    expect(started.outcome).toBe("started");
-    expect(viewArgs).toEqual(["--remote", "unix:///owned/codex.sock"]);
+    expect(started.outcome, JSON.stringify(started)).toBe("started");
+    expect(viewArgs?.[viewArgs.indexOf("--cd") + 1]).toBe(root);
+    expect(viewArgs).toContain(native.endpoint);
     expect(boundAs).toHaveLength(1);
 
     // The launcher exec'd the installed Codex in the terminal's own process, and Clankie

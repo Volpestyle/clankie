@@ -164,7 +164,7 @@ it.each(["metadata", "legacy-field", "legacy-method"])(
           request.method === "thread/loaded/list"
             ? { data: loaded ? ["saved-thread"] : [] }
             : request.method === "thread/read"
-              ? { thread: { id: "saved-thread" } }
+              ? { thread: { id: "saved-thread", cwd: "/fixture" } }
               : request.method === "thread/resume"
                 ? { thread: { id: "saved-thread", turns: [] } }
                 : request.method === "thread/turns/list"
@@ -284,7 +284,7 @@ describe("trusted native seat policy", () => {
               : request.method === "thread/loaded/list"
                 ? { data: ["root"] }
                 : request.method === "thread/read"
-                  ? { thread: { id: "root" } }
+                  ? { thread: { id: "root", cwd: "/fixture" } }
                   : request.method === "thread/resume"
                     ? { thread: { id: "root", turns: [] } }
                     : request.method === "turn/start"

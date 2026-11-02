@@ -35,7 +35,10 @@ trust flags or answer a trust prompt for the owner.
 Codex hires in the Herdr desktop app's terminals (ADR 0319, ADR 0341): one space
 per project (`clankie workers`), one tab per hire named for it, and a pipeline's
 hires three to a tab. Their seat ids read `herdr-core/t7`. A Codex hire there
-loses its tools when the service restarts; rehire it. `auto` (the default) and
+loses its tools when the service restarts; rehire it. New Codex hires explicitly
+select their prepared checkout with `--cd`; startup refuses a different or missing
+pane cwd, and briefed hires also verify the native thread cwd before sending the
+brief. `auto` (the default) and
 `herdr` keep hires in Herdr panes.
 
 Hired seats have their own default-on `seatRestarts`

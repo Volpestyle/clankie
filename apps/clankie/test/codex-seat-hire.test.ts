@@ -76,6 +76,7 @@ async function fixture(owner?: ConversationAuthority) {
     terminalId: "term_test",
     agent: "codex",
     status: "idle",
+    workingDirectory: root,
     title: "Chats drawer | /tmp/wt-vuh2541",
     session: { source: "herdr:codex", kind: "id", value: "thread" },
   };

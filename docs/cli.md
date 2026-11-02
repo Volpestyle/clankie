@@ -5211,7 +5211,9 @@ is refused while the desktop app isn't running. `herdr` keeps them in panes, and
 `auto`, the default, keeps them in panes until the desktop app's hires are
 proven. Other harnesses stay in Herdr panes for now, and hires already running
 stay where they are. A Codex hire in the desktop app keeps its tools until the
-service restarts; rehire it after that.
+service restarts; rehire it after that. New Codex hires explicitly select their
+prepared checkout with `--cd`; startup refuses a different or missing pane cwd,
+and briefed hires also verify the native thread cwd before sending the brief.
 
 `--closure` and `--machine-setup` both default to `lead`:
 

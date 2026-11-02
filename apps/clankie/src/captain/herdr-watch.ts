@@ -4520,6 +4520,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(sessionId === undefined ? {} : { sessionId }),
       });
     }
+    if (input.harness === "codex" && agent.workingDirectory !== input.workingDirectory)
+      throw new Error("The seat cwd does not match the prepared checkout; startup is unconfirmed");
     const allocation = this.projectAllocations.get(input);
     if (allocation) {
       this.projectHires.pane(allocation, agent.paneId);
@@ -5200,7 +5202,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             const matches = (current: HerdrAgentSnapshot) =>
               current.paneId === paneId &&
               current.agent === ref.harness &&
-              current.workingDirectory === input.workingDirectory &&
+              (ref.harness !== "codex" || current.workingDirectory === input.workingDirectory) &&
               current.status !== "offline" &&
               current.status !== "unknown" &&
               nativeSessionId(current) === ref.sessionId;
@@ -5313,8 +5315,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
             this.hireReceipts.update(receiptKey, original.messageId, { sessionId: ref.sessionId });
           }
           const agent = await this.agentWithSession(paneId, SPAWN_SESSION_WAIT_MS);
-          if (agent.workingDirectory !== input.workingDirectory)
-            throw new Error("The seat cwd does not match the prepared checkout; startup is unconfirmed");
           if (agent.session === undefined)
             throw new Error("The seat started without reporting its session to herdr");
           if (resume !== undefined && nativeSessionId(agent) !== resume.sessionId)
@@ -5538,6 +5538,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       const args = [
         ...skillLaunch.args,
+        // Bare Codex hires use its shared daemon: the terminal cwd does not select the thread cwd.
+        ...(input.harness === "codex" ? ["--cd", input.workingDirectory] : []),
         ...(input.harness === "codex" && remote === undefined ? fleetSeatCodexStartArgs() : []),
         ...modelArgs,
         ...effortArgs,

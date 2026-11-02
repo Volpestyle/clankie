@@ -56,3 +56,19 @@ report-agent`. The runner accepts a report only for the harness it started in
 - A Codex desktop hire does not survive a service restart with its tools; its
   terminal stays up for the owner, and it can be rehired.
 - Herdr panes are unchanged for every harness.
+
+## Amendment: each Codex hire selects its checkout (#252)
+
+A terminal's cwd does not select the native thread's cwd when Codex uses an
+app-server. In particular, a hire without a brief skips Clankie's dedicated
+app-server adapter and launches plain Codex, which may use the shared daemon.
+Both that launch and the dedicated adapter's remote TUI launch now pass `--cd`
+with the prepared hire checkout explicitly. Claude continues to run from its
+terminal's own cwd.
+
+Before reporting a Codex hire started, Clankie checks the pane's observed cwd
+against the prepared directory; missing or different observations leave startup
+unconfirmed. The dedicated adapter also checks `thread/read`'s cwd before
+binding or sending any brief. A thread mismatch fails startup without a brief.
+No process-wide cwd change or shared app-server restart is needed. This applies
+to new hires after the updated service loads; existing threads keep their cwd.

@@ -24,7 +24,11 @@ import { PersonaStore } from "../src/captain/personas.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
 
-async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {}, fleetProjection = false) {
+async function hiredFixture(
+  options: Parameters<typeof codex0160Protocol>[1] = {},
+  fleetProjection = false,
+  startup: { bare?: boolean; observedCwd?: string } = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), "codex-hire-protocol-"));
   const native = await codex0160Protocol(directory, options);
   const pane = {
@@ -34,7 +38,7 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
     agent: "codex",
     agent_status: "idle",
     terminal_title: "Protocol hire",
-    cwd: directory,
+    cwd: startup.observedCwd ?? directory,
     agent_session: { source: "herdr:codex", kind: "path", value: native.rolloutPath },
   };
   const snapshot = () => parseHerdrAgentResult(JSON.stringify({ result: { agent: pane } }));
@@ -97,7 +101,8 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
       createTab: async () => pane.pane_id,
       startAgent: async ({ args, name }) => {
         pane.name = name;
-        expect(args).toContain(native.endpoint);
+        expect(args?.[args.indexOf("--cd") + 1]).toBe(directory);
+        if (!startup.bare) expect(args).toContain(native.endpoint);
         native.startView();
       },
       get: async () => snapshot(),
@@ -178,20 +183,28 @@ async function hiredFixture(options: Parameters<typeof codex0160Protocol>[1] = {
         effortReason: "Exercise the fixed native protocol transcript and question routing.",
       },
       undefined,
-      "Initial brief",
+      startup.bare ? undefined : "Initial brief",
       undefined,
       owner,
     );
-    expect(hire).toMatchObject({ outcome: "spawned", control: { mode: "adapter" } });
-    if (hire.outcome !== "spawned") throw new Error("Native protocol hire did not start");
+    if (startup.observedCwd) {
+      expect(hire).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+    } else {
+      expect(hire).toMatchObject({
+        outcome: "spawned",
+        control: { mode: startup.bare ? "terminal" : "adapter" },
+      });
+    }
     const control = await adapter.attach({
       harness: "codex",
       paneId: pane.pane_id,
       sessionId: native.threadId,
     });
-    expect(control).toBeDefined();
-    expect(native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(1);
-    expect(reports.some((args) => args.includes(native.threadId))).toBe(true);
+    if (!startup.bare && !startup.observedCwd) expect(control).toBeDefined();
+    expect(native.requests.filter(({ method }) => method === "turn/start")).toHaveLength(
+      startup.bare || startup.observedCwd ? 0 : 1,
+    );
+    if (!startup.bare) expect(reports.some((args) => args.includes(native.threadId))).toBe(true);
     const holdNextWake = () => {
       let entered!: () => void;
       let release!: () => void;
@@ -1408,3 +1421,18 @@ it("reads a surviving Codex holder after host restart and returns idle without r
     await f.close();
   }
 });
+
+it.each([false, true])(
+  "pins the prepared checkout and refuses a pane in another cwd (bare=%s)",
+  async (bare) => {
+    const correct = await hiredFixture({}, false, { bare });
+    await correct.close();
+    const wrong = await hiredFixture({}, false, { bare, observedCwd: "/old/shared/worktree" });
+    try {
+      expect(wrong.hire).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      expect(wrong.native.requests.some(({ method }) => method === "turn/start")).toBe(false);
+    } finally {
+      await wrong.close();
+    }
+  },
+);
