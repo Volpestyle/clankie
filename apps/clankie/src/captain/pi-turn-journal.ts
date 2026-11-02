@@ -75,7 +75,7 @@ export class PiTurnPausedError extends Error {
 }
 
 /** How long a durable turn waits out an unavailable provider before it fails (ADR 0284). */
-export const PROVIDER_OUTAGE_WAIT_MS = 60 * 60_000;
+const PROVIDER_OUTAGE_WAIT_MS = 60 * 60_000;
 
 function retryableModelError(step: z.infer<typeof Step> | undefined): boolean {
   return (
