@@ -270,8 +270,11 @@ it("the service's own bulk work holds a light slot, and a holder that dies frees
         )});
         const governor = createResourceGovernor({ directory: process.argv[1],
           probe: async () => ({ loadRatio: 0.1, availableMemoryMb: 64000 }) });
+        // An unsettled promise alone lets Node exit, and the governor then rightly
+        // reaps the lease as claim_owner_exited (#510): keep the holder alive
+        // until the test kills it.
         await governor.holdLight({ holderId: "service:prune_worktree", operation: "prune_worktree" },
-          () => new Promise(() => console.log("held")));`,
+          () => new Promise(() => { setInterval(() => {}, 60_000); console.log("held"); }));`,
         f.registry,
       ],
       { stdio: ["ignore", "pipe", "inherit"] },
