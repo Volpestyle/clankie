@@ -1158,5 +1158,14 @@ if __name__ == "__main__":
                 detail += " (errno %s)" % error.errno
             print("Fleet resource lock helper failed: " + detail + " at " + lock_stage, file=sys.stderr)
         else:
-            print("Fleet resource native boundary unavailable", file=sys.stderr)
+            # Name the failed step without data: the mode, the error type, an errno, and
+            # this file's own fixed RuntimeError text (never paths, arguments or tokens).
+            detail = type(error).__name__
+            if isinstance(error, OSError) and error.errno is not None:
+                detail += " (errno %s)" % error.errno
+            elif type(error) is RuntimeError and error.args and isinstance(error.args[0], str):
+                detail += ": " + error.args[0][:120]
+            named = len(sys.argv) > 1 and 0 < len(sys.argv[1]) <= 32
+            mode = sys.argv[1] if named and all(c.isalnum() or c == "-" for c in sys.argv[1]) else "unknown"
+            print("Fleet resource native boundary unavailable (" + mode + ": " + detail + ")", file=sys.stderr)
         sys.exit(1)
