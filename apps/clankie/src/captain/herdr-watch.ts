@@ -4781,7 +4781,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       return {
         outcome: "failed",
         reason: "unknown_directory",
-        detail: `${input.workingDirectory} is not a granted workspace on fleet ${remote}; grant it with clankie runtime workspaces ${remote} --dir PATH`,
+        detail: `${input.workingDirectory} is not a granted workspace on fleet ${remote}; add it, keeping the other grants, with clankie runtime workspaces ${remote} --dir '${input.workingDirectory}'`,
       };
     }
     const adapters = remote === undefined ? this.seatAdapters : this.remoteSeatAdapters?.(remote);

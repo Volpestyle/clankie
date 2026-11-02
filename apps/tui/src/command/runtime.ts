@@ -72,19 +72,31 @@ export async function runRuntimeCommand(
     method = "POST";
     body = JSON.stringify({ action: "capacity", id: args[1], capacity: limit });
   } else if (args[0] === "workspaces" && args.length >= 3) {
+    const usage =
+      "Use workspaces ID [--replace | --remove] (--repo /checkout | --dir /directory)... or workspaces ID --clear";
     const workspaces: Array<{ kind: "repository" | "directory"; path: string }> = [];
-    if (!(args.length === 3 && args[2] === "--clear")) {
-      for (let index = 2; index < args.length; index += 2) {
-        const kind = args[index],
-          target = args[index + 1];
-        // A Windows fleet's grants are drive paths on that machine (ADR 0184).
-        if (!["--repo", "--dir"].includes(kind!) || !/^(?:\/|[A-Za-z]:[\\/])/u.test(target ?? ""))
-          throw new Error("Use workspaces ID (--repo /checkout | --dir /directory)... or --clear");
-        workspaces.push({ kind: kind === "--repo" ? "repository" : "directory", path: target! });
-      }
+    // Adding keeps every other approval; only --replace or --clear drops them (#375).
+    let mode: "add" | "replace" | "remove" = "add";
+    let index = 2;
+    if (args[2] === "--clear") {
+      if (args.length !== 3) throw new Error(usage);
+      mode = "replace";
+      index = args.length;
+    } else if (args[2] === "--replace" || args[2] === "--remove") {
+      mode = args[2] === "--replace" ? "replace" : "remove";
+      index = 3;
+      if (args.length === 3) throw new Error(usage);
+    }
+    for (; index < args.length; index += 2) {
+      const kind = args[index],
+        target = args[index + 1];
+      // A Windows fleet's grants are drive paths on that machine (ADR 0184).
+      if (!["--repo", "--dir"].includes(kind!) || !/^(?:\/|[A-Za-z]:[\\/])/u.test(target ?? ""))
+        throw new Error(usage);
+      workspaces.push({ kind: kind === "--repo" ? "repository" : "directory", path: target! });
     }
     method = "POST";
-    body = JSON.stringify({ action: "workspaces", id: args[1], workspaces });
+    body = JSON.stringify({ action: "workspaces", id: args[1], mode, workspaces });
   } else if (["harnesses", "membership"].includes(args[0] ?? "") && args.length === 2) {
     path = `/v1/runtime-connections/${encodeURIComponent(args[1]!)}/${args[0]}`;
   } else if (args[0] === "prepare") {

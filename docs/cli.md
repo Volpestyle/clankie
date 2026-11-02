@@ -5971,6 +5971,8 @@ the operator API (the same commands work as `/runtime` in the TUI):
 ```sh
 clankie runtime workspaces default --repo /absolute/project --dir /absolute/scratch
 clankie runtime workspaces build --repo /absolute/project
+clankie runtime workspaces build --remove --dir /absolute/scratch
+clankie runtime workspaces build --replace --repo /absolute/project
 clankie runtime workspaces build --clear
 ```
 
@@ -5978,8 +5980,12 @@ Runtime capacity defaults to 16. `clankie runtime capacity ID N` changes it;
 `--clear` selects unlimited and `0` pauses new admission. The operator endpoint
 owns these settings. `runtime status` reports the effective value and source.
 
-Each call **replaces** that runtime's extra approvals; `--clear` restores the
-conversation-directory-only default. `runtime list` shows the stored policy.
+`--repo` and `--dir` **add** to that runtime's approvals and keep the others; adding
+one already approved changes nothing. `--remove` drops just the named grants (a
+folder that no longer exists matches as written; a path that isn't approved is
+refused). `--replace` sets the whole list to the given grants, and `--clear`
+restores the conversation-directory-only default. Each call prints the list it
+left. `runtime list` shows the stored policy. A runtime holds at most 32 grants.
 `--repo` pins the canonical Git common directory and accepts that repository's
 currently registered checkouts, including newly created linked worktrees outside
 the original directory. Stale approvals grant nothing; rejected requests identify
@@ -5991,7 +5997,9 @@ machine (a drive path such as `C:\src\rivals` for a Windows fleet), stored as
 written, because this host can neither resolve nor stat them.
 
 The operator-only POST `/v1/runtime-connections` accepts
-`{ "action": "workspaces", "id": "default", "workspaces": [{ "kind": "repository", "path": "/absolute/project" }] }`.
+`{ "action": "workspaces", "id": "default", "mode": "add", "workspaces": [{ "kind": "repository", "path": "/absolute/project" }] }`.
+`mode` is `add`, `remove` or `replace`; without it the request replaces the list,
+as earlier clients expect. The CLI always sends a mode, `add` by default.
 Named `connect` JSON also accepts `workspaces`;
 captain/Discord credentials cannot call this endpoint. Existing operator-machine
 shell authority remains unchanged.
