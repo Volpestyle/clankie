@@ -984,6 +984,7 @@ it("keeps a fleet-qualified hire's persona through raw fleet census and child-co
     (personaId) => roster.find((seat) => seat.personaId === personaId)?.seatId,
   );
   try {
+    if (hire.outcome !== "spawned") throw new Error("Native protocol hire did not start");
     const adopted = personas.adoptSpawn(hire.seat, "Protocol worker");
     expect(hire.seat.subject).toBe(`pc-${pane.name}`);
     const created = await conversations.serve({
