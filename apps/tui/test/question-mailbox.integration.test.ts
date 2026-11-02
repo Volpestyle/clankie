@@ -20,7 +20,7 @@ import {
 import { questionConsoleCommand } from "../src/question-commands.ts";
 import type { SetupFlow } from "../src/shell/setup-flow.ts";
 
-it("the mailbox sends verification, send-back reasons and free text to their source over the real API, fencing changed asks", async () => {
+it("the mailbox sends verification, send-back reasons and free text to their source over the real API, and answering an ask after the conversation moved on", async () => {
   const root = await mkdtemp(join(tmpdir(), "question-mailbox-"));
   const messages: { id: string; text: string }[] = [];
   const store = new ConversationStore(join(root, "conversations"), async (id, text) => {
@@ -183,7 +183,10 @@ it("the mailbox sends verification, send-back reasons and free text to their sou
       if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("send failed");
       await store.awaitRun(sent.result.runId);
     };
-    await expect(command("", flow)).rejects.toThrow("conversation changed");
+    // An ask is immutable under its request ID, so its answer lands even after another
+    // ask and an owner turn moved the conversation on (#118); the newer ask stays open.
+    expect(await command("", flow)).toContain("Answer sent to KH2 lead");
+    expect((await client.inputGet!(a, stale.question!.requestId)).question?.status).toBe("submitted");
     expect((await client.inputGet!(a, replacement!.question!.requestId)).question?.status).toBe("pending");
     const answerWrites = requests.filter((r) => (r as { op: string }).op === "input_answer");
     expect(answerWrites).toHaveLength(4);
