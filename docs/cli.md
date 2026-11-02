@@ -2048,6 +2048,9 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
 `start_agent` existed sign in again to use it. A service refusal keeps its own words.
+Pass the first task as `prompt` to `start_agent`. Every connector tool rejects
+unknown arguments, including nested fields, before dispatching anything; `brief`
+is not an alias for `prompt`.
 A blocked project hire names its allocation, native receipt when recorded, pane
 when observed, age (unknown for legacy records), and existing owner recovery
 commands. A lost answer or HTTP 502 stays uncertain: read `list_agents` before

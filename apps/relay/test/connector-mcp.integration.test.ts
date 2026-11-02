@@ -849,6 +849,39 @@ describe("Claude connector MCP endpoint", () => {
     await Promise.all([first.close(), second.close()]);
   });
 
+  it("rejects unknown connector arguments before dispatch, including a misspelled hire brief", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    try {
+      const before = relay.seen.length;
+      const misspelled = await client.callTool({
+        name: "start_agent",
+        arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", brief: "fix the desync" },
+      });
+      expect(misspelled.isError).toBe(true);
+      expect(textOf(misspelled)).toContain('Unknown arguments for start_agent: "brief"');
+      expect(textOf(misspelled)).toContain("Use prompt");
+      expect(relay.seen).toHaveLength(before);
+      for (const [name, args, field] of [
+        ["post_note", { text: "do not send", typo: true }, "typo"],
+        ["list_agents", { machin: "pc1" }, "machin"],
+        ["start_agent", { notify: { lead: "grok", ref: "thread", typo: true } }, "notify.typo"],
+        [
+          "answer_prompt",
+          { agent: "herdr:term-loose", expect: "ready", steps: [{ key: "enter", typo: true }] },
+          "steps[0].typo",
+        ],
+      ] as const) {
+        const result = await client.callTool({ name, arguments: args });
+        expect(result.isError).toBe(true);
+        expect(textOf(result)).toContain(JSON.stringify(field));
+        expect(relay.seen).toHaveLength(before);
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
   it("starts an agent only in a known project's place, through the connector's own allowlist", async () => {
     const relay = await startConnectorRelay();
     const client = await connect(relay.url);
