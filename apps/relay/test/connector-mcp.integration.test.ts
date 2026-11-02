@@ -793,7 +793,7 @@ describe("Claude connector MCP endpoint", () => {
     expect(inSession.detail).toMatch(/has the message in its session/u);
     const waiting = await tell("when you're done");
     expect(waiting).toMatchObject({ status: "queued" });
-    expect(waiting.detail).toMatch(/waiting in its queue/u);
+    expect(waiting.detail).toMatch(/waiting in its native queue/u);
     const send = relay.seen.find((request) => request.op === "send");
     expect(send).toMatchObject({
       turn: {
