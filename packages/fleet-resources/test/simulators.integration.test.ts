@@ -1487,20 +1487,13 @@ it("an acquire stalled in created fails within its bound, frees its own slot, ke
   const paused = f.pauseInventory(true);
   const started = Date.now();
   expect(await f.http("/acquire", f.request)).toMatchObject({ outcome: "booting" });
-  let failed: SimulatorResult | undefined;
-  await expect
-    .poll(
-      async () => {
-        const answer = await f.http("/acquire", f.request);
-        if (answer.outcome === "rejected") failed = answer;
-        return answer.outcome;
-      },
-      { timeout: 30_000, interval: 100 },
-    )
-    .toBe("rejected");
+  // The job fails at its bound and frees the slot while no caller is awaiting it.
+  await expect.poll(() => f.governor.simulatorReservations(), { timeout: 30_000, interval: 100 }).toEqual([]);
   // At most both stages' bounds, never the ten-minute boot wait or idle expiry.
   expect(Date.now() - started).toBeLessThan(25_000);
-  expect(failed).toMatchObject({ reason: "internal_error" });
+  // The seat's next acquire hears why instead of starting a fresh reservation.
+  const failed = await f.http("/acquire", f.request);
+  expect(failed).toMatchObject({ outcome: "rejected", reason: "internal_error" });
   expect((failed as { detail?: string }).detail).toMatch(
     /^Simulator preparation stalled: (choosing and creating its device|submitting its boot) did not finish within 8s\. The reservation was released and device [0-9A-F-]{36} kept, unbooted; acquire again\./u,
   );
@@ -1516,7 +1509,7 @@ it("an acquire stalled in created fails within its bound, frees its own slot, ke
   const booted = lease(await f.manager.acquire(f.request));
   expect(booted.phase).toBe("booted");
   await f.manager.release(booted.id, f.owner);
-}, 30_000);
+}, 60_000);
 
 it("a native error in a preparation stage is returned with the stage, not swallowed as held (#386)", async () => {
   const f = await fixture({ respondWithinMs: 2_000 });

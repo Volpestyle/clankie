@@ -348,6 +348,14 @@ export function createSimulatorManager(input: {
     abandoned.add(id);
     if (abandoned.size > 256) abandoned.delete(abandoned.values().next().value!);
   };
+  /**
+   * A preparation failure that settled its seat's reservation, kept for the
+   * seat's next acquire: a caller polling acquire may not be the one awaiting
+   * when the job fails, and would otherwise start a fresh reservation (#386).
+   */
+  const failures = new Map<string, { atMs: number; result: SimulatorResult }>();
+  const seatKey = (seat: SeatIdentity) =>
+    JSON.stringify([seat.fleet ?? "default", seat.seatId, seat.occupantId, seat.holderId]);
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = operations.then(operation, operation);
     operations = result.catch(() => undefined);
@@ -749,10 +757,13 @@ export function createSimulatorManager(input: {
     if (!current || current.token !== lease.token) return unavailable(lease.id);
     if (current.phase === "reserved" || current.phase === "created") {
       await forget(current, "acquire_aborted");
-      return rejected(
+      const result = rejected(
         "internal_error",
         `${what} The reservation was released${current.deviceId ? ` and device ${current.deviceId} kept, unbooted` : ""}; acquire again. If it repeats, check CoreSimulator with \`xcrun simctl list devices\`.`,
       );
+      failures.set(seatKey(current), { atMs: now(), result });
+      if (failures.size > 64) failures.delete(failures.keys().next().value!);
+      return result;
     }
     return rejected(
       "internal_error",
@@ -972,7 +983,11 @@ export function createSimulatorManager(input: {
     });
     try {
       const result = await Promise.race([job, pending]);
-      if (result) return result;
+      if (result) {
+        // This caller heard the failure; the seat's next acquire starts fresh.
+        if (result.outcome === "rejected") failures.delete(seatKey(lease));
+        return result;
+      }
     } finally {
       clearTimeout(timeout);
     }
@@ -1034,6 +1049,11 @@ export function createSimulatorManager(input: {
     const owner = proof.owner;
     const existing = (await reservations()).find((lease) => sameSeat(lease, owner));
     if (!(await authorized(request))) return revoked();
+    const failure = existing ? undefined : failures.get(seatKey(owner));
+    if (failure) {
+      failures.delete(seatKey(owner));
+      if (now() - failure.atMs < RESERVED_LIMIT_MS) return failure.result;
+    }
     if (existing) {
       if (!matchesOwner(existing, owner)) return rejected("stale_owner");
       if (
@@ -1646,6 +1666,8 @@ export function createSimulatorManager(input: {
     /** Resolves when every preparation this manager started has settled. */
     async settled(): Promise<void> {
       while (jobs.size) await Promise.allSettled(jobs.values());
+      // A stage abandoned at its bound is no longer a job but may still hold the section.
+      await serial(async () => undefined);
     },
     start(): void {
       if (timer) return;
