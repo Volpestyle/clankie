@@ -43,9 +43,10 @@ turn. Newly added skills need no conversation reset; selected exclusions remain.
   Owner settings (fleet, persona, voice, Discord, worker holds, Linear follow/wake,
   `awake`, `update auto`) go through the owner settings API: read the current
   snapshot, then send its revision; a conflict requires a fresh read and a
-  reviewed change. Never retry by editing settings.json. The full
-  flag/JSON/exit-code contract is `{repoRoot}/docs/cli.md` (every install) and
-  `clankie help`; JSON is on stdout and progress on stderr.
+  reviewed change. Never retry by editing settings.json. Read a
+  command's flags with `clankie <command> --help` (`clankie help` lists them
+  all); JSON is on stdout and progress on stderr. `{repoRoot}/docs/cli.md` is
+  the long reference: search it for one section, never read it whole.
 - **Keychain locked.** Do not repeat commands or launch parallel credential reads.
   Doctor's `credentialStoreHealth` and one notice in the owner's conversation
   explain the state. The owner unlocks it in Keychain Access; uncached reads retry

@@ -125,39 +125,28 @@ This checklist records no executed passes. Automated links describe coverage at 
 - **Expected:** Tokens stay in the body's broker; PKCE verifier stays in its pending in-memory flow. Client sees metadata, gateway sees encrypted code/state; no canary in client/log/event/telemetry output.
   Unauthorized device is refused; disconnect deletes local custody even if remote revocation fails. Do not claim provider revocation without its receipt.
 - **Look:** Broker presence without printing secrets, `/v1/accounts` responses, encrypted gateway capture and redacted body/client telemetry.
-- **Automation:** [accounts/redaction](../../apps/clankie/test/accounts.test.ts), [gateway encryption](../../apps/clankie/test/gateway-encryption.test.ts), [fixture proof and limits](2026-09-26-hosted-connections/README.md); real hosted/provider/device custody is manual-only.
+- **Automation:** [accounts/redaction](../../apps/clankie/test/accounts.test.ts), [gateway encryption](../../apps/clankie/test/gateway-encryption.test.ts), fixture proof and limits (archived with the hosted-connections evidence); real hosted/provider/device custody is manual-only.
 
 ### 12. Deploy happens during a live voice session — [VUH-1522](https://linear.app/vuhlp/issue/VUH-1522), [VUH-1472](https://linear.app/vuhlp/issue/VUH-1472)
 
 - [ ] **Setup:** Consenting test call, marked handoff, clean running pin and existing approved local update ref. Record `clankie discord call`;
-      set `clankie integrate hold --holder James --reason "VUH-1522 live voice"`.
-- **Action:** Attempt an update while held. When James permits interruption, run `clankie integrate release HOLD_ID --actor James --reason "voice test finished"`,
+      set `clankie update hold --holder James --reason "VUH-1522 live voice" --minutes 60`.
+- **Action:** Attempt an update while held. When James permits interruption, run `clankie update release HOLD_ID --actor James --reason "voice test finished"`,
   run `clankie update --ref APPROVED_BRANCH_OR_SHA` and make a fresh attributed ask. Named branches fetch origin; explicit SHAs remain exact. Inspect the accepted SHA and any older/diverged warning.
 - **Expected:** Hold blocks admission with unchanged runtime/call. After release, terminal receipts identify the new boot SHA; one active mouth/body and an audible fresh ask/result.
   Record original handoffs as completed/interrupted/unconfirmed; stale-session results may be dropped. Never replay them automatically.
   Record disconnect/rejoin and audio gaps; active voice creates no automatic hold here. Accepted/pending is not recovery or proof of uninterrupted audio.
-- **Look:** `clankie integrate holds`, `clankie update status`, `clankie status`, `clankie discord call`, service boot receipts and actual listeners' observations.
-- **Automation:** [hold admission](../../apps/clankie/test/integrate.integration.test.ts) is partial; live deployment, continuity and audibility are **manual-only**.
+- **Look:** `clankie update holds`, `clankie update status`, `clankie status`, `clankie discord call`, service boot receipts and actual listeners' observations.
+- **Automation:** [hold placement, listing and release](../../apps/clankie/test/runtime-update-ux.integration.test.ts) is partial; live deployment, continuity and audibility are **manual-only**.
 
 ### 13. Full gate/push applies to the exact HEAD — [VUH-1522](https://linear.app/vuhlp/issue/VUH-1522)
 
-- [ ] **Setup:** Integrator-owned approved inputs. Negative cases require an isolated service/fixture `IntegrationQueue` bound to private clone sources, HOME/state/credentials and bare origins;
-      changing the caller's directory does not retarget the service. Follow [integration admission](../integration.md); no evals.
-- **Action:** `clankie integrate CORE_SHA --id UUID --no-wait` (add approved `--app APP_SHA` when needed), poll `clankie integrate status UUID`,
-  then `clankie integrate push UUID` only after a recorded pass. Separately alter gated HEAD or dirty its tree in the fixture before push.
-- **Expected:** Every required gate exits zero on the exact composed SHA and clean tree; matching origin/destination permit a fast-forward only.
-  Failed/missing gates, changed HEAD or dirty tree refuse landing. Gate output for another SHA cannot authorize this push; push does not deploy.
-- **Look:** Returned `batch.evidence` path (default `~/.clankie/integration/batches/UUID/record.json`, under `CLANKIE_STATE` when set), gate logs/exits/tested SHAs and `git ls-remote origin refs/heads/main`.
-- **Automation:** [real Git/private-install fixtures](../../apps/clankie/test/integrate.integration.test.ts) use a fixture gate; the actual full release/batch gate remains an explicit integrator run, **manual-only** here.
+Retired with the integrate queue: changes land through pull requests that merge on green checks
+([ADR 0332](../adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
 
 ### 14. Origin moves while a gate is running — [VUH-1522](https://linear.app/vuhlp/issue/VUH-1522)
 
-- [ ] **Setup:** Isolated service/fixture queue bound to two private clones/origin at A and private state/credentials. Install a gate barrier before composition;
-      without this fixture mark unavailable. Compose and wait at the barrier; never edit a tree while its gate runs.
-- **Action:** Advance that private origin to B from the second clone, release the gate and attempt landing. Start a fresh batch from B with the approved inputs.
-- **Expected:** Old batch is held for origin drift and leaves origin at B; no force-push or stale attestation reuse. Fresh composition reruns its gate.
-- **Look:** Both batch IDs, base/composed/tested/origin SHAs, gate logs and independent `git ls-remote`; reconcile any uncertain push before doing anything else.
-- **Automation:** [saved-pass drift refusal](../../apps/clankie/test/integrate.integration.test.ts) moves origin after the gate; the during-gate timing is **manual-only / coverage gap**.
+Retired with the integrate queue, as scenario 13.
 
 ### 15. Seat call loses its response during service restart — [VUH-1638](https://linear.app/vuhlp/issue/VUH-1638)
 

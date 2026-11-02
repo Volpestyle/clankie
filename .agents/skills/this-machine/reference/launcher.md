@@ -108,42 +108,22 @@ A pressured window stays `canary-pending` (`canary.pressure`), not a regression.
 Do not claim a rollback or alert delivery from a claimed receipt.
 
 Holds block until the owner releases them. A reviewed failed canary hold is
-released with `clankie integrate release UUID --actor NAME --reason TEXT`. Only
+released with `clankie update release UUID --actor NAME --reason TEXT`;
+`clankie update holds` lists them. Only
 the authenticated owner may run `clankie update --override-holds --reason TEXT`,
 with a reviewed reason; an override cannot bypass `blockedReason`. A confirmed
 `accepted: false` is a refusal, not an uncertain send. Never edit update journals
 or remove locks to recover, and never remove a maintenance lock by age.
 
-An integration-head progress alert does not authorize cancellation or another
-submission: read `clankie integrate status UUID` and its evidence. A request
-waiting behind a live queue-lock writer is read by its UUID, never resubmitted or
-unlocked. Priority never authorizes an ungated tree.
-
 Thresholds, retention, canary policy, alert deadlines, `source-managed` harness
-refresh refusals and older-bridge behaviour are in `docs/cli.md` under `update`
-and `integrate`. Social turns cannot update the machine. A lost tool result is not
+refresh refusals and older-bridge behaviour are in the `update` section of
+`docs/cli.md`; search that file rather than reading it whole. Social turns cannot update the machine. A lost tool result is not
 permission to resend it.
 
 Runtime and canary alerts reach the owner's native `global-default` attachment
 without a model turn; when delivery is unavailable, inspect
 `native.health_alert.delivery` in the service log, and reconcile a `submitted`
 dispatch rather than sending a replacement.
-
-## Integration queue
-
-Follow the workspace's own landing rules; `integrate` is an optional composed
-batch, never a substitute for them. `clankie integrate status [UUID]` shows
-position and ETA; `clankie integrate cancel UUID --actor NAME --reason TEXT`
-withdraws obsolete input before landing. Check the original receipt before
-submitting a replacement after an uncertain cancellation; never infer withdrawal
-from a timeout. Each active attempt holds deploys for at most sixty minutes: do
-not override that hold merely to hasten a routine update, and follow the original
-UUID after an interruption. Never manually delete a batch or a lock.
-A pass or hold left unlanded for 7 days expires: `push` and `revert` refuse it,
-so land again with a fresh request. The automatic sweep frees old batch clones;
-an old record still reading `queued` is history, not a waiting request.
-[Integration](../../../../docs/integration.md) owns the contract, including
-reclaim, deploy holds and paired app/core installs.
 
 ## Changing yourself
 

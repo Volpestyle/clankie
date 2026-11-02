@@ -39,9 +39,6 @@ prints the same index.
 clankie                         # choose mode on first run; open the selected console
 clankie --chat <conversationId> # select a server-owned conversation
 clankie status                  # probe every launcher-owned service
-clankie integrate SHA --push --no-wait # optional gated batch (main takes direct pushes)
-clankie integrate status               # running, waiting and last batch result
-clankie integrate status UUID --wait   # block to that request’s terminal result
 clankie doctor                  # ready, or the first repair and its command
 clankie doctor --json           # full install card for scripts and investigation
 clankie restart [service]       # restart in dependency order

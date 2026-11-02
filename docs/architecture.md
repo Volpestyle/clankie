@@ -67,46 +67,21 @@ Support audit uses keyed device references and a separate durable spool;
 disclosure fails closed without it. Independent sink acknowledgements govern
 spool pruning, regardless of diagnostic consent.
 
-## Approved commit integration
+## Landing review
 
-The source-checkout service owns an approved-commit integration queue through
-`POST /v1/integrate` and `clankie integrate`. Landings go directly to `main`
-(ADR 0240); the queue is an optional gated path. Requests waiting during a gate share the next compatible batch;
-each compatible batch has at most three requests. Conflicting requests roll back;
-failed shared gates retry members individually at their original admission priority.
-`integrate status` and `/integrate` expose running/waiting work, the isolation chain,
-a conditional measured ETA and the last result. An owner can withdraw a waiting
-or active isolated request before landing; a gate containing withdrawn input
-cannot authorize a push.
-Each batch has independent Git clones and detached sibling worktrees, private gate environments and durable tested-HEAD
-records. Exact passed trees land core before app; partial landings preserve each
-confirmed SHA. Each running attempt automatically holds runtime deploys through
-its safe point, bounded at an hour; waiting and accepted deploys fence new attempts.
-Startup recovers interrupted approved requests once with the same commit objects,
-checking remote main before any push and notifying the lead. Timed deploy holds
-never block landing; each lifts with a receipt, and operator overrides are audited. [Integration](integration.md) owns the contract,
-isolation boundary and recovery rules.
-
-```mermaid
-flowchart LR
-  Approvals["Ordered approved SHAs"] --> Queue["Service integration queue"]
-  Queue --> Compose["Fresh origin + detached sibling worktrees"]
-  Compose --> Gate["Private installs + full checks"]
-  Gate -->|pass| Record["Durable exit code + tested HEAD"]
-  Gate -->|shared failure| Split["Smaller batches / report failing request"]
-  Split --> Compose
-  Record --> Verify["Exact HEAD + clean tree + current origin"]
-  Verify --> Core["Fast-forward core"]
-  Core --> App["Fast-forward app / retain partial result"]
-```
-
-A project may name a standing reviewer ([ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md)).
+A project may name a reviewer ([ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md)).
 The [review gate](../apps/clankie/src/captain/review-gate.ts) stores each author's
 exact patch from native seat proof, hashes it with `git patch-id`, routes it to a
 live reviewer seat and binds the verdict to that hash. The
-[owner routes](../apps/clankie/src/review-routes.ts) serve `clankie review`, and
-`pnpm check:landing` asks them whether this checkout's patch may land, exiting 3
-until the reviewer approves it.
+[owner routes](../apps/clankie/src/review-routes.ts) serve `clankie review`;
+`clankie review status` says whether this checkout's patch may land.
+Clankie's own repositories land through pull requests that merge on green checks
+([ADR 0332](adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+
+Deploy holds (`clankie update holds|hold|release`, `POST /v1/deploy-holds`) keep
+runtime updates off the running service for at most an hour, or until the
+runtime canary ends; each lifts with a receipt, operator overrides are audited,
+and none ever blocks a merge.
 
 ## Device and host authority
 
@@ -627,7 +602,7 @@ tick resolves due slots with `croner` in the routine's time zone and applies
 `catch_up` or `skip` to slots missed while the Mac slept.
 `captain/routine-runner.ts` runs a target as its conversation: a `turn` takes
 the self-wake path, a `hire` goes through `HireSeat`, and a `check` runs on a
-heavy permit from the service's own fleet governor, as the merge gate does: the
+heavy permit from the service's own fleet governor: the
 machine's shared registry, or a test service's fixture registry, so a real run's
 check is covered by the permit that run already holds. Routines are explicit owner or lead schedules, so `/autonomy
 off` does not pause them; each has its own pause. `POST /v1/captain/routines`,

@@ -185,9 +185,3 @@ for reuse; nothing deletes devices except an explicit owner tidy naming exact
 stopped UDIDs. Never run global shutdown, erase, delete-all or unavailable-device
 cleanup for fleet work. Queues, holder identity, device choice, usage readings,
 runaway shutdown and create receipts: [simulators](reference/simulators.md).
-
-For an already submitted integration request, run
-`clankie integrate status UUID --wait` as a harness background task and continue
-on its completion notice. A new `clankie integrate ... --push` already waits by
-default. A terminal held, failed, cancelled or interrupted result remains that
-result; waiting never resubmits or overrides it.

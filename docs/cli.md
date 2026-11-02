@@ -630,12 +630,7 @@ commit SHA (full, or abbreviated to at least 7 hex digits), `HEAD`, or `refs/tag
 for an explicit local target. A hex-looking ref is always a commit, never a branch;
 name a branch like `cafe1234` as `refs/heads/cafe1234`. An abbreviation is checked
 after fetching `origin/main` (local objects only if origin is unreachable), so one
-that is unknown or ambiguous with a newly landed commit is refused. A deploy waiting
-for integration batches previews its ref up front (a fetch of up to 60 seconds while
-the registry lock is held) and refuses it when it cannot be resolved right then,
-including when origin is unreachable. A queued wait that then fails five times, about
-75 seconds of continuous failure, is dropped so the integrate queue resumes, and the
-lead is alerted once; request the update again afterwards. The result
+that is unknown or ambiguous with a newly landed commit is refused. The result
 records `resolvedRef` and `newCommit`, with `older-than-current-pin` or
 `diverged-from-current-pin` warnings when applicable. It installs dependencies
 in an independent detached worktree and schedules a fixed helper in a separate
@@ -658,9 +653,7 @@ exits 0. The service checks every minute and applies the newest `main` once the
 body is idle or `dueAt` passes, under its own authority and through the same
 deploy holds, canary and rollback; a batch whose `main` has no new commits is
 dropped without a restart. A hold or a failed fetch keeps the batch waiting.
-`update status` shows a pending batch as `deferred`. An active integration attempt
-holds deployment until its safe point or its sixty-minute automatic hold expires,
-even after `dueAt`; status names the blocking batch UUIDs.
+`update status` shows a pending batch as `deferred`.
 
 `clankie update now` (`{"now": true}`, or `now: true` on `update_runtime`)
 applies at once. So do an explicit `--ref` (a commit, tag or other branch, such
@@ -702,7 +695,7 @@ fails the canary: an absolute CPU figure depends on the machine and its fleet.
 `update status` (`canaryCpu`) and `update canary` (`cpu`) report the new mean
 beside the previous runtime's recorded mean on this machine, their ratio, and
 whether it exceeds the advisory `cpuPercent` (default 10). Its deploy hold blocks
-further updates and integration landings during observation. A pass releases
+further updates during observation. A pass releases
 that canary's hold and verified older canary holds admitted by its override or
 superseded through the recorded installed-runtime chain. A health regression or missing health signal records a
 failed canary, retains the hold, names the
@@ -803,9 +796,9 @@ interrupted window. The candidate still checks its complete boot identity over f
 a persistent replacement fails within the existing availability budget.
 
 To clear a failed canary's hold after reviewing runtime health, read its full
-hold UUID with `clankie update status --json` or `clankie integrate holds`.
+hold UUID with `clankie update status --json` or `clankie update holds`.
 Explicitly release that UUID with
-`clankie integrate release UUID --actor NAME --reason "why this hold is safe to release"`;
+`clankie update release UUID --actor NAME --reason "why this hold is safe to release"`;
 the release is audited. This does not change the historical failed canary or
 claim it passed. Alternatively, the authenticated owner can authorize one
 update with `clankie update --override-holds --reason "why proceeding is safe"`.
@@ -977,22 +970,14 @@ CPU microseconds. Boot identity comes from the running updater's immutable
 identity; liveness probes do not reread update transaction files. The response
 carries no messages, prompts, tenant content or credentials.
 
-Integration attempts automatically acquire bounded deploy holds through composition,
-gating and push. Updates wait on these holds; waiting or accepted deploys keep new
-attempts queued. `update status` names each `integrationBatchId` and its time left.
-An immediate request answers HTTP 202 with `accepted: false`, `pending` and
-`waitingForIntegration: {id, ref}`; the CLI exits 0. That intent survives service
-restart and retries hold admission every fifteen seconds. `update cancel` cancels
-it, including when the underlying source-update batch has already become due.
-Manual and canary holds retain their refusal and explicit override behavior.
-
 Deploy holds block runtime-update admission. `update status` and an `update`
 refusal list each hold's holder, how long it has held, the time left and the
 holder's presence. An operator may override explicitly with
 `--override-hold UUID --actor NAME --reason TEXT` (repeat the hold flag for every
 hold); the registry records the override and retains the hold. A reviewed hold
 that lifts before admission needs no override. The API accepts an `overrides`
-array of `{holdId, actor, reason}`. See [integration](integration.md#deploy-holds).
+array of `{holdId, actor, reason}`. Place, list and release holds with `update hold|holds|release`; see
+[deploy holds](deploy-holds.md).
 
 Supported `clankie mcp` operator bridges reinitialize after an explicit
 `unknown_session` rejection before tool admission and retry that rejected request
@@ -1293,206 +1278,6 @@ intent UUID when known; use those exact identities for separately authorized wor
 The native `hire_agent` tool accepts the same optional `freshIntent`. This adds
 no account change, fleet alias or TUI setting. Exit 0 from the fresh CLI means
 the service returned `spawned`; completion still needs the matching native event.
-
-### `integrate`
-
-`clankie integrate status UUID` includes each repository's `reviewChecks`:
-the parent's exact-patch verdict after the gate and immediately before push,
-with the checked base, HEAD and time. Unavailable verdicts record their error
-and hold landing. These receipts cover app gates that have no review step.
-
-Default landing is direct: commit to `main`, `git pull --rebase origin main`,
-run `clankie heavy -- pnpm check:landing`, then push
-([ADR 0240](adr/0240-changes-land-directly-on-main.md)). `integrate` is optional
-when you want a composed, gated batch. When the project names a reviewer, the
-gate also waits for that reviewer to approve the exact patch (see
-[`review`](#review) below).
-
-Clankie's core queue landing gates rerun each failed Vitest file once in
-isolation on the same composed tree before isolating batch members. The first attempt completes its
-original selection. The entire isolated retry pass has a five-minute deadline;
-a timeout kills the Vitest runner, blocks the gate and retains the failed rerun
-receipt and log. The enclosing heavy permit drains leftover forks. Recovery
-requires complete accounted results and every rerun passing. As in release,
-more than two recovered files blocks the gate. Non-test failures,
-repeated failures, interruptions and changed sources still block. The gate log
-and `.data/qa/landing-check-summary.md` list each failed file with its exact
-failed cases. `status UUID` includes `repos[].gate.testRecovery` with
-the flaky files, first failure and rerun receipts. The direct root gate uses
-this policy only with `pnpm check:landing --retry-failed-tests`. An app
-`check:landing` receives the same flag only when the composed app tree's
-`package.json` declares `clankie.landingGate.retryFailedTests: true`; the app
-gate then applies its own per-package equivalent (VUH-2166).
-
-```bash
-clankie integrate CORE_SHA... [--app APP_SHA]... [--push] [--id UUID] [--no-wait]
-clankie integrate status [UUID] [--wait]
-clankie integrate push UUID
-clankie integrate cancel UUID --actor NAME --reason TEXT
-clankie integrate revert PASSED_BATCH_UUID [--push]
-clankie integrate holds
-clankie integrate hold --holder NAME --reason TEXT --minutes 1-60 [--pane ID|--seat ID] [--id UUID]
-clankie integrate release UUID --actor NAME --reason TEXT
-```
-
-To use the queue, push a branch and run `clankie integrate <sha>... --push` as a
-harness background task; it blocks until the request settles. For a request
-already submitted, `clankie integrate status UUID --wait` blocks through queueing,
-gating, isolation and pushing and returns its actual terminal result. `--wait`
-requires a UUID; without it status remains an immediate snapshot. Existing
-per-request transport timeouts and terminal held/failed/cancelled/interrupted
-results are preserved; waiting never resubmits or cancels the request. Composition cherry-picks exactly the listed
-commits, oldest first, so a request lists every unlanded commit of its change.
-`run` refuses a request whose listed commits build on an unlanded commit that is
-neither listed earlier nor in a request already queued ahead; the refusal names the
-missing commits and prints the complete command (VUH-2745). Commits already on
-`main` by patch, such as an earlier slice landed by cherry-pick, count as landed. With no UUID, status shows running batches, waiting
-requests, the last result and interrupted work. `status UUID` reads a request
-receipt, including its shared batch and attempts. `progress` shows the isolation
-chain, scheduled batch position and a conditional completion ETA from recent
-completed gates (`null` until measurements exist). `/integrate` displays the chain
-and ETA in the TUI.
-
-Review applies to the exact composed patch. The owning service reads the source
-project's reviewer setting and supplies a verdict bound to the batch's base,
-HEAD and patch-id to local or linked-machine gates. Test isolation keeps its
-private HOME and credentials; `CI=1` never skips batch review. Missing review
-status holds the landing. Review is refreshed after checks and before pushing,
-including a saved or reused pass. If composition changes the patch, that exact
-composed patch needs review before it can land (ADR 0287).
-
-Local batches hold one governed full permit across installation and landing
-gates, admitted through the same FIFO queue and slots as ordinary full builds.
-They leave spare full slots, light jobs, servers and simulator work available
-under the normal resource guards. `fleet resources` exposes the batch as
-`mergeGate` for observation; it does not reserve the machine. Gates held over
-fifteen minutes also appear in `holderAlerts`. Sharing requires the updated
-service and workers.
-
-The service checks integration progress every 30 seconds. A running head without
-a checkpoint for three minutes alerts the owner through the existing runtime
-health route, unless its owned install/gate process is proven alive or its
-bounded remote runner is active. Waiting followers do not trigger this alert.
-Opening and recovery notices are durably deduplicated across service restarts;
-unavailable observations retain the incident. The observer never cancels,
-restarts or resubmits a batch. Inspect the named receipt with `integrate status`.
-
-If the local install/gate runner stops without a completed phase receipt, the
-batch is `interrupted`, with the phase, runner exit and retained log paths in its
-reason. Signaled commands are also interrupted. Completed nonzero installs or
-gates remain failures. An interruption never attests a pass. Newly accepted requests
-retain exact approved commit objects and resubmit once automatically after a runner
-interruption or service restart; the original UUID follows the fresh attempt.
-Recovery checks remote main before any push and records an already-present
-candidate without sending it again. The lead is notified. A second interruption
-or an older record without recovery metadata requires review before resubmission.
-
-`cancel UUID --actor NAME --reason TEXT` withdraws a waiting request or active
-isolated retry before landing. It reads `cancelled` with who and why. An in-flight
-isolated gate finishes, but its tree cannot land with a withdrawn input even if
-green; surviving requests need a fresh composition and gate. The first
-non-isolated gate and a landing already under way refuse cancellation.
-
-Requests arriving during a gate coalesce into compatible batches of at most
-three requests. Conflicting members roll back; failed shared gates retry members
-individually at their original admission priority, before later arrivals. An
-earlier repository pass is reusable only for the same exact tree, base, approved
-contributions and sibling core candidate; `gateReuse` records the retained pass.
-Removing a core contribution invalidates the app pass and requires a new gate.
-Gate-only runs stay
-separate and never land; restores remain admission-order barriers.
-An ordered approved batch composes on fresh origin in independent throwaway
-core/app worktrees, performs real installs and full checks with private home,
-state, credentials and package stores, and records tested HEAD and exit codes
-durably. It only lands a clean exact HEAD with a recorded pass. Core lands first;
-app rejection retains a partial record and retries skip already landed core.
-Revert creates a new commit restoring a passed tree. Deploy holds keep runtime
-updates off the running service and never block landing; each lifts on its own
-after its `--minutes` (at most 60) with an `expire` receipt naming the holder.
-`holds` lists current holds with their `expiresAt` and the latest receipts.
-The lead or owner may release anyone's hold; the receipt records holder, actor
-and reason.
-Requires a local source-checkout service. See [integration](integration.md) for
-evidence paths, isolation limits, uncertain sends and crash recovery.
-
-Requests admitted while the fresh service holds `queue.lock` for startup
-reclamation stay queued until its proven live writer releases the lock. Their
-UUID and queue order stay intact. Unknown owners and unrecoverable stale locks
-remain explicit failures; do not delete locks or resubmit an uncertain request.
-
-Integration clones keep client hooks disabled.
-
-`clankie integrate reclaim` sweeps historical terminal batches even while another
-batch is gating and reports removed paths, retained reasons, and `freedBytes`
-(allocated blocks measured before removal). It also removes empty worktrees folders.
-A proven live queue owner no longer blocks terminal tree reclamation. The sweep
-fences durable request dependencies before deleting: `batchId`,
-`isolation.rootBatchId`, prior attempts, reused gates and `interruptionRetry.batchId`.
-Raw queued receipts protect a shared attempt between failure and retry admission;
-recoverable interrupted requests protect their sources before startup recovery
-saves a retry claim. Those old sources become disposable when the request finishes.
-An unreadable or mismatched receipt defers tree cleanup rather than hiding a retry
-dependency. Concurrent sweeps serialize, and per-batch locks serialize automatic
-cleanup with explicit reclamation. Each writer rereads its record under that lock.
-
-Finished passes and retry sources can shed copied download stores independently:
-`isolation/{core,app}/{pnpm-store,npm-cache}`. Installs copy package contents into
-`node_modules`, so neither pushing nor retrying depends on those stores. This
-cache-only path preserves worktrees, private environments and records. Active
-batches, aliased paths, stored logs and live process cwd remain protected; an
-unknown queue owner still refuses.
-
-Pushed batches and failed, cancelled, interrupted or conflicting attempts lose
-their disposable scratch worktrees and private `isolation/` install/gate caches as soon as the queue no longer needs them.
-Failed shared attempts remain while individual retries reuse them. Records and
-gate logs remain; detached commits are pinned before
-`git worktree remove --force` and `git worktree prune`. Gate artifacts and dirty
-scratch files do not prevent cleanup. A partially removed checkout missing its
-`.git` file can be finished only when its exact private Git registration and
-batch record agree. Passed, held and partial batches remain available for push.
-Aliased, locked, unverified or live-process directories stay retained; incomplete
-cwd observations defer cleanup. A five-minute sweep retries deferred removals.
-On macOS, each fresh cwd census reads kernel vnode paths through the native
-process helper, including a complete account inventory. It avoids repeated
-`lsof` filesystem scans while retaining the live-process recheck before every
-removal; no cwd snapshot is reused across deletions.
-Clones (`repositories/core`, `repositories/app`) are removed only by this sweep,
-and only while it holds the idle queue's lock:
-
-- a pushed batch's at the next sweep. Its head is on `origin/main`, and
-  `revert` restores from there; it refuses if main no longer contains the head.
-- a failed, cancelled, interrupted or conflicting attempt's 72 hours after it
-  settled, unless it is a retry source.
-- a passed or held batch's after 7 days unlanded. The batch gains `expired`, and
-  `push` and `revert` refuse it: land again with a fresh request.
-
-Partial landings and retry sources keep theirs. Each removal is recorded in
-`repositoryReclamation`; a clone still inside its window is reported as
-`repository_retention`, and one left for the next pass after the 90-second
-per-pass limit as `repository_deferred`. Old receipts that still say `queued` are history, not
-queue entries; status shows their shared attempt's result
-([ADR 0240](adr/0240-changes-land-directly-on-main.md)).
-Recursive scratch and cache deletion runs in an awaited child process, so large
-installs do not occupy the live service's filesystem threadpool. The same
-ownership, retry and live-process checks still authorize each removal.
-
-Progress alerts. The service observes an integration head every 30 seconds and
-alerts after three minutes without progress or a proven active install/gate job;
-the alert names the batch and last checkpoint. Read `integrate status UUID` and
-its evidence: an alert does not authorize cancellation or another submission.
-Opening and recovery notices survive restarts without replay, and an unavailable
-observation does not prove recovery. Remote install/gate output is observed too:
-three minutes without output alerts, ten minutes triggers a fresh local gate, and
-a ninety-minute wall-clock limit holds even with output. The remote timeout cause
-and log remain evidence; fallback never attests a remote pass, and these
-deadlines stop only that request's owned transport. A request waiting behind a
-proven live queue-lock writer (including startup worktree reclamation) is read by
-its UUID, never resubmitted or unlocked; an unproven owner or unrecoverable stale
-lock retains its actual error for review. Failed shared gates retry members at
-their original admission priority, before later arrivals. A retained `gateReuse`
-pass covers only its unchanged exact tree, base, approved contributions and
-sibling core candidate; excluding a core member requires a new app gate, and an
-origin move after reuse requires a fresh gate.
 
 ### Scratch service and relay proofs
 
@@ -4677,7 +4462,7 @@ green checks forward when only `main` moved, asks about review again and exits 3
 while it is held; exit 0 means push, exit 1 means rerun the gate. A rebase that
 changes the patch changes its hash and needs a new review. A live verdict that
 names no reviewer needs no approval. An unavailable service may be skipped only
-in external CI without owner settings; integrate always holds on a missing verdict.
+in external CI without owner settings.
 
 <a id="fleet-resource-governor"></a>
 
@@ -5079,7 +4864,7 @@ channel or Discord.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -5252,9 +5037,6 @@ A live non-Git parent directory also protects worktrees nested below it, except
 `$HOME`, its ancestors and directories above the repository's main checkout.
 Where the owner turned automatic tidy off, it stays off until they decide
 otherwise; installing an update does not change that setting.
-
-`--remote-gates on` lets an integrate batch gate on a linked machine while this
-one is saturated; it defaults to off. Remote placement/staging times out after two minutes and falls back to the local gate with the reason recorded; cleanup is bounded to ten seconds. See [gates on a linked machine](integration.md#gates-on-a-linked-machine).
 
 `--worker-sandbox on` starts each new local hire under an OS profile that denies
 reading or writing the owner's protected credential stores: the protected
@@ -5694,7 +5476,7 @@ including the default `lead` responsibilities.
 JSON includes the global `fleet` projection and a separate workspace
 `workingPreferences` report, with either available resolved values or an
 unavailable detail. `fleet status` also reports `deployHolds`: each current
-[deploy hold](integration.md#deploy-holds) with a `summary` of its holder, how
+[deploy hold](deploy-holds.md) with a `summary` of its holder, how
 long it has held and the time left, or an `unavailable` detail when the service
 cannot list them. The TUI `/fleet` command opens the same editor (worker
 harness, model and account, connected tools, peer messages, closure, machine setup,
@@ -9332,7 +9114,7 @@ clears the project's standing reviewer
 ([ADR 0287](adr/0287-a-standing-reviewer-gates-every-landing.md)). A role such as
 `reviewer` resolves to the live seats holding it and is the better default,
 because seats retire; a seat is an exact `FLEET/term_…` ID. While a reviewer is
-set, `pnpm check:landing` exits 3 until the reviewer approves the exact patch
+set, `clankie review status` holds each landing until the reviewer approves its exact patch
 (see [`review`](#review)). Seats already working in the project keep a way to
 submit: the result's `reviewSubmit` names `submit_for_review` and, for a seat
 whose catalog lacks it, `clankie review submit` from its own pane. The JSON update accepts `review` as `{"role":"ROLE"}`,
@@ -10705,8 +10487,7 @@ and fast-forwards an owner checkout on `main` only when it has no local commits
 and no local edits overlapping incoming paths. Disjoint staged and unstaged
 edits survive. A refusal lists blocking files with their modification age in
 seconds. No stash, reset, rebase, force, or automatic commit is used. Confirmed
-`clankie integrate` pushes run the same sync and retain its result in the batch;
-updates targeting `origin/main` also run it and retain the result. The running
+Updates targeting `origin/main` also run it and retain the result. The running
 service observes shared `origin/main` refs every five seconds and
 fetches once a minute to catch pushes from separate clones or machines. It syncs
 registered local owner checkouts automatically on startup and after main advances.
@@ -11175,15 +10956,3 @@ The default affects new projects without an existing saved convention; existing
 repo conventions and owner-reviewed project proposals take precedence.
 The TUI accepts the same review/apply arguments through `/fleet tracker` and
 `/project settings PROJECT tracker`; `/fleet status` also shows the default.
-
-### Read-only shipping status (VUH-2526)
-
-`GET /v1/integrate/shipping` projects the same durable queue that
-`clankie integrate status` reads. Owner operators and paired Take Control devices
-can read it through the existing relay/device transport. It accepts no mutation.
-Each batch supplies state, updated time, issue keys extracted from commit subjects,
-short commit IDs, failed-check status, and its pending request count. Shared batch
-members count once each. Recent terminal results are bounded to 30 across projects;
-active requests remain visible. Paths, errors, command output and credentials stay
-in the operator-only status response. Unknown issue keys remain unmapped; no title
-or checkout-name guessing is used. Interrupted historical records require resubmit.

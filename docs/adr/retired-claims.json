@@ -39,12 +39,12 @@
     {
       "pattern": "install-main-guard|main push guard|CLANKIE_MAIN_PUSH_BYPASS",
       "adr": "0240",
-      "now": "Changes land directly on main after narrow checks; no pre-push guard is offered."
+      "now": "Every change lands through a pull request that merges on green checks and the real-app run, rebased once right before merging."
     },
     {
       "pattern": "changes through the landing queue|do not push main directly",
       "adr": "0240",
-      "now": "Changes land directly on main after narrow checks; clankie integrate is optional."
+      "now": "Every change lands through a pull request that merges on green checks and the real-app run, rebased once right before merging."
     },
     {
       "pattern": "shuts the device down and deletes it only if the lease created it",
@@ -90,6 +90,26 @@
       "pattern": "keep (its|the|your) (pull request'?s? )?branch current with `?main",
       "adr": "0345",
       "now": "A pull request rebases onto origin/main once, right before it merges, and pushes with --force-with-lease to its own branch; it never merges main in repeatedly."
+    },
+    {
+      "pattern": "\\bclankie integrate\\b|\\bintegrate is optional\\b|POST /v1/integrate\\b|/integrate status",
+      "adr": "0332",
+      "now": "The integrate queue is gone. Every change lands through a pull request that merges on green checks and the real-app run, rebased once right before merging. Deploy holds are `clankie update holds|hold|release`."
+    },
+    {
+      "pattern": "exits 3 until|submit_for_review`?,? then `?pnpm check:landing",
+      "adr": "0332",
+      "now": "Clankie's own pull requests merge once their checks are green; a project reviewer's verdict is read with `clankie review status`."
+    },
+    {
+      "pattern": "land(s)? (clankie and clankie-app )?changes directly on `?main|changes land directly on `?main\\b",
+      "adr": "0332",
+      "now": "Every change lands through a pull request that merges on green checks and the real-app run, rebased once right before merging."
+    },
+    {
+      "pattern": "--remote-gates|\\bremote integrate gates?\\b",
+      "adr": "0332",
+      "now": "Remote gates went with the integrate queue."
     }
   ]
 }
