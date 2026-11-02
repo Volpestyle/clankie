@@ -215,6 +215,12 @@ export class MachineJoins {
   accessCeiling(id: string): MachineAccessLevel | undefined {
     return this.registrations.get(id)?.accessCeiling;
   }
+  async legacyJoinsEnabled(): Promise<boolean> {
+    return (await this.options.settings.load()).legacyMachineJoins;
+  }
+  async setLegacyJoinsEnabled(enabled: boolean): Promise<void> {
+    await this.options.settings.update((current) => ({ ...current, legacyMachineJoins: enabled }));
+  }
   start(raw: unknown) {
     const input = MachineJoinStartSchema.parse(raw);
     for (const [id, ticket] of this.tickets) if (ticket.expiresAt <= this.now()) this.tickets.delete(id);

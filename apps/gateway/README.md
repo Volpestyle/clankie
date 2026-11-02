@@ -147,6 +147,14 @@ Channel and leave use independently authenticated encrypted machine envelopes;
 the body verifies registry identity and one-use challenges, and the receiver
 checks its original consent ceiling and directories before effects.
 
+Start admission allows four requests per client and refills one per minute,
+while the shared host budget remains 32 requests and refills 0.2/s. During the
+five-minute ticket lifetime, a single address can admit at most nine starts.
+Clients sharing an address share this budget; the gateway uses forwarding
+addresses only from its configured trusted proxy. The home's owner can disable
+new starts immediately with `clankie machines legacy-joins off` (default on).
+Pending claims and existing joined-machine channels remain available.
+
 `/v1/machine-joins/approve` remains inside the ordinary encrypted device request
 with owner/Take Control authorization. Sending it directly returns `426`.
 Query strings, unknown fields, sender-supplied grants and plaintext execution
