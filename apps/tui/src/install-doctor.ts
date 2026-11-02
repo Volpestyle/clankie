@@ -115,6 +115,10 @@ export interface InstallDoctorReport {
   readonly simulators?: import("@clankie/protocol").FleetSimulatorStatus;
   readonly kind: InstallKind;
   readonly version: string;
+  /** Connector devices disconnected after a rotated refresh token was reused. */
+  readonly connectorRefreshRevocations?:
+    | { readonly devices: readonly import("@clankie/protocol").DeviceListItem[] }
+    | { readonly status: "unavailable"; readonly detail: string };
   readonly runtimeHealth?: import("@clankie/protocol").RuntimeHealthObservation;
   /** Each extension's last known state (ADR 0328). */
   readonly extensions?: readonly import("@clankie/protocol").ExtensionStateReport[];

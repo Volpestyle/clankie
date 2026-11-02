@@ -102,6 +102,8 @@ export const DeviceRecordSchema = z
     pendingExpiresAt: z.string().datetime(),
     activatedAt: z.string().datetime().optional(),
     lastRefreshAt: z.string().datetime().optional(),
+    /** Binding replaced by the latest refresh (including the initial activation). */
+    previousRefreshAt: z.string().datetime().optional(),
     lastSeenAt: z.string().datetime().optional(),
     /**
      * Last delivery state the device asked for, disabled included (ADR 0159).

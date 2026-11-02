@@ -1,3 +1,4 @@
+import { listDevices } from "../../bin/devices.ts";
 import { formatUnheardSpeakers } from "../discord-room-view.ts";
 import {
   DiscordRoomVoiceStatusSchema,
@@ -76,7 +77,17 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
           : `Never repeat this launch. Inspect clankie seat migrate status ${row.id}; once its exact binding is ready, run clankie seat migrate complete ${row.id}.`
       }`;
     }) ?? [];
-  const detail = [summary, ...seats, ...migrations].join("\n");
+  const connectorRevocations = report.connectorRefreshRevocations;
+  const connectorNotices =
+    connectorRevocations && "devices" in connectorRevocations
+      ? connectorRevocations.devices.map(
+          (device) =>
+            `Connector app ${JSON.stringify(device.name)} (${device.deviceId}) disconnected at ${device.revokedAt}: a rotated refresh token was reused. Sign in again to reconnect.`,
+        )
+      : connectorRevocations
+        ? [`Connector refresh revocations: ${connectorRevocations.detail}`]
+        : [];
+  const detail = [summary, ...connectorNotices, ...seats, ...migrations].join("\n");
   const observed =
     binding && "available" in binding && binding.mode !== "enforce" && !report.pendingEnforcingUpdate
       ? seatBindingSummary(report)
@@ -517,6 +528,7 @@ export async function doctorCommand(
   }
   return {
     ...report,
+    connectorRefreshRevocations: await inspectConnectorRefreshRevocations(options),
     ...(options.credentialStore?.health ? { credentialStoreHealth: options.credentialStore.health() } : {}),
     machineAccessRefusals: await inspectMachineAccessRefusals({
       ...options,
@@ -764,5 +776,34 @@ async function inspectMachineAccessRefusals(
     };
   } catch (error) {
     return { status: "unavailable" as const, detail: String(error) };
+  }
+}
+
+/** Read the same durable device list the owner apps use; never infer from logs. */
+export async function inspectConnectorRefreshRevocations(
+  options: InspectInstallOptions & { host?: string },
+): Promise<NonNullable<InstallDoctorReport["connectorRefreshRevocations"]>> {
+  try {
+    const credential = await resolveOperatorCredential({
+      env: options.env ?? process.env,
+      ...(options.credentialStore ? { store: options.credentialStore } : {}),
+    });
+    if (!credential) throw new Error("Connector refresh revocations need the operator credential");
+    const devices = await listDevices({
+      controlPlaneUrl: commandHost(options),
+      operatorToken: credential.token,
+      fetchImpl: options.fetchImpl ?? fetch,
+      signal: AbortSignal.timeout(5_000),
+    });
+    return {
+      devices: devices.filter(
+        (device) =>
+          device.scope === "connector" &&
+          device.status === "revoked" &&
+          device.revokedBy === "connector-refresh-reuse",
+      ),
+    };
+  } catch (error) {
+    return { status: "unavailable", detail: error instanceof Error ? error.message : String(error) };
   }
 }

@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import type { PresenceStateFactory } from "./presence.ts";
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
 import type { QuestionAuthority } from "../captain/conversation-questions.ts";
 import type { CaptainPort } from "../captain/port.ts";
@@ -68,7 +69,7 @@ export interface ExtensionRouteHost {
  */
 export interface ExtensionRoutes {
   /** Persona-owned durable replay and compaction, used before routes mount. */
-  readonly presenceState?: import("./presence.ts").PresenceStateFactory;
+  readonly presenceState?: PresenceStateFactory;
   readonly place: "body" | "tracker" | "owner";
   register(app: Hono, host: ExtensionRouteHost): void;
   /** Releases what the routes hold when the app closes. */
