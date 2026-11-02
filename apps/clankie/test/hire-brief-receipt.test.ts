@@ -75,6 +75,8 @@ test("a remote Codex hire is briefed and messaged through its fleet's own adapte
     agent: "codex",
     status: "idle",
     title: "Remote",
+    // The PC's Herdr reports the pane's cwd: the checkout this hire asked for.
+    workingDirectory: "C:\\src\\app",
     session: { source: "herdr:codex", kind: "id", value: "thread-1" },
   };
   const sent: string[] = [];

@@ -334,12 +334,14 @@ async function fixture(
     get: async (pane) => get(pane),
     resolveTerminal: async (seatId) => [...agents.values()].find((agent) => agent.terminalId === seatId),
     wait: async (pane) => get(pane),
-    createTab: async ({ label }) => {
+    createTab: async ({ label, cwd }) => {
       const pane = `w1:p${++nextPane}`;
       agents.set(pane, {
         paneId: pane,
         terminalId: `fixture-seat-${nextPane}`,
         title: label,
+        // Herdr reports the pane's cwd, which a Codex hire's binding checks.
+        workingDirectory: cwd,
         agent: "shell",
         status: "idle",
       });

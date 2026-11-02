@@ -377,6 +377,7 @@ describe("a remote hire runs as the account Clankie chose on that machine", () =
               {
                 pane_id: "w2:p9",
                 terminal_id: "term_new",
+                cwd: "C:\\src\\rivals",
                 agent: expected,
                 agent_status: "idle",
                 agent_session: { source: `herdr:${expected}`, kind: "id", value: "session-new" },
