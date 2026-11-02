@@ -284,7 +284,7 @@ export function createHerdrSessionSource(
           tree === undefined
             ? ""
             : tree.outcome === "removed"
-              ? ` Worktree ${tree.path} removed; estimated ${tree.freedBytes ?? 0} bytes freed.${tree.evidencePath ? ` Evidence: ${tree.evidencePath}.` : ""}`
+              ? ` Worktree ${tree.path} removed; ${tree.freedBytes === undefined ? "space estimate unavailable" : `estimated ${tree.freedBytes} bytes freed`}.${tree.evidencePath ? ` Evidence: ${tree.evidencePath}.` : ""}`
               : ` Worktree ${tree.path} left on disk (${tree.reason ?? tree.outcome}).${tree.left ? ` Left: ${JSON.stringify(tree.left)}.` : ""}${tree.evidencePath ? ` Evidence: ${tree.evidencePath}.` : ""}`;
         return { id, status: "closed", detail: `Its pane is closed.${cleanup}` };
       }

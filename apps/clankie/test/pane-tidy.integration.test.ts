@@ -1904,3 +1904,64 @@ it("retires an exact finished occupant through the owner API and reopens it thro
     f.watch.close();
   }
 });
+
+// #265: real Git, process census, evidence store and guarded prune after native close.
+it.each(["removed", "shared", "leave_unlanded", "prune_failed"])(
+  "a confirmed close reports its exact worktree cleanup (%s)",
+  async (mode) => {
+    const w = await workerWorktree();
+    await fixtureOrigin(w);
+    await writeFile(join(w.repo, ".gitignore"), ".local/\n");
+    await git(w.repo, "add", ".gitignore");
+    await git(w.repo, "commit", "--quiet", "-m", "ignore evidence");
+    await git(w.repo, "push", "--quiet", "origin", "main");
+    await git(w.repo, "fetch", "--quiet", "origin");
+    await git(w.tree, "merge", "--ff-only", "origin/main");
+    const f = await fixture({ cwd: w.tree, socket: true, ordinaryHire: true });
+    const { pruneTidyWorktree, sweepEvidenceTrash } = await import("../src/captain/prune-worktree.ts");
+    const archive = join(w.base, "archive");
+    await mkdir(join(w.tree, ".local", "node_modules"), { recursive: true });
+    await writeFile(join(w.tree, ".local", "proof.md"), "kept evidence\n");
+    await writeFile(join(w.tree, ".local", "node_modules", "regenerable"), "x".repeat(65536));
+    const originalList = f.ports.runner.list!.bind(f.ports.runner);
+    const before = await f.ports.runner.get("w1:p1");
+    if (mode === "shared")
+      f.ports.runner.list = async () => [
+        ...(await originalList()),
+        { ...before, paneId: "w1:shared", terminalId: "term_shared" },
+      ];
+    f.ports.prune = async (repository, path, guard) => {
+      if (mode === "prune_failed") throw Error("injected admission failure");
+      return pruneTidyWorktree(repository, path, archive, f.ports.runner, guard);
+    };
+    const result = await f.tidy.close(
+      {
+        pane: "w1:p1",
+        reason: "landed",
+        reportPath: f.reportPath,
+        ...(mode === "leave_unlanded" ? { unlandedReason: "retain exact checkout" } : {}),
+      },
+      authority,
+    );
+    expect(result.outcome).toBe("closed");
+    if (result.outcome !== "closed") return;
+    if (mode === "removed") {
+      expect(result.entry.worktree).toMatchObject({ outcome: "removed", branchDeleted: true });
+      expect(result.entry.worktree!.freedBytes).toBeGreaterThan(65536);
+      expect(await stat(w.tree).catch(() => undefined)).toBeUndefined();
+      expect(await readFile(join(result.entry.worktree!.evidencePath!, "proof.md"), "utf8")).toBe(
+        "kept evidence\n",
+      );
+      await sweepEvidenceTrash(archive);
+      expect(await git(w.repo, "worktree", "list", "--porcelain")).not.toContain(w.tree);
+      expect(new PaneTidy(f.path, f.ports).history()[0]?.worktree).toEqual(result.entry.worktree);
+    } else {
+      expect(result.entry.worktree).toMatchObject({
+        outcome: mode === "prune_failed" ? "unavailable" : "kept",
+      });
+      expect((await stat(w.tree)).isDirectory()).toBe(true);
+      expect(await readFile(join(w.tree, ".local", "proof.md"), "utf8")).toBe("kept evidence\n");
+    }
+  },
+  30_000,
+);

@@ -324,13 +324,13 @@ export async function pruneTidyWorktree(
       if (scan.nestedWorktree !== undefined)
         return { outcome: "kept", path, reason: `nested_worktree: .local/${scan.nestedWorktree}` };
     }
+    const beforeBytes = await allocatedBytes(path);
     const fresh = await listTidyWorktrees(repository, "origin/main", runner, { ...protection, only: path });
     const current = fresh.candidates.find(
       (entry) => entry.path === path && entry.sha === candidate.sha && entry.branch === candidate.branch,
     );
     if (fresh.outcome !== "listed" || !current) return { outcome: "kept", path, reason: "inventory_changed" };
     await guard();
-    const beforeBytes = await allocatedBytes(path);
     const keptRef =
       candidate.landedBy === "decision"
         ? `refs/clankie/dropped-worktrees/${candidate.sha}`

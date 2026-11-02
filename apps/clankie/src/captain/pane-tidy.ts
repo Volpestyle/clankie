@@ -225,6 +225,8 @@ export class PaneTidy {
     nativeExitAvailable?(agent: HerdrAgentSnapshot): Promise<boolean>;
     changed(): void;
     runtimeRoot?: string;
+    /** Named local Herdr sessions; qualified remote paths must never be inspected on this machine. */
+    localFleet?(fleet: string): Promise<boolean>;
     now?: () => number;
   };
   constructor(path: string, ports: PaneTidy["ports"]) {
@@ -449,12 +451,14 @@ export class PaneTidy {
   async worktreeForClose(
     agent: HerdrAgentSnapshot,
   ): Promise<{ path: string; repository?: string; reason?: string } | undefined> {
-    const owner = this.ports.provenance(agent);
-    if (owner === "unknown" || owner === "owner_interactive" || !owner.hired || !agent.workingDirectory)
-      return undefined;
-    const cwd = agent.foregroundWorkingDirectory ?? agent.workingDirectory;
-    if (splitFleetQualified(agent.paneId)) return { path: cwd, reason: "remote_worktree" };
+    if (!agent.workingDirectory) return undefined;
+    const cwd = agent.workingDirectory;
     try {
+      const owner = this.ports.provenance(agent);
+      if (owner === "unknown" || owner === "owner_interactive") return undefined;
+      const fleet = splitFleetQualified(agent.paneId)?.fleet;
+      if (fleet && fleet !== DESKTOP_SEAT_FLEET && !(await this.ports.localFleet?.(fleet)))
+        return { path: cwd, reason: "remote_worktree" };
       const path = realpathSync((await checkoutGit(cwd, ["rev-parse", "--show-toplevel"])).trim());
       return { path, repository: await ownerCheckout(path) };
     } catch (error) {
