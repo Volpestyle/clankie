@@ -43,6 +43,9 @@ test("a quiet Clankie hire shows its last screen locally and on a PC; an owner's
     `#!${process.execPath}
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+// Herdr names a pane's agent from its foreground process. On Linux node's own name is
+// "MainThread" with "node" in its cmdline, so name the stand-in as real Codex's binary is.
+process.title = "codex";
 execFileSync("herdr", ["pane", "report-agent", process.env.HERDR_PANE_ID, "--source", "herdr:codex",
   "--agent", "codex", "--state", "idle", "--agent-session-id", randomUUID()]);
 process.stdout.write("Codex: fixing #298\\nPR opened as a draft\\nWaiting on CI\\n");
