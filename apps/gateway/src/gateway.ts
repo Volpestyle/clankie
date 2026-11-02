@@ -932,6 +932,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     // An older Mac never sends the header, so it is never offered a device's stream.
     const carriesStreams = request.headers[PUBLIC_GATEWAY_STREAMS_HEADER] === "1";
     webSockets.handleUpgrade(request, socket, head, (webSocket) => {
+      // Refused sockets also need an error handler before attachment.
+      webSocket.once("error", () => undefined);
       const attach = () =>
         attachHost(
           hostId,
@@ -967,7 +969,6 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       };
       proving.add(webSocket);
       webSocket.once("close", cleanup);
-      webSocket.once("error", () => undefined);
       webSocket.once("message", (data, isBinary) => {
         cleanup();
         if (closing || webSocket.readyState !== WebSocket.OPEN) return;
