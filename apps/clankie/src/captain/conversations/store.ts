@@ -128,6 +128,7 @@ import {
   SEAT_CONVERSATION_RETAINED_EVENTS_AFTER_TRIM,
   SEAT_CONVERSATION_RETAINED_EVENTS_MAX,
   ZERO_CURSOR,
+  LINEAR_BURST_WINDOW_MS,
 } from "./constants.ts";
 import { ConversationRefusedError, ConversationResetError, QuestionCommitError } from "./errors.ts";
 import {
@@ -495,6 +496,8 @@ export class ConversationStore {
   public onLinearWakeReceived:
     | ((references: readonly import("../tracker-activity.ts").TrackerWakeReference[]) => Promise<unknown>)
     | undefined;
+  /** How long a chat's tracker activity gathers into one wake; tests shorten it (#383). */
+  public linearBurstWindowMs = LINEAR_BURST_WINDOW_MS;
 
   public constructor(
     root: string,
@@ -709,12 +712,16 @@ export class ConversationStore {
       }
     }
     this.prune();
-    for (const meta of this.metas.values())
-      if (
-        this.trackerWakeTargetAllowed(meta.conversationId) &&
-        this.freshTrackerEvents(meta.conversationId).length
-      )
-        this.queueTrackerActivity(meta.conversationId);
+    // Re-queue restored tracker activity once construction returns, so the caller's own
+    // setup (its routing hooks and burst window) applies to it as to any new activity.
+    queueMicrotask(() => {
+      for (const meta of this.metas.values())
+        if (
+          this.trackerWakeTargetAllowed(meta.conversationId) &&
+          this.freshTrackerEvents(meta.conversationId).length
+        )
+          this.queueTrackerActivity(meta.conversationId);
+    });
     this.scheduleDecisionDeadlines();
   }
 
