@@ -30,6 +30,8 @@ import { createOperatorConversationRelayHandler } from "../src/operator-conversa
 
 const CONNECTOR_TOKEN = "connector-device-session-token";
 const NOW = "2026-10-29T12:00:00.000Z";
+const BLOCKED_START =
+  "The earlier hire still needs checking. No new agent was started. Blocking allocation a1 in pane p1 (age 300s); native receipt r1.";
 const connectorDevice = {
   deviceId: "device-connector-1",
   name: "Claude",
@@ -337,6 +339,8 @@ async function startConnectorRelay(
             status: "places",
             places,
           };
+        if (request.workingDirectory === "C:\\code\\blocked")
+          return { op: "start_agent", schemaVersion: 1, status: "refused", places, detail: BLOCKED_START };
         // The hire outlives a lost answer, as when Clankie's own deadline passes mid-start.
         if (request.workingDirectory === "C:\\code\\slow") throw new Error("upstream deadline passed");
         // The sign-in ends while the agent starts: the relay's recheck refuses a hire that happened.
@@ -567,9 +571,12 @@ async function startConnectorRelay(
   });
   const connector = createConnectorMcpHandler({
     authorizeDevice,
-    operator: createLoopbackConnectorOperator("http://placeholder.invalid", (input, init) =>
-      fetch(new URL(new URL(String(input)).pathname, selfUrl), init),
-    ),
+    operator: createLoopbackConnectorOperator("http://placeholder.invalid", (input, init) => {
+      const request = JSON.parse(String(init?.body));
+      if (request.op === "start_agent" && request.workingDirectory === "C:\\code\\timeout")
+        throw new DOMException("The operation timed out", "TimeoutError");
+      return fetch(new URL(new URL(String(input)).pathname, selfUrl), init);
+    }),
     localAuthorizationServer: "http://127.0.0.1:4310",
     version: "test",
     // This checkout's own shipped skills.
@@ -966,6 +973,19 @@ describe("Claude connector MCP endpoint", () => {
       },
     });
     expect(other.isError).toBe(true);
+    const blocked = await client.callTool({
+      name: "start_agent",
+      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\blocked" },
+    });
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked)).toBe(BLOCKED_START);
+    const timedOut = await client.callTool({
+      name: "start_agent",
+      arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\timeout" },
+    });
+    expect(timedOut.isError).toBe(true);
+    expect(textOf(timedOut)).toContain("transport timed out");
+    expect(textOf(timedOut)).toContain("Call list_agents");
     const lost = await client.callTool({
       name: "start_agent",
       arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\slow" },

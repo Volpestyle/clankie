@@ -2566,8 +2566,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const receipts = this.hireReceipts.all().filter(([key, record]) => {
       if (request?.freshIntent !== undefined) return record.freshHire?.id === request.freshIntent.id;
       if (baseKey === undefined) return false;
-      return (record.freshHire?.baseKey ?? record.hireBaseKey ?? key) === baseKey &&
-        (allocation?.pane === undefined || record.paneId === allocation.pane);
+      return (
+        (record.freshHire?.baseKey ?? record.hireBaseKey ?? key) === baseKey &&
+        (allocation?.pane === undefined || record.paneId === allocation.pane)
+      );
     });
     const receipt = receipts.length === 1 ? receipts[0]![1] : undefined;
     const receiptId = receipt?.messageId;
@@ -3312,7 +3314,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           receiptId: pending.messageId,
           reason: "delivery_unconfirmed",
           deliveryStage: "uncertain",
-          detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
+          detail: this.projectRecoveryOnly.has(input)
+            ? `The earlier hire still needs checking. No new agent was started. Blocking ${this.projectHireBlocker(this.projectRecoveryOnly.get(input)!)}.`
+            : `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
         };
       } finally {
         this.activeHires.delete(receiptKey);

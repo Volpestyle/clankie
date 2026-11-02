@@ -103,7 +103,7 @@ export interface ConnectorMcpOptions {
 }
 
 /**
- * Only a malformed request or an op the connector may never call proves nothing started. The
+ * A session refusal, malformed request or forbidden op proves nothing started. The
  * relay rechecks sign-in after a dispatch too, so even a 401 or 403 can follow a started hire.
  */
 function startNeverRan(error: unknown): boolean {
@@ -115,8 +115,11 @@ function startNeverRan(error: unknown): boolean {
 }
 
 class StartUncertain extends Error {
-  public constructor(public readonly cause: unknown) {
+  public readonly transportError: unknown;
+
+  public constructor(transportError: unknown) {
     super("start_uncertain");
+    this.transportError = transportError;
   }
 }
 
@@ -1129,10 +1132,18 @@ function connectorServer(
       }
       return failure(`There's no tool called ${call.params.name}.`);
     } catch (error) {
-      if (error instanceof StartUncertain)
+      if (error instanceof StartUncertain) {
+        const cause = error.transportError;
+        const detail =
+          cause instanceof ConnectorRefusal
+            ? `${cause.status >= 500 ? "The start_agent transport failed." : refusalText(cause)} HTTP ${cause.status} (${cause.code}).`
+            : cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError")
+              ? "The start_agent transport timed out or was interrupted."
+              : "The start_agent transport failed or its answer was lost.";
         return failure(
-          `${error.cause instanceof ConnectorRefusal ? `${refusalText(error.cause)} HTTP ${error.cause.status}. ` : "The start_agent transport failed or its answer was lost. "}I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
+          `${detail} I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
         );
+      }
       if (error instanceof ConnectorRefusal) return failure(refusalText(error));
       if (error instanceof SessionRefusal) return failure(error.message);
       if (error instanceof ConnectorImageRefusal) return failure(error.message);
