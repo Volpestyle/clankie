@@ -338,6 +338,8 @@ it.each([
       settingsStore: settings,
       settings: () => settings.load(),
       deps: {},
+      // No live Herdr agent behind the seat, so no main checkpoint applies to this close.
+      herdrRunner: { resolveTerminal: async () => Promise.reject(new Error("no terminal")) },
       herdrWatches: {
         tidy: {
           // The owner chooses Watch while the close waits on its worktree check.
