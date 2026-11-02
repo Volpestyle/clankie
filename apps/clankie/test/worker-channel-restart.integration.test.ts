@@ -244,9 +244,12 @@ it("bounds a permanently mismatched native binding's unknown ACK without replayi
   await new Promise((resolve) => setTimeout(resolve, 2_500));
   expect((await service.status()).ackAttempts).toHaveLength(attempts);
   expect((await service.status()).bound.sable).toBe(false);
-  expect(sable.events.filter((id) => id === `report:${reportId}:stored`)).toHaveLength(1);
+  // The seeded report was already read into a lead turn, and a sender hears only
+  // a report's newest stage (d8d342994), so its one receipt is `taken` (#292).
+  const receipt = `report:${reportId}:taken`;
+  expect(sable.events.filter((id) => id === receipt)).toHaveLength(1);
   expect(new Set(sable.events).size).toBe(sable.events.length);
-  expect((await service.status()).pendingReports).toContain(`report:${reportId}:stored`);
+  expect((await service.status()).pendingReports).toContain(receipt);
 });
 
 it("rechecks a refused bridge on its next explicit report after restart, while foreign seats remain refused", async () => {
