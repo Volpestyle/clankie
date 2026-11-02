@@ -662,11 +662,14 @@ it("an app's note reaches the real board signed with the name the owner approved
       (result.content as Array<{ text: string }>)[0]!.text;
 
     const note = "Claude here: I'm reviewing the kh2 netcode PR; Bram's pane is mine until 5pm.";
-    // An author argument is no part of the tool: the board signs with the approved name.
-    const posted = await claude.client.callTool({
+    // An author argument is no part of the tool: it is refused, and the board signs with the approved name.
+    const forged = await claude.client.callTool({
       name: "post_note",
       arguments: { text: note, author: "Owner" },
     });
+    expect(forged.isError).toBe(true);
+    expect(textOf(forged)).toContain('Unknown arguments for post_note: "author"');
+    const posted = await claude.client.callTool({ name: "post_note", arguments: { text: note } });
     expect(JSON.parse(textOf(posted)).posted).toMatchObject({ author: "Claude", text: note });
     const read = JSON.parse(textOf(await grok.client.callTool({ name: "read_notes", arguments: {} }))) as {
       notes: Array<{ author: string; text: string }>;
