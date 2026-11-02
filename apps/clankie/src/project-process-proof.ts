@@ -72,12 +72,16 @@ export async function installedLauncher(harness: string): Promise<NativeLauncher
 const DESKTOP_EXEC_RETRIES = 20;
 const DESKTOP_EXEC_RETRY_MS = 100;
 async function isLaunchShell(executable: string, canonical: (path: string) => Promise<string>) {
+  // macOS's /bin/sh is a stub that execs the shell /private/var/select/sh names (bash by
+  // default) in place, so the kernel shows that shell, never /bin/sh (#506).
   // allow-swallowed-rejection -- an unresolvable path is not the launcher's shell
-  const [observed, shell] = await Promise.all([
+  const [observed, shell, selected] = await Promise.all([
     canonical(executable).catch(() => executable),
     canonical("/bin/sh").catch(() => "/bin/sh"),
+    // allow-swallowed-rejection -- no shell selection outside macOS
+    canonical("/private/var/select/sh").catch(() => undefined),
   ]);
-  return observed === shell || executable === "/bin/sh";
+  return observed === shell || observed === selected || executable === "/bin/sh";
 }
 
 /** A running seat's harness binary differs from the installed one only by its release. */
@@ -301,13 +305,15 @@ export function createProjectProcessObserver(options: {
     at("initial_process");
     const observeInitial = async () => {
       // The first observation only finds the harness's parent; the kernel checks it below.
-      const located =
-        seat.pid === process.pid ? undefined : (await snapshot(process.pid, "initial"))?.processes[1];
-      if (!located || located.pid !== seat.pid || located.ppid <= 1 || located.ppid === seat.pid)
+      if (seat.pid === process.pid) return "native_initial_unavailable" as const;
+      const located = (await snapshot(process.pid, "initial"))?.processes[1];
+      // Mid-exec the kernel briefly can't report the process at all; that is retried.
+      if (!located) return "native_initial_unseen" as const;
+      if (located.pid !== seat.pid || located.ppid <= 1 || located.ppid === seat.pid)
         return "native_initial_unavailable" as const;
       const initial = await snapshot(located.ppid, "initial");
       const [shell, agent] = initial?.processes ?? [];
-      if (!initial || !shell || !agent) return "native_initial_unavailable" as const;
+      if (!initial || !shell || !agent) return "native_initial_unseen" as const;
       if (
         agent.pid !== seat.pid ||
         agent.ppid !== shell.pid ||
@@ -319,22 +325,25 @@ export function createProjectProcessObserver(options: {
       return { initial, shell, agent, match };
     };
     // The terminal's launcher execs the harness in its own process. Seen in that instant,
-    // the process is still the launcher's shell: look again, briefly, for the exec to land.
-    // Nothing else is retried, and the harness must still match the installed launcher.
+    // the process is still the launcher's shell, or mid-exec the kernel can't report it at
+    // all (#506): look again, briefly, for the exec to land. Nothing else is retried, and
+    // the harness must still match the installed launcher.
     let observed = await observeInitial();
     for (
       let attempt = 0;
       attempt < DESKTOP_EXEC_RETRIES &&
-      typeof observed !== "string" &&
-      !observed.match &&
-      (await isLaunchShell(observed.agent.executable, canonical));
+      (observed === "native_initial_unseen" ||
+        (typeof observed !== "string" &&
+          !observed.match &&
+          (await isLaunchShell(observed.agent.executable, canonical))));
       attempt++
     ) {
       await new Promise((resolve) => setTimeout(resolve, DESKTOP_EXEC_RETRY_MS));
       if (options.signal?.aborted) break;
       observed = await observeInitial();
     }
-    if (typeof observed === "string") return refuse(observed);
+    if (typeof observed === "string")
+      return refuse(observed === "native_initial_unseen" ? "native_initial_unavailable" : observed);
     const { initial, shell, agent, match } = observed;
     if (!match) return refuse("launcher_mismatch");
     at("final_process");
