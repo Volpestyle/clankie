@@ -35,7 +35,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: clankie-public-docs-production
+  # PR builds supersede only their own pushes; deploys keep one production group.
+  group: ${{ github.event_name == 'pull_request' && format('clankie-public-docs-pr-{0}', github.event.pull_request.number) || 'clankie-public-docs-production' }}
   cancel-in-progress: true
 
 permissions:
