@@ -37,6 +37,20 @@ export interface HerdrSessionSourceOptions {
   readonly localMachine?: string;
 }
 
+/** One line for a lead choosing who takes related work (#425): newest three, compactly. */
+function workedOnWords(entries: NonNullable<OperatorFleetSeat["workedOn"]>): string | undefined {
+  const parts = entries.slice(0, 3).flatMap((entry) => {
+    const what = entry.issue ?? entry.branch;
+    if (what === undefined) return [];
+    const areas = entry.areas?.length ? ` in ${entry.areas.slice(0, 3).join(", ")}` : "";
+    const pulls = entry.pullRequests?.length
+      ? ` (${entry.pullRequests.map((url) => url.replace(/^https:\/\/github\.com\//u, "")).join(", ")})`
+      : "";
+    return [`${what}${areas}${pulls}`];
+  });
+  return parts.length === 0 ? undefined : parts.join("; ");
+}
+
 function starterWords(starter: NonNullable<OperatorFleetSeat["startedBy"]>): string {
   return starter.kind === "owner" ? "the owner" : starter.kind === "clankie" ? "Clankie" : starter.name;
 }
@@ -74,6 +88,7 @@ export function createHerdrSessionSource(
         const answering = seat.fleet === undefined || linked.get(seat.fleet)?.reachable !== false;
         const doing = seat.stance?.note ?? seat.summary;
         const name = names.get(seat.personaId);
+        const workedOn = seat.workedOn === undefined ? undefined : workedOnWords(seat.workedOn);
         return {
           id: seat.seatId,
           source: "herdr",
@@ -86,6 +101,7 @@ export function createHerdrSessionSource(
           status: answering ? seat.status : "unreachable",
           ...(seat.title.length === 0 ? {} : { title: seat.title }),
           ...(doing === undefined ? {} : { doing }),
+          ...(workedOn === undefined ? {} : { workedOn }),
           ...(seat.startedBy === undefined ? {} : { startedBy: starterWords(seat.startedBy) }),
           canMessage: true,
         };

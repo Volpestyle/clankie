@@ -1,6 +1,7 @@
 import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -29,6 +30,7 @@ import {
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { createDiscordTurns } from "../src/captain/captain-discord-turns.ts";
+import { createHerdrSessionSource } from "@clankie/agent-hosts/sessions";
 
 const fixtures: Array<{ root: string; captain: ReturnType<typeof createCaptain> }> = [];
 afterEach(async () => {
@@ -49,9 +51,12 @@ async function fixture(
     adopted?: boolean;
     /** A local worker beside a configured remote machine whose census never answers. */
     unreachable?: boolean;
+    /** The worker's folder; its own temp root by default. */
+    workingDirectory?: (root: string) => string;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-lead-integration-"));
+  const cwd = options.workingDirectory?.(root) ?? root;
   const seeded = new ConversationStore(join(root, "conversations"), async () => {});
   const leads: string[] = [];
   for (const title of ["Lead A", "Lead B"]) {
@@ -69,7 +74,7 @@ async function fixture(
     status: "working",
     title: "Noor",
     session: { source: "herdr:codex", kind: "id", value: "native-one" },
-    workingDirectory: root,
+    workingDirectory: cwd,
   };
   const owner: ConversationOwner = {
     conversationId: options.gone ? "removed-conversation" : options.room ? room : leads[0]!,
@@ -153,7 +158,7 @@ async function fixture(
     agent_status: "working",
     title: "Noor",
     agent_session: { ...agent.session! },
-    cwd: root,
+    cwd,
   };
   const censusAgent = structuredClone(wireAgent);
   const snapshotState: {
@@ -844,3 +849,105 @@ it("the fleet room records a lead's message to its hire and the hire's report on
     notes: [{ author: "Claude", text: "PR review on kh2 is mine today." }],
   });
 });
+
+// #425: a lead routes related work to a worker that already knows the area. The fleet
+// records what each persona worked on from what the service itself observes: the issue the
+// seat holds, its worktree branch and the areas its own commits touched, and the pull
+// requests its done report names. It survives a service restart and reaches list_agents.
+it("records what a worker has worked on, shows it to its lead and keeps it across a restart", async () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+      cwd,
+      stdio: "pipe",
+    });
+  const f = await fixture({
+    workingDirectory: (root) => {
+      // The worker's own linked worktree of a project checkout, as a hire gets.
+      const repo = join(root, "repo");
+      mkdirSync(repo);
+      git(repo, "init", "-q", "-b", "main");
+      writeFileSync(join(repo, "README.md"), "fixture\n");
+      git(repo, "add", "-A");
+      git(repo, "commit", "-q", "-m", "init");
+      git(repo, "worktree", "add", "-q", "-b", "clankie/dead-app-server", join(root, "wt"));
+      return join(root, "wt");
+    },
+  });
+  const worktree = f.agent.workingDirectory!;
+  const fleet = async (captain = f.captain) => {
+    const result = await captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 });
+    if (result.op !== "fleet") throw new Error("Expected a fleet");
+    return OperatorFleetSnapshotSchema.parse(result.snapshot);
+  };
+  expect((await fleet()).seats).toEqual([expect.objectContaining({ seatId: f.agent.terminalId })]);
+
+  // Its lead assigns it an issue, as a lead re-tasks a seat, and it commits in two areas.
+  const bank = await f.captain.laneToolBank("operator", f.leads[0]!);
+  const reviewed = await bank.tools
+    .find((tool) => tool.name === "fleet_efficiency")!
+    .call({
+      action: "review",
+      seatId: f.agent.terminalId,
+      deliverable: "CLK-362",
+      evidence: "Reassigned to the dead app-server fix.",
+    });
+  expect(JSON.stringify(reviewed.content)).toContain("reviewedAt");
+  mkdirSync(join(worktree, "apps", "clankie", "src"), { recursive: true });
+  mkdirSync(join(worktree, "docs"));
+  writeFileSync(join(worktree, "apps", "clankie", "src", "a.ts"), "export {};\n");
+  writeFileSync(join(worktree, "apps", "clankie", "src", "b.ts"), "export {};\n");
+  writeFileSync(join(worktree, "docs", "notes.md"), "notes\n");
+  git(worktree, "add", "-A");
+  git(worktree, "commit", "-q", "-m", "fix");
+  // A fleet read answers from the last census while the next one runs.
+  const workedOn = () => fleet().then((snapshot) => snapshot.seats[0]?.workedOn);
+  await expect.poll(workedOn, { timeout: 10_000, interval: 600 }).toEqual([
+    {
+      issue: "CLK-362",
+      branch: "clankie/dead-app-server",
+      areas: ["apps/clankie", "docs"],
+      at: expect.any(String),
+    },
+  ]);
+
+  // Its done report names the pull request.
+  const receipt = await delivery(f.captain, f.agent.paneId);
+  expect(
+    await f.captain.receiveFleetSeatMessage(
+      f.agent.paneId,
+      "Done. PR https://github.com/Volpestyle/clankie/pull/426 is merged.",
+      receipt,
+      undefined,
+      { kind: "done" },
+    ),
+  ).toMatchObject({ received: true });
+  await expect.poll(workedOn, { timeout: 10_000, interval: 600 }).toEqual([
+    expect.objectContaining({
+      issue: "CLK-362",
+      pullRequests: ["https://github.com/Volpestyle/clankie/pull/426"],
+    }),
+  ]);
+  const seat = (await fleet()).seats[0]!;
+
+  // A lead choosing who takes related work sees it in list_agents.
+  const sessions = createHerdrSessionSource(
+    {
+      dispatch: (request) => f.captain.serveOperatorConversation(request),
+      terminalTail: async () => {
+        throw new Error("No terminal tails in this fixture");
+      },
+      tailRefusal: async () => new Error("No terminal tails in this fixture"),
+    },
+    { surfaceClientId: "fixture" },
+  );
+  expect((await sessions.list()).sessions).toEqual([
+    expect.objectContaining({
+      workedOn: "CLK-362 in apps/clankie, docs (Volpestyle/clankie/pull/426)",
+    }),
+  ]);
+
+  // The record lives in hub state: a restarted service shows it again.
+  await f.captain.close();
+  const reopened = f.open();
+  expect((await fleet(reopened)).seats[0]?.workedOn).toEqual(seat.workedOn);
+}, 30_000);

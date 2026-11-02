@@ -4,6 +4,22 @@ import { z } from "zod";
 export const SeatEfficiencyIssueKeyPattern = "^(?:[A-Z][A-Z0-9]*-[0-9]+|LOCAL-[A-Z][A-Z0-9]*-[1-9][0-9]*)$";
 export const SeatEfficiencyIssueKeySchema = z.string().regex(new RegExp(SeatEfficiencyIssueKeyPattern, "u"));
 
+/**
+ * One piece of work a persona did (#425), newest first on its seat: the issue it held,
+ * its branch, the top-level areas its commits touched and the pull requests its done
+ * reports named. Routing evidence for its lead; it controls nothing.
+ */
+export const OperatorSeatWorkedOnSchema = z
+  .object({
+    issue: z.string().min(1).max(256).optional(),
+    branch: z.string().min(1).max(256).optional(),
+    areas: z.array(z.string().min(1).max(256)).max(8).optional(),
+    pullRequests: z.array(z.string().url().max(512)).max(8).optional(),
+    at: z.string().datetime(),
+  })
+  .strict();
+export type OperatorSeatWorkedOn = z.infer<typeof OperatorSeatWorkedOnSchema>;
+
 /** Observed evidence for the owning lead to review; flags never control a worker. */
 export const OperatorSeatEfficiencySchema = z
   .object({

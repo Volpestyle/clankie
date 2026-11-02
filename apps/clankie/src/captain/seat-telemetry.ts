@@ -238,6 +238,76 @@ export async function readGithubOriginSlug(cwd: string): Promise<string | undefi
 }
 
 /** Capture before native work begins; a primary checkout cannot own this signal. */
+/** Where a change lives: `apps/clankie`, `packages/protocol`, `docs`, or a root file. */
+export function changeArea(path: string): string {
+  const parts = path.split("/");
+  return parts.length > 2 && ["apps", "packages", "integrations"].includes(parts[0]!)
+    ? `${parts[0]}/${parts[1]}`
+    : parts.length > 1
+      ? parts[0]!
+      : path;
+}
+
+/**
+ * The areas a seat's own commits touched since its baseline (#425), most-changed first.
+ * Each commit range is diffed once; any git failure is simply unknown.
+ */
+export function createChangedAreasReader() {
+  const diffs = new Map<string, Promise<string[] | undefined>>();
+  const run = (root: string, args: string[]) =>
+    execFileAsync("git", ["-C", root, ...args], {
+      timeout: 1500,
+      maxBuffer: 1024 * 1024,
+      env: gitEnvironment(),
+    }).then(({ stdout }) => stdout);
+  // HEAD from the worktree's own git files: no process per fleet read.
+  const head = async (baseline: SeatCommitBaseline): Promise<string | undefined> => {
+    try {
+      const pointer = (await smallFile(join(baseline.gitDir, "HEAD"))).trim();
+      if (/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/iu.test(pointer)) return pointer;
+      const ref = /^ref: (refs\/heads\/\S+)$/u.exec(pointer)?.[1];
+      if (ref === undefined) return undefined;
+      try {
+        return (await smallFile(join(baseline.commonDir, ref))).trim();
+      } catch {
+        const packed = await smallFile(join(baseline.commonDir, "packed-refs"), 4 * 1024 * 1024);
+        return packed
+          .split("\n")
+          .map((line) => line.split(" "))
+          .find(([, name]) => name === ref)?.[0];
+      }
+    } catch {
+      return undefined;
+    }
+  };
+  const areas = async (root: string, from: string, to: string) => {
+    const counts = new Map<string, number>();
+    for (const path of (await run(root, ["diff", "--name-only", `${from}..${to}`]))
+      .split("\n")
+      .filter(Boolean))
+      counts.set(changeArea(path), (counts.get(changeArea(path)) ?? 0) + 1);
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 8)
+      .map(([area]) => area);
+  };
+  return {
+    async read(baseline: SeatCommitBaseline): Promise<string[] | undefined> {
+      const current = await head(baseline);
+      if (current === undefined) return undefined;
+      const key = `${baseline.worktreeRoot}\0${baseline.head}\0${current}`;
+      let hit = diffs.get(key);
+      if (hit === undefined) {
+        if (diffs.size > 256) diffs.clear();
+        // allow-swallowed-rejection -- an unreadable diff leaves this seat's areas unknown; routing evidence only.
+        hit = areas(baseline.worktreeRoot, baseline.head, current).catch(() => undefined);
+        diffs.set(key, hit);
+      }
+      return hit;
+    },
+  };
+}
+
 export async function readSeatCommitBaseline(cwd: string): Promise<SeatCommitBaseline | undefined> {
   if (!isAbsolute(cwd)) return undefined;
   try {

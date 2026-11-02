@@ -45,6 +45,7 @@ import type { ProjectHirePolicy } from "./herdr-watch.ts";
 import { prepareStoppedTurnSettlement } from "./stopped-turn.ts";
 import { fleetInstructions } from "./captain-prompts.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
+import { PersonaWorkHistory } from "./persona-work-history.ts";
 import { prepareSeatTelemetry, readSeatCommitBaseline, type SeatCommitBaseline } from "./seat-telemetry.ts";
 import { fleetReviewContext } from "./fleet-review.ts";
 import { readCodexGoal } from "@clankie/agent-transcript";
@@ -1337,6 +1338,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const stances = createStanceStore();
   const agentWork = createAgentWorkStore(options.stateDir);
   const seatEfficiency = new SeatEfficiencyStore(join(options.stateDir, "seat-efficiency.json"));
+  const workHistory = new PersonaWorkHistory(join(options.stateDir, "persona-work-history.json"));
   const seatLeadOwners = new WeakMap<
     OperatorFleetSeat,
     { owner: ConversationOwner; admitted: boolean; observed: ObservedFleetSeat }
@@ -3639,6 +3641,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     observedCommitBaselines,
     preparedTelemetry,
     seatEfficiency,
+    workHistory,
     issueStatus,
     fleetRoster,
     waitingRosterSeats,
@@ -6240,6 +6243,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 detail: `Recorded for huddle ${recorded.id}; carry on with your work.`,
               };
             }
+          }
+          // #425: the pull requests a done report names join its persona's work history.
+          if (options?.kind === "done" && agent.session !== undefined) {
+            const occupant = occupantIdForHerdrSession(agent.session);
+            const persona = liveSeats.find((seat) => seat.occupantId === occupant)?.personaId;
+            if (persona !== undefined) workHistory.noteDone(persona, text);
           }
           const message = [
             `An agent wrote to you from a fleet pane${fleet === undefined ? "" : ` on ${fleet}`}: ` +
