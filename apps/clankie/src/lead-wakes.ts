@@ -14,7 +14,7 @@ const TIMEOUT_MS = 15_000;
 const REPLY_HINT =
   "Answer with post_note on Clankie's connector; the sender reads the notes board with read_notes.";
 
-export interface WorkerWakeEvent {
+interface WorkerWakeEvent {
   readonly agent: string;
   readonly ref: string;
   readonly event: "report" | "settled";

@@ -140,6 +140,7 @@
         "scripts/linear-cutover-rehearsal.ts",
         "test/fixtures/runtime-canary-cpu-preload.mjs",
         "test/fixtures/runtime-canary-service.ts",
+        "test/fixtures/codex-report-native-service.ts",
         "test/fixtures/mcp-stdio-bridge.ts",
         "test/fixtures/lent-screen-provider.mjs",
         "src/captain/pi-worker-fleet.d.mts",
