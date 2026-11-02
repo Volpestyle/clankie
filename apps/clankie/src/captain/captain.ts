@@ -1,3 +1,4 @@
+import { FleetLeadActivity, type LeadHire } from "./fleet-lead-activity.ts";
 import { discordGuildSettings } from "@clankie/protocol";
 import { listedOnLane } from "./mcp-tool-surface.ts";
 import { RoomLoops } from "./room-loops.ts";
@@ -1360,6 +1361,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // drew. Same bounds and the same volatility as the prompt ring (ADR 0163).
   const seatMessages = new SeatMessageWindow();
   const leadVisits = new LeadVisitWindow();
+  const fleetLeadActivity = new FleetLeadActivity();
   const noteFleetRoom = (record: FleetRoomRecord) => {
     try {
       fleetRoom.record(record);
@@ -1391,6 +1393,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   };
   const recordLeadVisit = (seatId: string, kind: "message" | "close", text?: string) => {
     const seat = liveSeats.find((candidate) => candidate.seatId === seatId);
+    if (seat) {
+      const at = new Date().toISOString();
+      fleetLeadActivity.record({ at, touch: { seatId, occupantId: seat.occupantId, kind, at } });
+    }
     leadVisits.record({
       id: randomUUID(),
       kind,
@@ -2724,6 +2730,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     seatByPersona,
     desktop,
     recordLeadVisit,
+    recordHire: (seat, source) => {
+      const caller = source?.connectorPlace;
+      if (source?.ownerHire !== undefined) return;
+      const at = new Date().toISOString();
+      fleetLeadActivity.record({
+        ...(caller?.deviceId === undefined ? {} : { deviceId: caller.deviceId }),
+        ...(caller?.channel === undefined ? {} : { channel: caller.channel }),
+        at,
+        touch: { seatId: seat.seatId, occupantId: seat.occupantId, kind: "hire", at },
+      });
+    },
     noteFleetRoom,
     leadParty,
     workerParty,
@@ -5103,6 +5120,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return fleetSnapshot;
       },
       seatStarters: (snapshot) => seatStarters(snapshot),
+      observeConnectorLead: (input) => fleetLeadActivity.record(input),
       get headSeat() {
         return headSeat;
       },
@@ -5206,6 +5224,35 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     evaluatorCommand: (command) => evaluator.command(command),
     routineCommand: (command) => routines.command(command, { kind: "owner" }),
 
+    observeConnectorLead: (input) => fleetLeadActivity.record(input),
+    async fleetLeadTarget(seatId) {
+      const { snapshot } = await fleetSnapshot();
+      const seat = snapshot.seats.find((candidate) => candidate.seatId === seatId);
+      return seat && { seatId: seat.seatId, occupantId: seat.occupantId };
+    },
+    async fleetLeadDetails(now) {
+      const { snapshot } = await fleetSnapshot();
+      const hires: LeadHire[] = snapshot.seats.flatMap((seat) => {
+        if (seat.owner?.hired !== true) return [];
+        const starter = herdrWatches.seatStarter(seat.seatId, seat.occupantId);
+        if (starter?.kind === "owner") return [];
+        return [
+          {
+            seatId: seat.seatId,
+            occupantId: seat.occupantId,
+            startedBy:
+              starter?.kind === "app"
+                ? {
+                    kind: "app" as const,
+                    deviceId: starter.deviceId,
+                    ...(starter.channel === undefined ? {} : { channel: starter.channel }),
+                  }
+                : { kind: "clankie" as const },
+          },
+        ];
+      });
+      return { hires, activity: fleetLeadActivity.recent(now) };
+    },
     async fleetLeadState() {
       const [last] = await turnSettled.read({ limit: 1 });
       const settledAt = last?.completedAt ?? last?.failedAt;

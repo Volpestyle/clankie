@@ -49,6 +49,11 @@ paths:
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       summary: Read Clankie and connected app lead activity
       description: Owner operator or owner Take Control device, through the relay like the fleet roster. Sorted by id, with no ranking or authority. Connector devices cannot read this route. Clankie is active when selected as lead or after model activity within ten minutes; connector devices are active when seen within fifteen minutes. Revoked and expired registrations are omitted.
+      parameters:
+        - in: query
+          name: includeChannels
+          schema: { type: boolean, default: false }
+          description: Opt into one lead per device/channel seen within 24 hours or holding a live hire, plus unnamed device leads and Clankie. Adds channel, appId, live hires and recent touches; the default response is unchanged. Connected leads pass channel with their owner-known chat or channel name on start_agent and message_agent (also answer_prompt, press_keys and close_agent); omit if none. Trimmed 1–64 characters; grants nothing and never reaches the worker.
       responses:
         "200":
           description: Current host lead observations
@@ -73,6 +78,30 @@ paths:
                         name: { type: string, minLength: 1 }
                         active: { type: boolean }
                         lastActiveAt: { type: string, format: date-time }
+                        channel: { type: string, minLength: 1, maxLength: 64 }
+                        appId: { type: string, minLength: 1 }
+                        hires:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: false
+                            required: [seatId, occupantId]
+                            properties:
+                              seatId: { type: string, minLength: 1 }
+                              occupantId: { type: string, minLength: 1 }
+                        touches:
+                          type: array
+                          maxItems: 20
+                          description: Confirmed worker acts within 30 minutes, newest first; in memory. Channel lead ids are deviceId:channel and activity expires after 15 minutes.
+                          items:
+                            type: object
+                            additionalProperties: false
+                            required: [seatId, occupantId, kind, at]
+                            properties:
+                              seatId: { type: string, minLength: 1 }
+                              occupantId: { type: string, minLength: 1 }
+                              kind: { type: string, enum: [hire, message, answer, close] }
+                              at: { type: string, format: date-time }
         "403": { description: Owner fleet read required }
         "503": { description: Lead observations unavailable }
   /v1/operator/http-settings:

@@ -437,6 +437,12 @@ export interface CaptainPort {
    * no transcript, tool arguments, or credentials.
    */
   /** Existing lead setting and most recent service model turn, for owner fleet reads. */
+  observeConnectorLead?(input: import("./fleet-lead-activity.ts").LeadActivityObservation): void;
+  fleetLeadTarget?(seatId: string): Promise<{ seatId: string; occupantId: string } | undefined>;
+  fleetLeadDetails?(now: number): Promise<{
+    hires: import("./fleet-lead-activity.ts").LeadHire[];
+    activity: import("./fleet-lead-activity.ts").LeadActivity[];
+  }>;
   fleetLeadState?(): Promise<{ lead: "clankie" | "apps"; lastActiveAt?: string }>;
   readTurnMetrics(query: {
     readonly limit?: number;

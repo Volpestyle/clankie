@@ -21,6 +21,7 @@ const HireStarterSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("app"),
       deviceId: z.string().min(1).max(256),
+      channel: z.string().trim().min(1).max(64).optional(),
       notify: WorkerNotifySchema.optional(),
     })
     .strict(),

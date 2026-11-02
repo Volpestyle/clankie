@@ -10885,7 +10885,7 @@ command is sent, and a call that cannot be recorded is refused. The audit stores
 only the digest, but the full command text stays in that conversation's session
 transcript. The digest is a convention, not secrecy.
 
-### `fleet leads [--json]`
+### `fleet leads [--json] [--channels]`
 
 Reads `GET /v1/fleet/leads` through the same owner-only boundary as the roster.
 Prints each lead's id, registered name, active/inactive state and last activity
@@ -10896,6 +10896,17 @@ app lead, active when seen within fifteen minutes. Revoked and expired devices
 are omitted. Rows are sorted by id, with no ranking or authority implied.
 Connector calls refresh their device's last seen time at most once per minute
 through the relay's `/v1/devices/self` authorization check.
+
+`--channels` opts into `?includeChannels=true`: one lead per app device and
+channel seen in the last 24 hours or holding a live hire, plus unnamed device
+leads and Clankie. Rows add `appId`, optional `channel`, exact live
+`hires: [{seatId, occupantId}]`, and `touches` (up to 20 acts from the last
+30 minutes, newest first, with `seatId`, `occupantId`, `kind`, and `at`).
+Kinds are `hire`, `message`, `answer`, and `close`. Channel ids are
+`deviceId:channel`; channel activity is in memory and hires survive restarts.
+The response without this option is unchanged.
+
+- Connected leads: pass `channel` with your owner-known chat or channel name on `start_agent` and `message_agent` (also on `answer_prompt`, `press_keys`, and `close_agent`); omit it if you have none. It is trimmed, 1–64 characters, grants nothing, and is never shown to the worker.
 
 ### `fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]`
 

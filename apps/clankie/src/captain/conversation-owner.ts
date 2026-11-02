@@ -84,6 +84,7 @@ export interface ConversationAuthority {
   readonly connectorPlace?: {
     readonly projectId: string;
     readonly deviceId?: string;
+    readonly channel?: string;
     readonly notify?: import("@clankie/protocol/connector").WorkerNotify;
   };
   readonly owner: ConversationOwner;
@@ -115,6 +116,9 @@ export function captureConversationAuthority(
       ? {
           connectorPlace: Object.freeze({
             projectId: source.connectorPlace.projectId,
+            ...(source.connectorPlace.channel === undefined
+              ? {}
+              : { channel: source.connectorPlace.channel }),
             ...(source.connectorPlace.notify === undefined
               ? {}
               : { notify: Object.freeze({ ...source.connectorPlace.notify }) }),

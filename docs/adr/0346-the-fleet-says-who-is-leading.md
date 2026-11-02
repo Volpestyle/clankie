@@ -15,9 +15,9 @@ Several leads drive the same fleet: Clankie's own captain, and connected apps su
 
 ## Consequences
 
-- The read states facts the host already keeps; it adds no new durable state and grants nothing.
+- The default read states facts the host already keeps and grants nothing. The channel opt-in below adds display attribution to existing hire records.
 - A quiet app becomes inactive within fifteen minutes; a webhook-woken one shows while it works. Inactive registrations remain in the read with active false.
-- Connector traffic already records device.seen at most once a minute through the relay's /v1/devices/self check; no activity-write change is needed.
+- Connector traffic already records device.seen at most once a minute through the relay's /v1/devices/self check for the default read; channel activity below is observed in memory.
 - The connector's list_agents is unchanged.
 
 ## Channels

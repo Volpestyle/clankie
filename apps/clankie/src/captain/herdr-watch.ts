@@ -3039,6 +3039,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ? ({
               kind: "app",
               deviceId: authority.connectorPlace.deviceId,
+              ...(authority.connectorPlace.channel === undefined
+                ? {}
+                : { channel: authority.connectorPlace.channel }),
               ...(authority.connectorPlace.notify === undefined
                 ? {}
                 : { notify: authority.connectorPlace.notify }),

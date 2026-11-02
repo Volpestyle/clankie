@@ -16,6 +16,13 @@ import { TurnMetrics, TurnSettledLog, turnSettledLogPath } from "../src/captain/
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
 import { runFleetLeadsCommand } from "../../tui/src/command/fleet-leads.ts";
+import {
+  HerdrWatchStore,
+  type HerdrAgentSnapshot,
+  type HerdrSeatSpawnResult,
+} from "../src/captain/herdr-watch.ts";
+import { HireOwners } from "../src/captain/hire-owners.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { leadChatFixture } from "./fixtures/lead-chats.ts";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -25,7 +32,76 @@ afterEach(async () => {
 });
 
 it("reads real host lead and device facts over HTTP, including the relay's throttled connector activity", async () => {
-  const f = await leadChatFixture(false, cleanup);
+  const workers: HerdrAgentSnapshot[] = [];
+  const f = await leadChatFixture(false, cleanup, {
+    nativeSourceProof: true,
+    extraAgents: () => workers,
+    closePane: async (pane, guard) => {
+      await guard?.();
+      const index = workers.findIndex((agent) => agent.paneId === pane);
+      if (index >= 0) workers.splice(index, 1);
+    },
+  });
+  await f.settings.update((settings) => ({
+    ...settings,
+    projects: {
+      projects: [
+        {
+          id: "proof",
+          name: "Proof",
+          workspaces: [{ id: "local", machineId: "local", platform: "posix", path: f.root }],
+        },
+      ],
+    },
+  }));
+  // Replace only native allocation/delivery: real start admission writes its hire intent,
+  // real journal binding and census retain attribution, and real HTTP reads project it.
+  const native = HerdrWatchStore.prototype as unknown as { performSpawnSeat: HerdrWatchStore["spawnSeat"] };
+  const briefs: string[] = [];
+  vi.spyOn(native, "performSpawnSeat").mockImplementation(
+    async function (this: HerdrWatchStore, request, _subject, brief, _resume, authority, adopt, flush) {
+      if (!authority?.intentId) throw new Error("No persisted hire intent");
+      briefs.push(brief ?? "");
+      const index = workers.length;
+      const agent: HerdrAgentSnapshot = {
+        paneId: `w4:p${index + 3}`,
+        terminalId: `term_worker_${index}`,
+        agent: "codex",
+        status: "idle",
+        title: request.title,
+        workingDirectory: f.root,
+        session: { source: "herdr:codex", kind: "id", value: randomUUID() },
+      };
+      const occupantId = occupantIdForHerdrSession(agent.session!);
+      const journal = (this as unknown as { hireOwners: HireOwners }).hireOwners;
+      journal.bind(
+        agent.paneId,
+        authority.owner,
+        agent.terminalId,
+        authority.intentId,
+        occupantId,
+        undefined,
+        "proof",
+      );
+      workers.push(agent);
+      const result: Extract<HerdrSeatSpawnResult, { outcome: "spawned" }> = {
+        outcome: "spawned",
+        seat: {
+          seatId: agent.terminalId,
+          paneId: agent.paneId,
+          occupantId,
+          subject: `proof-${index}`,
+          harness: "codex",
+          status: "idle",
+          title: request.title,
+          workingDirectory: f.root,
+        },
+      };
+      adopt?.(result, "proof");
+      await flush?.();
+      return result;
+    },
+  );
   let now = Date.now();
   const iso = (offset = 0) => new Date(now + offset).toISOString();
   const key = randomBytes(32);
@@ -67,6 +143,10 @@ it("reads real host lead and device facts over HTTP, including the relay's throt
     deviceSessionKey: key,
     eventLogPath,
     clock: () => new Date(now),
+    authenticateCaptain: async (request) =>
+      request.headers.get("authorization") === "Bearer relay"
+        ? { captainId: "relay", steerSourceLane: "api" }
+        : undefined,
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
   });
@@ -135,6 +215,167 @@ it("reads real host lead and device facts over HTTP, including the relay's throt
     else expect(output).toContain("recent\tClaude\tactive");
   }
 
+  const dispatch = async (body: object, bearer = "relay") => {
+    const response = await fetch(`${baseUrl}${OPERATOR_CONVERSATION_DISPATCH_PATH}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: 1, ...body }),
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+    return response.json();
+  };
+  const expanded = async () => {
+    const response = await fetch(`${baseUrl}${FLEET_LEADS_PATH}?includeChannels=true`, {
+      headers: { authorization: "Bearer owner" },
+    });
+    expect(response.status).toBe(200);
+    return FleetLeadsSnapshotSchema.parse(await response.json());
+  };
+  const beforeChannels = await (await read()).text();
+  for (const channel of ["   ", "x".repeat(65), 42]) {
+    const invalid = await fetch(`${baseUrl}${OPERATOR_CONVERSATION_DISPATCH_PATH}`, {
+      method: "POST",
+      headers: { authorization: "Bearer relay", "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: 1, op: "start_agent", appDeviceId: "recent", channel }),
+    });
+    expect(invalid.status).toBe(400);
+  }
+  for (const channel of ["a", "b"]) {
+    let started = await dispatch({
+      op: "start_agent",
+      appDeviceId: "recent",
+      channel: ` ${channel} `,
+      machine: "local",
+      workingDirectory: f.root,
+      harness: "codex",
+      name: `Task ${channel}`,
+      prompt: "Do the assigned job.",
+    });
+    if (started.status === "pending") {
+      await expect
+        .poll(async () => {
+          started = await dispatch({ op: "start_agent", appDeviceId: "recent", startId: started.startId });
+          return started.status;
+        })
+        .toBe("started");
+    }
+    expect(started.status).toBe("started");
+  }
+  expect(briefs).toHaveLength(2);
+  expect(briefs.every((brief) => !brief.includes('"channel"') && !brief.includes("channel:"))).toBe(true);
+  const journal = new HireOwners(join(f.root, "herdr-watches.json.owners.json"));
+  const own = workers.map((agent) => ({
+    seatId: agent.terminalId,
+    occupantId: occupantIdForHerdrSession(agent.session!),
+  }));
+  expect(journal.starter(own[0]!.seatId, own[0]!.occupantId)).toMatchObject({
+    kind: "app",
+    deviceId: "recent",
+    channel: "a",
+  });
+  expect(journal.starter(own[1]!.seatId, own[1]!.occupantId)).toMatchObject({
+    kind: "app",
+    deviceId: "recent",
+    channel: "b",
+  });
+  const channels = (await expanded()).leads.filter((lead) => lead.appId === "recent");
+  expect(
+    channels
+      .filter((lead) => lead.channel)
+      .map((lead) => ({ id: lead.id, channel: lead.channel, hires: lead.hires })),
+  ).toEqual([
+    { id: "recent:a", channel: "a", hires: [own[0]] },
+    { id: "recent:b", channel: "b", hires: [own[1]] },
+  ]);
+  for (const [index, channel] of ["a", "b"].entries())
+    expect(channels.find((lead) => lead.channel === channel)?.touches).toMatchObject([
+      { ...own[index], kind: "hire" },
+    ]);
+  expect(await (await read()).text()).toBe(beforeChannels);
+  const cliChannels = await runFleetLeadsCommand(["--json", "--channels"], {
+    host: baseUrl,
+    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+  });
+  expect(cliChannels.leads).toEqual((await expanded()).leads);
+
+  // Native prompt I/O is the boundary seam; authorization and touch recording use the HTTP route.
+  await fetch(`${baseUrl}/v1/connector/prompt-answers`, {
+    method: "POST",
+    headers: { authorization: "Bearer owner", "content-type": "application/json" },
+    body: JSON.stringify({ deviceId: "recent", allowed: true }),
+  });
+  vi.spyOn(f.captain, "answerPrompt").mockResolvedValue({ outcome: "answered", message: "Answered" });
+  vi.spyOn(f.captain, "pressKeys").mockResolvedValue({ outcome: "pressed", message: "Pressed" });
+  await dispatch({
+    op: "prompt_answer",
+    appDeviceId: "recent",
+    channel: "a",
+    terminalId: own[0]!.seatId,
+    expect: "Proceed?",
+    steps: [{ key: "enter" }],
+  });
+  await dispatch({
+    op: "key_press",
+    appDeviceId: "recent",
+    channel: "b",
+    terminalId: own[1]!.seatId,
+    keys: ["esc"],
+  });
+  expect((await expanded()).leads.find((lead) => lead.id === "recent:a")?.touches?.[0]).toMatchObject({
+    ...own[0],
+    kind: "answer",
+  });
+  expect((await expanded()).leads.find((lead) => lead.id === "recent:b")?.touches?.[0]).toMatchObject({
+    ...own[1],
+    kind: "answer",
+  });
+
+  const created = await dispatch(
+    {
+      op: "create",
+      scope: {
+        kind: "persona",
+        personaId: (await f.captain.fleetRoster!()).agents.find((agent) => agent.seatId === own[0]!.seatId)!
+          .personaId,
+      },
+      title: "Worker",
+    },
+    "relay",
+  );
+  f.workerDelivery.mockResolvedValue({ outcome: "delivered", deliveryStage: "consumed" });
+  const sent = await dispatch({
+    op: "send",
+    appDeviceId: "recent",
+    channel: "b",
+    turn: {
+      schemaVersion: 1,
+      conversationId: created.conversation.conversationId,
+      surfaceClientId: "proof",
+      expectedRevision: created.conversation.revision,
+      kind: "message",
+      message: "Continue the job.",
+    },
+  });
+  expect(sent.result.status).toBe("accepted");
+  expect((await expanded()).leads.find((lead) => lead.id === "recent:b")?.touches?.[0]).toMatchObject({
+    ...own[0],
+    kind: "message",
+  });
+  const closed = await dispatch({
+    op: "close_seat",
+    appDeviceId: "recent",
+    channel: "b",
+    seatId: own[0]!.seatId,
+  });
+  expect(closed.closed).toBe(true);
+  const afterClose = (await expanded()).leads;
+  expect(afterClose.find((lead) => lead.id === "recent:b")?.touches?.[0]).toMatchObject({
+    ...own[0],
+    kind: "close",
+  });
+  expect(afterClose.find((lead) => lead.id === "recent:a")?.hires).toEqual([]);
+  expect(afterClose.find((lead) => lead.id === "recent:b")?.hires).toEqual([own[1]]);
+
   const relayAuth = new ControlPlaneDeviceAuthorizer({ baseUrl });
   expect((await relayAuth.authorize(token("old"))).authorized).toBe(true);
   let refreshed = (await snapshot()).leads.find((lead) => lead.id === "old")!;
@@ -176,4 +417,14 @@ it("reads real host lead and device facts over HTTP, including the relay's throt
   expect((await snapshot()).leads[0]!.active).toBe(true);
   now += 15 * 60_000;
   expect((await snapshot()).leads.find((lead) => lead.id === "old")!.active).toBe(false);
+  now += 5 * 60_000;
+  expect((await expanded()).leads.every((lead) => lead.touches?.length === 0)).toBe(true);
+  now += 24 * 60 * 60_000;
+  const quiet = (await expanded()).leads;
+  expect(quiet.find((lead) => lead.id === "recent:a")).toBeUndefined();
+  expect(quiet.find((lead) => lead.id === "recent:b")).toMatchObject({
+    active: false,
+    hires: [own[1]],
+    touches: [],
+  });
 });
