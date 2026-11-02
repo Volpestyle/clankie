@@ -892,6 +892,9 @@ export async function startCodexAppServerSeat(options: {
       "check_for_update_on_startup=false",
       "--remote",
       endpoint,
+      // Remote thread creation otherwise inherits the app-server's cwd, not the terminal's.
+      "--cd",
+      options.cwd,
       ...(options.model ? ["--model", options.model] : []),
       ...(options.effort ? ["-c", `model_reasoning_effort=${JSON.stringify(options.effort)}`] : []),
       ...(options.resumeThreadId ? ["resume", options.resumeThreadId] : []),
@@ -962,6 +965,10 @@ export async function startCodexAppServerSeat(options: {
     let thread = record(result.thread);
     if (typeof thread.id !== "string") throw new Error("Codex app-server returned no thread identity");
     if (thread.id !== threadId) throw new Error("Native thread/read identity changed");
+    if (thread.cwd !== options.cwd)
+      throw new Error(
+        `Native Codex thread cwd does not match the prepared checkout: expected ${options.cwd}, observed ${String(thread.cwd)}; no brief was sent`,
+      );
     // Codex 0.160 generates titles by loading an ephemeral second thread when
     // an unnamed TUI receives its first input. Name our newly allocated root
     // through the native API before that input; preserve the single-writer
