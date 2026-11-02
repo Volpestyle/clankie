@@ -3,8 +3,9 @@ import { createInterface } from "node:readline";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type DiscordTextIngress, type DiscordTextIngressPort } from "@clankie/discord-presence-core";
-import type { Message, TextBasedChannel } from "discord.js";
+import { MessageType, type Message, type TextBasedChannel } from "discord.js";
 import {
+  DISCORD_PRESENCE_REPLY_EXCERPT_MAX,
   CaptainChannelTurnResultSchema,
   DiscordPresenceChannelTurnRequestSchema,
   DiscordPresenceWriteResultSchema,
@@ -596,6 +597,26 @@ export async function scanDiscordTextChannel(
     inbox.scanned(channel.id, after);
     if (page.size < 100) break;
   }
+}
+
+/**
+ * The message a Discord reply answers, so he knows which one is meant (#381).
+ * A forward or a reference he can no longer read carries nothing.
+ */
+export async function discordReplyTarget(
+  message: Message,
+  botId: string | undefined,
+): Promise<{ messageId: string; authorId: string; fromYou: boolean; excerpt: string } | undefined> {
+  if (message.type !== MessageType.Reply || !message.reference?.messageId) return undefined;
+  // allow-swallowed-rejection -- a deleted or unreadable original only loses the quote, never the reply.
+  const referenced = await message.fetchReference().catch(() => undefined);
+  if (referenced === undefined) return undefined;
+  return {
+    messageId: referenced.id,
+    authorId: referenced.author.id,
+    fromYou: botId !== undefined && referenced.author.id === botId,
+    excerpt: referenced.content.slice(0, DISCORD_PRESENCE_REPLY_EXCERPT_MAX),
+  };
 }
 
 /** Replies with mention_author disabled still address their referenced author. */

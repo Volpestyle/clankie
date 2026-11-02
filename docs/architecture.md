@@ -153,7 +153,10 @@ A Discord message reaches the active bridge. A text-only message in the live
 voice channel's attached chat enters that room's existing `VoiceFloor`; the
 realtime room thread may answer aloud, ask Clankie to act, or stay silent,
 and no separate text turn races it ([ADR 0124](adr/0124-one-self-has-many-local-threads.md)).
-Every other message posts to `POST /v1/captain/channel-turns`. The bridge asks for an immediate
+Every other message posts to `POST /v1/captain/channel-turns`. A Discord reply carries
+`trigger.replyTo`: the replied-to message's id, its author, whether Clankie wrote it, and
+its first 500 characters, which the room prompt and an owner's main-conversation escalation
+quote as untrusted content so he knows which message is meant (#381). The bridge asks for an immediate
 acknowledgment and polls `GET /v1/captain/channel-turns/{deliveryId}` until the turn settles, so a
 long model turn does not depend on one open HTTP request. A retry submits the same delivery ID;
 the service joins a surviving turn, and the bridge's inbox saves the final reply and permits only

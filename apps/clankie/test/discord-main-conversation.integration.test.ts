@@ -178,6 +178,41 @@ it("a linked private owner message reaches the main head once and returns only i
   }
 });
 
+it("an owner reply in the linked channel names the Clankie message it answers and quotes its start (#381)", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  let run: ReturnType<typeof f.captain.submitDiscordTurn> | undefined;
+  try {
+    f.request.trigger.body = "yes, do that one";
+    f.request.trigger.replyTo = {
+      messageId: "clankie-older",
+      authorId: "30001",
+      fromYou: true,
+      excerpt: "Option B: move the save fix first.",
+    };
+    const poll = f.captain.pollSeatEvents(5_000, abort.signal, "global-default");
+    run = f.captain.submitDiscordTurn(f.request);
+    const [event] = await poll;
+    expect(event?.source).toBe("discord-main");
+    expect(event!.content).toContain("The owner is replying to Discord message clankie-older, one of yours");
+    expect(event!.content).toContain(
+      JSON.stringify({
+        body: "yes, do that one",
+        attachments: [],
+        replyTo: f.request.trigger.replyTo,
+      }),
+    );
+    expect(await f.captain.replySeatEvent(event!.id, "Moving the save fix first.", "global-default")).toBe(
+      true,
+    );
+    expect(await run).toMatchObject({ state: "settled", response: "Moving the save fix first." });
+  } finally {
+    abort.abort();
+    await f.close();
+    await run?.catch(() => undefined);
+  }
+});
+
 it.each(["audience", "binding", "owner"] as const)(
   "a changed %s suppresses an in-flight main answer",
   async (change) => {

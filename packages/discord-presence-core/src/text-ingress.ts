@@ -304,6 +304,8 @@ export interface DiscordInboundMessage {
   readonly attachments?: readonly DiscordPresenceAttachment[];
   /** How many attachments the selection left out, so he can be told (ADR 0072). */
   readonly attachmentsOmitted?: number;
+  /** The message this one replies to, read by the gateway (#381). */
+  readonly replyTo?: NonNullable<DiscordPresenceChannelTurnRequest["trigger"]["replyTo"]>;
   readonly contextMessages?: readonly DiscordInboundContextMessage[];
   readonly loadContextMessages?: () => Promise<readonly DiscordInboundContextMessage[]>;
   /** Set only by {@link DiscordTextIngress.catchUp}; he is looking at a backlog. */
@@ -620,6 +622,7 @@ export class DiscordTextIngress {
           ? {}
           : { attachmentsOmitted: message.attachmentsOmitted }),
         ...(this.unprompted(message) ? { unprompted: true } : {}),
+        ...(message.replyTo === undefined ? {} : { replyTo: message.replyTo }),
       },
       contextMessages: context.messages,
       ...(context.visual === undefined ? {} : { contextVisual: context.visual }),

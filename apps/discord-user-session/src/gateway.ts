@@ -1,5 +1,9 @@
 import type { DiscordRawAttachment, DiscordRawEmbed } from "@clankie/discord-presence-core";
-import type { DiscordDirectoryRequest, DiscordDirectorySnapshot } from "@clankie/protocol";
+import {
+  DISCORD_PRESENCE_REPLY_EXCERPT_MAX,
+  type DiscordDirectoryRequest,
+  type DiscordDirectorySnapshot,
+} from "@clankie/protocol";
 import { DiscordUserDirectory } from "./directory.ts";
 import { EventEmitter } from "node:events";
 import { WebSocket, type RawData } from "ws";
@@ -48,6 +52,8 @@ export interface DiscordGatewayMessage {
   readonly attachments: readonly DiscordRawAttachment[];
   /** Raw visual embeds from the dispatch; shared ingress selects bounded images and GIFs. */
   readonly embeds: readonly DiscordRawEmbed[];
+  /** The message a reply answers, from the dispatch's `referenced_message` (#381). */
+  readonly replyTo?: { messageId: string; authorId: string; fromYou: boolean; excerpt: string };
 }
 
 interface DiscordGatewayVoiceState {
@@ -326,6 +332,9 @@ export class DiscordUserGateway {
         if (typeof payload.id !== "string" || typeof payload.channel_id !== "string") return;
         if (typeof author?.id !== "string") return;
         const mentions = Array.isArray(payload.mentions) ? payload.mentions : [];
+        // Type 19 is a reply; a forward or a deleted original carries no referenced message.
+        const referenced = payload.type === 19 ? record(payload.referenced_message) : undefined;
+        const referencedAuthor = record(referenced?.author);
         this.emit("messageCreate", {
           id: payload.id,
           ...(typeof payload.guild_id === "string" ? { guildId: payload.guild_id } : {}),
@@ -343,6 +352,19 @@ export class DiscordUserGateway {
           content: typeof payload.content === "string" ? payload.content : "",
           attachments: readAttachments(payload.attachments),
           embeds: readEmbeds(payload.embeds),
+          ...(typeof referenced?.id === "string" && typeof referencedAuthor?.id === "string"
+            ? {
+                replyTo: {
+                  messageId: referenced.id,
+                  authorId: referencedAuthor.id,
+                  fromYou: this.selfUserId !== undefined && referencedAuthor.id === this.selfUserId,
+                  excerpt: (typeof referenced.content === "string" ? referenced.content : "").slice(
+                    0,
+                    DISCORD_PRESENCE_REPLY_EXCERPT_MAX,
+                  ),
+                },
+              }
+            : {}),
         });
         return;
       }

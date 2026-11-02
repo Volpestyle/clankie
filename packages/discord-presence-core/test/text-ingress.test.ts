@@ -66,6 +66,27 @@ describe("DiscordTextIngress", () => {
     expect(evidence.map((event) => event.outcome)).toEqual(["accepted", "settled"]);
   });
 
+  it("carries the message a reply answers into the turn request (#381)", async () => {
+    const port = new RecordingPort();
+    const ingress = new DiscordTextIngress(port, config());
+    const replyTo = {
+      messageId: "older",
+      authorId: "bot-1",
+      fromYou: true,
+      excerpt: "Ship the menu fix first?",
+    };
+    await ingress.handle({
+      id: "message-reply",
+      channelId: "dm-1",
+      authorId: "james",
+      authorIsBot: false,
+      mentionsBot: false,
+      body: "yes, that one",
+      replyTo,
+    });
+    expect(port.turns[0]?.trigger.replyTo).toEqual(replyTo);
+  });
+
   it("drops self loops and non-allowlisted guild or DM traffic before a model turn", async () => {
     const port = new RecordingPort();
     const evidence: DiscordTextIngressEvidence[] = [];

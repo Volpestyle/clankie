@@ -554,6 +554,7 @@ gatewayUnsubscribes.push(
             : {}),
           attachments: selection.attachments,
           attachmentsOmitted: selection.omitted,
+          ...(message.replyTo === undefined ? {} : { replyTo: message.replyTo }),
         });
         if (result.state === "failed") {
           console.error(
