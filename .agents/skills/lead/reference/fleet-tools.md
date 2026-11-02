@@ -367,7 +367,11 @@ acknowledges marks it answered.
 Desktop Codex hires (`herdr-core/t…`) remain messageable after a service restart:
 Clankie reconnects to the surviving terminal's observed dedicated socket. Its
 service-owned seat record and exact native transcript establish the recipient;
-no rehire or terminal typing is needed. An unavailable socket proves nothing was
+no rehire or terminal typing is needed. Worker reports and tool admission also
+recover by proving the request descends from that dedicated native server, with
+the hired session loaded and the original terminal PID still live. A replacement
+PID, foreign session or terminal Clankie did not hire stays refused.
+An unavailable socket proves nothing was
 sent; an uncertain native write still keeps its original receipt fence.
 
 ## Unresolved Claude channel deliveries

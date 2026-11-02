@@ -5269,8 +5269,9 @@ Herdr desktop app's own terminals, in its Clankie space, instead of Herdr panes
 is refused while the desktop app isn't running. `herdr` keeps them in panes, and
 `auto`, the default, keeps them in panes until the desktop app's hires are
 proven. Other harnesses stay in Herdr panes for now, and hires already running
-stay where they are. A Codex hire in the desktop app keeps its tools until the
-service restarts; rehire it after that. New Codex hires explicitly select their
+stay where they are. A surviving Codex hire in the desktop app keeps its report and tool
+admission across service restarts: Clankie re-proves its service-owned seat,
+original view PID, native session and dedicated server socket. New Codex hires explicitly select their
 prepared checkout with `--cd`; startup refuses a different or missing pane cwd,
 and briefed hires also verify the native thread cwd before sending the brief.
 
@@ -10184,6 +10185,10 @@ session can read it back. The server list is lost if the worker restarts;
 Desktop Codex workers (`herdr-core/t…`) can receive messages after a service
 restart through their surviving dedicated native socket. Reconnection checks the
 service-owned terminal record, current process and socket, and exact thread.
+Worker reports recover admission from that same evidence plus kernel-observed
+request ancestry: the bridge must descend from the native server owning that
+endpoint, with the hired session still loaded. A replacement terminal PID, a
+foreign session or a terminal without a service-owned seat record is refused.
 The native server supplies the transcript path for receipt reconciliation, even
 when the worker uses a different Codex home. A readable exact transcript with no
 original message and an idle recipient permits a different message after the

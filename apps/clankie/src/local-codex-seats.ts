@@ -58,8 +58,8 @@ const processStart = async (
  * One of Clankie's terminals in the Herdr desktop app (ADR 0319). A Codex hire there
  * (ADR 0341) is registered in memory only: its records are never written to the launch
  * file the Herdr-pane recovery, census and retirement paths read, so none of them acts on
- * a terminal they cannot see. After a service restart such a seat is no longer admitted
- * through its server; a rehire binds a new one.
+ * a terminal they cannot see. Restart admission instead re-proves the surviving
+ * desktop view and its private server through fresh native observations.
  */
 const DESKTOP_TERMINAL = /^herdr-core\/t[0-9a-z]+$/u;
 
@@ -98,14 +98,31 @@ export class LocalCodexSeats {
   private readonly durable: DurableSeats | undefined;
   /** The desktop app core's binding, for a seat in one of its terminals; unset, none registers. */
   private readonly coreBinding: (() => HerdrBinding | undefined) | undefined;
+  private readonly desktopAdmission:
+    | ((
+        ancestors: readonly number[],
+        pane: string,
+        binding: HerdrBinding,
+        nativeOccupantId?: string,
+        signal?: AbortSignal,
+      ) => Promise<boolean>)
+    | undefined;
   constructor(
     binding: () => HerdrBinding | undefined,
     observeStart = processStart,
     durable?: DurableSeats,
     coreBinding?: () => HerdrBinding | undefined,
+    desktopAdmission?: (
+      ancestors: readonly number[],
+      pane: string,
+      binding: HerdrBinding,
+      nativeOccupantId?: string,
+      signal?: AbortSignal,
+    ) => Promise<boolean>,
   ) {
     this.binding = binding;
     this.coreBinding = coreBinding;
+    this.desktopAdmission = desktopAdmission;
     this.observeStart = observeStart;
     this.durable = durable;
     if (durable) {
@@ -463,7 +480,9 @@ export class LocalCodexSeats {
       )
         return true;
     }
-    return false;
+    return DESKTOP_TERMINAL.test(pane) && this.desktopAdmission !== undefined
+      ? this.desktopAdmission(ancestors, pane, binding, nativeOccupantId, signal)
+      : false;
   }
 }
 

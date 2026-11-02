@@ -3,16 +3,19 @@
 // Codex adapter, desktop runner, private-server registry and project proof; the core's socket
 // (which needs the desktop app) and the Codex app-server stand in at their seams. The Mac's
 // Herdr TUI server need not run at all: nothing here reaches a Herdr CLI.
+import { readPersistedConversation } from "./support/persisted-conversation.ts";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { build } from "esbuild";
-import { spawn, type ChildProcess } from "node:child_process";
+import { promisify } from "node:util";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it } from "vitest";
 import type { SeatRef, SeatView } from "@clankie/agent-hosts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
@@ -29,6 +32,7 @@ import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
+import { desktopCodexAdmission } from "../src/desktop-codex-admission.ts";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
 import { localProjectProof } from "../src/local-fleet-proof.ts";
@@ -38,7 +42,11 @@ const checkout = fileURLToPath(new URL("../../../", import.meta.url));
 const codex = fileURLToPath(new URL("./fixtures/desktop-codex/codex.mjs", import.meta.url));
 const helper = fleetProcessHelper(checkout);
 // The view's own proof reads the real process's identity, as on the owner's Mac.
-const processIt = it.skipIf(!["darwin", "linux"].includes(process.platform) || !existsSync(helper));
+const processIt = it.skipIf(!["darwin", "linux"].includes(process.platform));
+beforeAll(async () => {
+  if (["darwin", "linux"].includes(process.platform))
+    await promisify(execFile)(process.execPath, [join(checkout, "scripts/build-fleet-proof.mjs")]);
+});
 
 const children: ChildProcess[] = [];
 const cleanups: (() => Promise<void>)[] = [];
@@ -299,7 +307,7 @@ it("a Codex launch names no session on its command line, so only its server's re
 
 // Real surviving view process and dedicated Unix protocol server; reconstruct
 // service controllers and desktop runner without touching the installed service.
-it("delivers once to a pre-restart desktop Codex hire and settles absent originals from its native transcript", async () => {
+processIt("delivers and reports once across a desktop Codex service restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "desktop-restart-"));
   roots.push(root);
   const seats = core();
@@ -312,6 +320,7 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
   const runner = createHerdrCoreRunner(runnerOptions);
   const native = await codex0160Protocol(root, { socketPath: join(root, "rpc.sock") });
   cleanups.push(native.close);
+  await chmod(join(root, "rpc.sock"), 0o600);
   const adapter = createCodexSeatAdapter({
     desktop: desktopCodexViews(runner),
     server: native.launch,
@@ -334,6 +343,14 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
     },
   );
   expect(started.outcome).toBe("started");
+  const binding = {
+    runtime: "external" as const,
+    session: HERDR_CORE_FLEET,
+    socketPath: join(root, "core.sock"),
+  };
+  // Production's kernel guard must reject this fixture's Node listener as a
+  // Codex app-server. Only the explicit fixture seam below substitutes it.
+  expect(await desktopCodexAdmission(runner, () => binding)([process.pid], paneId, binding)).toBe(false);
   const routed = (desktop: ReturnType<typeof createHerdrCoreRunner>) =>
     routeHerdrFleets(
       {
@@ -393,6 +410,15 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
   // Kill and replace an actual disposable service process as well: the view
   // PID and native server survive. Its durable receipt must survive too.
   await writeFile(join(root, "terminals.json"), JSON.stringify([...seats.terminals.values()]));
+  await writeFile(
+    join(root, "native-server.json"),
+    JSON.stringify({
+      pid: process.pid,
+      endpoint: native.endpoint,
+      paneId,
+      threadId: (await runner.get(address)).session!.value,
+    }),
+  );
   const entry = join(root, "delivery-service.mjs");
   await build({
     entryPoints: [fileURLToPath(new URL("./fixtures/desktop-codex-delivery-service.ts", import.meta.url))],
@@ -404,8 +430,8 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
       js: "import { createRequire as fixtureRequire } from 'node:module'; const require = fixtureRequire(import.meta.url);",
     },
   });
-  const startService = async () => {
-    const child = spawn(process.execPath, [entry, root], {
+  const startService = async (initial = false) => {
+    const child = spawn(process.execPath, [entry, root, helper, initial ? "initial" : "restarted"], {
       env: {
         PATH: process.env.PATH,
         HOME: root,
@@ -430,8 +456,8 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
         throw new Error(stderr);
       }),
     ]);
-    expect(ready[0]).toEqual({ ready: true });
-    return child;
+    expect(ready[0]).toMatchObject({ ready: true, port: expect.any(Number) });
+    return Object.assign(child, { port: (ready[0] as { port: number }).port });
   };
   const send = async (
     child: ChildProcess,
@@ -442,7 +468,26 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
     child.send({ seatId: paneId, text, receipt });
     return (await result)[0];
   };
-  const firstService = await startService();
+  const report = async (service: { port: number }, deliveryId: string, text: string) => {
+    const response = await fetch(
+      `http://127.0.0.1:${service.port}/v1/fleet/seats/${encodeURIComponent(paneId)}/messages`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-clankie-pane": paneId },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          text,
+          delivery: { id: deliveryId, binding: "a".repeat(64) },
+        }),
+      },
+    );
+    return { status: response.status, body: await response.json() };
+  };
+  const firstService = await startService(true);
+  expect(await report(firstService, randomUUID(), "Before restart report")).toMatchObject({
+    status: 200,
+    body: { deliveryStage: "stored" },
+  });
   expect(await send(firstService)).toMatchObject({ result: { outcome: "delivered" } });
   const exited = once(firstService, "exit");
   firstService.kill("SIGKILL");
@@ -455,6 +500,42 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
   expect(
     await send(secondService, "New message after process restart", "new-process-original"),
   ).toMatchObject({ result: { outcome: "delivered" } });
+  const reportId = randomUUID();
+  expect(await report(secondService, reportId, "After restart report")).toMatchObject({
+    status: 200,
+    body: { received: true, deliveryStage: "stored" },
+  });
+  expect(await report(secondService, reportId, "After restart report")).toMatchObject({
+    status: 200,
+    body: { deliveryStage: "stored" },
+  });
+  const meta = readPersistedConversation(join(root, "conversations/global-default/meta.json"));
+  expect(
+    Object.values(meta.inboundAcceptances).filter(
+      (entry) => (entry as { text: string }).text === "After restart report",
+    ),
+  ).toHaveLength(1);
+  native.loadedInventory({ data: [randomUUID()], nextCursor: null });
+  expect((await report(secondService, randomUUID(), "Foreign session report")).status).toBe(403);
+  native.loadedInventory(undefined);
+  // The same socket/request owner cannot report through a replaced terminal PID.
+  const originalTerminal = seats.terminals.get(address)!;
+  await writeFile(
+    join(root, "terminals.json"),
+    JSON.stringify([{ ...originalTerminal, pid: secondService.pid }]),
+  );
+  expect((await report(secondService, randomUUID(), "Replacement report")).status).toBe(403);
+  await writeFile(join(root, "terminals.json"), JSON.stringify([...seats.terminals.values()]));
+  const seatRecord = join(root, "seats", `${address}.json`);
+  await rename(seatRecord, `${seatRecord}.held`);
+  expect((await report(secondService, randomUUID(), "Unhired terminal report")).status).toBe(403);
+  await rename(`${seatRecord}.held`, seatRecord);
+  // Refused attempts stored nothing; only the two admitted report IDs remain.
+  expect(
+    Object.keys(
+      readPersistedConversation(join(root, "conversations/global-default/meta.json")).inboundAcceptances,
+    ),
+  ).toHaveLength(2);
   const processStopped = once(secondService, "exit");
   secondService.kill("SIGTERM");
   await processStopped;
@@ -510,4 +591,4 @@ it("delivers once to a pre-restart desktop Codex hire and settles absent origina
     outcome: "undelivered",
   });
   expect(native.requests.filter(({ method }) => method === "thread/queue/add")).toHaveLength(6);
-}, 30_000);
+});

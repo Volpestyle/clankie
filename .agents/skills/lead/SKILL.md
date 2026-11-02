@@ -34,8 +34,10 @@ trust flags or answer a trust prompt for the owner.
 `clankie fleet set --seat-host desktop` starts this machine's new Claude and
 Codex hires in the Herdr desktop app's terminals (ADR 0319, ADR 0341): one space
 per project (`clankie workers`), one tab per hire named for it, and a pipeline's
-hires three to a tab. Their seat ids read `herdr-core/t7`. A Codex hire there
-loses its tools when the service restarts; rehire it. New Codex hires explicitly
+hires three to a tab. Their seat ids read `herdr-core/t7`. A surviving Codex hire there
+keeps its report and tool admission across service restarts: Clankie re-proves
+its service-owned seat, original view PID, native session and dedicated server.
+New Codex hires explicitly
 select their prepared checkout with `--cd`; startup refuses a different or missing
 pane cwd, and briefed hires also verify the native thread cwd before sending the
 brief. `auto` (the default) and

@@ -247,7 +247,7 @@ export function createHerdrSessionSource(
             status: "queued",
             detail:
               result.seatDelivery.detail ??
-              `${name} is busy, so the message is waiting in its queue and may not be read until its current work ends.`,
+              `${name} has the message waiting in its native queue. Read the agent to see it respond.`,
           };
         if (result.status === "accepted")
           return { id, status: "delivered", detail: `Sent to ${name}. Read the agent to see it respond.` };
