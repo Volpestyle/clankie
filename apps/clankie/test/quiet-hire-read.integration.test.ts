@@ -112,7 +112,10 @@ setInterval(() => {}, 1 << 30);
       owner: { conversationId: "global-default", hired },
     }) as unknown as OperatorFleetSeat;
   const serve = createOperatorService({
-    deps: { herdrAvailable: () => true, fleets: { list: [pc], run: () => herdr, remoteWorkspace: async () => false } },
+    deps: {
+      herdrAvailable: () => true,
+      fleets: { list: [pc], run: () => herdr, remoteWorkspace: async () => false },
+    },
     shutdown: new AbortController(),
     personas: { ready: async () => {} },
     settingsStore: {},
