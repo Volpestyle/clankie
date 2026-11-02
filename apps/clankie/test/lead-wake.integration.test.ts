@@ -266,7 +266,19 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
       },
     });
     expect(hire.isError, textOf(hire)).toBeFalsy();
-    const agent = JSON.parse(textOf(hire)).agent as string;
+    // A hire may answer pending with its receipt; reading the receipt never repeats the hire.
+    let hired = JSON.parse(textOf(hire)) as { status: string; startId?: string; agent?: string };
+    expect(hired.agent).toBe("herdr:term_report");
+    await expect
+      .poll(async () => {
+        if (hired.status === "pending")
+          hired = JSON.parse(
+            textOf(await client!.callTool({ name: "start_agent", arguments: { startId: hired.startId } })),
+          );
+        return hired.status;
+      })
+      .toBe("started");
+    const agent = hired.agent;
     expect(agent).toBe("herdr:term_report");
     const journal = await readFile(join(root, "herdr-watches.json.owners.json"), "utf8");
     expect(journal).toContain('"deviceId"');
