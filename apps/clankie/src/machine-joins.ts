@@ -300,11 +300,17 @@ export class MachineJoins {
       ticket.approving = false;
     }
   }
-  challenge(raw: unknown) {
+  async challenge(raw: unknown) {
     const id = JoinedId.parse(raw);
-    // Removed machines still need a fresh challenge for an authenticated refusal.
+    // Removed machines still need a fresh challenge for an authenticated refusal,
+    // but only ids the home holds a key for may take one from the shared pool.
+    if (!this.has(id) && !(await this.options.secrets.get(credentialName(id)))) throw Error("revoked");
+    const mine: string[] = [];
     for (const [key, value] of this.challenges)
       if (value.expiresAt <= this.now()) this.challenges.delete(key);
+      else if (value.machineId === id) mine.push(key);
+    // One machine id never holds more than a few open challenges; its oldest give way.
+    while (mine.length >= 8) this.challenges.delete(mine.shift()!);
     if (this.challenges.size >= 512) throw Error("join_capacity");
     const challenge = randomBytes(32).toString("base64url");
     this.challenges.set(challenge, { machineId: id, expiresAt: this.now() + 60_000 });

@@ -259,6 +259,14 @@ test("public CLI waits for owner consent, joins through the relay, and removal r
     expect(
       (await f.post("/v1/joined-machines/challenge", { machineId: credential.lease.machineId })).status,
     ).toBe(200);
+    // An id the home holds no key for takes nothing from the shared challenge pool.
+    expect(
+      (
+        await f.post("/v1/joined-machines/challenge", {
+          machineId: "join-00000000-0000-4000-8000-000000000000",
+        })
+      ).status,
+    ).toBe(403);
     await expect(exchangeJoinedMachine(credential, { op: "poll", results: [] })).rejects.toThrow("revoked");
     const restored = new MachineJoins({ settings: f.settings, secrets: f.secrets, directory: f.ledger });
     await expect(restored.poll(credential.lease.token, { results: [] })).rejects.toThrow("revoked");
@@ -463,7 +471,7 @@ test("an untrusted relay cannot read, forge, reflect or replay an authenticated 
       requests: [],
     });
     expect(await work).toMatchObject({ ok: false });
-    const challenge = f.joins.challenge(credential.lease.machineId).challenge;
+    const challenge = (await f.joins.challenge(credential.lease.machineId)).challenge;
     expect((await f.post("/v1/joined-machines/channel", { ...envelope, challenge })).status).toBe(403);
     expect(
       (

@@ -102,7 +102,7 @@ export function createMachineJoinRoutes(
     try {
       const body = await context.req.json();
       if (Object.keys(body).length !== 1) throw Error("malformed");
-      return context.json(joins.challenge(body.machineId));
+      return context.json(await joins.challenge(body.machineId));
     } catch (error) {
       if (error instanceof Error && error.message === "revoked")
         return context.json({ error: "revoked" }, 403);
