@@ -84,6 +84,28 @@ it
       let preparations = 0;
       const options = {
         runner,
+        // A new work hire needs observed plan usage since VUH-2256.
+        workerAccountsReport: async () => ({
+          machine: fleet,
+          shell: "posix" as const,
+          observedAt: new Date().toISOString(),
+          accounts: [
+            {
+              harness: "codex" as const,
+              label: "fixture",
+              home: root,
+              signedIn: true,
+              usable: true,
+              plan: "pro",
+              headroom: 0.8,
+              usage: {
+                source: "codex-rate-limits" as const,
+                observedAt: new Date().toISOString(),
+                windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+              },
+            },
+          ],
+        }),
         remoteHireReceipts: native,
         remoteWorkspace: async (selected: string, directory: string) =>
           selected === fleet && directory === cwd,
@@ -163,6 +185,9 @@ it
         schemaVersion: 1 as const,
         harness: "codex" as const,
         title: "Boundary proof",
+        // Hires name their own effort since fleet-wide effort was retired (VUH-2256).
+        effort: "low",
+        effortReason: "A census boundary proof whose preparation is denied before any work.",
         fleet,
         workingDirectory: cwd,
         freshIntent: { id: randomUUID(), afterReceiptId: completed.messageId },
