@@ -57,6 +57,7 @@ export async function codex0160Protocol(
   let loaded = false;
   let threadName = options.threadName;
   let nextLoadedInventory: unknown;
+  let loadedInventory: unknown;
   let closed = false;
   let silentInterrupt = false;
   let omitUserReceipt = false;
@@ -131,7 +132,8 @@ export async function codex0160Protocol(
             result = { userAgent: "codex/0.160.0", codexHome: directory };
             break;
           case "thread/loaded/list":
-            result = nextLoadedInventory ?? { data: loaded ? [threadId] : [], nextCursor: null };
+            result = loadedInventory ??
+              nextLoadedInventory ?? { data: loaded ? [threadId] : [], nextCursor: null };
             nextLoadedInventory = undefined;
             break;
           case "thread/read":
@@ -324,6 +326,9 @@ export async function codex0160Protocol(
     },
     resourceThread(id: string, parentThreadId: string | null, status: "active" | "idle") {
       resourceThreads.set(id, { id, parentThreadId, status: { type: status, activeFlags: [] } });
+    },
+    loadedInventory(value: unknown) {
+      loadedInventory = value;
     },
     nextLoadedInventory(value: unknown) {
       nextLoadedInventory = value;

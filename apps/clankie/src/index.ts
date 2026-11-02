@@ -17,7 +17,12 @@ import { AutoRoundRecord } from "./captain/auto-rounds.ts";
 import type { HerdrBinding } from "@clankie/protocol";
 import { herdrCoreSocketPath } from "./captain/herdr-core.ts";
 import { desktopCodexAdmission } from "./desktop-codex-admission.ts";
-import { HERDR_CORE_FLEET, createHerdrCoreRunner, liveDesktopSeat, liveDesktopTerminal } from "./captain/herdr-core-runner.ts";
+import {
+  HERDR_CORE_FLEET,
+  createHerdrCoreRunner,
+  liveDesktopSeat,
+  liveDesktopTerminal,
+} from "./captain/herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./captain/herdr-core-seats.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
@@ -1103,13 +1108,18 @@ const localCodexSeats = new LocalCodexSeats(
   // A Codex hire in the desktop app's terminals (ADR 0341) is bound to the core's socket.
   () => ({ runtime: "external", session: HERDR_CORE_FLEET, socketPath: herdrCoreSocketPath(process.env) }),
   // Lazy: the listener's desktop paths are initialized below before requests arrive.
-  (...args) => desktopCodexAdmission(
-    createHerdrCoreRunner({
-      seats: createHerdrCoreSeats({ socketPath: herdrCoreSocketPath(process.env) }),
-      seatDirectory: desktopSeats,
-    }),
-    () => ({ runtime: "external", session: HERDR_CORE_FLEET, socketPath: herdrCoreSocketPath(process.env) }),
-  )(...args),
+  (...args) =>
+    desktopCodexAdmission(
+      createHerdrCoreRunner({
+        seats: createHerdrCoreSeats({ socketPath: herdrCoreSocketPath(process.env) }),
+        seatDirectory: desktopSeats,
+      }),
+      () => ({
+        runtime: "external",
+        session: HERDR_CORE_FLEET,
+        socketPath: herdrCoreSocketPath(process.env),
+      }),
+    )(...args),
 );
 const workerRuntimeRevision = randomUUID();
 const harnessProcesses = new FleetHarnessProcesses({

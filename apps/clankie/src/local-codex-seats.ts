@@ -98,18 +98,31 @@ export class LocalCodexSeats {
   private readonly durable: DurableSeats | undefined;
   /** The desktop app core's binding, for a seat in one of its terminals; unset, none registers. */
   private readonly coreBinding: (() => HerdrBinding | undefined) | undefined;
+  private readonly desktopAdmission:
+    | ((
+        ancestors: readonly number[],
+        pane: string,
+        binding: HerdrBinding,
+        nativeOccupantId?: string,
+        signal?: AbortSignal,
+      ) => Promise<boolean>)
+    | undefined;
   constructor(
     binding: () => HerdrBinding | undefined,
     observeStart = processStart,
     durable?: DurableSeats,
     coreBinding?: () => HerdrBinding | undefined,
-    private readonly desktopAdmission?: (
-      ancestors: readonly number[], pane: string, binding: HerdrBinding,
-      nativeOccupantId?: string, signal?: AbortSignal,
+    desktopAdmission?: (
+      ancestors: readonly number[],
+      pane: string,
+      binding: HerdrBinding,
+      nativeOccupantId?: string,
+      signal?: AbortSignal,
     ) => Promise<boolean>,
   ) {
     this.binding = binding;
     this.coreBinding = coreBinding;
+    this.desktopAdmission = desktopAdmission;
     this.observeStart = observeStart;
     this.durable = durable;
     if (durable) {
